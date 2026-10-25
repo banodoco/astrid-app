@@ -6,6 +6,7 @@ export const LOCAL_AGENT_TABLE = {
   'claude-code': { name: 'Claude Code' },
   codex: { name: 'Codex' },
   hermes: { name: 'Hermes' },
+  dsh: { name: 'DeepSeek Harness' },
 } as const;
 
 export type LocalAgentId = keyof typeof LOCAL_AGENT_TABLE;

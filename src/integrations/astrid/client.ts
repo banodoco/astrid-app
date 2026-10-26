@@ -25,7 +25,7 @@ export type AstridLocalClientOptions = {
   projectSlug: string;
   /** Same-origin base; must travel the per-boot-token-injecting proxy. */
   baseUrl?: string;
-  /** Optional longer deadline for ACP prompts, which may legitimately run for minutes. */
+  /** Default request deadline. ACP prompt completion has no elapsed-time deadline. */
   timeoutMs?: number;
 };
 

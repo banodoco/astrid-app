@@ -5,8 +5,8 @@
  * Consumed by `AstridLocalClient` (timelines/tasks/generations/media). It owns exactly three
  * concerns and nothing more:
  *
- * 1. **Timeout** — every request is bounded by `BRIDGE_REQUEST_TIMEOUT_MS`
- *    so a hung (not dead) bridge becomes an ordinary transport failure.
+ * 1. **Timeout** — requests default to `BRIDGE_REQUEST_TIMEOUT_MS`;
+ *    ACP prompt completion explicitly opts out while retaining caller aborts.
  * 2. **Envelope parsing** — non-2xx responses parse against the shared
  *    `bridgeErrorEnvelopeSchema` and surface as a {@link BridgeRouteError}
  *    carrying the raw wire code plus its public category; success
@@ -178,6 +178,8 @@ export type BridgeRequestInit =
       headers?: Record<string, string>;
       /** Extra abort signal combined with the transport deadline. */
       signal?: AbortSignal;
+      /** Override the request deadline; null waits for completion or caller abort. */
+      timeoutMs?: number | null;
       /** Let the request outlive the page (best-effort close on pagehide). */
       keepalive?: boolean;
     }
@@ -189,6 +191,8 @@ export type BridgeRequestInit =
       headers?: Record<string, string>;
       /** Extra abort signal combined with the transport deadline. */
       signal?: AbortSignal;
+      /** Override the request deadline; null waits for completion or caller abort. */
+      timeoutMs?: number | null;
       /** Let the request outlive the page (best-effort close on pagehide). */
       keepalive?: boolean;
     };
@@ -293,7 +297,7 @@ export class AstridBridgeTransport {
         headers,
         body,
         keepalive: request.keepalive,
-        signal: composeSignals(this.timeoutMs, request.signal),
+        signal: composeSignals(request.timeoutMs === undefined ? this.timeoutMs : request.timeoutMs, request.signal),
       });
     } catch (cause) {
       throw new BridgeTransportFailure(cause);
@@ -301,7 +305,8 @@ export class AstridBridgeTransport {
   }
 }
 
-function composeSignals(timeoutMs: number, extra: AbortSignal | undefined): AbortSignal {
+function composeSignals(timeoutMs: number | null, extra: AbortSignal | undefined): AbortSignal | undefined {
+  if (timeoutMs === null) return extra;
   const deadline = AbortSignal.timeout(timeoutMs);
   return extra ? AbortSignal.any([deadline, extra]) : deadline;
 }

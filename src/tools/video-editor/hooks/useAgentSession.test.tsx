@@ -64,6 +64,77 @@ afterEach(() => {
 });
 
 describe('timeline agent ACP chat', () => {
+  it('keeps a prompt running past five minutes on the same writer connection until it completes', async () => {
+    vi.spyOn(await import('../runtime/admitted-elements'), 'refreshProjectElementContext').mockResolvedValue(undefined as never);
+    vi.useFakeTimers();
+    // Model the browser deadline with the controlled clock: native timeout
+    // implementations do not consistently follow Vitest's fake timers.
+    vi.spyOn(AbortSignal, 'timeout').mockImplementation(ms => {
+      const deadline = new AbortController();
+      setTimeout(() => deadline.abort(new DOMException('Timed out', 'TimeoutError')), ms);
+      return deadline.signal;
+    });
+    const sessionId = 'codex:long-turn';
+    const requestId = 'long-request';
+    let active = false;
+    let notifyFinished = false;
+    let complete!: (response: Response) => void;
+    let dispatched!: () => void;
+    const started = new Promise<void>(resolve => { dispatched = resolve; });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/chat')) return Response.json({ project_id: 'p', scope_key: 'p', revision: 1, selected_session_id: sessionId, sessions: [{ id: sessionId }], draft: { text: '', revision: 0 } });
+      if (url.endsWith('/connect')) return Response.json({ connection_id: 'original-writer', initialize: {} });
+      if (url.endsWith('/rpc')) return Response.json({ result: { _astridSession: { role: 'writer', active, activeRequestId: active ? requestId : null } } });
+      if (url.endsWith('/events')) {
+        const updates = [
+          { sessionUpdate: 'astrid_session_control', role: 'writer', active, activeRequestId: active ? requestId : null },
+          ...(notifyFinished ? [{ sessionUpdate: 'agent_message_chunk', messageId: 'answer', content: { type: 'text', text: 'Finished the long task' } }] : []),
+        ];
+        notifyFinished = false;
+        return Response.json({ disconnected: false, notifications: updates.map(update => ({ method: 'session/update', params: { sessionId, update } })) });
+      }
+      if (url.endsWith('/chat/prompt')) {
+        expect(JSON.parse(String(init?.body)).request_id).toBe(requestId);
+        active = true;
+        return new Promise<Response>((resolve, reject) => {
+          complete = resolve;
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+          dispatched();
+        });
+      }
+      throw new Error(`Unexpected request: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      const store = new AstridAgentSessionStore();
+      await store.get('p', sessionId);
+      let outcome = 'pending';
+      const prompt = store.prompt(sessionId, { message: 'Make a long scene', requestId }, { tool: 'video-editor', projectId: 'p', timelineId: null })
+        .then(() => { outcome = 'completed'; }, error => { outcome = String(error); });
+      await started;
+      await store.heartbeat('p', sessionId);
+      await vi.advanceTimersByTimeAsync(6 * 60_000);
+      const running = await store.get('p', sessionId);
+      expect(outcome).toBe('pending');
+      expect(running.status).toBe('processing');
+      expect(running.control).toEqual({ role: 'writer', active: true, activeRequestId: requestId });
+      await expect(store.prompt(sessionId, { message: 'duplicate', requestId }, { tool: 'video-editor', projectId: 'p', timelineId: null })).rejects.toThrow('already active');
+      active = false;
+      notifyFinished = true;
+      complete(Response.json({ result: { stopReason: 'end_turn' } }));
+      await prompt;
+      const finished = await store.get('p', sessionId);
+      expect(outcome).toBe('completed');
+      expect(finished.status).toBe('waiting_user');
+      expect(finished.turns.filter(turn => turn.role === 'assistant')).toEqual([expect.objectContaining({ content: 'Finished the long task' })]);
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/connect'))).toHaveLength(1);
+      expect(fetchMock.mock.calls.filter(([url]) => String(url).endsWith('/chat/prompt'))).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it.each([
     ['load', 'not_found'], ['events', 'not_found'],
     ['load', 'connection_not_found'], ['events', 'connection_not_found'],
@@ -173,7 +244,7 @@ describe('timeline agent ACP chat', () => {
   it('allows the active writer to cancel and lets its prompt finish across active control updates', async () => {
     const projectChat = { project_id: 'p', scope_key: 'project:p', revision: 1, selected_session_id: 'chat-active', sessions: [{ id: 'chat-active' }], draft: { text: '', revision: 1, queued_messages: [] } };
     let releasePrompt!: () => void;
-    let notifications: unknown[] = [];
+    const notifications: unknown[] = [];
     const promptWait = new Promise<void>(resolve => { releasePrompt = resolve; });
     const acp = {
       connect: vi.fn(async () => ({ connection_id: 'active-connection' })),

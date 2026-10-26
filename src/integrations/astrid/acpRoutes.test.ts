@@ -5,6 +5,19 @@ import { LOCAL_AGENT_TABLE } from './localAgents.ts';
 import { BridgeRouteError, type AstridBridgeTransport } from './transport.ts';
 
 describe('AstridLocalAcpRoutes', () => {
+  it('waits without a completion deadline for legacy prompts while keeping control requests bounded', async () => {
+    const requestJson = vi.fn(async (_path: string, _request: unknown, _schema: unknown, _what: string) => ({ result: {} }));
+    const routes = new AstridLocalAcpRoutes({ requestJson } as unknown as AstridBridgeTransport);
+    await routes.promptSession('connection', 'chat', [{ type: 'text', text: 'long task' }]);
+    await routes.loadSession('connection', 'chat');
+    expect(requestJson.mock.calls[0]).toEqual(['/acp/connection/rpc', {
+      method: 'POST', timeoutMs: null, body: { method: 'session/prompt', params: { sessionId: 'chat', prompt: [{ type: 'text', text: 'long task' }] } },
+    }, expect.anything(), 'ACP session/prompt']);
+    expect(requestJson.mock.calls[1]).toEqual(['/acp/connection/rpc', {
+      method: 'POST', body: { method: 'session/load', params: { sessionId: 'chat' } },
+    }, expect.anything(), 'ACP session/load']);
+  });
+
   it('accepts old and new provider fields and drops unknown provider keys', () => {
     const oldCatalog = modelCatalogSchema.parse({ providers: [{ id: 'openai', name: 'OpenAI', signedIn: true, models: [] }], currentModel: null });
     expect(oldCatalog.providers[0]).toMatchObject({ id: 'openai', signedIn: true });
@@ -54,7 +67,7 @@ describe('AstridLocalAcpRoutes', () => {
     await routes.promptProjectSession('p', 'second-tab', 'codex:chat-3', [{ type: 'text', text: 'hello' }], 'queued-1');
     expect(requestJson.mock.calls.map(([path, request]) => ({ path, request }))).toEqual([
       { path: '/acp/second-tab/rpc', request: { method: 'POST', body: { method: 'session/takeover', params: { sessionId: 'codex:chat-3' } } } },
-      { path: '/acp/projects/p/chat/prompt', request: { method: 'POST', body: { connection_id: 'second-tab', session_id: 'codex:chat-3', prompt: [{ type: 'text', text: 'hello' }], request_id: 'queued-1' } } },
+      { path: '/acp/projects/p/chat/prompt', request: { method: 'POST', timeoutMs: null, body: { connection_id: 'second-tab', session_id: 'codex:chat-3', prompt: [{ type: 'text', text: 'hello' }], request_id: 'queued-1' } } },
     ]);
   });
   it('passes a new chat model at connect and keeps model discovery read-only', async () => {

@@ -168,7 +168,7 @@ export class AstridLocalAcpRoutes {
 
   async promptProjectSession(projectId: string, connectionId: string, sessionId: string, prompt: Array<Record<string, unknown>>, requestId?: string): Promise<unknown> {
     const response = await this.transport.requestJson(`/acp/projects/${encodeURIComponent(projectId)}/chat/prompt`, {
-      method: 'POST', body: { connection_id: connectionId, session_id: sessionId, prompt, ...(requestId ? { request_id: requestId } : {}) },
+      method: 'POST', timeoutMs: null, body: { connection_id: connectionId, session_id: sessionId, prompt, ...(requestId ? { request_id: requestId } : {}) },
     }, rpcResponseSchema, 'Prompt project chat session');
     return response.result;
   }
@@ -293,7 +293,7 @@ export class AstridLocalAcpRoutes {
   private async rpc<T>(connectionId: string, method: string, params: AstridAcpRpcParams): Promise<T> {
     const response = await this.transport.requestJson(
       `/acp/${encodeURIComponent(connectionId)}/rpc`,
-      { method: 'POST', body: { method, params } },
+      { method: 'POST', ...(method === 'session/prompt' ? { timeoutMs: null } : {}), body: { method, params } },
       rpcResponseSchema,
       `ACP ${method}`,
     );

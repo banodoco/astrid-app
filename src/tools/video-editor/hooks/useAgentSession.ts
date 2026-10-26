@@ -38,7 +38,7 @@ export type AgentSessionView = {
 type AgentSessionOption = Pick<AgentSessionView, 'id' | 'status'>;
 type JsonRecord = Record<string, unknown>;
 
-const ACP_PROMPT_TIMEOUT_MS = 5 * 60_000;
+const ACP_REQUEST_TIMEOUT_MS = 5 * 60_000;
 const ACP_ACTIVE_POLL_MS = 500;
 const ACP_IDLE_POLL_MS = 15_000;
 const ACP_TASK_ACTIVE_POLL_MS = 1_000;
@@ -303,7 +303,7 @@ type LiveSceneAcpModule = typeof import('../runtime/liveSceneAcpRoundtrip');
 export class AstridAgentSessionStore {
   constructor(private readonly client = new AstridLocalClient({
     projectSlug: 'astrid-acp',
-    timeoutMs: ACP_PROMPT_TIMEOUT_MS,
+    timeoutMs: ACP_REQUEST_TIMEOUT_MS,
   }), private readonly loadLiveSceneAcpRoundtrip: () => Promise<LiveSceneAcpModule> =
     () => import('../runtime/liveSceneAcpRoundtrip')) {}
   private readonly connectionIds = new Map<LocalAgentId, string>();

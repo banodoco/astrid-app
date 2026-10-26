@@ -205,7 +205,7 @@ describe('Astrid bridge transport boundary', () => {
     }
   });
 
-  it('aborts a slow bridge request and releases the client request', async () => {
+  it.each(['deadline', 'caller'] as const)('aborts a slow bridge request via %s and releases the client request', async (abortSource) => {
     let requestStarted: () => void = () => undefined;
     const started = new Promise<void>((resolve) => { requestStarted = resolve; });
     let requestClosed: () => void = () => undefined;
@@ -224,13 +224,16 @@ describe('Astrid bridge transport boundary', () => {
       const transport = new AstridBridgeTransport({ baseUrl, timeoutMs: 25 });
       const rejected = expect(transport.requestJson(
         '/health',
-        {},
+        abortSource === 'caller' ? { timeoutMs: null, signal: deadline.signal } : {},
         z.object({ ok: z.boolean() }),
         'health',
       )).rejects.toBeInstanceOf(BridgeTransportFailure);
       await started;
-      expect(timeout).toHaveBeenCalledWith(25);
-      deadline.abort(new DOMException('The operation timed out', 'TimeoutError'));
+      if (abortSource === 'caller') expect(timeout).not.toHaveBeenCalled();
+      else expect(timeout).toHaveBeenCalledWith(25);
+      deadline.abort(abortSource === 'caller'
+        ? new DOMException('Cancelled by caller', 'AbortError')
+        : new DOMException('The operation timed out', 'TimeoutError'));
       await rejected;
       await expect(closed).resolves.toBeUndefined();
     } finally {

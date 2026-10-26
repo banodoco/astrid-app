@@ -69,12 +69,12 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(nudge).toBeVisible();
     }
 
-    test('A: nothing configured locks the composer and reports all four agents honestly and offers another', async ({ page }) => {
+    test('A: nothing configured locks the composer and reports all five agents honestly and offers another', async ({ page }) => {
       await open(page, 'A');
-      await expect(card(page).getByRole('option')).toHaveCount(5); // the four catalog agents plus "Another agent" (c77c8971f)
+      await expect(card(page).getByRole('option')).toHaveCount(6); // the five catalog agents plus "Another agent"
       await expect(card(page).getByRole('option', { name: /Another agent/ })).toBeVisible();
       await expect(card(page).getByRole('option', { name: /Astrid's agent/ })).toContainText('Set up');
-      for (const name of ['Claude Code', 'Codex', 'Hermes']) await expect(card(page).getByRole('option', { name: new RegExp(name) })).toContainText('Not installed');
+      for (const name of ['Claude Code', 'Codex', 'Hermes', 'Octop']) await expect(card(page).getByRole('option', { name: new RegExp(name) })).toContainText('Not installed');
       await expect(composer(page)).toBeDisabled();
     });
 
@@ -108,6 +108,16 @@ for (const theme of ['light', 'dark'] as const) {
       await shot(page, 'D', 'install');
       await control(page, { ready: true });
       await done(page, 'D', 'Hermes');
+    });
+
+    test('H: Octop installation advances automatically', async ({ page }) => {
+      await open(page, 'H');
+      await card(page).getByRole('option', { name: /Octop/ }).click();
+      await expect(card(page).locator('code').first()).toContainText('octop.app/install.sh | bash');
+      await expect(card(page).getByRole('button', { name: 'Copy Octop install command' })).toBeVisible();
+      await shot(page, 'H', 'install');
+      await control(page, { ready: true });
+      await done(page, 'H', 'Octop');
     });
 
     test('E: OpenRouter rejects and clears a key, then selects the default and replies without leaking keys', async ({ page }) => {

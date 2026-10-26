@@ -6,6 +6,7 @@ export const LOCAL_AGENT_TABLE = {
   'claude-code': { name: 'Claude Code' },
   codex: { name: 'Codex' },
   hermes: { name: 'Hermes' },
+  octop: { name: 'Octop' },
 } as const;
 
 export type LocalAgentId = keyof typeof LOCAL_AGENT_TABLE;
@@ -18,6 +19,7 @@ export const PERSONAL_AGENT_DIRECTORIES: Partial<Record<LocalAgentId, string>> =
   astrid: '~/.omp/agent/agents',
   'claude-code': '~/.claude/agents',
   codex: '~/.codex/agents',
+  octop: '~/.octop/agents',
 };
 
 export const thoughtLevelSchema = z.object({

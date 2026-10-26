@@ -42,7 +42,7 @@ describe('AgentSetupCard choices', () => {
     expect(screen.getByText('Use your OpenRouter, ChatGPT or Claude account')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Built on oh-my-pi' })).toHaveAttribute('href', 'https://example.test/omp');
     view.rerenderCard({ agents: ready() });
-    expect(screen.getAllByText('Ready')).toHaveLength(4);
+    expect(screen.getAllByText('Ready')).toHaveLength(5);
   });
   it.each(['last', 'external', 'astrid'])('highlights and focuses the %s choice', kind => {
     const agents = ready();
@@ -59,6 +59,8 @@ describe('AgentSetupCard choices', () => {
     fireEvent.keyDown(screen.getByRole('option', { selected: true }), { key: 'End' });
     expect(screen.getByRole('option', { name: /Another agent/ })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
+    expect(screen.getByRole('option', { name: /Octop/ })).toHaveFocus();
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
     expect(screen.getByRole('option', { name: /Hermes/ })).toHaveFocus();
     fireEvent.keyDown(document.activeElement!, { key: 'ArrowUp' });
     expect(screen.getByRole('option', { name: /Use Codex/ })).toHaveFocus();
@@ -71,15 +73,15 @@ describe('AgentSetupCard choices', () => {
 });
 
 describe('another agent setup', () => {
-  it.each(['astrid', "'/custom Astrid/run-astrid'", undefined])('offers terminal instructions using %s and returns to the fifth row', async command => {
+  it.each(['astrid', "'/custom Astrid/run-astrid'", undefined])('offers terminal instructions using %s and returns to the sixth row', async command => {
     const agents = ready();
     if (command) agents[0].terminal = { command, skillSynced: false };
     agents[2].terminal = { command: 'codex', skillSynced: true };
     const view = mount({ agents, onSetup: vi.fn() });
     const options = screen.getAllByRole('option');
-    expect(options).toHaveLength(5);
-    expect(options[4]).toHaveTextContent('Another agentUse a different agent, like Gemini CLI or OpenCode');
-    expect(within(options[4]).queryByText(/Ready|Set up|Sign in|Not installed/)).toBeNull();
+    expect(options).toHaveLength(6);
+    expect(options[5]).toHaveTextContent('Another agentUse a different agent, like Gemini CLI or OpenCode');
+    expect(within(options[5]).queryByText(/Ready|Set up|Sign in|Not installed/)).toBeNull();
     choose('Another agent');
     expect(screen.getByRole('heading', { name: 'Use it from your terminal' })).toHaveFocus();
     expect(screen.getByText('Run your agent in a terminal and ask it to use Astrid. Edits, tasks and generations show up right here.')).toBeInTheDocument();

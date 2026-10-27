@@ -53,6 +53,14 @@ test('PowerShell bootstrap source selects local manifest pins before download an
   assert.match(script, /\} \(\[bool\]\$PSCommandPath -and \$MyInvocation\.MyCommand -is \[Management\.Automation\.ExternalScriptInfo\]\) @args\s*$/);
 });
 
+test('PowerShell bootstrap accepts unknown top-level manifest keys', () => scenario(async (context, run) => {
+  context.manifest.release = 1;
+  context.manifest.required = { release: 1, reason: 'Required update' };
+  const result = await run();
+  alive(result);
+  assert.match(result.stdout, /Astrid is ready\./);
+}));
+
 test('PowerShell explains first-run preparation before Python setup completes', () => scenario(async (context) => {
   const harness = await context.powershell();
   const release = path.join(context.root, 'release-python');

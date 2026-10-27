@@ -1,6 +1,6 @@
 import { strict as assert } from 'node:assert';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { describe, it } from 'node:test';
 import { Worker } from 'node:worker_threads';
 import { tmpdir } from 'node:os';
@@ -373,6 +373,7 @@ describe('runBoundedCommand', () => {
 
   it('keeps twenty concurrent scoped cleanups isolated from an unrelated process', { skip: declaredSkip('macos-release-process-containment') }, async () => {
     const root = mkdtempSync(resolve(tmpdir(), 'bounded-command-parallel-scope-'));
+    const released = resolve(root, 'cleanup-returned');
     const unrelated = spawn(NODE, ['-e', 'setInterval(() => {}, 1_000)'], { detached: true, stdio: 'ignore' });
     unrelated.unref();
     const moduleUrl = new URL('./bounded-command.mjs', import.meta.url).href;
@@ -389,7 +390,7 @@ describe('runBoundedCommand', () => {
         const source = [
           "const { spawn } = require('node:child_process');",
           `const child = spawn(process.execPath, ['-e', ${JSON.stringify(
-            `setTimeout(() => require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'orphan'), 600);`,
+            `const fs = require('node:fs'); const timer = setInterval(() => { if (!fs.existsSync(${JSON.stringify(root)})) { clearInterval(timer); return; } if (fs.existsSync(${JSON.stringify(released)})) { fs.writeFileSync(${JSON.stringify(marker)}, 'orphan'); clearInterval(timer); } }, 10);`,
           )}], { detached: true, stdio: 'ignore' });`,
           'child.unref(); process.exit(0);',
         ].join('');
@@ -405,6 +406,9 @@ describe('runBoundedCommand', () => {
       });
       const results = await Promise.all(workers);
       assert.deepEqual(results, Array(20).fill('success'));
+      // A descendant running during cleanup is allowed. Only a process that
+      // survives the completed cleanup can observe this release and write.
+      writeFileSync(released, 'cleanup returned');
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 750));
       for (let index = 0; index < 20; index += 1) assert.equal(existsSync(resolve(root, `parallel-${index}.marker`)), false);
       assert.doesNotThrow(() => process.kill(unrelated.pid, 0));
@@ -449,7 +453,8 @@ describe('runBoundedCommand', () => {
     const secret = `bounded-secret-${process.pid}-${Date.now()}`;
     const source = [
       "const { execFileSync } = require('node:child_process');",
-      "const rows = execFileSync('/bin/ps', ['eww', '-axo', 'pid=,ppid=,command='], { encoding: 'utf8' }).split('\\n');",
+      "let listing; try { listing = execFileSync('/bin/ps', ['eww', '-axo', 'pid=,ppid=,command='], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 }); } catch (error) { throw new Error('Process listing failed: ' + (error.code || error.status)); }",
+      "const rows = listing.split('\\n');",
       'const parent = process.ppid;',
       "const parentRow = rows.find((row) => Number(row.trim().split(/\\s+/, 1)[0]) === parent) || '';",
       "const parentParts = parentRow.trim().split(/\\s+/);",

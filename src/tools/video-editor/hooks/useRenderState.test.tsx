@@ -1,6 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ReactNode } from 'react';
+import { StrictMode, type ReactNode } from 'react';
 import {
   formatAstridExecutorDiagnostic,
   useRenderState,
@@ -25,7 +25,12 @@ import { createDiagnosticCollection } from '@astrid/editor-sdk';
 
 const mocks = vi.hoisted(() => ({
   startClientRender: vi.fn(),
+  downloadRenderedFile: vi.fn().mockResolvedValue(undefined),
+  toastError: vi.fn(),
 }));
+
+vi.mock('@/tools/video-editor/lib/render-download.ts', () => ({ downloadRenderedFile: mocks.downloadRenderedFile }));
+vi.mock('@/shared/components/ui/toast.tsx', () => ({ toast: { error: mocks.toastError } }));
 
 const renderRouterMocks = vi.hoisted(() => ({
   buildRenderTimelinePayload: vi.fn(),
@@ -678,6 +683,45 @@ describe('useRenderState render routing', () => {
     expect(result.current.renderResultFilename).toBe('out.mp4');
   });
 
+  it('downloads each new completion once across repeated events, StrictMode and remounts', async () => {
+    const listeners: Array<(progress: { phase: string; resultUrl?: string }) => void> = [];
+    const exporter = { render: vi.fn(async () => ({ id: 'job', subscribe(listener: typeof listeners[number]) {
+      listeners.push(listener); return () => undefined;
+    } })) };
+    const hook = () => useRenderState(buildConfig({ id: 'clip', clipType: 'media', track: 'V1', at: 0, hold: 1 }),
+      { fps: 30, durationInFrames: 30, compositionWidth: 1920, compositionHeight: 1080 }, exporter);
+    const wrapper = ({ children }: { children: ReactNode }) => <StrictMode>{children}</StrictMode>;
+    const view = renderHook(hook, { wrapper });
+    expect(mocks.downloadRenderedFile).not.toHaveBeenCalled();
+    await act(async () => { await view.result.current.startRender(); });
+    await act(async () => { listeners[0]({ phase: 'complete', resultUrl: 'blob:first' }); });
+    view.rerender();
+    await act(async () => { listeners[0]({ phase: 'complete', resultUrl: 'blob:first' }); });
+    expect(mocks.downloadRenderedFile).toHaveBeenCalledTimes(1);
+    await act(async () => { await view.result.current.startRender(); });
+    await act(async () => { listeners[0]({ phase: 'complete', resultUrl: 'blob:first' }); });
+    expect(mocks.downloadRenderedFile).toHaveBeenCalledTimes(1);
+    await act(async () => { listeners[1]({ phase: 'complete', resultUrl: 'blob:second' }); });
+    expect(mocks.downloadRenderedFile).toHaveBeenCalledTimes(2);
+    expect(mocks.downloadRenderedFile).toHaveBeenLastCalledWith('blob:second', 'out.mp4');
+    view.unmount();
+    renderHook(hook, { wrapper });
+    expect(mocks.downloadRenderedFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a completed render available when its automatic download fails', async () => {
+    mocks.downloadRenderedFile.mockRejectedValueOnce(new Error('network unavailable'));
+    const exporter = { render: vi.fn(async () => ({ id: 'job', subscribe(listener: (value: { phase: string; resultUrl: string }) => void) {
+      listener({ phase: 'complete', resultUrl: 'blob:retry' }); return () => undefined;
+    } })) };
+    const { result } = renderHook(() => useRenderState(buildConfig({ id: 'clip', clipType: 'media', track: 'V1', at: 0, hold: 1 }),
+      { fps: 30, durationInFrames: 30, compositionWidth: 1920, compositionHeight: 1080 }, exporter));
+    await act(async () => { await result.current.startRender(); });
+    expect(result.current.renderStatus).toBe('done');
+    expect(result.current.renderResultUrl).toBe('blob:retry');
+    expect(mocks.toastError).toHaveBeenCalledWith('network unavailable', expect.objectContaining({ description: expect.stringContaining('retry Download') }));
+  });
+
   it('blocks malformed remotion_module metadata without invoking the client renderer', async () => {
     const { result } = renderHook(() => useRenderState(
       buildConfig({
@@ -824,8 +868,9 @@ describe('useRenderState render routing', () => {
     expect(result.current.renderStatus).toBe('done');
     expect(result.current.renderProgress?.percent).toBe(100);
     expect(result.current.renderResultUrl).toBe(`/api/astrid/v1/objects/sha256%3A${'b'.repeat(64)}`);
-    // Completion exposes the result for the player; it never downloads itself.
-    expect(anchorClick).not.toHaveBeenCalled();
+    // The real completion owns one CORS download; controls only present the result.
+    expect(mocks.downloadRenderedFile).toHaveBeenCalledWith(`/api/astrid/v1/objects/sha256%3A${'b'.repeat(64)}`, 'out.mp4');
+    expect(mocks.downloadRenderedFile).toHaveBeenCalledTimes(1);
     expect(result.current.renderResultFilename).toBe('out.mp4');
     expect(result.current.renderResultInfo).toMatchObject({ revision: 7 });
     expect(typeof result.current.renderResultInfo?.completedAt).toBe('number');

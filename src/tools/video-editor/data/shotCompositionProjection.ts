@@ -542,7 +542,11 @@ export function projectCanonicalComposition(
     const asset = clip.asset && occurrenceId
       ? assetAliases.get(`${occurrenceId}\u0000${clip.asset}`) ?? clip.asset
       : clip.asset;
-    return { ...clip, ...(asset ? { asset } : {}), assetEntry: asset ? registry[asset] : undefined };
+    // Runtime authoring calls still-image clips `image`; the browser's native
+    // still-image renderer and export contract call them `hold`. Normalize the
+    // read model only, retaining the canonical document and its clip identity.
+    const clipType = clip.clipType === 'image' ? 'hold' : clip.clipType;
+    return { ...clip, clipType, ...(asset ? { asset } : {}), assetEntry: asset ? registry[asset] : undefined };
   });
   const output = outputBaseConfig?.output ?? { resolution: '1920x1080', fps: 30, file: `timeline-${composition.parentDocumentId}.mp4` };
   const baseApp = record(outputBaseConfig?.app) ?? {};

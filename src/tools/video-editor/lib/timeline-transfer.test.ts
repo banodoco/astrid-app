@@ -1,7 +1,11 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { classifyPairedRoute } from '../../../../config/vite/pairedRoutePolicy.ts';
 import { readStoredZip, writeStoredZip } from './timeline-transfer-zip.ts';
 import { exportTimelineArchive, importTimelineArchive, uniqueTimelineName } from './timeline-transfer.ts';
+
+const download = vi.hoisted(() => vi.fn());
+vi.mock('@/shared/runtime/browserDownloadRuntime.ts', () => ({ downloadBlobAsFile: download }));
+beforeEach(() => download.mockClear());
 
 const mediaSha = 'b'.repeat(64);
 const artifactDigest = 'sha256:' + 'a'.repeat(64);
@@ -124,6 +128,8 @@ describe('timeline transfer workflows', () => {
       { projectId: 'catalog-route-test', timelineId: 'timeline', timelineName: 'Catalog route', flushPendingSave: async () => undefined },
       { client: client as never, fetchImpl: actionFetch(plan) },
     );
+    expect(download).toHaveBeenCalledWith(expect.any(Blob), 'Catalog route.astrid');
+    expect((globalThis as typeof globalThis & { showSaveFilePicker?: unknown }).showSaveFilePicker).not.toHaveBeenCalled();
     expect(paths).toEqual(['/api/astrid/v1/capabilities?limit=100']);
     expect(paths.some((path) => path === '/api/runtime/v1/capabilities')).toBe(false);
   });
@@ -151,7 +157,7 @@ describe('timeline transfer workflows', () => {
         ? new Response(mediaBytes)
         : new Response(JSON.stringify(plan), { status: 200 });
     }) as typeof fetch;
-    await exportTimelineArchive({ projectId: 'p', timelineId: 't', timelineName: 'Timeline', flushPendingSave: async () => { order.push('flush'); } }, { client: client as never, fetchImpl, toast: { loading: () => 'x', update: () => undefined, success: () => undefined, warning: () => undefined, error: (message, _id, description) => errors.push(`${message}: ${description}`) } });
+    await exportTimelineArchive({ projectId: 'p', timelineId: 't', timelineName: 'Timeline', flushPendingSave: async () => { order.push('flush'); } }, { saveAs: true, client: client as never, fetchImpl, toast: { loading: () => 'x', update: () => undefined, success: () => undefined, warning: () => undefined, error: (message, _id, description) => errors.push(`${message}: ${description}`) } });
     expect(order).toEqual(['picker', 'flush', 'admit']);
     expect(errors).toEqual([]);
     expect(writes.length).toBeGreaterThan(0);
@@ -186,7 +192,7 @@ describe('timeline transfer workflows', () => {
       ? new Response(mediaBody)
       : new Response(JSON.stringify(plan))) as typeof fetch;
     await exportTimelineArchive({ projectId: 'p', timelineId: 't', timelineName: 'T', flushPendingSave: async () => undefined }, {
-      client: client as never, fetchImpl, toast: { loading: () => 'toast', update: () => undefined, success: () => undefined, warning: () => undefined, error: (message, _id, description) => errors.push(`${message}: ${description}`) },
+      saveAs: true, client: client as never, fetchImpl, toast: { loading: () => 'toast', update: () => undefined, success: () => undefined, warning: () => undefined, error: (message, _id, description) => errors.push(`${message}: ${description}`) },
     });
     expect(errors).toContain("Couldn't export T: disk full");
     expect(cancelled).toBe(true);
@@ -199,7 +205,7 @@ describe('timeline transfer workflows', () => {
     const client = { listCapabilities: vi.fn(), admitTask: vi.fn(), getTask: vi.fn(), listManagedOutputs: vi.fn(), ingestProjectObject: vi.fn(), listProjectObjects: vi.fn(), importProjectMedia: vi.fn(), importTimeline: vi.fn() };
     await exportTimelineArchive({ projectId: 'p', timelineId: 't', timelineName: 'T', flushPendingSave: async () => { throw new Error('save failed'); } }, { client: client as never });
     expect(client.admitTask).not.toHaveBeenCalled();
-    expect(picker).toHaveBeenCalledTimes(1);
+    expect(picker).not.toHaveBeenCalled();
 
     delete (globalThis as typeof globalThis & { showSaveFilePicker?: unknown }).showSaveFilePicker;
     const largePlan = { manifest: { format: 'astrid.timeline/1', name: 'Large', elements: [], media: [{ sha256: mediaSha, size: 1024 * 1024 * 1024 }], transcripts: [] }, timeline: {}, transcripts: {}, media: [{ sha256: mediaSha, size: 1024 * 1024 * 1024 }] };
@@ -211,7 +217,7 @@ describe('timeline transfer workflows', () => {
     };
     const errors: string[] = [];
     await exportTimelineArchive({ projectId: 'p', timelineId: 't', timelineName: 'Large', flushPendingSave: async () => undefined }, { client: largeClient as never, fetchImpl: actionFetch(largePlan), toast: { loading: () => 'x', update: () => undefined, success: () => undefined, warning: () => undefined, error: (message, _id, description) => errors.push(`${message}: ${description}`) } });
-    expect(errors.join(' ')).toContain('Use Chrome, or run: astrid timelines export');
+    expect(errors.join(' ')).toContain('Choose Save timeline as…');
   });
 
   it('preflights before uploads, sends expected digests, and commits the prepared artifact', async () => {

@@ -345,6 +345,7 @@ test.describe('audio-reactive-colour browser export proof', () => {
 
     const renderButton = page.getByRole('button', { name: /^Render(?: \d+%)?$/ });
     await expect(renderButton).toBeEnabled();
+    const downloadPromise = page.waitForEvent('download', { timeout: 120_000 });
     await renderButton.click();
     const downloadLink = page.getByRole('button', { name: 'Download', exact: true });
     const renderBlocker = page.locator('[data-video-editor-render-blocker="true"]');
@@ -360,8 +361,7 @@ test.describe('audio-reactive-colour browser export proof', () => {
     await expect(renderedFilm.getByTestId('timeline-render-player')).toBeVisible();
     await expect(renderedFilm.getByRole('button', { name: 'Download', exact: true })).toBeVisible();
 
-    const downloadPromise = page.waitForEvent('download', { timeout: 30_000 });
-    await downloadLink.click();
+    // Completion starts a normal browser download without opening a save picker.
     const download = await downloadPromise;
     const outputPath = browserEvidencePath(testInfo, 'audio-reactive-colour/browser-render.mp4');
     await download.saveAs(outputPath);
@@ -369,6 +369,11 @@ test.describe('audio-reactive-colour browser export proof', () => {
     expect((await readFile(outputPath)).subarray(4, 8).toString('ascii')).toBe('ftyp');
 
     await assertDecodedFixture(outputPath);
+
+    // Download remains a normal browser-managed retry/copy action.
+    const manualDownloadPromise = page.waitForEvent('download', { timeout: 30_000 });
+    await downloadLink.click();
+    expect((await manualDownloadPromise).suggestedFilename()).toBe(download.suggestedFilename());
 
     // Rendering is client-only and must not write the timeline. Repeat it to
     // prove idempotency and to catch accidental Runtime persistence coupling.
@@ -379,13 +384,12 @@ test.describe('audio-reactive-colour browser export proof', () => {
     await renderedFilm.getByRole('button', { name: 'Close' }).click();
     await expect(renderedFilm).toBeHidden();
     await expect(renderButton).toBeEnabled();
+    const secondDownloadPromise = page.waitForEvent('download', { timeout: 120_000 });
     await renderButton.click();
     await expect(renderButton).toBeDisabled({ timeout: 5_000 });
     await expect(renderedFilm).toBeVisible({ timeout: 120_000 });
     await expect(downloadLink).toBeVisible();
     await expect(renderedFilm.getByTestId('timeline-render-player')).not.toHaveAttribute('src', firstFilmSource!);
-    const secondDownloadPromise = page.waitForEvent('download', { timeout: 30_000 });
-    await downloadLink.click();
     const secondDownload = await secondDownloadPromise;
     const secondOutputPath = browserEvidencePath(testInfo, 'audio-reactive-colour/browser-render-repeat.mp4');
     await secondDownload.saveAs(secondOutputPath);

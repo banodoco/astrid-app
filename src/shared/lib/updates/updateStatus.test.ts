@@ -3,7 +3,7 @@ import { checkHostedUpdate, checkLocalUpdate } from './updateStatus.ts';
 
 const health = (release?: number) => ({ status: 'ok', protocol: 'workspace.v1', schema_digest: 'digest', runtime_epoch: 1, runtime_session_id: 's', runtime_instance_id: 'i', ...(release === undefined ? {} : { release }) }) as never;
 function response(value: unknown, status = 200) {
-  return { ok: status >= 200 && status < 300, status, text: async () => JSON.stringify(value) } as Response;
+  return { ok: status >= 200 && status < 300, status, json: async () => value } as Response;
 }
 
 describe('update status queries', () => {
@@ -18,6 +18,7 @@ describe('update status queries', () => {
     expect(result.release).toBe(0);
     expect(result.behind).toBe(true);
     expect(result.resolution.installedRelease).toBe(0);
+    expect(result.resolution.updateNowAvailable).toBeUndefined();
   });
 
   it('handles equal, behind, ahead, and required release facts', async () => {
@@ -41,6 +42,7 @@ describe('update status queries', () => {
     expect(fetcher.mock.calls[0]?.[0]).toBe('/__astrid/local-update-status');
     expect(fetcher.mock.calls[0]?.[1]).toMatchObject({ method: 'POST', body: '', cache: 'no-store' });
     expect(result).toMatchObject({ app: 'local-head', servedApp: 'served-head', behind: true });
+    expect(result.resolution.updateNowAvailable).toBeUndefined();
     await expect(checkLocalUpdate(vi.fn<typeof fetch>().mockResolvedValue(response({ error: 'unavailable' }, 503)))).rejects.toThrow('HTTP 503');
   });
 });

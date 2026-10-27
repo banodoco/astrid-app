@@ -4,11 +4,11 @@ import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
+import { DIAGNOSTICS_FALLBACK_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { fetchDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
-import { APP_BUILD, fetchBuildInfo } from '@/shared/lib/updates/appBuildWatch.ts';
-import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
-import { DIAGNOSTICS_FALLBACK_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 
 type CheckState = 'checking' | 'ready' | 'error';
 
@@ -29,18 +29,10 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
 
   const loadDiagnostics = async () => {
     try {
-      const build = await fetchBuildInfo(fetch);
-      const query = new URLSearchParams();
-      const appBuild = APP_BUILD || build?.app;
-      if (appBuild) query.set('app_build', appBuild);
-      if (build) query.set('app_release', String(build.release));
-      const response = await fetch(`${runtimeApiBase()}/v1/diagnostics${query.size ? `?${query}` : ''}`, { cache: 'no-store', headers: { Accept: 'application/json' } });
-      if (!response.ok) throw new Error('Runtime could not provide diagnostics.');
-      const payload = await response.json() as { report?: unknown };
-      if (typeof payload.report !== 'string') throw new Error('Runtime diagnostics response was invalid.');
-      setDiagnostics(payload.report);
+      const report = await fetchDiagnosticsReport(fetch);
+      setDiagnostics(report);
       setDiagnosticsError(false);
-      return payload.report;
+      return report;
     } catch {
       setDiagnostics('');
       setDiagnosticsError(true);
@@ -74,9 +66,9 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         if (!connection.isConnected) throw new Error('Connect to Astrid before checking its release.');
         const current = await new AstridRuntimeClient().readStatus();
         next = await checkHostedUpdate(current.health);
-        base = resolveUpdate({ ...next.resolution, installType, settingsSurface: true, updateNowAvailable: false });
+        base = resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings');
       }
-      if (local) base = resolveUpdate({ ...next.resolution, installType, settingsSurface: true, updateNowAvailable: false });
+      if (local) base = resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings');
       setStatus(next);
       setResolution(base);
       setState('ready');

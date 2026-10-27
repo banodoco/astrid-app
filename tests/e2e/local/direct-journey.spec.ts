@@ -696,6 +696,28 @@ test.describe('restarts', () => {
     await expect(firstTrackName(page)).toHaveValue('Draft kept across the restart');
   });
 
+  test('App: a stale-build notice reloads directly and the existing recovery path keeps an unsaved draft', async ({ page, harness }) => {
+    await page.route('**/build.json', route => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify({ app: 'older-or-newer-app-build', release: 0 }) }));
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    const releaseSaves = await holdTimelineSaves(page);
+    await editFirstTrackName(page, 'Draft kept across App reload');
+    const headBefore = await currentHead(harness);
+    await expect(page.getByRole('status').getByRole('button', { name: 'Reload' })).toBeVisible();
+    await page.getByRole('status').getByRole('button', { name: 'Reload' }).click();
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    const recovered = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
+    await expect(recovered).toBeVisible();
+    expect(await currentHead(harness), 'held save means the draft was not persisted before reload').toBe(headBefore);
+    await releaseSaves();
+    await recovered.getByRole('button', { name: 'Save them' }).click();
+    await expect.poll(() => currentHead(harness), { timeout: 20_000 }).not.toBe(headBefore);
+    await expect(firstTrackName(page)).toHaveValue('Draft kept across App reload');
+    await page.unroute('**/build.json');
+  });
+
   test('App: Astrid stopping while the page is connected shows "Astrid stopped", and the card clears by itself when it is back', async ({ page, harness }) => {
     await openApp(page, harness);
     await expectConnected(page);

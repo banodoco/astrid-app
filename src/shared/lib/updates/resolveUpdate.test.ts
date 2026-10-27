@@ -30,4 +30,19 @@ describe('resolveUpdate', () => {
   it('keeps mid-session schema errors on the mounted-editor banner path', () => {
     expect(resolveUpdate({ midSessionSchemaMismatch: true })).toMatchObject({ card: 'mid-session', title: 'Editor updated', primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' } });
   });
+
+  it('uses the hard Reload action for a stale page ahead of update states', () => {
+    for (const input of [
+      { compatibility: { kind: 'schema' as const, detail: 'old schema' } },
+      { installedRelease: 1, requiredRelease: 2, requiredReason: 'security fix' },
+      { releaseBehind: true },
+      { installedRelease: 9, servedRelease: 8 },
+    ]) {
+      expect(resolveUpdate({ ...input, pageStale: true })).toMatchObject({
+        card: 'reload', title: 'Editor updated', primary: { label: 'Reload' }, secondary: null,
+      });
+    }
+    expect(resolveUpdate({ pageStale: true, compatibility: { kind: 'schema', detail: 'old' } }).primary)
+      .not.toHaveProperty('destination');
+  });
 });

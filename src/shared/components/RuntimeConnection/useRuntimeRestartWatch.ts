@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
+import { scheduleFocusAndInterval } from '@/shared/lib/updates/appBuildWatch.ts';
 
 /**
  * Notices, while connected, that Astrid stopped, restarted or changed.
@@ -161,12 +162,10 @@ export function useRuntimeRestartWatch(
       }
     };
     void check();
-    const interval = setInterval(() => void check(), intervalMs);
-    window.addEventListener('focus', check);
+    const unschedule = scheduleFocusAndInterval(() => { void check(); }, intervalMs);
     return () => {
       stopped = true;
-      clearInterval(interval);
-      window.removeEventListener('focus', check);
+      unschedule();
     };
   }, [enabled, settled, intervalMs, fetchImpl, confirmPermission]);
 
@@ -210,12 +209,10 @@ export function useOnAstridAnswers(
       }
     };
     void check();
-    const interval = setInterval(() => void check(), intervalMs);
-    window.addEventListener('focus', check);
+    const unschedule = scheduleFocusAndInterval(() => { void check(); }, intervalMs);
     return () => {
       disposed = true;
-      clearInterval(interval);
-      window.removeEventListener('focus', check);
+      unschedule();
     };
   }, [intervalMs, fetchImpl]);
 }

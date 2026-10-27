@@ -57,6 +57,9 @@ function renderSettings() {
     />,
   );
   const section = screen.getByRole('region', { name: STATUS_COPY.title });
+  expect(screen.getAllByRole('region')[0]).toHaveAccessibleName('Updates');
+  expect(screen.getByText('No update has run yet.')).toBeInTheDocument();
+  expect(screen.getByText('No update log yet.')).toBeInTheDocument();
   expect(screen.queryByRole('region', { name: 'Connection' })).toBeNull();
   return section;
 }
@@ -79,7 +82,7 @@ describe('SettingsModal Astrid status', () => {
     expect(within(section).getByText(STATUS_COPY.workspaceName).closest('div')).toHaveTextContent('My Studio');
     expect(within(section).getByText('Runtime')).toHaveAttribute('data-state', 'pass');
     expect(section.querySelector('[data-check="workspace"]')).toHaveAttribute('data-state', 'pass');
-    expect(readStatusMock).toHaveBeenCalledTimes(1);
+    expect(readStatusMock).toHaveBeenCalledTimes(2);
     expect(within(section).queryByText('Tools')).toBeNull();
     expect(within(section).queryByText(COPY.updateNeeded.title)).toBeNull();
   });

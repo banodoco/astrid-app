@@ -7,6 +7,7 @@ import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers.ts';
 import { RUNTIME_CONNECTION_COPY as COPY, withCommandShell, withOrigin } from './copy.ts';
 import { useRuntimeRestartWatch } from './useRuntimeRestartWatch.ts';
+import { QuietUpdateNotice } from './QuietUpdateNotice.tsx';
 
 export interface RuntimeConnectionPillProps {
   readonly connection: RuntimeConnectionValue;
@@ -57,9 +58,9 @@ export function RuntimeConnectionPill({
 
   if (restart === 'ok') {
     return (
-      <div data-testid="runtime-connection-status" data-state="connected" className="sr-only">
+      <><div data-testid="runtime-connection-status" data-state="connected" className="sr-only">
         {COPY.connected.sentence}
-      </div>
+      </div><QuietUpdateNotice connection={connection} /></>
     );
   }
 

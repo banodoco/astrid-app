@@ -577,6 +577,8 @@ const env = {
   ASTRID_RUNTIME_DATA_ROOT: runtimeSettings.dataRoot,
   ASTRID_SUPPORT_ROOT: runtimeSettings.dataRoot,
   ASTRID_WORKSPACE_DISCOVERY: discoveryPath,
+  ASTRID_LOCAL_UPDATE_STATUS: '1',
+  VITE_ASTRID_LOCAL_UPDATE_STATUS: '1',
   ...(astridCheckout ? { ASTRID_CHECKOUT: astridCheckout } : {}),
   ...(configuredAstridPublicCheckout ? { ASTRID_PUBLIC_CHECKOUT: configuredAstridPublicCheckout } : {}),
   PORT: port,

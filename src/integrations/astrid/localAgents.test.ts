@@ -6,7 +6,7 @@ afterEach(() => localStorage.clear());
 
 describe('local agent registry', () => {
   it('keeps external IDs and session routing in sync', () => {
-    expect(LOCAL_AGENT_IDS).toEqual(['astrid', 'claude-code', 'codex', 'hermes']);
+    expect(LOCAL_AGENT_IDS).toEqual(['astrid', 'claude-code', 'codex', 'hermes', 'dsh']);
     for (const agent of EXTERNAL_AGENT_IDS) {
       expect(isExternalAgentSession(`${agent}:chat-1`)).toBe(true);
       expect(sessionAgentId(`${agent}:chat-1`)).toBe(agent);

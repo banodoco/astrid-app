@@ -34,6 +34,9 @@ export function createFakeAcp(projectSelectors: readonly string[], initialScenar
         { id: 'claude-code', name: 'Claude Code', command: 'claude', install: 'curl -fsSL https://claude.ai/install.sh | bash', login: 'claude auth login', installed: scenario === 'C', available: scenario === 'C' && ready },
         { id: 'codex', name: 'Codex', command: 'codex', install: 'npm install -g @openai/codex', login: 'codex login', installed: ['B', 'F', 'G'].includes(scenario), available: ['B', 'F', 'G'].includes(scenario) },
         { id: 'hermes', name: 'Hermes', command: 'hermes', install: 'curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash', login: 'hermes setup', installed: scenario === 'D' && ready, available: scenario === 'D' && ready },
+        // DeepSeek Harness speaks ACP through its pinned `dsh --profile acp` launcher, so it
+        // reports the same not-installed/sign-in/ready surface as the other external agents.
+        { id: 'dsh', name: 'DeepSeek Harness', command: 'dsh', install: 'npm install -g @deepseek-ai/dsh', login: 'dsh web', installed: scenario === 'H' && ready, available: scenario === 'H' && ready },
       ].map(agent => ({ id: agent.id, name: agent.name, state: agent.available ? 'ready' : agent.installed ? 'sign-in' : 'not-installed', signIn: agent.available ? 'signed-in' : 'signed-out', line: `Run \`${agent.installed ? agent.login : agent.install}\`.`, steps: [...(agent.installed ? [] : [{ kind: 'install', command: agent.install, label: `Copy ${agent.name} install command` }]), { kind: 'sign-in', command: agent.login, label: `Copy ${agent.name} sign-in command` }], terminal: { command: agent.command, skillSynced: true }, models: [], defaultModel: null })),
     ],
   });

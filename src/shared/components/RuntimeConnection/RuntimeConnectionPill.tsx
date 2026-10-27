@@ -8,6 +8,7 @@ import { UI_Z_LAYERS } from '@/shared/lib/uiLayers.ts';
 import { RUNTIME_CONNECTION_COPY as COPY, withCommandShell, withOrigin } from './copy.ts';
 import { useRuntimeRestartWatch } from './useRuntimeRestartWatch.ts';
 import { QuietUpdateNotice } from './QuietUpdateNotice.tsx';
+import { DownloadDiagnosticsButton } from './DownloadDiagnosticsButton.tsx';
 
 export interface RuntimeConnectionPillProps {
   readonly connection: RuntimeConnectionValue;
@@ -68,6 +69,7 @@ export function RuntimeConnectionPill({
     return (
       <div data-testid="runtime-connection-status" data-state="busy" role="status" className={CARD_CLASS} style={CARD_STYLE}>
         <CardText title={COPY.busy.title} sentence={COPY.busy.sentence} />
+        <DownloadDiagnosticsButton />
       </div>
     );
   }

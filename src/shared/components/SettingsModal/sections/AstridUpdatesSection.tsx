@@ -6,7 +6,8 @@ import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
-import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
+import { APP_BUILD, fetchBuildInfo } from '@/shared/lib/updates/appBuildWatch.ts';
+import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
 
 type CheckState = 'checking' | 'ready' | 'error';
 
@@ -22,6 +23,40 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const [state, setState] = useState<CheckState>('checking');
   const [error, setError] = useState('');
   const [resolution, setResolution] = useState<UpdateResolution | null>(null);
+  const [diagnostics, setDiagnostics] = useState('');
+  const [diagnosticsError, setDiagnosticsError] = useState(false);
+
+  const loadDiagnostics = async () => {
+    try {
+      const build = await fetchBuildInfo(fetch);
+      const query = new URLSearchParams();
+      const appBuild = APP_BUILD || build?.app;
+      if (appBuild) query.set('app_build', appBuild);
+      if (build) query.set('app_release', String(build.release));
+      const response = await fetch(`${runtimeApiBase()}/v1/diagnostics${query.size ? `?${query}` : ''}`, { cache: 'no-store', headers: { Accept: 'application/json' } });
+      if (!response.ok) throw new Error('Runtime could not provide diagnostics.');
+      const payload = await response.json() as { report?: unknown };
+      if (typeof payload.report !== 'string') throw new Error('Runtime diagnostics response was invalid.');
+      setDiagnostics(payload.report);
+      setDiagnosticsError(false);
+      return payload.report;
+    } catch {
+      setDiagnostics('');
+      setDiagnosticsError(true);
+      return '';
+    }
+  };
+
+  const downloadDiagnostics = async () => {
+    const report = diagnostics || await loadDiagnostics();
+    if (!report) return;
+    const url = URL.createObjectURL(new Blob([report], { type: 'text/plain;charset=utf-8' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'astrid-diagnostics.txt';
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   const installType = connection.managedByPinokio ? 'pinokio'
     : local ? 'fully-local' : hosted ? 'installer' : 'source';
@@ -53,7 +88,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   };
 
   useEffect(() => {
-    if (isOpen) void check();
+    if (isOpen) { void check(); void loadDiagnostics(); }
     // A fresh status is requested each time Settings opens; Check for updates invokes the same path.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
@@ -74,8 +109,14 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
       {state === 'ready' && resolution?.title && <div className="text-sm"><p className="font-medium">{resolution.title}</p>{resolution.body && <p className="text-muted-foreground">{resolution.body}</p>}</div>}
       {state === 'ready' && resolution && resolution.card !== 'none' && <UpdateResolutionActions resolution={resolution} />}
       <div className="border-t pt-2 text-sm">
-        <p><span className="text-muted-foreground">Last result:</span> No update has run yet.</p>
-        <p className="mt-1"><span className="text-muted-foreground">View log:</span> No update log yet.</p>
+        <p><span className="text-muted-foreground">Last result:</span> {diagnostics.match(/^Last update result: (.*)$/m)?.[1] || 'No update has run yet.'}</p>
+        <details className="mt-1"><summary className="cursor-pointer underline">View log</summary><pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{diagnostics.match(/Installer transaction log:\n([\s\S]*?)\nRetained back-end copies:/)?.[1] || 'No update log yet.'}</pre></details>
+        <Button type="button" variant="retro-secondary" size="retro-sm" className="mt-2" onClick={() => void downloadDiagnostics()}>Download diagnostics</Button>
+        {diagnosticsError && <div className="mt-2 space-y-2">
+          <p>Runtime could not answer. You can still collect diagnostics:</p>
+          <div><Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void navigator.clipboard?.writeText('Run `astrid-runtime doctor` and read the log directory named in the report.')}>Copy for your agent</Button></div>
+          <p>Run it yourself: <code>astrid-runtime doctor &gt; astrid-diagnostics.txt</code></p>
+        </div>}
       </div>
     </div>
   </section>;

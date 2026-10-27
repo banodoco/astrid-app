@@ -8,6 +8,8 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, describe, it, test } from 'node:test';
 import { readGeneratedSchemaDigest } from './runtime-schema-guard.mjs';
+import { RUNTIME_ACCEPTED_SCHEMA_DIGESTS } from '../src/integrations/runtime/contract-metadata.ts';
+import { SOURCE_SCHEMA_MISMATCH_ACTION } from '../src/integrations/runtime/runtime-update-contract.mjs';
 import { terminateProcessTree } from './terminate-process-tree.mjs';
 import { listenOnTestPort } from './test-port.mjs';
 
@@ -286,13 +288,14 @@ async function launchFixture(overrides = {}) {
       return;
     }
     const digest = readGeneratedSchemaDigest(resolve('src/integrations/runtime/generated-contract-metadata.ts'));
+    const responseDigest = (key) => Object.hasOwn(overrides, key) ? overrides[key] : digest;
     const json = (value) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(value)); };
     if (req.url === '/v1/health') return json({
-      status: 'ok', protocol: overrides.healthProtocol ?? 'workspace.v1', schema_digest: overrides.healthDigest ?? digest,
+      status: 'ok', protocol: overrides.healthProtocol ?? 'workspace.v1', schema_digest: responseDigest('healthDigest'),
       runtime_instance_id: overrides.healthInstanceId ?? runtimeInstanceId,
     });
     if (req.url === '/v1/handshake') return json({
-      protocol: overrides.handshakeProtocol ?? 'workspace.v1', schema_digest: overrides.handshakeDigest ?? digest, session_id: 'session-r3',
+      protocol: overrides.handshakeProtocol ?? 'workspace.v1', schema_digest: responseDigest('handshakeDigest'), session_id: 'session-r3',
       actor_id: overrides.handshakeActorId ?? actorId,
       realm_id: overrides.handshakeRealmId ?? realmId,
       scopes: overrides.handshakeScopes ?? ['handshake', 'projects:read', 'projects:write', 'objects:read', 'objects:write', 'tasks:read', 'tasks:write'],
@@ -905,6 +908,40 @@ test('a Pinokio Runtime with an incompatible schema points to a Pinokio restart'
     assert.equal(result.code, 1);
     assert.match(result.stderr.split('\n')[0], /; restart: Stop and start Astrid in Pinokio$/);
   } finally { await fixture.close(); }
+});
+
+test('the launcher accepts every page-compatible digest from health and handshake', async () => {
+  for (const digest of RUNTIME_ACCEPTED_SCHEMA_DIGESTS) {
+    for (const endpoint of ['health', 'handshake']) {
+      const fixture = await launchFixture({ [`${endpoint}Digest`]: digest });
+      try {
+        const result = await launcherEnds({ fixture, args: ['--check'] });
+        assert.equal(result.code, 0, `${endpoint} ${digest}: ${result.stderr}`);
+        assert.equal(result.spawned, '', `${endpoint} ${digest}: app unexpectedly spawned during --check`);
+        assert.deepEqual(runtimeCliCalls(fixture), []);
+      } finally { await fixture.close(); }
+    }
+  }
+});
+
+test('health and handshake schema mismatches include A1 source action and stop before app start', async () => {
+  for (const [endpoint, digest] of [
+    ['health', 'sha256:unsupported-health'],
+    ['handshake', 'sha256:unsupported-handshake'],
+    ['health', undefined],
+    ['handshake', ''],
+  ]) {
+    const fixture = await launchFixture({ [`${endpoint}Digest`]: digest });
+    try {
+      const result = await launcherEnds({ fixture });
+      assert.equal(result.code, 1, `${endpoint} ${digest}: ${result.stderr}`);
+      assert.match(result.stderr, new RegExp(SOURCE_SCHEMA_MISMATCH_ACTION));
+      assert.match(result.stderr, /App workspace\.v1 schema sha256:[0-9a-f]+/);
+      assert.match(result.stderr, /restart: astrid-runtime restart --profile astrid --data-root/);
+      assert.equal(result.spawned, '', `${endpoint} ${digest}: app/bridge spawned`);
+      assert.deepEqual(runtimeCliCalls(fixture), []);
+    } finally { await fixture.close(); }
+  }
 });
 
 function assertOpenAfterStart(started) {

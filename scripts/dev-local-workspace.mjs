@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import { request as httpRequest } from 'node:http';
 import { readGeneratedSchemaDigest, schemaDigestMismatch } from './runtime-schema-guard.mjs';
+import { LEGACY_RUNTIME_SCHEMA_DIGESTS, SOURCE_SCHEMA_MISMATCH_ACTION } from '../src/integrations/runtime/runtime-update-contract.mjs';
 import {
   parseDevLocalWorkspaceArgs,
   resolveRuntimeCommand,
@@ -438,7 +439,7 @@ async function verifyRuntime(endpoint, token, expectedIdentity, allowStart = fal
       const quote = (value) => /^[A-Za-z0-9_./:=+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
       const invocation = [selected.command, ...selected.args.filter((value) => value !== '--json')].map(quote).join(' ');
       const restart = pinokioManaged ? 'Stop and start Astrid in Pinokio' : `${selected.cwd ? `cd ${quote(selected.cwd)} && ` : ''}${invocation}`;
-      console.error(`Astrid: Runtime ${actual?.protocol ?? 'unknown'} schema ${actual?.schema_digest ?? 'unknown'} is incompatible with App workspace.v1 schema ${expectedSchemaDigest}; ${reason}; restart: ${restart}`);
+      console.error(`Astrid: Runtime ${actual?.protocol ?? 'unknown'} schema ${actual?.schema_digest ?? 'unknown'} is incompatible with App workspace.v1 schema ${expectedSchemaDigest}; ${reason}; ${SOURCE_SCHEMA_MISMATCH_ACTION}; restart: ${restart}`);
       process.exitCode = 1;
       return null;
     };
@@ -448,7 +449,8 @@ async function verifyRuntime(endpoint, token, expectedIdentity, allowStart = fal
     if (health?.runtime_instance_id !== expectedIdentity.runtimeInstanceId) {
       return fail(ENGINE_CHANGED, 'Runtime health instance does not match the selected Astrid profile');
     }
-    const digestError = schemaDigestMismatch(health?.schema_digest, expectedSchemaDigest);
+    const acceptedSchemaDigests = [expectedSchemaDigest, ...LEGACY_RUNTIME_SCHEMA_DIGESTS];
+    const digestError = schemaDigestMismatch(health?.schema_digest, acceptedSchemaDigests);
     if (digestError) return incompatible(health, 'runtime schema digest mismatch');
 
     const handshakeResponse = await fetch(new URL('/v1/handshake', endpoint), {
@@ -464,7 +466,7 @@ async function verifyRuntime(endpoint, token, expectedIdentity, allowStart = fal
     });
     if (!handshakeResponse.ok) return fail(CANT_START, `Runtime identity handshake returned HTTP ${handshakeResponse.status}`);
     const handshake = await handshakeResponse.json();
-    const handshakeDigestError = schemaDigestMismatch(handshake?.schema_digest, expectedSchemaDigest);
+    const handshakeDigestError = schemaDigestMismatch(handshake?.schema_digest, acceptedSchemaDigests);
     if (handshakeDigestError) return incompatible(handshake, 'Runtime handshake schema digest mismatch');
     if (handshake?.protocol !== 'workspace.v1'
       || handshake?.actor_id !== expectedIdentity.actorId

@@ -1,6 +1,8 @@
 import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Minimize2 } from 'lucide-react';
+import { useIsMobile, useIsTablet } from '@/shared/hooks/mobile';
+import { usePaneControlsHosted } from '@/shared/state/paneControlsHost';
 import { useOptionalVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 
 export interface PanelFullscreenFrameProps {
@@ -18,16 +20,20 @@ function focusInitial(body: HTMLElement): boolean {
 }
 
 /**
- * A panel filling the editor shell when the host supplies one, with a document-level fallback for
- * standalone hosts (not the Fullscreen API). The host moves the panel's DOM node into the ref'd
- * body. Shell-scoped panels leave chat reachable; standalone panels are modal. Whoever opened it
- * returns focus to its own button on exit.
+ * A panel filling the editor shell on desktop, with a document-level host for standalone, phone,
+ * and pane-hosting layouts (not the Fullscreen API). The host moves the panel's DOM node into the
+ * ref'd body. Window-hosted panels trap focus and lock page scrolling; shell-scoped panels leave
+ * chat reachable. Whoever opened it returns focus to its own button on exit.
  */
 export const PanelFullscreenFrame = forwardRef<HTMLDivElement, PanelFullscreenFrameProps>(function PanelFullscreenFrame(
   { title, onExit },
   bodyRef,
 ) {
   const shellRoot = useOptionalVideoEditorRuntime()?.shellRootRef?.current ?? null;
+  const isMobile = useIsMobile();
+  const isTablet = useIsTablet();
+  const paneControlsHosted = usePaneControlsHosted();
+  const fillsWindow = (isMobile && !isTablet) || paneControlsHosted || !shellRoot;
   const frameRef = useRef<HTMLDivElement | null>(null);
   const innerBodyRef = useRef<HTMLDivElement | null>(null);
   const onExitRef = useRef(onExit);
@@ -51,27 +57,26 @@ export const PanelFullscreenFrame = forwardRef<HTMLDivElement, PanelFullscreenFr
     return () => observer.disconnect();
   }, []);
 
-  // Esc exits from the editor shell unless a panel consumed it; chat keeps its Escape.
+  // Esc exits from a window-hosted frame, or from the editor shell unless a panel consumed it.
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       const frame = frameRef.current;
       if (!frame) return;
       const target = event.target instanceof Node ? event.target : null;
-      const inEditor = !shellRoot || target === null || target === document.body
-        || target === document.documentElement || frame.contains(target) || shellRoot.contains(target);
+      const inEditor = fillsWindow || target === null || target === document.body
+        || target === document.documentElement || frame.contains(target) || Boolean(shellRoot?.contains(target));
       if (!inEditor) return;
       event.preventDefault();
       onExitRef.current();
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shellRoot]);
+  }, [fillsWindow, shellRoot]);
 
-  // Tab wraps inside the frame when it owns the whole document. The shell-scoped frame leaves
-  // the chat pane reachable.
+  // Tab wraps inside window-hosted frames. The shell-scoped frame leaves the chat pane reachable.
   useEffect(() => {
-    if (shellRoot) return undefined;
+    if (!fillsWindow) return undefined;
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Tab' || event.defaultPrevented) return;
       const frame = frameRef.current;
@@ -94,25 +99,25 @@ export const PanelFullscreenFrame = forwardRef<HTMLDivElement, PanelFullscreenFr
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [shellRoot]);
+  }, [fillsWindow]);
 
   // The page behind stays put while the frame is up.
   useLayoutEffect(() => {
-    if (shellRoot) return undefined;
+    if (!fillsWindow) return undefined;
     const previous = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => { document.body.style.overflow = previous; };
-  }, [shellRoot]);
+  }, [fillsWindow]);
 
   // The app's pane handles are fixed at z-[100016] (see shared/config/panes.ts); the frame stacks above them.
   const frame = (
     <div
       ref={frameRef}
       role="dialog"
-      aria-modal={shellRoot ? 'false' : 'true'}
+      aria-modal={fillsWindow ? 'true' : 'false'}
       aria-label={title}
       data-panel-fullscreen-frame
-      className={`${shellRoot ? 'absolute inset-y-0 left-0 right-3.5 z-50' : 'fixed inset-0 z-[100017]'} flex min-h-0 flex-col bg-background text-foreground`}
+      className={`${fillsWindow ? 'fixed inset-0 z-[100017]' : 'absolute inset-y-0 left-0 right-3.5 z-50'} flex min-h-0 flex-col bg-background text-foreground`}
     >
       <div data-panel-fullscreen-titlebar className="flex h-9 shrink-0 select-none items-center gap-2 border-b border-border bg-muted/40 px-3">
         <span className="min-w-0 flex-1 truncate text-sm font-medium">{title}</span>
@@ -130,5 +135,5 @@ export const PanelFullscreenFrame = forwardRef<HTMLDivElement, PanelFullscreenFr
     </div>
   );
 
-  return createPortal(frame, shellRoot ?? document.body);
+  return createPortal(frame, fillsWindow ? document.body : shellRoot!);
 });

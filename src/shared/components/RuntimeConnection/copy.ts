@@ -406,7 +406,7 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
   updateNeeded: {
     title: 'Update Astrid',
     sentence: 'This page needs a newer Astrid. Give these instructions to your coding agent to update it.',
-    pinokioSentence: 'This page needs a newer Astrid. In Pinokio, choose Stop, then Update, then Start.',
+    pinokioSentence: 'This page needs a newer Astrid. Update in Pinokio.',
   },
 
   /** Lead-in above the shared update screen when a chat reply from this computer's Astrid is out of date. */

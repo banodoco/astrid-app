@@ -346,10 +346,10 @@ describe('RuntimeConnectionPanel', () => {
     expect(connect).toHaveBeenCalledOnce();
   });
 
-  it('Pinokio update guidance gives the visible Stop, Update, Start sequence without installer steps', () => {
+  it('Pinokio update guidance points to Pinokio without installer steps', () => {
     panel(connectionFor({ status: 'update_needed' }, { managedByPinokio: true }));
 
-    expect(screen.getByText('This page needs a newer Astrid. In Pinokio, choose Stop, then Update, then Start.')).toBeInTheDocument();
+    expect(screen.getByText('This page needs a newer Astrid. Update in Pinokio.')).toBeInTheDocument();
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: COPY.agent.commandCopy })).not.toBeInTheDocument();
     expect(screen.getByText('Update in Pinokio')).toBeInTheDocument();

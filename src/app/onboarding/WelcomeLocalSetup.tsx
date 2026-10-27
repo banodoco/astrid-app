@@ -29,7 +29,7 @@ export function WelcomeLocalSetup({ onBack }: { readonly onBack: () => void }) {
           {copy.status === 'failed' && <CopyFallback text={instructions} label={RUNTIME_CONNECTION_COPY.agent.copy} />}
         </div>
         <section className="min-w-0 space-y-1.5 text-left">
-          <p className="text-[13px] font-medium text-muted-foreground">Or do it yourself</p>
+          <p className="text-[13px] font-medium text-muted-foreground">Run it yourself</p>
           <ol className="min-w-0 list-decimal space-y-1.5 pl-5 text-[13px] leading-5 text-muted-foreground marker:text-muted-foreground">
             {steps.map((step, stepIndex) => <li key={stepIndex} className="min-w-0">
               <div className="min-w-0 break-words">

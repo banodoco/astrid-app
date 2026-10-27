@@ -4,10 +4,11 @@ import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
+import { DIAGNOSTICS_FALLBACK_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { fetchDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
-import { fetchDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
 
 type CheckState = 'checking' | 'ready' | 'error';
 
@@ -105,9 +106,9 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         <details className="mt-1"><summary className="cursor-pointer underline">View log</summary><pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{diagnostics.match(/Installer transaction log:\n([\s\S]*?)\nRetained back-end copies:/)?.[1] || 'No update log yet.'}</pre></details>
         <Button type="button" variant="retro-secondary" size="retro-sm" className="mt-2" onClick={() => void downloadDiagnostics()}>Download diagnostics</Button>
         {diagnosticsError && <div className="mt-2 space-y-2">
-          <p>Runtime could not answer. You can still collect diagnostics:</p>
-          <div><Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void navigator.clipboard?.writeText('Run `astrid-runtime doctor` and read the log directory named in the report.')}>Copy for your agent</Button></div>
-          <p>Run it yourself: <code>astrid-runtime doctor &gt; astrid-diagnostics.txt</code></p>
+          <p>{DIAGNOSTICS_FALLBACK_COPY.intro}</p>
+          <div><Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void navigator.clipboard?.writeText(DIAGNOSTICS_FALLBACK_COPY.agent)}>Copy for your agent</Button></div>
+          <p>Run it yourself: <code>{DIAGNOSTICS_FALLBACK_COPY.command}</code></p>
         </div>}
       </div>
     </div>

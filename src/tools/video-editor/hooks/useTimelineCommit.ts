@@ -127,6 +127,7 @@ export type TimelineEditMutation =
   | {
       type: 'prepared-media';
       command: PlacePreparedMediaCommand;
+      additionalCommands?: PlacePreparedMediaCommand[];
     };
 
 export type ApplyEditOptions = {
@@ -452,27 +453,35 @@ export function useTimelineCommit({
     }
 
     if (mutation.type === 'prepared-media') {
-      const prepared = applyPreparedMediaCommand(current, mutation.command);
-      if (!prepared) {
-        eventBus.emit('lostEdit');
-        return;
+      const commands = [mutation.command, ...(mutation.additionalCommands ?? [])];
+      let nextData = current;
+      const placements: Array<{ command: PlacePreparedMediaCommand; clipId: string }> = [];
+      let history;
+      for (const command of commands) {
+        const prepared = applyPreparedMediaCommand(nextData, command);
+        if (!prepared) {
+          eventBus.emit('lostEdit');
+          return;
+        }
+        nextData = prepared.nextData;
+        history = prepared.history;
+        placements.push({ command, clipId: prepared.commandResult.detail!.clipId as string });
       }
-
-      commitData(prepared.nextData, {
-        ...(!current.registry.assets[mutation.command.payload.asset.assetKey]
+      commitData(nextData, {
+        ...(commands.length > 1 || !current.registry.assets[mutation.command.payload.asset.assetKey]
           || (mutation.command.payload.afterClipId && mutation.command.payload.asset.mediaType === 'video') ? {
           gestureBasis: { kind: 'prepared-media' as const, config: current.config, registry: current.registry,
-            clipId: prepared.commandResult!.detail!.clipId as string, command: mutation.command },
+            ...placements[0], ...(placements.length > 1 ? { additionalPlacements: placements.slice(1) } : {}) },
         } : {}),
         save: options?.save,
-        selectedClipId: options?.selectedClipId,
+        selectedClipId: options?.selectedClipId ?? placements.at(-1)!.clipId,
         selectedTrackId: options?.selectedTrackId,
         transactionId: options?.transactionId,
         semantic: options?.semantic,
         skipHistory: options?.skipHistory,
         commandHistory: {
-          transaction: { commands: [mutation.command] },
-          history: prepared.history,
+          transaction: { commands },
+          history: { ...history!, appliedCount: commands.length, commandTypes: commands.map(command => command.type) },
         },
       });
       return;

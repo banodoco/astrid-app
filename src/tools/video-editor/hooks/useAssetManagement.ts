@@ -14,7 +14,7 @@ import {
   assertRuntimeMediaImportSize,
   type PreparedMediaImport,
 } from '@/tools/video-editor/data/AssetResolver.ts';
-import type { TimelineProvisionedAsset } from '@/tools/video-editor/commands/provisioning.ts';
+import { estimateProvisionedAssetDuration, type TimelineProvisionedAsset } from '@/tools/video-editor/commands/provisioning.ts';
 import {
   type TimelineData,
 } from '@/tools/video-editor/lib/timeline-data.ts';
@@ -74,6 +74,7 @@ export interface UseAssetManagementResult {
   registerGenerationAsset: (data: UploadedGenerationData | null) => string | null;
   uploadImageGeneration: (file: File) => Promise<UploadedGenerationResult>;
   uploadVideoGeneration: (file: File) => Promise<UploadedGenerationResult>;
+  handleAssetBatchDrop: (assets: TimelineProvisionedAsset[], trackId: string | undefined, time: number, forceNewTrack?: boolean, insertAtTop?: boolean) => boolean;
   handleAssetDrop: (
     assetKey: string,
     trackId: string | undefined,
@@ -362,6 +363,32 @@ export function useAssetManagement({
     return true;
   }, [getApplyEdit, getDataRef, getSelectedTrackId, selectedProjectId]);
 
+  // Use the same prepared placement planner as a Finder drop, but publish the
+  // whole selection through one applyEdit so history has one undo boundary.
+  const handleAssetBatchDrop = useCallback((assets: TimelineProvisionedAsset[], trackId: string | undefined,
+    time: number, forceNewTrack = false, insertAtTop = false) => {
+    let current = getDataRef().current;
+    if (!current || !assets.length) return false;
+    const commands: PlacePreparedMediaCommand[] = [];
+    let at = time;
+    let targetTrackId = trackId;
+    for (const asset of assets) {
+      const command = buildPlacePreparedMediaCommand({ prepared: asset, trackId: targetTrackId,
+        selectedTrackId: getSelectedTrackId(), time: at, forceNewTrack, insertAtTop });
+      const preview = previewPreparedMediaCommand(current, command);
+      if (!preview) return false;
+      commands.push(command);
+      current = preview.nextData;
+      targetTrackId = preview.commandResult.detail?.trackId as string;
+      const clipId = preview.commandResult.detail?.clipId as string;
+      const action = current.rows.flatMap(row => row.actions).find(action => action.id === clipId);
+      at = action?.end ?? at + estimateProvisionedAssetDuration(asset);
+      forceNewTrack = false;
+    }
+    getApplyEdit()({ type: 'prepared-media', command: commands[0], additionalCommands: commands.slice(1) }, { semantic: true });
+    return true;
+  }, [getApplyEdit, getDataRef, getSelectedTrackId]);
+
   const handleAssetDrop = useCallback((assetKey: string, trackId: string | undefined, time: number, forceNewTrack = false, insertAtTop = false, preparedAsset?: TimelineProvisionedAsset, removeClipId?: string) => {
     if (preparedAsset) {
       return placePreparedAsset(preparedAsset, trackId, time, forceNewTrack, insertAtTop, removeClipId);
@@ -504,5 +531,6 @@ export function useAssetManagement({
     uploadImageGeneration,
     uploadVideoGeneration,
     handleAssetDrop,
+    handleAssetBatchDrop,
   };
 }

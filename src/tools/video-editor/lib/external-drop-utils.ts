@@ -40,6 +40,7 @@ import {
 } from '@/tools/video-editor/data/AssetResolver.ts';
 
 export type TimelineDropPosition = NonNullable<ReturnType<DragCoordinator['update']>>;
+export type TimelineFileDropPosition = Pick<TimelineDropPosition, 'time' | 'trackId' | 'isNewTrack' | 'isNewTrackTop' | 'pointerTrackId'>;
 
 type PreparedGenerationDropData = Parameters<UseAssetManagementResult['prepareGenerationAsset']>[0];
 
@@ -261,6 +262,7 @@ export async function handleFileDrop({
   uploadImageGeneration,
   uploadVideoGeneration,
   dropAsset,
+  dropAssets,
   directAssetUploadAllFiles = false,
   mediaImportForImageVideo = false,
   onAssetDropError,
@@ -268,7 +270,7 @@ export async function handleFileDrop({
   files: File[];
   dataRef: MutableRefObject<TimelineData | null>;
   pendingOpsRef: MutableRefObject<number>;
-  dropPosition: TimelineDropPosition;
+  dropPosition: TimelineFileDropPosition;
   insertAtTop: boolean;
   selectedTrackId: string | null;
   applyEdit: TimelineApplyEdit;
@@ -280,12 +282,57 @@ export async function handleFileDrop({
   uploadImageGeneration: UseAssetManagementResult['uploadImageGeneration'];
   uploadVideoGeneration: UseAssetManagementResult['uploadVideoGeneration'];
   dropAsset: UseAssetManagementResult['handleAssetDrop'];
+  dropAssets?: UseAssetManagementResult['handleAssetBatchDrop'];
   directAssetUploadAllFiles?: boolean;
   mediaImportForImageVideo?: boolean;
   onAssetDropError?: (error: unknown) => void;
 }): Promise<boolean> {
   if (!files.length || !dataRef.current) {
     return false;
+  }
+
+  // One multi-file gesture has one placement commit. Preparation still uses
+  // the Finder-drop import functions and does not mutate the timeline.
+  if (files.length > 1 && dropAssets) {
+    const scope = canonicalJsonStringify({ head: dataRef.current.head,
+      composition: dataRef.current.config.app?.canonicalComposition });
+    pendingOpsRef.current += 1;
+    try {
+      const assets: TimelineProvisionedAsset[] = [];
+      for (const file of files) {
+        let asset: TimelineProvisionedAsset | null;
+        if (isImageFile(file) || isVideoFile(file)) {
+          const generation = isImageFile(file) ? await uploadImageGeneration(file) : await uploadVideoGeneration(file);
+          asset = prepareGenerationForDrop(generation, dataRef, registerGenerationAsset, prepareGenerationAsset);
+        } else {
+          if (!prepareAssetUpload) throw new Error('This editor backend does not support prepared asset placement');
+          const result = await prepareAssetUpload(file);
+          const source = getAssetResolutionToken(result.entry);
+          if (!source) throw new Error('Uploaded asset has no file locator or media identity');
+          await resolveAssetUrl(source);
+          const kind = getPlayableAssetKind(result.entry);
+          asset = kind ? { assetKey: result.assetId, mediaType: kind, durationSeconds: result.entry.duration ?? null,
+            entry: result.entry, source: 'registered' } : null;
+        }
+        if (!asset) throw new Error('Uploaded asset is not playable media');
+        assets.push(asset);
+      }
+      const current = dataRef.current;
+      if (!current || canonicalJsonStringify({ head: current.head,
+        composition: current.config.app?.canonicalComposition }) !== scope) {
+        throw new Error('The timeline changed before the media was placed. Choose Add media again.');
+      }
+      if (!dropAssets(assets, dropPosition.isNewTrack ? undefined : dropPosition.trackId,
+        dropPosition.time, dropPosition.isNewTrack, insertAtTop)) {
+        throw new Error('The timeline drop target changed before the media was placed');
+      }
+      void invalidateAssetRegistry();
+    } catch (error) {
+      onAssetDropError?.(error);
+    } finally {
+      pendingOpsRef.current -= 1;
+    }
+    return true;
   }
 
   const defaultClipDuration = 5;

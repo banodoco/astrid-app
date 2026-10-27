@@ -137,6 +137,7 @@ export interface TimelineEditorOpsContextValue {
   onTimelineDragOver: ExternalDropHook['onTimelineDragOver'];
   onTimelineDragLeave: ExternalDropHook['onTimelineDragLeave'];
   onTimelineDrop: ExternalDropHook['onTimelineDrop'];
+  addMediaFiles: ExternalDropHook['addMediaFiles'];
   handleAssetDrop: AssetManagementHook['handleAssetDrop'];
   handleUpdateClips: ClipEditingHook['handleUpdateClips'];
   handleUpdateClipsDeep: ClipEditingHook['handleUpdateClipsDeep'];

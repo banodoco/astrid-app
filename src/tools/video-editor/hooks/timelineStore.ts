@@ -255,6 +255,7 @@ function createInitialOpsSlice(): TimelineEditorOpsContextValue {
   const onTimelineDragOver: TimelineEditorOpsContextValue['onTimelineDragOver'] = opsUnavailable('onTimelineDragOver');
   const onTimelineDragLeave: TimelineEditorOpsContextValue['onTimelineDragLeave'] = opsUnavailable('onTimelineDragLeave');
   const onTimelineDrop: TimelineEditorOpsContextValue['onTimelineDrop'] = opsUnavailable('onTimelineDrop');
+  const addMediaFiles: TimelineEditorOpsContextValue['addMediaFiles'] = opsUnavailable('addMediaFiles');
   const handleAssetDrop: TimelineEditorOpsContextValue['handleAssetDrop'] = opsUnavailable('handleAssetDrop');
   const handleUpdateClips: TimelineEditorOpsContextValue['handleUpdateClips'] = opsUnavailable('handleUpdateClips');
   const handleUpdateClipsDeep: TimelineEditorOpsContextValue['handleUpdateClipsDeep'] = opsUnavailable('handleUpdateClipsDeep');
@@ -316,6 +317,7 @@ function createInitialOpsSlice(): TimelineEditorOpsContextValue {
     onTimelineDragOver,
     onTimelineDragLeave,
     onTimelineDrop,
+    addMediaFiles,
     handleAssetDrop,
     handleUpdateClips,
     handleUpdateClipsDeep,

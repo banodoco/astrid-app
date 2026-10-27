@@ -801,6 +801,7 @@ export function VideoEditorRuntimeContent({
     onTimelineDragOver: editor.onTimelineDragOver,
     onTimelineDragLeave: editor.onTimelineDragLeave,
     onTimelineDrop: editor.onTimelineDrop,
+    addMediaFiles: editor.addMediaFiles,
     handleAssetDrop: editor.handleAssetDrop,
     handleUpdateClips: editor.handleUpdateClips,
     handleUpdateClipsDeep: editor.handleUpdateClipsDeep,

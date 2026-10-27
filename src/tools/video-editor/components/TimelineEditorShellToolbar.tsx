@@ -1,3 +1,4 @@
+import { TimelineAddMediaButton } from './TimelineAddMediaButton.tsx';
 import type { Dispatch, PointerEvent as ReactPointerEvent, ReactNode, SetStateAction } from 'react';
 import { formatDistanceToNow } from 'date-fns';
 import { GripHorizontal, History, Maximize2, Minimize2, Redo2, Undo2, ZoomIn, ZoomOut } from 'lucide-react';
@@ -323,6 +324,7 @@ export function TimelineEditorShellToolbar({
         {saveBadge}
         <TimelineUndoRedo buttonClassName={toolbarButtonSizeClass} />
         {historyMenu}
+        <TimelineAddMediaButton disabled={!timelineLoaded} />
       </div>
       {armedGestureControl}
       {!condensed && !armedGestureControl && (

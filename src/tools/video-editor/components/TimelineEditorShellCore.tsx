@@ -1,3 +1,4 @@
+import { TimelineAddMediaButton } from './TimelineAddMediaButton.tsx';
 import { useDataLanes } from '@/tools/video-editor/data-kinds/useDataLanes.ts';
 import { EDITOR_TOUR_ANCHOR_ATTRIBUTE, EDITOR_TOUR_ANCHORS } from '@/tools/video-editor/tour/anchors';
 import { useDataKindRegistrySnapshot } from '@/tools/video-editor/data-kinds/DataKindRegistryContext.tsx';
@@ -1013,6 +1014,7 @@ function TimelineEditorShellCoreComponent({
               >
                 <Images className="h-4 w-4" />
               </Button>
+              <TimelineAddMediaButton touch disabled={!editorData.data} />
               <button
                 type="button"
                 className="flex h-11 min-w-0 flex-1 items-center gap-2 rounded-full border border-border bg-card/95 px-4 text-left text-sm text-muted-foreground shadow-sm transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"

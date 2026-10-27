@@ -1836,12 +1836,13 @@ describe('TimelineEditorShellCore — phone layout', () => {
     expect(paneControlsHosted()).toBe(false);
   });
 
-  it('has no Text button in the bar: Gallery and Ask Astrid only', () => {
+  it('offers Gallery, Add media and Ask Astrid in the touch bar', () => {
     render(<TimelineEditorShellCore timelineId="test-timeline" />);
     const bar = screen.getByTestId('touch-agent-bar');
     expect(within(bar).queryByRole('button', { name: 'Add text' })).toBeNull();
     expect(within(bar).getAllByRole('button').map((button) => button.getAttribute('aria-label') ?? button.textContent)).toEqual([
       'Open gallery',
+      'Add media',
       'Ask Astrid…',
     ]);
   });

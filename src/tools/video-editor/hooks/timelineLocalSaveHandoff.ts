@@ -29,7 +29,9 @@ export type TimelineGestureReadBasis = {
   clipId: string;
 } & ({ kind: 'split'; timeSeconds: number } | { kind: 'move'; trackId: string } | {
   kind: 'trim'; patch: Partial<Pick<TimelineConfig['clips'][number], 'from' | 'to' | 'hold' | 'speed'>>;
-} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext });
+} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand;
+  additionalPlacements?: Array<{ command: PlacePreparedMediaCommand; clipId: string }> }
+  | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext });
 
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
@@ -290,15 +292,17 @@ export function createTimelineLocalSaveHandoff(options: {
           && Array.isArray(parent.clips) && parent.clips.length) refuse('element parent clips are not present in the mounted source');
         payload.config = changes(configBefore, configSource, next.config, ['config'], gestureBasis?.kind === 'element') as Record<string, OutboxJson>;
         if (gestureBasis?.kind === 'prepared-media') {
-          const asset = gestureBasis.command.payload.asset;
+          const selectedAssets = [gestureBasis.command, ...(gestureBasis.additionalPlacements ?? []).map(item => item.command)]
+            .map(command => command.payload.asset);
+          const entries = Object.fromEntries(selectedAssets.map(asset => [asset.assetKey, asset.entry]));
           if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
             || !same(authoredJson(next.registry), authoredJson({ ...source.registry,
-              assets: { ...source.registry.assets, [asset.assetKey]: asset.entry } }))) {
-            refuse('prepared media registry changes exceed the selected asset; draft retained');
+              assets: { ...source.registry.assets, ...entries } }))) {
+            refuse('prepared media registry changes exceed the selected assets; draft retained');
           }
           // Bootstrap registry is {}, while the editor displays { assets: {} }.
           payload.registry = { ...parent.registry, assets: { ...(parent.registry.assets ?? {}),
-            [asset.assetKey]: authoredJson(asset.entry) } };
+            ...authoredJson(entries) as Record<string, OutboxJson> } };
         } else {
           payload.registry = changes(parent.registry, source.registry, next.registry, ['registry']) as Record<string, OutboxJson>;
         }
@@ -410,125 +414,245 @@ export function createTimelineLocalSaveHandoff(options: {
         let mediaLabel = 'Add media';
         if (gestureBasis?.kind === 'prepared-media') {
           if (gestureBasis.command.type !== 'place-prepared-media') refuse('prepared media command is unavailable');
-          const prepared = gestureBasis.command.payload;
-          const media = prepared.asset.mediaSelection;
-          const keys = ['asset', 'generation_id', 'variant_id', 'object_id', 'catalog_digest'];
-          if (!media || Object.keys(media).length !== keys.length
-            || keys.some(key => typeof media[key as keyof typeof media] !== 'string' || !media[key as keyof typeof media])) {
-            refuse('prepared media needs the Runtime project media selection. Draft retained; reload the timeline, then import the media again');
-          }
-          const duplicateVideo = Boolean(prepared.afterClipId && prepared.asset.mediaType === 'video');
-          // File drops may remove only their transient uploading action. The
-          // command caller separately proves that the action exists locally;
-          // this handoff still refuses authored IDs and non-drop removals.
-          if ((prepared.removeClipId !== undefined
-            && (duplicateVideo || !prepared.removeClipId.startsWith('uploading-')))
-            || (!duplicateVideo && prepared.afterClipId) || prepared.replaceClipId || prepared.removeClipIds?.length
-            || prepared.pinnedShotGroupsOverride
-            || (!duplicateVideo && prepared.asset.mediaType !== 'image')) {
-            refuse('prepared media currently supports an ordinary image add on a visual track. Draft retained; reload the timeline, then choose Add media');
-          }
-          const config = configBefore as Record<string, OutboxJson>;
-          const nextConfig = payload.config as Record<string, OutboxJson>;
-          const clips = config.clips;
-          const nextClips = nextConfig.clips;
-          if (!Array.isArray(clips) || !Array.isArray(nextClips)) refuse('prepared media clip collection is unavailable');
-          if (prepared.removeClipId !== undefined && clips.some(clip => object(clip) && clip.id === prepared.removeClipId)) {
-            refuse('prepared media cannot remove an authored parent clip. Draft retained; reload the timeline, then choose Add media');
-          }
-          const row = duplicateVideo ? nextClips.find(clip => object(clip) && clip.id === gestureBasis.clipId) : nextClips.at(-1);
-          const tracks = config.tracks;
-          const nextTracks = nextConfig.tracks;
-          const newTrack = object(row) && Array.isArray(tracks) && Array.isArray(nextTracks)
-            && !tracks.some(track => object(track) && track.id === row.track)
-            ? nextTracks.find(track => object(track) && track.id === row.track) : undefined;
-          const visualTrack = object(row) && Array.isArray(nextTracks)
-            && nextTracks.filter(track => object(track) && track.id === row.track);
-          if (!object(row) || row.id !== gestureBasis.clipId || row.asset !== prepared.asset.assetKey
-            || clips.some(clip => object(clip) && clip.id === row.id)
-            || (!duplicateVideo && !same(nextClips.slice(0, -1), clips))
-            || !Array.isArray(tracks) || !Array.isArray(nextTracks)
-            || (!same(authoredJson(gestureBasis.config.tracks), authoredJson(authoringSource.config.tracks))
-              && (!newTrack || !same(authoredJson(gestureBasis.config.tracks), authoredJson(next.config.tracks))))
-            || !same({ ...nextConfig, clips, tracks }, config)
-            || (newTrack ? duplicateVideo || !same(nextTracks.filter(track => track !== newTrack), tracks)
-              : !same(nextTracks, tracks))
-            || !visualTrack || visualTrack.length !== 1 || !object(visualTrack[0])
-            || visualTrack[0].kind !== 'visual' || (visualTrack[0].role ?? 'output') !== 'output') {
-            refuse('prepared media changes more than one ordinary parent clip. Draft retained; reload the timeline, then choose an existing visual track');
-          }
-          if (Array.isArray(parent.occurrences) && parent.occurrences.some(occurrence => object(occurrence)
-            && (occurrence.track === row.track || (object(occurrence.placement) && occurrence.placement.track === row.track)))) {
-            refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
-          }
-          if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
-            || !same(payload.registry, { ...parent.registry, assets: { ...(parent.registry.assets ?? {}),
-              [prepared.asset.assetKey]: authoredJson(prepared.asset.entry) } })) {
-            refuse('prepared media registry changes exceed the selected asset; draft retained');
-          }
-          if (duplicateVideo) {
-            mediaLabel = 'Add video after clip';
-            const old = prepared.oldMediaSelection;
-            const anchorIndex = clips.findIndex(clip => object(clip) && clip.id === prepared.afterClipId);
-            const anchor = clips[anchorIndex];
-            if (!old || Object.keys(old).length !== keys.length
-              || keys.some(key => typeof old[key as keyof typeof old] !== 'string' || !old[key as keyof typeof old])
-              || !object(anchor) || anchor.asset !== old.asset || row.asset !== media.asset) {
-              refuse('video duplication needs both exact Runtime project media selections. Draft retained; reload the timeline, then import the media again');
+          const extraPlacements = gestureBasis.additionalPlacements ?? [];
+          if (extraPlacements.length) {
+            const placements = [
+              { command: gestureBasis.command, clipId: gestureBasis.clipId },
+              ...extraPlacements,
+            ];
+            if (placements.some(({ command, clipId }) => command.type !== 'place-prepared-media' || !clipId)
+              || new Set(placements.map(({ clipId }) => clipId)).size !== placements.length) {
+              refuse('prepared media batch has duplicate or missing clip bindings');
             }
-            // Bound the consumer to the upstream parent duplicate preview. Timing
-            // and metadata normalization remain the provider's responsibility.
-            const retained = nextClips.filter(clip => object(clip) && clip.id !== row.id);
-            if (nextClips.length !== clips.length + 1 || !same(nextClips.map(clip => object(clip) ? clip.id : null),
-              [...clips.slice(0, anchorIndex + 1).map(clip => object(clip) ? clip.id : null), row.id,
-                ...clips.slice(anchorIndex + 1).map(clip => object(clip) ? clip.id : null)])
-              || row.track !== anchor.track || clips.some((clip, index) => {
-                const nextClip = retained[index];
-                if (!object(clip) || !object(nextClip)) return true;
-                return index <= anchorIndex || clip.track !== anchor.track ? !same(clip, nextClip)
-                  : !same({ ...nextClip, at: clip.at }, clip);
-              })) refuse('video duplication exceeds one parent after-anchor preview; draft retained');
-            commands = [{ schema_version: 1, op: 'clip.duplicate-media', version: '1',
-              select: `parent/clip:${prepared.afterClipId}`, args: { id: row.id, old_media: authoredJson(old), media: authoredJson(media) },
-              intent: { ownership: 'parent' }, created: [
-                ...(Object.prototype.hasOwnProperty.call(parent.registry.assets, media.asset) ? [] : [`parent/asset:${media.asset}`]),
-                `parent/clip:${row.id}`,
-              ] }];
-            const order = clips.map(clip => (clip as Record<string, OutboxJson>).id as string);
-            mediaReads = [{ kind: 'collection', ref: 'parent', path: ['config', 'clips'], members: [...order].sort(), order }];
-            mediaSteps = [{ id: crypto.randomUUID(), label: 'Add video after clip', intent: 'Duplicate selected parent video', tags: [],
-              command_ordinals: [0], patch: [], reads: [{ kind: 'field', ref: 'parent', path: ['config', 'clips', `id:${prepared.afterClipId}`],
-                state: { state: 'present', value: authoredJson(anchor) } }] }];
-          } else {
+            const config = configBefore as Record<string, OutboxJson>;
+            const nextConfig = payload.config as Record<string, OutboxJson>;
+            const clips = config.clips;
+            const nextClips = nextConfig.clips;
+            const tracks = config.tracks;
+            const nextTracks = nextConfig.tracks;
+            if (!Array.isArray(clips) || !Array.isArray(nextClips) || !Array.isArray(tracks) || !Array.isArray(nextTracks)) {
+              refuse('prepared media batch collections are unavailable');
+            }
+            const placementRows = placements.map(({ command, clipId }) => {
+              const prepared = command.payload;
+              const media = prepared.asset.mediaSelection;
+              const keys = ['asset', 'generation_id', 'variant_id', 'object_id', 'catalog_digest'];
+              if (!media || Object.keys(media).length !== keys.length
+                || keys.some(key => typeof media[key as keyof typeof media] !== 'string' || !media[key as keyof typeof media])
+                || (prepared.removeClipId !== undefined && !prepared.removeClipId.startsWith('uploading-'))
+                || prepared.afterClipId || prepared.replaceClipId || prepared.removeClipIds?.length || prepared.pinnedShotGroupsOverride
+                || !['image', 'video'].includes(prepared.asset.mediaType)
+                || prepared.asset.assetKey !== media.asset) {
+                refuse('prepared media batch requires ordinary Runtime image/video adds with exact project selections');
+              }
+              const matches = nextClips.filter(clip => object(clip) && clip.id === clipId);
+              if (matches.length !== 1 || clips.some(clip => object(clip) && clip.id === clipId)) {
+                refuse('prepared media batch clip has no unique added parent binding');
+              }
+              const row = matches[0] as Record<string, OutboxJson>;
+              if (row.asset !== prepared.asset.assetKey) refuse('prepared media batch clip does not match its selected asset');
+              return { prepared, media, row };
+            });
+            const placementIds = new Set(placements.map(({ clipId }) => clipId));
+            const addedRows = nextClips.filter(clip => object(clip) && placementIds.has(String(clip.id)));
+            if (addedRows.length !== placements.length
+              || nextClips.length !== clips.length + placements.length
+              || !same(nextClips.filter(clip => !object(clip) || !placementIds.has(String(clip.id))), clips)) {
+              refuse('prepared media batch changes more than its selected parent clips');
+            }
+            const addedTrackIds = new Set(nextTracks.filter(track => object(track)
+              && !tracks.some(old => object(old) && old.id === track.id)).map(track => String((track as Record<string, unknown>).id)));
+            const referencedNewTracks = new Set(placementRows.map(({ row }) => String(row.track))
+              .filter(trackId => addedTrackIds.has(trackId)));
+            if (referencedNewTracks.size !== addedTrackIds.size
+              || !same(nextTracks.filter(track => !object(track) || !addedTrackIds.has(String(track.id))), tracks)
+              || (!same(authoredJson(gestureBasis.config.tracks), authoredJson(authoringSource.config.tracks))
+                && !same(authoredJson(gestureBasis.config.tracks), authoredJson(nextConfig.tracks)))) {
+              refuse('prepared media batch changes more than its selected parent tracks');
+            }
+            placementRows.forEach(({ prepared, row }) => {
+              const matches = nextTracks.filter(track => object(track) && track.id === row.track);
+              const expectedKind = prepared.asset.mediaType === 'image' || prepared.asset.mediaType === 'video' ? 'visual' : 'audio';
+              if (matches.length !== 1 || !object(matches[0]) || matches[0].kind !== expectedKind
+                || (matches[0].role ?? 'output') !== 'output') {
+                refuse('prepared media batch placement needs a compatible output track');
+              }
+            });
+            if (!same({ ...nextConfig, clips, tracks }, config)) {
+              refuse('prepared media batch changes unrelated parent config');
+            }
+            const occurrences = parent.occurrences;
+            if (Array.isArray(occurrences) && placementRows.some(({ row }) => occurrences.some(occurrence => object(occurrence)
+              && (occurrence.track === row.track || (object(occurrence.placement) && occurrence.placement.track === row.track))))) {
+              refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+            }
+            const assets = new Map<string, { entry: unknown; media: unknown }>();
+            for (const { prepared, media } of placementRows) {
+              if (assets.has(prepared.asset.assetKey) && !same(assets.get(prepared.asset.assetKey),
+                { entry: authoredJson(prepared.asset.entry), media: authoredJson(media) })) refuse('prepared media batch repeats an inconsistent asset identity');
+              assets.set(prepared.asset.assetKey, { entry: authoredJson(prepared.asset.entry), media: authoredJson(media) });
+            }
+            const expectedAssets = { ...(parent.registry && object(parent.registry) && object(parent.registry.assets) ? parent.registry.assets : {}) };
+            for (const [assetKey, { entry }] of assets) expectedAssets[assetKey] = entry as OutboxJson;
+            if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
+              || !same(payload.registry, { ...parent.registry, assets: expectedAssets })) {
+              refuse('prepared media batch registry changes exceed the selected assets; draft retained');
+            }
+            const newTracks = nextTracks.filter(track => object(track) && addedTrackIds.has(String(track.id)));
             commands = [
-              ...(newTrack ? [{ schema_version: 1, op: 'track.create', version: '1', select: 'parent',
-                args: { row: authoredJson(newTrack) }, intent: {}, created: [`parent/track:${row.track}`] } as EditCommand] : []),
-              { schema_version: 1, op: 'clip.add-media', version: '1', select: 'parent',
-              args: { row: authoredJson(row), media: authoredJson(media) }, intent: {}, created: [
-                ...(Object.prototype.hasOwnProperty.call(parent.registry.assets ?? {}, row.asset) ? [] : [`parent/asset:${row.asset}`]),
-                `parent/clip:${row.id}`,
-              ] }];
-          }
-          // track.create appends. Preserve a drop at the top in the same
-          // atomic commit, using the normal document-patch encoder for order.
-          if (newTrack && nextTracks.at(-1) !== newTrack) {
-            const appended = structuredClone(before);
-            const appendedPayload = appended.parent_revision.payload;
-            (appendedPayload.config as Record<string, OutboxJson>).tracks = [...tracks, newTrack];
-            if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) appendedPayload.tracks = [...tracks, newTrack];
-            const reordered = structuredClone(appended);
-            (reordered.parent_revision.payload.config as Record<string, OutboxJson>).tracks = nextTracks;
-            if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) reordered.parent_revision.payload.tracks = nextTracks;
-            const patch = documentPatchIntent({ before: appended, after: reordered, basis: { head: initial.head },
-              roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
-              label: mediaLabel, step: { id: crypto.randomUUID(), label: 'Position new track', intent: 'Keep the dropped track position', tags: [] },
-              reads: [] }) as Record<string, OutboxJson>;
-            commands!.splice(1, 0, { schema_version: 1, op: 'doc.patch', version: '1', select: null,
-              args: { changes: patch.changes }, created: patch.created as string[] });
-            mediaReads = [];
-            mediaSteps = commands!.map((_, index) => index === 1
-              ? { ...patch.step as NonNullable<CommitRequest['steps']>[number], command_ordinals: [index], patch: patch.changes as NonNullable<CommitRequest['steps']>[number]['patch'] }
-              : { id: crypto.randomUUID(), label: mediaLabel, intent: mediaLabel, tags: [], command_ordinals: [index], patch: [] });
+              ...newTracks.map(track => ({ schema_version: 1, op: 'track.create', version: '1', select: 'parent',
+                args: { row: authoredJson(track) }, intent: {}, created: [`parent/track:${(track as Record<string, unknown>).id}`] } as EditCommand)),
+            ];
+            const trackCommandCount = commands.length;
+            const createdAssets = new Set(Object.keys(object(parent.registry) && object(parent.registry.assets) ? parent.registry.assets : {}));
+            for (let index = 0; index < placementRows.length; index += 1) {
+              const { prepared, media, row } = placementRows[index];
+              commands.push({ schema_version: 1, op: 'clip.add-media', version: '1', select: 'parent',
+                args: { row: authoredJson(row), media: authoredJson(media) }, intent: {}, created: [
+                  ...(createdAssets.has(prepared.asset.assetKey) ? [] : [`parent/asset:${prepared.asset.assetKey}`]),
+                  `parent/clip:${placements[index].clipId}`,
+                ] });
+              createdAssets.add(prepared.asset.assetKey);
+            }
+            if (newTracks.length && !same(nextTracks, [...tracks, ...newTracks])) {
+              const appended = structuredClone(before);
+              const appendedPayload = appended.parent_revision.payload;
+              (appendedPayload.config as Record<string, OutboxJson>).tracks = [...tracks, ...newTracks];
+              if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) appendedPayload.tracks = [...tracks, ...newTracks];
+              const reordered = structuredClone(appended);
+              (reordered.parent_revision.payload.config as Record<string, OutboxJson>).tracks = nextTracks;
+              if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) reordered.parent_revision.payload.tracks = nextTracks;
+              const patch = documentPatchIntent({ before: appended, after: reordered, basis: { head: initial.head },
+                roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
+                label: mediaLabel, step: { id: crypto.randomUUID(), label: 'Position new tracks', intent: 'Keep the dropped track positions', tags: [] }, reads: [] }) as Record<string, OutboxJson>;
+              commands.splice(trackCommandCount, 0, { schema_version: 1, op: 'doc.patch', version: '1', select: null,
+                args: { changes: patch.changes }, created: patch.created as string[] });
+              mediaReads = [];
+              mediaSteps = commands.map((_, index) => index === trackCommandCount
+                ? { ...patch.step as NonNullable<CommitRequest['steps']>[number], command_ordinals: [index], patch: patch.changes as NonNullable<CommitRequest['steps']>[number]['patch'] }
+                : { id: crypto.randomUUID(), label: mediaLabel, intent: mediaLabel, tags: [], command_ordinals: [index], patch: [] });
+            }
+          } else {
+            const prepared = gestureBasis.command.payload;
+            const media = prepared.asset.mediaSelection;
+            const keys = ['asset', 'generation_id', 'variant_id', 'object_id', 'catalog_digest'];
+            if (!media || Object.keys(media).length !== keys.length
+              || keys.some(key => typeof media[key as keyof typeof media] !== 'string' || !media[key as keyof typeof media])) {
+              refuse('prepared media needs the Runtime project media selection. Draft retained; reload the timeline, then import the media again');
+            }
+            const duplicateVideo = Boolean(prepared.afterClipId && prepared.asset.mediaType === 'video');
+            // File drops may remove only their transient uploading action. The
+            // command caller separately proves that the action exists locally;
+            // this handoff still refuses authored IDs and non-drop removals.
+            if ((prepared.removeClipId !== undefined
+              && (duplicateVideo || !prepared.removeClipId.startsWith('uploading-')))
+              || (!duplicateVideo && prepared.afterClipId) || prepared.replaceClipId || prepared.removeClipIds?.length
+              || prepared.pinnedShotGroupsOverride
+              || (!duplicateVideo && !['image', 'video'].includes(prepared.asset.mediaType))) {
+              refuse('prepared media currently supports an ordinary image/video add on a visual track. Draft retained; reload the timeline, then choose Add media');
+            }
+            const config = configBefore as Record<string, OutboxJson>;
+            const nextConfig = payload.config as Record<string, OutboxJson>;
+            const clips = config.clips;
+            const nextClips = nextConfig.clips;
+            if (!Array.isArray(clips) || !Array.isArray(nextClips)) refuse('prepared media clip collection is unavailable');
+            if (prepared.removeClipId !== undefined && clips.some(clip => object(clip) && clip.id === prepared.removeClipId)) {
+              refuse('prepared media cannot remove an authored parent clip. Draft retained; reload the timeline, then choose Add media');
+            }
+            const row = duplicateVideo ? nextClips.find(clip => object(clip) && clip.id === gestureBasis.clipId) : nextClips.at(-1);
+            const tracks = config.tracks;
+            const nextTracks = nextConfig.tracks;
+            const newTrack = object(row) && Array.isArray(tracks) && Array.isArray(nextTracks)
+              && !tracks.some(track => object(track) && track.id === row.track)
+              ? nextTracks.find(track => object(track) && track.id === row.track) : undefined;
+            const visualTrack = object(row) && Array.isArray(nextTracks)
+              && nextTracks.filter(track => object(track) && track.id === row.track);
+            if (!object(row) || row.id !== gestureBasis.clipId || row.asset !== prepared.asset.assetKey
+              || clips.some(clip => object(clip) && clip.id === row.id)
+              || (!duplicateVideo && !same(nextClips.slice(0, -1), clips))
+              || !Array.isArray(tracks) || !Array.isArray(nextTracks)
+              || (!same(authoredJson(gestureBasis.config.tracks), authoredJson(authoringSource.config.tracks))
+                && (!newTrack || !same(authoredJson(gestureBasis.config.tracks), authoredJson(next.config.tracks))))
+              || !same({ ...nextConfig, clips, tracks }, config)
+              || (newTrack ? duplicateVideo || !same(nextTracks.filter(track => track !== newTrack), tracks)
+                : !same(nextTracks, tracks))
+              || !visualTrack || visualTrack.length !== 1 || !object(visualTrack[0])
+              || visualTrack[0].kind !== 'visual' || (visualTrack[0].role ?? 'output') !== 'output') {
+              refuse('prepared media changes more than one ordinary parent clip. Draft retained; reload the timeline, then choose an existing visual track');
+            }
+            if (Array.isArray(parent.occurrences) && parent.occurrences.some(occurrence => object(occurrence)
+              && (occurrence.track === row.track || (object(occurrence.placement) && occurrence.placement.track === row.track)))) {
+              refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+            }
+            if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
+              || !same(payload.registry, { ...parent.registry, assets: { ...(parent.registry.assets ?? {}),
+                [prepared.asset.assetKey]: authoredJson(prepared.asset.entry) } })) {
+              refuse('prepared media registry changes exceed the selected asset; draft retained');
+            }
+            if (duplicateVideo) {
+              mediaLabel = 'Add video after clip';
+              const old = prepared.oldMediaSelection;
+              const anchorIndex = clips.findIndex(clip => object(clip) && clip.id === prepared.afterClipId);
+              const anchor = clips[anchorIndex];
+              if (!old || Object.keys(old).length !== keys.length
+                || keys.some(key => typeof old[key as keyof typeof old] !== 'string' || !old[key as keyof typeof old])
+                || !object(anchor) || anchor.asset !== old.asset || row.asset !== media.asset) {
+                refuse('video duplication needs both exact Runtime project media selections. Draft retained; reload the timeline, then import the media again');
+              }
+              // Bound the consumer to the upstream parent duplicate preview. Timing
+              // and metadata normalization remain the provider's responsibility.
+              const retained = nextClips.filter(clip => object(clip) && clip.id !== row.id);
+              if (nextClips.length !== clips.length + 1 || !same(nextClips.map(clip => object(clip) ? clip.id : null),
+                [...clips.slice(0, anchorIndex + 1).map(clip => object(clip) ? clip.id : null), row.id,
+                  ...clips.slice(anchorIndex + 1).map(clip => object(clip) ? clip.id : null)])
+                || row.track !== anchor.track || clips.some((clip, index) => {
+                  const nextClip = retained[index];
+                  if (!object(clip) || !object(nextClip)) return true;
+                  return index <= anchorIndex || clip.track !== anchor.track ? !same(clip, nextClip)
+                    : !same({ ...nextClip, at: clip.at }, clip);
+                })) refuse('video duplication exceeds one parent after-anchor preview; draft retained');
+              commands = [{ schema_version: 1, op: 'clip.duplicate-media', version: '1',
+                select: `parent/clip:${prepared.afterClipId}`, args: { id: row.id, old_media: authoredJson(old), media: authoredJson(media) },
+                intent: { ownership: 'parent' }, created: [
+                  ...(Object.prototype.hasOwnProperty.call(parent.registry.assets, media.asset) ? [] : [`parent/asset:${media.asset}`]),
+                  `parent/clip:${row.id}`,
+                ] }];
+              const order = clips.map(clip => (clip as Record<string, OutboxJson>).id as string);
+              mediaReads = [{ kind: 'collection', ref: 'parent', path: ['config', 'clips'], members: [...order].sort(), order }];
+              mediaSteps = [{ id: crypto.randomUUID(), label: 'Add video after clip', intent: 'Duplicate selected parent video', tags: [],
+                command_ordinals: [0], patch: [], reads: [{ kind: 'field', ref: 'parent', path: ['config', 'clips', `id:${prepared.afterClipId}`],
+                  state: { state: 'present', value: authoredJson(anchor) } }] }];
+            } else {
+              commands = [
+                ...(newTrack ? [{ schema_version: 1, op: 'track.create', version: '1', select: 'parent',
+                  args: { row: authoredJson(newTrack) }, intent: {}, created: [`parent/track:${row.track}`] } as EditCommand] : []),
+                { schema_version: 1, op: 'clip.add-media', version: '1', select: 'parent',
+                args: { row: authoredJson(row), media: authoredJson(media) }, intent: {}, created: [
+                  ...(Object.prototype.hasOwnProperty.call(parent.registry.assets ?? {}, row.asset) ? [] : [`parent/asset:${row.asset}`]),
+                  `parent/clip:${row.id}`,
+                ] }];
+            }
+            // track.create appends. Preserve a drop at the top in the same
+            // atomic commit, using the normal document-patch encoder for order.
+            if (newTrack && nextTracks.at(-1) !== newTrack) {
+              const appended = structuredClone(before);
+              const appendedPayload = appended.parent_revision.payload;
+              (appendedPayload.config as Record<string, OutboxJson>).tracks = [...tracks, newTrack];
+              if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) appendedPayload.tracks = [...tracks, newTrack];
+              const reordered = structuredClone(appended);
+              (reordered.parent_revision.payload.config as Record<string, OutboxJson>).tracks = nextTracks;
+              if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) reordered.parent_revision.payload.tracks = nextTracks;
+              const patch = documentPatchIntent({ before: appended, after: reordered, basis: { head: initial.head },
+                roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
+                label: mediaLabel, step: { id: crypto.randomUUID(), label: 'Position new track', intent: 'Keep the dropped track position', tags: [] },
+                reads: [] }) as Record<string, OutboxJson>;
+              commands!.splice(1, 0, { schema_version: 1, op: 'doc.patch', version: '1', select: null,
+                args: { changes: patch.changes }, created: patch.created as string[] });
+              mediaReads = [];
+              mediaSteps = commands!.map((_, index) => index === 1
+                ? { ...patch.step as NonNullable<CommitRequest['steps']>[number], command_ordinals: [index], patch: patch.changes as NonNullable<CommitRequest['steps']>[number]['patch'] }
+                : { id: crypto.randomUUID(), label: mediaLabel, intent: mediaLabel, tags: [], command_ordinals: [index], patch: [] });
+            }
           }
         }
         // Verified parent recipes preserve the complete child closure cloned above.

@@ -38,6 +38,7 @@ import {
   isGenerationDragType,
   isImageFile,
   type TimelineDropPosition,
+  type TimelineFileDropPosition,
 } from '@/tools/video-editor/lib/external-drop-utils.ts';
 import { RafLoopDetector } from '@/tools/video-editor/lib/perf-diagnostics.ts';
 import { buildPinnedShotGroupsOverride } from '@/tools/video-editor/lib/shot-group-commands.ts';
@@ -68,42 +69,26 @@ async function resolveFinalVideoDurationSecondsWithRetry(
 async function dispatchTimelineDrop({
   event,
   dataRef,
-  pendingOpsRef,
   dropPosition,
   selectedTrackId,
   applyEdit,
-  prepareAssetUpload,
-  invalidateAssetRegistry,
-  resolveAssetUrl,
   registerGenerationAsset,
   prepareGenerationAsset,
-  uploadImageGeneration,
-  uploadVideoGeneration,
   dropAsset,
-  directAssetUploadAllFiles,
-  mediaImportForImageVideo,
-  onAssetDropError,
   shots,
   finalVideoMap,
   onPanelClipDrop,
+  onFilesDrop,
 }: {
+  onFilesDrop: (files: File[], position: TimelineDropPosition) => Promise<boolean>;
   event: React.DragEvent<HTMLDivElement>;
   dataRef: React.MutableRefObject<TimelineData | null>;
-  pendingOpsRef: React.MutableRefObject<number>;
   dropPosition: TimelineDropPosition;
   selectedTrackId: string | null;
   applyEdit: TimelineApplyEdit;
-  prepareAssetUpload?: TimelineUploadAsset;
-  invalidateAssetRegistry: TimelineInvalidateAssetRegistry;
-  resolveAssetUrl: (file: string) => Promise<string>;
   registerGenerationAsset: UseAssetManagementResult['registerGenerationAsset'];
   prepareGenerationAsset?: UseAssetManagementResult['prepareGenerationAsset'];
-  uploadImageGeneration: UseAssetManagementResult['uploadImageGeneration'];
-  uploadVideoGeneration: UseAssetManagementResult['uploadVideoGeneration'];
   dropAsset: UseAssetManagementResult['handleAssetDrop'];
-  directAssetUploadAllFiles: boolean;
-  mediaImportForImageVideo: boolean;
-  onAssetDropError?: (error: unknown) => void;
   shots: Shot[] | undefined;
   finalVideoMap: Map<string, { id: string; location: string; thumbnailUrl: string | null; durationSeconds?: number | null }>;
   onPanelClipDrop?: (dropPosition: TimelineDropPosition) => Promise<void>;
@@ -120,28 +105,7 @@ async function dispatchTimelineDrop({
     return;
   }
 
-  if (await handleFileDrop({
-    files: Array.from(event.dataTransfer.files),
-    dataRef,
-    pendingOpsRef,
-    dropPosition,
-    insertAtTop,
-    selectedTrackId,
-    applyEdit,
-    prepareAssetUpload,
-    invalidateAssetRegistry,
-    resolveAssetUrl,
-    registerGenerationAsset,
-    prepareGenerationAsset,
-    uploadImageGeneration,
-    uploadVideoGeneration,
-    dropAsset,
-    directAssetUploadAllFiles,
-    mediaImportForImageVideo,
-    onAssetDropError,
-  })) {
-    return;
-  }
+  if (await onFilesDrop(Array.from(event.dataTransfer.files), dropPosition)) return;
 
   const shotData = getShotDropData(event);
   if (shotData) {
@@ -477,12 +441,14 @@ export interface UseExternalDropArgs {
   uploadImageGeneration: UseAssetManagementResult['uploadImageGeneration'];
   uploadVideoGeneration: UseAssetManagementResult['uploadVideoGeneration'];
   handleAssetDrop: UseAssetManagementResult['handleAssetDrop'];
+  handleAssetBatchDrop?: UseAssetManagementResult['handleAssetBatchDrop'];
   onSeekToTime?: (time: number) => void;
   shots?: Shot[] | undefined;
   finalVideoMap: Map<string, ShotFinalVideo>;
 }
 
 export interface UseExternalDropResult {
+  addMediaFiles: (files: File[], time: number) => Promise<void>;
   onTimelineDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
   onTimelineDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
   onTimelineDrop: (event: React.DragEvent<HTMLDivElement>) => void;
@@ -503,6 +469,7 @@ export function useExternalDrop({
   uploadImageGeneration,
   uploadVideoGeneration,
   handleAssetDrop: dropAsset,
+  handleAssetBatchDrop: dropAssets,
   onSeekToTime,
   shots,
   finalVideoMap,
@@ -534,6 +501,24 @@ export function useExternalDrop({
   const getApplyEdit = useCallback(() => {
     return store?.getState().ops.applyEdit ?? applyEdit;
   }, [applyEdit, store]);
+  const importFiles = useCallback((files: File[], dropPosition: TimelineFileDropPosition) => handleFileDrop({
+    files, dropPosition, insertAtTop: Boolean(dropPosition.isNewTrackTop),
+    dataRef: getDataRef(), pendingOpsRef: getPendingOpsRef(), selectedTrackId: getSelectedTrackId(),
+    applyEdit: getApplyEdit(), prepareAssetUpload, invalidateAssetRegistry, resolveAssetUrl,
+    registerGenerationAsset, prepareGenerationAsset, uploadImageGeneration, uploadVideoGeneration,
+    dropAsset, dropAssets, directAssetUploadAllFiles, mediaImportForImageVideo,
+    onAssetDropError: (error) => runtime.toast.error('Failed to save asset', {
+      ...(error instanceof Error && error.message ? { description: error.message } : {}),
+    }),
+  }), [getDataRef, getPendingOpsRef, getSelectedTrackId, getApplyEdit, prepareAssetUpload,
+    invalidateAssetRegistry, resolveAssetUrl, registerGenerationAsset, prepareGenerationAsset,
+    uploadImageGeneration, uploadVideoGeneration, dropAsset, dropAssets, directAssetUploadAllFiles,
+    mediaImportForImageVideo, runtime.toast]);
+  const addMediaFiles = useCallback(async (files: File[], time: number) => {
+    if (!files.length || runtime.timelineEditability?.checkTimeline?.().allowed === false) return;
+    await importFiles(files, { time: Math.max(0, time), trackId: getSelectedTrackId() ?? undefined, isNewTrack: false });
+    onSeekToTime?.(time);
+  }, [getSelectedTrackId, importFiles, onSeekToTime, runtime.timelineEditability]);
   const isManagedImageFileDrag = useCallback((event: React.DragEvent<HTMLDivElement>): boolean => {
     if (!mediaImportForImageVideo) return false;
     const files = Array.from(event.dataTransfer.files);
@@ -684,26 +669,14 @@ export function useExternalDrop({
     if (isInvalidTimelineRowTarget(dropPosition.plan?.rejectReason)) return;
     await dispatchTimelineDrop({
       event,
+      onFilesDrop: importFiles,
       dataRef: getDataRef(),
-      pendingOpsRef: getPendingOpsRef(),
       dropPosition,
       selectedTrackId: getSelectedTrackId(),
       applyEdit: getApplyEdit(),
-      prepareAssetUpload,
-      invalidateAssetRegistry,
-      resolveAssetUrl,
       registerGenerationAsset,
       prepareGenerationAsset,
-      uploadImageGeneration,
-      uploadVideoGeneration,
       dropAsset,
-      directAssetUploadAllFiles,
-      mediaImportForImageVideo,
-      onAssetDropError: (error) => {
-        runtime.toast.error('Failed to save asset', {
-          ...(error instanceof Error && error.message ? { description: error.message } : {}),
-        });
-      },
       shots,
       finalVideoMap,
       onPanelClipDrop: panelClip ? (position) => placePanelClip(position, panelClip) : undefined,
@@ -715,27 +688,20 @@ export function useExternalDrop({
     dropAsset,
     getApplyEdit,
     getDataRef,
-    getPendingOpsRef,
     getSelectedTrackId,
     placePanelClip,
-    invalidateAssetRegistry,
+    importFiles,
     registerGenerationAsset,
-    prepareAssetUpload,
     prepareGenerationAsset,
-    resolveAssetUrl,
-    directAssetUploadAllFiles,
-    mediaImportForImageVideo,
     isManagedImageFileDrag,
     runtime.timelineEditability,
-    runtime.toast,
     shots,
     finalVideoMap,
     onSeekToTime,
-    uploadImageGeneration,
-    uploadVideoGeneration,
   ]);
 
   return {
+    addMediaFiles,
     onTimelineDragOver,
     onTimelineDragLeave,
     onTimelineDrop,

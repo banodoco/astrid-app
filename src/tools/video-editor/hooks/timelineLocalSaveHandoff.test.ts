@@ -96,8 +96,8 @@ function preparedImageCommand(removeClipId?: string) {
 }
 
 describe('upstream local document handoff', () => {
-  it('retains the upstream video preview whose row lacks the hold required by Python media add', async () => {
-    const env = await environment();
+  it('captures imported video with the hold required by native media add', async () => {
+    const env = await environment(false, 'property', []);
     const current = await buildTimelineData(env.source.config, env.source.registry);
     const command = { type: 'place-prepared-media' as const, payload: { at: 0, trackId: 'V1', asset: {
       assetKey: 'import-video', mediaType: 'video' as const, durationSeconds: 3, source: 'registered' as const,
@@ -107,14 +107,14 @@ describe('upstream local document handoff', () => {
     const preview = applyPreparedMediaCommand(current, command)!;
     const row = preview.nextData.config.clips[0];
     expect(row).toMatchObject({ from: 0, to: 3, asset: 'import-video' });
-    expect(row.hold).toBeUndefined();
+    expect(row.hold).toBe(3);
     await expect(env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry },
       { kind: 'prepared-media', config: env.source.config, registry: env.source.registry, clipId: row.id, command }))
-      .rejects.toThrow('ordinary image add');
-    await expect(env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry }))
-      .rejects.toThrow('original Runtime project media selection');
-    expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
-    expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
+      .resolves.toBeUndefined();
+    const [record] = await env.outboxes.list(env.scope);
+    expect(record.intents).toHaveLength(1);
+    expect(record.intents[0].payload).toMatchObject({ commands: [expect.objectContaining({ op: 'clip.add-media',
+      args: expect.objectContaining({ row: expect.objectContaining({ asset: 'import-video', from: 0, to: 3, hold: 3 }) }) })] });
     expect(env.send).not.toHaveBeenCalled();
     await env.session.dispose();
   });

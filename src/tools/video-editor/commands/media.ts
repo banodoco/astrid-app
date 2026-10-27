@@ -767,6 +767,21 @@ const buildPlacePreparedMediaEffect = (
     resolvedRegistry: nextResolvedRegistry,
   });
 
+  // Literal native clip.add-media births include the video source-window
+  // length as hold. Normalize only newly imported videos, preserving existing
+  // clips and the separate after-anchor duplication recipe.
+  if (payload.asset.mediaType === 'video' && payload.asset.mediaSelection && !payload.replaceClipId) {
+    const clip = nextData.config.clips.find(clip => clip.id === nextEdit.clipId)!;
+    if (typeof clip.from !== 'number' || typeof clip.to !== 'number') throw new Error('Imported video needs a source window.');
+    if (typeof payload.asset.durationSeconds === 'number') clip.to = Math.min(clip.to, payload.asset.durationSeconds);
+    clip.hold = clip.to - clip.from;
+    return {
+      mutation: { type: 'data', data: buildDataFromCurrentRegistry(nextData.config, nextData) },
+      summary: `Placed prepared asset ${payload.asset.assetKey} on track ${targetTrackId}.`,
+      detail: { assetKey: payload.asset.assetKey, clipId: nextEdit.clipId, trackId: targetTrackId },
+    };
+  }
+
   return {
     mutation: { type: 'data', data: nextData },
     summary: `Placed prepared asset ${payload.asset.assetKey} on track ${targetTrackId}.`,

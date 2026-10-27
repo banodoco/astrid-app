@@ -73,9 +73,9 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         if (!connection.isConnected) throw new Error('Connect to Astrid before checking its release.');
         const current = await new AstridRuntimeClient().readStatus();
         next = await checkHostedUpdate(current.health);
-        base = resolveUpdate({ ...next.resolution, installType, settingsSurface: true, updateNowAvailable: false });
+        base = resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings');
       }
-      if (local) base = resolveUpdate({ ...next.resolution, installType, settingsSurface: true, updateNowAvailable: false });
+      if (local) base = resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings');
       setStatus(next);
       setResolution(base);
       setState('ready');

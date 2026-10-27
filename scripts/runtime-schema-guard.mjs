@@ -15,7 +15,8 @@ export function readGeneratedSchemaDigest(metadataPath) {
   return match[1];
 }
 
-export function schemaDigestMismatch(actual, expected) {
-  if (actual === expected) return null;
-  return `runtime schema digest ${String(actual)} does not match Astrid generated contract ${expected}; sync src/integrations/runtime/generated-contract-metadata.ts from the Runtime checkout`;
+export function schemaDigestMismatch(actual, accepted) {
+  const acceptedDigests = Array.isArray(accepted) ? accepted : [accepted];
+  if (typeof actual === 'string' && acceptedDigests.includes(actual)) return null;
+  return `runtime schema digest ${String(actual)} does not match Astrid generated contract (expected one of ${acceptedDigests.join(', ')}); sync src/integrations/runtime/generated-contract-metadata.ts from the Runtime checkout`;
 }

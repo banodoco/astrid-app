@@ -1,4 +1,5 @@
 import type { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
+import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
 
 export type UpdateAction = {
   readonly label: string;
@@ -49,7 +50,7 @@ export function resolveUpdate(input: UpdateResolutionInput): UpdateResolution {
   if (input.compatibility?.kind === 'schema') {
     const commands = commandActions(input);
     if (input.installType === 'pinokio') return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, primary: { label: 'Update in Pinokio' }, secondary: null };
-    if (input.installType === 'source') return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, primary: { label: 'update your checkouts' }, secondary: null };
+    if (input.installType === 'source') return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
     return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail,
       primary: input.updateNowAvailable ? { label: input.primaryUpdateLabel ?? 'Update now', destination: 'settings-updates' } : commands.primary,
       secondary: input.updateNowAvailable ? commands.primary : commands.secondary };

@@ -217,7 +217,7 @@ describe('RuntimeConnectionPill', () => {
         if (String(input) === '/build.json') {
           return new Response(JSON.stringify({ app: 'served-app-build', release: 42 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
         }
-        return new Response(JSON.stringify({ report: 'Astrid diagnostics\nApp build: served-app-build\nApp release: 42' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        return new Response(JSON.stringify({ report: 'Astrid diagnostics' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
       });
       vi.stubGlobal('fetch', diagnosticsFetch);
       render(<RuntimeConnectionPill connection={connected()} fetchImpl={busyFetch} restartCheckIntervalMs={3000} />);
@@ -231,11 +231,13 @@ describe('RuntimeConnectionPill', () => {
       const diagnosticsCall = diagnosticsFetch.mock.calls.find(([input]) => String(input).includes('/v1/diagnostics'));
       expect(diagnosticsCall).toBeDefined();
       const diagnosticsUrl = new URL(String(diagnosticsCall?.[0]), window.location.origin);
-      expect(diagnosticsUrl.searchParams.get('app_build')).toBe('served-app-build');
-      expect(diagnosticsUrl.searchParams.get('app_release')).toBe('42');
+      expect(diagnosticsUrl.search).toBe('');
       expect(diagnosticsCall?.[1]).toEqual(expect.objectContaining({ cache: 'no-store' }));
       expect(createObjectURL).toHaveBeenCalledOnce();
-      expect(await (createObjectURL.mock.calls[0][0] as Blob).text()).toContain('App build: served-app-build\nApp release: 42');
+      const report = await (createObjectURL.mock.calls[0][0] as Blob).text();
+      expect(report).toContain('App build: served-app-build\nApp release: 42');
+      expect(report.match(/^App build:/gm)).toHaveLength(1);
+      expect(report.match(/^App release:/gm)).toHaveLength(1);
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:diagnostics');
       expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
     } finally {

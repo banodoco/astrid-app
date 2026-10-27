@@ -174,7 +174,11 @@ export function describeFailure(value: unknown, platform: Platform = detectPlatf
     return { summary, lastExit: null, logPath: null };
   }
   if (value instanceof RuntimeCompatibilityError) {
-    return { summary: "This Astrid Runtime doesn't match this workspace or this version of the editor.", lastExit: null, logPath: null };
+    return { summary: value.kind === 'schema'
+      ? "This Astrid Runtime doesn't support the schema this editor needs."
+      : value.kind === 'identity'
+        ? 'The connected Astrid Runtime identity changed.'
+        : 'This Astrid Runtime does not provide a required capability.', lastExit: null, logPath: null };
   }
   if (value instanceof Error && value.message.trim()) {
     return { summary: value.message.trim(), lastExit: null, logPath: null };
@@ -465,14 +469,14 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
   },
 
   agent: {
-    copy: 'Copy agent instructions',
+    copy: 'Copy for your agent',
     copied: 'Copied. Paste them into your agent.',
     pasteNext: 'Steps copied. Paste them into your agent.',
     copyFailed: "Copying didn't work. Select the text below and copy it.",
     commandCopy: 'Copy command',
     commandCopied: 'Command copied',
     terminalAlternative: 'Or run this yourself in a terminal:',
-    terminalAlternativeUpdate: 'If you installed Astrid with the installer, run this in a terminal:',
+    terminalAlternativeUpdate: 'No coding agent? Run this in a terminal:',
   },
 
   composeDisabled: "Making new images isn't on this page yet.",

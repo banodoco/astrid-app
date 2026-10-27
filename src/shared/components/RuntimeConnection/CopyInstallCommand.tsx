@@ -91,6 +91,7 @@ export function CopyInstallCommand({ mode = 'install', services }: CopyInstallCo
         {agentCopy.status === 'failed' && <CopyFallback text={instructions} label={copy.copyFailed} />}
       </div>
       <div className="space-y-1.5 text-left">
+        <p className="text-xs font-medium text-foreground">Run it yourself</p>
         <p className="text-xs text-muted-foreground">{withCommandShell(mode === 'update' ? copy.terminalAlternativeUpdate : copy.terminalAlternative)}</p>
         <CopyCommandRow command={command} label={copy.commandCopy} copiedLabel={copy.commandCopied} />
         {mode === 'update' && localBuild && <p className="pt-1 text-xs text-muted-foreground">{UPDATE_ROUTES.source}</p>}

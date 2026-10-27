@@ -12,7 +12,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe('local setup card', () => {
   it('copies instructions and shows copied feedback', async () => {
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Copy agent instructions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
     expect(await screen.findByRole('button', { name: 'Copied. Paste them into your agent.' })).toBeInTheDocument();
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(localSetupInstructions());
   });
@@ -21,7 +21,7 @@ describe('local setup card', () => {
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
     expect(Array.from(document.querySelectorAll('pre')).some(pre => pre.textContent === localSetupInstructions())).toBe(false);
     expect(screen.queryByRole('button', { name: 'Show the instructions' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Copy agent instructions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
     expect(screen.getByText('Or do it yourself')).toBeInTheDocument();
   });
 

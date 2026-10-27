@@ -167,12 +167,17 @@ export class RuntimeAuthenticationError extends Error {
 
 export class RuntimeCompatibilityError extends Error {
   readonly code = 'runtime_incompatible' as const;
-  readonly recoveryAction = 'Start the Runtime built from the accepted contract and retry.';
+  readonly recoveryAction: string;
 
-  constructor(public readonly reason: string, baseUrl: string) {
-    const recoveryAction = 'Start the Runtime built from the accepted contract and retry.';
-    super(`Workspace Runtime at ${baseUrl} is incompatible with the accepted consumer contract: ${reason}. ${recoveryAction}`);
+  constructor(public readonly kind: 'schema' | 'capability' | 'identity', public readonly detail: string, baseUrl: string) {
+    const recoveryAction = kind === 'schema'
+      ? 'Update Astrid on this computer, then reconnect.'
+      : kind === 'identity'
+        ? 'Restart the selected Astrid Runtime and reconnect to the same workspace.'
+        : 'Use a Runtime that supports this capability, then retry.';
+    super(`Workspace Runtime at ${baseUrl} is incompatible (${kind}): ${detail}. ${recoveryAction}`);
     this.name = 'RuntimeCompatibilityError';
+    this.recoveryAction = recoveryAction;
   }
 }
 
@@ -302,13 +307,13 @@ export class AstridRuntimeClient {
   /** Refuse every operation once any client sharing this binding saw a restart. */
   assertNotFenced(): void {
     const reason = this.identityStore.get(this.baseUrl)?.fencedReason;
-    if (reason) throw new RuntimeCompatibilityError(reason, this.baseUrl);
+    if (reason) throw new RuntimeCompatibilityError('identity', reason, this.baseUrl);
   }
 
   private fence(reason: string): never {
     const bound = this.identityStore.get(this.baseUrl);
     if (bound) bound.fencedReason = reason;
-    throw new RuntimeCompatibilityError(reason, this.baseUrl);
+    throw new RuntimeCompatibilityError('identity', reason, this.baseUrl);
   }
 
   private static instanceIdOf(health: Health): string {
@@ -321,7 +326,7 @@ export class AstridRuntimeClient {
     this.assertNotFenced();
     const instanceId = AstridRuntimeClient.instanceIdOf(health);
     if (!instanceId) {
-      throw new RuntimeCompatibilityError('Runtime health did not report an instance id, so restarts cannot be detected', this.baseUrl);
+      throw new RuntimeCompatibilityError('identity', 'Runtime health did not report an instance id, so restarts cannot be detected', this.baseUrl);
     }
     const bound = this.identityStore.get(this.baseUrl);
     if (!bound) return;
@@ -348,7 +353,7 @@ export class AstridRuntimeClient {
     }
     if (AstridRuntimeClient.instanceIdOf(health) !== expected) {
       this.slot.current = null;
-      if (this.expectedIdentity) throw new RuntimeCompatibilityError(RESTART_INSTANCE, this.baseUrl);
+      if (this.expectedIdentity) throw new RuntimeCompatibilityError('identity', RESTART_INSTANCE, this.baseUrl);
       this.fence(RESTART_INSTANCE);
     }
   }
@@ -396,7 +401,7 @@ export class AstridRuntimeClient {
         this.signal?.throwIfAborted();
         if (this.discoveryBinding.identity && identity
           && (identity.actorId !== this.discoveryBinding.identity.actorId || identity.realmId !== this.discoveryBinding.identity.realmId)) {
-          throw new RuntimeCompatibilityError('Runtime discovery changed the selected actor or realm', this.baseUrl);
+          throw new RuntimeCompatibilityError('identity', 'Runtime discovery changed the selected actor or realm', this.baseUrl);
         }
         this.discoveryBinding.identity ??= identity;
         this.expectedIdentity = identity;
@@ -440,10 +445,10 @@ export class AstridRuntimeClient {
     const instanceId = AstridRuntimeClient.instanceIdOf(health);
     const expectedInstanceId = this.expectedIdentity?.runtimeInstanceId ?? AstridRuntimeClient.instanceIdOf(session.health);
     if (!instanceId || instanceId !== expectedInstanceId) {
-      throw new RuntimeCompatibilityError('Runtime status belongs to a different instance than the connected workspace', this.baseUrl);
+      throw new RuntimeCompatibilityError('identity', 'Runtime status belongs to a different instance than the connected workspace', this.baseUrl);
     }
     if (this.expectedIdentity && session.realm.realm_id !== this.expectedIdentity.realmId) {
-      throw new RuntimeCompatibilityError('Runtime status belongs to a different realm than the selected Astrid profile', this.baseUrl);
+      throw new RuntimeCompatibilityError('identity', 'Runtime status belongs to a different realm than the selected Astrid profile', this.baseUrl);
     }
     this.checkObservedIdentity(health, session.handshake);
     return { health, realm: session.realm };
@@ -472,19 +477,19 @@ export class AstridRuntimeClient {
       if (!RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(health.schema_digest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])
         || !RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(handshake.schema_digest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])) {
         throw new RuntimeCompatibilityError(
-          `schema digest mismatch (health=${health.schema_digest}, handshake=${handshake.schema_digest}, expected one of ${RUNTIME_ACCEPTED_SCHEMA_DIGESTS.join(', ')})`,
+          'schema', `schema digest mismatch (health=${health.schema_digest}, handshake=${handshake.schema_digest}, expected one of ${RUNTIME_ACCEPTED_SCHEMA_DIGESTS.join(', ')})`,
           this.baseUrl,
         );
       }
       if (!handshake.capabilities.includes(RUNTIME_TARGETED_EXECUTION_CAPABILITY)) {
         throw new RuntimeCompatibilityError(
-          `missing capability ${RUNTIME_TARGETED_EXECUTION_CAPABILITY}`,
+          'capability', `missing capability ${RUNTIME_TARGETED_EXECUTION_CAPABILITY}`,
           this.baseUrl,
         );
       }
       if (FORBIDDEN_RUNTIME_ACTORS.has(handshake.actor_id) || !hasExactScopes(handshake.scopes)) {
         throw new RuntimeCompatibilityError(
-          'authenticated actor or granted scopes do not match the Astrid App product connector role',
+          'identity', 'authenticated actor or granted scopes do not match the Astrid App product connector role',
           this.baseUrl,
         );
       }
@@ -492,7 +497,7 @@ export class AstridRuntimeClient {
         if (handshake.actor_id !== this.expectedIdentity.actorId
           || handshake.realm_id !== this.expectedIdentity.realmId) {
           throw new RuntimeCompatibilityError(
-            'authenticated actor or realm does not match the selected Astrid profile',
+            'identity', 'authenticated actor or realm does not match the selected Astrid profile',
             this.baseUrl,
           );
         }
@@ -503,6 +508,7 @@ export class AstridRuntimeClient {
         && (health as Health & { runtime_instance_id?: string }).runtime_instance_id
           !== this.expectedIdentity.runtimeInstanceId) {
         throw new RuntimeCompatibilityError(
+          'identity',
           'Runtime restarted—relaunch workspace. The selected Runtime instance changed; your timeline draft is preserved.',
           this.baseUrl,
         );
@@ -510,11 +516,11 @@ export class AstridRuntimeClient {
       if (!this.expectedIdentity) this.checkObservedIdentity(health, handshake);
       const realm = await this.client.getRealm();
       if (realm.realm_id !== handshake.realm_id) {
-        throw new RuntimeCompatibilityError('Runtime realm endpoint does not match its handshake', this.baseUrl);
+        throw new RuntimeCompatibilityError('identity', 'Runtime realm endpoint does not match its handshake', this.baseUrl);
       }
       if (this.expectedIdentity && realm.realm_id !== this.expectedIdentity.realmId) {
         throw new RuntimeCompatibilityError(
-          'Runtime realm endpoint does not match the selected Astrid profile',
+          'identity', 'Runtime realm endpoint does not match the selected Astrid profile',
           this.baseUrl,
         );
       }
@@ -541,7 +547,7 @@ export class AstridRuntimeClient {
       if (this.readOnly && this.usesRuntimeConfig && runtimeOrigin() === ''
         && (error instanceof TypeError || error instanceof RuntimeUnavailableError
           || error instanceof RuntimeAuthenticationError
-          || error instanceof RuntimeCompatibilityError && error.reason === RESTART_INSTANCE
+          || error instanceof RuntimeCompatibilityError && error.detail === RESTART_INSTANCE
           || error instanceof ApiError && (error.status === 401 || error.status >= 500))) {
         await this.reconnect();
         return operation();

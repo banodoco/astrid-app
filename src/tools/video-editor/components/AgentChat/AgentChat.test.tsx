@@ -1983,7 +1983,7 @@ describe('local Astrid update flag', () => {
     </RuntimeConnectionProvider>
   );
 
-  it('turns on when the local chat service is out of date, and off again once a chat read succeeds', async () => {
+  it('does not mark malformed local chat payloads as out of date', async () => {
     mocks.useLocalAgents.mockReturnValue({
       data: undefined,
       isLoading: false,
@@ -1992,7 +1992,7 @@ describe('local Astrid update flag', () => {
       refetch: vi.fn(),
     });
     const view = render(page());
-    await waitFor(() => expect(screen.getByTestId('out-of-date')).toHaveTextContent('true'));
+    await waitFor(() => expect(screen.getByTestId('out-of-date')).toHaveTextContent('false'));
 
     mocks.useLocalAgents.mockReturnValue({
       data: { agents: [{ id: 'astrid', name: 'Astrid', state: 'ready', line: null, models: [{ modelId: 'openai/gpt-5', name: 'GPT 5' }], defaultModel: 'openai/gpt-5' }], defaultAgent: 'astrid' },

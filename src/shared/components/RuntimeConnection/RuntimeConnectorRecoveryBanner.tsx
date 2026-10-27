@@ -7,8 +7,10 @@ import { writeClipboardTextSafe } from '@/shared/lib/browser/clipboard.ts';
 import { ASTRID_APP_LOCAL_DEV_COMMAND } from '@/shared/lib/localAstridRuntime.ts';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { useRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
-import { RuntimeAuthenticationError, RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
+import { RuntimeAuthenticationError, RuntimeCompatibilityError, RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { describeFailure, healthCheckCommand, RUNTIME_CONNECTION_COPY, runtimeLogDirectory } from '@/shared/components/RuntimeConnection/copy.ts';
+import { CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 
 export interface RuntimeConnectorRecoveryBannerProps {
@@ -119,7 +121,9 @@ export function RuntimeConnectorRecoveryBanner({
   const failure = describeFailure(error);
   const restartBrief = buildWorkspaceRestartBrief({ error, connectionUrl: safeUrl, projectId, timelineId });
   const authenticationFailed = error instanceof RuntimeAuthenticationError;
-  const typedFailure = authenticationFailed || error instanceof RuntimeUnavailableError && (error.failureKind === "admission" || error.failureKind === "storage");
+  const updateResolution = resolveUpdate({ compatibility: error instanceof RuntimeCompatibilityError ? error : undefined });
+  const schemaUpdate = updateResolution.card === 'update';
+  const typedFailure = authenticationFailed || error instanceof RuntimeCompatibilityError || error instanceof RuntimeUnavailableError && (error.failureKind === "admission" || error.failureKind === "storage");
   const visibleFailureSummary = failureSummary?.trim()
     || (!hosted ? failure.summary : null)
     || 'The editor could not complete workspace discovery.';
@@ -139,20 +143,31 @@ export function RuntimeConnectorRecoveryBanner({
   const titles = RUNTIME_CONNECTION_COPY.connectorFailure;
   const title = authenticationFailed
     ? titles.authentication
-    : error instanceof RuntimeUnavailableError && error.failureKind === "admission"
-      ? titles.admission
-      : error instanceof RuntimeUnavailableError && error.failureKind === "storage"
-        ? titles.storage
-        : titles.unavailable;
+    : error instanceof RuntimeCompatibilityError
+      ? updateResolution.title ?? titles.unavailable
+      : error instanceof RuntimeUnavailableError && error.failureKind === "admission"
+        ? titles.admission
+        : error instanceof RuntimeUnavailableError && error.failureKind === "storage"
+          ? titles.storage
+          : titles.unavailable;
   const action = 'recoveryAction' in error && typeof error.recoveryAction === 'string'
     ? error.recoveryAction
     : 'Retry the connection to your configured Astrid Runtime.';
+  if (schemaUpdate) return (
+    <div role="alert" data-testid="runtime-connector-alert" className="fixed left-1/2 top-16 z-[100110] w-[min(56rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-border bg-background p-4 shadow-xl sm:flex sm:items-start sm:justify-between sm:gap-6">
+      <div className="min-w-0 sm:max-w-sm">
+        <p className="text-sm font-medium text-foreground">Update Astrid</p>
+        <p className="mt-1 text-xs text-muted-foreground">This Runtime schema is not supported by this editor. Your draft and undo history stay open.</p>
+      </div>
+      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><CopyInstallCommand mode="update" /></div>
+    </div>
+  );
   if (hosted) return (
     <RecoveryOverlay onRetry={onRetry} retryRef={retryRef} quietRetry={!authenticationFailed}>
     <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-background p-6 shadow-lg" role="alert">
       <div className="min-w-0">
         <p className="text-sm font-medium text-foreground">{typedFailure ? title : RUNTIME_CONNECTION_COPY.loadFailed.title}</p>
-        <p className="mt-1 text-xs text-muted-foreground">{typedFailure ? action : RUNTIME_CONNECTION_COPY.loadFailed.sentence}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{error instanceof RuntimeCompatibilityError && updateResolution.card === 'identity' ? updateResolution.body : typedFailure ? action : RUNTIME_CONNECTION_COPY.loadFailed.sentence}</p>
       </div>
       <Button ref={retryRef} type="button" size="sm" variant="outline" onClick={() => void onRetry()} disabled={retrying}>
         {retrying ? RUNTIME_CONNECTION_COPY.loadFailed.retrying : RUNTIME_CONNECTION_COPY.loadFailed.button}

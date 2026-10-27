@@ -352,6 +352,15 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByText('This page needs a newer Astrid. In Pinokio, choose Stop, then Update, then Start.')).toBeInTheDocument();
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: COPY.agent.commandCopy })).not.toBeInTheDocument();
+    expect(screen.getByText('Update in Pinokio')).toBeInTheDocument();
+  });
+
+  it('source update guidance points to updating checkouts and never shows an installer command', () => {
+    panel(connectionFor({ status: 'update_needed' }, { managedByPinokio: false }));
+
+    expect(screen.getByText('update your checkouts')).toBeInTheDocument();
+    expect(screen.queryByRole('code')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: COPY.agent.commandCopy })).not.toBeInTheDocument();
   });
 
   describe('refused', () => {
@@ -363,7 +372,7 @@ describe('RuntimeConnectionPanel', () => {
       expect(screen.queryByRole('code')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: COPY.agent.commandCopy })).not.toBeInTheDocument();
       expect(shownText()).not.toMatch(/isn't answering|install|curl -fsSL|irm /i);
-      expect(screen.getByRole('button', { name: 'Copy agent instructions' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
       expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
     });
@@ -373,7 +382,7 @@ describe('RuntimeConnectionPanel', () => {
       stubClipboard(writeText);
       const connect = vi.fn();
       panel(connectionFor({ status: 'refused' }, { connect }));
-      fireEvent.click(screen.getByRole('button', { name: 'Copy agent instructions' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
       await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
       const text = writeText.mock.calls[0]![0];
       expect(text).toContain(`refuses requests from the page at ${window.location.origin}`);
@@ -466,7 +475,6 @@ describe('RuntimeConnectionPanel', () => {
   describe('command copying', () => {
     it.each([
       ['not_running', () => connectionFor({ status: 'not_running' }), 'install'],
-      ['update_needed', () => connectionFor({ status: 'update_needed' }), 'update'],
     ] as const)('%s shows and copies its command', async (_name, connection, mode) => {
       const writeText = vi.fn(async (_text: string) => undefined);
       stubClipboard(writeText);
@@ -478,10 +486,16 @@ describe('RuntimeConnectionPanel', () => {
     });
 
     it.each(['not_running', 'update_needed'] as const)('%s prioritizes the complete agent brief and keeps command copying independent', async (status) => {
+      if (status === 'update_needed') {
+        panel(connectionFor({ status }));
+        expect(screen.getByText('update your checkouts')).toBeInTheDocument();
+        expect(screen.queryByRole('code')).not.toBeInTheDocument();
+        return;
+      }
       const writeText = vi.fn(async (_text: string) => undefined);
       stubClipboard(writeText);
       panel(connectionFor({ status }));
-      const primary = screen.getByRole('button', { name: 'Copy agent instructions' });
+      const primary = screen.getByRole('button', { name: 'Copy for your agent' });
       const commandCopy = screen.getByRole('button', { name: 'Copy command' });
       expect(screen.getAllByRole('button')[0]).toBe(primary);
       expect(commandCopy.parentElement).toContainElement(screen.getByRole('code'));
@@ -507,7 +521,7 @@ describe('RuntimeConnectionPanel', () => {
     it('keeps the full agent brief selectable when copying it fails', async () => {
       stubClipboard(vi.fn(async () => { throw new Error('Clipboard denied'); }));
       panel(connectionFor({ status: 'not_running' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Copy agent instructions' }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
       const field = await screen.findByRole('textbox', { name: COPY.agent.copyFailed }) as HTMLTextAreaElement;
       expect(field.value).toContain('selected workspace and data root');
       expect(field.value).toContain('read the log path printed by the installer');

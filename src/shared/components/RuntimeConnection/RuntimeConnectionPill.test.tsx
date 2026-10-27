@@ -135,7 +135,7 @@ describe('RuntimeConnectionPill', () => {
     expect(status()).toHaveAttribute('data-state', 'refused');
     expect(screen.queryByRole('heading', { name: 'Astrid stopped' })).not.toBeInTheDocument();
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy agent instructions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
   });
 
   it('when the permission is gone the pill blames nothing: it asks the permission first', async () => {

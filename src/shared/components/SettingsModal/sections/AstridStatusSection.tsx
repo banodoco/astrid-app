@@ -11,6 +11,7 @@ import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/components/ui/collapsible';
 import { Card } from '@/shared/components/ui/card';
 import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 import { ASTRID_STATUS_COPY as COPY, connectionStatusCopy } from './astridStatusCopy.ts';
 
 const POLL_INTERVAL_MS = 5_000;
@@ -131,7 +132,8 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
 
             {summary.checks && <SetupStatusLine checks={summary.checks} mink={false} announce={false} />}
             {(!connected || summary.outOfDate) && summary.detail && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary.outOfDate ? withCommandShell(summary.detail) : summary.detail}</p>}
-            {summary.outOfDate && <CopyInstallCommand mode="update" />}
+            {summary.outOfDate === 'runtime' && summary.updateResolution && <UpdateResolutionActions resolution={summary.updateResolution} />}
+            {summary.outOfDate === 'chat' && <CopyInstallCommand mode="update" />}
             {summary.connect && <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => connection.connect()}>{RUNTIME_CONNECTION_COPY.permission.connect}</Button>}
             {connected && details && needsRepair && (
               <>

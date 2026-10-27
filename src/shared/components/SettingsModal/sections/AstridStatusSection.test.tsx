@@ -36,6 +36,7 @@ describe('AstridStatusSection', () => {
   beforeEach(() => {
     mocks.connection.state = { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } };
     mocks.connection.isChecking = false;
+    mocks.connection.schemaDigest = null;
     mocks.connection.localServiceOutOfDate = false;
     mocks.connection.connect = mocks.connect.mockReset();
     mocks.clipboard.mockReset().mockResolvedValue(true);
@@ -67,6 +68,16 @@ describe('AstridStatusSection', () => {
     expect(screen.getByText('Runtime')).toHaveAttribute('data-state', 'pass');
     expect(document.querySelector('[data-check="workspace"]')).toHaveAttribute('data-state', 'pass');
     expect(screen.queryByRole('heading', { name: 'Connection' })).not.toBeInTheDocument();
+  });
+
+  it('uses the shared resolver action in Settings for a source checkout schema mismatch', () => {
+    mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
+    render(<AstridStatusSection isOpen />);
+
+    expect(screen.getByText(/This page needs a newer Astrid/)).toBeInTheDocument();
+    expect(screen.getByText('update your checkouts')).toBeInTheDocument();
+    expect(screen.queryByRole('code')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CONNECTION_COPY.agent.commandCopy })).not.toBeInTheDocument();
   });
 
   it('offers the browser permission action before checking Runtime details', () => {
@@ -197,7 +208,7 @@ describe('AstridStatusSection', () => {
 
   it('copies a complete agent brief separately from the repair command', async () => {
     render(<AstridStatusSection isOpen />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy agent instructions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy for your agent' }));
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
     const brief = mocks.clipboard.mock.calls[0][0];
     expect(brief).toContain('selected workspace and data root');

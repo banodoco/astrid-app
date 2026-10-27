@@ -28,6 +28,7 @@ import {
   AstridRuntimeClient,
   RUNTIME_CLIENT_SCOPES,
   RuntimeAuthenticationError,
+  RuntimeCompatibilityError,
 } from "@/integrations/runtime/client.ts";
 import type { DataProvider } from "@/tools/video-editor/data/DataProvider.ts";
 import type {
@@ -1264,6 +1265,23 @@ describe("VideoEditorPage", () => {
     await act(async()=>{ready.resolve();await ready.promise;});
     await waitFor(()=>expect(screen.queryByTestId('runtime-connector-alert')).toBeNull());
     expect(screen.getByTestId('video-editor-provider')).toBe(editor);expect(editor).toBeVisible();expect(state.providerMounts).toBe(mounts);expect(state.providerUnmounts).toBe(0);
+  });
+
+  it('shows a schema update banner over the mounted editor and preserves the draft and undo-capable editor instance', async () => {
+    const probe = deferred();
+    state.nativeProbe.mockImplementationOnce(() => probe.promise);
+    renderPage('/tools/video-editor?project=ados-talks&timeline=11111111-1111-1111-1111-111111111111');
+    const editor = await screen.findByTestId('video-editor-provider');
+    const mounts = state.providerMounts;
+    act(() => state.pendingWorkCallback?.({ writing: false, unsaved: true }));
+    act(() => state.runtimeOnError?.(new RuntimeCompatibilityError('schema', 'digest mismatch', '/api/runtime')));
+    expect(await screen.findByTestId('runtime-connector-alert')).toBeInTheDocument();
+    expect(document.body).toHaveTextContent('Update Astrid');
+    expect(document.body).toHaveTextContent('Copy for your agent');
+    expect(screen.getByTestId('video-editor-provider')).toBe(editor);
+    expect(editor).toBeVisible();
+    expect(state.providerMounts).toBe(mounts);
+    expect(state.providerUnmounts).toBe(0);
   });
 
   it('does not let an older successful probe clear a failure reported after that probe started', async () => {

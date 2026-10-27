@@ -37,8 +37,16 @@ describe('Astrid Updates Settings section', () => {
     const diagnosticCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes('/v1/diagnostics'));
     expect(diagnosticCall).toBeDefined();
     const requestUrl = new URL(String(diagnosticCall?.[0]), 'http://localhost');
-    expect(requestUrl.searchParams.get('app_build')).toBe(APP_BUILD || 'served-app-build');
-    expect(requestUrl.searchParams.get('app_release')).toBe('12');
+    expect(requestUrl.search).toBe('');
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:settings-diagnostics');
+    vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+    vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    fireEvent.click(within(section).getByRole('button', { name: 'Download diagnostics' }));
+    await waitFor(() => expect(createObjectURL).toHaveBeenCalledOnce());
+    const report = await (createObjectURL.mock.calls[0][0] as Blob).text();
+    expect(report).toContain(`App build: ${APP_BUILD || 'served-app-build'}\nApp release: 12`);
+    expect(report.match(/^App build:/gm)).toHaveLength(1);
+    expect(report.match(/^App release:/gm)).toHaveLength(1);
   });
 
   it('offers agent and terminal instructions when Runtime diagnostics cannot answer', async () => {

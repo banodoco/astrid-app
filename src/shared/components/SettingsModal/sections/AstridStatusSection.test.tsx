@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AstridStatusSection } from './AstridStatusSection.tsx';
 import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY, installCommand } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
+import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 
 const mocks = vi.hoisted(() => ({
   readStatus: vi.fn(),
@@ -78,6 +79,22 @@ describe('AstridStatusSection', () => {
     expect(screen.getByText('update your checkouts')).toBeInTheDocument();
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: CONNECTION_COPY.agent.commandCopy })).not.toBeInTheDocument();
+  });
+
+  it('keeps the Settings hard mismatch action and routes its Details button to Updates', () => {
+    const onOpen = vi.fn();
+    function Capture() {
+      useAppEventListener('openSettings', onOpen);
+      return <AstridStatusSection isOpen />;
+    }
+    mocks.readStatus.mockReturnValue(new Promise(() => undefined));
+    mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
+    render(<Capture />);
+    expect(screen.getByText('update your checkouts')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
+    expect(window.location.search).toContain('settings=updates');
+    window.history.replaceState({}, '', '/');
   });
 
   it('offers the browser permission action before checking Runtime details', () => {

@@ -30,6 +30,7 @@ import { createShareMetaPlugin } from "./shareMeta";
 import { createInstallerAssetsPlugin } from "./installerAssets";
 import { createPreviewCacheHeadersPlugin } from "./previewCacheHeaders";
 import { createAppBuildPlugin } from "./appBuild";
+import { createLocalUpdateStatusPlugin } from "./localUpdateStatus";
 
 const logger = createLogger();
 const originalWarn = logger.warn.bind(logger);
@@ -162,6 +163,7 @@ export default defineConfig(() => {
       createShareMetaPlugin(process.env.ASTRID_SITE_ORIGIN?.trim() || undefined),
       createInstallerAssetsPlugin(),
       createAppBuildPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
+      createLocalUpdateStatusPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
       createPreviewCacheHeadersPlugin(),
       react(),
       createBundleBudgetPlugin(),

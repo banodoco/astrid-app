@@ -27,6 +27,7 @@ export interface UpdateResolutionInput {
   readonly releaseBehind?: boolean;
   readonly midSessionSchemaMismatch?: boolean;
   readonly updateNowAvailable?: boolean;
+  readonly settingsSurface?: boolean;
   readonly primaryUpdateLabel?: string;
   readonly installType?: 'pinokio' | 'source' | 'fully-local' | 'installer';
   readonly command?: string;
@@ -63,9 +64,25 @@ export function resolveUpdate(input: UpdateResolutionInput): UpdateResolution {
   }
   if (input.requiredRelease !== undefined && input.installedRelease !== undefined && input.installedRelease < input.requiredRelease) {
     const commands = commandActions(input);
-    return { card: 'update', title: 'Update Astrid', body: `This update is required: ${input.requiredReason ?? 'A required update is available.'}`, primary: input.updateNowAvailable ? settingsAction : commands.primary, secondary: commands.secondary };
+    const actions = input.installType === 'pinokio'
+      ? { primary: { label: 'Update in Pinokio' }, secondary: null }
+      : input.installType === 'source'
+        ? { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null }
+        : input.updateNowAvailable
+          ? { primary: settingsAction, secondary: commands.primary }
+          : commands;
+    return { card: 'update', title: 'Update Astrid', body: `This update is required: ${input.requiredReason ?? 'A required update is available.'}`, ...actions };
   }
-  if (input.releaseBehind) return { card: 'notice', title: 'Update available', body: 'A newer release of Astrid is available.', primary: settingsAction, secondary: null };
+  if (input.releaseBehind) {
+    const settingsActions = input.settingsSurface
+      ? input.installType === 'pinokio'
+        ? { primary: { label: 'Update in Pinokio' }, secondary: null }
+        : input.updateNowAvailable
+          ? { primary: settingsAction, secondary: null }
+          : commandActions(input)
+      : { primary: settingsAction, secondary: null };
+    return { card: 'notice', title: 'Update available', body: 'A newer release of Astrid is available.', ...settingsActions };
+  }
   if (input.realError || input.compatibility) return { card: 'error', title: 'Could not connect to Astrid', body: input.realError ?? input.compatibility?.detail ?? 'An unexpected error occurred.', primary: null, secondary: null };
   return { card: 'none', title: null, body: null, primary: null, secondary: null };
 }

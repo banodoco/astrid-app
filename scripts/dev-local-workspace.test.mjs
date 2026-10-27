@@ -564,7 +564,7 @@ const fs = require('node:fs');
 const kind = args.includes('dev:astrid-acp') ? 'acp' : (args.includes('dev') || args.includes('preview') ? 'vite' : 'other');
 fs.appendFileSync(${JSON.stringify(spawnLog)}, args.join(' ') + '\\n');
 fs.appendFileSync(process.env.FAKE_RUNTIME_LIFECYCLE_LOG, kind + ':start\\n');
-if (kind === 'vite') fs.writeFileSync(process.env.FAKE_RUNTIME_APP_ENV, JSON.stringify({ args, astridCheckout: process.env.ASTRID_CHECKOUT, dataRoot: process.env.ASTRID_RUNTIME_DATA_ROOT, supportRoot: process.env.ASTRID_SUPPORT_ROOT, discovery: process.env.ASTRID_WORKSPACE_DISCOVERY }));
+if (kind === 'vite') fs.writeFileSync(process.env.FAKE_RUNTIME_APP_ENV, JSON.stringify({ args, astridCheckout: process.env.ASTRID_CHECKOUT, dataRoot: process.env.ASTRID_RUNTIME_DATA_ROOT, supportRoot: process.env.ASTRID_SUPPORT_ROOT, discovery: process.env.ASTRID_WORKSPACE_DISCOVERY, localUpdateStatus: process.env.ASTRID_LOCAL_UPDATE_STATUS, viteLocalUpdateStatus: process.env.VITE_ASTRID_LOCAL_UPDATE_STATUS }));
 console.log(['fake-npm', ...args].join(' '));
 if (kind === 'vite' && process.env.FAKE_NPM_VITE_EXIT) process.exit(Number(process.env.FAKE_NPM_VITE_EXIT));
 if (process.env.FAKE_NPM_TREE_PIDS) {
@@ -1082,6 +1082,8 @@ process.exit(result.status ?? 1);
     assert.equal(childEnvironment.dataRoot, dataRoot);
     assert.equal(childEnvironment.supportRoot, dataRoot);
     assert.equal(childEnvironment.discovery, join(dataRoot, 'runtime', 'discovery.json'));
+    assert.equal(childEnvironment.localUpdateStatus, '1');
+    assert.equal(childEnvironment.viteLocalUpdateStatus, '1');
     assert.equal(existsSync(join(dataRoot, 'runtime', 'discovery.json')), true);
     assert.equal(existsSync(join(ambientRoot, 'runtime', 'discovery.json')), false);
     await started.stop();

@@ -13,6 +13,14 @@ import { CopyInstallCommand } from './CopyInstallCommand.tsx';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { usePageStale } from './AppBuildProvider.tsx';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
+import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
+
+function openUpdateDetails() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('settings', 'updates');
+  window.history.pushState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  dispatchAppEvent('openSettings', { tab: 'updates' });
+}
 
 export interface RuntimeConnectorRecoveryBannerProps {
   readonly retrying?: boolean;
@@ -170,7 +178,7 @@ export function RuntimeConnectorRecoveryBanner({
         <p className="text-sm font-medium text-foreground">Update Astrid</p>
         <p className="mt-1 text-xs text-muted-foreground">This Runtime schema is not supported by this editor. Your draft and undo history stay open.</p>
       </div>
-      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><CopyInstallCommand mode="update" /></div>
+      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><CopyInstallCommand mode="update" /><Button type="button" variant="link" size="sm" onClick={openUpdateDetails}>Details</Button></div>
     </div>
   );
   if (hosted) return (

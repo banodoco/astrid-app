@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Home, LayoutGrid, Settings } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/shared/components/ui/button.tsx';
@@ -9,6 +9,10 @@ import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import { ProjectTimelinePicker } from '@/shared/components/ProjectTimelineSelectors.tsx';
 import { ProjectHeaderActions } from '@/shared/components/ProjectHeaderActions.tsx';
 import { useRuntimeEditorDiscovery } from '@/tools/video-editor/hooks/useRuntimeEditorDiscovery.ts';
+import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
+import { loadPageUpdateStatus, resolvePageUpdateStatus } from '@/shared/lib/updates/pageUpdateStatus.ts';
+import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 
 export type AppHeaderNavigationMode = 'home' | 'tools';
 
@@ -93,6 +97,29 @@ export function AppHeader({
   const isToolsNavigation = navigationMode === 'tools';
   const navigationLabel = isToolsNavigation ? 'Tools' : 'Home';
   const NavigationIcon = isToolsNavigation ? LayoutGrid : Home;
+  const connection = useRuntimeConnection();
+  const pageStale = usePageStale();
+  const local = import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
+  const hosted = runtimeOrigin() !== '';
+  const [updateAvailable, setUpdateAvailable] = useState(false);
+
+  useEffect(() => {
+    if (!connection.isConnected || (!local && !hosted)) return undefined;
+    let active = true;
+    const installType = connection.managedByPinokio ? 'pinokio' : local ? 'fully-local' : 'installer';
+    void loadPageUpdateStatus(local).then((status) => {
+      if (!active || !status) return;
+      setUpdateAvailable(resolvePageUpdateStatus(status, installType).card === 'notice');
+    });
+    return () => { active = false; };
+  }, [connection.isConnected, connection.managedByPinokio, hosted, local]);
+
+  const openUpdates = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('settings', 'updates');
+    window.history.pushState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    dispatchAppEvent('openSettings', { tab: 'updates' });
+  };
 
   return (
     // `relative z-10` puts the header in the same layer as the app content, above the fixed sky backdrop
@@ -143,13 +170,14 @@ export function AppHeader({
         type="button"
         variant="ghost"
         size="icon"
-        className={cn('ml-auto h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground', COARSE_TOUCH_TARGET)}
-        onClick={() => dispatchAppEvent('openSettings', {})}
+        className={cn('relative ml-auto h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground', COARSE_TOUCH_TARGET)}
+        onClick={openUpdates}
         disabled={settingsDisabled}
         title="Settings"
         aria-label="Settings"
       >
         <Settings className="h-3.5 w-3.5" />
+        {updateAvailable && !pageStale && <span data-testid="settings-update-indicator" aria-label="Update available" className="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500" />}
       </Button>
 
     </header>

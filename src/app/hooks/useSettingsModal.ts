@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { useSettingsEventIntent } from '@/app/hooks/useSettingsModalIntents';
 
 export function useSettingsModal() {
@@ -13,6 +13,10 @@ export function useSettingsModal() {
   useSettingsEventIntent(useCallback(({ settingsTab }) => {
     handleOpenSettings(settingsTab);
   }, [handleOpenSettings]));
+
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('settings') === 'updates') handleOpenSettings('updates');
+  }, [handleOpenSettings]);
 
   return {
     isSettingsModalOpen,

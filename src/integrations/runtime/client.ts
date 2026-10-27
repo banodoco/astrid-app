@@ -36,6 +36,7 @@ import { loadWorkspaceRuntimeConfig } from './workspaceRuntimeConfig.ts';
 export const RUNTIME_CLIENT_VERSION = 'astrid-r1-consumer-20260911';
 export const RUNTIME_CLIENT_SCOPES = [
   'handshake',
+  'installer:update',
   'projects:read',
   'projects:write',
   'objects:read',
@@ -105,9 +106,11 @@ function sharedSlotFor(key: string): SessionSlot {
   return slot;
 }
 
+const LEGACY_RUNTIME_CLIENT_SCOPES = RUNTIME_CLIENT_SCOPES.filter((scope) => scope !== 'installer:update');
 function hasExactScopes(actual: string[]): boolean {
-  return actual.length === RUNTIME_CLIENT_SCOPES.length
-    && [...actual].sort().every((scope, index) => scope === [...RUNTIME_CLIENT_SCOPES].sort()[index]);
+  return [RUNTIME_CLIENT_SCOPES, LEGACY_RUNTIME_CLIENT_SCOPES].some((expected) =>
+    actual.length === expected.length
+      && [...actual].sort().every((scope, index) => scope === [...expected].sort()[index]));
 }
 
 export class RuntimeUnavailableError extends Error {
@@ -467,7 +470,17 @@ export class AstridRuntimeClient {
       // the race is observed here so it never surfaces as unhandled. The realm read
       // stays after validation: an incompatible Runtime is never asked for more.
       const healthRead = this.client.health();
-      const handshakeRead = this.client.handshake('astrid-browser', RUNTIME_CLIENT_VERSION, RUNTIME_CLIENT_SCOPES);
+      const handshakeRead = this.client.handshake('astrid-browser', RUNTIME_CLIENT_VERSION, RUNTIME_CLIENT_SCOPES)
+        .catch((error: unknown) => {
+          // Older owners and credentials keep normal use and command fallback.
+          // Only the precise missing update grant permits a legacy negotiation.
+          if (error instanceof ApiError && error.status === 401 && error.code === 'unauthorized'
+            && Array.isArray(error.details.scopes) && error.details.scopes.length === 1
+            && error.details.scopes[0] === 'installer:update') {
+            return this.client.handshake('astrid-browser', RUNTIME_CLIENT_VERSION, LEGACY_RUNTIME_CLIENT_SCOPES);
+          }
+          throw error;
+        });
       for (const pending of [healthRead, handshakeRead]) pending.catch(() => undefined);
       const health = await healthRead;
       if (health.status !== 'ok' && !(allowDegradedHealth && health.status === 'degraded')) {

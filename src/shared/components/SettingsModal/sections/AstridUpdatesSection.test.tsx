@@ -5,10 +5,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const { connectionMock, readStatusMock, hostedCheckMock, localCheckMock, originMock } = vi.hoisted(() => ({ connectionMock: { value: null as unknown }, readStatusMock: vi.fn(), hostedCheckMock: vi.fn(), localCheckMock: vi.fn(), originMock: { value: 'https://astrid.test' } }));
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({ useRuntimeConnection: () => connectionMock.value }));
 vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readStatus = readStatusMock; } }));
-vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => originMock.value }));
+vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => originMock.value, runtimeApiBase: () => 'http://127.0.0.1:17340/api/runtime' }));
 vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: hostedCheckMock, checkLocalUpdate: localCheckMock }));
 
 import { AstridUpdatesSection } from './AstridUpdatesSection.tsx';
+import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -17,9 +18,37 @@ beforeEach(() => {
   hostedCheckMock.mockReset();
   localCheckMock.mockReset();
   originMock.value = 'https://astrid.test';
+  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+    const buildResponse = String(input) === '/build.json';
+    return Promise.resolve(new Response(JSON.stringify(buildResponse
+      ? { app: 'served-app-build', release: 12 }
+      : { report: 'Astrid diagnostics\nLast update result: rolled_back\nInstaller transaction log:\ntransaction line\nRetained back-end copies: 0 bytes' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+  }));
 });
 
 describe('Astrid Updates Settings section', () => {
+  it('shows the report-backed last result and expandable update log', async () => {
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(section).findByText('rolled_back')).toBeInTheDocument();
+    fireEvent.click(within(section).getByText('View log'));
+    expect(within(section).getByText('transaction line')).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    const diagnosticCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes('/v1/diagnostics'));
+    expect(diagnosticCall).toBeDefined();
+    const requestUrl = new URL(String(diagnosticCall?.[0]), 'http://localhost');
+    expect(requestUrl.searchParams.get('app_build')).toBe(APP_BUILD || 'served-app-build');
+    expect(requestUrl.searchParams.get('app_release')).toBe('12');
+  });
+
+  it('offers agent and terminal instructions when Runtime diagnostics cannot answer', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(section).findByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
+  });
+
   it('checks immediately when opened and shows the shared update action', async () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'app-a', servedRelease: 4, servedApp: 'app-b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);

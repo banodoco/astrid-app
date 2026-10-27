@@ -76,6 +76,14 @@ test('POSIX defaults to hosted manifest and pinned source archive URLs', () => s
   for (const name of ['runtime', 'agent']) assert.ok(localInstall.includes(`https://github.com/banodoco/astrid-${name}/archive/${context.manifest[name].sha}.tar.gz`));
 }));
 
+test('POSIX bootstrap accepts unknown top-level manifest keys', () => scenario(async (context) => {
+  context.manifest.release = 1;
+  context.manifest.required = { release: 1, reason: 'Required update' };
+  const result = await run(context);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal((await context.calls()).at(-1)[0], 'run');
+}));
+
 for (const repoValue of ['relative/path', '', null, 'https://example.com/source', 'file://remote/tmp/repo', 'file:///tmp/repo?branch=main', 'file:///tmp/repo#main', 'file://user@localhost/tmp/repo', 'file://localhost:123/tmp/repo', 'file://localhost:-1/tmp/repo', 'file://localhost']) {
   test(`POSIX rejects invalid developer source ${JSON.stringify(repoValue)} before core`, () => scenario(async (context) => {
     context.manifest.agent.repo = repoValue;

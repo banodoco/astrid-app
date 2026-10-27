@@ -43,6 +43,16 @@ export const ASTRID_COMMANDS = {
   windowsUpdate: '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update',
 } as const;
 
+/** K8's shared label for the standard install line, which also updates and repairs. */
+export const INSTALL_LINE_LABEL = 'Install or update Astrid';
+
+/** One owner for G1's offline diagnostics fallback, shared by Settings and recovery surfaces. */
+export const DIAGNOSTICS_FALLBACK_COPY = {
+  intro: 'Runtime could not answer. You can still collect diagnostics:',
+  agent: 'Run `astrid-runtime doctor` and read the log directory named in its report.',
+  command: 'astrid-runtime doctor > astrid-diagnostics.txt',
+} as const;
+
 export const ASTRID_REPO_URL = 'https://github.com/banodoco/astrid-app';
 const LOCAL_SETUP_DIRECTORY = 'astrid-app';
 
@@ -80,7 +90,7 @@ export function localSetupSteps(): readonly LocalSetupStep[] {
   const windows = detectPlatform() === 'windows';
   return [
     {
-      line: `Install Astrid: in ${windows ? 'PowerShell' : 'Terminal'} run`,
+      line: `${INSTALL_LINE_LABEL}: in ${windows ? 'PowerShell' : 'Terminal'} run`,
       command: windows ? L.windowsInstaller : L.macLinuxInstaller,
       commandLabel: 'Copy the install command',
       ...(windows ? { hint: 'If pasting gives nothing, select the command and press Ctrl+C.' } : {}),
@@ -406,7 +416,7 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
   updateNeeded: {
     title: 'Update Astrid',
     sentence: 'This page needs a newer Astrid. Give these instructions to your coding agent to update it.',
-    pinokioSentence: 'This page needs a newer Astrid. In Pinokio, choose Stop, then Update, then Start.',
+    pinokioSentence: 'This page needs a newer Astrid. Update in Pinokio.',
   },
 
   /** Lead-in above the shared update screen when a chat reply from this computer's Astrid is out of date. */

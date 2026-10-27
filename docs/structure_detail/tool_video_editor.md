@@ -218,3 +218,7 @@ Both refuse to auto-reset on a children-reference change once a recovery key exi
 | Frontend architecture, shared hooks | `frontend_architecture.md`, `shared_utilities.md` |
 | Context/state audit and fat-context gate | `docs/state_management_context_audit.md` |
 | File-size and anti-pattern standards | `docs/code_quality_audit.md` |
+
+## File downloads
+
+Timeline export and newly completed renders use browser-managed Downloads. The render hook requests one automatic download per started render; mounting controls or opening an existing result does not replay it. Runtime media is fetched with CORS before download so the Runtime's Origin check remains intact. Browser downloads are bounded to 1 GiB, including streamed responses without Content-Length. The timeline menu and rendered-film player offer explicit **Save as…** streaming for larger files; those direct writes do not appear in browser Downloads. Sources: `lib/timeline-transfer.ts`, `lib/render-download.ts`, `hooks/useRenderState.ts`, `components/TimelineRenderControls.tsx`.

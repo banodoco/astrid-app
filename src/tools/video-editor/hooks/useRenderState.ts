@@ -1,3 +1,5 @@
+import { downloadRenderedFile } from '@/tools/video-editor/lib/render-download.ts';
+import { toast } from '@/shared/components/ui/toast.tsx';
 import { useCallback, useContext, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react';
 import type { AstridLocalClient } from '@/integrations/astrid/client.ts';
 import { isLocalTestMode } from '@/app/localTestRuntime.ts';
@@ -94,18 +96,6 @@ function newRenderOperationId(): string {
 export interface RenderResultInfo {
   revision: number | null;
   completedAt: number;
-}
-
-/** Trigger one normal browser download without adding another visible preview. */
-export function triggerRenderDownload(url: string, filename: string): void {
-  if (typeof document === 'undefined') return;
-  const anchor = document.createElement('a');
-  anchor.href = url;
-  anchor.download = filename;
-  anchor.hidden = true;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
 }
 
 /**
@@ -546,6 +536,10 @@ export function useRenderState(
   const renderPollGenerationRef = useRef(0);
   const renderPollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const renderRevisionRef = useRef<number | null>(null);
+  // Only a render started here can request an automatic download. Consume this
+  // at completion, not in a mount effect: multiple controls/history cannot replay it.
+  const pendingAutomaticDownload = useRef(false);
+  const renderGeneration = useRef(0);
   // One export intent keeps one idempotency key across transport retries. A
   // terminal task clears it so the next explicit export is a new operation.
   const renderOperationIdRef = useRef<string | null>(null);
@@ -611,8 +605,14 @@ export function useRenderState(
     setRenderResultUrl(nextValue.url);
     setRenderResultFilename(nextValue.filename);
 
-    // Completion never downloads on its own: the editor shows a player and
-    // Download is an explicit action there.
+    if (nextValue.url && pendingAutomaticDownload.current) {
+      pendingAutomaticDownload.current = false;
+      void downloadRenderedFile(nextValue.url, nextValue.filename ?? 'timeline-render.mp4').catch((error: unknown) => {
+        toast.error(error instanceof Error ? error.message : "Couldn't download the render", {
+          description: 'Your render is ready. Open Play last render to retry Download or choose Save as….',
+        });
+      });
+    }
     setRenderResultInfo(nextValue.url
       ? { revision: renderRevisionRef.current, completedAt: Date.now() }
       : null);
@@ -1113,6 +1113,9 @@ export function useRenderState(
       return;
     }
 
+    const generation = ++renderGeneration.current;
+    pendingAutomaticDownload.current = true;
+
     // Only Astrid admission knows a revision; clear any previous one.
     renderRevisionRef.current = null;
 
@@ -1159,7 +1162,9 @@ export function useRenderState(
         },
       });
 
+      let settled = false;
       job.subscribe((progress) => {
+        if (settled || renderGeneration.current !== generation) return;
         setRenderLog(progress.log ?? '');
         setRenderProgress(progress.progress == null
           ? null
@@ -1171,6 +1176,7 @@ export function useRenderState(
           });
 
         if (progress.phase === 'complete') {
+          settled = true;
           setRenderStatus('done');
           setRenderDirty(false);
           if (progress.resultUrl) {
@@ -1180,6 +1186,8 @@ export function useRenderState(
         }
 
         if (progress.phase === 'failed') {
+          settled = true;
+          pendingAutomaticDownload.current = false;
           setRenderStatus('error');
           setRenderDirty(false);
           return;

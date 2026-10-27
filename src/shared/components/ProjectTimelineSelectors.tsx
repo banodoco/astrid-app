@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FileInput, Plus } from 'lucide-react';
+import { FileInput, FileOutput, Plus } from 'lucide-react';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import {
   PickerFooterAction,
@@ -72,7 +72,7 @@ export function ProjectTimelinePicker({
   showTimelineSelector?: boolean;
   onOpenChange?(open: boolean): void;
   onRenameTimeline?: (timelineId: string, name: string) => Promise<void>;
-  onExportTimeline?: (timelineId: string, timelineName: string) => void;
+  onExportTimeline?: (timelineId: string, timelineName: string, saveAs?: boolean) => void;
   onImportTimeline?: (file: File) => void;
 }) {
   const [projectOpen, setProjectOpen] = useState(false),
@@ -115,8 +115,16 @@ export function ProjectTimelinePicker({
       footer={
         // New timeline is the picker's own last row, pinned under the list so a long
         // list never scrolls it away: the one way to start a timeline, first or not.
-        kind === 'timeline' && (onCreateTimeline || onImportTimeline) && !loading && !error ? (
+        kind === 'timeline' && (onCreateTimeline || onImportTimeline || onExportTimeline) && !loading && !error ? (
           <>
+            {onExportTimeline && selected && typeof window !== 'undefined' && 'showSaveFilePicker' in window && <PickerFooterAction
+              icon={FileOutput}
+              disabled={disabled}
+              onClick={() => {
+                const row = rows.find((item) => item.id === selected);
+                if (row) { setOpen(false); onExportTimeline(row.id, row.name, true); }
+              }}
+            >Save timeline as… (direct to file)</PickerFooterAction>}
             {onCreateTimeline && <PickerFooterAction
               icon={Plus}
               disabled={disabled || creatingTimeline}

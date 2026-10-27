@@ -1,3 +1,4 @@
+import { downloadBlobAsFile } from '@/shared/runtime/browserDownloadRuntime.ts';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import type { Task } from '@/integrations/runtime/generated.ts';
 import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
@@ -17,7 +18,7 @@ type TaskClient = Pick<AstridRuntimeClient,
 
 export type TransferProgress = { phase: string; loaded: number; total: number };
 export type TransferToast = { loading(message: string): unknown; update(id: unknown, message: string): void; success(message: string, id?: unknown, description?: string): void; warning(message: string, id?: unknown, description?: string): void; error(message: string, id?: unknown, description?: string): void };
-type TransferOptions = { client?: TaskClient; fetchImpl?: typeof fetch; xhrFactory?: () => XMLHttpRequest; onProgress?: (progress: TransferProgress) => void; toast?: TransferToast; existingNames?: readonly string[]; onImported?: (timelineId: string) => Promise<boolean> };
+type TransferOptions = { saveAs?: boolean; client?: TaskClient; fetchImpl?: typeof fetch; xhrFactory?: () => XMLHttpRequest; onProgress?: (progress: TransferProgress) => void; toast?: TransferToast; existingNames?: readonly string[]; onImported?: (timelineId: string) => Promise<boolean> };
 
 /** "Name" if free, else "Name 2", "Name 3", … (same numbering as "Timeline N"). */
 export function uniqueTimelineName(name: string, existing: readonly string[]): string {
@@ -145,24 +146,17 @@ function saveFileHandle(filename: string): Promise<FileSystemFileHandle> {
   return picker({ suggestedName: filename, types: [{ description: 'Astrid timeline', accept: { 'application/zip': ['.astrid'] } }] });
 }
 
-function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url; link.download = filename; link.click();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-}
-
 function safeFilename(name: string): string {
-  const base = name.trim().replace(/[\\/:*?"<>|\u0000-\u001f]/g, '_').replace(/\.+$/g, '') || 'timeline';
+  const printable = Array.from(name.trim(), (character) => character.charCodeAt(0) < 32 ? '_' : character).join('');
+  const base = printable.replace(/[\\/:*?"<>|]/g, '_').replace(/\.+$/g, '') || 'timeline';
   return base.toLowerCase().endsWith('.astrid') ? base : `${base}.astrid`;
 }
 
-/** The save handle is acquired synchronously in the click gesture before this function awaits. */
+/** Explicit Save as acquires its handle in the click gesture; exports use browser Downloads. */
 export async function exportTimelineArchive(input: { projectId: string; timelineId: string; timelineName: string; flushPendingSave: () => Promise<unknown> }, options: TransferOptions = {}): Promise<void> {
   const filename = safeFilename(input.timelineName);
   let handle: FileSystemFileHandle | undefined;
-  const picker = (globalThis as typeof globalThis & { showSaveFilePicker?: (options: unknown) => Promise<FileSystemFileHandle> }).showSaveFilePicker;
-  const handlePromise = picker ? saveFileHandle(filename).then(
+  const handlePromise = options.saveAs ? saveFileHandle(filename).then(
     (value) => ({ value }),
     (error: unknown) => ({ error }),
   ) : undefined;
@@ -221,7 +215,7 @@ export async function exportTimelineArchive(input: { projectId: string; timeline
     const pickerApi = !!handle;
     const zipOverhead = entries.reduce((sum, entry) => sum + 160 + encoder.encode(entry.name).byteLength, 98);
     if (!pickerApi && total + Math.max(1024 * 1024, Math.ceil(total * 0.03), zipOverhead) > MAX_FALLBACK_ARCHIVE) {
-      throw new Error('This timeline is too large to export in this browser. Use Chrome, or run: astrid timelines export');
+      throw new Error('This timeline is too large for a browser download (1 GiB limit). Choose Save timeline as… in the timeline menu to stream it directly to a file.');
     }
     const sources = entries.map((entry) => ({
       name: entry.name,
@@ -239,9 +233,9 @@ export async function exportTimelineArchive(input: { projectId: string; timeline
       const chunks: Uint8Array[] = [];
       const writable = new WritableStream<Uint8Array>({ write(chunk) { chunks.push(chunk); } });
       await writeStoredZip(sources, writable, progress);
-      downloadBlob(new Blob(chunks.map((chunk) => chunk.slice().buffer as ArrayBuffer), { type: 'application/zip' }), filename);
+      downloadBlobAsFile(new Blob(chunks.map((chunk) => chunk.slice().buffer as ArrayBuffer), { type: 'application/zip' }), filename);
     }
-    options.toast?.success(`Exported ${input.timelineName}`, toastId);
+    options.toast?.success(handle ? `Saved ${input.timelineName}` : `Download started: ${input.timelineName}`, toastId);
   } catch (error) {
     if ((error as { name?: string }).name !== 'AbortError') options.toast?.error(`Couldn't export ${input.timelineName}`, toastId, error instanceof Error ? error.message : String(error));
   }
@@ -488,7 +482,7 @@ export async function importTimelineArchive(file: File, projectId: string, optio
       }
       objectsCursor = page.next_cursor ?? undefined;
     } while (objectsCursor);
-    let missing: Array<{ digest: string; size: number; filename: string; mediaType: string; blob: Blob }> = [];
+    const missing: Array<{ digest: string; size: number; filename: string; mediaType: string; blob: Blob }> = [];
     let totalUpload = 0;
     for (const [index, item] of media.entries()) {
       options.toast?.update(toastId, `Checking media ${index + 1} of ${media.length}…`);

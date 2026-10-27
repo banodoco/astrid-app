@@ -785,10 +785,10 @@ export default function VideoEditorPage() {
       await new AstridRuntimeClient().renameTimeline(selectedProject.project_id, timelineId, name);
       await runtimeDiscovery.timelinesQuery.refetch();
     },
-    onExportTimeline: (timelineId: string, timelineName: string) => {
+    onExportTimeline: (timelineId: string, timelineName: string, saveAs = false) => {
       const flushPendingSave = flushTimelineSaveRef.current;
       if (!flushPendingSave) { toast.error("The timeline editor is still loading. Try again in a moment."); return; }
-      void exportTimelineArchive({ projectId: projectId ?? "", timelineId, timelineName, flushPendingSave }, { toast: transferToast() });
+      void exportTimelineArchive({ projectId: projectId ?? "", timelineId, timelineName, flushPendingSave }, { toast: transferToast(), saveAs });
     },
     onImportTimeline: (file: File) => {
       if (!projectId || tourHeader?.disabled) return;

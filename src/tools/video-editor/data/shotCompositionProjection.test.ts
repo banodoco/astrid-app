@@ -13,6 +13,7 @@ import { timelineContentExtentMs } from './shotCompositionTiming.ts';
 import { boundCanonicalClipToOccurrence } from '@/tools/video-editor/lib/canonicalRenderBounds.ts';
 import { getClipTimelineDuration } from '@/tools/video-editor/lib/config-utils.ts';
 import type { ResolvedTimelineConfig } from '@/tools/video-editor/types/index.ts';
+import { collectBuiltInKnownIds, collectExtensionDeclaredIds, scanExportConfig } from '@/tools/video-editor/runtime/exportGuard.ts';
 
 const prepared = createShotCompositionAdapter({ load: async () => fixture }).prepare(fixture);
 
@@ -58,6 +59,25 @@ function withOccurrenceRevision(
 }
 
 describe('canonical shot-composition downstream projection', () => {
+  it('projects Runtime images as native stills without changing the source or admitting unknown clip types', () => {
+    const source = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline,
+      clips: [
+        { id: 'still', clipType: 'image', asset: 'alpha-image', track: 'video', at: 0, hold: 2, opacity: 0.7, x: 12 },
+        { id: 'unknown', clipType: 'unknown-custom', track: 'video', at: 2, hold: 1 },
+      ],
+    }));
+    const sourceBefore = JSON.stringify(source);
+    const projection = projectCanonicalComposition(source);
+    const still = projection.config.clips.find((clip) => clip.id === 'occ-1:still');
+
+    expect(still).toMatchObject({ clipType: 'hold', at: 0, hold: 2, opacity: 0.7, x: 12 });
+    expect(still?.assetEntry).toBeDefined();
+    expect(JSON.stringify(source)).toBe(sourceBefore);
+    const guard = scanExportConfig(projection.config, collectBuiltInKnownIds(), collectExtensionDeclaredIds([]));
+    expect(guard.unknownClipTypes).toEqual(['unknown-custom']);
+  });
+
   it('merges shot-only lanes around shared picture layers and preserves authored properties', () => {
     const composition = withOccurrenceRevision(prepared, 0, (timeline) => ({
       ...timeline,

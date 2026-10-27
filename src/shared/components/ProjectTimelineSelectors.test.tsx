@@ -64,6 +64,19 @@ describe('ProjectTimelinePicker', () => {
     expect(within(shotRow).queryByRole('img', { name: 'Primary timeline' })).toBeNull();
   });
 
+  it('offers an explicit direct-to-file Save as action for the selected timeline', async () => {
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: vi.fn() });
+    try {
+      const onExportTimeline = vi.fn();
+      render(<ProjectTimelinePicker projects={[]} timelines={[{ id: 'current', name: 'Main Cut' }]}
+        projectId="p" timelineId="current" onSelectProject={vi.fn()} onSelectTimeline={vi.fn()} onExportTimeline={onExportTimeline} />);
+      const user = userEvent.setup();
+      await user.click(screen.getByRole('combobox', { name: 'Select timeline' }));
+      await user.click(screen.getByRole('button', { name: 'Save timeline as… (direct to file)' }));
+      expect(onExportTimeline).toHaveBeenCalledWith('current', 'Main Cut', true);
+    } finally { Reflect.deleteProperty(window, 'showSaveFilePicker'); }
+  });
+
   it('creates the first timeline from an empty list and disables while creating', async () => {
     const onCreateTimeline = vi.fn();
     const view = render(

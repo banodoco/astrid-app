@@ -8,6 +8,7 @@ import { toast } from '@/shared/components/ui/toast.tsx';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/shared/components/ui/tooltip.tsx';
 import { useTimelineChromeContext } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { mediaCrossOrigin } from '@/shared/lib/media/mediaCrossOrigin';
+import { downloadRenderedFile } from '@/tools/video-editor/lib/render-download.ts';
 import type { VisualSeamReport } from '@/tools/video-editor/data/visualSeamContract.ts';
 
 function diagnosticRecord(value: unknown): Record<string, unknown> | undefined {
@@ -207,13 +208,13 @@ export function TimelineRenderControls({
 
   const hasResult = Boolean(renderResultUrl) && chrome.renderStatus !== 'rendering';
   const filename = chrome.renderResultFilename ?? 'timeline-render.mp4';
-  const downloadRender = async () => {
+  const downloadRender = async (saveAs = false) => {
     if (!renderResultUrl || isDownloading) return;
     setIsDownloading(true);
     try {
       const pickerWindow = window as RenderSaveFilePickerWindow;
       const saveFilePicker = pickerWindow.showSaveFilePicker;
-      if (typeof saveFilePicker === 'function') {
+      if (saveAs && typeof saveFilePicker === 'function') {
         let fileHandle: Awaited<ReturnType<NonNullable<RenderSaveFilePickerWindow['showSaveFilePicker']>>>;
         try {
           fileHandle = await saveFilePicker.call(pickerWindow, {
@@ -238,23 +239,10 @@ export function TimelineRenderControls({
         return;
       }
 
-      const response = await fetch(renderResultUrl, { mode: 'cors' });
-      if (!response.ok) {
-        toast.error(`Couldn't download the render (HTTP ${response.status})`);
-        return;
-      }
-      const blob = await response.blob();
-      const objectUrl = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = objectUrl;
-      link.download = filename;
-      link.style.display = 'none';
-      document.body.append(link);
-      link.click();
-      link.remove();
-      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
+      if (saveAs) throw new Error('Save as is unavailable in this browser. Use Chrome for large files.');
+      await downloadRenderedFile(renderResultUrl, filename);
     } catch (error) {
-      if (!isAbortError(error)) toast.error("Couldn't download the render");
+      if (!isAbortError(error)) toast.error(error instanceof Error ? error.message : "Couldn't download the render");
     } finally {
       setIsDownloading(false);
     }
@@ -328,7 +316,12 @@ export function TimelineRenderControls({
               className="max-h-[60dvh] w-full rounded bg-black"
               data-testid="timeline-render-player"
             />
-            <div className="flex justify-end">
+            <p className="text-xs text-muted-foreground">Download appears in your browser’s Downloads. Save as… writes directly to a file for large renders.</p>
+            <div className="flex justify-end gap-2">
+              {typeof (window as RenderSaveFilePickerWindow).showSaveFilePicker === 'function' && <Button
+                type="button" size="sm" variant="outline" disabled={isDownloading}
+                onClick={() => void downloadRender(true)}
+              >Save as…</Button>}
               <Button
                 type="button"
                 size="sm"
@@ -377,6 +370,12 @@ export function TimelineRenderControls({
             <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
             <span>{renderError.split('\n')[0]}</span>
           </div>
+          {renderError.includes('\n') && (
+            <details className="mt-2">
+              <summary className="cursor-pointer">Details</summary>
+              <pre className="mt-1 whitespace-pre-wrap break-words font-sans">{renderError}</pre>
+            </details>
+          )}
           {hasVisualSeamFindings(chrome.visualSeamReport) && (
             <VisualBoundaryReport
               report={chrome.visualSeamReport}

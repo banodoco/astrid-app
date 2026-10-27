@@ -84,6 +84,16 @@ describe('TimelineRenderControls', () => {
     expect(document.querySelector('[data-video-editor-render-blocker="true"]')).toBeNull();
   });
 
+  it('exposes the full render diagnostic behind Details', () => {
+    mocks.useTimelineChromeContext.mockReturnValue(chrome({ renderStatus: 'error',
+      renderLog: 'Export guard: 2 errors\n[missing-resource] Source image is unavailable\n[unknown-effect] Unknown blur effect',
+    }));
+    render(<TimelineRenderControls previewActionButtonClass="" />);
+    fireEvent.click(screen.getByText('Details'));
+    expect(screen.getByText(/Source image is unavailable/)).toBeTruthy();
+    expect(screen.getByText(/Unknown blur effect/)).toBeTruthy();
+  });
+
   it('dismisses the render error on an outside pointer-down', () => {
     mocks.useTimelineChromeContext.mockReturnValue(chrome({
       renderStatus: 'error',
@@ -239,7 +249,7 @@ describe('TimelineRenderControls', () => {
     anchorClick.mockRestore();
   });
 
-  it('fetches the render with CORS and streams it to the save file picker', async () => {
+  it('streams directly only when Save as is explicitly chosen', async () => {
     const writable = {} as WritableStream;
     const pipeTo = vi.fn().mockResolvedValue(undefined);
     const createWritable = vi.fn().mockResolvedValue(writable);
@@ -259,7 +269,7 @@ describe('TimelineRenderControls', () => {
 
     render(<TimelineRenderControls previewActionButtonClass="" />);
     fireEvent.click(screen.getByRole('button', { name: /Play last render/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save as…' }));
     expect(screen.getByRole('button', { name: 'Downloading…' })).toBeDisabled();
 
     await act(async () => resolvePicker({ createWritable }));
@@ -273,12 +283,10 @@ describe('TimelineRenderControls', () => {
     expect(createWritable).toHaveBeenCalledOnce();
   });
 
-  it('falls back to a blob download with the render filename when the picker is unavailable', async () => {
-    const blob = new Blob(['render bytes'], { type: 'video/mp4' });
-    const fetchRender = vi.fn().mockResolvedValue({
-      ok: true,
-      blob: vi.fn().mockResolvedValue(blob),
-    } as unknown as Response);
+  it('uses browser Downloads even when the save picker is available', async () => {
+    const picker = vi.fn();
+    Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: picker });
+    const fetchRender = vi.fn().mockResolvedValue(new Response('render bytes', { headers: { 'Content-Type': 'video/mp4' } }));
     const createObjectURL = vi.fn().mockReturnValue('blob:render-result');
     const revokeObjectURL = vi.fn();
     Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: createObjectURL });
@@ -297,9 +305,10 @@ describe('TimelineRenderControls', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Download' }));
 
     await waitFor(() => expect(clickedDownloads).toEqual([{ href: 'blob:render-result', download: 'render.mp4' }]));
-    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:render-result'));
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledWith('blob:render-result'), { timeout: 2000 });
     expect(fetchRender).toHaveBeenCalledWith('/api/astrid/v1/objects/render.mp4', { mode: 'cors' });
-    expect(createObjectURL).toHaveBeenCalledWith(blob);
+    expect(createObjectURL).toHaveBeenCalledWith(expect.any(Blob));
+    expect(picker).not.toHaveBeenCalled();
   });
 
   it('shows an error for a failed response without saving the response body', async () => {
@@ -331,7 +340,7 @@ describe('TimelineRenderControls', () => {
 
     render(<TimelineRenderControls previewActionButtonClass="" />);
     fireEvent.click(screen.getByRole('button', { name: /Play last render/ }));
-    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save as…' }));
 
     await waitFor(() => expect(picker).toHaveBeenCalledOnce());
     expect(fetchRender).not.toHaveBeenCalled();

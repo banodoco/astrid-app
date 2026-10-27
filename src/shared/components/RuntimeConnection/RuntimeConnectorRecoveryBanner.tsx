@@ -11,6 +11,7 @@ import { RuntimeAuthenticationError, RuntimeCompatibilityError, RuntimeUnavailab
 import { describeFailure, healthCheckCommand, RUNTIME_CONNECTION_COPY, runtimeLogDirectory } from '@/shared/components/RuntimeConnection/copy.ts';
 import { CopyInstallCommand } from './CopyInstallCommand.tsx';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
+import { usePageStale } from './AppBuildProvider.tsx';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 
 export interface RuntimeConnectorRecoveryBannerProps {
@@ -118,10 +119,11 @@ export function RuntimeConnectorRecoveryBanner({
   const [copyStatus, setCopyStatus] = useState('');
   const safeUrl = safeConnectionUrl(connectionUrl);
   const hosted = runtimeOrigin() !== '';
+  const pageStale = usePageStale();
   const failure = describeFailure(error);
   const restartBrief = buildWorkspaceRestartBrief({ error, connectionUrl: safeUrl, projectId, timelineId });
   const authenticationFailed = error instanceof RuntimeAuthenticationError;
-  const updateResolution = resolveUpdate({ compatibility: error instanceof RuntimeCompatibilityError ? error : undefined });
+  const updateResolution = resolveUpdate({ pageStale, compatibility: error instanceof RuntimeCompatibilityError ? error : undefined });
   const schemaUpdate = updateResolution.card === 'update';
   const typedFailure = authenticationFailed || error instanceof RuntimeCompatibilityError || error instanceof RuntimeUnavailableError && (error.failureKind === "admission" || error.failureKind === "storage");
   const visibleFailureSummary = failureSummary?.trim()
@@ -153,6 +155,15 @@ export function RuntimeConnectorRecoveryBanner({
   const action = 'recoveryAction' in error && typeof error.recoveryAction === 'string'
     ? error.recoveryAction
     : 'Retry the connection to your configured Astrid Runtime.';
+  if (updateResolution.card === 'reload') return (
+    <div role="alert" data-testid="runtime-connector-alert" className="fixed left-1/2 top-16 z-[100110] w-[min(56rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-border bg-background p-4 shadow-xl sm:flex sm:items-start sm:justify-between sm:gap-6">
+      <div className="min-w-0 sm:max-w-sm">
+        <p className="text-sm font-medium text-foreground">{updateResolution.title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">{updateResolution.body}</p>
+      </div>
+      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><Button type="button" variant="outline" onClick={() => window.location.reload()}>Reload</Button></div>
+    </div>
+  );
   if (schemaUpdate) return (
     <div role="alert" data-testid="runtime-connector-alert" className="fixed left-1/2 top-16 z-[100110] w-[min(56rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-border bg-background p-4 shadow-xl sm:flex sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0 sm:max-w-sm">

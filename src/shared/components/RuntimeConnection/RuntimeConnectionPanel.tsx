@@ -17,6 +17,7 @@ import { linkForSupportedBrowser } from '@/integrations/runtime/autoConnectReque
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
+import { usePageStale } from './AppBuildProvider.tsx';
 
 export interface RuntimeConnectionPanelProps {
   /** The gate's value: the screen to show (on the way out, the last one shown). */
@@ -326,9 +327,10 @@ function RefusedCard({ connection, onBack }: { readonly connection: RuntimeConne
 }
 
 function UpdateNeededCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
+  const pageStale = usePageStale();
   const { updateNeeded } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
-  const resolution = resolveUpdate({ compatibility: { kind: 'schema', detail: pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence }, installType: pinokioManaged ? 'pinokio' : runtimeOrigin() === '' ? 'source' : 'installer' });
+  const resolution = resolveUpdate({ pageStale, compatibility: { kind: 'schema', detail: pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence }, installType: pinokioManaged ? 'pinokio' : runtimeOrigin() === '' ? 'source' : 'installer' });
   return <Card title={resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} />} status={COPY.waiting} showHelp />;
 }
 

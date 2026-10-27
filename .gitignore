@@ -52,6 +52,8 @@ temp/
 !docs/structure_detail/*.md
 !docs/blog/*.md
 !docs/quality/*.md
+!docs/fully-local-update.md
+!docs/local-update-canary.md
 !vendor/astrid-browser/remotion/public/fonts/FONT_PROVENANCE.md
 !docs/state_management_context_audit.md
 !docs/design/*.md

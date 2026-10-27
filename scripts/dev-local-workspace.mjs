@@ -11,11 +11,14 @@ import { existsSync, readFileSync, realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { packageManagerInvocation } from './node-package-manager.mjs';
 import { terminateProcessTree } from './terminate-process-tree.mjs';
+import { startLocalUpdateControl } from './local-update-control.mjs';
+import { createLocalUpdater, restorePreparedResources, validateAppContext } from './local-update-runner.mjs';
+import { restoreCheckout, releasePreparation, prepareUpdate, selectUpdateTarget } from './local-update-checkout.mjs';
+import { installedBackend, runBackendUpdate, pinokioHandoff } from './local-update-backend.mjs';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
-import { request as httpRequest } from 'node:http';
 import { readGeneratedSchemaDigest, schemaDigestMismatch } from './runtime-schema-guard.mjs';
 import { LEGACY_RUNTIME_SCHEMA_DIGESTS, SOURCE_SCHEMA_MISMATCH_ACTION } from '../src/integrations/runtime/runtime-update-contract.mjs';
 import {
@@ -90,6 +93,7 @@ let ownedRuntime;
 let runtimeCliChild;
 let cleanupPromise;
 let interrupted = false;
+let updateControl;
 
 function spawnService(command, args, { kind = 'bridge', ...options }) {
   if (interrupted) exit(130);
@@ -145,6 +149,7 @@ async function runRuntimeCommand(action) {
 
 function cleanup(signal = 'SIGTERM') {
   return cleanupPromise ??= (async () => {
+    await updateControl?.close();
     for (const service of services.filter(({ kind }) => kind === 'vite')) await stopService(service, signal);
     for (const service of services.filter(({ kind }) => kind !== 'vite')) await stopService(service, signal);
     if (ownedRuntime) {
@@ -157,7 +162,7 @@ function cleanup(signal = 'SIGTERM') {
 }
 
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
-  interrupted = true;
+  if (!updateControl?.busy) interrupted = true;
   if (signal === 'SIGINT' && !process.exitCode) process.exitCode = 130;
   if (cleanupPromise) return;
   // Let up complete its custody/readiness handoff before deciding whether we own
@@ -220,13 +225,6 @@ if (buildOnly && launcherOptions.preview) {
 const paired = launcherOptions.paired;
 const resetPairing = launcherOptions.resetPairing;
 let previewDirectory = null;
-if (launcherOptions.preview) {
-  try {
-    previewDirectory = validatePreviewOutputDirectory(launcherOptions.previewDir);
-  } catch (error) {
-    exit(fail(CANT_START, error instanceof Error ? error.message : String(error)) ? 1 : 1);
-  }
-}
 const pairedRelayOrigin = process.env.ASTRID_APP_PAIRED_RELAY_ORIGIN?.trim();
 const hostedOriginArgumentIndex = process.argv.indexOf('--hosted-origin');
 const hostedOriginArgument = hostedOriginArgumentIndex >= 0
@@ -504,6 +502,90 @@ function validateDiscovery(discovery) {
   return expectedIdentity ? { endpoint, credentialPath, credential, expectedIdentity } : null;
 }
 
+// Recover C2's retained App context before ordinary startup can select a
+// replacement owner or reject the half-activated tree. A temporary editor
+// proves the restored build; normal launcher startup follows on that tree.
+if (!checkOnly && !buildOnly) {
+  let backend;
+  try { backend = installedBackend(resolveRuntimeCommand(runtimeSettings).command); }
+  catch (error) { if (error.step !== 'select-backend') throw error; }
+  if (backend && !runtimeSettings.runtimeCheckout) {
+    runtimeSettings.runtimePython = backend.python;
+    runtimeSettings.sourceManifest = backend.profile;
+  }
+  const journalPath = backend && resolve(backend.root, 'update-transaction.json');
+  const pending = journalPath && existsSync(journalPath) ? JSON.parse(readFileSync(journalPath, 'utf8')) : null;
+  if (pending?.transaction_context?.owner === 'local-update' && !['complete', 'rolled_back'].includes(pending.step)) {
+    let recoveryEditor;
+    let recoverySelection;
+    const stopRecoveryEditor = async () => {
+      if (recoveryEditor) await stopService(services.find((item) => item.child === recoveryEditor), 'SIGTERM');
+      recoveryEditor = undefined;
+    };
+    try {
+      await runBackendUpdate({ backend, action: { action: 'recover' }, hook: async (message) => {
+        const app = validateAppContext(message.app, process.cwd());
+        switch (message.hook) {
+          case 'stop-editor':
+            if (pinokioManaged) await pinokioHandoff(backend, 'begin');
+            await stopRecoveryEditor();
+            if (await waitForPort(port, 0)) throw new Error(`Recovery needs the previous editor on port ${port} to be stopped. Keep ${app.preparationRoot} and retry after stopping that editor.`);
+            break;
+          case 'restore-checkout':
+            await restoreCheckout({ cwd: process.cwd(), state: app });
+            await restorePreparedResources(app);
+            break;
+          case 'pinokio-start':
+            await pinokioHandoff(backend, 'runtime', { version: basename(message.version.root), operationId: message.operationId });
+            break;
+          case 'start-editor': {
+            runtimeSettings.runtimePython = message.version.python;
+            runtimeSettings.sourceManifest = message.version.profile;
+            runtimeSettings.runtimeCheckout = undefined;
+            recoverySelection = validateDiscovery(JSON.parse(readFileSync(discoveryPath, 'utf8')));
+            if (!recoverySelection || !(await verifyRuntime(recoverySelection.endpoint, recoverySelection.credential.token, recoverySelection.expectedIdentity))) throw new Error('The restored Runtime did not pass its realm and handshake checks');
+            const recoveryEnv = { ...process.env, PORT: port,
+              ASTRID_RUNTIME_DATA_ROOT: runtimeSettings.dataRoot, ASTRID_SUPPORT_ROOT: runtimeSettings.dataRoot,
+              ASTRID_WORKSPACE_DISCOVERY: discoveryPath, ASTRID_RUNTIME_PYTHON: message.version.python,
+              ASTRID_RUNTIME_SOURCE_MANIFEST: message.version.profile,
+              WORKSPACE_RUNTIME_TOKEN_FILE: recoverySelection.credentialPath,
+              VITE_WORKSPACE_RUNTIME_URL: recoverySelection.endpoint.origin,
+              VITE_APP_BUILD: app.oldAppBuild, RAILWAY_GIT_COMMIT_SHA: app.oldAppBuild,
+            };
+            const invocation = packageManagerInvocation('npm', viteChildArgs({ preview: app.previousMode === 'preview', previewDir: app.previousPreviewDirectory, quiet: true }), { env: recoveryEnv });
+            recoveryEditor = spawnService(invocation.command, invocation.args, { kind: 'vite', stdio: 'ignore', env: recoveryEnv });
+            if (!(await waitForPort(port, 60_000, () => recoveryEditor.exitCode !== null || recoveryEditor.signalCode !== null))) throw new Error('The restored editor did not start');
+            break;
+          }
+          case 'verify-editor': {
+            const response = await fetch(`http://127.0.0.1:${port}/build.json`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+            const build = await response.json();
+            if (!response.ok || build.app !== app.oldAppBuild || build.release !== app.oldAppRelease || recoveryEditor.exitCode !== null) throw new Error('The restored App build did not pass verification');
+            break;
+          }
+          case 'release-app':
+            await stopRecoveryEditor();
+            if (pinokioManaged) await pinokioHandoff(backend, 'end');
+            await releasePreparation({ cwd: process.cwd(), state: app });
+            break;
+          default: throw new Error(`Unexpected recovery callback ${message.hook}`);
+        }
+      } });
+    } finally { await stopRecoveryEditor(); }
+  }
+}
+
+// A fresh preview launch can have no active dist while a retained update
+// transaction still owns the old build. Let recovery restore it before applying
+// the ordinary preview-output check.
+if (launcherOptions.preview) {
+  try {
+    previewDirectory = validatePreviewOutputDirectory(launcherOptions.previewDir);
+  } catch (error) {
+    exit(fail(CANT_START, error instanceof Error ? error.message : String(error)) ? 1 : 1);
+  }
+}
+
 let discovery = existsSync(discoveryPath) || checkOnly || buildOnly
   ? readJson(discoveryPath, 'runtime discovery', NOT_SET_UP) : null;
 if (process.exitCode) exit(1);
@@ -540,7 +622,7 @@ if (verified === NOT_RUNNING && !checkOnly && !buildOnly) {
 if (verified === NOT_RUNNING) exit(fail(NOT_SET_UP, `no live Runtime discovery at ${discoveryPath}`) ? 1 : 1);
 if (!verified) exit(process.exitCode ?? 1);
 if (interrupted) exit(130);
-const { endpoint, credentialPath, credential, expectedIdentity } = selected;
+let { endpoint, credentialPath, credential, expectedIdentity } = selected;
 const doorPort = hostedOrigin && !checkOnly && !buildOnly ? requireDoor(discovery, hostedOrigin) : null;
 if (hostedOrigin && !checkOnly && !buildOnly && !doorPort) exit(1);
 if (paired && !pairedRelayOrigin) exit(fail(CANT_START, '--paired requires ASTRID_APP_PAIRED_RELAY_ORIGIN') ? 1 : 1);
@@ -720,18 +802,21 @@ const viteInvocation = packageManagerInvocation('npm', [...npmQuiet, ...viteChil
   previewDir: previewDirectory,
   quiet: !showTechnical,
 })], { env });
-const child = spawnService(viteInvocation.command, viteInvocation.args, {
+let child = spawnService(viteInvocation.command, viteInvocation.args, {
   kind: 'vite', stdio: piped,
   // The local Vite process is the connector's fixed compose/ACP destination;
   // it must not install another relay and accidentally loop back to itself.
   env: serviceEnvironment(paired ? { ASTRID_APP_PAIRED_RELAY_ENABLED: '0', ASTRID_LOCAL_COMPOSE_URL: `http://127.0.0.1:${port}/api/astrid/generation/compose` } : {}),
 });
-const viteOutput = watch(child);
+let viteOutput = watch(child);
+let updatingEditor = false;
+let finishLauncher;
+const launcherFinished = new Promise((done) => { finishLauncher = done; });
 
 const shutdown = (signal) => {
   if (shuttingDown) return;
   shuttingDown = true;
-  void cleanup(signal).catch((error) => fail(CANT_START, error.message));
+  void cleanup(signal).catch((error) => fail(CANT_START, error.message)).finally(finishLauncher);
 };
 /** A failure: the technical output held back so far is shown, then the friendly line and its details. */
 const stopWith = (friendly, details) => {
@@ -742,8 +827,10 @@ const stopWith = (friendly, details) => {
 };
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
-child.on('error', (error) => stopWith(COULDNT_START, `could not start Vite: ${error.message}`));
-child.on('exit', (code, signal) => {
+function watchEditor(instance) {
+instance.on('error', (error) => { if (!updatingEditor && instance === child) stopWith(COULDNT_START, `could not start Vite: ${error.message}`); });
+instance.on('exit', (code, signal) => {
+  if (updatingEditor || instance !== child) return;
   if (!shuttingDown && !opened && (code ?? 1) !== 0) {
     // Vite never listened: usually the app's port is taken (`--strictPort`).
     stopWith(/already in use|EADDRINUSE/i.test(viteOutput.tail) ? PROGRAM_IN_THE_WAY : COULDNT_START, `Vite exited${signal ? ` with ${signal}` : ` with code ${code}`}${withLast(viteOutput)}`);
@@ -751,6 +838,106 @@ child.on('exit', (code, signal) => {
   shutdown('SIGTERM');
   process.exitCode = process.exitCode || (code ?? 0);
 });
+}
+watchEditor(child);
+
+const updaterEditor = {
+  mode: launcherOptions.preview ? 'preview' : 'dev',
+  previewDirectory,
+  async captureIdentity() {
+    const response = await fetch(`http://127.0.0.1:${port}/build.json`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+    const build = await response.json();
+    if (!response.ok || typeof build.app !== 'string' || !Number.isSafeInteger(build.release)) throw new Error('The current App did not serve its build identity');
+    return build;
+  },
+  async stop() {
+    updatingEditor = true;
+    const service = services.find((item) => item.child === child);
+    if (service) await stopService(service, 'SIGTERM');
+  },
+  async start({ app, version, rollback }) {
+    discovery = readJson(discoveryPath, 'runtime discovery', NOT_SET_UP);
+    selected = discovery && validateDiscovery(discovery);
+    if (!selected) throw new Error('The selected Runtime did not publish a valid discovery record');
+    ({ endpoint, credentialPath, credential, expectedIdentity } = selected);
+    runtimeSettings.runtimePython = version.python;
+    runtimeSettings.sourceManifest = version.profile;
+    runtimeSettings.runtimeCheckout = undefined;
+    if (ownedRuntime) ownedRuntime.instanceId = expectedIdentity.runtimeInstanceId;
+    Object.assign(env, version.env);
+    if (version.env?.ASTRID_NODE_EXECUTABLE) {
+      delete env.npm_execpath;
+      env.npm_node_execpath = version.env.ASTRID_NODE_EXECUTABLE;
+    }
+    Object.assign(env, {
+      ASTRID_RUNTIME_PYTHON: version.python,
+      ASTRID_RUNTIME_SOURCE_MANIFEST: version.profile,
+      WORKSPACE_RUNTIME_TOKEN_FILE: credentialPath,
+      ASTRID_BRIDGE_TOKEN: credential.token,
+      VITE_WORKSPACE_RUNTIME_EXPECTED_ACTOR_ID: expectedIdentity.actorId,
+      VITE_WORKSPACE_RUNTIME_EXPECTED_REALM_ID: expectedIdentity.realmId,
+      VITE_WORKSPACE_RUNTIME_EXPECTED_INSTANCE_ID: expectedIdentity.runtimeInstanceId,
+      VITE_APP_BUILD: rollback ? app.oldAppBuild : app.targetSha,
+      RAILWAY_GIT_COMMIT_SHA: rollback ? app.oldAppBuild : app.targetSha,
+    });
+    const mode = rollback ? app.previousMode : updaterEditor.mode;
+    const output = rollback ? app.previousPreviewDirectory : resolve(process.cwd(), 'dist');
+    const invocation = packageManagerInvocation('npm', viteChildArgs({ preview: mode === 'preview', previewDir: output, quiet: !showTechnical }), { env, execPath: env.ASTRID_NODE_EXECUTABLE || process.execPath });
+    child = spawnService(invocation.command, invocation.args, { kind: 'vite', stdio: piped, env: serviceEnvironment() });
+    viteOutput = watch(child);
+    watchEditor(child);
+    if (!(await waitForPort(port, VITE_START_TIMEOUT_MS, () => child.exitCode !== null || child.signalCode !== null))) {
+      throw new Error(`The editor did not restart on port ${port}${withLast(viteOutput)}`);
+    }
+  },
+  async verify({ app, version, rollback }) {
+    if (!(await verifyRuntime(endpoint, credential.token, expectedIdentity))) throw new Error('Runtime identity, selected realm, or handshake verification failed');
+    const healthResponse = await fetch(new URL('/v1/health', endpoint), { headers: { Authorization: `Bearer ${credential.token}` }, signal: AbortSignal.timeout(3000) });
+    const health = await healthResponse.json();
+    if (health.release !== version.identity.release || (health.managed_by ?? null) !== (version.identity.managed_by ?? null)) {
+      throw new Error('The running Runtime release identity does not match the selected backend');
+    }
+    const buildResponse = await fetch(`http://127.0.0.1:${port}/build.json`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+    if (!buildResponse.ok) throw new Error('The restarted App did not serve its build identity');
+    const build = await buildResponse.json();
+    if (build.app !== (rollback ? app.oldAppBuild : app.targetSha) || build.release !== (rollback ? app.oldAppRelease : app.release)) {
+      throw new Error('The restarted App build/release does not match the selected checkout');
+    }
+    if (child.exitCode !== null || child.signalCode !== null) throw new Error('The restarted editor exited during verification');
+    updatingEditor = false;
+    updaterEditor.previewDirectory = rollback ? app.previousPreviewDirectory : resolve(process.cwd(), 'dist');
+  },
+};
+// The secret and ephemeral control port stay in this worktree's private Git
+// metadata. The CLI asks this already-running launcher to perform the update.
+try {
+updateControl = await startLocalUpdateControl({ cwd: process.cwd(), origin: new URL(editorUrl).origin, update: async () => {
+  if (shuttingDown || interrupted) throw new Error('Astrid is stopping. Start it again before updating.');
+  let backend;
+  try { backend = installedBackend(resolveRuntimeCommand(runtimeSettings).command); }
+  catch (error) {
+    if (error.step !== 'select-backend') throw error;
+    const target = await selectUpdateTarget({ cwd: process.cwd() });
+    if (target.upToDate) return { status: 'up-to-date', message: 'Astrid is up to date.' };
+    throw error;
+  }
+  const update = createLocalUpdater({ cwd: process.cwd(), backend, editor: updaterEditor, backendUpdate: runBackendUpdate,
+    prepare: (options) => prepareUpdate({ ...options, environment: env, execPath: env.ASTRID_NODE_EXECUTABLE || process.execPath, preparationDirectory: backend.root }),
+    ...(pinokioManaged ? { session: {
+      begin: () => pinokioHandoff(backend, 'begin'),
+      start: (version, operationId) => pinokioHandoff(backend, 'runtime', { version: basename(version.root), operationId }),
+      end: () => pinokioHandoff(backend, 'end'),
+    } } : {}),
+  });
+  const result = await update();
+  console.log(result.message);
+  return result;
+} });
+if (shuttingDown || interrupted) await updateControl.close();
+} catch (error) {
+  if (error.code !== 'ENOENT' || error.path !== 'git') throw error;
+  technical('Local updates need Git. Install Git and restart Astrid to use npm run update.');
+}
 connector?.on('error', (error) => { fail(CANT_START, `could not start paired connector: ${error.message}`); });
 // Astrid is reachable when the Runtime's door listens and the app answers. Only then does a person get the Open block.
 if (hostedOrigin) {
@@ -770,7 +957,7 @@ if (hostedOrigin) {
 } else if (await waitForPort(port, VITE_START_TIMEOUT_MS, () => shuttingDown)) {
   console.log(`Local App: ${editorUrl}`);
 }
-await services.find(({ child: owned }) => owned === child).done;
+await launcherFinished;
 
 }
 }

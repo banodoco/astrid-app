@@ -14,7 +14,7 @@ describe('resolveUpdate', () => {
   });
 
   it('routes update actions to Settings and prefers in-app update when it is available', () => {
-    expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, updateNowAvailable: true, primaryUpdateLabel: 'Update now' }).primary)
+    expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, updateNowAvailable: true }).primary)
       .toEqual({ label: 'Update now', destination: 'settings-updates' });
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' } })).toMatchObject({
       primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
@@ -29,6 +29,15 @@ describe('resolveUpdate', () => {
 
   it('keeps mid-session schema errors on the mounted-editor banner path', () => {
     expect(resolveUpdate({ midSessionSchemaMismatch: true })).toMatchObject({ card: 'mid-session', title: 'Editor updated', primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' } });
+  });
+
+  it('routes soft release actions to Settings on the page and keeps command choices in Settings', () => {
+    const status = { releaseBehind: true, installType: 'installer' as const };
+    expect(resolveUpdate(status).primary).toEqual({ label: 'Update now', destination: 'settings-updates' });
+    expect(resolveUpdate(status, 'settings')).toMatchObject({
+      primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
+    });
+    expect(resolveUpdate({ ...status, installType: 'pinokio' }, 'settings').primary).toEqual({ label: 'Update in Pinokio' });
   });
 
   it('uses the hard Reload action for a stale page ahead of update states', () => {

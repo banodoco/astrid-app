@@ -27,8 +27,6 @@ export interface UpdateResolutionInput {
   readonly releaseBehind?: boolean;
   readonly midSessionSchemaMismatch?: boolean;
   readonly updateNowAvailable?: boolean;
-  readonly settingsSurface?: boolean;
-  readonly primaryUpdateLabel?: string;
   readonly installType?: 'pinokio' | 'source' | 'fully-local' | 'installer';
   readonly command?: string;
   readonly realError?: string;
@@ -40,8 +38,22 @@ const commandActions = (input: UpdateResolutionInput): Pick<UpdateResolution, 'p
   secondary: { label: 'Run it yourself', ...(input.command ? { command: input.command } : {}) },
 });
 
+type ActionContext = 'page' | 'settings';
+
+function updateActions(input: UpdateResolutionInput, context: ActionContext, softRelease = false): Pick<UpdateResolution, 'primary' | 'secondary'> {
+  if (softRelease) {
+    if (context === 'page') return { primary: settingsAction, secondary: null };
+    if (input.installType === 'pinokio') return { primary: { label: 'Update in Pinokio' }, secondary: null };
+    return commandActions(input);
+  }
+  if (input.installType === 'pinokio') return { primary: { label: 'Update in Pinokio' }, secondary: null };
+  if (input.installType === 'source') return { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
+  if (input.updateNowAvailable) return { primary: settingsAction, secondary: commandActions(input).primary };
+  return commandActions(input);
+}
+
 /** The sole update decision point. Conditions are intentionally ordered to match CONTRACTS K6. */
-export function resolveUpdate(input: UpdateResolutionInput): UpdateResolution {
+export function resolveUpdate(input: UpdateResolutionInput, context: ActionContext = 'page'): UpdateResolution {
   if (input.runtime) return { card: 'not-running', title: 'Astrid isn’t running', body: input.failure ?? 'Start Astrid Runtime to continue.', primary: { label: 'Start Astrid' }, secondary: { label: 'Repair' } };
   if (input.pageStale) return { card: 'reload', title: 'Editor updated', body: 'Reload this page to use the latest editor.', primary: { label: 'Reload' }, secondary: null };
   if (input.compatibility?.kind === 'identity') return { card: 'identity', title: 'Restart Astrid', body: 'An older Astrid is still running. Restart the selected Runtime, then reconnect.', primary: null, secondary: null };
@@ -49,39 +61,17 @@ export function resolveUpdate(input: UpdateResolutionInput): UpdateResolution {
     return { card: 'newer', title: null, body: 'Astrid on this computer is newer than astrid.haus; a fix is on its way.', primary: null, secondary: null };
   }
   if (input.compatibility?.kind === 'schema') {
-    const commands = commandActions(input);
-    if (input.installType === 'pinokio') return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, primary: { label: 'Update in Pinokio' }, secondary: null };
-    if (input.installType === 'source') return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
-    return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail,
-      primary: input.updateNowAvailable ? { label: input.primaryUpdateLabel ?? 'Update now', destination: 'settings-updates' } : commands.primary,
-      secondary: input.updateNowAvailable ? commands.primary : commands.secondary };
+    return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, ...updateActions(input, context) };
   }
   if (input.midSessionSchemaMismatch) {
-    const commands = commandActions(input);
     return { card: 'mid-session', title: 'Editor updated', body: 'Update Astrid, then reload when your draft is safe.',
-      primary: input.updateNowAvailable ? settingsAction : commands.primary,
-      secondary: input.updateNowAvailable ? commands.primary : commands.secondary };
+      ...updateActions(input, context) };
   }
   if (input.requiredRelease !== undefined && input.installedRelease !== undefined && input.installedRelease < input.requiredRelease) {
-    const commands = commandActions(input);
-    const actions = input.installType === 'pinokio'
-      ? { primary: { label: 'Update in Pinokio' }, secondary: null }
-      : input.installType === 'source'
-        ? { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null }
-        : input.updateNowAvailable
-          ? { primary: settingsAction, secondary: commands.primary }
-          : commands;
-    return { card: 'update', title: 'Update Astrid', body: `This update is required: ${input.requiredReason ?? 'A required update is available.'}`, ...actions };
+    return { card: 'update', title: 'Update Astrid', body: `This update is required: ${input.requiredReason ?? 'A required update is available.'}`, ...updateActions(input, context) };
   }
   if (input.releaseBehind) {
-    const settingsActions = input.settingsSurface
-      ? input.installType === 'pinokio'
-        ? { primary: { label: 'Update in Pinokio' }, secondary: null }
-        : input.updateNowAvailable
-          ? { primary: settingsAction, secondary: null }
-          : commandActions(input)
-      : { primary: settingsAction, secondary: null };
-    return { card: 'notice', title: 'Update available', body: 'A newer release of Astrid is available.', ...settingsActions };
+    return { card: 'notice', title: 'Update available', body: 'A newer release of Astrid is available.', ...updateActions(input, context, true) };
   }
   if (input.realError || input.compatibility) return { card: 'error', title: 'Could not connect to Astrid', body: input.realError ?? input.compatibility?.detail ?? 'An unexpected error occurred.', primary: null, secondary: null };
   return { card: 'none', title: null, body: null, primary: null, secondary: null };

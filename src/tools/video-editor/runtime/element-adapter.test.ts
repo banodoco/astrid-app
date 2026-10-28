@@ -210,6 +210,68 @@ describe('Astrid element operation adapter', () => {
     })).resolves.toBeDefined();
   });
 
+  it('preserves contributed effect arrays when setting legacy clip fades', async () => {
+    const payload = documentPayload();
+    const effects = [{ id: 'glow', params: { amount: 0.6 } }];
+    (payload.config.clips[0] as Record<string, unknown>).effects = effects;
+    const save = vi.fn(async (_ref, input) => ({
+      ...payload,
+      config: input.config,
+      registry: input.registry,
+      config_version: 8,
+    }));
+    const adapter = new AstridElementOperationAdapter(context(), {
+      get: vi.fn(async () => payload),
+      save,
+    }, 'astrid-intro');
+
+    await adapter.execute({
+      name: 'timeline.set_clip_fade',
+      project: 'astrid-intro',
+      timeline: 'main',
+      expected_version: 7,
+      clip_id: 'a',
+      fade_in: 0.5,
+      fade_out: 0.25,
+    });
+
+    const savedClip = save.mock.calls[0]?.[1].config.clips[0];
+    expect(savedClip.effects).toEqual(effects);
+    expect(savedClip.entrance).toEqual({ type: 'fade', duration: 0.5 });
+    expect(savedClip.exit).toEqual({ type: 'fade-out', duration: 0.25 });
+  });
+
+  it('preserves legacy drawable effects objects when setting clip fades', async () => {
+    const payload = documentPayload();
+    const effects = { fade_in: 0.1, blur: 0.25, vendorFlag: 3 };
+    (payload.config.clips[0] as Record<string, unknown>).effects = effects;
+    const save = vi.fn(async (_ref, input) => ({
+      ...payload,
+      config: input.config,
+      registry: input.registry,
+      config_version: 8,
+    }));
+    const adapter = new AstridElementOperationAdapter(context(), {
+      get: vi.fn(async () => payload),
+      save,
+    }, 'astrid-intro');
+
+    await adapter.execute({
+      name: 'timeline.set_clip_fade',
+      project: 'astrid-intro',
+      timeline: 'main',
+      expected_version: 7,
+      clip_id: 'a',
+      fade_in: 0.5,
+      fade_out: 0.25,
+    });
+
+    const savedClip = save.mock.calls[0]?.[1].config.clips[0];
+    expect(savedClip.effects).toEqual({ ...effects, fade_in: 0.5, fade_out: 0.25 });
+    expect(savedClip.entrance).toEqual({ type: 'fade', duration: 0.5 });
+    expect(savedClip.exit).toEqual({ type: 'fade-out', duration: 0.25 });
+  });
+
   it('rejects an operation against a stale loaded document before writing', async () => {
     const payload = documentPayload();
     const save = vi.fn();

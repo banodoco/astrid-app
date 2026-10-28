@@ -1,0 +1,1522 @@
+{
+  "agent_checkout": "/home/user/work/wt-int/agent-c0bfbc34f1f3",
+  "agent_pin": "c0bfbc34f1f3024de3339ed07df9027fa490e649",
+  "agent_pin_source": "tests/astrid-agent.pin",
+  "agent_provider_import": "/home/user/work/wt-int/agent-c0bfbc34f1f3/astrid/sdk/timeline/commit.py",
+  "cases": [
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-74843368d9334e0a8dd94b83efb38252",
+        "revision_id": "authoring-parent-revision-8ea199571b133a0a988215eb3b2e0160f8c5aaedbb4883cdb18306d31e627f0b",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "entrance": {
+          "durationFrames": 12,
+          "id": "fade",
+          "params": {
+            "easing": "step"
+          }
+        }
+      },
+      "case_key": "entrance.fade",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 12,
+              "id": "fade",
+              "params": {
+                "easing": "step"
+              }
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture"
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-f168a6252f24428d934f54dd97ea3d70",
+        "revision_id": "authoring-parent-revision-476a6928d019c3208e735611d781f4fee89224783767e52d580560578a930263",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "entrance": {
+          "durationFrames": 12,
+          "id": "fade",
+          "params": {
+            "easing": "linear"
+          }
+        }
+      },
+      "case_key": "entrance.fade.linear",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 12,
+              "id": "fade",
+              "params": {
+                "easing": "linear"
+              }
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture"
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-bb8be4b9e5dc483fb70f8ea413cfba9c",
+        "revision_id": "authoring-parent-revision-28e616897fc02c0eedab1670c230db7cad345dda4c10da81f94289ae7260465e",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "entrance": {
+          "durationFrames": 18,
+          "id": "fade-up"
+        }
+      },
+      "case_key": "entrance.fade-up",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "fade-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture"
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-9730b5b242104ee99414ca97ca6e4f97",
+        "revision_id": "authoring-parent-revision-5e141d0bb619beb0708c28ec069fac58b13c753f163528ba1fbd14c7aff60c9a",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "entrance": {
+          "durationFrames": 18,
+          "id": "scale-in"
+        }
+      },
+      "case_key": "entrance.scale-in",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture"
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-95dad44defb3485bbab61174cbd368da",
+        "revision_id": "authoring-parent-revision-87101ea20e0cdb3e3e1bb34ec5b88ef9cfb04e7213492c22a1d63a81648cb312",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "exit": {
+          "durationFrames": 12,
+          "id": "fade"
+        }
+      },
+      "case_key": "exit.fade",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "fade"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture"
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-ed5af5e3a7ec48e4b66b76d153221d1f",
+        "revision_id": "authoring-parent-revision-8ce41b198064b4d6989016a96dab3b494bb5240b0a07f8d846cda7aba831dd46",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "exit": {
+          "durationFrames": 12,
+          "id": "slide-up"
+        }
+      },
+      "case_key": "exit.slide-up",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "slide-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture"
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-d7df9afead044451a2b9fd6f2884f97d",
+        "revision_id": "authoring-parent-revision-228eca4444da92be4708e97929fccd6dfca1ec9d80c320c465ec0eea3b6bfc75",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "transition": {
+          "id": "fade"
+        }
+      },
+      "case_key": "transition.fade.default",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "slide-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture",
+            "transition": {
+              "id": "fade"
+            }
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-a0e401117d164b5fa1d9d7028f2abcec",
+        "revision_id": "authoring-parent-revision-c2fce68d0a9e01732bd16eac46820a2ae553b44ba5c0287efb07b1fb77faf7a9",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "transition": {
+          "id": "cross-fade"
+        }
+      },
+      "case_key": "transition.cross-fade.default",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "slide-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture",
+            "transition": {
+              "id": "cross-fade"
+            }
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-75d9bea925394bd88a92ebb5baa7d130",
+        "revision_id": "authoring-parent-revision-9738de8743796c8936c1c410739c9b74547160b1f302a2afb2292e77b5235be2",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "transition": {
+          "durationFrames": 8,
+          "id": "fade"
+        }
+      },
+      "case_key": "transition.fade.explicit-frames",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "slide-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture",
+            "transition": {
+              "durationFrames": 8,
+              "id": "fade"
+            }
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-11572dc05c30483e97154237507874be",
+        "revision_id": "authoring-parent-revision-b48b3bbabbfdc00b85f8807558b22fb3bd5a95d424409312744de4f67e8a0e8b",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "transition": {
+          "duration": 0.5,
+          "type": "crossfade"
+        }
+      },
+      "case_key": "transition.cross-fade.legacy-seconds",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "id": "music-fade",
+                "params": {
+                  "direction": "in",
+                  "duration": 0.25
+                },
+                "type": "fade"
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "slide-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture",
+            "transition": {
+              "duration": 0.5,
+              "type": "crossfade"
+            }
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-8dcafb45a6914ac38a6f33a611281535",
+        "revision_id": "authoring-parent-revision-2731ba24e92b2d5115046d4c566920afb8fc1c6d8772337349a6382f87413dd7",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "effects": [
+          {
+            "fade_in": 0.25
+          },
+          {
+            "fade_out": 0.5
+          }
+        ]
+      },
+      "case_key": "effects.array",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": [
+              {
+                "fade_in": 0.25
+              },
+              {
+                "fade_out": 0.5
+              }
+            ],
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "slide-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture",
+            "transition": {
+              "duration": 0.5,
+              "type": "crossfade"
+            }
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    },
+    {
+      "accepted_revision": {
+        "project_id": "7b6f2bae8ffe42bf925216c38249ed79",
+        "publication_id": "txn-01a0951604d542349de4b6f7896a3649",
+        "revision_id": "authoring-parent-revision-5b001f06315053b5a0acf5f826a3e0f3abc6b0ac1959c81452d2979df8ddd523",
+        "timeline_id": "film"
+      },
+      "authored_visual_fields": {
+        "effects": {
+          "fade_in": 0.25,
+          "fade_out": 0.5
+        }
+      },
+      "case_key": "effects.object",
+      "frame_basis": {
+        "published_canvas": null,
+        "published_output": {
+          "fps": 24
+        },
+        "setter_fps": 24
+      },
+      "published_readback_config": {
+        "clips": [
+          {
+            "at": 0,
+            "clipType": "text",
+            "effects": {
+              "fade_in": 0.25,
+              "fade_out": 0.5
+            },
+            "entrance": {
+              "durationFrames": 18,
+              "id": "scale-in"
+            },
+            "exit": {
+              "durationFrames": 12,
+              "id": "slide-up"
+            },
+            "hold": 5.5,
+            "id": "music-bed",
+            "params": {
+              "custom": {
+                "entrance": {
+                  "future": [
+                    null,
+                    "nested entrance"
+                  ]
+                },
+                "exit": {
+                  "future": [
+                    false,
+                    "nested exit"
+                  ]
+                },
+                "opaque": [
+                  null,
+                  false,
+                  {
+                    "easing": "package-owned"
+                  }
+                ],
+                "transition": {
+                  "future": [
+                    0,
+                    "nested transition"
+                  ]
+                }
+              },
+              "entrance": "custom-element-setting"
+            },
+            "text": {
+              "content": "Visual field publication proof"
+            },
+            "track": "picture",
+            "transition": {
+              "duration": 0.5,
+              "type": "crossfade"
+            }
+          },
+          {
+            "asset": "music-bed",
+            "at": 0,
+            "clipType": "audio",
+            "extension": {
+              "opaque": [
+                null,
+                {
+                  "keep": true
+                }
+              ]
+            },
+            "hold": 5.5,
+            "id": "music-other",
+            "track": "music-2"
+          }
+        ],
+        "output": {
+          "fps": 24
+        },
+        "playback": {
+          "fade": {
+            "in": 0.25,
+            "out": 0.4
+          },
+          "music_bed": "music-bed"
+        },
+        "tracks": [
+          {
+            "id": "picture",
+            "kind": "visual",
+            "role": "output"
+          },
+          {
+            "id": "music",
+            "kind": "audio"
+          },
+          {
+            "id": "music-2",
+            "kind": "audio"
+          }
+        ]
+      }
+    }
+  ],
+  "expected_agent_pin": "c0bfbc34f1f3024de3339ed07df9027fa490e649",
+  "output_path": "/tmp/claude-0/-home-user-repo/7dc61be1-7066-52e0-a5d0-94f90e61430a/scratchpad/orch/tests/P-P1c-L3r5-occupancy-integration-1027234303-11106/d66/runtime-visual-fields-readback.json"
+}

@@ -301,11 +301,17 @@ export function applyTimelineOperation(
     case 'timeline.set_clip_fade':
       return replaceClip(config, operation.clip_id, (clip) => ({
         ...clip,
-        effects: {
-          ...(clip.effects && !Array.isArray(clip.effects) ? clip.effects : {}),
-          ...(operation.fade_in === undefined ? {} : { fade_in: operation.fade_in }),
-          ...(operation.fade_out === undefined ? {} : { fade_out: operation.fade_out }),
-        },
+        ...(Array.isArray(clip.effects)
+          ? { effects: clip.effects }
+          : clip.effects || operation.fade_in !== undefined || operation.fade_out !== undefined
+            ? {
+                effects: {
+                  ...(clip.effects ?? {}),
+                  ...(operation.fade_in === undefined ? {} : { fade_in: operation.fade_in }),
+                  ...(operation.fade_out === undefined ? {} : { fade_out: operation.fade_out }),
+                },
+              }
+            : {}),
         ...(operation.fade_in === undefined ? {} : { entrance: { type: 'fade', duration: operation.fade_in } }),
         ...(operation.fade_out === undefined ? {} : { exit: { type: 'fade-out', duration: operation.fade_out } }),
       }));

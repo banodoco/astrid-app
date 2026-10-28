@@ -2360,6 +2360,15 @@ export function repairTimelineClipTransitions(
   let repairedParamsCount = 0;
 
   const clips: TimelineClip[] = config.clips.map((clip) => {
+    const rawTransition = clip.transition as unknown;
+
+    // Package references are already canonical and must survive repair intact.
+    // The app's legacy repair validator only understands type + seconds.
+    if (rawTransition && typeof rawTransition === 'object' && !Array.isArray(rawTransition)) {
+      const reference = rawTransition as { id?: unknown; durationFrames?: unknown };
+      if (typeof reference.id === 'string' && typeof reference.durationFrames === 'number') return clip;
+    }
+
     const transition = clip.transition as ClipTransition | undefined;
 
     // Skip clips without a transition

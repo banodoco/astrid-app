@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { createServer } from 'vite';
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -113,7 +114,10 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
         '@banodoco/timeline-composition': join(root, 'node_modules/@banodoco/timeline-composition'),
       } } }),
     });
-    const browserExecutable = process.env.ASTRID_REMOTION_BROWSER_EXECUTABLE;
+    // The lane pins one headless_shell build; use the installed one when that path is gone.
+    const pinnedBrowser = process.env.ASTRID_REMOTION_BROWSER_EXECUTABLE;
+    const installedShell = '/opt/pw-browsers/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell';
+    const browserExecutable = pinnedBrowser && !existsSync(pinnedBrowser) && existsSync(installedShell) ? installedShell : pinnedBrowser;
     type Case = [string, 'exit' | 'entrance' | 'transition' | 'effects', unknown, number[], string | undefined, string | undefined];
     // Drawn exactly as the Runtime published it (field JSON and fps basis).
     const published = (name: string, key: string, frames: number[], variant?: string): Case => {

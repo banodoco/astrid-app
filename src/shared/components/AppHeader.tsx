@@ -109,7 +109,8 @@ export function AppHeader({
     const installType = connection.managedByPinokio ? 'pinokio' : local ? 'fully-local' : 'installer';
     void loadPageUpdateStatus(local).then((status) => {
       if (!active || !status) return;
-      setUpdateAvailable(resolvePageUpdateStatus(status, installType).card === 'notice');
+      const { card } = resolvePageUpdateStatus(status, installType);
+      setUpdateAvailable(card === 'notice' || card === 'update');
     });
     return () => { active = false; };
   }, [connection.isConnected, connection.managedByPinokio, hosted, local]);

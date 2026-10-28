@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'react';
 import { ProjectHeaderActions } from '@/shared/components/ProjectHeaderActions.tsx';
 import { ProjectTimelinePicker } from '@/shared/components/ProjectTimelineSelectors.tsx';
+import { ProvenanceButton } from '@/tools/video-editor/provenance/index.ts';
 import type { EditorProjectChoice } from '@/shared/components/ProjectTimelineSelectors.tsx';
 
 type SelectedProject = ComponentProps<typeof ProjectHeaderActions>['selectedProject'];
@@ -77,6 +78,10 @@ export function ProjectHeaderControls({
         disabled={actionsDisabled}
         confirmNavigation={confirmNavigation}
         showDialogs={showDialogs}
+      />
+      <ProvenanceButton
+        projectId={selectedProject?.project_id ?? projectId}
+        projectName={selectedProject?.name ?? projectName ?? null}
       />
     </div>
   );

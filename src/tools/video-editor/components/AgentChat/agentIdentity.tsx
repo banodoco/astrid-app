@@ -9,7 +9,10 @@ const agentIcons = { astrid: Sparkles, 'claude-code': Asterisk, codex: Hexagon, 
 
 /** A quiet mark that tells chats apart at a glance; the name always travels with it. */
 export function AgentIcon({ agent, ...props }: { agent: LocalAgentId } & LucideProps) {
+  // A workspace can remember an agent this build does not ship (it was saved by a
+  // newer Astrid): draw nothing rather than crash the whole panel.
   const Icon = agentIcons[agent];
+  if (!Icon) return null;
   return <Icon aria-hidden="true" {...props} />;
 }
 

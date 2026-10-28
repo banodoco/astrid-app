@@ -9,6 +9,7 @@ import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import { ProjectTimelinePicker } from '@/shared/components/ProjectTimelineSelectors.tsx';
 import { ProjectHeaderActions } from '@/shared/components/ProjectHeaderActions.tsx';
 import { useRuntimeEditorDiscovery } from '@/tools/video-editor/hooks/useRuntimeEditorDiscovery.ts';
+import { ProvenanceButton } from '@/tools/video-editor/provenance/index.ts';
 
 export type AppHeaderNavigationMode = 'home' | 'tools';
 
@@ -71,6 +72,10 @@ function AppHeaderProjectControls() {
           onProjectCreated={refreshProjects}
           onProjectUpdated={refreshProjects}
           disabled={discovery.projectsQuery.isLoading}
+        />
+        <ProvenanceButton
+          projectId={selectedProject?.project_id ?? projectId ?? null}
+          projectName={selectedProject?.name ?? null}
         />
       </div>
     </>

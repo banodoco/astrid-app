@@ -291,9 +291,9 @@ describe('Runtime shot-composition port', () => {
         ...track,
         id: track.id.replace(/^occ-1~/, ''),
       })),
-      clips: newerDraft.clips.map(({ assetEntry: _assetEntry, ...clip }) => {
-        const app = clip.app && typeof clip.app === 'object'
-          ? Object.fromEntries(Object.entries(clip.app).filter(([key]) => (
+      clips: newerDraft.clips.map(({ assetEntry: _assetEntry, app: rawApp, ...clip }) => {
+        const app = rawApp && typeof rawApp === 'object'
+          ? Object.fromEntries(Object.entries(rawApp).filter(([key]) => (
             !['canonical', 'canonicalTiming', 'canonicalEffects', 'group'].includes(key)
           )))
           : undefined;
@@ -311,6 +311,9 @@ describe('Runtime shot-composition port', () => {
     });
     expect(recovery?.draft.config.tracks?.every((track) => !track.app?.group)).toBe(true);
     expect(recovery?.draft.config.clips.every((clip) => !clip.app?.group)).toBe(true);
+    expect(recovery?.draft.config.clips.every((clip) => (
+      !['canonical', 'canonicalTiming', 'canonicalEffects'].some((key) => Object.hasOwn(clip.app ?? {}, key))
+    ))).toBe(true);
     await clearTimelineDraft(recoveryId);
   });
 

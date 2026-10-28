@@ -136,8 +136,8 @@
       "source": {
         "repo": "agent",
         "path": "tests/editing_conformance/fixtures/recipe_m2_clip_trim.json",
-        "commit": "cda4d18ca1e0369ee2e1398f5d594ffda75647dc",
-        "sha256": "60fcc84d769a2a68b5330288e842ca286f3907510a5dd18bc240c6e314ee612c"
+        "commit": "c61e892b9f6fe1ba0b5627a89fcd74254c16a745",
+        "sha256": "0d12aacf5b88f769a2cebef0279f251e045326fe1089a6030479a29c423b23df"
       },
       "command": {
         "op": "clip.trim",

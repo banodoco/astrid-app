@@ -10,6 +10,7 @@ import { useRuntimeAuthority } from '@/app/runtime/runtimeAuthority';
 import { AppProviders } from './AppProviders';
 
 const mocks = vi.hoisted(() => ({ listProjects: vi.fn(), listTimelines: vi.fn() }));
+let authorityProbeMounts = 0;
 
 vi.mock('@/integrations/runtime/client', () => ({
   AstridRuntimeClient: class {
@@ -115,7 +116,10 @@ function AuthorityNavigationProbe() {
   const { runtimeAuthority, runtimeProjectId } = useRuntimeAuthority();
   const navigate = useNavigate();
   const [mounts, setMounts] = useState(0);
-  useEffect(() => setMounts((value) => value + 1), []);
+  useEffect(() => {
+    authorityProbeMounts += 1;
+    setMounts(authorityProbeMounts);
+  }, []);
   return (
     <>
       <span data-testid="authority-project">{runtimeAuthority ? runtimeProjectId : 'no-runtime-authority'}</span>
@@ -127,6 +131,7 @@ function AuthorityNavigationProbe() {
 
 describe('AppProviders', () => {
   beforeEach(() => {
+    authorityProbeMounts = 0;
     mocks.listProjects.mockReset().mockResolvedValue([
       { project_id: 'project-id', slug: 'project-slug', name: 'Project' },
       { project_id: 'project-2', slug: 'project-two', name: 'Project Two' },
@@ -225,10 +230,16 @@ describe('AppProviders', () => {
       </MemoryRouter>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('authority-project')).toHaveTextContent('project-id'));
+    await waitFor(() => {
+      expect(screen.getByTestId('authority-project')).toHaveTextContent('project-id');
+      expect(screen.getByTestId('authority-mounts')).toHaveTextContent('1');
+    });
     expect(screen.getByTestId('authority-mounts')).toHaveTextContent('1');
     act(() => screen.getByText('navigate project').click());
-    await waitFor(() => expect(screen.getByTestId('authority-project')).toHaveTextContent('project-2'));
+    await waitFor(() => {
+      expect(screen.getByTestId('authority-project')).toHaveTextContent('project-2');
+      expect(screen.getByTestId('authority-mounts')).toHaveTextContent('1');
+    });
     expect(screen.getByTestId('authority-mounts')).toHaveTextContent('1');
   });
 });

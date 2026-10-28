@@ -180,12 +180,16 @@ async function dragGalleryImageOntoNewShotTrack(page: Page): Promise<boolean> {
   });
 }
 
-async function reloadAndOpenShot(page: Page, seed: ThreeProductsSeed, revisionId: string) {
+async function reloadAndOpenShot(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, revisionId: string) {
   await page.reload();
   await expect(page.locator('[data-testid="runtime-connection-status"]')).toHaveAttribute('data-state', 'connected');
   await expect(page.getByRole('textbox', { name: 'Track name' }).first()).toBeVisible();
-  await expect(page.getByTestId('preview-revision-label').filter({ hasText: `Committed ${revisionId}` }).first())
-    .toBeVisible(CEILING);
+  const head = await harness.runtimeJson<{ head_revision_id: string }>(
+    'GET', `/v1/projects/${harness.seed.projectId}/timelines/${seed.timelineId}`,
+  );
+  expect(head.status, JSON.stringify(head.body)).toBe(200);
+  expect(head.body.head_revision_id).toBe(revisionId);
+  await expect(page.getByTestId('preview-revision-unavailable')).toHaveCount(0);
   return openEmbeddedCanonicalShot(page, seed.occurrenceId, 'F2 agent shot');
 }
 
@@ -236,7 +240,7 @@ appTest('C2 gallery drag into shot saves exactly one shot-local clip, reloads, a
   await dialog.getByRole('button', { name: 'Close', exact: true }).click();
   await expect(page.locator(`.clip-action[data-clip-id="${projectedClipId}"]`)).toHaveCount(0);
 
-  const reloadedDialog = await reloadAndOpenShot(page, seed, after.parent_revision.revision_id);
+  const reloadedDialog = await reloadAndOpenShot(page, harness, seed, after.parent_revision.revision_id);
   await expect(reloadedDialog.locator(`.clip-action[data-clip-id="${shotClipId}"]`)).toHaveCount(1);
   await reloadedDialog.getByRole('button', { name: 'Close', exact: true }).click();
 
@@ -249,7 +253,7 @@ appTest('C2 gallery drag into shot saves exactly one shot-local clip, reloads, a
   expect(undone.shot_revisions).toEqual(before.shot_revisions);
   expect(undone.internal_timeline_revisions).toEqual(before.internal_timeline_revisions);
 
-  const undoneDialog = await reloadAndOpenShot(page, seed, undone.parent_revision.revision_id);
+  const undoneDialog = await reloadAndOpenShot(page, harness, seed, undone.parent_revision.revision_id);
   await expect(undoneDialog.locator(`.clip-action[data-clip-id="${shotClipId}"]`)).toHaveCount(0);
 });
 

@@ -32,6 +32,10 @@ type Params = {
   flipX?: boolean;
   keyframes?: Keyframe[];
   stepFrames?: 2 | 3;
+  /** Source clip-local frame for a piece cut from an existing sprite clip. */
+  frameOffset?: number;
+  /** Original output-frame clock for a chapter piece, before playback-rate flooring. */
+  sourceClock?: {offsetFrames: number; speed: number};
   enter?: 'stamp' | 'slideIn' | 'cut';
   slideFrom?: 'left' | 'right' | 'top' | 'bottom';
   slideDistance?: number;
@@ -54,7 +58,17 @@ const spriteAt = (raw: unknown, assetEntry: ElementComponentProps['assetEntry'],
   const params = narrowParams<Params>(raw);
   const scale = integerIn(params.scale, 1, 24, 6);
   const stepFrames = integerIn(params.stepFrames, 2, 3, 2);
-  const sf = stepStart(frame, stepFrames);
+  const frameOffset = integerIn(params.frameOffset, 0, 10000000, 0);
+  const clock = params.sourceClock;
+  const animationFrame = clock && Number.isFinite(clock.offsetFrames) && Number.isFinite(clock.speed) && clock.speed > 0
+    ? Math.floor((frame + clock.offsetFrames) * clock.speed)
+    : frame;
+  const sourceFrame = animationFrame + frameOffset;
+  const sf = stepStart(sourceFrame, stepFrames) - frameOffset;
+  const keyframeOrigin = clock && Number.isFinite(clock.offsetFrames) && Number.isFinite(clock.speed) && clock.speed > 0
+    ? Math.floor(clock.offsetFrames * clock.speed)
+    : 0;
+  const keyframeStep = sf - keyframeOrigin;
 
   // Active keyframe: the last one at or before this step. Keyframes apply
   // as held poses, so the sprite never interpolates between them.
@@ -63,7 +77,7 @@ const spriteAt = (raw: unknown, assetEntry: ElementComponentProps['assetEntry'],
   let flipX = params.flipX === true;
   const keyframes = [...(params.keyframes ?? [])].sort((a, b) => a.frame - b.frame);
   for (const key of keyframes) {
-    if (key.frame <= sf) {
+    if (key.frame <= keyframeStep) {
       x = finiteNumber(key.x, x);
       y = finiteNumber(key.y, y);
       flipX = key.flipX ?? flipX;
@@ -76,14 +90,14 @@ const spriteAt = (raw: unknown, assetEntry: ElementComponentProps['assetEntry'],
   const enter = oneOf(params.enter, ENTERS, 'cut');
   if (enter === 'stamp') {
     // 2-frame flicker (on, off) then land 1 px lower on frame 2.
-    if (frame < 2) {
-      visible = frame === 0;
+    if (sourceFrame < 2) {
+      visible = sourceFrame === 0;
       dy = -1;
     }
   } else if (enter === 'slideIn') {
     const side = oneOf(params.slideFrom, SIDES, 'left');
     const distance = Math.max(0, finiteNumber(params.slideDistance, 24));
-    const k = Math.min(SLIDE_STEPS, Math.floor(frame / stepFrames));
+    const k = Math.min(SLIDE_STEPS, Math.floor(sourceFrame / stepFrames));
     const remaining = Math.round((distance * (SLIDE_STEPS - k)) / SLIDE_STEPS);
     if (side === 'left') dx = -remaining;
     if (side === 'right') dx = remaining;
@@ -96,12 +110,12 @@ const spriteAt = (raw: unknown, assetEntry: ElementComponentProps['assetEntry'],
     : params.blinkAt === undefined
       ? []
       : [params.blinkAt];
-  const blinking = blinks.some((at) => frame >= at && frame < at + 2);
+  const blinking = blinks.some((at) => animationFrame >= at && animationFrame < at + 2);
 
   const frames = params.frames;
   let index = 0;
   if (frames && frames.count >= 1 && frames.fps > 0) {
-    const tick = Math.floor((frame * frames.fps) / fps);
+    const tick = Math.floor((sourceFrame * frames.fps) / fps);
     const seq = Array.isArray(frames.sequence) ? frames.sequence.filter((n) => Number.isFinite(n)) : [];
     index = seq.length > 0
       ? Math.round(seq[tick % seq.length])
@@ -121,7 +135,7 @@ const spriteAt = (raw: unknown, assetEntry: ElementComponentProps['assetEntry'],
   const artH = frames ? Math.max(1, Math.round(frames.frameHeight)) : res ? Number(res[2]) : 0;
   const rect = {x: (x + dx) * LOGICAL_PX, y: (y + dy) * LOGICAL_PX,
     width: artW * scale, height: artH * scale};
-  return {scale, x, y, dx, dy, flipX, visible, frames, index, artW, artH, rect};
+  return {scale, x, y, dx, dy, flipX, visible, frames, index, artW, artH, rect, animationFrame};
 };
 
 const prepareSpriteScene = ({clip, assetEntry, fps}: ComponentCapabilityContext): PreparedComponentCapability => ({
@@ -148,21 +162,22 @@ const prepareSpriteScene = ({clip, assetEntry, fps}: ComponentCapabilityContext)
 function AmSprite(props: ElementComponentProps): ReactElement | null {
   const frame = useCurrentFrame();
   const params = narrowParams<Params>(props.params);
+  const frameOffset = integerIn(params.frameOffset, 0, 10000000, 0);
   const url = elementSource(props.assetEntry, params.src);
   if (!url) return null;
-  const {scale, x, y, dx, dy, flipX, visible, frames, index, artW, artH, rect} = spriteAt(params, props.assetEntry, frame, props.fps);
+  const {scale, x, y, dx, dy, flipX, visible, frames, index, artW, artH, rect, animationFrame} = spriteAt(params, props.assetEntry, frame, props.fps);
 
   // Silhouette and outline are CSS filters on the art (inside the scale), so
   // offsets are art px and land on the pixel grid. drop-shadow with 0 blur is a
   // hard 1-art-px ring; four of them make an outline.
   const sil = params.silhouette;
-  const silOn = sil === true || (typeof sil === 'object' && sil !== null && (sil.until === undefined || frame < sil.until));
+  const silOn = sil === true || (typeof sil === 'object' && sil !== null && (sil.until === undefined || animationFrame < sil.until));
   const ol = params.outline && typeof params.outline === 'object' ? params.outline : null;
   const filters: string[] = [];
   if (silOn) filters.push('brightness(0)');
   if (ol) {
     const pulse = Math.max(0, Math.round(finiteNumber(ol.pulse, 0)));
-    const wide = pulse > 0 && Math.floor(frame / pulse) % 2 === 1;
+    const wide = pulse > 0 && Math.floor((animationFrame + frameOffset) / pulse) % 2 === 1;
     const w = Math.max(1, Math.round(finiteNumber(ol.px, 1))) + (wide ? 1 : 0);
     const c = typeof ol.color === 'string' ? ol.color : '#ED6B23';
     filters.push(`drop-shadow(${w}px 0 0 ${c})`, `drop-shadow(-${w}px 0 0 ${c})`, `drop-shadow(0 ${w}px 0 ${c})`, `drop-shadow(0 -${w}px 0 ${c})`);

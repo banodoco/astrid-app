@@ -1,9 +1,10 @@
-import { lstat, rename, rm, readFile, cp } from 'node:fs/promises';
+import { lstat, rename, rm, cp } from 'node:fs/promises';
 import { resolve, join, basename, relative, isAbsolute, sep } from 'node:path';
 import {
   UpdateError, selectUpdateTarget, preflightUpdate, prepareUpdate,
   moveCheckout, restoreCheckout, releasePreparation,
 } from './local-update-checkout.mjs';
+import { journalSettled, readUpdateJournal } from './local-update-backend.mjs';
 
 const exists = async (path) => lstat(path).then(() => true, (error) => { if (error.code === 'ENOENT') return false; throw error; });
 const containsPath = (parent, child) => {
@@ -131,8 +132,8 @@ export function createLocalUpdater({ cwd, backend, editor, session, backendUpdat
       // A journal may have been written before the process failed. Retain the
       // prepared tree and old resources until a fresh controller recovers it.
       let journal;
-      try { journal = JSON.parse(await readFile(join(backend.root, 'update-transaction.json'), 'utf8')); } catch { /* no journal */ }
-      if (!journal || ['complete', 'rolled_back'].includes(journal.step)) {
+      try { journal = await readUpdateJournal(backend.root); } catch { /* unreadable journal: nothing to keep */ }
+      if (journalSettled(journal)) {
         await session?.end().catch(() => {});
         if (retained) await release({ cwd, state: app }).catch(() => {});
         retained = undefined;

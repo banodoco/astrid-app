@@ -6,8 +6,10 @@ import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
 const exec = promisify(execFile);
+/** The launcher's private receipt, under the checkout's git directory. */
+export const LOCAL_UPDATE_RECEIPT = 'astrid-local-update.json';
 export async function controlReceiptPath(cwd) {
-  const { stdout } = await exec('git', ['rev-parse', '--git-path', 'astrid-local-update.json'], { cwd, encoding: 'utf8' });
+  const { stdout } = await exec('git', ['rev-parse', '--git-path', LOCAL_UPDATE_RECEIPT], { cwd, encoding: 'utf8' });
   return resolve(cwd, stdout.trim());
 }
 const equalSecret = (left, right) => typeof left === 'string' && Buffer.byteLength(left) === Buffer.byteLength(right)
@@ -24,8 +26,8 @@ const PAGE_REFUSALS = new Map([['update_busy', 'update_busy'], ['non_fast_forwar
 /**
  * The running launcher is the only update coordinator. `/update` serves the CLI
  * through a private receipt. With `page: true`, `/page-update` also serves the
- * editor page with its own secret, which a later settings adapter reads from the
- * receipt's `page` entry on the Vite server side, and which rotates whenever the
+ * editor page with its own secret, which config/vite/localUpdatePage.ts reads from
+ * the receipt's `page` entry on the Vite server side, and which rotates whenever the
  * launcher restarts the editor (see `rotatePageToken`).
  */
 export async function startLocalUpdateControl({ cwd, origin, update, page = false }) {

@@ -17,3 +17,13 @@ export async function fetchDiagnosticsReport(fetchImpl: typeof fetch = fetch): P
   if (build) report.push(`App release: ${build.release}`);
   return report.join('\n');
 }
+
+/** Saves a diagnostics report as the astrid-diagnostics.txt download. */
+export function saveDiagnosticsReport(report: string): void {
+  const url = URL.createObjectURL(new Blob([report], { type: 'text/plain;charset=utf-8' }));
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'astrid-diagnostics.txt';
+  link.click();
+  URL.revokeObjectURL(url);
+}

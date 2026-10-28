@@ -4,11 +4,11 @@ import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection
 import { useAuthSafe } from '@/shared/contexts/AuthContext.tsx';
 import { scheduleFocusAndInterval } from './appBuildWatch.ts';
 import { pageUpdateOperation } from './updateOperation.ts';
-import { installTypeOf } from './resolveUpdate.ts';
+import { localUpdateStatus, pageInstallType } from './pageUpdateStatus.ts';
 
 export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   const { isAuthenticated, authError } = useAuthSafe();
-  const local = import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
+  const local = localUpdateStatus();
   const operation = pageUpdateOperation(runtimeApiBase());
   const snapshot = useSyncExternalStore(operation.subscribe, operation.getSnapshot, operation.getSnapshot);
   // Schema incompatibility prevents workspace negotiation, but the provider
@@ -37,7 +37,7 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
     return () => { disposed = true; unschedule(); };
   }, [monitor, operation, confirmPermission]);
   const manager = snapshot.health?.identity?.managed_by;
-  const installType = installTypeOf(manager, { managedByPinokio: connection?.managedByPinokio, local, originless: runtimeOrigin() === '' });
+  const installType = pageInstallType(manager, connection?.managedByPinokio);
   // Missing identity is never evidence of an installer-owned installation. The
   // Runtime performs the full ownership/lock/busy admission on the explicit POST.
   const available = enabled && installType === 'installer' && manager === null

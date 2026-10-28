@@ -48,7 +48,7 @@ function AssetRow({ record, selected, onSelect }: {
 }
 
 export function ProvenanceOverlay({ open, onOpenChange, projectId, projectName }: ProvenanceOverlayProps) {
-  const { records, total, truncated, timelinesScanned, isLoading, error, refetch } = useProvenance(projectId, open);
+  const { records, total, limits, timelinesScanned, isLoading, error, refetch } = useProvenance(projectId, open);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -131,10 +131,13 @@ export function ProvenanceOverlay({ open, onOpenChange, projectId, projectName }
               ) : null}
               {isLoading ? <p className="px-2 py-6 text-center text-[11.5px] text-muted-foreground">Reading the workspace…</p> : null}
             </div>
-            <p className="border-t border-border px-3 py-2 text-[10px] leading-relaxed text-muted-foreground">
+            <p
+              className="border-t border-border px-3 py-2 text-[10px] leading-relaxed text-muted-foreground"
+              title={limits.length ? limits.join('\n') : undefined}
+            >
               {total} object{total === 1 ? '' : 's'}
-              {truncated ? ' (first page)' : ''}
-              {timelinesScanned ? ` · ${timelinesScanned} timeline${timelinesScanned === 1 ? '' : 's'} scanned for uses` : ''}
+              {timelinesScanned ? ` · ${timelinesScanned} timeline${timelinesScanned === 1 ? '' : 's'} scanned` : ''}
+              {limits.length ? ` · read stopped early (${limits.length})` : ''}
             </p>
           </div>
 

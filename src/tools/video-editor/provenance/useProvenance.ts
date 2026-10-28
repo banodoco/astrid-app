@@ -2,12 +2,13 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { buildProvenanceRecords } from './provenanceModel.ts';
-import type { ProvenanceRecord, ProvenanceSnapshot, ProvenanceUse } from './types.ts';
+import type { ProvenanceRecord, ProvenanceSnapshot, ProvenanceTruncation, ProvenanceUse } from './types.ts';
 
 /** A viewer is a read: it must never stall on a workspace with thousands of objects. */
 const MAX_OBJECTS = 100;
 const MAX_GENERATIONS = 40;
 const MAX_VARIANTS_LOOKUPS = 25;
+const MAX_TASKS = 100;
 const MAX_TIMELINES = 8;
 
 const provenanceKey = (kind: string, projectId: string | null) => ['provenance', kind, projectId] as const;
@@ -27,15 +28,15 @@ async function loadUsage(
   client: AstridRuntimeClient,
   projectId: string,
   objectIds: string[],
-): Promise<{ usage: Map<string, ProvenanceUse[]>; scanned: number }> {
+): Promise<{ usage: Map<string, ProvenanceUse[]>; scanned: number; total: number }> {
   const usage = new Map<string, ProvenanceUse[]>();
-  if (!objectIds.length) return { usage, scanned: 0 };
+  if (!objectIds.length) return { usage, scanned: 0, total: 0 };
 
   let timelines: Record<string, unknown>[];
   try {
     timelines = await client.listTimelines(projectId);
   } catch {
-    return { usage, scanned: 0 };
+    return { usage, scanned: 0, total: 0 };
   }
 
   const heads = await Promise.all(timelines.slice(0, MAX_TIMELINES).map(async (timeline, index) => {
@@ -60,15 +61,17 @@ async function loadUsage(
       usage.set(objectId, existing);
     }
   }
-  return { usage, scanned };
+  return { usage, scanned, total: timelines.length };
 }
 
 export interface ProvenanceData {
   records: ProvenanceRecord[];
   total: number;
-  /** Objects past the first page are not listed; the caption says so. */
-  truncated: boolean;
+  /** Which project-wide reads stopped at their cap. */
+  truncated: ProvenanceTruncation;
   timelinesScanned: number;
+  /** Sentences the footer shows about the bounds of this read. */
+  limits: string[];
   isLoading: boolean;
   error: Error | null;
   refetch: () => void;
@@ -81,9 +84,7 @@ export function useProvenance(projectId: string | null, enabled: boolean): Prove
   const objectsQuery = useQuery({
     queryKey: provenanceKey('objects', projectId),
     enabled: ready,
-    queryFn: async () => {
-      return client.listProjectObjects(projectId as string, undefined, MAX_OBJECTS);
-    },
+    queryFn: () => client.listProjectObjects(projectId as string, undefined, MAX_OBJECTS),
   });
 
   const generationsQuery = useQuery({
@@ -101,17 +102,19 @@ export function useProvenance(projectId: string | null, enabled: boolean): Prove
           return [];
         }
       }));
-      return { generations, variants: variantPages.flat() };
+      return {
+        generations,
+        variants: variantPages.flat(),
+        next: page.next_cursor ?? null,
+        variantLookups: lookups.length,
+      };
     },
   });
 
   const tasksQuery = useQuery({
     queryKey: provenanceKey('tasks', projectId),
     enabled: ready,
-    queryFn: async () => {
-      const page = await client.listProjectTasks(projectId as string, undefined, MAX_OBJECTS);
-      return page.items;
-    },
+    queryFn: () => client.listProjectTasks(projectId as string, undefined, MAX_TASKS),
   });
 
   const objectIds = useMemo(
@@ -120,10 +123,19 @@ export function useProvenance(projectId: string | null, enabled: boolean): Prove
   );
 
   const usageQuery = useQuery({
-    queryKey: provenanceKey('usage', projectId),
+    // The ids are part of the key: a refetched object page must re-resolve usage.
+    queryKey: [...provenanceKey('usage', projectId), objectIds],
     enabled: ready && objectIds.length > 0,
     queryFn: () => loadUsage(client, projectId as string, objectIds),
   });
+
+  const truncated: ProvenanceTruncation = useMemo(() => ({
+    objects: Boolean(objectsQuery.data?.next_cursor),
+    generations: Boolean(generationsQuery.data?.next),
+    variants: Boolean(generationsQuery.data && generationsQuery.data.generations.length > generationsQuery.data.variantLookups),
+    tasks: Boolean(tasksQuery.data?.next_cursor),
+    timelines: Boolean(usageQuery.data && usageQuery.data.total > usageQuery.data.scanned),
+  }), [generationsQuery.data, objectsQuery.data, tasksQuery.data, usageQuery.data]);
 
   const snapshot: ProvenanceSnapshot | null = useMemo(() => {
     if (!objectsQuery.data || !generationsQuery.data || !tasksQuery.data) return null;
@@ -131,20 +143,32 @@ export function useProvenance(projectId: string | null, enabled: boolean): Prove
       objects: objectsQuery.data.items,
       generations: generationsQuery.data.generations,
       variants: generationsQuery.data.variants,
-      tasks: tasksQuery.data,
+      tasks: tasksQuery.data.items,
       usage: usageQuery.data?.usage ?? new Map<string, ProvenanceUse[]>(),
+      truncated,
     };
-  }, [generationsQuery.data, objectsQuery.data, tasksQuery.data, usageQuery.data]);
+  }, [generationsQuery.data, objectsQuery.data, tasksQuery.data, truncated, usageQuery.data]);
 
   const records = useMemo(() => (snapshot ? buildProvenanceRecords(snapshot) : []), [snapshot]);
+
+  const limits = useMemo(() => {
+    const lines: string[] = [];
+    if (truncated.objects) lines.push(`Only the first ${MAX_OBJECTS} objects are listed.`);
+    if (truncated.generations) lines.push(`Producer lookup read the first ${MAX_GENERATIONS} generations.`);
+    if (truncated.variants) lines.push(`Variant families were read for the first ${MAX_VARIANTS_LOOKUPS} generations.`);
+    if (truncated.tasks) lines.push(`Producer lookup read the first ${MAX_TASKS} tasks.`);
+    if (truncated.timelines) lines.push(`References were read from ${usageQuery.data?.scanned ?? MAX_TIMELINES} of ${usageQuery.data?.total ?? 0} timelines.`);
+    return lines;
+  }, [truncated, usageQuery.data]);
 
   const error = (objectsQuery.error ?? generationsQuery.error ?? tasksQuery.error) as Error | null;
 
   return {
     records,
     total: objectsQuery.data?.items.length ?? 0,
-    truncated: Boolean(objectsQuery.data?.next_cursor),
+    truncated,
     timelinesScanned: usageQuery.data?.scanned ?? 0,
+    limits,
     isLoading: ready && !snapshot && !error,
     error,
     refetch: () => {

@@ -24,6 +24,7 @@ const ORIGIN_TONE: Record<ProvenanceOrigin, string> = {
   generated: 'border-primary/30 bg-primary/10 text-primary',
   rendered: 'border-border bg-muted text-foreground',
   imported: 'border-border bg-muted text-muted-foreground',
+  recorded: 'border-border bg-muted text-foreground',
   unknown: 'border-dashed border-border bg-transparent text-muted-foreground',
 };
 
@@ -31,6 +32,7 @@ const ORIGIN_LABEL: Record<ProvenanceOrigin, string> = {
   generated: 'generated',
   rendered: 'rendered',
   imported: 'imported',
+  recorded: 'unclassified task',
   unknown: 'no record',
 };
 

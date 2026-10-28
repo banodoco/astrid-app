@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Copy, Download, ShieldCheck } from 'lucide-react';
+import { AlertTriangle, Check, Copy, Download, Loader2, ShieldCheck } from 'lucide-react';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { useCopyToClipboard } from '@/shared/hooks/clipboard/useCopyToClipboard.ts';
@@ -13,13 +13,14 @@ const ORIGIN_SENTENCE: Record<ProvenanceRecord['origin'], string> = {
   generated: 'This file was generated inside Astrid.',
   rendered: 'This file was rendered from a timeline.',
   imported: 'This file was imported, so it has no generation behind it.',
+  recorded: 'A task settled these bytes; its capability is not one this build describes.',
   unknown: 'Astrid holds these bytes but has no record of what made them.',
 };
 
 function ProducerLine({ record }: { record: ProvenanceRecord }) {
   const { producer } = record;
-  if (producer.kind === 'unknown') {
-    return <p className="text-[12px] text-muted-foreground">No capability, task or generation is attached to this object.</p>;
+  if (producer.kind === 'none') {
+    return <p className="text-[12px] text-muted-foreground">No task or generation is attached to this object.</p>;
   }
   return (
     <div className="space-y-1.5">
@@ -38,28 +39,41 @@ function ProducerLine({ record }: { record: ProvenanceRecord }) {
   );
 }
 
-function Integrity({ projectId, record }: { projectId: string | null; record: ProvenanceRecord }) {
-  const client = useMemo(() => new AstridRuntimeClient({ readOnly: true }), []);
-  const location = useQuery({
-    queryKey: ['provenance', 'location', projectId, record.objectId],
-    enabled: Boolean(projectId),
-    queryFn: () => client.getProjectObjectLocation(projectId as string, record.objectId),
-    retry: false,
-  });
+function IntegrityStatus({ state, error }: { state: string; error: unknown }) {
+  if (state === 'checking') {
+    return (
+      <span className="inline-flex items-center gap-1">
+        <Loader2 className="h-3 w-3 animate-spin" aria-hidden="true" />
+        checking the digest…
+      </span>
+    );
+  }
+  if (state === 'verified') {
+    return (
+      <span className="inline-flex items-center gap-1 text-primary">
+        <ShieldCheck className="h-3 w-3" aria-hidden="true" />
+        digest matches on read
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1">
+      <AlertTriangle className="h-3 w-3" aria-hidden="true" />
+      {state === 'unavailable'
+        ? `could not verify: ${error instanceof Error ? error.message : 'unknown error'}`
+        : 'the workspace did not confirm this read'}
+    </span>
+  );
+}
 
+function Integrity({ record, state, error }: { record: ProvenanceRecord; state: string; error: unknown }) {
   return (
     <Section title="Integrity">
       <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
         <p className="break-all font-mono text-[10.5px] leading-relaxed text-foreground/80">{record.digest}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-muted-foreground">
-          <span>{location.data?.storage ?? 'runtime CAS'}</span>
-          <span>{formatBytes(location.data?.size ?? record.size)} on disk</span>
-          {location.data?.verified ? (
-            <span className="inline-flex items-center gap-1 text-primary">
-              <ShieldCheck className="h-3 w-3" aria-hidden="true" />
-              digest matches on read
-            </span>
-          ) : null}
+          <span>{formatBytes(record.size)} on disk</span>
+          <IntegrityStatus state={state} error={error} />
         </div>
       </div>
     </Section>
@@ -67,9 +81,20 @@ function Integrity({ projectId, record }: { projectId: string | null; record: Pr
 }
 
 export function ProvenanceDetail({ record, projectId }: { record: ProvenanceRecord; projectId: string | null }) {
-  const receipt = useMemo(() => receiptJson(record), [record]);
+  const client = useMemo(() => new AstridRuntimeClient({ readOnly: true }), []);
+  const location = useQuery({
+    queryKey: ['provenance', 'location', projectId, record.objectId],
+    enabled: Boolean(projectId),
+    queryFn: () => client.getProjectObjectLocation(projectId as string, record.objectId),
+    retry: false,
+  });
+  const receipt = useMemo(() => receiptJson(record, { location: location.data }), [location.data, record]);
   const { copied, handleCopy } = useCopyToClipboard(receipt);
-  const prompt = record.prompt;
+
+  const state = location.isLoading ? 'checking'
+    : location.error ? 'unavailable'
+      : location.data?.verified ? 'verified'
+        : 'unconfirmed';
 
   const download = () => {
     const blob = new Blob([receipt], { type: 'application/json' });
@@ -111,86 +136,110 @@ export function ProvenanceDetail({ record, projectId }: { record: ProvenanceReco
 
       <div className="min-h-0 flex-1 space-y-5 overflow-auto px-5 py-4">
         <div className="max-w-[720px] space-y-5">
-        <Section title="How it was made">
-          <ProducerLine record={record} />
-          <FactGrid facts={record.recipe.filter(fact => fact.label !== 'Prompt')} />
-          {prompt ? (
-            <blockquote className="rounded-md border border-border bg-muted/50 px-3 py-2 text-[11.5px] leading-relaxed text-foreground/90">
-              {prompt}
-            </blockquote>
-          ) : null}
-        </Section>
-
-        {record.inputs.length ? (
-          <Section title="Inputs" hint={`${record.inputs.length} object${record.inputs.length === 1 ? '' : 's'}`}>
-            <div className="flex flex-wrap gap-2">
-              {record.inputs.map(input => (
-                <div key={input.objectId} className="w-24 space-y-1">
-                  <ObjectThumb objectId={input.objectId} mediaType="image/*" filename={input.filename} className="h-14 w-24" />
-                  <p className="truncate text-[10.5px] text-muted-foreground" title={input.filename ?? input.objectId}>
-                    {input.filename ?? shortDigest(input.objectId)}
-                  </p>
-                </div>
-              ))}
-            </div>
+          <Section title="How it was made">
+            <ProducerLine record={record} />
+            <FactGrid facts={record.recipe.filter(fact => fact.label !== 'Prompt')} />
+            {record.prompt ? (
+              <blockquote className="rounded-md border border-border bg-muted/50 px-3 py-2 text-[11.5px] leading-relaxed text-foreground/90">
+                {record.prompt}
+              </blockquote>
+            ) : null}
+            {record.extraFields.length ? (
+              <div className="space-y-1">
+                <p className="text-[10.5px] text-muted-foreground">Also recorded by the pack</p>
+                <FactGrid facts={record.extraFields} />
+              </div>
+            ) : null}
           </Section>
-        ) : null}
 
-        {variants.length ? (
-          <Section title="Same generation" hint={`${variants.length} variants`}>
-            <div className="flex flex-wrap gap-2">
-              {variants.map(variant => {
-                const current = variant.objectId === record.objectId;
-                return (
-                  <div key={variant.objectId} className="w-24 space-y-1">
+          {record.inputs.length ? (
+            <Section title="Inputs" hint={`${record.inputs.length} object${record.inputs.length === 1 ? '' : 's'}`}>
+              <div className="flex flex-wrap gap-2">
+                {record.inputs.map(input => (
+                  <div key={input.objectId} className="w-24 space-y-1">
                     <ObjectThumb
-                      objectId={variant.objectId}
-                      mediaType={record.mediaType}
-                      filename={null}
-                      className={cn('h-14 w-24', current && 'ring-2 ring-primary ring-offset-1 ring-offset-background')}
+                      objectId={input.objectId}
+                      mediaType={input.mediaType ?? 'application/octet-stream'}
+                      filename={input.filename}
+                      className={cn('h-14 w-24', !input.loaded && 'opacity-60')}
                     />
-                    <p className="truncate text-[10.5px] text-muted-foreground">
-                      {current ? 'this asset' : variant.viewedAt ? 'viewed' : 'never viewed'}
+                    <p className="truncate text-[10.5px] text-muted-foreground" title={input.filename ?? input.objectId}>
+                      {input.filename ?? `${shortDigest(input.objectId)} · not loaded`}
                     </p>
                   </div>
-                );
-              })}
-            </div>
+                ))}
+              </div>
+            </Section>
+          ) : null}
+
+          {variants.length ? (
+            <Section title="Same generation" hint={`${variants.length} variants`}>
+              <div className="flex flex-wrap gap-2">
+                {variants.map(variant => {
+                  const current = variant.objectId === record.objectId;
+                  return (
+                    <div key={variant.objectId} className="w-24 space-y-1">
+                      <ObjectThumb
+                        objectId={variant.objectId}
+                        mediaType={record.mediaType}
+                        filename={null}
+                        className={cn('h-14 w-24', current && 'ring-2 ring-primary ring-offset-1 ring-offset-background')}
+                      />
+                      <p className="truncate text-[10.5px] text-muted-foreground">
+                        {current ? 'this asset' : variant.viewedAt ? 'viewed' : 'never viewed'}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </Section>
+          ) : null}
+
+          <Integrity record={record} state={state} error={location.error} />
+
+          <Section title="Used in">
+            {record.uses.length ? (
+              <ul className="space-y-1 text-[12px]">
+                {record.uses.map(use => (
+                  <li key={use.timelineId} className="flex items-center gap-2">
+                    <span className="h-1.5 w-1.5 rounded-sm bg-primary" aria-hidden="true" />
+                    <span className="truncate">{use.timelineName}</span>
+                    <span className="ml-auto font-mono text-[10px] text-muted-foreground">{use.timelineId.slice(0, 8)}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-[12px] text-muted-foreground">
+                No reference in the timelines Astrid can read. The Runtime has no object→usage query yet.
+              </p>
+            )}
           </Section>
-        ) : null}
 
-        <Integrity projectId={projectId} record={record} />
+          {record.gaps.length ? (
+            <Section title="What the record does not say">
+              <ul className="space-y-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                {record.gaps.map(gap => (
+                  <li key={gap} className="flex gap-2">
+                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true" />
+                    <span>{gap}</span>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
 
-        <Section title="Used in">
-          {record.uses.length ? (
-            <ul className="space-y-1 text-[12px]">
-              {record.uses.map(use => (
-                <li key={use.timelineId} className="flex items-center gap-2">
-                  <span className="h-1.5 w-1.5 rounded-sm bg-primary" aria-hidden="true" />
-                  <span className="truncate">{use.timelineName}</span>
-                  <span className="ml-auto font-mono text-[10px] text-muted-foreground">{use.timelineId.slice(0, 8)}</span>
-                </li>
-              ))}
-            </ul>
-          ) : (
-            <p className="text-[12px] text-muted-foreground">
-              No reference in the timelines Astrid can read. The Runtime has no object→usage query yet.
-            </p>
-          )}
-        </Section>
-
-        {record.gaps.length ? (
-          <Section title="What the record does not say">
-            <ul className="space-y-1 text-[11.5px] leading-relaxed text-muted-foreground">
-              {record.gaps.map(gap => (
-                <li key={gap} className="flex gap-2">
-                  <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-muted-foreground/50" aria-hidden="true" />
-                  <span>{gap}</span>
-                </li>
-              ))}
-            </ul>
-          </Section>
-        ) : null}
+          {record.limits.length ? (
+            <Section title="Where this read stops">
+              <ul className="space-y-1 text-[11.5px] leading-relaxed text-muted-foreground">
+                {record.limits.map(limit => (
+                  <li key={limit} className="flex gap-2">
+                    <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full border border-muted-foreground/60" aria-hidden="true" />
+                    <span>{limit}</span>
+                  </li>
+                ))}
+              </ul>
+            </Section>
+          ) : null}
         </div>
       </div>
 

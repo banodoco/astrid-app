@@ -7,6 +7,7 @@ import { Button } from '@/shared/components/ui/button';
 import { SetupStatusLine } from '@/shared/components/RuntimeConnection/SetupStatusLine.tsx';
 import { describeFailure, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
 import { connectionStatus } from './ConnectionSection.tsx';
+import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/components/ui/collapsible';
 import { Card } from '@/shared/components/ui/card';
@@ -104,7 +105,9 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
     };
   }, [isOpen, connected]);
 
-  const summary = connectionStatus(connection);
+  // The install type comes from the same identity-based rule as the Settings Updates section and the header notice.
+  const { installType } = useInstallerUpdate(connection);
+  const summary = connectionStatus(connection, installType);
   const status = connection.state.status;
   const rawServices = details?.health.services;
   const hasServiceDetails = Array.isArray(rawServices) && rawServices.every(isRuntimeService);

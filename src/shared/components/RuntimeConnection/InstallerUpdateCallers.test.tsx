@@ -237,7 +237,11 @@ describe('installer update callers', () => {
     render(<AstridUpdatesSection isOpen />);
     await screen.findByRole('button', { name: 'Check for updates' });
     if (_label === 'disconnected') await screen.findByText('Connect to Astrid before checking its release.');
-    else await screen.findAllByText('Update available · Release 4');
+    else if (_label === 'source managed') {
+      // A source checkout has no release to install: the status line follows the resolver, which has no update to offer.
+      await screen.findAllByText('Astrid is up to date');
+      expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
+    } else await screen.findAllByText('Update available · Release 4');
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
   });

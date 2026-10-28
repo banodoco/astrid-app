@@ -3,8 +3,7 @@ import { type RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConne
 import { type SetupChecks } from '@/shared/components/RuntimeConnection/SetupStatusLine.tsx';
 import { RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from '@/shared/components/RuntimeConnection/copy.ts';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
-import type { UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
-import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
+import type { InstallType, UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 
 interface ConnectionStatus {
   readonly title: string;
@@ -22,8 +21,9 @@ const REACHED: SetupChecks = { runtime: 'pass', workspace: 'pass', ready: true }
 /** The provider keeps looking until Astrid answers, so these spin rather than fail. */
 const LOOKING: SetupChecks = { runtime: 'checking', workspace: 'checking', ready: false };
 
-function schemaUpdateStatus(connection: RuntimeConnectionValue, checks: SetupChecks): ConnectionStatus {
-  const resolution = resolveUpdate({ compatibility: { kind: 'schema', detail: COPY.updateNeeded.sentence }, installType: connection.managedByPinokio ? 'pinokio' : runtimeOrigin() === '' ? 'source' : 'installer' });
+/** The caller supplies the install type from the Runtime's identity (`installTypeOf`), never from the connection alone. */
+function schemaUpdateStatus(connection: RuntimeConnectionValue, checks: SetupChecks, installType: InstallType): ConnectionStatus {
+  const resolution = resolveUpdate({ compatibility: { kind: 'schema', detail: COPY.updateNeeded.sentence }, installType });
   return { title: resolution.title ?? COPY.updateNeeded.title, detail: resolution.body ?? COPY.updateNeeded.sentence, checks, outOfDate: 'runtime', updateResolution: resolution };
 }
 
@@ -33,12 +33,12 @@ function needsUpdate(schemaDigest: string | null): boolean {
 }
 
 /** Each gate state's title and one line: the connection screens' own words, without their buttons and guides. */
-export function connectionStatus(connection: RuntimeConnectionValue): ConnectionStatus {
+export function connectionStatus(connection: RuntimeConnectionValue, installType: InstallType): ConnectionStatus {
   const { state } = connection;
   switch (state.status) {
     case 'connected':
       if (needsUpdate(connection.schemaDigest)) {
-        return schemaUpdateStatus(connection, REACHED);
+        return schemaUpdateStatus(connection, REACHED, installType);
       }
       // The Runtime itself is fine; only the chat service is older than this page.
       if (connection.localServiceOutOfDate) {
@@ -68,7 +68,7 @@ export function connectionStatus(connection: RuntimeConnectionValue): Connection
     case 'restart':
       return { title: COPY.restarted.title, detail: COPY.restarted.sentence, checks: LOOKING };
     case 'update_needed':
-      return schemaUpdateStatus(connection, LOOKING);
+      return schemaUpdateStatus(connection, LOOKING, installType);
     case 'refused':
       return { title: COPY.refused.title, detail: withOrigin(COPY.refused.sentence, window.location.origin), checks: LOOKING };
     case 'not_running':

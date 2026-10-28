@@ -82,7 +82,10 @@ import {TimelineComposition, compileCanonicalTransitions, toRuntimeTheme} from '
 import {BUNDLED_THEMES} from '@banodoco/timeline-composition/registry.generated';
 const Draw = props => {
   // The bundled 2rp theme owns the registered section-hook element the Player draws and is black like the preview root.
-  const theme = BUNDLED_THEMES['2rp'];
+  const merge = (base, overlay) => Object.fromEntries(Object.entries({...base, ...overlay}).map(([key, value]) => [key,
+    value && typeof value === 'object' && !Array.isArray(value) && base?.[key] && typeof base[key] === 'object' ? merge(base[key], overlay?.[key]) : (overlay && key in overlay ? overlay[key] : value)]));
+  // The same theme_overrides the preview resolves, so both products draw the element with one font.
+  const theme = merge(BUNDLED_THEMES['2rp'], props.timeline.theme_overrides ?? {});
   const tracks = props.timeline.tracks.filter(t => t.kind === 'visual').map(track => ({track, clips: props.timeline.clips.filter(c => c.track === track.id)}));
   const compiledTransitions = compileCanonicalTransitions(tracks, 24, toRuntimeTheme(theme));
   return <TimelineComposition {...props} theme={theme} compiledTransitions={compiledTransitions}/>;
@@ -159,12 +162,12 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
     const captures: object[] = [];
     for (const [name, field, reference, frames, variant, handoffKey] of cases) {
       const track = { id: 'picture', kind: 'visual', fit: 'contain' };
-      const element = { clipType: 'section-hook', params: { title: 'Fixture', entrance: [], exit: [] } };
+      const element = { clipType: 'section-hook', params: { title: 'I', entrance: [], exit: [] } };
       const clips = [
         { id: 'first', track: 'picture', clipType: 'media', at: 0, hold: 1, asset: 'solid', ...(variant && field !== 'transition' ? element : {}), ...(field !== 'transition' ? { [field]: reference } : {}) },
         { id: 'second', track: 'picture', clipType: 'media', at: 1, hold: 1, asset: 'second', ...(variant && field === 'transition' ? element : {}), ...(field === 'transition' ? { transition: reference } : {}) },
       ];
-      const config = { output: { resolution: '160x90', fps: FIXTURE_FPS, file: 'fixture.mp4' }, theme_overrides: { visual: { color: { bg: '#000000' } } }, tracks: [track], clips,
+      const config = { output: { resolution: '160x90', fps: FIXTURE_FPS, file: 'fixture.mp4' }, theme_overrides: { visual: { color: { bg: '#000000' }, type: { families: { heading: "'DejaVu Sans Mono', monospace" } } } }, tracks: [track], clips,
         registry: { assets: { solid: { file: solidImage(SOLID_COLORS['solid.svg']), type: 'image/svg+xml' },
           second: { file: solidImage(SOLID_COLORS['second.svg']), type: 'image/svg+xml' } } } };
       const exportRegistry = { assets: { solid: { file: 'solid.svg', type: 'image/svg+xml' },

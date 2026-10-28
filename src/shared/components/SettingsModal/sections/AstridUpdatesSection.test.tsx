@@ -282,7 +282,7 @@ describe('fully-local Update now', () => {
   it('does not offer the launcher button on hosted installs', async () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'a', servedRelease: 4, servedApp: 'b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
-    await screen.findByText('Update available · release 4');
+    await screen.findByText('Update available · Release 4');
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
   });
 });

@@ -37,5 +37,6 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
   return <div role="status" data-testid="quiet-update-notice" className="fixed bottom-4 left-4 z-[100110] max-w-[min(28rem,calc(100%-2rem))] space-y-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-md">
     <span><span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />Update available · Release {current?.servedRelease ?? release}</span>
     <UpdateResolutionActions resolution={decision} operation={operation} />
+  </div>;
 
 }

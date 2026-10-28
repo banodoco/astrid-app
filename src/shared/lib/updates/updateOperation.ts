@@ -183,7 +183,7 @@ export class LocalPageUpdate {
       }
       return this.set({ phase: 'failed', message: typeof body.error === 'string' ? body.error : 'The update did not complete.' });
     } catch {
-      return this.set({ phase: 'failed', message: 'The update result is not confirmed. Check for updates before trying again.' });
+      return this.set({ phase: 'failed', message: 'The update result could not be confirmed. Check for updates before trying again.' });
     }
   };
 }

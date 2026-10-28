@@ -64,7 +64,7 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
     return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, ...updateActions(input, context) };
   }
   if (input.midSessionSchemaMismatch) {
-    return { card: 'mid-session', title: 'Editor updated', body: 'Update Astrid, then reload when your draft is safe.',
+    return { card: 'mid-session', title: 'Editor updated', body: 'Update Astrid, then reload when your drafts can be saved.',
       ...updateActions(input, context) };
   }
   if (input.requiredRelease !== undefined && input.installedRelease !== undefined && input.installedRelease < input.requiredRelease) {

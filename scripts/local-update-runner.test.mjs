@@ -20,8 +20,9 @@ async function tempRoot(prefix = 'astrid-runner-test-') {
   return { cwd, close: () => rm(cwd, { recursive: true, force: true }) };
 }
 
-async function createApp(cwd, { previous = true, symlinked = false } = {}) {
+async function createApp(t, cwd, { previous = true, symlinked = false } = {}) {
   const preparationRoot = await mkdtemp(join(tmpdir(), 'astrid-app-update-runner-'));
+  t.after(() => rm(preparationRoot, { recursive: true, force: true }));
   const worktree = join(preparationRoot, 'checkout');
   const buildDir = join(worktree, 'dist');
   const dependenciesDir = join(worktree, 'node_modules');
@@ -64,7 +65,7 @@ async function createApp(cwd, { previous = true, symlinked = false } = {}) {
 
 test('resource swap retains the prior build and dependencies, including symlinks, until restore', async (t) => {
   const root = await tempRoot(); t.after(root.close);
-  const app = await createApp(root.cwd, { symlinked: true });
+  const app = await createApp(t, root.cwd, { symlinked: true });
   validateAppContext(app, root.cwd);
   await installPreparedResources(app);
   assert.equal((await lstat(join(root.cwd, 'dist'))).isSymbolicLink(), false);
@@ -84,7 +85,7 @@ test('resource swap retains the prior build and dependencies, including symlinks
 
 test('restore removes newly installed resources when there was no prior build or node_modules', async (t) => {
   const root = await tempRoot(); t.after(root.close);
-  const app = await createApp(root.cwd, { previous: false });
+  const app = await createApp(t, root.cwd, { previous: false });
   await installPreparedResources(app);
   assert.equal(await readFile(join(root.cwd, 'dist', 'candidate.txt'), 'utf8'), 'new build');
   await restorePreparedResources(app);
@@ -129,7 +130,7 @@ test('normal recovery check precedes selection and an up-to-date result is a no-
 test('backend transaction hooks run in order and retain the old build through verification', async (t) => {
   const root = await tempRoot(); t.after(root.close);
   const events = [];
-  const appBase = await createApp(root.cwd);
+  const appBase = await createApp(t, root.cwd);
   const prepared = { ...appBase };
   const editor = {
     mode: 'local', previewDirectory: join(root.cwd, 'dist'),
@@ -174,7 +175,7 @@ test('backend transaction hooks run in order and retain the old build through ve
 test('failed transaction with a pending journal retains its worktree and prior resources for recovery', async (t) => {
   const root = await tempRoot(); t.after(root.close);
   const events = [];
-  const prepared = await createApp(root.cwd);
+  const prepared = await createApp(t, root.cwd);
   const editor = {
     mode: 'local', previewDirectory: join(root.cwd, 'dist'),
     stop: async () => { events.push('stop'); },

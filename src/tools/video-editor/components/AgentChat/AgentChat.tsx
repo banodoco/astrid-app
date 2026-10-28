@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronUp, Download, Loader2, X } from 'lucide-react';
 import type { GenerationRow } from '@/domains/generation/types/index.ts';
 import { sessionAgentId, type LocalAgentId } from '@/integrations/astrid/localAgents.ts';
@@ -61,6 +61,7 @@ import { TourChatPanel } from './TourChatPanel';
 import { useEditorTourRunning } from '@/shared/state/editorTourStore.ts';
 import { EDITOR_TOUR_ANCHOR_ATTRIBUTE, EDITOR_TOUR_ANCHORS } from '@/tools/video-editor/tour/anchors.ts';
 import { presentEditorRequests } from '../../runtime/editorRequestPresentation';
+import { useDraftSafeReload } from '@/shared/lib/updates/draftSafeReload.ts';
 
 export { buildRenderedTurns, type RenderedTurn, type ToolCallPair } from './buildRenderedTurns';
 
@@ -206,6 +207,7 @@ function AvailableAgentChatPanel({
   const projectId = editorContext?.projectId ?? null;
   const sessions = useAgentSessions(timelineId, projectId);
   const localAgents = useLocalAgents();
+  const refetchLocalAgents = localAgents.refetch;
   const { setLocalServiceOutOfDate } = useRuntimeConnection();
   const projectChat = useProjectChat(projectId);
   const saveDraft = useSaveProjectDraft(projectId);
@@ -333,6 +335,7 @@ function AvailableAgentChatPanel({
   }, [browseAgent, localAgents.data, localAgents.error, localAgents.isFetching, localAgents.isLoading]);
   const hydratedProjectDraftRef = useRef(false);
   const draftPersistenceRef = useRef<ProjectChatDraftPersistence<QueuedMessage> | null>(null);
+  const draftPersistenceProjectRef = useRef<string | null>(null);
   const draftScopeRef = useRef<string | null>(null);
   const draftSnapshotRef = useRef({ text: draft, queue });
   draftSnapshotRef.current = { text: draft, queue };
@@ -404,6 +407,7 @@ function AvailableAgentChatPanel({
       persistence.saved = local.persistence.saved;
     }
     persistence.mounted = true;
+    draftPersistenceProjectRef.current = projectId!;
     persistence.observe(projectChat.data.draft.revision, saved, local ?? saved);
     draftPersistenceRef.current = persistence;
     const initial = local ? { text: local.text, queue: local.queue } : saved;
@@ -413,11 +417,11 @@ function AvailableAgentChatPanel({
     initial.queue.forEach(item => pausedQueuedIdsRef.current.add(item.id));
     setPausedQueueHeadId(initial.queue[0]?.id ?? null);
   }, [projectChat.data, projectId]);
-  const flushDraftRef = useRef<() => Promise<void>>(async () => undefined);
-  flushDraftRef.current = async () => {
-    const persistence = draftPersistenceRef.current;
-    if (!projectId || !persistence) return;
-    const snapshot = draftSnapshotRef.current;
+  const persistDraftForOwner = useCallback(async (
+    snapshot: { text: string; queue: QueuedMessage[] },
+    ownerProjectId: string,
+    persistence: ProjectChatDraftPersistence<QueuedMessage>,
+  ) => {
     const toWire = (rows: QueuedMessage[]) => rows.map((item) => ({ id: item.id, text: item.text, session_id: item.sessionId, attachments: item.attachments }));
     try {
       await persistence.save(snapshot, async (firstRevision) => {
@@ -436,9 +440,9 @@ function AvailableAgentChatPanel({
             const remote = (current.draft.queued_messages ?? []).map((item) => ({ id: item.id, text: item.text, sessionId: item.session_id, attachments: Array.isArray(item.attachments) ? item.attachments as AgentTurnAttachment[] : [] }));
             const base = persistence.saved.queue;
             queue = mergeQueues(base, remote, queue);
-            const live = draftSnapshotRef.current.queue;
+            const live = draftPersistenceRef.current === persistence ? draftSnapshotRef.current.queue : snapshot.queue;
             const liveMerged = mergeQueues(base, remote, live);
-            if (JSON.stringify(liveMerged) !== JSON.stringify(live)) {
+            if (draftPersistenceRef.current === persistence && JSON.stringify(liveMerged) !== JSON.stringify(live)) {
               const known = new Set(live.map(item => item.id));
               liveMerged.forEach(item => { if (!known.has(item.id)) pausedQueuedIdsRef.current.add(item.id); });
               draftSnapshotRef.current = { ...draftSnapshotRef.current, queue: liveMerged };
@@ -448,18 +452,58 @@ function AvailableAgentChatPanel({
           }
         }
       });
-      setDraftSaveError(null);
-      const current = unsavedProjectChatDrafts.get(projectId);
+      if (draftPersistenceRef.current === persistence) setDraftSaveError(null);
+      const current = unsavedProjectChatDrafts.get(ownerProjectId);
       if (current?.persistence === persistence && sameProjectDraft(current, snapshot)) {
-        unsavedProjectChatDrafts.set(projectId, { ...current, dirty: false });
+        const durable = persistence.current;
+        unsavedProjectChatDrafts.set(ownerProjectId, {
+          ...current,
+          ...durable,
+          dirty: !persistence.idle || !sameProjectDraft(durable, persistence.saved),
+        });
       }
     } catch (error) {
-      if (draftPersistenceRef.current !== persistence) return;
+      if (draftPersistenceRef.current !== persistence) throw error;
       // A draft that fails to save is not worth interrupting anyone: the next edit saves again. A queued message is.
       if (snapshot.queue.length > 0) setDraftSaveError(error instanceof BridgeRouteError ? (error.detail ?? error.message) : error instanceof Error ? error.message : String(error));
       throw error;
     }
+  }, [projectChat, saveDraft, setQueue, setDraftSaveError]);
+  const flushDraftRef = useRef<() => Promise<void>>(async () => undefined);
+  flushDraftRef.current = async () => {
+    const persistence = draftPersistenceRef.current;
+    const ownerProjectId = draftPersistenceProjectRef.current;
+    if (!ownerProjectId || !persistence) return;
+    await persistDraftForOwner(draftSnapshotRef.current, ownerProjectId, persistence);
   };
+  const activePersistence = draftPersistenceRef.current;
+  useLayoutEffect(() => {
+    if (!activePersistence || !projectId || draftPersistenceProjectRef.current !== projectId) return;
+    activePersistence.track(draftSnapshotRef.current, (snapshot) => persistDraftForOwner(snapshot, projectId, activePersistence));
+  }, [activePersistence, projectId, persistDraftForOwner, draft, queue]);
+  useDraftSafeReload('Agent chat', async () => {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const persistence = draftPersistenceRef.current;
+      const snapshot = draftSnapshotRef.current;
+      if (!projectId) return;
+      if (!persistence) {
+        if (!snapshot.text && snapshot.queue.length === 0) return;
+        throw new Error('the draft has not finished loading and cannot be saved yet');
+      }
+      if (persistence.idle && sameProjectDraft(snapshot, persistence.saved)) return;
+      await flushDraftRef.current();
+      const current = draftPersistenceRef.current;
+      if (current?.idle && sameProjectDraft(draftSnapshotRef.current, current.saved)) return;
+    }
+    throw new Error('the draft kept changing while it was being saved');
+  }, Boolean(projectId && !hydratedProjectDraftRef.current), () => {
+    if (!projectId) return false;
+    const persistence = draftPersistenceRef.current;
+    const snapshot = draftSnapshotRef.current;
+    return persistence
+      ? !persistence.idle || !sameProjectDraft(snapshot, persistence.saved)
+      : Boolean(snapshot.text || snapshot.queue.length);
+  });
   useEffect(() => {
     if (!projectId || !hydratedProjectDraftRef.current) return;
     const timer = window.setTimeout(() => { void flushDraftRef.current().catch(() => undefined); }, 350);
@@ -469,7 +513,7 @@ function AvailableAgentChatPanel({
     const persistence = draftPersistenceRef.current;
     if (!projectId || !persistence || !draftScopeRef.current) return;
     const snapshot = draftSnapshotRef.current;
-    unsavedProjectChatDrafts.set(projectId, { ...snapshot, dirty: !sameProjectDraft(snapshot, persistence.saved), scopeKey: draftScopeRef.current, persistence });
+    unsavedProjectChatDrafts.set(projectId, { ...snapshot, dirty: !persistence.idle || !sameProjectDraft(snapshot, persistence.saved), scopeKey: draftScopeRef.current, persistence });
   }, [projectId, draft, queue]);
   useEffect(() => {
     if (draftPersistenceRef.current) draftPersistenceRef.current.mounted = true;
@@ -649,8 +693,8 @@ function AvailableAgentChatPanel({
     if (!writableChat || !isAgentSetupError(turnFailure)) return;
     setSetupDone(null);
     setSetupRequest({ agent: chatAgent, sessionId: activeSessionId, error: turnFailure });
-    void localAgents.refetch();
-  }, [turnFailure, writableChat, chatAgent, activeSessionId, localAgents.refetch]);
+    void refetchLocalAgents();
+  }, [turnFailure, writableChat, chatAgent, activeSessionId, refetchLocalAgents]);
   // One update flow: a reply from the local chat service this page can't read also puts Settings on Update Astrid
   // (it never gates the app). The next chat read that comes back readable clears it.
   const chatServiceOutOfDate = startFailure?.updateNeeded === true
@@ -1027,13 +1071,13 @@ function AvailableAgentChatPanel({
       return { sessionId };
     } catch (error) {
       if (isCurrent?.() === false || (currentSessionRef.current !== sourceSessionId && currentSessionRef.current !== sessionId)) return {};
-      if (isAgentSetupError(error) && hasProject && !isFollower) { setSetupDone(null); setSetupRequest({ agent: chosen, sessionId: sessionId ?? sourceSessionId, error }); void localAgents.refetch(); }
+      if (isAgentSetupError(error) && hasProject && !isFollower) { setSetupDone(null); setSetupRequest({ agent: chosen, sessionId: sessionId ?? sourceSessionId, error }); void refetchLocalAgents(); }
       setStartFailure({ agent: chosen, choice: agent, model, thoughtLevel, sessionId: sessionId ?? undefined, sourceSessionId: sessionId ?? sourceSessionId, error, details: error instanceof Error ? error.message : String(error), updateNeeded: isChatUpdateError(error) });
       return { error };
     } finally {
       setStartingAgent(null);
     }
-  }, [defaultAgent, handleNewSession, configureSession, hasProject, isFollower, localAgents.refetch]);
+  }, [defaultAgent, handleNewSession, configureSession, hasProject, isFollower, refetchLocalAgents]);
 
   // Cmd+Shift+R global shortcut — kept verbatim per plan_v5 Step 4.7.
   useEffect(() => {

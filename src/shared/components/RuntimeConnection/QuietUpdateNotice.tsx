@@ -5,9 +5,12 @@ import type { UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { loadPageUpdateStatus, resolvePageUpdateStatus } from '@/shared/lib/updates/pageUpdateStatus.ts';
 import { usePageStale } from './AppBuildProvider.tsx';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
+import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 
 export function QuietUpdateNotice({ connection }: { readonly connection: RuntimeConnectionValue }) {
   const pageStale = usePageStale();
+  const operation = useInstallerUpdate(connection);
   const local = import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
   const hosted = runtimeOrigin() !== '';
   const [resolution, setResolution] = useState<UpdateResolution | null>(null);
@@ -28,9 +31,11 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
     return () => { active = false; };
   }, [connection.isConnected, connection.managedByPinokio, hosted, local]);
 
-  if (pageStale || !resolution || release === null) return null;
+  const current = operation.releaseStatus;
+  const decision = current ? resolveUpdate({ ...current.resolution, installType: operation.installType, updateNowAvailable: operation.available }) : resolution;
+  if (pageStale || !decision || decision.card !== 'notice' || release === null && !current) return null;
   return <div role="status" data-testid="quiet-update-notice" className="fixed bottom-4 left-4 z-[100110] max-w-[min(28rem,calc(100%-2rem))] rounded-md border bg-background px-3 py-2 text-sm shadow-md">
-    <span><span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />Update available · release {release}</span>
-    <UpdateResolutionActions resolution={resolution} />
+    <span><span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />Update available · release {current?.servedRelease ?? release}</span>
+    <UpdateResolutionActions resolution={decision} operation={operation} />
   </div>;
 }

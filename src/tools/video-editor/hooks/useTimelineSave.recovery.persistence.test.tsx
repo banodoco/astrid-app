@@ -155,6 +155,23 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
   });
 
+  it('reloads the latest guarded timeline draft through the next editor recovery offer', async () => {
+    const latest = timelineConfig('latest-before-runtime-restart');
+    const { hook } = await mountRecoveryEditor({ seedRecovery: false, initialConfig: latest });
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
+
+    await act(async () => { await hook.result.current.preserveTimelineDraftForReload(); });
+    expect(hook.result.current.isTimelineDraftDurableForReload()).toBe(true);
+    expect((await loadTimelineDraft(recoveryKey))?.draft.config).toMatchObject({ output: { file: latest.output.file } });
+    hook.unmount();
+
+    const reopened = await mountRecoveryEditor({ seedRecovery: false });
+    await waitFor(() => expect(reopened.hook.result.current.recoveryDraft).not.toBeNull());
+    await act(async () => { await reopened.hook.result.current.retryRecoveredDraft(); });
+    expect(reopened.hook.result.current.data?.config.output.file).toBe(latest.output.file);
+    reopened.hook.unmount();
+  });
+
   it.each([
     {},
     { baseHeadRevisionId: 'unscoped-old-head' },

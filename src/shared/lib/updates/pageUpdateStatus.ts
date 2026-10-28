@@ -10,8 +10,8 @@ export function loadPageUpdateStatus(local: boolean): Promise<UpdateStatus | nul
     pageStatusPromise = (async () => {
       try {
         if (local) return await checkLocalUpdate();
-        const current = await new AstridRuntimeClient().readStatus();
-        return await checkHostedUpdate(current.health);
+        const health = await new AstridRuntimeClient().readInstallerUpdateHealth();
+        return await checkHostedUpdate(health);
       } catch {
         return null;
       }

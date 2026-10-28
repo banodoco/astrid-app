@@ -33,8 +33,9 @@ test('dev-local Vite serves bounded local status and preview mode refuses clearl
     const address = server.httpServer?.address();
     assert(address && typeof address !== 'string', 'Vite did not listen on TCP');
     const origin = `http://127.0.0.1:${address.port}`;
-    globalThis.fetch = (input, init) => String(input) === 'https://astrid.haus/build.json'
-      ? Promise.resolve(new Response(JSON.stringify({ app: head, release: 7 }), { status: 200 }))
+    const served = { 'https://astrid.haus/build.json': { app: head, release: 7 }, 'https://astrid.haus/install-manifest.json': { release: 7 } };
+    globalThis.fetch = (input, init) => Object.hasOwn(served, String(input))
+      ? Promise.resolve(new Response(JSON.stringify(served[String(input)]), { status: 200 }))
       : originalFetch(input, init);
     const response = await originalFetch(`${origin}/__astrid/local-update-status`, {
       method: 'POST', body: '', headers: { Origin: origin, Accept: 'application/json', 'Content-Type': 'application/json' },
@@ -85,8 +86,9 @@ test('the repository Vite config used by dev-local registers the bounded local s
   try {
     await server.listen();
     const origin = `http://127.0.0.1:${port}`;
-    globalThis.fetch = (input, init) => String(input) === 'https://astrid.haus/build.json'
-      ? Promise.resolve(new Response(JSON.stringify({ app: head, release: manifest.release ?? 0 }), { status: 200 }))
+    const served = { 'https://astrid.haus/build.json': { app: head, release: manifest.release ?? 0 }, 'https://astrid.haus/install-manifest.json': { release: manifest.release ?? 0 } };
+    globalThis.fetch = (input, init) => Object.hasOwn(served, String(input))
+      ? Promise.resolve(new Response(JSON.stringify(served[String(input)]), { status: 200 }))
       : originalFetch(input, init);
     const response = await originalFetch(`${origin}/__astrid/local-update-status`, {
       method: 'POST', body: '', headers: { Origin: origin, Accept: 'application/json', 'Content-Type': 'application/json' },

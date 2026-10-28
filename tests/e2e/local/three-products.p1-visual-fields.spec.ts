@@ -84,7 +84,7 @@ const Draw = props => {
   // The bundled 2rp theme owns the registered section-hook element the Player draws and is black like the preview root.
   const merge = (base, overlay) => Object.fromEntries(Object.entries({...base, ...overlay}).map(([key, value]) => [key,
     value && typeof value === 'object' && !Array.isArray(value) && base?.[key] && typeof base[key] === 'object' ? merge(base[key], overlay?.[key]) : (overlay && key in overlay ? overlay[key] : value)]));
-  // The same theme_overrides the preview resolves: the element paints the theme background as an opaque solid, so both products draw the same flat colour and no text/font metrics.
+  // The same theme_overrides the preview resolves: the element paints that opaque theme background (blank title), so no text or font metrics are drawn.
   const theme = merge(BUNDLED_THEMES['2rp'], props.timeline.theme_overrides ?? {});
   const tracks = props.timeline.tracks.filter(t => t.kind === 'visual').map(track => ({track, clips: props.timeline.clips.filter(c => c.track === track.id)}));
   const compiledTransitions = compileCanonicalTransitions(tracks, 24, toRuntimeTheme(theme));
@@ -166,8 +166,11 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
       const clips = [
         { id: 'first', track: 'picture', clipType: 'media', at: 0, hold: 1, asset: 'solid', ...(variant && field !== 'transition' ? element : {}), ...(field !== 'transition' ? { [field]: reference } : {}) },
         { id: 'second', track: 'picture', clipType: 'media', at: 1, hold: 1, asset: 'second', ...(variant && field === 'transition' ? element : {}), ...(field === 'transition' ? { transition: reference } : {}) },
+        // The element paints the opaque theme background, so a plain media clip on the track below
+        // is what a faded, entering or leaving element reveals in both products.
+        ...(variant ? [{ id: 'under', track: 'under', clipType: 'media', at: 0, hold: 2, asset: 'solid' }] : []),
       ];
-      const config = { output: { resolution: '160x90', fps: FIXTURE_FPS, file: 'fixture.mp4' }, theme_overrides: { visual: { color: { bg: variant ? '#c04070' : '#000000' } } }, tracks: [track], clips,
+      const config = { output: { resolution: '160x90', fps: FIXTURE_FPS, file: 'fixture.mp4' }, theme_overrides: { visual: { color: { bg: '#000000' } } }, tracks: [track, ...(variant ? [{ id: 'under', kind: 'visual', fit: 'contain' }] : [])], clips,
         registry: { assets: { solid: { file: solidImage(SOLID_COLORS['solid.svg']), type: 'image/svg+xml' },
           second: { file: solidImage(SOLID_COLORS['second.svg']), type: 'image/svg+xml' } } } };
       const exportRegistry = { assets: { solid: { file: 'solid.svg', type: 'image/svg+xml' },

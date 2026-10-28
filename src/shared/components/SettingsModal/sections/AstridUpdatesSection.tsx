@@ -97,7 +97,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         {state === 'checking' ? 'Checking for updates…' : 'Check for updates'}
       </Button>
       <p role="status" aria-live="polite" className="text-sm">
-        {state === 'checking' ? 'Checking for updates…' : state === 'error' ? error : resolution?.card === 'newer' ? resolution.body : status?.behind ? `Update available · release ${status.servedRelease}` : 'Astrid is up to date'}
+        {state === 'checking' ? 'Checking for updates…' : state === 'error' ? error : resolution?.card === 'newer' ? resolution.body : status?.behind ? `Update available · Release ${status.servedRelease}` : 'Astrid is up to date'}
       </p>
       {state === 'ready' && resolution?.title && <div className="text-sm"><p className="font-medium">{resolution.title}</p>{resolution.body && <p className="text-muted-foreground">{resolution.body}</p>}</div>}
       {state === 'ready' && resolution && resolution.card !== 'none' && <UpdateResolutionActions resolution={resolution} />}

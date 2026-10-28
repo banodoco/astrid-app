@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { flushDraftsBeforeReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { ProjectChatDraftPersistence, mergeQueues } from './projectChatDraftPersistence';
 
 const snapshot = (text: string, attachment = 'asset-a') => ({ text, queue: [{ id: 'q', text: 'queued', sessionId: 's', attachments: [{ assetId: attachment }] }] });
@@ -123,5 +124,66 @@ describe('draft persistence adoption', () => {
     await persistence.save(snapshot('mine'), async () => ({ revision: 7, snapshot: snapshot('mine', 'merged') }));
     expect(persistence.revision).toBe(7);
     expect(persistence.saved).toEqual(snapshot('mine', 'merged'));
+  });
+});
+
+describe('project chat reload ownership', () => {
+  it('keeps an unmounted project owner registered and writes a revert after an older held write', async () => {
+    const original = snapshot('saved');
+    const persistence = new ProjectChatDraftPersistence(4, original);
+    let releaseOlder!: (revision: number) => void;
+    let releaseLatest!: (revision: number) => void;
+    const write = vi.fn()
+      .mockImplementationOnce(() => new Promise<number>(resolve => { releaseOlder = resolve; }))
+      .mockImplementationOnce((revision: number) => new Promise<number>(resolve => { releaseLatest = () => resolve(revision + 1); }));
+    const ownerWriter = (value: ReturnType<typeof snapshot>) => persistence.save(value, write);
+    persistence.track(snapshot('older B'), ownerWriter);
+    const older = persistence.save(snapshot('older B'), write);
+    await Promise.resolve(); await Promise.resolve();
+    persistence.track(original, ownerWriter);
+    persistence.mounted = false;
+
+    let barrierFinished = false;
+    const barrier = flushDraftsBeforeReload().then(() => { barrierFinished = true; });
+    await Promise.resolve();
+    expect(barrierFinished).toBe(false);
+    expect(write).toHaveBeenCalledTimes(1);
+    releaseOlder(5);
+    await older;
+    await vi.waitFor(() => expect(write).toHaveBeenCalledTimes(2));
+    expect(barrierFinished).toBe(false);
+    releaseLatest(6);
+    await barrier;
+    expect(persistence.saved).toEqual(original);
+  });
+
+  it('retains a failed dirty owner for a later durable retry', async () => {
+    const persistence = new ProjectChatDraftPersistence(4, snapshot('saved'));
+    const current = snapshot('unsaved');
+    const write = vi.fn()
+      .mockRejectedValueOnce(new Error('temporary write failure'))
+      .mockImplementation(async (revision: number) => revision + 1);
+    persistence.track(current, value => persistence.save(value, write));
+    persistence.mounted = false;
+
+    await expect(flushDraftsBeforeReload()).rejects.toThrow('temporary write failure');
+    expect(persistence.saved).toEqual(snapshot('saved'));
+    await flushDraftsBeforeReload();
+    expect(persistence.saved).toEqual(current);
+    expect(write).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps reload blocked while the current draft keeps changing during saves', async () => {
+    const persistence = new ProjectChatDraftPersistence(4, snapshot('saved'));
+    let writes = 0;
+    const ownerWriter = (value: ReturnType<typeof snapshot>) => persistence.save(value, async revision => {
+      writes++;
+      persistence.track(snapshot(`edit ${writes}`), ownerWriter);
+      return revision + 1;
+    });
+    persistence.track(snapshot('first edit'), ownerWriter);
+    await expect(flushDraftsBeforeReload()).rejects.toThrow('kept changing');
+    expect(writes).toBe(5);
+    persistence.track(persistence.saved, ownerWriter);
   });
 });

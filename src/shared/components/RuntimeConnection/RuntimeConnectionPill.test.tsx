@@ -79,7 +79,7 @@ describe('RuntimeConnectionPill', () => {
     expect(isRecoveryCardShowing()).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-    expect(onReload).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
   });
 
   it('another identity behind the door after connecting is the same restart card, not a second message', async () => {
@@ -135,7 +135,7 @@ describe('RuntimeConnectionPill', () => {
     expect(status()).toHaveAttribute('data-state', 'refused');
     expect(screen.queryByRole('heading', { name: 'Astrid stopped' })).not.toBeInTheDocument();
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy agent instructions' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
   });
 
   it('when the permission is gone the pill blames nothing: it asks the permission first', async () => {
@@ -178,15 +178,68 @@ describe('RuntimeConnectionPill', () => {
       expect(status()).toHaveAttribute('data-state', 'busy');
       expect(screen.getByRole('heading', { name: COPY.busy.title })).toBeInTheDocument();
       expect(screen.getByText(COPY.busy.sentence)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
       expect(screen.queryByRole('alert')).not.toBeInTheDocument();
       expect(screen.queryByRole('button', { name: COPY.agent.commandCopy })).not.toBeInTheDocument();
       expect(document.body.textContent).not.toMatch(/curl|install/);
       expect(isRecoveryCardShowing()).toBe(true);
 
+      const writeText = vi.fn(async (_text: string) => undefined);
+      Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+      vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Download diagnostics' })); await Promise.resolve(); });
+      expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+      expect(screen.getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' })); await Promise.resolve(); });
+      expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/doctor.*log directory named in its report/));
+
       answer.step = healthy('instance-1');
       await act(async () => { await vi.advanceTimersByTimeAsync(3000 * 2); });
       expect(status()).toHaveAttribute('data-state', 'connected');
       expect(isRecoveryCardShowing()).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('busy-card diagnostics download uses the Runtime report when available', async () => {
+    vi.useFakeTimers();
+    try {
+      const timeout = (init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('The operation was aborted.', 'AbortError')));
+      });
+      const answer = { step: healthy('instance-1') as (init?: RequestInit) => Promise<Response> | Response };
+      const busyFetch = vi.fn(async (_input: string, init?: RequestInit) => answer.step(init));
+      const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:diagnostics');
+      const revokeObjectURL = vi.spyOn(URL, 'revokeObjectURL').mockImplementation(() => undefined);
+      const anchorClick = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+      const diagnosticsFetch = vi.fn(async (input: RequestInfo | URL) => {
+        if (String(input) === '/build.json') {
+          return new Response(JSON.stringify({ app: 'served-app-build', release: 42 }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+        }
+        return new Response(JSON.stringify({ report: 'Astrid diagnostics' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      });
+      vi.stubGlobal('fetch', diagnosticsFetch);
+      render(<RuntimeConnectionPill connection={connected()} fetchImpl={busyFetch} restartCheckIntervalMs={3000} />);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      answer.step = timeout;
+      await act(async () => { await vi.advanceTimersByTimeAsync(3000 * 6); });
+      expect(status()).toHaveAttribute('data-state', 'busy');
+
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Download diagnostics' })); await Promise.resolve(); });
+      expect(anchorClick).toHaveBeenCalledOnce();
+      const diagnosticsCall = diagnosticsFetch.mock.calls.find(([input]) => String(input).includes('/v1/diagnostics'));
+      expect(diagnosticsCall).toBeDefined();
+      const diagnosticsUrl = new URL(String(diagnosticsCall?.[0]), window.location.origin);
+      expect(diagnosticsUrl.search).toBe('');
+      expect(diagnosticsCall?.[1]).toEqual(expect.objectContaining({ cache: 'no-store' }));
+      expect(createObjectURL).toHaveBeenCalledOnce();
+      const report = await (createObjectURL.mock.calls[0][0] as Blob).text();
+      expect(report).toContain('App build: served-app-build\nApp release: 42');
+      expect(report.match(/^App build:/gm)).toHaveLength(1);
+      expect(report.match(/^App release:/gm)).toHaveLength(1);
+      expect(revokeObjectURL).toHaveBeenCalledWith('blob:diagnostics');
+      expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

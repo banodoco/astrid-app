@@ -7,6 +7,10 @@ import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers.ts';
 import { RUNTIME_CONNECTION_COPY as COPY, withCommandShell, withOrigin } from './copy.ts';
 import { useRuntimeRestartWatch } from './useRuntimeRestartWatch.ts';
+import { QuietUpdateNotice } from './QuietUpdateNotice.tsx';
+import { DownloadDiagnosticsButton } from './DownloadDiagnosticsButton.tsx';
+import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 
 export interface RuntimeConnectionPillProps {
   readonly connection: RuntimeConnectionValue;
@@ -43,6 +47,8 @@ export function RuntimeConnectionPill({
   restartCheckIntervalMs,
   fetchImpl,
 }: RuntimeConnectionPillProps) {
+  const operation = useInstallerUpdate(connection);
+  const guarded = useGuardedReload(onReload);
   const restart = useRuntimeRestartWatch(connection.isConnected, { intervalMs: restartCheckIntervalMs, fetchImpl, confirmPermission: connection.confirmPermission });
   const cardShowing = connection.isConnected && restart !== 'ok';
 
@@ -57,9 +63,9 @@ export function RuntimeConnectionPill({
 
   if (restart === 'ok') {
     return (
-      <div data-testid="runtime-connection-status" data-state="connected" className="sr-only">
+      <><div data-testid="runtime-connection-status" data-state="connected" className="sr-only">
         {COPY.connected.sentence}
-      </div>
+      </div><QuietUpdateNotice connection={connection} /></>
     );
   }
 
@@ -67,6 +73,7 @@ export function RuntimeConnectionPill({
     return (
       <div data-testid="runtime-connection-status" data-state="busy" role="status" className={CARD_CLASS} style={CARD_STYLE}>
         <CardText title={COPY.busy.title} sentence={COPY.busy.sentence} />
+        <DownloadDiagnosticsButton />
       </div>
     );
   }
@@ -93,7 +100,11 @@ export function RuntimeConnectionPill({
   return (
     <div data-testid="runtime-connection-status" data-state="restarted" role="alert" className={CARD_CLASS} style={CARD_STYLE}>
       <CardText title={COPY.restarted.title} sentence={COPY.restarted.sentence} />
-      <Button type="button" className="w-full sm:w-auto" onClick={onReload}>{COPY.restarted.reload}</Button>
+      {operation.pending && <p role="status">Update in progress. Checking its result…</p>}
+      {operation.fresh && operation.status?.result && <p role="status">{operation.status.result}</p>}
+      {operation.error && <p role="alert">{operation.error}</p>}
+      <Button type="button" className="w-full sm:w-auto" disabled={guarded.pending} onClick={() => void guarded.reload()}>{COPY.restarted.reload}</Button>
+      {guarded.error && <p role="alert">{guarded.error}</p>}
     </div>
   );
 }

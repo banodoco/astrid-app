@@ -346,7 +346,8 @@ describe('AstridRuntimeClient paired restart detection without build-time ids', 
     const later = unbound(fixture, baseUrl);
     await expect(later.ensureSession()).rejects.toMatchObject({
       name: 'RuntimeCompatibilityError',
-      reason: expect.stringContaining('Runtime restarted—relaunch workspace'),
+      kind: 'identity',
+      detail: expect.stringContaining('Runtime restarted—relaunch workspace'),
     });
     await expect(later.updateProject(PROJECT_ID, 'restart-no-write', 1, 'edited', {}))
       .rejects.toThrow('Runtime restarted—relaunch workspace');
@@ -426,7 +427,8 @@ describe('AstridRuntimeClient canonical Runtime reads and browser task seam', ()
     options.runtimeInstanceId = 'replacement-runtime-same-realm';
     await expect(client.reconnect()).rejects.toMatchObject({
       name: 'RuntimeCompatibilityError',
-      reason: expect.stringContaining('Runtime restarted—relaunch workspace'),
+      kind: 'identity',
+      detail: expect.stringContaining('Runtime restarted—relaunch workspace'),
     });
     await expect(client.updateProject(PROJECT_ID, 'restart-no-write', 1, 'edited', {}))
       .rejects.toThrow('Runtime restarted—relaunch workspace');
@@ -470,6 +472,7 @@ describe('AstridRuntimeClient canonical Runtime reads and browser task seam', ()
     await expect(client.ensureSession()).rejects.toMatchObject({
       name: 'RuntimeCompatibilityError',
       code: 'runtime_incompatible',
+      kind: 'schema',
     });
     expect(fixture.requests.map(({ method, path }) => `${method} ${path}`)).toEqual([
       'GET /v1/health',
@@ -480,8 +483,7 @@ describe('AstridRuntimeClient canonical Runtime reads and browser task seam', ()
     const fixture = createTransport({ schemaDigest: `sha256:${'0'.repeat(64)}` });
     const client = clientFor(fixture);
 
-    await expect(client.ensureSession()).rejects.toBeInstanceOf(RuntimeCompatibilityError);
-    await expect(client.ensureSession()).rejects.toMatchObject({ code: 'runtime_incompatible' });
+    await expect(client.ensureSession()).rejects.toMatchObject({ code: 'runtime_incompatible', kind: 'schema' });
   });
 
   it('fails closed on a stale additive Runtime contract', async () => {
@@ -502,8 +504,18 @@ describe('AstridRuntimeClient canonical Runtime reads and browser task seam', ()
 
     await expect(client.ensureSession()).rejects.toMatchObject({
       name: 'RuntimeCompatibilityError',
-      reason: expect.stringContaining('execution_binding.targeted.v1'),
+      kind: 'capability',
+      detail: expect.stringContaining('execution_binding.targeted.v1'),
     });
+  });
+
+  it('uses kind-specific recovery actions so only schema failures ask for an update', async () => {
+    const schema = new RuntimeCompatibilityError('schema', 'digest mismatch', '/runtime');
+    const capability = new RuntimeCompatibilityError('capability', 'missing operation', '/runtime');
+    const identity = new RuntimeCompatibilityError('identity', 'wrong realm', '/runtime');
+    expect(schema.recoveryAction).toMatch(/Update Astrid/);
+    expect(capability.recoveryAction).toMatch(/supports this capability/);
+    expect(identity.recoveryAction).toMatch(/Restart the selected Astrid Runtime/);
   });
 
   it('rejects owner, worker, wrong actor/realm/instance and non-exact connector scopes', async () => {
@@ -525,7 +537,8 @@ describe('AstridRuntimeClient canonical Runtime reads and browser task seam', ()
       if (!error) throw new Error(`${label}: expected the Runtime identity check to fail`);
       expect(error).toMatchObject({
         name: 'RuntimeCompatibilityError',
-        reason: expect.stringMatching(expectedReason),
+        kind: 'identity',
+        detail: expect.stringMatching(expectedReason),
       });
       expect(fixture.requests.some(({ path }) => path === '/v1/projects')).toBe(false);
       if (label !== 'realm endpoint substitution') {

@@ -696,6 +696,63 @@ test.describe('restarts', () => {
     await expect(firstTrackName(page)).toHaveValue('Draft kept across the restart');
   });
 
+  test('App: a stale-build reload waits for a durable timeline save before reloading', async ({ page, harness }) => {
+    await page.route('**/build.json', route => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify({ app: 'older-or-newer-app-build', release: 0 }) }));
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    const headBefore = await currentHead(harness);
+    const reloadButton = page.getByRole('status').getByRole('button', { name: 'Reload' });
+    await expect(reloadButton).toBeVisible();
+    let release!: () => void;
+    let signalRequest!: () => void;
+    const saveStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
+    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      signalRequest();
+      await new Promise<void>((resolve) => { release = resolve; });
+      await route.continue();
+    });
+    await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
+    await editFirstTrackName(page, 'Saved before App reload');
+    await reloadButton.click();
+    await saveStarted;
+    await expect(page.getByRole('status').getByRole('button', { name: 'Saving drafts…' })).toBeVisible();
+    expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'reload waits while the save is unacknowledged').toBe(true);
+    const pageReload = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
+    release();
+    await pageReload;
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    await expect.poll(() => currentHead(harness), { timeout: 20_000 }).not.toBe(headBefore);
+    await expect(firstTrackName(page)).toHaveValue('Saved before App reload');
+    await expect(page.getByRole('alert').filter({ hasText: 'You have unsaved changes' })).toHaveCount(0);
+    await page.unroute('**/build.json');
+  });
+
+  test('App: a stale-build reload stays open and shows an error when timeline persistence fails', async ({ page, harness }) => {
+    await page.route('**/build.json', route => route.fulfill({ status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' }, body: JSON.stringify({ app: 'older-or-newer-app-build', release: 0 }) }));
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    const headBefore = await currentHead(harness);
+    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
+      if (route.request().method() === 'POST') return route.abort('failed');
+      return route.fallback();
+    });
+    await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
+    await editFirstTrackName(page, 'Keep this unsaved draft');
+    const reloadButton = page.getByRole('status').getByRole('button', { name: 'Reload' });
+    await expect(reloadButton).toBeVisible();
+    await reloadButton.click();
+    const reloadError = page.getByRole('alert').filter({ hasText: 'Could not safely reload' });
+    await expect(reloadError).toContainText('Timeline:');
+    expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'failed persistence prevents navigation').toBe(true);
+    await expect(firstTrackName(page)).toHaveValue('Keep this unsaved draft');
+    expect(await currentHead(harness)).toBe(headBefore);
+    await page.unroute('**/build.json');
+  });
+
   test('App: Astrid stopping while the page is connected shows "Astrid stopped", and the card clears by itself when it is back', async ({ page, harness }) => {
     await openApp(page, harness);
     await expectConnected(page);

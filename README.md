@@ -35,7 +35,7 @@ Open **http://127.0.0.1:5180/tools/video-editor?connect=1** and confirm it shows
 
 - **Start later:** in this clone, run `npm run dev:local`. The launcher attaches to the installed Runtime or starts it using its recorded Python environment. If it asks for a repair, rerun the official installer.
 - **Stop:** press Ctrl+C in that terminal. It stops the editor and its proxy, and any Runtime it started. A Runtime already running through the installer's login service keeps running, so astrid.haus remains usable.
-- **Update the editor:** stop it, save or commit your source changes, then run `git pull --ff-only origin main`, `npx -y npm@11 ci` and `npm run dev:local`. If Git reports a conflict or divergence, keep your changes and resolve it before continuing.
+- **Update the editor:** while Astrid is running from this clone, open another terminal in the same checkout and run `npm run update`. The updater checks the App build served by astrid.haus, prepares that exact commit, keeps unrelated edits, then restarts and verifies Astrid. Read [the fully local update guide](docs/fully-local-update.md) before a recovery or canary run.
 - **Update the Runtime and agent:** use the [official update command](https://github.com/banodoco/astrid-agent/blob/main/docs/setup/troubleshooting.md#update-astrid), then restart the editor. Never delete the workspace to resolve a version mismatch.
 
 Your clone is the editor's code. Edit it while the dev server runs to see changes through Vite's normal development workflow. If port 5180 is occupied, the launcher reports it; stop the program that owns it before starting Astrid.
@@ -65,6 +65,7 @@ Use `--source-manifest <path>` to select an explicit Runtime source manifest. Th
 - [Video editor SDK](docs/video-editor-sdk/README.md)
 - [Code quality guide](docs/code_quality_audit.md)
 - [Agent instructions](CLAUDE.md)
+- [Fully local updates and canary](docs/fully-local-update.md)
 
 ## Gate-to-Surface Map
 

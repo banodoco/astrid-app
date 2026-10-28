@@ -1,3 +1,5 @@
+import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
+
 export type ProjectDraftSnapshot<T> = { text: string; queue: T[] };
 
 export function sameProjectDraft<T>(left: ProjectDraftSnapshot<T>, right: ProjectDraftSnapshot<T>): boolean {
@@ -28,17 +30,68 @@ export class ProjectChatDraftPersistence<T> {
   private requested = 0;
   private acknowledgedThrough = 0;
   private inflight = 0;
+  private activeWriteRequest: number | null = null;
+  private latest: ProjectDraftSnapshot<T>;
+  private writer: ((snapshot: ProjectDraftSnapshot<T>) => Promise<void>) | null = null;
+  private unregisterReloadGuard: (() => void) | null = null;
 
-  constructor(public revision: number, public saved: ProjectDraftSnapshot<T>) {}
+  constructor(public revision: number, public saved: ProjectDraftSnapshot<T>) {
+    this.latest = saved;
+  }
 
   /** No save is queued or running: the saved base is exactly what this composer last wrote or read. */
   get idle(): boolean { return this.inflight === 0; }
+  get current(): ProjectDraftSnapshot<T> { return this.latest; }
+
+  /** Keep this project's latest draft and a project-bound durable writer owned across component lifetimes. */
+  track(snapshot: ProjectDraftSnapshot<T>, writer: (snapshot: ProjectDraftSnapshot<T>) => Promise<void>): void {
+    this.latest = snapshot;
+    this.writer = writer;
+    this.syncReloadGuard();
+  }
+
+  private get dirty(): boolean {
+    return !this.idle || !sameProjectDraft(this.latest, this.saved);
+  }
+
+  private syncReloadGuard(): void {
+    if (this.dirty && !this.unregisterReloadGuard && this.writer) {
+      this.unregisterReloadGuard = registerDraftSafeReloadGuard({
+        label: 'Agent chat',
+        flush: () => this.flushLatest(),
+        isDirty: () => this.dirty,
+      });
+    } else if (!this.dirty && this.unregisterReloadGuard) {
+      this.unregisterReloadGuard();
+      this.unregisterReloadGuard = null;
+    }
+  }
+
+  /** Flush the current version, then recheck for edits and writes that arrived during the flush. */
+  private async flushLatest(): Promise<void> {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const snapshot = this.latest;
+      const writer = this.writer;
+      if (!writer) {
+        if (!this.dirty) return;
+        throw new Error('the draft has not finished loading and cannot be saved yet');
+      }
+      if (!this.idle || !sameProjectDraft(snapshot, this.saved)) await writer(snapshot);
+      if (this.idle && sameProjectDraft(this.latest, this.saved)) {
+        this.syncReloadGuard();
+        return;
+      }
+    }
+    throw new Error('the draft kept changing while it was being saved');
+  }
 
   /** Take another client's newer draft as this composer's base (the caller has checked the composer is idle). */
   adopt(revision: number, saved: ProjectDraftSnapshot<T>): void {
     this.revision = revision;
     this.saved = saved;
-    this.acknowledgedThrough = this.requested;
+    this.latest = saved;
+    this.acknowledgedThrough = this.activeWriteRequest === null ? this.requested : this.activeWriteRequest - 1;
+    this.syncReloadGuard();
   }
 
   observe(revision: number, saved: ProjectDraftSnapshot<T>, local: ProjectDraftSnapshot<T>): void {
@@ -47,24 +100,34 @@ export class ProjectChatDraftPersistence<T> {
     if (revision > this.revision && (sameProjectDraft(saved, this.saved) || sameProjectDraft(saved, local))) {
       this.revision = revision;
       this.saved = saved;
-      if (sameProjectDraft(saved, local)) this.acknowledgedThrough = this.requested;
+      if (sameProjectDraft(saved, local)) {
+        // A snapshot observed while a write is running does not prove that the
+        // in-flight older write cannot land after it. Leave later requests queued.
+        this.acknowledgedThrough = this.activeWriteRequest === null ? this.requested : this.activeWriteRequest - 1;
+      }
+      this.syncReloadGuard();
     }
   }
 
   save(snapshot: ProjectDraftSnapshot<T>, write: (revision: number) => Promise<DraftWriteResult<T>>): Promise<void> {
     const request = ++this.requested;
     this.inflight++;
+    if (sameProjectDraft(this.latest, this.saved) || sameProjectDraft(this.latest, snapshot)) this.latest = snapshot;
+    this.syncReloadGuard();
     const pending = this.chain.catch(() => undefined).then(async () => {
       // An exact acknowledgement of newer local text supersedes older queued
       // snapshots; they must never overwrite that already durable text.
       if (request <= this.acknowledgedThrough || sameProjectDraft(snapshot, this.saved)) return;
+      this.activeWriteRequest = request;
       const result = await write(this.revision);
       const revision = typeof result === 'number' ? result : result.revision;
       if (revision >= this.revision) {
         this.revision = revision;
         this.saved = typeof result === 'number' ? snapshot : result.snapshot;
+        if (sameProjectDraft(this.latest, snapshot)) this.latest = this.saved;
       }
-    }).finally(() => { this.inflight--; });
+      this.syncReloadGuard();
+    }).finally(() => { this.inflight--; this.activeWriteRequest = null; this.syncReloadGuard(); });
     this.chain = pending;
     return pending;
   }

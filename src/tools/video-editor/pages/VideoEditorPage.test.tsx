@@ -28,6 +28,7 @@ import {
   AstridRuntimeClient,
   RUNTIME_CLIENT_SCOPES,
   RuntimeAuthenticationError,
+  RuntimeCompatibilityError,
 } from "@/integrations/runtime/client.ts";
 import type { DataProvider } from "@/tools/video-editor/data/DataProvider.ts";
 import type {
@@ -218,10 +219,12 @@ vi.mock("@/integrations/astrid/nativeEditorConnection.ts", () => ({assertNativeE
 
 vi.mock("@/integrations/runtime/RuntimeConnectionProvider.tsx", () => ({
   useRuntimeConnection: () => ({ connectedBefore: true }),
+  useRuntimeConnectionSafe: () => ({ connectedBefore: true }),
 }));
 
 vi.mock("@/shared/contexts/AuthContext.tsx", () => ({
   useAuth: () => state.auth,
+  useAuthSafe: () => state.auth,
 }));
 
 vi.mock("@/shared/contexts/ProjectContext.tsx", () => ({
@@ -1264,6 +1267,26 @@ describe("VideoEditorPage", () => {
     await act(async()=>{ready.resolve();await ready.promise;});
     await waitFor(()=>expect(screen.queryByTestId('runtime-connector-alert')).toBeNull());
     expect(screen.getByTestId('video-editor-provider')).toBe(editor);expect(editor).toBeVisible();expect(state.providerMounts).toBe(mounts);expect(state.providerUnmounts).toBe(0);
+  });
+
+  it('shows a schema update banner over the mounted editor and preserves the draft and undo-capable editor instance', async () => {
+    const probe = deferred();
+    state.nativeProbe.mockImplementationOnce(() => probe.promise);
+    renderPage('/tools/video-editor?project=ados-talks&timeline=11111111-1111-1111-1111-111111111111');
+    const editor = await screen.findByTestId('video-editor-provider');
+    const mounts = state.providerMounts;
+    act(() => state.pendingWorkCallback?.({ writing: false, unsaved: true }));
+    act(() => state.runtimeOnError?.(new RuntimeCompatibilityError('schema', 'digest mismatch', '/api/runtime')));
+    expect(await screen.findByTestId('runtime-connector-alert')).toBeInTheDocument();
+    expect(document.body).toHaveTextContent('Update Astrid');
+    // This test runs without a Runtime origin, so it is a source checkout: the
+    // banner must point at the checkout update and never offer an installer command.
+    expect(document.body).toHaveTextContent('update your checkouts');
+    expect(screen.queryByRole('button', { name: 'Copy for your agent' })).toBeNull();
+    expect(screen.getByTestId('video-editor-provider')).toBe(editor);
+    expect(editor).toBeVisible();
+    expect(state.providerMounts).toBe(mounts);
+    expect(state.providerUnmounts).toBe(0);
   });
 
   it('does not let an older successful probe clear a failure reported after that probe started', async () => {

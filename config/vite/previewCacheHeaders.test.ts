@@ -6,6 +6,7 @@ describe('hosted preview cache headers', () => {
     expect(previewCacheControlForPath('/')).toBe('no-cache');
     expect(previewCacheControlForPath('/tools/video-editor', 'text/html')).toBe('no-cache');
     expect(previewCacheControlForPath('/index.html')).toBe('no-cache');
+    expect(previewCacheControlForPath('/build.json')).toBe('no-store');
     expect(previewCacheControlForPath('/assets/index-Dx9ab12Z.js'))
       .toBe('public, max-age=31536000, immutable');
     expect(previewCacheControlForPath('/assets/logo.svg')).toBeNull();

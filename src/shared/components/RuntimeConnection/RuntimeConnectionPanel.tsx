@@ -14,6 +14,11 @@ import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
 import { PINOKIO_INSTALL_COPY, RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from './copy.ts';
 import { detectInstallScenario } from '@/pages/Home/installScenario.ts';
 import { linkForSupportedBrowser } from '@/integrations/runtime/autoConnectRequest.ts';
+import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
+import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
+import { usePageStale } from './AppBuildProvider.tsx';
 
 export interface RuntimeConnectionPanelProps {
   /** The gate's value: the screen to show (on the way out, the last one shown). */
@@ -323,9 +328,17 @@ function RefusedCard({ connection, onBack }: { readonly connection: RuntimeConne
 }
 
 function UpdateNeededCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
+  const pageStale = usePageStale();
+  const operation = useInstallerUpdate(connection);
   const { updateNeeded } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
-  return <Card title={updateNeeded.title} sentence={pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence} onBack={onBack} action={pinokioManaged ? undefined : <CopyInstallCommand mode="update" />} status={COPY.waiting} showHelp />;
+  const resolution = resolveUpdate({ ...operation.releaseStatus?.resolution, pageStale, compatibility: { kind: 'schema', detail: pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence }, installType: operation.installType, updateNowAvailable: operation.available });
+  return <Card title={resolution.card === 'newer' ? 'Astrid on this computer is newer' : resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} operation={operation} />} status={COPY.waiting} showHelp />;
+}
+
+function RestartReloadButton() {
+  const guarded = useGuardedReload();
+  return <div><Button type="button" className="w-full" disabled={guarded.pending} onClick={() => void guarded.reload()}>{COPY.restarted.reload}</Button>{guarded.error && <p role="alert">{guarded.error}</p>}</div>;
 }
 
 /** The screen for a connection: its name (the journey and Layout tests read it) and its card. */
@@ -336,7 +349,7 @@ function screenFor(connection: RuntimeConnectionValue, onBack?: () => void): { n
     case 'phone': return { name: 'phone', card: <PhoneCard onBack={onBack} /> };
     case 'unsupported': return { name: 'unsupported', card: <UnsupportedCard onBack={onBack} /> };
     case 'browser_update_needed': return { name: 'browser_update_needed', card: <UnsupportedCard updateNeeded onBack={onBack} /> };
-    case 'restart': return { name: 'restart', card: <Card title={COPY.restarted.title} sentence={COPY.restarted.sentence} onBack={onBack} action={<Button type="button" className="w-full" onClick={() => window.location.reload()}>{COPY.restarted.reload}</Button>} /> };
+    case 'restart': return { name: 'restart', card: <Card title={COPY.restarted.title} sentence={COPY.restarted.sentence} onBack={onBack} action={<RestartReloadButton />} /> };
     case 'not_running': return { name: 'not_running', card: <NotRunningCard connection={connection} onBack={onBack} /> };
     case 'refused': return { name: 'refused', card: <RefusedCard connection={connection} onBack={onBack} /> };
     case 'blocked': return { name: 'blocked', card: <BlockedCard onBack={onBack} /> };

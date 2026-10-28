@@ -12,6 +12,7 @@ import { useLargeModal } from '@/shared/hooks/useModal';
 import { useScrollFade } from "@/shared/hooks/useScrollFade";
 import { PreferencesSection } from "./sections/PreferencesSection";
 import { AstridStatusSection } from "./sections/AstridStatusSection";
+import { AstridUpdatesSection } from "./sections/AstridUpdatesSection";
 import type { SettingsModalProps } from "./types";
 
 const SettingsModal: React.FC<SettingsModalProps> = ({
@@ -60,6 +61,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           ref={scrollRef}
           className={`${modal.scrollClass} ${modal.isMobile ? 'px-2' : 'px-2'} overflow-x-hidden [scrollbar-gutter:stable_both-edges] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] sm:[&::-webkit-scrollbar]:block sm:[-ms-overflow-style:auto] sm:[scrollbar-width:auto] sm:pr-4`}
         >
+          <AstridUpdatesSection isOpen={isOpen} />
           <AstridStatusSection isOpen={isOpen} />
           <PreferencesSection
             isMobile={isMobile}

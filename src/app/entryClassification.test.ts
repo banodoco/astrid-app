@@ -57,7 +57,12 @@ describe('browser entry classification', () => {
     rememberAppEntryPreference();
     expect(prefersAppEntry()).toBe(true);
     expect(resolveReturningAppEntry(new URL('https://astrid.test/?ref=x'), true))
-      .toBe('/tools/video-editor');
+      .toBe('/tools/video-editor?ref=x');
+  });
+
+  it('preserves the updates Settings deep link through the app-entry redirect', () => {
+    const url = new URL('https://astrid.test/?settings=updates&project=film#continue');
+    expect(resolveReturningAppEntry(url, true)).toBe('/tools/video-editor?settings=updates&project=film#continue');
   });
 
   it('sends installer root links to the Runtime gate with their query intact', () => {

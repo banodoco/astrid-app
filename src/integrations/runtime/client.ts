@@ -36,6 +36,7 @@ import { loadWorkspaceRuntimeConfig } from './workspaceRuntimeConfig.ts';
 export const RUNTIME_CLIENT_VERSION = 'astrid-r1-consumer-20260911';
 export const RUNTIME_CLIENT_SCOPES = [
   'handshake',
+  'installer:update',
   'projects:read',
   'projects:write',
   'objects:read',
@@ -105,9 +106,11 @@ function sharedSlotFor(key: string): SessionSlot {
   return slot;
 }
 
+const LEGACY_RUNTIME_CLIENT_SCOPES = RUNTIME_CLIENT_SCOPES.filter((scope) => scope !== 'installer:update');
 function hasExactScopes(actual: string[]): boolean {
-  return actual.length === RUNTIME_CLIENT_SCOPES.length
-    && [...actual].sort().every((scope, index) => scope === [...RUNTIME_CLIENT_SCOPES].sort()[index]);
+  return [RUNTIME_CLIENT_SCOPES, LEGACY_RUNTIME_CLIENT_SCOPES].some((expected) =>
+    actual.length === expected.length
+      && [...actual].sort().every((scope, index) => scope === [...expected].sort()[index]));
 }
 
 export class RuntimeUnavailableError extends Error {
@@ -167,16 +170,101 @@ export class RuntimeAuthenticationError extends Error {
 
 export class RuntimeCompatibilityError extends Error {
   readonly code = 'runtime_incompatible' as const;
-  readonly recoveryAction = 'Start the Runtime built from the accepted contract and retry.';
+  readonly recoveryAction: string;
 
-  constructor(public readonly reason: string, baseUrl: string) {
-    const recoveryAction = 'Start the Runtime built from the accepted contract and retry.';
-    super(`Workspace Runtime at ${baseUrl} is incompatible with the accepted consumer contract: ${reason}. ${recoveryAction}`);
+  constructor(public readonly kind: 'schema' | 'capability' | 'identity', public readonly detail: string, baseUrl: string) {
+    const recoveryAction = kind === 'schema'
+      ? 'Update Astrid on this computer, then reconnect.'
+      : kind === 'identity'
+        ? 'Restart the selected Astrid Runtime and reconnect to the same workspace.'
+        : 'Use a Runtime that supports this capability, then retry.';
+    super(`Workspace Runtime at ${baseUrl} is incompatible (${kind}): ${detail}. ${recoveryAction}`);
     this.name = 'RuntimeCompatibilityError';
+    this.recoveryAction = recoveryAction;
   }
 }
 
 export type RuntimeConnectorError = RuntimeAuthenticationError | RuntimeUnavailableError | RuntimeCompatibilityError;
+
+export type InstallerUpdateStatusState = 'none' | 'active' | 'terminal' | 'recovery-needed';
+export type InstallerUpdateOutcome = 'updated' | 'rolled_back' | 'failed';
+
+/** Raw, read-only installer status returned by the Runtime producer. */
+export interface InstallerUpdateStatus {
+  available: boolean;
+  state: InstallerUpdateStatusState;
+  operation_id?: string;
+  result?: string;
+  outcome?: InstallerUpdateOutcome;
+  target_release?: number | string;
+  accepted_at?: number | string;
+  log_path?: string;
+  reason?: string;
+}
+
+/** The producer's update capability is only whether its transient launcher exists. */
+export type InstallerUpdateCapability = Pick<InstallerUpdateStatus, 'available' | 'reason'>;
+
+/** Successful durable acceptance of an update request. */
+export interface InstallerUpdateAcceptance {
+  accepted: true;
+  state: 'accepted';
+  operation_id: string;
+  message: string;
+}
+
+/** Startup identity exposed by the authenticated health endpoint. */
+export interface InstallerUpdateHealth extends Health {
+  identity?: { managed_by?: string | null; release?: number; [key: string]: unknown } | null;
+}
+
+export interface InstallerUpdateEligibilityRefusal {
+  reason: string;
+  message: string;
+}
+
+function objectValue(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateInstallerUpdateStatus(value: unknown): InstallerUpdateStatus {
+  if (!objectValue(value) || typeof value.available !== 'boolean'
+    || !['none', 'active', 'terminal', 'recovery-needed'].includes(String(value.state))) {
+    throw new Error('invalid installer update status response');
+  }
+  if (value.operation_id !== undefined && typeof value.operation_id !== 'string') throw new Error('invalid installer update operation id');
+  if (value.result !== undefined && typeof value.result !== 'string') throw new Error('invalid installer update result');
+  if (value.outcome !== undefined && !['updated', 'rolled_back', 'failed'].includes(String(value.outcome))) throw new Error('invalid installer update outcome');
+  if (value.target_release !== undefined && typeof value.target_release !== 'string' && typeof value.target_release !== 'number') throw new Error('invalid installer update target release');
+  if (value.accepted_at !== undefined && typeof value.accepted_at !== 'string' && typeof value.accepted_at !== 'number') throw new Error('invalid installer update acceptance time');
+  if (value.log_path !== undefined && typeof value.log_path !== 'string') throw new Error('invalid installer update log path');
+  if (value.reason !== undefined && typeof value.reason !== 'string') throw new Error('invalid installer update reason');
+  return value as unknown as InstallerUpdateStatus;
+}
+
+function validateInstallerUpdateAcceptance(value: unknown): InstallerUpdateAcceptance {
+  if (!objectValue(value) || value.accepted !== true || value.state !== 'accepted'
+    || typeof value.operation_id !== 'string' || !/^[0-9a-f]{32}$/.test(value.operation_id)
+    || typeof value.message !== 'string') {
+    throw new Error('invalid installer update acceptance response');
+  }
+  return value as unknown as InstallerUpdateAcceptance;
+}
+
+function validateInstallerUpdateHealth(value: unknown): InstallerUpdateHealth {
+  if (!objectValue(value) || (value.status !== 'ok' && value.status !== 'degraded')
+    || value.protocol !== PROTOCOL || typeof value.schema_digest !== 'string'
+    || typeof value.runtime_instance_id !== 'string' || typeof value.runtime_session_id !== 'string'
+    || typeof value.runtime_epoch !== 'number'
+    || (value.identity !== undefined && value.identity !== null && !objectValue(value.identity))) {
+    throw new Error('invalid installer update health response');
+  }
+  const identity = objectValue(value.identity) ? value.identity : undefined;
+  return {
+    ...value,
+    ...(typeof identity?.release === 'number' ? { release: identity.release } : {}),
+  } as unknown as InstallerUpdateHealth;
+}
 
 export function isRuntimeUnavailableFailure(error: unknown): boolean {
   if (error instanceof RuntimeUnavailableError) return true;
@@ -302,13 +390,13 @@ export class AstridRuntimeClient {
   /** Refuse every operation once any client sharing this binding saw a restart. */
   assertNotFenced(): void {
     const reason = this.identityStore.get(this.baseUrl)?.fencedReason;
-    if (reason) throw new RuntimeCompatibilityError(reason, this.baseUrl);
+    if (reason) throw new RuntimeCompatibilityError('identity', reason, this.baseUrl);
   }
 
   private fence(reason: string): never {
     const bound = this.identityStore.get(this.baseUrl);
     if (bound) bound.fencedReason = reason;
-    throw new RuntimeCompatibilityError(reason, this.baseUrl);
+    throw new RuntimeCompatibilityError('identity', reason, this.baseUrl);
   }
 
   private static instanceIdOf(health: Health): string {
@@ -321,7 +409,7 @@ export class AstridRuntimeClient {
     this.assertNotFenced();
     const instanceId = AstridRuntimeClient.instanceIdOf(health);
     if (!instanceId) {
-      throw new RuntimeCompatibilityError('Runtime health did not report an instance id, so restarts cannot be detected', this.baseUrl);
+      throw new RuntimeCompatibilityError('identity', 'Runtime health did not report an instance id, so restarts cannot be detected', this.baseUrl);
     }
     const bound = this.identityStore.get(this.baseUrl);
     if (!bound) return;
@@ -348,7 +436,7 @@ export class AstridRuntimeClient {
     }
     if (AstridRuntimeClient.instanceIdOf(health) !== expected) {
       this.slot.current = null;
-      if (this.expectedIdentity) throw new RuntimeCompatibilityError(RESTART_INSTANCE, this.baseUrl);
+      if (this.expectedIdentity) throw new RuntimeCompatibilityError('identity', RESTART_INSTANCE, this.baseUrl);
       this.fence(RESTART_INSTANCE);
     }
   }
@@ -396,7 +484,7 @@ export class AstridRuntimeClient {
         this.signal?.throwIfAborted();
         if (this.discoveryBinding.identity && identity
           && (identity.actorId !== this.discoveryBinding.identity.actorId || identity.realmId !== this.discoveryBinding.identity.realmId)) {
-          throw new RuntimeCompatibilityError('Runtime discovery changed the selected actor or realm', this.baseUrl);
+          throw new RuntimeCompatibilityError('identity', 'Runtime discovery changed the selected actor or realm', this.baseUrl);
         }
         this.discoveryBinding.identity ??= identity;
         this.expectedIdentity = identity;
@@ -440,10 +528,10 @@ export class AstridRuntimeClient {
     const instanceId = AstridRuntimeClient.instanceIdOf(health);
     const expectedInstanceId = this.expectedIdentity?.runtimeInstanceId ?? AstridRuntimeClient.instanceIdOf(session.health);
     if (!instanceId || instanceId !== expectedInstanceId) {
-      throw new RuntimeCompatibilityError('Runtime status belongs to a different instance than the connected workspace', this.baseUrl);
+      throw new RuntimeCompatibilityError('identity', 'Runtime status belongs to a different instance than the connected workspace', this.baseUrl);
     }
     if (this.expectedIdentity && session.realm.realm_id !== this.expectedIdentity.realmId) {
-      throw new RuntimeCompatibilityError('Runtime status belongs to a different realm than the selected Astrid profile', this.baseUrl);
+      throw new RuntimeCompatibilityError('identity', 'Runtime status belongs to a different realm than the selected Astrid profile', this.baseUrl);
     }
     this.checkObservedIdentity(health, session.handshake);
     return { health, realm: session.realm };
@@ -462,7 +550,17 @@ export class AstridRuntimeClient {
       // the race is observed here so it never surfaces as unhandled. The realm read
       // stays after validation: an incompatible Runtime is never asked for more.
       const healthRead = this.client.health();
-      const handshakeRead = this.client.handshake('astrid-browser', RUNTIME_CLIENT_VERSION, RUNTIME_CLIENT_SCOPES);
+      const handshakeRead = this.client.handshake('astrid-browser', RUNTIME_CLIENT_VERSION, RUNTIME_CLIENT_SCOPES)
+        .catch((error: unknown) => {
+          // Older owners and credentials keep normal use and command fallback.
+          // Only the precise missing update grant permits a legacy negotiation.
+          if (error instanceof ApiError && error.status === 401 && error.code === 'unauthorized'
+            && Array.isArray(error.details.scopes) && error.details.scopes.length === 1
+            && error.details.scopes[0] === 'installer:update') {
+            return this.client.handshake('astrid-browser', RUNTIME_CLIENT_VERSION, LEGACY_RUNTIME_CLIENT_SCOPES);
+          }
+          throw error;
+        });
       for (const pending of [healthRead, handshakeRead]) pending.catch(() => undefined);
       const health = await healthRead;
       if (health.status !== 'ok' && !(allowDegradedHealth && health.status === 'degraded')) {
@@ -472,19 +570,19 @@ export class AstridRuntimeClient {
       if (!RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(health.schema_digest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])
         || !RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(handshake.schema_digest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])) {
         throw new RuntimeCompatibilityError(
-          `schema digest mismatch (health=${health.schema_digest}, handshake=${handshake.schema_digest}, expected one of ${RUNTIME_ACCEPTED_SCHEMA_DIGESTS.join(', ')})`,
+          'schema', `schema digest mismatch (health=${health.schema_digest}, handshake=${handshake.schema_digest}, expected one of ${RUNTIME_ACCEPTED_SCHEMA_DIGESTS.join(', ')})`,
           this.baseUrl,
         );
       }
       if (!handshake.capabilities.includes(RUNTIME_TARGETED_EXECUTION_CAPABILITY)) {
         throw new RuntimeCompatibilityError(
-          `missing capability ${RUNTIME_TARGETED_EXECUTION_CAPABILITY}`,
+          'capability', `missing capability ${RUNTIME_TARGETED_EXECUTION_CAPABILITY}`,
           this.baseUrl,
         );
       }
       if (FORBIDDEN_RUNTIME_ACTORS.has(handshake.actor_id) || !hasExactScopes(handshake.scopes)) {
         throw new RuntimeCompatibilityError(
-          'authenticated actor or granted scopes do not match the Astrid App product connector role',
+          'identity', 'authenticated actor or granted scopes do not match the Astrid App product connector role',
           this.baseUrl,
         );
       }
@@ -492,7 +590,7 @@ export class AstridRuntimeClient {
         if (handshake.actor_id !== this.expectedIdentity.actorId
           || handshake.realm_id !== this.expectedIdentity.realmId) {
           throw new RuntimeCompatibilityError(
-            'authenticated actor or realm does not match the selected Astrid profile',
+            'identity', 'authenticated actor or realm does not match the selected Astrid profile',
             this.baseUrl,
           );
         }
@@ -503,6 +601,7 @@ export class AstridRuntimeClient {
         && (health as Health & { runtime_instance_id?: string }).runtime_instance_id
           !== this.expectedIdentity.runtimeInstanceId) {
         throw new RuntimeCompatibilityError(
+          'identity',
           'Runtime restarted—relaunch workspace. The selected Runtime instance changed; your timeline draft is preserved.',
           this.baseUrl,
         );
@@ -510,11 +609,11 @@ export class AstridRuntimeClient {
       if (!this.expectedIdentity) this.checkObservedIdentity(health, handshake);
       const realm = await this.client.getRealm();
       if (realm.realm_id !== handshake.realm_id) {
-        throw new RuntimeCompatibilityError('Runtime realm endpoint does not match its handshake', this.baseUrl);
+        throw new RuntimeCompatibilityError('identity', 'Runtime realm endpoint does not match its handshake', this.baseUrl);
       }
       if (this.expectedIdentity && realm.realm_id !== this.expectedIdentity.realmId) {
         throw new RuntimeCompatibilityError(
-          'Runtime realm endpoint does not match the selected Astrid profile',
+          'identity', 'Runtime realm endpoint does not match the selected Astrid profile',
           this.baseUrl,
         );
       }
@@ -541,7 +640,7 @@ export class AstridRuntimeClient {
       if (this.readOnly && this.usesRuntimeConfig && runtimeOrigin() === ''
         && (error instanceof TypeError || error instanceof RuntimeUnavailableError
           || error instanceof RuntimeAuthenticationError
-          || error instanceof RuntimeCompatibilityError && error.reason === RESTART_INSTANCE
+          || error instanceof RuntimeCompatibilityError && error.detail === RESTART_INSTANCE
           || error instanceof ApiError && (error.status === 401 || error.status >= 500))) {
         await this.reconnect();
         return operation();
@@ -552,6 +651,91 @@ export class AstridRuntimeClient {
       }
       throw error;
     }
+  }
+
+  /** Installer routes use the authenticated connector directly and deliberately skip workspace negotiation. */
+  private async installerUpdateRequest(method: 'GET' | 'POST', path: string): Promise<Uint8Array> {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    let response: { status: number; headers: Record<string, string>; body: Uint8Array };
+    if (this.transport) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const abortCaller = () => controller.abort(this.signal?.reason);
+      if (this.signal?.aborted) abortCaller();
+      else this.signal?.addEventListener('abort', abortCaller, { once: true });
+      const interrupted = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+      });
+      try {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        response = await Promise.race([this.transport(method, path, headers, undefined), interrupted]);
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        this.signal?.removeEventListener('abort', abortCaller);
+      }
+    } else {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const abortCaller = () => controller.abort(this.signal?.reason);
+      if (this.signal?.aborted) abortCaller();
+      else this.signal?.addEventListener('abort', abortCaller, { once: true });
+      try {
+        const fetched = await fetch(`${this.baseUrl.replace(/\/$/, '')}${path}`, {
+          method,
+          headers,
+          signal: controller.signal,
+          ...(method === 'GET' ? { cache: 'no-store' as const } : {}),
+        });
+        response = {
+          status: fetched.status,
+          headers: Object.fromEntries(fetched.headers),
+          body: new Uint8Array(await fetched.arrayBuffer()),
+        };
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        this.signal?.removeEventListener('abort', abortCaller);
+      }
+    }
+    const expected = method === 'POST' ? 202 : 200;
+    if (response.status !== expected) {
+      try {
+        const value = JSON.parse(new TextDecoder().decode(response.body)) as Record<string, unknown>;
+        throw new ApiError(
+          response.status,
+          typeof value.code === 'string' ? value.code : 'http_error',
+          typeof value.message === 'string' ? value.message : `HTTP ${response.status}`,
+          typeof value.request_id === 'string' ? value.request_id : '',
+          objectValue(value.details) ? value.details : {},
+        );
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(response.status, 'http_error', `HTTP ${response.status}`);
+      }
+    }
+    return response.body;
+  }
+
+  /** Read status without schema handshake, and bypass all browser/proxy caches. */
+  async readInstallerUpdateStatus(): Promise<InstallerUpdateStatus> {
+    return validateInstallerUpdateStatus(JSON.parse(new TextDecoder().decode(
+      await this.installerUpdateRequest('GET', '/v1/update/status'),
+    )) as unknown);
+  }
+
+  /** Read the authenticated startup identity needed to classify the installation. */
+  async readInstallerUpdateHealth(): Promise<InstallerUpdateHealth> {
+    return validateInstallerUpdateHealth(JSON.parse(new TextDecoder().decode(
+      await this.installerUpdateRequest('GET', '/v1/health'),
+    )) as unknown);
+  }
+
+  /** Accept one update request. A lost acknowledgement is surfaced; this POST is never retried. */
+  async startInstallerUpdate(): Promise<InstallerUpdateAcceptance> {
+    if (this.readOnly) throw new RuntimeCompatibilityError('identity', 'A discovery client cannot start an update.', this.baseUrl);
+    return validateInstallerUpdateAcceptance(JSON.parse(new TextDecoder().decode(
+      await this.installerUpdateRequest('POST', '/v1/update'),
+    )) as unknown);
   }
 
   async listProjects(): Promise<Project[]> {

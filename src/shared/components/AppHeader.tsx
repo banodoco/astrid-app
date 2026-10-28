@@ -5,10 +5,13 @@ import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { COARSE_TOUCH_TARGET } from '@/shared/components/ui/contracts/touchTarget.ts';
-import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import { ProjectTimelinePicker } from '@/shared/components/ProjectTimelineSelectors.tsx';
 import { ProjectHeaderActions } from '@/shared/components/ProjectHeaderActions.tsx';
 import { useRuntimeEditorDiscovery } from '@/tools/video-editor/hooks/useRuntimeEditorDiscovery.ts';
+import { useRuntimeConnectionSafe } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
+import { usePageUpdateResolution } from '@/shared/lib/updates/usePageUpdateResolution.ts';
+import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
+import { openUpdatesSettings } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 
 export type AppHeaderNavigationMode = 'home' | 'tools';
 
@@ -93,6 +96,12 @@ export function AppHeader({
   const isToolsNavigation = navigationMode === 'tools';
   const navigationLabel = isToolsNavigation ? 'Tools' : 'Home';
   const NavigationIcon = isToolsNavigation ? LayoutGrid : Home;
+  // The onboarding tour renders this header with no Runtime provider above it. With no connection there is no
+  // update to show, so the header stays usable instead of throwing.
+  const connection = useRuntimeConnectionSafe();
+  const pageStale = usePageStale();
+  const page = usePageUpdateResolution(connection);
+  const updateAvailable = page?.resolution.card === 'notice' || page?.resolution.card === 'update';
 
   return (
     // `relative z-10` puts the header in the same layer as the app content, above the fixed sky backdrop
@@ -143,13 +152,14 @@ export function AppHeader({
         type="button"
         variant="ghost"
         size="icon"
-        className={cn('ml-auto h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground', COARSE_TOUCH_TARGET)}
-        onClick={() => dispatchAppEvent('openSettings', {})}
+        className={cn('relative ml-auto h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground', COARSE_TOUCH_TARGET)}
+        onClick={openUpdatesSettings}
         disabled={settingsDisabled}
         title="Settings"
         aria-label="Settings"
       >
         <Settings className="h-3.5 w-3.5" />
+        {updateAvailable && !pageStale && <span data-testid="settings-update-indicator" aria-label="Update available" className="absolute right-1 top-1 h-2 w-2 rounded-full bg-amber-500" />}
       </Button>
 
     </header>

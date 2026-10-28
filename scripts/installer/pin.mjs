@@ -54,7 +54,31 @@ async function readAgentRuntime(agentSha) {
   return lock.source_commit;
 }
 
-async function pin(agentSha) {
+export function applyReleasePin(manifest, reason) {
+  const previousRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
+  if (!Number.isSafeInteger(previousRelease) || previousRelease < 0) {
+    throw new Error('install-manifest.json release must be a non-negative integer');
+  }
+  const release = previousRelease + 1;
+  if (!Number.isSafeInteger(release)) throw new Error('install-manifest.json release exceeds the safe integer range');
+  manifest.release = release;
+  if (reason !== undefined) {
+    if (typeof reason !== 'string' || !reason.trim()) throw new Error('--require needs a non-empty reason');
+    const currentRequiredRelease = manifest.required == null
+      ? 0
+      : Object.hasOwn(manifest.required, 'release') ? manifest.required.release : 0;
+    if (!Number.isSafeInteger(currentRequiredRelease) || currentRequiredRelease < 0) {
+      throw new Error('install-manifest.json required.release must be a non-negative integer');
+    }
+    manifest.required = {
+      release: Math.max(release, currentRequiredRelease),
+      reason: reason.trim(),
+    };
+  }
+  return manifest;
+}
+
+async function pin(agentSha, reason) {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   if (!manifest.agent || !manifest.runtime) throw new Error('install-manifest.json needs agent and runtime records');
   const runtimeSha = await readAgentRuntime(agentSha);
@@ -62,6 +86,7 @@ async function pin(agentSha) {
   manifest.agent.sha = agentSha;
   manifest.runtime.sha = runtimeSha;
   manifest.runtime.schema_digest = schemaDigest;
+  applyReleasePin(manifest, reason);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
@@ -86,8 +111,21 @@ async function check() {
 async function main() {
   const args = process.argv.slice(2);
   if (args.length === 1 && args[0] === '--check') return check();
-  if (args.length === 1 && /^[0-9a-f]{40}$/i.test(args[0])) return pin(args[0]);
-  throw new Error('Usage: node scripts/installer/pin.mjs <agent-sha> | --check');
+  let reason;
+  let agentSha;
+  for (let index = 0; index < args.length; index += 1) {
+    if (args[index] === '--require') {
+      if (reason !== undefined || !args[index + 1]) throw new Error('--require needs one non-empty reason');
+      reason = args[index + 1];
+      index += 1;
+    } else if (!agentSha && /^[0-9a-f]{40}$/i.test(args[index])) {
+      agentSha = args[index];
+    } else {
+      throw new Error('Usage: node scripts/installer/pin.mjs <agent-sha> [--require "<reason>"] | --check');
+    }
+  }
+  if (agentSha) return pin(agentSha, reason);
+  throw new Error('Usage: node scripts/installer/pin.mjs <agent-sha> [--require "<reason>"] | --check');
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

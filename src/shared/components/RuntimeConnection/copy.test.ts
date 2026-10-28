@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentInstructions, ASTRID_COMMANDS, describeFailure, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, withOrigin } from './copy.ts';
+import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, INSTALL_LINE_LABEL, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, withOrigin } from './copy.ts';
 
 afterEach(() => vi.restoreAllMocks());
 
 describe('install commands', () => {
+  it('uses the shared K8 label next to the install line', () => {
+    expect(INSTALL_LINE_LABEL).toBe('Install or update Astrid');
+    expect(localSetupSteps()[0].line).toContain(INSTALL_LINE_LABEL);
+  });
+
   it.each([
     ['MacIntel', 'Macintosh', 'install', 'curl -fsSL https://astrid.haus/install | sh'],
     ['Linux x86_64', 'Linux', 'install', 'curl -fsSL https://astrid.haus/install | sh'],
@@ -15,6 +20,13 @@ describe('install commands', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(os);
     expect(installCommand(mode)).toBe(expected);
+  });
+});
+
+describe('offline diagnostics copy', () => {
+  it('owns one command for each of the two G1 options', () => {
+    expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('astrid-runtime doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.command).toBe('astrid-runtime doctor > astrid-diagnostics.txt');
   });
 });
 

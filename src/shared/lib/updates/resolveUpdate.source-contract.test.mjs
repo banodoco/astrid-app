@@ -4,6 +4,10 @@ import { RUNTIME_ACCEPTED_SCHEMA_DIGESTS } from '../../../integrations/runtime/c
 import { LEGACY_RUNTIME_SCHEMA_DIGESTS, SOURCE_SCHEMA_MISMATCH_ACTION } from '../../../integrations/runtime/runtime-update-contract.mjs';
 import { resolveUpdate } from './resolveUpdate.ts';
 
+test('accepts the previously shipped Runtime during rollout', () => {
+  assert.ok(LEGACY_RUNTIME_SCHEMA_DIGESTS.includes('sha256:9061d4982c786e04d99e45470b8ea4f3d9c9ff9855c4a2f83d751a93408c205b'));
+});
+
 test('A1 source update contract shares its compatibility data with the local launcher', () => {
   assert.deepEqual(RUNTIME_ACCEPTED_SCHEMA_DIGESTS.slice(1), LEGACY_RUNTIME_SCHEMA_DIGESTS);
 });

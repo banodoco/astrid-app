@@ -1,11 +1,12 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 import { DIAGNOSTICS_FALLBACK_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { fetchDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
-import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
+import { installTypeOf, resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
@@ -113,7 +114,9 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, operationKey]);
   const currentStatus = operation.releaseStatus ?? status;
-  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, installType, updateNowAvailable: operation.available }, 'settings') : resolution;
+  // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
+  const statusInstallType = currentStatus ? installTypeOf(currentStatus.managedBy, { managedByPinokio: connection.managedByPinokio, local, originless: runtimeOrigin() === '' }) : installType;
+  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, installType: statusInstallType, updateNowAvailable: operation.available }, 'settings') : resolution;
   const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
   const lastResult = operation.error ? 'Update status could not be confirmed.' : operation.status?.result ?? reportResult ?? 'No update has run yet.';
 

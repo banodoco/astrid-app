@@ -1,6 +1,6 @@
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from './updateStatus.ts';
-import { resolveUpdate, type UpdateResolution } from './resolveUpdate.ts';
+import { installTypeOf, resolveUpdate, type UpdateResolution } from './resolveUpdate.ts';
 
 let pageStatusPromise: Promise<UpdateStatus | null> | null = null;
 
@@ -20,6 +20,7 @@ export function loadPageUpdateStatus(local: boolean): Promise<UpdateStatus | nul
   return pageStatusPromise;
 }
 
-export function resolvePageUpdateStatus(status: UpdateStatus, installType: 'pinokio' | 'source' | 'fully-local' | 'installer'): UpdateResolution {
-  return resolveUpdate({ ...status.resolution, installType, updateNowAvailable: false });
+/** The page's install type comes from the connection and the Runtime's identity in the same status, never the connection alone. */
+export function resolvePageUpdateStatus(status: UpdateStatus, mode: { managedByPinokio?: boolean | null; local: boolean }): UpdateResolution {
+  return resolveUpdate({ ...status.resolution, installType: installTypeOf(status.managedBy, mode), updateNowAvailable: false });
 }

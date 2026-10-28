@@ -110,10 +110,9 @@ export function AppHeader({
   useEffect(() => {
     if (!connected || (!local && !hosted)) return undefined;
     let active = true;
-    const installType = managedByPinokio ? 'pinokio' : local ? 'fully-local' : 'installer';
     void loadPageUpdateStatus(local).then((status) => {
       if (!active || !status) return;
-      const { card } = resolvePageUpdateStatus(status, installType);
+      const { card } = resolvePageUpdateStatus(status, { managedByPinokio, local });
       setUpdateAvailable(card === 'notice' || card === 'update');
     });
     return () => { active = false; };

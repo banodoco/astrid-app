@@ -4,7 +4,7 @@ import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection
 import { useAuthSafe } from '@/shared/contexts/AuthContext.tsx';
 import { scheduleFocusAndInterval } from './appBuildWatch.ts';
 import { pageUpdateOperation } from './updateOperation.ts';
-import type { UpdateResolutionInput } from './resolveUpdate.ts';
+import { installTypeOf } from './resolveUpdate.ts';
 
 export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   const { isAuthenticated, authError } = useAuthSafe();
@@ -37,8 +37,7 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
     return () => { disposed = true; unschedule(); };
   }, [monitor, operation, confirmPermission]);
   const manager = snapshot.health?.identity?.managed_by;
-  const installType: NonNullable<UpdateResolutionInput['installType']> = connection?.managedByPinokio || manager === 'pinokio' ? 'pinokio'
-    : local ? 'fully-local' : runtimeOrigin() === '' || manager === 'source' ? 'source' : 'installer';
+  const installType = installTypeOf(manager, { managedByPinokio: connection?.managedByPinokio, local, originless: runtimeOrigin() === '' });
   // Missing identity is never evidence of an installer-owned installation. The
   // Runtime performs the full ownership/lock/busy admission on the explicit POST.
   const available = enabled && installType === 'installer' && manager === null

@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { isReleaseNumber } from './installedRelease.ts';
 
 export const APP_BUILD_CHECK_INTERVAL_MS = 10 * 60 * 1000;
 export const APP_BUILD = typeof __ASTRID_APP_BUILD__ === 'undefined' ? '' : __ASTRID_APP_BUILD__;
@@ -25,8 +26,8 @@ export async function fetchBuildInfo(fetchImpl: BuildFetch): Promise<BuildInfo |
     const payload: unknown = await response.json();
     if (typeof payload !== 'object' || payload === null) return null;
     const { app, release } = payload as Partial<BuildInfo>;
-    if (typeof app !== 'string' || !app || !Number.isSafeInteger(release) || (release as number) < 0) return null;
-    return { app, release: release as number };
+    if (typeof app !== 'string' || !app || !isReleaseNumber(release)) return null;
+    return { app, release };
   } catch {
     return null;
   }

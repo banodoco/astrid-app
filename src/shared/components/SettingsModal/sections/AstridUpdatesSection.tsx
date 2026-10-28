@@ -1,12 +1,12 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
-import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
-import { DIAGNOSTICS_FALLBACK_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
-import { fetchDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
-import { installTypeOf, resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
+import { DiagnosticsFallback } from '@/shared/components/RuntimeConnection/DownloadDiagnosticsButton.tsx';
+import { fetchDiagnosticsReport, saveDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
+import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
+import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpdateStatus.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
@@ -24,7 +24,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const connection = useRuntimeConnection();
   const operation = useInstallerUpdate(connection);
   const pageStale = usePageStale();
-  const local = import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
+  const local = localUpdateStatus();
   const localUpdate = pageLocalUpdate();
   const localState = useSyncExternalStore(localUpdate.subscribe, localUpdate.getSnapshot, localUpdate.getSnapshot);
   const guarded = useGuardedReload();
@@ -51,12 +51,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const downloadDiagnostics = async () => {
     const report = diagnostics || await loadDiagnostics();
     if (!report) return;
-    const url = URL.createObjectURL(new Blob([report], { type: 'text/plain;charset=utf-8' }));
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'astrid-diagnostics.txt';
-    link.click();
-    URL.revokeObjectURL(url);
+    saveDiagnosticsReport(report);
   };
 
   const installType = operation.installType;
@@ -73,7 +68,6 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
     void operation.refresh();
     try {
       let next: UpdateStatus;
-      let base: UpdateResolution = resolveUpdate({ installType, updateNowAvailable: false });
       if (local) {
         next = await checkLocalUpdate();
       } else {
@@ -86,11 +80,9 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         }
         const health = operation.health ?? await new AstridRuntimeClient().readInstallerUpdateHealth();
         next = await checkHostedUpdate(health);
-        base = resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings');
       }
-      if (local) base = resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings');
       setStatus(next);
-      setResolution(base);
+      setResolution(resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings'));
       setState('ready');
     } catch (cause) {
       setStatus(null);
@@ -115,7 +107,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   }, [isOpen, operationKey]);
   const currentStatus = operation.releaseStatus ?? status;
   // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
-  const statusInstallType = currentStatus ? installTypeOf(currentStatus.managedBy, { managedByPinokio: connection.managedByPinokio, local, originless: runtimeOrigin() === '' }) : installType;
+  const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
   const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, installType: statusInstallType, updateNowAvailable: operation.available }, 'settings') : resolution;
   const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
   const lastResult = operation.error ? 'Update status could not be confirmed.' : operation.status?.result ?? reportResult ?? 'No update has run yet.';
@@ -146,11 +138,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         <p><span className="text-muted-foreground">Last result:</span> {lastResult}</p>
         <details className="mt-1"><summary className="cursor-pointer underline">View log</summary>{operation.status?.log_path && <p>{operation.status.log_path}</p>}<pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{operation.status?.result && reportResult !== operation.status.result ? 'The latest log is not available in diagnostics yet. Check again.' : diagnostics.match(/Installer transaction log:\n([\s\S]*?)\nRetained back-end copies:/)?.[1] || 'No update log yet.'}</pre></details>
         <Button type="button" variant="retro-secondary" size="retro-sm" className="mt-2" onClick={() => void downloadDiagnostics()}>Download diagnostics</Button>
-        {diagnosticsError && <div className="mt-2 space-y-2">
-          <p>{DIAGNOSTICS_FALLBACK_COPY.intro}</p>
-          <div><Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void navigator.clipboard?.writeText(DIAGNOSTICS_FALLBACK_COPY.agent)}>Copy for your agent</Button></div>
-          <p>Run it yourself: <code>{DIAGNOSTICS_FALLBACK_COPY.command}</code></p>
-        </div>}
+        {diagnosticsError && <DiagnosticsFallback className="mt-2 space-y-2" />}
       </div>
     </div>
   </section>;

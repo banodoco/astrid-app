@@ -22,7 +22,7 @@ const REACHED: SetupChecks = { runtime: 'pass', workspace: 'pass', ready: true }
 const LOOKING: SetupChecks = { runtime: 'checking', workspace: 'checking', ready: false };
 
 /** The caller supplies the install type from the Runtime's identity (`installTypeOf`), never from the connection alone. */
-function schemaUpdateStatus(connection: RuntimeConnectionValue, checks: SetupChecks, installType: InstallType): ConnectionStatus {
+function schemaUpdateStatus(checks: SetupChecks, installType: InstallType): ConnectionStatus {
   const resolution = resolveUpdate({ compatibility: { kind: 'schema', detail: COPY.updateNeeded.sentence }, installType });
   return { title: resolution.title ?? COPY.updateNeeded.title, detail: resolution.body ?? COPY.updateNeeded.sentence, checks, outOfDate: 'runtime', updateResolution: resolution };
 }
@@ -38,7 +38,7 @@ export function connectionStatus(connection: RuntimeConnectionValue, installType
   switch (state.status) {
     case 'connected':
       if (needsUpdate(connection.schemaDigest)) {
-        return schemaUpdateStatus(connection, REACHED, installType);
+        return schemaUpdateStatus(REACHED, installType);
       }
       // The Runtime itself is fine; only the chat service is older than this page.
       if (connection.localServiceOutOfDate) {
@@ -68,7 +68,7 @@ export function connectionStatus(connection: RuntimeConnectionValue, installType
     case 'restart':
       return { title: COPY.restarted.title, detail: COPY.restarted.sentence, checks: LOOKING };
     case 'update_needed':
-      return schemaUpdateStatus(connection, LOOKING, installType);
+      return schemaUpdateStatus(LOOKING, installType);
     case 'refused':
       return { title: COPY.refused.title, detail: withOrigin(COPY.refused.sentence, window.location.origin), checks: LOOKING };
     case 'not_running':

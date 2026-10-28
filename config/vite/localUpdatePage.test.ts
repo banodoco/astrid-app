@@ -3,7 +3,8 @@ import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { createLocalUpdatePagePlugin, readPageTarget, validLocalPageRequest } from './localUpdatePage.ts';
+import { createLocalUpdatePagePlugin, PAGE_ENDPOINT_PATH, readPageTarget } from './localUpdatePage.ts';
+import { validLocalStatusRequest } from './localUpdateStatus.ts';
 
 const tempDirs: string[] = [];
 afterEach(async () => { await Promise.all(tempDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))); });
@@ -15,11 +16,11 @@ const RECEIPT = { format: 'astrid-local-update/v1', pid: 1, url: 'http://127.0.0
 describe('local update page endpoint', () => {
   it('shares the status route request rules on its own path', () => {
     const rest = ['127.0.0.1:4317', ORIGIN, 'same-origin', '0', undefined, 'application/json', 'application/json', 4317] as const;
-    expect(validLocalPageRequest('POST', '/__astrid/local-update-page', ...rest)).toBe(true);
-    expect(validLocalPageRequest('POST', '/__astrid/local-update-status', ...rest)).toBe(false);
-    expect(validLocalPageRequest('GET', '/__astrid/local-update-page', ...rest)).toBe(false);
-    expect(validLocalPageRequest('POST', '/__astrid/local-update-page', rest[0], 'http://evil.test', ...rest.slice(2))).toBe(false);
-    expect(validLocalPageRequest('POST', '/__astrid/local-update-page', rest[0], rest[1], 'cross-site', ...rest.slice(3))).toBe(false);
+    expect(validLocalStatusRequest('POST', '/__astrid/local-update-page', ...rest, PAGE_ENDPOINT_PATH)).toBe(true);
+    expect(validLocalStatusRequest('POST', '/__astrid/local-update-status', ...rest, PAGE_ENDPOINT_PATH)).toBe(false);
+    expect(validLocalStatusRequest('GET', '/__astrid/local-update-page', ...rest, PAGE_ENDPOINT_PATH)).toBe(false);
+    expect(validLocalStatusRequest('POST', '/__astrid/local-update-page', rest[0], 'http://evil.test', ...rest.slice(2), PAGE_ENDPOINT_PATH)).toBe(false);
+    expect(validLocalStatusRequest('POST', '/__astrid/local-update-page', rest[0], rest[1], 'cross-site', ...rest.slice(3), PAGE_ENDPOINT_PATH)).toBe(false);
   });
 
   it('returns only url and token, never the CLI secret, and only to the receipt origin', () => {

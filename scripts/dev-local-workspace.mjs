@@ -14,7 +14,7 @@ import { terminateProcessTree } from './terminate-process-tree.mjs';
 import { startLocalUpdateControl } from './local-update-control.mjs';
 import { createLocalUpdater, restorePreparedResources, validateAppContext } from './local-update-runner.mjs';
 import { restoreCheckout, releasePreparation, prepareUpdate, selectUpdateTarget } from './local-update-checkout.mjs';
-import { installedBackend, runBackendUpdate, pinokioHandoff } from './local-update-backend.mjs';
+import { installedBackend, journalSettled, pinokioSession, readUpdateJournal, runBackendUpdate } from './local-update-backend.mjs';
 import { homedir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -513,11 +513,11 @@ if (!checkOnly && !buildOnly) {
     runtimeSettings.runtimePython = backend.python;
     runtimeSettings.sourceManifest = backend.profile;
   }
-  const journalPath = backend && resolve(backend.root, 'update-transaction.json');
-  const pending = journalPath && existsSync(journalPath) ? JSON.parse(readFileSync(journalPath, 'utf8')) : null;
-  if (pending?.transaction_context?.owner === 'local-update' && !['complete', 'rolled_back'].includes(pending.step)) {
+  const pending = backend ? await readUpdateJournal(backend.root) : null;
+  if (pending?.transaction_context?.owner === 'local-update' && !journalSettled(pending)) {
     let recoveryEditor;
     let recoverySelection;
+    const pinokio = pinokioSession(backend);
     const stopRecoveryEditor = async () => {
       if (recoveryEditor) await stopService(services.find((item) => item.child === recoveryEditor), 'SIGTERM');
       recoveryEditor = undefined;
@@ -527,7 +527,7 @@ if (!checkOnly && !buildOnly) {
         const app = validateAppContext(message.app, process.cwd());
         switch (message.hook) {
           case 'stop-editor':
-            if (pinokioManaged) await pinokioHandoff(backend, 'begin');
+            if (pinokioManaged) await pinokio.begin();
             await stopRecoveryEditor();
             if (await waitForPort(port, 0)) throw new Error(`Recovery needs the previous editor on port ${port} to be stopped. Keep ${app.preparationRoot} and retry after stopping that editor.`);
             break;
@@ -536,7 +536,7 @@ if (!checkOnly && !buildOnly) {
             await restorePreparedResources(app);
             break;
           case 'pinokio-start':
-            await pinokioHandoff(backend, 'runtime', { version: basename(message.version.root), operationId: message.operationId });
+            await pinokio.start(message.version, message.operationId);
             break;
           case 'start-editor': {
             runtimeSettings.runtimePython = message.version.python;
@@ -565,7 +565,7 @@ if (!checkOnly && !buildOnly) {
           }
           case 'release-app':
             await stopRecoveryEditor();
-            if (pinokioManaged) await pinokioHandoff(backend, 'end');
+            if (pinokioManaged) await pinokio.end();
             await releasePreparation({ cwd: process.cwd(), state: app });
             break;
           default: throw new Error(`Unexpected recovery callback ${message.hook}`);
@@ -924,11 +924,7 @@ updateControl = await startLocalUpdateControl({ cwd: process.cwd(), origin: new 
   }
   const update = createLocalUpdater({ cwd: process.cwd(), backend, editor: updaterEditor, backendUpdate: runBackendUpdate,
     prepare: (options) => prepareUpdate({ ...options, environment: env, execPath: env.ASTRID_NODE_EXECUTABLE || process.execPath, preparationDirectory: backend.root }),
-    ...(pinokioManaged ? { session: {
-      begin: () => pinokioHandoff(backend, 'begin'),
-      start: (version, operationId) => pinokioHandoff(backend, 'runtime', { version: basename(version.root), operationId }),
-      end: () => pinokioHandoff(backend, 'end'),
-    } } : {}),
+    ...(pinokioManaged ? { session: pinokioSession(backend) } : {}),
   });
   const result = await update();
   console.log(result.message);

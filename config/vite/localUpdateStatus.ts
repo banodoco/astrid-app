@@ -7,8 +7,8 @@ const execFileAsync = promisify(execFile);
 const STATUS_PATH = '/__astrid/local-update-status';
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 
-export function validLocalStatusRequest(method: string | undefined, url: string | undefined, host: string | undefined, origin: string | undefined, fetchSite: string | undefined, contentLength: string | undefined, transferEncoding: string | undefined, contentType: string | undefined, accept: string | undefined, port: number): boolean {
-  if (method !== 'POST' || url !== STATUS_PATH || !host || !origin || (fetchSite && fetchSite !== 'same-origin') || (contentLength && contentLength !== '0') || transferEncoding || contentType !== 'application/json' || accept !== 'application/json') return false;
+export function validLocalStatusRequest(method: string | undefined, url: string | undefined, host: string | undefined, origin: string | undefined, fetchSite: string | undefined, contentLength: string | undefined, transferEncoding: string | undefined, contentType: string | undefined, accept: string | undefined, port: number, expectedPath = STATUS_PATH): boolean {
+  if (method !== 'POST' || url !== expectedPath || !host || !origin || (fetchSite && fetchSite !== 'same-origin') || (contentLength && contentLength !== '0') || transferEncoding || contentType !== 'application/json' || accept !== 'application/json') return false;
   let parsedOrigin: URL;
   try { parsedOrigin = new URL(origin); } catch { return false; }
   try {

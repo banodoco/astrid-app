@@ -1,18 +1,17 @@
 import type { ReactNode } from 'react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { Home, LayoutGrid, Settings } from 'lucide-react';
 import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { COARSE_TOUCH_TARGET } from '@/shared/components/ui/contracts/touchTarget.ts';
-import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import { ProjectTimelinePicker } from '@/shared/components/ProjectTimelineSelectors.tsx';
 import { ProjectHeaderActions } from '@/shared/components/ProjectHeaderActions.tsx';
 import { useRuntimeEditorDiscovery } from '@/tools/video-editor/hooks/useRuntimeEditorDiscovery.ts';
 import { useRuntimeConnectionSafe } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
-import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
-import { loadPageUpdateStatus, resolvePageUpdateStatus } from '@/shared/lib/updates/pageUpdateStatus.ts';
+import { usePageUpdateResolution } from '@/shared/lib/updates/usePageUpdateResolution.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
+import { openUpdatesSettings } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 
 export type AppHeaderNavigationMode = 'home' | 'tools';
 
@@ -100,30 +99,9 @@ export function AppHeader({
   // The onboarding tour renders this header with no Runtime provider above it. With no connection there is no
   // update to show, so the header stays usable instead of throwing.
   const connection = useRuntimeConnectionSafe();
-  const connected = connection?.isConnected ?? false;
-  const managedByPinokio = connection?.managedByPinokio ?? false;
   const pageStale = usePageStale();
-  const local = import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
-  const hosted = runtimeOrigin() !== '';
-  const [updateAvailable, setUpdateAvailable] = useState(false);
-
-  useEffect(() => {
-    if (!connected || (!local && !hosted)) return undefined;
-    let active = true;
-    void loadPageUpdateStatus(local).then((status) => {
-      if (!active || !status) return;
-      const { card } = resolvePageUpdateStatus(status, { managedByPinokio, local });
-      setUpdateAvailable(card === 'notice' || card === 'update');
-    });
-    return () => { active = false; };
-  }, [connected, managedByPinokio, hosted, local]);
-
-  const openUpdates = () => {
-    const url = new URL(window.location.href);
-    url.searchParams.set('settings', 'updates');
-    window.history.pushState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-    dispatchAppEvent('openSettings', { tab: 'updates' });
-  };
+  const page = usePageUpdateResolution(connection);
+  const updateAvailable = page?.resolution.card === 'notice' || page?.resolution.card === 'update';
 
   return (
     // `relative z-10` puts the header in the same layer as the app content, above the fixed sky backdrop
@@ -175,7 +153,7 @@ export function AppHeader({
         variant="ghost"
         size="icon"
         className={cn('relative ml-auto h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground', COARSE_TOUCH_TARGET)}
-        onClick={openUpdates}
+        onClick={openUpdatesSettings}
         disabled={settingsDisabled}
         title="Settings"
         aria-label="Settings"

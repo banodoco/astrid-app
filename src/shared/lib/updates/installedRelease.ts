@@ -2,7 +2,8 @@ function hasReleaseField(payload: unknown): payload is { release?: unknown } {
   return !!payload && typeof payload === 'object' && !Array.isArray(payload);
 }
 
-function isReleaseNumber(value: unknown): value is number {
+/** A release is a non-negative safe integer; every update surface reads releases through this one check. */
+export function isReleaseNumber(value: unknown): value is number {
   return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 

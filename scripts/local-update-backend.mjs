@@ -2,7 +2,18 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { existsSync, readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
-import { dirname, resolve, join, isAbsolute } from 'node:path';
+import { basename, dirname, resolve, join, isAbsolute } from 'node:path';
+
+/** The C2 journal in the backend root, or null when no update has left one. */
+export async function readUpdateJournal(root) {
+  try { return JSON.parse(await readFile(join(root, 'update-transaction.json'), 'utf8')); }
+  catch (error) { if (error.code !== 'ENOENT') throw error; return null; }
+}
+
+/** No journal, or one whose step is terminal, leaves nothing to recover or clean up. */
+export function journalSettled(journal) {
+  return !journal || ['complete', 'rolled_back'].includes(journal.step);
+}
 
 /** Locate the selected installed backend; source checkouts keep their own update instructions. */
 export function installedBackend(command) {
@@ -34,9 +45,9 @@ export function installedBackend(command) {
 export async function runBackendUpdate({ backend, action, hook, spawnProcess = spawn }) {
   if (action.action === 'recover') {
     let pending;
-    try { pending = JSON.parse(await readFile(join(backend.root, 'update-transaction.json'), 'utf8')); }
-    catch (error) { if (error.code !== 'ENOENT') throw Object.assign(error, { step: 'recover-backend' }); }
-    if (!pending || ['complete', 'rolled_back'].includes(pending.step)) return { status: 'no-recovery' };
+    try { pending = await readUpdateJournal(backend.root); }
+    catch (error) { throw Object.assign(error, { step: 'recover-backend' }); }
+    if (journalSettled(pending)) return { status: 'no-recovery' };
   }
   const child = spawnProcess(backend.python, ['-I', '-m', 'astrid.installer.local_update', '--root', backend.root], {
     cwd: backend.root, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONPATH: '', PYTHONHOME: '' },
@@ -85,4 +96,13 @@ export async function pinokioHandoff(backend, action, body = {}) {
   const result = await response.json();
   if (!response.ok) throw new Error(result.error ?? `Pinokio update handoff failed (HTTP ${response.status})`);
   return result;
+}
+
+/** The Pinokio session handoff the local updater drives: begin, start a Runtime version, end. */
+export function pinokioSession(backend) {
+  return {
+    begin: () => pinokioHandoff(backend, 'begin'),
+    start: (version, operationId) => pinokioHandoff(backend, 'runtime', { version: basename(version.root), operationId }),
+    end: () => pinokioHandoff(backend, 'end'),
+  };
 }

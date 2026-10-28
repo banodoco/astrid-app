@@ -45,29 +45,33 @@ export function installTypeOf(managedBy: string | null | undefined, mode: { mana
   return mode.originless || managedBy === 'source' ? 'source' : 'installer';
 }
 
+/** Action labels the UI matches on; the source label is owned by the Runtime contract. */
+export const UPDATE_IN_PINOKIO_ACTION = 'Update in Pinokio';
+export const COPY_FOR_AGENT_ACTION = 'Copy for your agent';
+export const RUN_IT_YOURSELF_ACTION = 'Run it yourself';
+export const RELOAD_ACTION = 'Reload';
+
 const settingsAction: UpdateAction = { label: 'Update now', destination: 'settings-updates' };
 /** A fully local install updates its own checkout; the installer would leave that checkout behind. */
 const FULLY_LOCAL_UPDATE_COMMAND = 'npm run update';
+const COPY_FOR_AGENT: UpdateAction = { label: COPY_FOR_AGENT_ACTION };
 const commandActions = (input: UpdateResolutionInput): Pick<UpdateResolution, 'primary' | 'secondary'> => ({
-  primary: { label: 'Copy for your agent' },
-  secondary: { label: 'Run it yourself', ...(input.command ? { command: input.command } : {}) },
+  primary: COPY_FOR_AGENT,
+  secondary: { label: RUN_IT_YOURSELF_ACTION, ...(input.command ? { command: input.command } : {}) },
 });
 
 type ActionContext = 'page' | 'settings';
 
 function updateActions(input: UpdateResolutionInput, context: ActionContext, softRelease = false): Pick<UpdateResolution, 'primary' | 'secondary'> {
-  if (input.installType === 'pinokio') return { primary: { label: 'Update in Pinokio' }, secondary: null };
+  if (input.installType === 'pinokio') return { primary: { label: UPDATE_IN_PINOKIO_ACTION }, secondary: null };
   if (input.installType === 'source') return { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
   if (input.installType === 'fully-local') {
-    const runIt: UpdateAction = { label: 'Run it yourself', command: FULLY_LOCAL_UPDATE_COMMAND };
+    const runIt: UpdateAction = { label: RUN_IT_YOURSELF_ACTION, command: FULLY_LOCAL_UPDATE_COMMAND };
     if (context === 'page') return { primary: settingsAction, secondary: softRelease ? null : runIt };
-    return { primary: { label: 'Copy for your agent' }, secondary: runIt };
+    return { primary: COPY_FOR_AGENT, secondary: runIt };
   }
-  if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: commandActions(input).primary };
-  if (softRelease) {
-    if (context === 'page') return { primary: settingsAction, secondary: null };
-    return commandActions(input);
-  }
+  if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: COPY_FOR_AGENT };
+  if (softRelease && context === 'page') return { primary: settingsAction, secondary: null };
   return commandActions(input);
 }
 

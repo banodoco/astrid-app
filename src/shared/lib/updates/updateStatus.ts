@@ -1,7 +1,7 @@
 import type { InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
 import type { UpdateResolutionInput } from './resolveUpdate.ts';
-import { fetchBuildInfo } from './appBuildWatch.ts';
-import { installedReleaseOf } from './installedRelease.ts';
+import { APP_BUILD, fetchBuildInfo } from './appBuildWatch.ts';
+import { installedReleaseOf, isReleaseNumber } from './installedRelease.ts';
 
 export interface UpdateStatus {
   readonly release: number;
@@ -15,8 +15,8 @@ export interface UpdateStatus {
 }
 
 function releaseNumber(value: unknown): number {
-  if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error('Release information was invalid');
-  return value as number;
+  if (!isReleaseNumber(value)) throw new Error('Release information was invalid');
+  return value;
 }
 
 async function readManifest(fetchImpl: typeof fetch): Promise<Record<string, unknown>> {
@@ -43,7 +43,7 @@ export async function checkHostedUpdate(health: InstallerUpdateHealth, fetchImpl
     requiredReason = required.reason;
   }
   const behind = installedRelease < servedRelease;
-  const app = typeof __ASTRID_APP_BUILD__ === 'string' ? __ASTRID_APP_BUILD__ : build.app;
+  const app = APP_BUILD || build.app;
   const managedBy = health.identity?.managed_by;
   return {
     release: installedRelease, app, servedRelease, servedApp: build.app, behind,

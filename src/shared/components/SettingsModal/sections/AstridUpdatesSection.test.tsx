@@ -64,7 +64,7 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'app-a', servedRelease: 4, servedApp: 'app-b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
     expect(readStatusMock).toHaveBeenCalledOnce();
     expect(hostedCheckMock).toHaveBeenCalledOnce();
     expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
@@ -89,7 +89,7 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(localCheckMock).not.toHaveBeenCalled();
@@ -100,7 +100,7 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
     expect(within(section).getByText('Update in Pinokio')).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Copy for your agent' })).toBeNull();
   });
@@ -111,7 +111,7 @@ describe('Astrid Updates Settings section', () => {
     localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
     expect(localCheckMock).toHaveBeenCalledOnce();
     expect(readStatusMock).not.toHaveBeenCalled();
     expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
@@ -151,7 +151,7 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 5, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 5, requiredRelease: 4, requiredReason: 'Security fix', releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · release 5')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available · Release 5')).toBeInTheDocument();
     expect(within(section).getByText('This update is required: Security fix')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
     const onOpen = vi.fn();
@@ -282,7 +282,7 @@ describe('fully-local Update now', () => {
   it('does not offer the launcher button on hosted installs', async () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'a', servedRelease: 4, servedApp: 'b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
-    await screen.findByText('Update available · release 4');
+    await screen.findByText('Update available · Release 4');
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
   });
 });

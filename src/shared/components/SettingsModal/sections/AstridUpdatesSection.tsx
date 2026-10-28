@@ -128,7 +128,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         {state === 'checking' ? 'Checking for updates…' : 'Check for updates'}
       </Button>
       <p role="status" aria-live="polite" className="text-sm">
-        {state === 'checking' ? 'Checking for updates…' : state === 'error' ? error : currentResolution?.card === 'newer' ? currentResolution.body : currentStatus?.behind ? `Update available · release ${currentStatus.servedRelease}` : 'Astrid is up to date'}
+        {state === 'checking' ? 'Checking for updates…' : state === 'error' ? error : currentResolution?.card === 'newer' ? currentResolution.body : currentStatus?.behind ? `Update available · Release ${currentStatus.servedRelease}` : 'Astrid is up to date'}
       </p>
       {state === 'ready' && currentResolution?.title && <div className="text-sm"><p className="font-medium">{currentResolution.title}</p>{currentResolution.body && <p className="text-muted-foreground">{currentResolution.body}</p>}</div>}
       {state === 'ready' && installType === 'fully-local' && currentStatus?.behind && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={localState.phase === 'running'} onClick={() => void updateNow()}>{localState.phase === 'running' ? 'Updating Astrid…' : 'Update now'}</Button>}

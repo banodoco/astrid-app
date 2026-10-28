@@ -23,6 +23,7 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
   const installSpecific = actions.find((action) => action.label === 'Update in Pinokio' || action.label === 'update your checkouts');
   const reload = actions.find((action) => action.label === 'Reload');
   const execute = actions.find((action) => action.execute === 'installer-update');
+  const localCommand = actions.find((action) => action.label === 'Run it yourself')?.command;
 
   return <div className="space-y-2">
     {reload && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{reload.label}</Button>}
@@ -30,7 +31,7 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdates}>{route.label}</Button>}
     {(resolution.card === 'update' || resolution.card === 'notice') && <Button type="button" variant="link" size="sm" onClick={openUpdates}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
-    {commandOptions && <CopyInstallCommand mode="update" />}
+    {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}

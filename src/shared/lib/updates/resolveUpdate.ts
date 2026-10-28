@@ -34,6 +34,8 @@ export interface UpdateResolutionInput {
 }
 
 const settingsAction: UpdateAction = { label: 'Update now', destination: 'settings-updates' };
+/** A fully local install updates its own checkout; the installer would leave that checkout behind. */
+const FULLY_LOCAL_UPDATE_COMMAND = 'npm run update';
 const commandActions = (input: UpdateResolutionInput): Pick<UpdateResolution, 'primary' | 'secondary'> => ({
   primary: { label: 'Copy for your agent' },
   secondary: { label: 'Run it yourself', ...(input.command ? { command: input.command } : {}) },
@@ -44,6 +46,11 @@ type ActionContext = 'page' | 'settings';
 function updateActions(input: UpdateResolutionInput, context: ActionContext, softRelease = false): Pick<UpdateResolution, 'primary' | 'secondary'> {
   if (input.installType === 'pinokio') return { primary: { label: 'Update in Pinokio' }, secondary: null };
   if (input.installType === 'source') return { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
+  if (input.installType === 'fully-local') {
+    const runIt: UpdateAction = { label: 'Run it yourself', command: FULLY_LOCAL_UPDATE_COMMAND };
+    if (context === 'page') return { primary: settingsAction, secondary: softRelease ? null : runIt };
+    return { primary: { label: 'Copy for your agent' }, secondary: runIt };
+  }
   if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: commandActions(input).primary };
   if (softRelease) {
     if (context === 'page') return { primary: settingsAction, secondary: null };

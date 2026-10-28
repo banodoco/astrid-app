@@ -35,7 +35,7 @@ describe('local update status endpoint boundary', () => {
     expect(localUpdateBehind(3, 4, true)).toBe(false);
   });
 
-  it('reads release from the local manifest and checks served App ancestry against local HEAD', async () => {
+  it('reads required update from the served manifest and release from the local manifest', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'astrid-local-update-'));
     tempDirs.push(dir);
     const checkout = path.join(dir, 'checkout');
@@ -48,7 +48,7 @@ describe('local update status endpoint boundary', () => {
     execFileSync('git', ['-C', checkout, 'commit', '-qm', 'fixture']);
     const localHead = execFileSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
     const manifestPath = path.join(dir, 'install-manifest.json');
-    await writeFile(manifestPath, JSON.stringify({ release: 4, required: { release: 5, reason: 'Security fix' } }));
+    await writeFile(manifestPath, JSON.stringify({ release: 3 }));
     const originalFlag = process.env.ASTRID_LOCAL_UPDATE_STATUS;
     process.env.ASTRID_LOCAL_UPDATE_STATUS = '1';
     const plugin = createLocalUpdateStatusPlugin({ manifestPath });
@@ -65,13 +65,19 @@ describe('local update status endpoint boundary', () => {
       return { response, headers, body: JSON.parse(response.body) as Record<string, unknown> };
     };
     try {
-      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ app: localHead, release: 4 }), { status: 200 })));
+      const servedFetch = (app: string) => vi.fn(async (input: unknown) => {
+        const url = String(input);
+        if (url === 'https://astrid.haus/build.json') return new Response(JSON.stringify({ app, release: 5 }), { status: 200 });
+        if (url === 'https://astrid.haus/install-manifest.json') return new Response(JSON.stringify({ release: 5, required: { release: 5, reason: 'Security fix' } }), { status: 200 });
+        throw new Error(`Unexpected fetch ${url}`);
+      });
+      vi.stubGlobal('fetch', servedFetch(localHead));
       const ancestor = await run();
       expect(ancestor.response.statusCode).toBe(200);
-      expect(ancestor.body).toMatchObject({ app: localHead, release: 4, servedApp: localHead, servedRelease: 4, behind: false, requiredRelease: 5, requiredReason: 'Security fix' });
-      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ app: '0000000000000000000000000000000000000000', release: 3 }), { status: 200 })));
+      expect(ancestor.body).toMatchObject({ app: localHead, release: 3, servedApp: localHead, servedRelease: 5, behind: true, requiredRelease: 5, requiredReason: 'Security fix' });
+      vi.stubGlobal('fetch', servedFetch('0000000000000000000000000000000000000000'));
       const notAncestor = await run();
-      expect(notAncestor.body.behind).toBe(true);
+      expect(notAncestor.body).toMatchObject({ behind: true, requiredRelease: 5 });
     } finally {
       if (originalFlag === undefined) delete process.env.ASTRID_LOCAL_UPDATE_STATUS;
       else process.env.ASTRID_LOCAL_UPDATE_STATUS = originalFlag;

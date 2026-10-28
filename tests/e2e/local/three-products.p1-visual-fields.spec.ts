@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createServer } from 'vite';
 import { createRequire } from 'node:module';
-import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -69,6 +68,7 @@ window.drawFixture = async config => {
   window.seekFixture = async frame => {
     ref.current.seekTo(frame);
     await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+    await document.fonts.ready;
     await Promise.all([...document.querySelectorAll('img')].map(img=>img.decode()));
     return ref.current.getCurrentFrame();
   };
@@ -84,7 +84,7 @@ const Draw = props => {
   // The bundled 2rp theme owns the registered section-hook element the Player draws and is black like the preview root.
   const merge = (base, overlay) => Object.fromEntries(Object.entries({...base, ...overlay}).map(([key, value]) => [key,
     value && typeof value === 'object' && !Array.isArray(value) && base?.[key] && typeof base[key] === 'object' ? merge(base[key], overlay?.[key]) : (overlay && key in overlay ? overlay[key] : value)]));
-  // The same theme_overrides the preview resolves: the element paints that opaque theme background (blank title), so no text or font metrics are drawn.
+  // The same theme_overrides the preview resolves: the element paints that opaque theme background (title text is drawn once the page fonts are ready).
   const theme = merge(BUNDLED_THEMES['2rp'], props.timeline.theme_overrides ?? {});
   const tracks = props.timeline.tracks.filter(t => t.kind === 'visual').map(track => ({track, clips: props.timeline.clips.filter(c => c.track === track.id)}));
   const compiledTransitions = compileCanonicalTransitions(tracks, 24, toRuntimeTheme(theme));
@@ -117,10 +117,7 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
         '@banodoco/timeline-composition': join(root, 'node_modules/@banodoco/timeline-composition'),
       } } }),
     });
-    // The lane pins one headless_shell build; use the installed one when that path is gone.
-    const pinnedBrowser = process.env.ASTRID_REMOTION_BROWSER_EXECUTABLE;
-    const installedShell = '/opt/pw-browsers/chromium_headless_shell-1243/chrome-headless-shell-linux64/chrome-headless-shell';
-    const browserExecutable = pinnedBrowser && !existsSync(pinnedBrowser) && existsSync(installedShell) ? installedShell : pinnedBrowser;
+    const browserExecutable = process.env.ASTRID_REMOTION_BROWSER_EXECUTABLE;
     type Case = [string, 'exit' | 'entrance' | 'transition' | 'effects', unknown, number[], string | undefined, string | undefined];
     // Drawn exactly as the Runtime published it (field JSON and fps basis).
     const published = (name: string, key: string, frames: number[], variant?: string): Case => {
@@ -162,7 +159,7 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
     const captures: object[] = [];
     for (const [name, field, reference, frames, variant, handoffKey] of cases) {
       const track = { id: 'picture', kind: 'visual', fit: 'contain' };
-      const element = { clipType: 'section-hook', params: { title: ' ', entrance: [], exit: [] } };
+      const element = { clipType: 'section-hook', params: { title: 'Fixture', entrance: [], exit: [] } };
       const clips = [
         { id: 'first', track: 'picture', clipType: 'media', at: 0, hold: 1, asset: variant && field === 'transition' ? 'under' : 'solid', ...(variant && field !== 'transition' ? element : {}), ...(field !== 'transition' ? { [field]: reference } : {}) },
         { id: 'second', track: 'picture', clipType: 'media', at: 1, hold: 1, asset: 'second', ...(variant && field === 'transition' ? element : {}), ...(field === 'transition' ? { transition: reference } : {}) },

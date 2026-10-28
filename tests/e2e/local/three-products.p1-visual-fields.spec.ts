@@ -164,7 +164,7 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
       const track = { id: 'picture', kind: 'visual', fit: 'contain' };
       const element = { clipType: 'section-hook', params: { title: ' ', entrance: [], exit: [] } };
       const clips = [
-        { id: 'first', track: 'picture', clipType: 'media', at: 0, hold: 1, asset: 'solid', ...(variant && field !== 'transition' ? element : {}), ...(field !== 'transition' ? { [field]: reference } : {}) },
+        { id: 'first', track: 'picture', clipType: 'media', at: 0, hold: 1, asset: variant && field === 'transition' ? 'under' : 'solid', ...(variant && field !== 'transition' ? element : {}), ...(field !== 'transition' ? { [field]: reference } : {}) },
         { id: 'second', track: 'picture', clipType: 'media', at: 1, hold: 1, asset: 'second', ...(variant && field === 'transition' ? element : {}), ...(field === 'transition' ? { transition: reference } : {}) },
         // The element paints the opaque theme background (a light grey, 64 levels above this clip), so
         // this plain media clip on the track below is what a faded or transitioning element reveals.

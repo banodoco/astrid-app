@@ -130,7 +130,7 @@
     "test:remotion-audio-resume-patch": "node --test scripts/patches/remotion-4.0.509-audio-resume.test.mjs scripts/patches/remotion-4.0.509-audio-resume.semantic.test.mjs"
   },
   "dependencies": {
-    "@banodoco/timeline-composition": "file:vendor/artifacts/banodoco-timeline-composition-cdd89c78d18b4b437a03efd1fff081f1ce00ee448d644ef8360fc1937df60f0f.tgz",
+    "@banodoco/timeline-composition": "file:vendor/artifacts/banodoco-timeline-composition-0.0.17.tgz",
     "@banodoco/timeline-ops": "file:vendor/timeline-ops",
     "@banodoco/timeline-schema": "file:vendor/timeline-schema",
     "@banodoco/timeline-theme-2rp": "file:vendor/timeline-theme-2rp",

@@ -563,3 +563,53 @@ test('preview launcher still refuses a missing output directory without retained
   assert.match(result.stderr, /--preview-dir does not exist/);
   assert.deepEqual((await readFile(fixture.env.FAKE_BACKEND_LOG, 'utf8')).trim(), '');
 });
+
+async function pageUpdate(fixture, token = undefined, requestId = 'a1'.repeat(16)) {
+  const receipt = JSON.parse(await readFile(join(fixture.app, (await git(fixture.app, 'rev-parse', '--git-path', 'astrid-local-update.json')).stdout.trim()), 'utf8'));
+  const body = JSON.stringify({ requestId });
+  const response = await fetch(receipt.page.url, { method: 'POST', headers: {
+    Origin: receipt.origin, Authorization: `Bearer ${token ?? receipt.page.token}`, 'Content-Type': 'application/json',
+  }, body });
+  return { receipt, status: response.status, body: await response.json() };
+}
+
+test('the page route updates through the launcher, restarts the fake editor on the new build and rotates its secret', { timeout: 60_000 }, async (t) => {
+  const fixture = await createFixture(); t.after(fixture.close);
+  const started = launch(fixture); t.after(started.stop);
+  await started.waitFor(() => started.output.stdout.includes('Local App:'));
+  await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
+  const first = JSON.parse(await readFile(join(fixture.app, (await git(fixture.app, 'rev-parse', '--git-path', 'astrid-local-update.json')).stdout.trim()), 'utf8'));
+  const wrongSecret = await pageUpdate(fixture, 'wrong');
+  assert.equal(wrongSecret.status, 403);
+  assert.equal(await gitSha(fixture.app), fixture.oldSha);
+
+  const result = await pageUpdate(fixture);
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.result.status, 'updated');
+  assert.equal(await gitSha(fixture.app), fixture.targetSha);
+  assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.targetSha, 2), { app: fixture.targetSha, release: 2 });
+  const starts = (await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.equal(starts.length, 2);
+  assert.notEqual(starts[0].pid, starts[1].pid);
+  assert.throws(() => process.kill(starts[0].pid, 0), { code: 'ESRCH' }, 'the old editor was stopped before the update');
+  const after = JSON.parse(await readFile(join(fixture.app, (await git(fixture.app, 'rev-parse', '--git-path', 'astrid-local-update.json')).stdout.trim()), 'utf8'));
+  assert.notEqual(after.page.token, first.page.token, 'restarting the editor rotates the page secret');
+  assert.equal((await pageUpdate(fixture, first.page.token, 'b2'.repeat(16))).status, 403);
+  await started.stop();
+});
+
+test('the page route refuses overlapping local edits as dirty and leaves the tree and editor alone', { timeout: 60_000 }, async (t) => {
+  const fixture = await createFixture(); t.after(fixture.close);
+  const started = launch(fixture); t.after(started.stop);
+  await started.waitFor(() => started.output.stdout.includes('Local App:'));
+  await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
+  await writeFile(join(fixture.app, 'public/install-manifest.json'), '{"release":1,"edited":true}\n');
+  const refused = await pageUpdate(fixture);
+  assert.equal(refused.status, 409, JSON.stringify(refused.body));
+  assert.equal(refused.body.refusal, 'dirty');
+  assert.equal(refused.body.code, 'local_edits_conflict');
+  assert.equal(await gitSha(fixture.app), fixture.oldSha);
+  assert.equal(await readFile(join(fixture.app, 'public/install-manifest.json'), 'utf8'), '{"release":1,"edited":true}\n');
+  assert.equal((await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').length, 1, 'the editor was not restarted');
+  await started.stop();
+});

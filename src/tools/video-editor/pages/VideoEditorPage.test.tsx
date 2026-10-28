@@ -219,6 +219,7 @@ vi.mock("@/integrations/astrid/nativeEditorConnection.ts", () => ({assertNativeE
 
 vi.mock("@/integrations/runtime/RuntimeConnectionProvider.tsx", () => ({
   useRuntimeConnection: () => ({ connectedBefore: true }),
+  useRuntimeConnectionSafe: () => ({ connectedBefore: true }),
 }));
 
 vi.mock("@/shared/contexts/AuthContext.tsx", () => ({

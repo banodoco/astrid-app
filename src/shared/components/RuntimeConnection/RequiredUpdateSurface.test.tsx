@@ -13,6 +13,7 @@ vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => 'h
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/integrations/runtime/RuntimeConnectionProvider.tsx')>()),
   useRuntimeConnection: () => connectionRef.current,
+  useRuntimeConnectionSafe: () => connectionRef.current,
 }));
 vi.mock('./AppBuildProvider.tsx', () => ({ usePageStale: () => false }));
 

@@ -3,12 +3,21 @@ import { cp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { test } from 'node:test';
+import { test as nodeTest } from 'node:test';
 import { createPinnedRepo, failure, fixture, observe, preparation, repo, terminalInterrupt } from './fixture.mjs';
 import { declaredSkip } from '../../scripts/quality/declared-skip.mjs';
 
 // CI selects pwsh on POSIX and both Windows PowerShell 5.1 and pwsh on Windows.
 const powershell = process.env.ASTRID_TEST_PWSH || 'pwsh';
+
+// Every test here spawns PowerShell. Without one on this machine each test is a declared skip (skipRegistry.mjs
+// 'pwsh-unavailable'); CI's installer-powershell job installs pwsh first, so the same tests run there.
+const pwshSkip = { skip: declaredSkip('pwsh-unavailable') };
+function test(name, options, fn) {
+  if (typeof options === 'function') return nodeTest(name, pwshSkip, options);
+  const { skip } = options;
+  return nodeTest(name, { ...options, ...(skip ? {} : pwshSkip) }, fn);
+}
 
 async function assertLocalRequirement(localInstall, expectedPath, sha, suffix = '') {
   const requirement = localInstall.find((argument) => argument.startsWith('git+') && argument.endsWith(`@${sha}${suffix}`));

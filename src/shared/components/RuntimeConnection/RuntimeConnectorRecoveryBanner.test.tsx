@@ -55,6 +55,7 @@ describe('RuntimeConnectorRecoveryBanner overlay and quiet retry', () => {
 
 describe('RuntimeConnectorRecoveryBanner', () => {
   it('keeps the recovery hard-card install action and routes Details to Settings Updates', () => {
+    harness.origin = 'https://astrid.test';
     const onOpen = vi.fn();
     function Capture() {
       useAppEventListener('openSettings', onOpen);

@@ -9,18 +9,12 @@ import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { useRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { RuntimeAuthenticationError, RuntimeCompatibilityError, RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { describeFailure, healthCheckCommand, RUNTIME_CONNECTION_COPY, runtimeLogDirectory } from '@/shared/components/RuntimeConnection/copy.ts';
-import { CopyInstallCommand } from './CopyInstallCommand.tsx';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { usePageStale } from './AppBuildProvider.tsx';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
-import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
-
-function openUpdateDetails() {
-  const url = new URL(window.location.href);
-  url.searchParams.set('settings', 'updates');
-  window.history.pushState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-  dispatchAppEvent('openSettings', { tab: 'updates' });
-}
+import { useRuntimeConnectionSafe } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
+import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 
 export interface RuntimeConnectorRecoveryBannerProps {
   readonly retrying?: boolean;
@@ -128,10 +122,11 @@ export function RuntimeConnectorRecoveryBanner({
   const safeUrl = safeConnectionUrl(connectionUrl);
   const hosted = runtimeOrigin() !== '';
   const pageStale = usePageStale();
+  const operation = useInstallerUpdate(useRuntimeConnectionSafe());
   const failure = describeFailure(error);
   const restartBrief = buildWorkspaceRestartBrief({ error, connectionUrl: safeUrl, projectId, timelineId });
   const authenticationFailed = error instanceof RuntimeAuthenticationError;
-  const updateResolution = resolveUpdate({ pageStale, compatibility: error instanceof RuntimeCompatibilityError ? error : undefined });
+  const updateResolution = resolveUpdate({ ...operation.releaseStatus?.resolution, runtime: error instanceof RuntimeUnavailableError ? 'unreachable' : undefined, pageStale, compatibility: error instanceof RuntimeCompatibilityError ? error : undefined, installType: operation.installType, updateNowAvailable: operation.available });
   const schemaUpdate = updateResolution.card === 'update';
   const typedFailure = authenticationFailed || error instanceof RuntimeCompatibilityError || error instanceof RuntimeUnavailableError && (error.failureKind === "admission" || error.failureKind === "storage");
   const visibleFailureSummary = failureSummary?.trim()
@@ -163,22 +158,23 @@ export function RuntimeConnectorRecoveryBanner({
   const action = 'recoveryAction' in error && typeof error.recoveryAction === 'string'
     ? error.recoveryAction
     : 'Retry the connection to your configured Astrid Runtime.';
+  if (updateResolution.card === 'newer') return <div role="status" data-testid="runtime-connector-alert" className="fixed left-1/2 top-16 z-[100110] -translate-x-1/2 rounded-xl border bg-background p-4 shadow-xl">{updateResolution.body}</div>;
   if (updateResolution.card === 'reload') return (
     <div role="alert" data-testid="runtime-connector-alert" className="fixed left-1/2 top-16 z-[100110] w-[min(56rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-border bg-background p-4 shadow-xl sm:flex sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0 sm:max-w-sm">
         <p className="text-sm font-medium text-foreground">{updateResolution.title}</p>
         <p className="mt-1 text-xs text-muted-foreground">{updateResolution.body}</p>
       </div>
-      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><Button type="button" variant="outline" onClick={() => window.location.reload()}>Reload</Button></div>
+      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><UpdateResolutionActions resolution={updateResolution} operation={operation} /></div>
     </div>
   );
   if (schemaUpdate) return (
     <div role="alert" data-testid="runtime-connector-alert" className="fixed left-1/2 top-16 z-[100110] w-[min(56rem,calc(100%-2rem))] -translate-x-1/2 rounded-xl border border-border bg-background p-4 shadow-xl sm:flex sm:items-start sm:justify-between sm:gap-6">
       <div className="min-w-0 sm:max-w-sm">
         <p className="text-sm font-medium text-foreground">Update Astrid</p>
-        <p className="mt-1 text-xs text-muted-foreground">This Runtime schema is not supported by this editor. Your draft and undo history stay open.</p>
+        <p className="mt-1 text-xs text-muted-foreground">{updateResolution.body} Your draft and undo history stay open.</p>
       </div>
-      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><CopyInstallCommand mode="update" /><Button type="button" variant="link" size="sm" onClick={openUpdateDetails}>Details</Button></div>
+      <div className="mt-3 w-full sm:mt-0 sm:max-w-sm"><UpdateResolutionActions resolution={updateResolution} operation={operation} /></div>
     </div>
   );
   if (hosted) return (

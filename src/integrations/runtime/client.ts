@@ -186,6 +186,86 @@ export class RuntimeCompatibilityError extends Error {
 
 export type RuntimeConnectorError = RuntimeAuthenticationError | RuntimeUnavailableError | RuntimeCompatibilityError;
 
+export type InstallerUpdateStatusState = 'none' | 'active' | 'terminal' | 'recovery-needed';
+export type InstallerUpdateOutcome = 'updated' | 'rolled_back' | 'failed';
+
+/** Raw, read-only installer status returned by the Runtime producer. */
+export interface InstallerUpdateStatus {
+  available: boolean;
+  state: InstallerUpdateStatusState;
+  operation_id?: string;
+  result?: string;
+  outcome?: InstallerUpdateOutcome;
+  target_release?: number | string;
+  accepted_at?: number | string;
+  log_path?: string;
+  reason?: string;
+}
+
+/** The producer's update capability is only whether its transient launcher exists. */
+export type InstallerUpdateCapability = Pick<InstallerUpdateStatus, 'available' | 'reason'>;
+
+/** Successful durable acceptance of an update request. */
+export interface InstallerUpdateAcceptance {
+  accepted: true;
+  state: 'accepted';
+  operation_id: string;
+  message: string;
+}
+
+/** Startup identity exposed by the authenticated health endpoint. */
+export interface InstallerUpdateHealth extends Health {
+  identity?: { managed_by?: string | null; release?: number; [key: string]: unknown } | null;
+}
+
+export interface InstallerUpdateEligibilityRefusal {
+  reason: string;
+  message: string;
+}
+
+function objectValue(value: unknown): value is Record<string, unknown> {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function validateInstallerUpdateStatus(value: unknown): InstallerUpdateStatus {
+  if (!objectValue(value) || typeof value.available !== 'boolean'
+    || !['none', 'active', 'terminal', 'recovery-needed'].includes(String(value.state))) {
+    throw new Error('invalid installer update status response');
+  }
+  if (value.operation_id !== undefined && typeof value.operation_id !== 'string') throw new Error('invalid installer update operation id');
+  if (value.result !== undefined && typeof value.result !== 'string') throw new Error('invalid installer update result');
+  if (value.outcome !== undefined && !['updated', 'rolled_back', 'failed'].includes(String(value.outcome))) throw new Error('invalid installer update outcome');
+  if (value.target_release !== undefined && typeof value.target_release !== 'string' && typeof value.target_release !== 'number') throw new Error('invalid installer update target release');
+  if (value.accepted_at !== undefined && typeof value.accepted_at !== 'string' && typeof value.accepted_at !== 'number') throw new Error('invalid installer update acceptance time');
+  if (value.log_path !== undefined && typeof value.log_path !== 'string') throw new Error('invalid installer update log path');
+  if (value.reason !== undefined && typeof value.reason !== 'string') throw new Error('invalid installer update reason');
+  return value as unknown as InstallerUpdateStatus;
+}
+
+function validateInstallerUpdateAcceptance(value: unknown): InstallerUpdateAcceptance {
+  if (!objectValue(value) || value.accepted !== true || value.state !== 'accepted'
+    || typeof value.operation_id !== 'string' || !/^[0-9a-f]{32}$/.test(value.operation_id)
+    || typeof value.message !== 'string') {
+    throw new Error('invalid installer update acceptance response');
+  }
+  return value as unknown as InstallerUpdateAcceptance;
+}
+
+function validateInstallerUpdateHealth(value: unknown): InstallerUpdateHealth {
+  if (!objectValue(value) || (value.status !== 'ok' && value.status !== 'degraded')
+    || value.protocol !== PROTOCOL || typeof value.schema_digest !== 'string'
+    || typeof value.runtime_instance_id !== 'string' || typeof value.runtime_session_id !== 'string'
+    || typeof value.runtime_epoch !== 'number'
+    || (value.identity !== undefined && value.identity !== null && !objectValue(value.identity))) {
+    throw new Error('invalid installer update health response');
+  }
+  const identity = objectValue(value.identity) ? value.identity : undefined;
+  return {
+    ...value,
+    ...(typeof identity?.release === 'number' ? { release: identity.release } : {}),
+  } as unknown as InstallerUpdateHealth;
+}
+
 export function isRuntimeUnavailableFailure(error: unknown): boolean {
   if (error instanceof RuntimeUnavailableError) return true;
   if (!(error instanceof ApiError)) return false;
@@ -571,6 +651,91 @@ export class AstridRuntimeClient {
       }
       throw error;
     }
+  }
+
+  /** Installer routes use the authenticated connector directly and deliberately skip workspace negotiation. */
+  private async installerUpdateRequest(method: 'GET' | 'POST', path: string): Promise<Uint8Array> {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (this.token) headers.Authorization = `Bearer ${this.token}`;
+    let response: { status: number; headers: Record<string, string>; body: Uint8Array };
+    if (this.transport) {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const abortCaller = () => controller.abort(this.signal?.reason);
+      if (this.signal?.aborted) abortCaller();
+      else this.signal?.addEventListener('abort', abortCaller, { once: true });
+      const interrupted = new Promise<never>((_, reject) => {
+        controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true });
+      });
+      try {
+        if (controller.signal.aborted) throw controller.signal.reason;
+        response = await Promise.race([this.transport(method, path, headers, undefined), interrupted]);
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        this.signal?.removeEventListener('abort', abortCaller);
+      }
+    } else {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(new DOMException(method === 'GET' ? 'Installer update read timed out' : 'Installer update acknowledgement timed out; check status before another action', 'TimeoutError')), method === 'GET' ? 8000 : 30_000);
+      const abortCaller = () => controller.abort(this.signal?.reason);
+      if (this.signal?.aborted) abortCaller();
+      else this.signal?.addEventListener('abort', abortCaller, { once: true });
+      try {
+        const fetched = await fetch(`${this.baseUrl.replace(/\/$/, '')}${path}`, {
+          method,
+          headers,
+          signal: controller.signal,
+          ...(method === 'GET' ? { cache: 'no-store' as const } : {}),
+        });
+        response = {
+          status: fetched.status,
+          headers: Object.fromEntries(fetched.headers),
+          body: new Uint8Array(await fetched.arrayBuffer()),
+        };
+      } finally {
+        if (timeout !== undefined) clearTimeout(timeout);
+        this.signal?.removeEventListener('abort', abortCaller);
+      }
+    }
+    const expected = method === 'POST' ? 202 : 200;
+    if (response.status !== expected) {
+      try {
+        const value = JSON.parse(new TextDecoder().decode(response.body)) as Record<string, unknown>;
+        throw new ApiError(
+          response.status,
+          typeof value.code === 'string' ? value.code : 'http_error',
+          typeof value.message === 'string' ? value.message : `HTTP ${response.status}`,
+          typeof value.request_id === 'string' ? value.request_id : '',
+          objectValue(value.details) ? value.details : {},
+        );
+      } catch (error) {
+        if (error instanceof ApiError) throw error;
+        throw new ApiError(response.status, 'http_error', `HTTP ${response.status}`);
+      }
+    }
+    return response.body;
+  }
+
+  /** Read status without schema handshake, and bypass all browser/proxy caches. */
+  async readInstallerUpdateStatus(): Promise<InstallerUpdateStatus> {
+    return validateInstallerUpdateStatus(JSON.parse(new TextDecoder().decode(
+      await this.installerUpdateRequest('GET', '/v1/update/status'),
+    )) as unknown);
+  }
+
+  /** Read the authenticated startup identity needed to classify the installation. */
+  async readInstallerUpdateHealth(): Promise<InstallerUpdateHealth> {
+    return validateInstallerUpdateHealth(JSON.parse(new TextDecoder().decode(
+      await this.installerUpdateRequest('GET', '/v1/health'),
+    )) as unknown);
+  }
+
+  /** Accept one update request. A lost acknowledgement is surfaced; this POST is never retried. */
+  async startInstallerUpdate(): Promise<InstallerUpdateAcceptance> {
+    if (this.readOnly) throw new RuntimeCompatibilityError('identity', 'A discovery client cannot start an update.', this.baseUrl);
+    return validateInstallerUpdateAcceptance(JSON.parse(new TextDecoder().decode(
+      await this.installerUpdateRequest('POST', '/v1/update'),
+    )) as unknown);
   }
 
   async listProjects(): Promise<Project[]> {

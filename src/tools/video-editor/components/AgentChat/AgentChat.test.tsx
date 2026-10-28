@@ -10,6 +10,7 @@ import type { LocalAgentChoice } from '@/integrations/astrid/localAgents.ts';
 import { AgentChatPanel as AgentChatPanelWithoutProvider } from './AgentChat';
 import { RuntimeConnectionProvider, useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { BridgeContractError } from '@/tools/video-editor/data/bridgeContract.ts';
+import { flushDraftsBeforeReload } from '@/shared/lib/updates/draftSafeReload.ts';
 
 // A tiny store standing in for the bridge's pending composer prompt, so a test can click a draft button twice.
 const composerPrompt = vi.hoisted(() => {
@@ -1815,6 +1816,134 @@ describe('project-only Astrid chat', () => {
 
 
 describe('project draft consumer ownership', () => {
+  it('flushes an unsent composer through the mounted draft guard before reload', async () => {
+    const state = createState();
+    state.activeSessionData.status = 'processing';
+    mockFromState(state);
+    const view = renderAgentChat();
+    try {
+      const composer = await getInput();
+      fireEvent.change(composer, { target: { value: 'Keep this unsent chat draft' } });
+
+      await act(async () => { await flushDraftsBeforeReload(); });
+
+      expect(state.projectChats['project-1'].draft.text).toBe('Keep this unsent chat draft');
+      expect(state.sendMessage.mutateAsync).not.toHaveBeenCalled();
+    } finally { view.unmount(); }
+  });
+
+  it('keeps a held draft write behind the reload barrier after the chat unmounts', async () => {
+    const state = createState();
+    state.activeSessionData.status = 'processing';
+    mockFromState(state);
+    let release!: () => void;
+    let started = false;
+    mocks.useSaveProjectDraft.mockImplementation((projectId: string | null) => ({ mutateAsync: vi.fn((input: {
+      text: string; queuedMessages: Array<{ id: string; text: string; session_id: string; attachments?: unknown[] }>;
+    }) => new Promise((resolve) => {
+      started = true;
+      release = () => {
+        const chat = state.projectChats[projectId as 'project-1' | 'project-2'];
+        chat.draft = { text: input.text, revision: chat.draft.revision + 1, queued_messages: input.queuedMessages };
+        resolve(chat);
+      };
+    })) }));
+    const view = renderAgentChat();
+    const composer = await getInput();
+    fireEvent.change(composer, { target: { value: 'unmounted but still owned' } });
+    await waitFor(() => expect(started).toBe(true));
+    view.unmount();
+
+    let admitted = false;
+    const barrier = flushDraftsBeforeReload().then(() => { admitted = true; });
+    await Promise.resolve();
+    expect(admitted).toBe(false);
+    await act(async () => { release(); });
+    await barrier;
+    expect(admitted).toBe(true);
+    expect(state.projectChats['project-1'].draft.text).toBe('unmounted but still owned');
+    expect(state.sendMessage.mutateAsync).not.toHaveBeenCalled();
+  });
+
+  it('retains a failed queued draft across unmount and durably retries it on reopen without sending it', async () => {
+    const state = createState();
+    state.activeSessionData.status = 'processing';
+    state.sessionsData = [{ id: 'session-1', status: 'processing' }];
+    mockFromState(state);
+    let allowSave = false;
+    let attempts = 0;
+    mocks.useSaveProjectDraft.mockImplementation((projectId: string | null) => ({ mutateAsync: vi.fn(async (input: {
+      text: string; queuedMessages: Array<{ id: string; text: string; session_id: string; attachments?: unknown[] }>;
+    }) => {
+      attempts++;
+      if (!allowSave) throw new Error('draft store unavailable');
+      const chat = state.projectChats[projectId as 'project-1' | 'project-2'];
+      chat.draft = { text: input.text, revision: chat.draft.revision + 1, queued_messages: input.queuedMessages };
+      return chat;
+    }) }));
+    const first = renderAgentChat();
+    const composer = await getInput();
+    await queueMessage(composer, 'keep this queued message');
+    expect(getQueuedTexts()).toContain('keep this queued message');
+    await waitFor(() => expect(attempts).toBeGreaterThan(0));
+    first.unmount();
+
+    await expect(flushDraftsBeforeReload()).rejects.toThrow('draft store unavailable');
+    expect(state.projectChats['project-1'].draft.queued_messages).toEqual([]);
+    allowSave = true;
+    const reopened = renderAgentChat();
+    await waitFor(() => expect(getQueuedTexts()).toContain('keep this queued message'));
+    await act(async () => { await flushDraftsBeforeReload(); });
+    expect(state.projectChats['project-1'].draft.queued_messages).toHaveLength(1);
+    expect(state.projectChats['project-1'].draft.queued_messages[0]).toEqual(expect.objectContaining({ text: 'keep this queued message', session_id: 'session-1' }));
+    expect(state.sendMessage.mutateAsync).not.toHaveBeenCalled();
+    reopened.unmount();
+  });
+
+  it('keeps an older project write owned after switching projects and saves a later revert last', async () => {
+    const state = createState();
+    state.projectChats['project-1'].draft.text = 'saved A';
+    state.projectChats['project-2'].draft.text = 'saved B';
+    state.activeSessionData.status = 'processing';
+    mockFromState(state);
+    let currentProject = 'project-1';
+    const context = (projectId: string) => ({ tool: 'video-editor' as const, projectId, projectSlug: projectId, timelineId: null, timelineName: null });
+    mocks.useAgentChatBridge.mockImplementation(() => ({ timelineId: null, editorContext: context(currentProject) }));
+    const pending: Array<() => void> = [];
+    mocks.useSaveProjectDraft.mockImplementation((projectId: string | null) => ({ mutateAsync: vi.fn((input: {
+      text: string; queuedMessages: Array<{ id: string; text: string; session_id: string; attachments?: unknown[] }>;
+    }) => new Promise((resolve) => {
+      pending.push(() => {
+        const chat = state.projectChats[projectId as 'project-1' | 'project-2'];
+        chat.draft = { text: input.text, revision: chat.draft.revision + 1, queued_messages: input.queuedMessages };
+        resolve(chat);
+      });
+    })) }));
+    const view = renderAgentChat();
+    const composer = await getInput();
+    await waitFor(() => expect(composer).toHaveValue('saved A'));
+    fireEvent.change(composer, { target: { value: 'older B' } });
+    await waitFor(() => expect(pending).toHaveLength(1));
+    fireEvent.change(composer, { target: { value: 'saved A' } });
+    currentProject = 'project-2';
+    rerenderAgentChat(view.rerender);
+    await waitFor(() => expect(screen.getByRole('textbox')).toHaveValue('saved B'));
+
+    let admitted = false;
+    const barrier = flushDraftsBeforeReload().then(() => { admitted = true; });
+    await Promise.resolve();
+    expect(admitted).toBe(false);
+    await act(async () => { pending[0]!(); });
+    await waitFor(() => expect(pending).toHaveLength(2));
+    expect(admitted).toBe(false);
+    await act(async () => { pending[1]!(); });
+    await barrier;
+    expect(state.projectChats['project-1'].draft.text).toBe('saved A');
+    expect(state.projectChats['project-2'].draft.text).toBe('saved B');
+    expect(state.sendMessage.mutateAsync).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
   it('hydrates each project draft/queue, flushes to its original owner on switch, and reopens retained local text', async () => {
     vi.clearAllMocks();
     mocks.panesState.isTasksPaneLocked = true;

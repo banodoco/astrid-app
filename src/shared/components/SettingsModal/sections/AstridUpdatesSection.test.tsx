@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { connectionMock, readStatusMock, hostedCheckMock, localCheckMock, originMock } = vi.hoisted(() => ({ connectionMock: { value: null as unknown }, readStatusMock: vi.fn(), hostedCheckMock: vi.fn(), localCheckMock: vi.fn(), originMock: { value: 'https://astrid.test' } }));
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({ useRuntimeConnection: () => connectionMock.value }));
-vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readStatus = readStatusMock; } }));
+vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readInstallerUpdateHealth = async () => (await readStatusMock()).health; } }));
 vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => originMock.value, runtimeApiBase: () => 'http://127.0.0.1:17340/api/runtime' }));
 vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: hostedCheckMock, checkLocalUpdate: localCheckMock }));
 

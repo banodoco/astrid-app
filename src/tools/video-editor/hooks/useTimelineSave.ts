@@ -386,6 +386,8 @@ export function useTimelineSave(
     saveStatus: recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty' : persistence.saveStatus,
     schemaIncompatible: persistence.schemaIncompatible,
     flushPendingSave: persistence.flushPendingSave,
+    preserveTimelineDraftForReload: persistence.preserveTimelineDraftForReload,
+    isTimelineDraftDurableForReload: persistence.isTimelineDraftDurableForReload,
     registrationOwner,
     setSelectedTrackId: commit.setSelectedTrackId,
     applyEdit: commit.applyEdit,

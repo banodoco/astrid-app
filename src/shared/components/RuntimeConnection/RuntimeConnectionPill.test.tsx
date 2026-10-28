@@ -79,7 +79,7 @@ describe('RuntimeConnectionPill', () => {
     expect(isRecoveryCardShowing()).toBe(true);
 
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-    expect(onReload).toHaveBeenCalledOnce();
+    await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
   });
 
   it('another identity behind the door after connecting is the same restart card, not a second message', async () => {

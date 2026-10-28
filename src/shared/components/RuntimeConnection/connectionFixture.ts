@@ -17,7 +17,6 @@ export function connectionFor(state: RuntimeConnectionValue['state'], overrides:
     realmName: state.status === 'connected' ? state.realm.display_name : null,
     schemaDigest: null,
     localServiceOutOfDate: false,
-    managedByPinokio: null,
     setLocalServiceOutOfDate: () => {},
     connect: () => {},
     askUnanswered: false,

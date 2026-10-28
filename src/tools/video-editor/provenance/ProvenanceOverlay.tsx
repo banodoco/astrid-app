@@ -47,14 +47,15 @@ function AssetRow({ record, selected, onSelect }: {
   );
 }
 
-export function ProvenanceOverlay({ open, onOpenChange, projectId, projectName }: ProvenanceOverlayProps) {
-  const { records, total, limits, timelinesScanned, isLoading, error, refetch } = useProvenance(projectId, open);
+/**
+ * Queries live here, and this mounts only while the sheet is open: the header that
+ * carries the trigger renders in tests and in other tools without a QueryClient, so
+ * an always-mounted panel would take the whole page down.
+ */
+function ProvenancePanel({ projectId, projectName }: Omit<ProvenanceOverlayProps, 'open' | 'onOpenChange'>) {
+  const { records, total, limits, timelinesScanned, isLoading, error, refetch } = useProvenance(projectId, true);
   const [query, setQuery] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!open) { setQuery(''); setSelectedId(null); }
-  }, [open]);
 
   useEffect(() => {
     if (selectedId && records.some(record => record.objectId === selectedId)) return;
@@ -73,17 +74,8 @@ export function ProvenanceOverlay({ open, onOpenChange, projectId, projectName }
   const selected = filtered.find(record => record.objectId === selectedId) ?? filtered[0] ?? null;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="grid h-[84vh] w-[min(1120px,94vw)] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:rounded-xl"
-        aria-label="Asset provenance"
-      >
-        <DialogTitle className="sr-only">Asset provenance</DialogTitle>
-        <DialogDescription className="sr-only">
-          Where each asset in this project came from, what produced it, and where it is used.
-        </DialogDescription>
-
-        <header className="flex flex-wrap items-center gap-3 border-b border-border py-3 pl-5 pr-12">
+    <>
+      <header className="flex flex-wrap items-center gap-3 border-b border-border py-3 pl-5 pr-12">
           <ShieldCheck className="h-4 w-4 text-primary" aria-hidden="true" />
           <div className="min-w-0">
             <h2 className="text-[13px] font-semibold leading-tight">Provenance</h2>
@@ -159,6 +151,22 @@ export function ProvenanceOverlay({ open, onOpenChange, projectId, projectName }
             )}
           </div>
         </div>
+    </>
+  );
+}
+
+export function ProvenanceOverlay({ open, onOpenChange, projectId, projectName }: ProvenanceOverlayProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="grid h-[84vh] w-[min(1120px,94vw)] max-w-none grid-rows-[auto_minmax(0,1fr)] gap-0 overflow-hidden p-0 sm:rounded-xl"
+        aria-label="Asset provenance"
+      >
+        <DialogTitle className="sr-only">Asset provenance</DialogTitle>
+        <DialogDescription className="sr-only">
+          Where each asset in this project came from, what produced it, and where it is used.
+        </DialogDescription>
+        {open ? <ProvenancePanel projectId={projectId} projectName={projectName} /> : null}
       </DialogContent>
     </Dialog>
   );

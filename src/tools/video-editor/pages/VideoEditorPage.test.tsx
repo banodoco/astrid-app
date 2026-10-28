@@ -224,6 +224,7 @@ vi.mock("@/integrations/runtime/RuntimeConnectionProvider.tsx", () => ({
 
 vi.mock("@/shared/contexts/AuthContext.tsx", () => ({
   useAuth: () => state.auth,
+  useAuthSafe: () => state.auth,
 }));
 
 vi.mock("@/shared/contexts/ProjectContext.tsx", () => ({
@@ -1278,7 +1279,10 @@ describe("VideoEditorPage", () => {
     act(() => state.runtimeOnError?.(new RuntimeCompatibilityError('schema', 'digest mismatch', '/api/runtime')));
     expect(await screen.findByTestId('runtime-connector-alert')).toBeInTheDocument();
     expect(document.body).toHaveTextContent('Update Astrid');
-    expect(document.body).toHaveTextContent('Copy for your agent');
+    // This test runs without a Runtime origin, so it is a source checkout: the
+    // banner must point at the checkout update and never offer an installer command.
+    expect(document.body).toHaveTextContent('update your checkouts');
+    expect(screen.queryByRole('button', { name: 'Copy for your agent' })).toBeNull();
     expect(screen.getByTestId('video-editor-provider')).toBe(editor);
     expect(editor).toBeVisible();
     expect(state.providerMounts).toBe(mounts);

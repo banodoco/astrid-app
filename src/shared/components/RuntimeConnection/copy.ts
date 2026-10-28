@@ -264,6 +264,20 @@ export function agentInstructions(mode: CommandMode, pageOrigin: string, localBu
 }
 
 /**
+ * The handoff for a fully local Astrid: its own checkout updates itself with `npm run update`, and the installer is
+ * never part of it. A refusal the command names is resolved without discarding edits.
+ */
+export function localUpdateInstructions(command: string, pageOrigin: string): string {
+  return [
+    `Please update my fully local Astrid so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
+    `Run \`${command}\` in the running Astrid checkout, the clone this page is served from.`,
+    'If it refuses, resolve the refusal it names (for example uncommitted edits, local commits that block a fast-forward, or an update already running) without discarding my edits. Keep my uncommitted changes and commits; do not reset, clean or overwrite them.',
+    'Do not reinstall Astrid or replace my workspace, projects, media, credentials or agent instructions.',
+    'When it finishes, confirm the page shows Connected. If anything did not finish, tell me the actual result.',
+  ].join('\n\n');
+}
+
+/**
  * The handoff for a running Astrid that refuses this page's origin: no install, no reset, a check the agent can run,
  * and the one fix there is (update) when the page is astrid.haus.
  */
@@ -356,6 +370,8 @@ export interface RuntimeConnectionCopy {
     readonly terminalAlternative: string;
     /** Update only, where the installer is one of two routes. */
     readonly terminalAlternativeUpdate: string;
+    /** Update of a fully local Astrid: the command runs in its checkout. */
+    readonly terminalAlternativeLocal: string;
   };
   /** Next to the compose controls the hosted build disables. */
   readonly composeDisabled: string;
@@ -487,6 +503,7 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
     commandCopied: 'Command copied',
     terminalAlternative: 'Or run this yourself in a terminal:',
     terminalAlternativeUpdate: 'No coding agent? Run this in a terminal:',
+    terminalAlternativeLocal: 'No coding agent? Run this in a terminal in the Astrid checkout:',
   },
 
   composeDisabled: "Making new images isn't on this page yet.",

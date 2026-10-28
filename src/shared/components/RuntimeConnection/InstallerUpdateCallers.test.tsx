@@ -139,7 +139,9 @@ describe('installer update callers', () => {
     expect(statusReads.length).toBeGreaterThan(0);
     expect(statusReads.every((call) => call.method === 'GET')).toBe(true);
     expect(screen.getAllByRole('button', { name: 'Copy for your agent' }).length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole('button', { name: 'Check for updates' }));
+    const checkForUpdates = await screen.findByRole('button', { name: 'Check for updates' });
+    expect(checkForUpdates).toBeEnabled();
+    fireEvent.click(checkForUpdates);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled());
     expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
 

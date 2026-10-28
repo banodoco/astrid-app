@@ -82,7 +82,9 @@ describe('SettingsModal Astrid status', () => {
     expect(within(section).getByText(STATUS_COPY.workspaceName).closest('div')).toHaveTextContent('My Studio');
     expect(within(section).getByText('Runtime')).toHaveAttribute('data-state', 'pass');
     expect(section.querySelector('[data-check="workspace"]')).toHaveAttribute('data-state', 'pass');
-    expect(readStatusMock).toHaveBeenCalledTimes(2);
+    // One status read per Settings open. The Updates section reads installer health instead (it must also work
+    // when the Runtime's schema differs, which readStatus rejects), so it no longer adds a second status read.
+    expect(readStatusMock).toHaveBeenCalledTimes(1);
     expect(within(section).queryByText('Tools')).toBeNull();
     expect(within(section).queryByText(COPY.updateNeeded.title)).toBeNull();
   });

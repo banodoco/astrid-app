@@ -14,7 +14,10 @@ const runtimeMock = vi.hoisted(() => ({
 vi.mock('@/tools/video-editor/hooks/useRuntimeEditorDiscovery.ts', () => ({
   useRuntimeEditorDiscovery: () => runtimeMock.discovery,
 }));
-vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({ useRuntimeConnection: () => runtimeMock.connection }));
+vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({
+  useRuntimeConnection: () => runtimeMock.connection,
+  useRuntimeConnectionSafe: () => runtimeMock.connection,
+}));
 vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => 'https://astrid.test' }));
 vi.mock('@/shared/components/RuntimeConnection/AppBuildProvider.tsx', () => ({ usePageStale: () => runtimeMock.pageStale }));
 vi.mock('@/shared/lib/updates/pageUpdateStatus.ts', () => ({

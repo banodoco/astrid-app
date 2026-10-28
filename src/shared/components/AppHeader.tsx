@@ -9,7 +9,7 @@ import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import { ProjectTimelinePicker } from '@/shared/components/ProjectTimelineSelectors.tsx';
 import { ProjectHeaderActions } from '@/shared/components/ProjectHeaderActions.tsx';
 import { useRuntimeEditorDiscovery } from '@/tools/video-editor/hooks/useRuntimeEditorDiscovery.ts';
-import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
+import { useRuntimeConnectionSafe } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { loadPageUpdateStatus, resolvePageUpdateStatus } from '@/shared/lib/updates/pageUpdateStatus.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
@@ -97,23 +97,27 @@ export function AppHeader({
   const isToolsNavigation = navigationMode === 'tools';
   const navigationLabel = isToolsNavigation ? 'Tools' : 'Home';
   const NavigationIcon = isToolsNavigation ? LayoutGrid : Home;
-  const connection = useRuntimeConnection();
+  // The onboarding tour renders this header with no Runtime provider above it. With no connection there is no
+  // update to show, so the header stays usable instead of throwing.
+  const connection = useRuntimeConnectionSafe();
+  const connected = connection?.isConnected ?? false;
+  const managedByPinokio = connection?.managedByPinokio ?? false;
   const pageStale = usePageStale();
   const local = import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
   const hosted = runtimeOrigin() !== '';
   const [updateAvailable, setUpdateAvailable] = useState(false);
 
   useEffect(() => {
-    if (!connection.isConnected || (!local && !hosted)) return undefined;
+    if (!connected || (!local && !hosted)) return undefined;
     let active = true;
-    const installType = connection.managedByPinokio ? 'pinokio' : local ? 'fully-local' : 'installer';
+    const installType = managedByPinokio ? 'pinokio' : local ? 'fully-local' : 'installer';
     void loadPageUpdateStatus(local).then((status) => {
       if (!active || !status) return;
       const { card } = resolvePageUpdateStatus(status, installType);
       setUpdateAvailable(card === 'notice' || card === 'update');
     });
     return () => { active = false; };
-  }, [connection.isConnected, connection.managedByPinokio, hosted, local]);
+  }, [connected, managedByPinokio, hosted, local]);
 
   const openUpdates = () => {
     const url = new URL(window.location.href);

@@ -19,22 +19,34 @@ export function validLocalStatusRequest(method: string | undefined, url: string 
   } catch { return false; }
 }
 
-function readManifest(raw: string): { release: number; requiredRelease?: number; requiredReason?: string } {
-  const manifest = JSON.parse(raw) as { release?: unknown; required?: { release?: unknown; reason?: unknown } };
+function readLocalRelease(raw: string): number {
+  const manifest = JSON.parse(raw) as { release?: unknown };
   const value = manifest.release === undefined ? 0 : manifest.release;
   if (!Number.isSafeInteger(value) || (value as number) < 0) throw new Error('Local install manifest has no valid release');
-  const requiredRelease = manifest.required?.release;
-  if (requiredRelease !== undefined && (!Number.isSafeInteger(requiredRelease) || (requiredRelease as number) < 0 || typeof manifest.required?.reason !== 'string' || !manifest.required.reason)) {
-    throw new Error('Local install manifest required update was invalid');
+  return value as number;
+}
+
+// The required update is published on astrid.haus, not in the checkout: a checkout pinned with --require
+// carries required.release <= its own release, so only the served manifest can require an update.
+function servedRequirement(raw: unknown, servedRelease: number): { requiredRelease?: number; requiredReason?: string } {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) throw new Error('Astrid install manifest response was invalid');
+  const manifest = raw as { release?: unknown; required?: unknown };
+  const release = manifest.release === undefined ? 0 : manifest.release;
+  if (release !== servedRelease) throw new Error('Astrid install manifest release does not match build.json');
+  if (manifest.required === undefined) return {};
+  if (!manifest.required || typeof manifest.required !== 'object' || Array.isArray(manifest.required)) throw new Error('Astrid install manifest required update was invalid');
+  const required = manifest.required as { release?: unknown; reason?: unknown };
+  if (!Number.isSafeInteger(required.release) || (required.release as number) < 0 || typeof required.reason !== 'string' || !required.reason) {
+    throw new Error('Astrid install manifest required update was invalid');
   }
-  return { release: value as number, ...(requiredRelease === undefined ? {} : { requiredRelease: requiredRelease as number, requiredReason: manifest.required?.reason as string }) };
+  return { requiredRelease: required.release as number, requiredReason: required.reason };
 }
 
 export function localUpdateBehind(servedRelease: number, checkoutRelease: number, servedAppIsAncestor: boolean): boolean {
   return servedRelease > checkoutRelease || !servedAppIsAncestor;
 }
 
-async function boundedJson(url: string): Promise<{ app: string; release: number }> {
+async function boundedJsonBody(url: string): Promise<unknown> {
   const response = await fetch(url, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`Astrid update check returned HTTP ${response.status}`);
   const declaredLength = Number(response.headers.get('content-length'));
@@ -60,7 +72,11 @@ async function boundedJson(url: string): Promise<{ app: string; release: number 
     text = await response.text();
     if (Buffer.byteLength(text) > 16_384) throw new Error('Astrid update status response was too large');
   }
-  const body = JSON.parse(text) as { app?: unknown; release?: unknown };
+  return JSON.parse(text) as unknown;
+}
+
+async function boundedJson(url: string): Promise<{ app: string; release: number }> {
+  const body = await boundedJsonBody(url) as { app?: unknown; release?: unknown };
   if (typeof body.app !== 'string' || !/^[0-9a-f]{40}$/i.test(body.app) || !Number.isSafeInteger(body.release) || (body.release as number) < 0) throw new Error('Astrid update status response was invalid');
   return { app: body.app, release: body.release as number };
 }
@@ -91,10 +107,11 @@ export function createLocalUpdateStatusPlugin({ manifestPath }: { manifestPath: 
         }
         try {
           const served = await boundedJson('https://astrid.haus/build.json');
-          const manifest = readManifest(await readFile(manifestPath, 'utf8'));
+          const requirement = servedRequirement(await boundedJsonBody('https://astrid.haus/install-manifest.json'), served.release);
+          const release = readLocalRelease(await readFile(manifestPath, 'utf8'));
           const { stdout: localHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: server.config.root, timeout: 2000, maxBuffer: 1024 });
           const ancestry = await execFileAsync('git', ['merge-base', '--is-ancestor', served.app, 'HEAD'], { cwd: server.config.root, timeout: 2000, maxBuffer: 1024 }).then(() => true, () => false);
-          const body = JSON.stringify({ app: localHead.trim(), ...manifest, servedApp: served.app, servedRelease: served.release, behind: localUpdateBehind(served.release, manifest.release, ancestry) });
+          const body = JSON.stringify({ app: localHead.trim(), release, ...requirement, servedApp: served.app, servedRelease: served.release, behind: localUpdateBehind(served.release, release, ancestry) });
           response.statusCode = 200;
           response.setHeader('Content-Type', 'application/json; charset=utf-8');
           response.setHeader('Cache-Control', 'no-store');

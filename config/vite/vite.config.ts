@@ -31,6 +31,7 @@ import { createInstallerAssetsPlugin } from "./installerAssets";
 import { createPreviewCacheHeadersPlugin } from "./previewCacheHeaders";
 import { createAppBuildPlugin } from "./appBuild";
 import { createLocalUpdateStatusPlugin } from "./localUpdateStatus";
+import { createLocalUpdatePagePlugin } from "./localUpdatePage";
 
 const logger = createLogger();
 const originalWarn = logger.warn.bind(logger);
@@ -164,6 +165,7 @@ export default defineConfig(() => {
       createInstallerAssetsPlugin(),
       createAppBuildPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
       createLocalUpdateStatusPlugin({ manifestPath: path.resolve(__dirname, "../../public/install-manifest.json") }),
+      createLocalUpdatePagePlugin(),
       createPreviewCacheHeadersPlugin(),
       react(),
       createBundleBudgetPlugin(),

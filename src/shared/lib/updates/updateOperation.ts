@@ -114,3 +114,82 @@ export function pageUpdateOperation(base: string): UpdateOperation {
   if (!operation) byBase.set(base, operation = new UpdateOperation());
   return operation;
 }
+
+export type LocalPageRefusal = 'update_busy' | 'non_fast_forward' | 'dirty';
+export const LOCAL_PAGE_REFUSAL_MESSAGES: Record<LocalPageRefusal, string> = {
+  update_busy: 'Another Astrid update is already running. Wait for it to finish, or update another way.',
+  non_fast_forward: 'This checkout has local commits that Astrid cannot fast-forward over. Update another way.',
+  dirty: 'Your local edits overlap files in this update. Astrid left them untouched; update another way.',
+};
+
+export type LocalPageUpdateState =
+  | { readonly phase: 'idle' }
+  | { readonly phase: 'running' }
+  | { readonly phase: 'done'; readonly status: 'updated' | 'up-to-date' | 'recovered'; readonly message: string }
+  | { readonly phase: 'refused'; readonly refusal: LocalPageRefusal; readonly message: string }
+  | { readonly phase: 'failed'; readonly message: string };
+
+const JSON_HEADERS = { Accept: 'application/json', 'Content-Type': 'application/json' } as const;
+const REFUSALS = new Set<string>(['update_busy', 'non_fast_forward', 'dirty']);
+
+async function readJson(response: Response): Promise<Record<string, unknown>> {
+  const parsed: unknown = await response.json().catch(() => null);
+  return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+}
+
+/**
+ * Settings "Update now" for the fully-local path. The Vite server hands over
+ * the launcher's page url and secret from its 0600 receipt; the launcher does
+ * the fenced update and relaunch, so its reply outlives the editor restart.
+ * One POST per click, never retried.
+ */
+export class LocalPageUpdate {
+  private state: LocalPageUpdateState = { phase: 'idle' };
+  private listeners = new Set<() => void>();
+  constructor(private readonly fetchImpl: typeof fetch = (...args) => fetch(...args)) {}
+  getSnapshot = () => this.state;
+  subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
+  private set(state: LocalPageUpdateState): LocalPageUpdateState {
+    this.state = state;
+    this.listeners.forEach((listener) => listener());
+    return state;
+  }
+  reset = () => { if (this.state.phase !== 'running') this.set({ phase: 'idle' }); };
+
+  start = async (): Promise<LocalPageUpdateState> => {
+    if (this.state.phase === 'running') return this.state;
+    this.set({ phase: 'running' });
+    let target: { url: string; token: string };
+    try {
+      const response = await this.fetchImpl('/__astrid/local-update-page', { method: 'POST', body: '', cache: 'no-store', redirect: 'error', headers: JSON_HEADERS, signal: AbortSignal.timeout(8000) });
+      const body = await readJson(response);
+      if (!response.ok || typeof body.url !== 'string' || typeof body.token !== 'string') throw new Error('The update launcher is not available.');
+      target = { url: body.url, token: body.token };
+    } catch (cause) {
+      return this.set({ phase: 'failed', message: cause instanceof Error ? cause.message : 'The update launcher is not available.' });
+    }
+    const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
+    try {
+      // No timeout: preparation can take minutes and the launcher owns recovery.
+      const response = await this.fetchImpl(target.url, { method: 'POST', cache: 'no-store', redirect: 'error', headers: { ...JSON_HEADERS, Authorization: `Bearer ${target.token}` }, body: JSON.stringify({ requestId }) });
+      const body = await readJson(response);
+      if (response.status === 409 && typeof body.refusal === 'string' && REFUSALS.has(body.refusal)) {
+        const refusal = body.refusal as LocalPageRefusal;
+        return this.set({ phase: 'refused', refusal, message: LOCAL_PAGE_REFUSAL_MESSAGES[refusal] });
+      }
+      const result = body.result as { status?: unknown; message?: unknown } | undefined;
+      if (response.ok && result && (result.status === 'updated' || result.status === 'up-to-date' || result.status === 'recovered')) {
+        return this.set({ phase: 'done', status: result.status, message: typeof result.message === 'string' ? result.message : '' });
+      }
+      return this.set({ phase: 'failed', message: typeof body.error === 'string' ? body.error : 'The update did not complete.' });
+    } catch {
+      return this.set({ phase: 'failed', message: 'The update result is not confirmed. Check for updates before trying again.' });
+    }
+  };
+}
+
+let localPageUpdate: LocalPageUpdate | undefined;
+/** Page-owned, so progress survives closing Settings. */
+export function pageLocalUpdate(): LocalPageUpdate {
+  return localPageUpdate ??= new LocalPageUpdate();
+}

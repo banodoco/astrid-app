@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AstridRuntimeClient, type InstallerUpdateHealth, type InstallerUpdateStatus } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import { UpdateOperation, pageUpdateOperation } from './updateOperation.ts';
+import { LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
 
 vi.mock('./updateStatus.ts', () => ({ checkHostedUpdate: vi.fn(async () => null) }));
@@ -118,5 +118,69 @@ describe('UpdateOperation', () => {
   it('reuses a page-owned operation across component remounts', () => {
     const base = `https://connector-${crypto.randomUUID()}.test/api/runtime`;
     expect(pageUpdateOperation(base)).toBe(pageUpdateOperation(base));
+  });
+});
+
+describe('LocalPageUpdate', () => {
+  const TARGET = { url: 'http://127.0.0.1:5000/page-update', token: 'ef'.repeat(32) };
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
+  function make(launcher: () => Response | Promise<Response>, target: () => Response = () => json(200, TARGET)) {
+    const post = vi.fn(launcher);
+    const fetchImpl = vi.fn(async (input: string | URL | Request, init?: RequestInit) => String(input) === '/__astrid/local-update-page' ? target() : post(init as never)) as unknown as typeof fetch;
+    return { update: new LocalPageUpdate(fetchImpl), post, fetchImpl };
+  }
+
+  it('sends one authenticated POST with a fresh 32-hex request id and reports the result', async () => {
+    const { update, post } = make(() => json(200, { result: { status: 'updated', message: 'Restart Astrid when convenient' } }));
+    const seen: string[] = [];
+    update.subscribe(() => seen.push(update.getSnapshot().phase));
+    const outcome = await update.start();
+    expect(outcome).toEqual({ phase: 'done', status: 'updated', message: 'Restart Astrid when convenient' });
+    expect(seen).toEqual(['running', 'done']);
+    expect(post).toHaveBeenCalledOnce();
+    const init = post.mock.calls[0]![0] as RequestInit;
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TARGET.token}`);
+    expect(JSON.parse(init.body as string).requestId).toMatch(/^[0-9a-f]{32}$/);
+  });
+
+  it.each(['update_busy', 'non_fast_forward', 'dirty'] as const)('maps the 409 %s refusal', async (refusal) => {
+    const { update } = make(() => json(409, { refusal, code: 'x' }));
+    expect(await update.start()).toEqual({ phase: 'refused', refusal, message: LOCAL_PAGE_REFUSAL_MESSAGES[refusal] });
+  });
+
+  it('treats a replay 409 and other 4xx/422 as failures, not refusals', async () => {
+    expect((await make(() => json(409, { error: 'used', code: 'replay' })).update.start()).phase).toBe('failed');
+    expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'build failed' });
+  });
+
+  it('reports recovered (rollback) as a completed outcome', async () => {
+    const { update } = make(() => json(200, { result: { status: 'recovered', message: 'Rolled back.' } }));
+    expect(await update.start()).toMatchObject({ phase: 'done', status: 'recovered' });
+  });
+
+  it('does not post when the receipt endpoint is unavailable, and never retries a lost reply', async () => {
+    const unavailable = make(() => json(200, {}), () => json(503, { error: 'page_update_unavailable' }));
+    expect((await unavailable.update.start()).phase).toBe('failed');
+    expect(unavailable.post).not.toHaveBeenCalled();
+    const lost = make(() => { throw new TypeError('connection reset'); });
+    const outcome = await lost.update.start();
+    expect(outcome).toMatchObject({ phase: 'failed' });
+    expect(lost.post).toHaveBeenCalledOnce();
+  });
+
+  it('ignores a second start while running', async () => {
+    let release!: () => void;
+    const { update, post } = make(() => new Promise<Response>((resolve) => { release = () => resolve(json(200, { result: { status: 'up-to-date', message: '' } })); }));
+    const first = update.start();
+    await vi.waitFor(() => expect(post).toHaveBeenCalled());
+    expect(await update.start()).toEqual({ phase: 'running' });
+    release();
+    expect((await first).phase).toBe('done');
+    expect(post).toHaveBeenCalledOnce();
+  });
+
+  it('reuses one page-owned instance', () => {
+    expect(pageLocalUpdate()).toBe(pageLocalUpdate());
   });
 });

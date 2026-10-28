@@ -275,6 +275,8 @@ export interface TimelineChromeContextValue {
   retryPendingSave: () => void;
   /** Sends the latest unsaved edit now and resolves once it is acknowledged (immediately when nothing is pending). */
   flushPendingSave: () => Promise<number>;
+  preserveTimelineDraftForReload: () => Promise<void>;
+  isTimelineDraftDurableForReload: () => boolean;
   /**
    * One-slot recovery draft (plan-v5 B9): non-null when a previous session
    * left unsaved work. The shell offers Retry / Discard.

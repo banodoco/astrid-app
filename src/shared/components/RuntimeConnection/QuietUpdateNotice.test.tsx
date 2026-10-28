@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 
 const { readStatusMock, hostedCheckMock, localCheckMock } = vi.hoisted(() => ({ readStatusMock: vi.fn(), hostedCheckMock: vi.fn(), localCheckMock: vi.fn() }));
-vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readStatus = readStatusMock; } }));
-vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => 'https://astrid.test' }));
+vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readInstallerUpdateHealth = async () => (await readStatusMock()).health; } }));
+vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => 'https://astrid.test', runtimeApiBase: () => 'https://astrid.test/api/runtime' }));
 vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: hostedCheckMock, checkLocalUpdate: localCheckMock }));
 vi.mock('./AppBuildProvider.tsx', () => ({ usePageStale: () => false }));
 

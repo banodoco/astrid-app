@@ -1,10 +1,11 @@
 import type { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
-import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
+import { SOURCE_SCHEMA_MISMATCH_ACTION } from '../../../integrations/runtime/runtime-update-contract.mjs';
 
 export type UpdateAction = {
   readonly label: string;
   readonly destination?: 'settings-updates';
   readonly command?: string;
+  readonly execute?: 'installer-update';
 };
 
 export type UpdateResolution = {
@@ -41,14 +42,13 @@ const commandActions = (input: UpdateResolutionInput): Pick<UpdateResolution, 'p
 type ActionContext = 'page' | 'settings';
 
 function updateActions(input: UpdateResolutionInput, context: ActionContext, softRelease = false): Pick<UpdateResolution, 'primary' | 'secondary'> {
-  if (softRelease) {
-    if (context === 'page') return { primary: settingsAction, secondary: null };
-    if (input.installType === 'pinokio') return { primary: { label: 'Update in Pinokio' }, secondary: null };
-    return commandActions(input);
-  }
   if (input.installType === 'pinokio') return { primary: { label: 'Update in Pinokio' }, secondary: null };
   if (input.installType === 'source') return { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
-  if (input.updateNowAvailable) return { primary: settingsAction, secondary: commandActions(input).primary };
+  if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: commandActions(input).primary };
+  if (softRelease) {
+    if (context === 'page') return { primary: settingsAction, secondary: null };
+    return commandActions(input);
+  }
   return commandActions(input);
 }
 

@@ -14,12 +14,12 @@ describe('resolveUpdate', () => {
   });
 
   it('routes update actions to Settings and prefers in-app update when it is available', () => {
-    expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, updateNowAvailable: true }).primary)
-      .toEqual({ label: 'Update now', destination: 'settings-updates' });
+    expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'installer', updateNowAvailable: true }).primary)
+      .toEqual({ label: 'Update now', execute: 'installer-update' });
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' } })).toMatchObject({
       primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
     });
-    expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, updateNowAvailable: true }).secondary)
+    expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'installer', updateNowAvailable: true }).secondary)
       .toEqual({ label: 'Copy for your agent' });
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'pinokio' }).primary)
       .toEqual({ label: 'Update in Pinokio' });

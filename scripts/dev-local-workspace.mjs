@@ -880,6 +880,7 @@ const updaterEditor = {
       VITE_APP_BUILD: rollback ? app.oldAppBuild : app.targetSha,
       RAILWAY_GIT_COMMIT_SHA: rollback ? app.oldAppBuild : app.targetSha,
     });
+    await updateControl?.rotatePageToken();
     const mode = rollback ? app.previousMode : updaterEditor.mode;
     const output = rollback ? app.previousPreviewDirectory : resolve(process.cwd(), 'dist');
     const invocation = packageManagerInvocation('npm', viteChildArgs({ preview: mode === 'preview', previewDir: output, quiet: !showTechnical }), { env, execPath: env.ASTRID_NODE_EXECUTABLE || process.execPath });
@@ -911,7 +912,7 @@ const updaterEditor = {
 // The secret and ephemeral control port stay in this worktree's private Git
 // metadata. The CLI asks this already-running launcher to perform the update.
 try {
-updateControl = await startLocalUpdateControl({ cwd: process.cwd(), origin: new URL(editorUrl).origin, update: async () => {
+updateControl = await startLocalUpdateControl({ cwd: process.cwd(), origin: new URL(editorUrl).origin, page: !pinokioManaged, update: async () => {
   if (shuttingDown || interrupted) throw new Error('Astrid is stopping. Start it again before updating.');
   let backend;
   try { backend = installedBackend(resolveRuntimeCommand(runtimeSettings).command); }

@@ -435,7 +435,13 @@ function TimelineEditorShellCoreComponent({
     outerRef.current = node;
     setShellRootNode(node);
   }, [runtime.shellRootRef]);
-  useEditorBrowserDefaults({ shellRoot: shellRootNode, saveStatus: chrome.saveStatus, flushPendingSave: chrome.flushPendingSave });
+  useEditorBrowserDefaults({
+    shellRoot: shellRootNode,
+    saveStatus: chrome.saveStatus,
+    flushPendingSave: chrome.flushPendingSave,
+    preserveTimelineDraftForReload: chrome.preserveTimelineDraftForReload,
+    isTimelineDraftDurableForReload: chrome.isTimelineDraftDurableForReload,
+  });
   const activateInstance = useCallback(() => {
     runtime.agentChat?.activateTimeline?.();
     if (runtime.agentSelectionOwner) activateTimelineClipData(runtime.agentSelectionOwner);

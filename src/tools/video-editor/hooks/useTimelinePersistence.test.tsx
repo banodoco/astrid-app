@@ -17,6 +17,10 @@ vi.mock('@/tools/video-editor/data/timelineDraftIndexedDb.ts', async (importOrig
 });
 import { useTimelinePersistence, TimelineSaveBarrierError, type UseTimelinePersistenceResult } from './useTimelinePersistence';
 import { useTimelineOps } from './useTimelineOps';
+import { useEditorBrowserDefaults } from './useEditorBrowserDefaults';
+import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { RuntimeDataProvider } from '@/integrations/runtime/dataProvider.ts';
+import { PROJECT_ID, TIMELINE_ID, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
 import { TimelineEventBus } from './useTimelineEventBus';
 import {
   TimelineStoreProvider,
@@ -123,6 +127,8 @@ interface TestHarness {
 }
 
 interface SetupOptions {
+  providerOverride?: DataProvider;
+  timelineId?: string;
   store?: TimelineStoreApi;
   initialData?: TimelineData;
   persistenceEnabled?: boolean;
@@ -147,7 +153,7 @@ function setup(options?: SetupOptions): TestHarness {
   const loadReferencedTimeline = options?.loadReferencedTimelineImpl
     ? vi.fn(options.loadReferencedTimelineImpl)
     : undefined;
-  const provider: DataProvider = {
+  const provider: DataProvider = options?.providerOverride ?? {
     persistenceEnabled: options?.persistenceEnabled,
     loadTimeline,
     ...(options?.loadCanonicalTimelineImpl
@@ -201,7 +207,7 @@ function setup(options?: SetupOptions): TestHarness {
       lastSavedSignatureRef,
       interactionStateRef,
     }),
-    { wrapper, initialProps: { provider, timelineId: 'timeline-1' } },
+    { wrapper, initialProps: { provider, timelineId: options?.timelineId ?? 'timeline-1' } },
   );
 
   return {
@@ -315,6 +321,76 @@ describe('useTimelinePersistence — interaction gating', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('guards the real reload action with the persistence owner recovery draft after Runtime restart', async () => {
+    const runtimeOptions = { runtimeInstanceId: 'timeline-restart-before' };
+    const fixture = runtimeFixture(runtimeOptions);
+    let blockHealth = false;
+    let releaseHealth!: () => void;
+    let markHealthStarted!: () => void;
+    const healthGate = new Promise<void>((resolve) => { releaseHealth = resolve; });
+    const healthStarted = new Promise<void>((resolve) => { markHealthStarted = resolve; });
+    const transport = async (...args: Parameters<typeof fixture.transport>) => {
+      if (blockHealth && args[1] === '/v1/health') {
+        markHealthStarted();
+        await healthGate;
+      }
+      return fixture.transport(...args);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
+    const loaded = await provider.loadTimeline(TIMELINE_ID);
+    const initial = makeTimelineData('restart-initial');
+    initial.head = loaded.head;
+    const harness = setup({ providerOverride: provider, timelineId: TIMELINE_ID, initialData: initial });
+    const inFlight = makeTimelineData('save-in-flight-at-restart');
+    inFlight.head = initial.head;
+    harness.editSeqRef.current++;
+    harness.scheduleSave(inFlight);
+    runtimeOptions.runtimeInstanceId = 'timeline-restart-after';
+    blockHealth = true;
+    const root = document.createElement('div');
+    document.body.appendChild(root);
+    const reload = vi.fn();
+    const page = renderHook(() => {
+      useEditorBrowserDefaults({
+        shellRoot: root,
+        saveStatus: harness.result.current.saveStatus,
+        flushPendingSave: harness.result.current.flushPendingSave,
+        preserveTimelineDraftForReload: harness.result.current.preserveTimelineDraftForReload,
+        isTimelineDraftDurableForReload: harness.result.current.isTimelineDraftDurableForReload,
+      });
+      return useGuardedReload(reload);
+    });
+
+    let pendingReload!: Promise<void>;
+    await act(async () => {
+      pendingReload = page.result.current.reload();
+      await healthStarted;
+    });
+    const latest = makeTimelineData('latest-after-restart');
+    latest.head = initial.head;
+    harness.editSeqRef.current++;
+    harness.scheduleSave(latest);
+    releaseHealth();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+      await pendingReload;
+    });
+
+    expect(reload).toHaveBeenCalledOnce();
+    expect(fixture.requests.filter((request) => request.method === 'POST'
+      && request.path.endsWith('/composition-revisions'))).toHaveLength(0);
+    expect(harness.result.current.isTimelineDraftDurableForReload()).toBe(true);
+    expect(harness.result.current.saveStatus).not.toBe('saved');
+    const draft = await loadTimelineDraft(TIMELINE_ID);
+    expect(draft?.draft.config).toEqual(latest.config);
+    expect(draft?.draft.registry).toEqual(latest.registry);
+    expect(draft?.baseHeadProjectId).toBe(PROJECT_ID);
+    expect(draft?.baseHeadTimelineId).toBe(TIMELINE_ID);
+    expect(draft?.baseHeadRevisionId).toBe(initial.head?.headRevisionId);
+    page.unmount();
+    harness.unmount();
   });
 
   it('binds a preflight no-write failure and fences its queued payload before correction', async () => {
@@ -2452,5 +2528,24 @@ describe('useTimelinePersistence — recovery draft gated by persistence', () =>
     expect(saveTimelineDraft).toHaveBeenCalledTimes(1);
     expect(vi.mocked(saveTimelineDraft).mock.calls[0][0]).toBe('timeline-1');
     expect(await loadTimelineDraft('timeline-1')).not.toBeNull();
+  });
+
+  it('keeps guarded reload blocked when its durable recovery write fails', async () => {
+    const harness = setup();
+    const failure = new Error('IndexedDB full');
+    vi.mocked(saveTimelineDraft).mockRejectedValueOnce(failure);
+    await expect(harness.result.current.preserveTimelineDraftForReload()).rejects.toBe(failure);
+    expect(harness.result.current.isTimelineDraftDurableForReload()).toBe(false);
+    expect(await loadTimelineDraft('timeline-1')).toBeNull();
+  });
+
+  it('keeps guarded reload blocked when edits continue throughout recovery preservation', async () => {
+    const harness = setup();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      vi.mocked(saveTimelineDraft).mockImplementationOnce(async () => { harness.editSeqRef.current++; });
+    }
+    await expect(harness.result.current.preserveTimelineDraftForReload()).rejects.toThrow('kept changing');
+    expect(harness.result.current.isTimelineDraftDurableForReload()).toBe(false);
+    expect(await loadTimelineDraft('timeline-1')).toBeNull();
   });
 });

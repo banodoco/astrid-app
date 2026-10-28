@@ -9,6 +9,8 @@ export function connectionFor(state: RuntimeConnectionValue['state'], overrides:
     gated: true,
     state,
     isConnected: state.status === 'connected',
+    isAuthenticated: state.status === 'connected',
+    managedByPinokio: false,
     connectedBefore: true,
     isBooting: false,
     isChecking: false,

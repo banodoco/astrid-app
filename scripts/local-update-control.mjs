@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { readFile, writeFile, unlink, chmod } from 'node:fs/promises';
+import { readFile, writeFile, unlink, chmod, rename } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { promisify } from 'node:util';
 
@@ -17,8 +17,18 @@ const reply = (response, status, body) => {
   response.end(JSON.stringify(body));
 };
 
-/** The running launcher is the only update coordinator. No browser-visible secret. */
-export async function startLocalUpdateControl({ cwd, origin, update }) {
+// Refusals the page shows with the two options. `dirty` is the checkout's
+// `local_edits_conflict` code; the other two keep their own codes.
+const PAGE_REFUSALS = new Map([['update_busy', 'update_busy'], ['non_fast_forward', 'non_fast_forward'], ['local_edits_conflict', 'dirty']]);
+
+/**
+ * The running launcher is the only update coordinator. `/update` serves the CLI
+ * through a private receipt. With `page: true`, `/page-update` also serves the
+ * editor page with its own secret, which a later settings adapter reads from the
+ * receipt's `page` entry on the Vite server side, and which rotates whenever the
+ * launcher restarts the editor (see `rotatePageToken`).
+ */
+export async function startLocalUpdateControl({ cwd, origin, update, page = false }) {
   if (new URL(origin).origin !== origin) throw new Error('The local updater requires an exact editor origin');
   const receiptPath = await controlReceiptPath(cwd);
   let previous;
@@ -32,17 +42,34 @@ export async function startLocalUpdateControl({ cwd, origin, update }) {
     await unlink(receiptPath);
   }
   const token = randomBytes(32).toString('hex');
+  let pageToken = randomBytes(32).toString('hex');
   let host, busy = false, closing = false, closePromise;
   const consumed = new Set();
   let active;
+  const pageReply = (response, status, body) => {
+    response.setHeader('Access-Control-Allow-Origin', origin);
+    response.setHeader('Vary', 'Origin');
+    reply(response, status, body);
+  };
   const server = createServer(async (request, response) => {
-    if (closing || request.method !== 'POST' || request.url !== '/update'
-        || request.headers.host !== host || request.headers.origin !== origin
-        || !equalSecret(request.headers.authorization, `Bearer ${token}`)
+    const isPage = page && request.url === '/page-update';
+    const send = isPage ? pageReply : reply;
+    const placeOk = request.headers.host === host && request.headers.origin === origin;
+    if (isPage && request.method === 'OPTIONS' && !closing && placeOk
+        && request.headers['access-control-request-method'] === 'POST') {
+      request.resume();
+      response.writeHead(204, { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Methods': 'POST',
+        'Access-Control-Allow-Headers': 'authorization, content-type', 'Access-Control-Max-Age': '0', Vary: 'Origin', 'Cache-Control': 'no-store' });
+      response.end(); return;
+    }
+    if (closing || request.method !== 'POST' || (request.url !== '/update' && !isPage)
+        || !placeOk
+        || !equalSecret(request.headers.authorization, `Bearer ${isPage ? pageToken : token}`)
+        || (isPage && request.headers['sec-fetch-site'] === 'cross-site')
         || request.headers['content-type'] !== 'application/json'
         || request.headers['transfer-encoding'] || !/^\d+$/.test(request.headers['content-length'] ?? '')
         || Number(request.headers['content-length']) > 256) {
-      request.resume(); reply(response, 403, { error: 'The local update request was refused', step: 'control-channel', code: 'request_refused' }); return;
+      request.resume(); send(response, 403, { error: 'The local update request was refused', step: 'control-channel', code: 'request_refused' }); return;
     }
     let raw = '';
     try {
@@ -53,32 +80,44 @@ export async function startLocalUpdateControl({ cwd, origin, update }) {
       const body = JSON.parse(raw);
       if (!body || Object.keys(body).length !== 1 || !/^[0-9a-f]{32}$/.test(body.requestId ?? '')) throw new Error('Invalid request');
       if (consumed.has(body.requestId) || consumed.size >= 4096) {
-        reply(response, 409, { error: 'This update request was already used; retry with a fresh request', step: 'control-channel', code: 'replay' }); return;
+        send(response, 409, { error: 'This update request was already used; retry with a fresh request', step: 'control-channel', code: 'replay' }); return;
       }
       consumed.add(body.requestId);
-      if (busy) { reply(response, 409, { error: 'Another Astrid update is already running', step: 'control-channel', code: 'update_busy' }); return; }
+      if (busy) { send(response, 409, { error: 'Another Astrid update is already running', step: 'control-channel', code: 'update_busy', ...(isPage ? { refusal: 'update_busy' } : {}) }); return; }
       busy = true;
       try {
         active = Promise.resolve().then(update);
-        reply(response, 200, { result: await active });
+        send(response, 200, { result: await active });
       } catch (error) {
-        reply(response, 422, { error: error.message, step: error.step ?? 'update', code: error.code ?? 'update_failed',
+        const refusal = isPage ? PAGE_REFUSALS.get(error.code) : undefined;
+        send(response, refusal ? 409 : 422, { error: error.message, step: error.step ?? 'update', code: error.code ?? 'update_failed',
+          ...(refusal ? { refusal } : {}),
           details: error.details, stopRefused: error.stopRefused, stopCompleted: error.stopCompleted });
       } finally { busy = false; active = undefined; }
     } catch {
-      if (!response.headersSent) reply(response, 400, { error: 'Invalid update request', step: 'control-channel', code: 'invalid_request' });
+      if (!response.headersSent) send(response, 400, { error: 'Invalid update request', step: 'control-channel', code: 'invalid_request' });
     }
   });
   server.requestTimeout = 0; // Preparation may take several minutes; the transaction owns recovery.
   await new Promise((ready, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', ready); });
   host = `127.0.0.1:${server.address().port}`;
-  const receipt = { format: 'astrid-local-update/v1', pid: process.pid, cwd: resolve(cwd), url: `http://${host}/update`, origin, token };
+  const receipt = { format: 'astrid-local-update/v1', pid: process.pid, cwd: resolve(cwd), url: `http://${host}/update`, origin, token,
+    ...(page ? { page: { url: `http://${host}/page-update`, token: pageToken } } : {}) };
   try {
     await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600, flag: 'wx' });
     await chmod(receiptPath, 0o600);
   } catch (error) { server.close(); throw error; }
   return {
     receipt,
+    /** A restarted editor gets a fresh page secret; the previous page's secret stops working. */
+    async rotatePageToken() {
+      if (!page) return;
+      pageToken = randomBytes(32).toString('hex');
+      receipt.page = { url: receipt.page.url, token: pageToken };
+      const temporary = `${receiptPath}.${process.pid}.tmp`;
+      await writeFile(temporary, JSON.stringify(receipt), { mode: 0o600 });
+      await rename(temporary, receiptPath);
+    },
     get busy() { return busy; },
     close() { return closePromise ??= (async () => {
       closing = true;

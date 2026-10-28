@@ -130,6 +130,8 @@ vi.mock('@/tools/video-editor/hooks/timelineStore.ts', async () => {
       loadError: null,
       retryLoad: vi.fn(),
       retryPendingSave: vi.fn(),
+      preserveTimelineDraftForReload: vi.fn(async () => undefined),
+      isTimelineDraftDurableForReload: () => false,
       ...__chromeOverrides,
     }),
     useTimelinePlaybackSelector: (selector: (playback: typeof __playback) => unknown) => {
@@ -149,6 +151,15 @@ vi.mock('@/tools/video-editor/hooks/timelineStore.ts', async () => {
     useProposalImportDiagnosticsFromStoreSafe: () => null,
   });
 });
+
+// AppHeader sits inside the real shell in these tests, but its Runtime
+// connection state belongs to the app-level provider and is outside this
+// shell harness. Keep that hook stable while retaining the actual header and
+// editor shell behavior under test.
+vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/integrations/runtime/RuntimeConnectionProvider.tsx')>()),
+  useRuntimeConnection: () => ({ isConnected: false, managedByPinokio: false }),
+}));
 
 vi.mock('@/tools/video-editor/components/ProposalPanel/ProposalPanel.tsx', () => ({
   ProposalPanel: ({ proposalRuntime, proposalImportDiagnostics }: any) =>

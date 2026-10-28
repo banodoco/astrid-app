@@ -139,6 +139,7 @@ interface ScheduledSave {
   data: TimelineData;
   seq: number;
   draftOwnerId: string;
+  draftIdentity: string;
   draftRecoveryKey: string;
   draftWrite: Promise<void>;
   traceId: string;
@@ -189,6 +190,9 @@ export interface UseTimelinePersistenceResult {
    * it can never snapshot an autosave-pending or unversioned `head`.
    */
   flushPendingSave: () => Promise<number>;
+  /** Preserve the current document in the owned IndexedDB recovery slot when its Runtime cannot acknowledge a save. */
+  preserveTimelineDraftForReload: () => Promise<void>;
+  isTimelineDraftDurableForReload: () => boolean;
   captureSaveTarget: (targetSeq?: number) => TimelineSaveTarget;
   flushSaveTarget: (target: TimelineSaveTarget) => Promise<number>;
   discardUncommittedSaveTarget: (target: TimelineSaveTarget, error: unknown) => boolean;
@@ -318,6 +322,7 @@ export function useTimelinePersistence({
     return Object.freeze({ session: session.identity, timelineId, targetSeq, generation: session.generation });
   }, [editSeqRef, session, timelineId]);
   const draftWriteChainRef = useRef<Promise<void>>(Promise.resolve());
+  const reloadPreservedSeqRef = useRef<{ identity: object; generation: number; seq: number } | null>(null);
   const doSaveRef = useRef<((save: ScheduledSave | SaveAttempt, options?: { attemptKind?: 'initial' | 'transport-retry' }) => void) | null>(null);
   const flushWaitersRef = useRef<Array<{
     session: PersistenceSession;
@@ -972,6 +977,7 @@ export function useTimelinePersistence({
     };
     // Without durable persistence (a read-only example, the editor tour) there is nothing to recover,
     // so no draft is written and a later session never offers one.
+    const draftIdentity = recoveryMetadata.draftIdentity ?? draftOwnerId;
     const draftWrite = persistenceEnabled
       ? draftWriteChainRef.current
         .catch(() => {})
@@ -987,7 +993,7 @@ export function useTimelinePersistence({
               baseHeadTimelineId: head?.timelineId,
             } : {}),
             ownerId: draftOwnerId,
-            draftIdentity: recoveryMetadata.draftIdentity ?? draftOwnerId,
+            draftIdentity,
           },
         ))
       : draftWriteChainRef.current;
@@ -999,6 +1005,7 @@ export function useTimelinePersistence({
       data: nextData,
       seq,
       draftOwnerId,
+      draftIdentity,
       draftRecoveryKey,
       draftWrite,
       traceId,
@@ -1011,6 +1018,7 @@ export function useTimelinePersistence({
   }, [configVersionRef, headRevisionRef, persistenceEnabled, provider, session, timelineId]);
 
   const scheduleSave = useCallback<ScheduleSaveFn>((nextData, options) => {
+    reloadPreservedSeqRef.current = null;
     // Recovery is an explicit CAS decision. Do not replace the recovered
     // record with a new-session edit before the user chooses Retry or Discard;
     // keep the edit in memory and resume it after that decision. The previous
@@ -1229,6 +1237,63 @@ export function useTimelinePersistence({
     // Capturing legacy callers here keeps the existing latest-document barrier.
     return flushSaveTarget(Object.freeze({ session: session.identity, timelineId, targetSeq: editSeqRef.current, generation: session.generation }), false);
   }, [editSeqRef, flushSaveTarget, session, timelineId]);
+
+  const preserveTimelineDraftForReload = useCallback(async (): Promise<void> => {
+    if (!persistenceEnabled) throw new Error('Durable timeline recovery is unavailable.');
+    if (recoveryPendingRef?.current || recoveryActiveRef?.current) {
+      throw new Error('Resolve the existing recovery draft before reloading.');
+    }
+    if (!isMountedRef.current || session !== activeTargetRef.current) {
+      throw new Error('Timeline session is closed or replaced before recovery preservation.');
+    }
+
+    // A Runtime instance restart permanently fences the old client. In that
+    // case a server acknowledgement is impossible, but the editor's own
+    // recovery slot is still a valid durable boundary for a guarded reload.
+    // Serialize behind every scheduled draft write, then verify the exact
+    // current sequence before admitting navigation.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const seq = editSeqRef.current;
+      const latest = getDataRef().current ?? dataRef.current;
+      if (!latest) throw new Error('Timeline data is not loaded, so it cannot be preserved for recovery.');
+      const previousScheduled = latestScheduledSaveRef.current;
+      const preservationSave = createScheduledSave(latest, seq);
+      // The recovery write uses the same owner/provenance builder as normal
+      // autosaves, but it is not a server mutation. Keep the pending network
+      // save selected for the normal writer unless a concurrent edit replaced
+      // this scheduled snapshot in the meantime.
+      if (latestScheduledSaveRef.current === preservationSave) {
+        latestScheduledSaveRef.current = previousScheduled;
+      }
+      await preservationSave.draftWrite;
+
+      if (!isMountedRef.current || session !== activeTargetRef.current) {
+        throw new Error('Timeline session changed during recovery preservation.');
+      }
+      if (editSeqRef.current !== seq) continue;
+      const durable = await loadTimelineDraft(preservationSave.draftRecoveryKey);
+      if (editSeqRef.current !== seq) continue;
+      if (!durable || durable.ownerId !== preservationSave.draftOwnerId
+        || durable.draftIdentity !== preservationSave.draftIdentity
+        || canonicalJsonStringify(durable.draft) !== canonicalJsonStringify({
+          config: latest.config,
+          registry: latest.registry,
+          bundle: preservationSave.effectiveBundle,
+        })) {
+        throw new Error('The latest timeline recovery draft could not be verified in durable storage.');
+      }
+      reloadPreservedSeqRef.current = { identity: session.identity, generation: session.generation, seq };
+      return;
+    }
+    throw new Error('The timeline kept changing while its recovery draft was being preserved.');
+  }, [createScheduledSave, dataRef, editSeqRef, getDataRef, persistenceEnabled, recoveryActiveRef, recoveryPendingRef, session, timelineId]);
+
+  const isTimelineDraftDurableForReload = useCallback(() =>
+    reloadPreservedSeqRef.current?.identity === session.identity
+      && reloadPreservedSeqRef.current.generation === session.generation
+      && reloadPreservedSeqRef.current.seq === editSeqRef.current
+      && isMountedRef.current && activeTargetRef.current === session,
+  [editSeqRef, session]);
 
   const discardUncommittedSaveTarget = useCallback((target: TimelineSaveTarget, error: unknown) => {
     if (!(error instanceof TimelineSaveBarrierError) || !issuedFailuresRef.current.has(error)
@@ -1566,6 +1631,8 @@ export function useTimelinePersistence({
     resumeDeferredRecoverySave,
     clearDeferredRecoverySave,
     flushPendingSave,
+    preserveTimelineDraftForReload,
+    isTimelineDraftDurableForReload,
     captureSaveTarget,
     flushSaveTarget,
     discardUncommittedSaveTarget,

@@ -153,3 +153,98 @@ test('C1 busy blockers and stop evidence survive the launcher control channel', 
     return true;
   });
 });
+
+const pageReceipt = (control) => ({ url: control.receipt.page.url, origin: control.receipt.origin, token: control.receipt.page.token });
+const preflight = (url, headers) => new Promise((resolve, reject) => {
+  const address = new URL(url);
+  const request = httpRequest({ hostname: address.hostname, port: address.port, path: address.pathname, method: 'OPTIONS', headers }, (response) => {
+    response.resume();
+    response.on('end', () => resolve({ status: response.statusCode, headers: response.headers }));
+  });
+  request.on('error', reject);
+  request.end();
+});
+
+test('page route is absent unless enabled and never accepts the CLI secret', async (t) => {
+  const repo = await gitRepo(); t.after(repo.close);
+  const off = await startLocalUpdateControl({ cwd: repo.cwd, origin: 'http://127.0.0.1:4173', update: async () => ({ status: 'updated' }) });
+  assert.equal(off.receipt.page, undefined);
+  const attempt = await rawRequest({ ...off.receipt, url: off.receipt.url.replace('/update', '/page-update') });
+  assert.equal(attempt.status, 403);
+  await off.close();
+
+  const on = await startLocalUpdateControl({ cwd: repo.cwd, origin: 'http://127.0.0.1:4173', page: true, update: async () => ({ status: 'updated' }) });
+  t.after(() => on.close());
+  assert.notEqual(on.receipt.page.token, on.receipt.token);
+  const cliSecretOnPage = await rawRequest({ ...on.receipt, url: on.receipt.page.url });
+  const pageSecretOnCli = await rawRequest({ ...on.receipt, token: on.receipt.page.token });
+  assert.deepEqual([cliSecretOnPage.status, pageSecretOnCli.status], [403, 403]);
+});
+
+test('page route checks secret, exact Origin and Host, answers the CORS preflight, and rotates its secret', async (t) => {
+  const repo = await gitRepo(); t.after(repo.close);
+  const origin = 'http://127.0.0.1:4173';
+  let calls = 0;
+  const control = await startLocalUpdateControl({ cwd: repo.cwd, origin, page: true, update: async () => { calls += 1; return { status: 'updated' }; } });
+  t.after(() => control.close());
+  const first = pageReceipt(control);
+  assert.equal(JSON.parse(await readFile(await controlReceiptPath(repo.cwd), 'utf8')).page.token, first.token);
+
+  const host = new URL(first.url).host;
+  const ok = await preflight(first.url, { Host: host, Origin: origin, 'Access-Control-Request-Method': 'POST', 'Access-Control-Request-Headers': 'authorization,content-type' });
+  assert.equal(ok.status, 204);
+  assert.equal(ok.headers['access-control-allow-origin'], origin);
+  const badOrigin = await preflight(first.url, { Host: host, Origin: 'http://localhost:4173', 'Access-Control-Request-Method': 'POST' });
+  assert.equal(badOrigin.status, 403);
+
+  const wrong = [
+    await rawRequest(first, { Origin: 'http://localhost:4173' }, 'a'.repeat(32)),
+    await rawRequest(first, { Host: 'localhost:4173' }, 'b'.repeat(32)),
+    await rawRequest(first, { Authorization: 'Bearer wrong' }, 'c'.repeat(32)),
+    await rawRequest(first, { 'Sec-Fetch-Site': 'cross-site' }, 'd'.repeat(32)),
+  ];
+  assert.deepEqual(wrong.map(({ status }) => status), [403, 403, 403, 403]);
+  assert.equal(calls, 0);
+
+  const accepted = await rawRequest(first, { 'Sec-Fetch-Site': 'same-site' }, 'e'.repeat(32));
+  assert.equal(accepted.status, 200);
+  assert.deepEqual(accepted.body, { result: { status: 'updated' } });
+  assert.equal((await rawRequest(first, {}, 'e'.repeat(32))).body.code, 'replay');
+
+  await control.rotatePageToken();
+  const second = pageReceipt(control);
+  assert.notEqual(second.token, first.token);
+  assert.equal((await rawRequest(first, {}, 'f'.repeat(32))).status, 403);
+  assert.equal((await rawRequest(second, {}, '1'.repeat(32))).status, 200);
+  assert.equal(JSON.parse(await readFile(await controlReceiptPath(repo.cwd), 'utf8')).page.token, second.token);
+  assert.equal(calls, 2);
+});
+
+test('page route maps busy, non-fast-forward and dirty-edit failures to 409 refusals and others to 422', async (t) => {
+  const repo = await gitRepo(); t.after(repo.close);
+  const failures = [
+    Object.assign(new Error('diverged'), { step: 'preflight', code: 'non_fast_forward' }),
+    Object.assign(new Error('overlap'), { step: 'preflight', code: 'local_edits_conflict' }),
+    Object.assign(new Error('boom'), { step: 'prepare-install', code: 'prepare_install_failed' }),
+  ];
+  let release; const gate = new Promise((resolve) => { release = resolve; });
+  let next = 0;
+  const control = await startLocalUpdateControl({ cwd: repo.cwd, origin: 'http://127.0.0.1:4173', page: true, update: async () => {
+    if (next === failures.length) { await gate; return { status: 'updated' }; }
+    throw failures[next++];
+  } });
+  t.after(() => control.close());
+  const receipt = pageReceipt(control);
+  const outcomes = [];
+  for (let index = 0; index < failures.length; index += 1) {
+    const response = await rawRequest(receipt, {}, String(index).repeat(32));
+    outcomes.push([response.status, response.body.code, response.body.refusal]);
+  }
+  assert.deepEqual(outcomes, [[409, 'non_fast_forward', 'non_fast_forward'], [409, 'local_edits_conflict', 'dirty'], [422, 'prepare_install_failed', undefined]]);
+  const running = rawRequest(receipt, {}, 'a'.repeat(32));
+  while (!control.busy) await new Promise((resolve) => setTimeout(resolve, 5));
+  const busy = await rawRequest(receipt, {}, 'b'.repeat(32));
+  assert.deepEqual([busy.status, busy.body.code, busy.body.refusal], [409, 'update_busy', 'update_busy']);
+  release();
+  assert.equal((await running).status, 200);
+});

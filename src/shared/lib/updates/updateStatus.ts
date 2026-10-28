@@ -1,6 +1,7 @@
 import type { Health } from '@/integrations/runtime/generated.ts';
 import type { UpdateResolutionInput } from './resolveUpdate.ts';
 import { fetchBuildInfo } from './appBuildWatch.ts';
+import { installedReleaseOf } from './installedRelease.ts';
 
 export interface UpdateStatus {
   readonly release: number;
@@ -28,7 +29,7 @@ export async function checkHostedUpdate(health: Health, fetchImpl: typeof fetch 
   const [build, manifest] = await Promise.all([fetchBuildInfo(fetchImpl), readManifest(fetchImpl)]);
   if (!build) throw new Error('App build information was invalid');
   const servedRelease = manifest.release === undefined ? 0 : releaseNumber(manifest.release);
-  const installedRelease = health.release === undefined ? 0 : releaseNumber(health.release);
+  const installedRelease = installedReleaseOf(health) ?? 0;
   const manifestRequired = manifest.required;
   let requiredRelease: number | undefined;
   let requiredReason: string | undefined;

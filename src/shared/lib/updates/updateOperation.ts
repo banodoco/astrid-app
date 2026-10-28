@@ -2,6 +2,7 @@ import { AstridRuntimeClient, type InstallerUpdateStatus, type InstallerUpdateHe
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
+import { installedReleaseOf } from './installedRelease.ts';
 
 export interface UpdateOperationSnapshot {
   readonly health: InstallerUpdateHealth | null;
@@ -48,7 +49,7 @@ export class UpdateOperation {
       // report an installed release even when status is absent or denied;
       // K6 must still suppress a downgrade prompt on those installations.
       if (statusRead.status === 'rejected') this.publish({ fresh: false, error: statusRead.reason instanceof Error ? statusRead.reason.message : 'Update status could not be read.' });
-      const identity = JSON.stringify([health.runtime_instance_id, health.release]);
+      const identity = JSON.stringify([health.runtime_instance_id, installedReleaseOf(health)]);
       if (this.releaseIdentity !== identity || !this.snapshot.releaseStatus) {
         try {
           const releaseStatus = await checkHostedUpdate(health);

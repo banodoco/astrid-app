@@ -184,6 +184,26 @@ describe('DynamicEffectRegistry', () => {
     expect(getAnimationStyle()?.opacity).toBe('0');
   });
 
+  it.each([
+    ['object', { fade_in: 0.5, fade_out: 0.5 }],
+    ['array', [{ fade_in: 0.5 }, { fade_out: 0.5 }]],
+  ])('ramps opacity from %s effects fade_in and fade_out like the installed package', (_form, effects) => {
+    const clip = { id: 'preview-field', at: 0, hold: 2, effects } as unknown as ResolvedTimelineClip;
+    const opacityAt = (frame: number) => {
+      remotionState.frame = frame;
+      const view = render(<>{wrapWithClipEffects(<span>content</span>, clip, 60, 30)}</>);
+      const wrapper = view.container.firstElementChild as HTMLElement;
+      const opacity = wrapper.style.opacity;
+      view.unmount();
+      return opacity;
+    };
+
+    expect(opacityAt(0)).toBe('0');
+    expect(opacityAt(6)).toBe('0.4');
+    expect(opacityAt(30)).toBe('1');
+    expect(opacityAt(54)).toBe('0.4');
+  });
+
   it('returns a compile error overlay instead of throwing for invalid custom code', async () => {
     const registry = new DynamicEffectRegistry({});
     expect(() => registry.register('broken', 'export default function Effect( {')).not.toThrow();

@@ -108,6 +108,8 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
       webpackOverride: (config: any) => ({ ...config, resolve: { ...config.resolve, alias: { ...config.resolve?.alias,
         react: join(root, 'node_modules/react'), 'react-dom': join(root, 'node_modules/react-dom'),
         remotion: join(root, 'node_modules/remotion'),
+        // An alias bypasses the package exports map, so the subpath needs its own (earlier) entry.
+        '@banodoco/timeline-composition/registry.generated': join(root, 'node_modules/@banodoco/timeline-composition/dist/registry.generated.js'),
         '@banodoco/timeline-composition': join(root, 'node_modules/@banodoco/timeline-composition'),
       } } }),
     });

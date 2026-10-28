@@ -3,7 +3,7 @@ import { AbsoluteFill, Sequence, useVideoConfig } from 'remotion';
 import { getClipDurationInFrames } from '@/tools/video-editor/lib/config-utils.ts';
 import { ClipTransition, clipSequenceTiming } from '@/tools/video-editor/compositions/ClipTransition.tsx';
 import { getDefaultBoxForClipType } from '@/tools/video-editor/clip-types/index.ts';
-import { ClipFadeOpacity, wrapWithClipEffects } from '@/tools/video-editor/effects/index.tsx';
+import { wrapWithClipEffects } from '@/tools/video-editor/effects/index.tsx';
 import {
   useOptionalEffectRegistryContext,
   type EffectRegistrySnapshot,
@@ -61,7 +61,7 @@ export const TextClip: FC<TextClipProps> = ({ clip, track: _track, fps, effectRe
     </AbsoluteFill>
   );
 
-  return <>{wrapWithClipEffects(<ClipTransition clip={clip} fps={fps}><ClipFadeOpacity clip={clip} fps={fps} fadeOnly>{content}</ClipFadeOpacity></ClipTransition>, clip, durationInFrames, fps, registrySnapshot)}</>;
+  return <>{wrapWithClipEffects(<ClipTransition clip={clip} fps={fps}>{content}</ClipTransition>, clip, durationInFrames, fps, registrySnapshot)}</>;
 };
 
 export const TextClipSequence: FC<TextClipProps> = ({ clip, track, fps, effectRegistrySnapshot, predecessor }) => {

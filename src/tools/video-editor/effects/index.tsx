@@ -8,7 +8,7 @@ import {
   type AnimationPhase,
 } from '@banodoco/timeline-composition/theme-api';
 import { clipOpacity } from '@banodoco/timeline-composition/evaluation';
-import { secondsToFrames } from '@/tools/video-editor/lib/config-utils.ts';
+import { getEffectValue, secondsToFrames } from '@/tools/video-editor/lib/config-utils.ts';
 import { DynamicEffectRegistry } from '@/tools/video-editor/effects/DynamicEffectRegistry.ts';
 import { EffectErrorBoundary } from '@/tools/video-editor/effects/EffectErrorBoundary.tsx';
 import {
@@ -222,19 +222,16 @@ const PackageAnimation: FC<{
   }, frame)}</>;
 };
 
-// Applies the effects-collection fade_in/fade_out through the package's own
-// clipOpacity. `fadeOnly` drops the authored clip.opacity for content that
-// already applies it (TextClip) so it is not multiplied twice.
-export const ClipFadeOpacity: FC<{
-  clip: ResolvedTimelineClip;
-  fps: number;
-  fadeOnly?: boolean;
-  children: ReactNode;
-}> = ({ clip, fps, fadeOnly, children }) => {
-  const frame = useCurrentFrame();
-  const opacity = clipOpacity((fadeOnly ? { ...clip, opacity: undefined } : clip) as never, frame, fps);
-  return opacity === 1 ? <>{children}</> : <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
+// `effects.fade_in` / `fade_out` ramp the clip's opacity through the package's own
+// clipOpacity. `clip.opacity` is applied by each clip body, so it is dropped here.
+const ClipFadeOpacity: FC<{ clip: ResolvedTimelineClip; fps: number; children: ReactNode }> = ({ clip, fps, children }) => {
+  const opacity = clipOpacity({ ...clip, opacity: undefined } as never, useCurrentFrame(), fps);
+  return <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
 };
+
+const hasClipFade = (clip: ResolvedTimelineClip): boolean => (
+  getEffectValue(clip.effects, 'fade_in') !== null || getEffectValue(clip.effects, 'fade_out') !== null
+);
 
 type PackageAnimationResolution = 'supported' | 'wrong-phase' | 'unknown';
 
@@ -358,5 +355,5 @@ export const wrapWithClipEffects = (
     });
   }
 
-  return wrapped;
+  return hasClipFade(clip) ? <ClipFadeOpacity clip={clip} fps={fps}>{wrapped}</ClipFadeOpacity> : wrapped;
 };

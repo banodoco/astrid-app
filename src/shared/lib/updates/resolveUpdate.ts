@@ -16,6 +16,8 @@ export type UpdateResolution = {
   readonly secondary: UpdateAction | null;
 };
 
+export type InstallType = 'pinokio' | 'source' | 'fully-local' | 'installer';
+
 export interface UpdateResolutionInput {
   readonly runtime?: 'unreachable' | 'failed';
   readonly failure?: string;
@@ -28,9 +30,19 @@ export interface UpdateResolutionInput {
   readonly releaseBehind?: boolean;
   readonly midSessionSchemaMismatch?: boolean;
   readonly updateNowAvailable?: boolean;
-  readonly installType?: 'pinokio' | 'source' | 'fully-local' | 'installer';
+  readonly installType?: InstallType;
   readonly command?: string;
   readonly realError?: string;
+}
+
+/**
+ * The one install-type rule, shared by the page and the installer hook. Pinokio and a fully local page come from the
+ * mode. Only the Runtime's identity (`managed_by`) can say `source`; `originless` is a page with no separate Runtime origin.
+ */
+export function installTypeOf(managedBy: string | null | undefined, mode: { managedByPinokio?: boolean | null; local?: boolean; originless?: boolean }): InstallType {
+  if (mode.managedByPinokio || managedBy === 'pinokio') return 'pinokio';
+  if (mode.local) return 'fully-local';
+  return mode.originless || managedBy === 'source' ? 'source' : 'installer';
 }
 
 const settingsAction: UpdateAction = { label: 'Update now', destination: 'settings-updates' };
@@ -64,7 +76,9 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   if (input.runtime) return { card: 'not-running', title: 'Astrid isn’t running', body: input.failure ?? 'Start Astrid Runtime to continue.', primary: { label: 'Start Astrid' }, secondary: { label: 'Repair' } };
   if (input.pageStale) return { card: 'reload', title: 'Editor updated', body: 'Reload this page to use the latest editor.', primary: { label: 'Reload' }, secondary: null };
   if (input.compatibility?.kind === 'identity') return { card: 'identity', title: 'Restart Astrid', body: 'An older Astrid is still running. Restart the selected Runtime, then reconnect.', primary: null, secondary: null };
-  if (input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {
+  // A source checkout has no release: its startup identity is fixed at 0, so the release rules (newer, required, behind) never apply.
+  const releaseRules = input.installType !== 'source';
+  if (releaseRules && input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {
     return { card: 'newer', title: null, body: 'Astrid on this computer is newer than astrid.haus; a fix is on its way.', primary: null, secondary: null };
   }
   if (input.compatibility?.kind === 'schema') {
@@ -74,10 +88,10 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
     return { card: 'mid-session', title: 'Editor updated', body: 'Update Astrid, then reload when your drafts can be saved.',
       ...updateActions(input, context) };
   }
-  if (input.requiredRelease !== undefined && input.installedRelease !== undefined && input.installedRelease < input.requiredRelease) {
+  if (releaseRules && input.requiredRelease !== undefined && input.installedRelease !== undefined && input.installedRelease < input.requiredRelease) {
     return { card: 'update', title: 'Update Astrid', body: `This update is required: ${input.requiredReason ?? 'A required update is available.'}`, ...updateActions(input, context) };
   }
-  if (input.releaseBehind) {
+  if (releaseRules && input.releaseBehind) {
     return { card: 'notice', title: 'Update available', body: 'A newer release of Astrid is available.', ...updateActions(input, context, true) };
   }
   if (input.realError || input.compatibility) return { card: 'error', title: 'Could not connect to Astrid', body: input.realError ?? input.compatibility?.detail ?? 'An unexpected error occurred.', primary: null, secondary: null };

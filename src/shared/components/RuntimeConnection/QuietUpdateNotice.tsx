@@ -19,10 +19,9 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
   useEffect(() => {
     if (!connection.isConnected || (!local && !hosted)) return;
     let active = true;
-    const installType = connection.managedByPinokio ? 'pinokio' : local ? 'fully-local' : 'installer';
     void loadPageUpdateStatus(local).then((status) => {
       if (!active || !status) return;
-      const decision = resolvePageUpdateStatus(status, installType);
+      const decision = resolvePageUpdateStatus(status, { managedByPinokio: connection.managedByPinokio, local });
       if (decision.card === 'notice' || decision.card === 'update') {
         setRelease(status.servedRelease);
         setResolution(decision);

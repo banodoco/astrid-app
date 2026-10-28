@@ -1,7 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { resolveUpdate } from './resolveUpdate.ts';
+import { installTypeOf, resolveUpdate } from './resolveUpdate.ts';
+
+describe('installTypeOf', () => {
+  it('takes source from the Runtime identity, after the Pinokio and fully-local modes', () => {
+    expect(installTypeOf('source', {})).toBe('source');
+    expect(installTypeOf('source', { managedByPinokio: true })).toBe('pinokio');
+    expect(installTypeOf('pinokio', {})).toBe('pinokio');
+    expect(installTypeOf('source', { local: true })).toBe('fully-local');
+    expect(installTypeOf(null, {})).toBe('installer');
+    expect(installTypeOf(undefined, { originless: true })).toBe('source');
+  });
+});
 
 describe('resolveUpdate', () => {
+  it('skips the release rules for a source checkout, which has no release, but keeps its schema action', () => {
+    expect(resolveUpdate({ installType: 'source', installedRelease: 0, requiredRelease: 5, requiredReason: 'security fix' })).toMatchObject({ card: 'none', primary: null });
+    expect(resolveUpdate({ installType: 'source', installedRelease: 0, servedRelease: 5, releaseBehind: true })).toMatchObject({ card: 'none', primary: null });
+    expect(resolveUpdate({ installType: 'source', installedRelease: 6, servedRelease: 5 })).toMatchObject({ card: 'none', primary: null });
+    expect(resolveUpdate({ installType: 'source', installedRelease: 0, requiredRelease: 5, compatibility: { kind: 'schema', detail: 'digest mismatch' } }))
+      .toMatchObject({ card: 'update', primary: { label: 'update your checkouts' } });
+  });
+
   it('uses K6 first-match precedence for unavailable, stale, identity, newer, schema, required, soft and real errors', () => {
     expect(resolveUpdate({ runtime: 'unreachable' }).card).toBe('not-running');
     expect(resolveUpdate({ pageStale: true, compatibility: { kind: 'schema', detail: 'old' } }).card).toBe('reload');

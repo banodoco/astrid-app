@@ -1,4 +1,4 @@
-import type { Health } from '@/integrations/runtime/generated.ts';
+import type { InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
 import type { UpdateResolutionInput } from './resolveUpdate.ts';
 import { fetchBuildInfo } from './appBuildWatch.ts';
 import { installedReleaseOf } from './installedRelease.ts';
@@ -9,6 +9,8 @@ export interface UpdateStatus {
   readonly servedRelease: number;
   readonly servedApp: string;
   readonly behind: boolean;
+  /** The Runtime's startup identity `managed_by` (`source`, `pinokio`, or null for a native install); null for the local launcher. */
+  readonly managedBy: string | null;
   readonly resolution: UpdateResolutionInput;
 }
 
@@ -25,7 +27,7 @@ async function readManifest(fetchImpl: typeof fetch): Promise<Record<string, unk
   return value as Record<string, unknown>;
 }
 
-export async function checkHostedUpdate(health: Health, fetchImpl: typeof fetch = fetch): Promise<UpdateStatus> {
+export async function checkHostedUpdate(health: InstallerUpdateHealth, fetchImpl: typeof fetch = fetch): Promise<UpdateStatus> {
   const [build, manifest] = await Promise.all([fetchBuildInfo(fetchImpl), readManifest(fetchImpl)]);
   if (!build) throw new Error('App build information was invalid');
   const servedRelease = manifest.release === undefined ? 0 : releaseNumber(manifest.release);
@@ -42,8 +44,10 @@ export async function checkHostedUpdate(health: Health, fetchImpl: typeof fetch 
   }
   const behind = installedRelease < servedRelease;
   const app = typeof __ASTRID_APP_BUILD__ === 'string' ? __ASTRID_APP_BUILD__ : build.app;
+  const managedBy = health.identity?.managed_by;
   return {
     release: installedRelease, app, servedRelease, servedApp: build.app, behind,
+    managedBy: typeof managedBy === 'string' ? managedBy : null,
     resolution: { installedRelease, servedRelease,
       ...(requiredRelease === undefined ? {} : { requiredRelease, requiredReason }),
       releaseBehind: behind },
@@ -63,6 +67,6 @@ export async function checkLocalUpdate(fetchImpl: typeof fetch = fetch): Promise
   const servedRelease = body.servedRelease === undefined ? 0 : releaseNumber(body.servedRelease);
   const requiredRelease = body.requiredRelease === undefined ? undefined : releaseNumber(body.requiredRelease);
   const requiredReason = typeof body.requiredReason === 'string' ? body.requiredReason : undefined;
-  return { release, app: body.app, servedRelease, servedApp: body.servedApp, behind: body.behind,
+  return { release, app: body.app, servedRelease, servedApp: body.servedApp, behind: body.behind, managedBy: null,
     resolution: { installedRelease: release, servedRelease, ...(requiredRelease === undefined ? {} : { requiredRelease, requiredReason }), releaseBehind: body.behind } };
 }

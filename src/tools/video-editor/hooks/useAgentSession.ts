@@ -1112,6 +1112,12 @@ function hasActiveProjectAgentTurn(queryClient: QueryClient, projectId: string):
   });
 }
 
+/** True when any agent session this App has loaded is mid-turn. Read on demand (no subscription), e.g. on an Update click. */
+export function hasAnyActiveAgentTurn(queryClient: QueryClient): boolean {
+  return queryClient.getQueryCache().findAll({ queryKey: ['timeline-agent-session'] })
+    .some((query) => isSessionActivelyControlled(query.state.data as AgentSessionView | undefined));
+}
+
 export function useAgentSessions(timelineId: string | null | undefined, projectId?: string | null) {
   return useQuery({
     queryKey: agentSessionsQueryKey(timelineId, projectId),

@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { agentSessionQueryKey } from '@/tools/video-editor/hooks/useAgentSession.ts';
 
 const harness = vi.hoisted(() => ({
   auth: { isAuthenticated: true },
@@ -314,5 +316,45 @@ describe('installer update callers', () => {
     await screen.findAllByText('Update available · Release 4');
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
+  });
+});
+
+describe('installer update while an agent turn runs', () => {
+  const TURN_WARNING = 'An agent turn is running; updating will interrupt it';
+  const postCount = () => calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
+  const renderWithSession = (status: 'processing' | 'waiting_user') => {
+    const client = new QueryClient();
+    client.setQueryData(agentSessionQueryKey('session-1', 'project-1'), { id: 'session-1', status, turns: [], taskLinks: [] });
+    return render(<QueryClientProvider client={client}><AstridUpdatesSection isOpen /></QueryClientProvider>);
+  };
+
+  it('sends Update now without a dialog when no agent turn is running', async () => {
+    renderWithSession('waiting_user');
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
+    await waitFor(() => expect(postCount()).toBe(1));
+    expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
+  });
+
+  it('asks before Update now interrupts a running agent turn', async () => {
+    renderWithSession('processing');
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
+    expect(await screen.findByText(TURN_WARNING)).toBeInTheDocument();
+    expect(postCount()).toBe(0);
+  });
+
+  it('Wait closes the agent-turn confirmation and sends no update', async () => {
+    renderWithSession('processing');
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Wait' }));
+    await waitFor(() => expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument());
+    expect(postCount()).toBe(0);
+  });
+
+  it('Update anyway sends the update after the agent-turn confirmation', async () => {
+    renderWithSession('processing');
+    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Update anyway' }));
+    await waitFor(() => expect(postCount()).toBe(1));
+    expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
   });
 });

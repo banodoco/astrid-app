@@ -17,7 +17,7 @@ const FIXTURE_FPS = 24;
 // data:image/svg+xml;base64 URIs, and the installed package (which resolves
 // non-http asset files through Remotion staticFile and cannot read data: URIs)
 // gets the same bytes as files in the bundle's public dir.
-const SOLID_COLORS = { 'solid.svg': '#e85030', 'second.svg': '#3080d0' } as const;
+const SOLID_COLORS = { 'solid.svg': '#e85030', 'second.svg': '#3080d0', 'under.svg': '#505050' } as const;
 const solidSvg = (color: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="90"><rect width="160" height="90" fill="${color}"/></svg>`;
 const solidImage = (color: string) => `data:image/svg+xml;base64,${Buffer.from(solidSvg(color)).toString('base64')}`;
@@ -166,15 +166,18 @@ registerRoot(() => <Composition id="Fields" component={Draw} durationInFrames={4
       const clips = [
         { id: 'first', track: 'picture', clipType: 'media', at: 0, hold: 1, asset: 'solid', ...(variant && field !== 'transition' ? element : {}), ...(field !== 'transition' ? { [field]: reference } : {}) },
         { id: 'second', track: 'picture', clipType: 'media', at: 1, hold: 1, asset: 'second', ...(variant && field === 'transition' ? element : {}), ...(field === 'transition' ? { transition: reference } : {}) },
-        // The element paints the opaque theme background, so a plain media clip on the track below
-        // is what a faded, entering or leaving element reveals in both products.
-        ...(variant ? [{ id: 'under', track: 'under', clipType: 'media', at: 0, hold: 2, asset: 'solid' }] : []),
+        // The element paints the opaque theme background (a light grey, 64 levels above this clip), so
+        // this plain media clip on the track below is what a faded or transitioning element reveals.
+        // The small level gap keeps 8-bit group-opacity rounding of the two browsers under the bound.
+        ...(variant ? [{ id: 'under', track: 'under', clipType: 'media', at: 0, hold: 2, asset: 'under' }] : []),
       ];
-      const config = { output: { resolution: '160x90', fps: FIXTURE_FPS, file: 'fixture.mp4' }, theme_overrides: { visual: { color: { bg: '#000000' } } }, tracks: [track, ...(variant ? [{ id: 'under', kind: 'visual', fit: 'contain' }] : [])], clips,
+      const config = { output: { resolution: '160x90', fps: FIXTURE_FPS, file: 'fixture.mp4' }, theme_overrides: { visual: { color: { bg: variant ? '#909090' : '#000000' } } }, tracks: [track, ...(variant ? [{ id: 'under', kind: 'visual', fit: 'contain' }] : [])], clips,
         registry: { assets: { solid: { file: solidImage(SOLID_COLORS['solid.svg']), type: 'image/svg+xml' },
-          second: { file: solidImage(SOLID_COLORS['second.svg']), type: 'image/svg+xml' } } } };
+          second: { file: solidImage(SOLID_COLORS['second.svg']), type: 'image/svg+xml' },
+          under: { file: solidImage(SOLID_COLORS['under.svg']), type: 'image/svg+xml' } } } };
       const exportRegistry = { assets: { solid: { file: 'solid.svg', type: 'image/svg+xml' },
-        second: { file: 'second.svg', type: 'image/svg+xml' } } };
+        second: { file: 'second.svg', type: 'image/svg+xml' },
+        under: { file: 'under.svg', type: 'image/svg+xml' } } };
       const baseline = { ...config, clips: clips.map(clip => {
         const copy = { ...clip } as Record<string, unknown>;
         delete copy[field];

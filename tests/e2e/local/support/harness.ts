@@ -971,11 +971,11 @@ if case['initialize']:
         'resolution': '1280x720', 'fps': 30, 'file': 'output.mp4',
         'background': None, 'background_scale': None,
     }))
+if not any(track.get('id') == 'V1' for track in bundle['parent']['config']['tracks']):
+    add(capture_track_create(bundle, 'parent', {'id': 'V1', 'kind': 'visual', 'label': 'V1'}))
+assert any(track.get('id') == 'V1' and track.get('kind') == 'visual' and track.get('label') == 'V1'
+           for track in bundle['parent']['config']['tracks'])
 if case['fixture'] == 'three-products':
-    if not case['initialize']:
-        assert bundle['parent']['config']['tracks'] == [{'id': 'V1', 'kind': 'visual', 'label': 'V1'}]
-    else:
-        add(capture_track_create(bundle, 'parent', {'id': 'V1', 'kind': 'visual', 'label': 'V1'}))
     add(capture_track_create(bundle, 'parent', {'id': 'S1', 'kind': 'visual', 'label': 'S1'}))
     add(capture_clip_add_media(bundle, {
         'id': 'f2-app-clip', 'at': 0, 'track': 'V1', 'clipType': 'image',
@@ -1018,10 +1018,14 @@ if case['fixture'] == 'three-products':
         'f2-app': asset({'file': 'f2-app.png', 'type': 'image/png', 'object_id': image['object_id'], 'digest': image['digest']}, pins['f2-app']),
         'f2-video': asset({'file': video['file'], 'type': video['media_type'], 'object_id': video['object_id'], 'digest': video['digest']}, pins['f2-video']),
     }
-    parent_registry['f2-video']['duration'] = 12
+    parent_registry['f2-video']['duration'] = 12.0
     # Retain the original authored fixture independently of the native candidate.
     expected_parent = {'slug': 'main', 'name': 'Main', 'config': {'clips': copy.deepcopy(parent_clips),
-        'tracks': [{'id': 'V1', 'kind': 'visual', 'label': 'V1'}, {'id': 'S1', 'kind': 'visual', 'label': 'S1'}],
+        'tracks': [
+            {'id': 'V1', 'kind': 'visual', 'scale': 1, 'fit': 'contain', 'opacity': 1, 'blendMode': 'normal', 'label': 'V1'},
+            {'id': 'A1', 'kind': 'audio', 'scale': 1, 'fit': 'contain', 'opacity': 1, 'blendMode': 'normal', 'label': 'A1'},
+            {'id': 'S1', 'kind': 'visual', 'scale': 1, 'fit': 'contain', 'opacity': 1, 'blendMode': 'normal', 'label': 'S1'},
+        ],
         'output': {'resolution': '1280x720', 'fps': 30, 'file': 'out.mp4'},
         'x_f2_opaque': case['opaque']['config'],
         'app': {'haus.astrid.scene-phase-markers': {'sceneMarkers': [{'id': 'ordinary-marker-a', 'time': 1}, {'id': 'ordinary-marker-b', 'time': 6}]}},
@@ -1066,9 +1070,10 @@ if case['fixture'] == 'three-products':
 else:
     before = copy.deepcopy(bundle)
     after = copy.deepcopy(bundle)
+    # Preserve Runtime-owned bootstrap tracks, including their normalized defaults.
     expected_parent = {'slug': 'main', 'name': 'Main', 'registry': {'assets': {}}, 'clips': [],
                        'config': {'output': {'resolution': '1280x720', 'fps': 30, 'file': 'out.mp4'},
-                                 'clips': [], 'tracks': [{'id': 'V1', 'kind': 'visual', 'label': 'V1'}]}}
+                                 'clips': [], 'tracks': copy.deepcopy(before['parent']['config']['tracks'])}}
     after['parent'] = copy.deepcopy(expected_parent)
     for command in emit_document_commands(before, after):
         add(command)

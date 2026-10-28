@@ -4,7 +4,7 @@ export type HeadersLike = Record<string, string>;
 export type RequestBody = Uint8Array | Blob;
 export type Transport = (method: string, path: string, headers: HeadersLike, body?: RequestBody) => Promise<{ status: number; headers: HeadersLike; body: Uint8Array }>;
 export interface ServiceStatus { name: string; state: "starting" | "running" | "restarting" | "failed"; last_exit: number | null; restart_count: number; reason?: string | null }
-export interface Health { status: "ok" | "degraded"; protocol: typeof PROTOCOL; schema_digest: string; runtime_epoch: number; runtime_session_id: string; runtime_instance_id: string; release?: number; services?: ServiceStatus[] }
+export interface Health { status: "ok" | "degraded"; protocol: typeof PROTOCOL; schema_digest: string; runtime_epoch: number; runtime_session_id: string; runtime_instance_id: string; services?: ServiceStatus[] }
 export interface Handshake { protocol: typeof PROTOCOL; schema_digest: string; session_id: string; actor_id: string; realm_id: string; scopes: string[]; capabilities: string[] }
 export interface Realm { realm_id: string; display_name: string; version: number; created_at: string; state?: "active" | "tombstoned"; tombstoned_at?: string | null; lifecycle_version?: number }
 export interface IntegrityCheck { ok: boolean; [key: string]: unknown }

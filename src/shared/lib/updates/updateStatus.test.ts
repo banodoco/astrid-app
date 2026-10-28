@@ -21,6 +21,19 @@ describe('update status queries', () => {
     expect(result.resolution.updateNowAvailable).toBeUndefined();
   });
 
+  it('reads an optional release from the raw health payload and treats absent or malformed as unknown', async () => {
+    const served = () => vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ app: 'served-build', release: 4 }))
+      .mockResolvedValueOnce(response({ release: 4 }));
+    const withRelease = await checkHostedUpdate(health(4), served());
+    expect(withRelease).toMatchObject({ release: 4, behind: false });
+    expect(withRelease.resolution).toMatchObject({ installedRelease: 4, releaseBehind: false });
+    const withoutRelease = await checkHostedUpdate(health(), served());
+    expect(withoutRelease).toMatchObject({ release: 0, behind: true });
+    const malformed = await checkHostedUpdate({ ...(health() as object), release: '4' } as never, served());
+    expect(malformed).toMatchObject({ release: 0, behind: true });
+  });
+
   it('handles equal, behind, ahead, and required release facts', async () => {
     for (const [installed, served, behind] of [[4, 4, false], [3, 4, true], [5, 4, false]] as const) {
       const fetcher = vi.fn<typeof fetch>()

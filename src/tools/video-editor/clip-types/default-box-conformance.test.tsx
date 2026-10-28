@@ -41,6 +41,11 @@ vi.mock('remotion', () => ({
     fps: 30,
     durationInFrames: 300,
   }),
+  // Frame 0: the box is measured at rest, not mid-transition.
+  useCurrentFrame: () => 0,
+  // Frame 0 maps to the first output value, which is what the real
+  // interpolate returns at rest.
+  interpolate: (_frame: number, _inputRange: number[], outputRange: number[]) => outputRange[0],
 }));
 
 vi.mock('@/tools/video-editor/effects/index.tsx', async (importOriginal) => {
@@ -123,7 +128,10 @@ describe('surface: renderer (TextClip)', () => {
   it('draws a position-less text clip at the descriptor box', () => {
     render(<TextClip clip={positionlessTextClip} track={track} fps={30} />);
 
-    const box = screen.getByTestId('absolute-fill');
+    // ClipTransition wraps the text box in an AbsoluteFill, so two elements
+    // carry the test id. The text box is the innermost one, last in DOM order.
+    const boxes = screen.getAllByTestId('absolute-fill');
+    const box = boxes[boxes.length - 1];
     expect(box.style.left).toBe(`${descriptorBox.x}px`);
     expect(box.style.top).toBe(`${descriptorBox.y}px`);
     expect(box.style.width).toBe(`${descriptorBox.width}px`);
@@ -139,7 +147,8 @@ describe('surface: renderer (TextClip)', () => {
       />,
     );
 
-    const box = screen.getByTestId('absolute-fill');
+    const boxes = screen.getAllByTestId('absolute-fill');
+    const box = boxes[boxes.length - 1];
     expect(box.style.left).toBe('10px');
     expect(box.style.top).toBe('20px');
     expect(box.style.width).toBe('300px');

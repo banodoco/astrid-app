@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "candidate_only": true,
+  "baseline": {
+    "release": 0,
+    "agent_sha": "3204bb00135bec8ee2d2d3fb21eed5abfceca649",
+    "runtime_sha": "6d53a19070faf63fc15ae1f81417722edc2c8a5f"
+  },
+  "release": 1,
+  "agent": {
+    "repo": "banodoco/astrid-agent",
+    "sha": "50e3dc5480ebf8fbb860ac3d37bf5d98ab58b3fc"
+  },
+  "runtime": {
+    "repo": "banodoco/astrid-runtime",
+    "sha": "ebd412199a9c1e53c3a984d27d335de8b40654a1",
+    "schema_digest": "sha256:5d229bf66ffaeb0b4937844a3c2b08ddd21f97cbcc305101a5cc19a95c971194"
+  }
+}

@@ -14,6 +14,23 @@ export interface UpdateOperationSnapshot {
   readonly restartRequired: boolean;
 }
 
+/** Translate the Runtime's transaction vocabulary into a status a person can act on. */
+export function installerUpdateStatusMessage(status: InstallerUpdateStatus | null | undefined): string | null {
+  if (!status) return null;
+  if (status.state === 'active') return 'Update in progress. Astrid may disconnect while it restarts.';
+  if (status.state === 'recovery-needed') return 'Astrid needs repair. Download diagnostics and run the installer update command.';
+  if (status.state === 'terminal') {
+    if (status.outcome === 'updated') return 'Astrid updated. Reload to continue.';
+    if (status.outcome === 'rolled_back') return 'The update did not finish. Astrid was restored to its previous version.';
+    if (status.outcome === 'failed') return 'The update did not complete. Check diagnostics before trying again.';
+    return 'The update finished. Check diagnostics for details.';
+  }
+  return null;
+}
+
+const UPDATE_STATUS_UNAVAILABLE = 'Could not check Astrid update status. Check your connection and try again.';
+const UPDATE_START_UNAVAILABLE = 'Astrid could not start the update. Check its status before trying again.';
+
 /** Page-owned operation, independent of any mounted notice or Settings panel. */
 export class UpdateOperation {
   private snapshot: UpdateOperationSnapshot = { health: null, status: null, releaseStatus: null, pending: false, error: null, fresh: false, restartRequired: false };
@@ -48,7 +65,7 @@ export class UpdateOperation {
       // Release ordering is independent of the F1 route. Older Runtimes can
       // report an installed release even when status is absent or denied;
       // K6 must still suppress a downgrade prompt on those installations.
-      if (statusRead.status === 'rejected') this.publish({ fresh: false, error: statusRead.reason instanceof Error ? statusRead.reason.message : 'Update status could not be read.' });
+      if (statusRead.status === 'rejected') this.publish({ fresh: false, error: UPDATE_STATUS_UNAVAILABLE });
       const identity = JSON.stringify([health.runtime_instance_id, installedReleaseOf(health)]);
       if (this.releaseIdentity !== identity || !this.snapshot.releaseStatus) {
         try {
@@ -77,8 +94,8 @@ export class UpdateOperation {
       }
       const pending = this.posting || status.state === 'active';
       this.publish({ health, status, pending, fresh: true, error: this.refusal });
-    } catch (cause) {
-      this.publish({ fresh: false, error: cause instanceof Error ? cause.message : 'Update status could not be read.' });
+    } catch {
+      this.publish({ fresh: false, error: UPDATE_STATUS_UNAVAILABLE });
     }
   }
   start = async (): Promise<void> => {
@@ -97,7 +114,7 @@ export class UpdateOperation {
       const definiteRefusal = cause instanceof ApiError && cause.status >= 400 && cause.status < 500
         && !String(cause.details?.reason).includes('acknowledgement-unknown');
       this.uncertain = !definiteRefusal;
-      const error = cause instanceof Error ? cause.message : 'Update acknowledgement was lost. Check update status.';
+      const error = UPDATE_START_UNAVAILABLE;
       if (definiteRefusal) this.refusal = error;
       this.publish({ pending: !definiteRefusal, fresh: false, error });
     } finally {
@@ -166,8 +183,8 @@ export class LocalPageUpdate {
       const body = await readJson(response);
       if (!response.ok || typeof body.url !== 'string' || typeof body.token !== 'string') throw new Error('The update launcher is not available.');
       target = { url: body.url, token: body.token };
-    } catch (cause) {
-      return this.set({ phase: 'failed', message: cause instanceof Error ? cause.message : 'The update launcher is not available.' });
+    } catch {
+      return this.set({ phase: 'failed', message: 'The update launcher is not available. Check that the local editor is still running.' });
     }
     const requestId = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, '0')).join('');
     try {
@@ -180,9 +197,9 @@ export class LocalPageUpdate {
       }
       const result = body.result as { status?: unknown; message?: unknown } | undefined;
       if (response.ok && result && (result.status === 'updated' || result.status === 'up-to-date' || result.status === 'recovered')) {
-        return this.set({ phase: 'done', status: result.status, message: typeof result.message === 'string' ? result.message : '' });
+        return this.set({ phase: 'done', status: result.status, message: result.status === 'updated' ? 'Astrid updated.' : result.status === 'up-to-date' ? 'Astrid is up to date.' : 'The update did not finish. Astrid was restored to its previous version.' });
       }
-      return this.set({ phase: 'failed', message: typeof body.error === 'string' ? body.error : 'The update did not complete.' });
+      return this.set({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
     } catch {
       return this.set({ phase: 'failed', message: 'The update result could not be confirmed. Check for updates before trying again.' });
     }

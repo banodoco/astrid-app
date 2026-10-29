@@ -123,7 +123,7 @@ it.each([
     expect(requests.filter((request) => request.url.endsWith('/v1/update') && request.method === 'POST')).toHaveLength(0);
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Update now' })[0]!);
-    await screen.findByText('Update accepted.');
+    expect(await screen.findAllByText('Update in progress. Astrid may disconnect while it restarts.')).not.toHaveLength(0);
     const posts = requests.filter((request) => request.url.endsWith('/v1/update') && request.method === 'POST');
     expect(posts).toHaveLength(1);
     expect(posts[0]?.body).toBeUndefined();

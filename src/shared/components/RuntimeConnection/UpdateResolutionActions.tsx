@@ -9,6 +9,7 @@ import { CopyInstallCommand } from './CopyInstallCommand.tsx';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 
 /** Opens Settings on its Updates tab; the header and the update cards share this route. */
 export function openUpdatesSettings() {
@@ -46,9 +47,9 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
-    {operation?.error && <p role="alert">{operation.error}</p>}
+    {operation?.error && <p role="alert">Could not confirm the update status. Download diagnostics before trying again.</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
-    {operation?.fresh && !operation.error && operation.status?.result && !operation.pending && <p role="status">{operation.status.result}</p>}
+    {operation?.fresh && !operation.error && installerUpdateStatusMessage(operation.status) && !operation.pending && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
     {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
     {guarded.error && <p role="alert">{guarded.error}</p>}
     <ConfirmDialog open={turnConfirmOpen} onOpenChange={setTurnConfirmOpen} title="An agent turn is running; updating will interrupt it" confirmText="Update anyway" cancelText="Wait" onConfirm={() => { setTurnConfirmOpen(false); void operation?.start(); }} />

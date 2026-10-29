@@ -172,8 +172,8 @@ describe('installer update callers', () => {
   });
 
   it.each([
-    ['updated', 'Update completed successfully.'],
-    ['rolled_back', 'Update rolled back safely.'],
+    ['updated', 'Astrid updated. Reload to continue.'],
+    ['rolled_back', 'The update did not finish. Astrid was restored to its previous version.'],
   ] as const)('refreshes on focus and reconnect, then confirms a matching %s result after remount and instance change', async (outcome, result) => {
     const view = render(<AstridUpdatesSection isOpen />);
     await screen.findByRole('button', { name: 'Update now' });
@@ -193,7 +193,7 @@ describe('installer update callers', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
     await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
-    await waitFor(() => expect(screen.getByText('Update accepted.')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('Update in progress. Astrid may disconnect while it restarts.')).toBeInTheDocument());
     expect(harness.statusState).toBe('active');
     harness.auth = { isAuthenticated: false };
     harness.connection = { isConnected: false, managedByPinokio: false, state: { status: 'not_running' } };
@@ -210,7 +210,7 @@ describe('installer update callers', () => {
     harness.connection = { isConnected: true, managedByPinokio: false, state: { status: 'connected' } };
     render(<AstridUpdatesSection isOpen />);
     await waitFor(() => expect(screen.getByText('Astrid restarted. Reload when your drafts can be saved.')).toBeInTheDocument());
-    expect(screen.getAllByText(result).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(outcome === 'updated' ? 'Astrid updated. Reload to continue.' : 'The update did not finish. Astrid was restored to its previous version.').length).toBeGreaterThan(0);
     expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1);
     expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
     expect(window.location.pathname).toBe('/');
@@ -245,7 +245,8 @@ describe('installer update callers', () => {
       // A source checkout has no release to install: the status line follows the resolver, which has no update to offer.
       await screen.findAllByText('Astrid is up to date');
       expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
-    } else await screen.findAllByText('Update available · Release 4');
+    } else if (_label === 'recovery required') await screen.findAllByText('Astrid needs repair. Download diagnostics and run the installer update command.');
+    else await screen.findAllByText('Update available · Release 4');
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
   });

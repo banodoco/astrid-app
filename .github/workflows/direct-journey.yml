@@ -274,7 +274,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '2b57de0482961509d22fe01d886922ae6e803c3f' }}
+          ref: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '90b140a03402794248589d279ba46c5de50e4f60' }}
           path: astrid-runtime
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -302,7 +302,7 @@ jobs:
         env:
           ASTRID_SKEW_MODE: ${{ matrix.mode }}
           ASTRID_SKEW_APP_SHA: ${{ matrix.mode == 'old-app' && 'b96c41fca2da7993b41324aedf61eb297dc34f10' || (github.event_name == 'workflow_dispatch' && inputs.run_skew_only && '0bdba813bf4ba496ae7286beb65219153d92da09' || github.sha) }}
-          ASTRID_SKEW_RUNTIME_SHA: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '2b57de0482961509d22fe01d886922ae6e803c3f' }}
+          ASTRID_SKEW_RUNTIME_SHA: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '90b140a03402794248589d279ba46c5de50e4f60' }}
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/skew.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/skew-results

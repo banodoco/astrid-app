@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +14,12 @@ const expected = {
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
+}
+
+export function assertExpectedAppSha(expectedSha, actualSha) {
+  assert(/^[0-9a-f]{40}$/.test(expectedSha ?? ''), 'Usage: node scripts/qualification/check-public-updater-candidate.mjs --expected-app-sha <full-40-hex-sha>');
+  assert(/^[0-9a-f]{40}$/.test(actualSha ?? ''), 'Could not read a full App commit SHA from this worktree');
+  assert(expectedSha === actualSha, `Expected App SHA ${expectedSha} does not match worktree HEAD ${actualSha}`);
 }
 
 function exactKeys(value, keys, label) {
@@ -57,7 +64,10 @@ async function runtimeSchemaDigest(runtimeSha) {
   return `sha256:${hash.digest('hex')}`;
 }
 
-async function main() {
+async function main(args = process.argv.slice(2)) {
+  assert(args.length === 2 && args[0] === '--expected-app-sha', 'Usage: node scripts/qualification/check-public-updater-candidate.mjs --expected-app-sha <full-40-hex-sha>');
+  const actualAppSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  assertExpectedAppSha(args[1], actualAppSha);
   const candidateRelative = path.relative(repoRoot, candidatePath).split(path.sep).join('/');
   assert(candidateRelative.startsWith('config/qualification/'), 'Candidate metadata must remain outside public/');
   const [candidate, baseline] = await Promise.all([readJson(candidatePath), readJson(baselinePath)]);
@@ -81,10 +91,12 @@ async function main() {
   assert(agentLock.source_commit === candidate.runtime.sha, 'Agent runtime.lock.json does not select the candidate Runtime SHA');
   const digest = await runtimeSchemaDigest(candidate.runtime.sha);
   assert(candidate.runtime.schema_digest === digest, `Candidate Runtime schema digest ${candidate.runtime.schema_digest} does not match pinned Runtime source ${digest}`);
-  process.stdout.write(`Candidate coherent: release ${candidate.release} > baseline ${baselineRelease}; Agent ${candidate.agent.sha}; Runtime ${candidate.runtime.sha}; ${digest}.\n`);
+  process.stdout.write(`Candidate coherent: App ${actualAppSha}; release ${candidate.release} > baseline ${baselineRelease}; Agent ${candidate.agent.sha}; Runtime ${candidate.runtime.sha}; ${digest}.\n`);
 }
 
-main().catch((error) => {
-  process.stderr.write(`${error.message}\n`);
-  process.exitCode = 1;
-});
+if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {
+  main().catch((error) => {
+    process.stderr.write(`${error.message}\n`);
+    process.exitCode = 1;
+  });
+}

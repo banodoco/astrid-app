@@ -178,6 +178,17 @@ if ([IO.File]::ReadAllText($Sentinel) -cne $Payload) { throw 'Update changed use
 $Result.stale_update = 'pass'
 Assert-Sentinel
 $Result.reinstall = 'running'
+# Match the product reinstall contract: uninstall the owned installation first,
+# then run the frozen installer again while keeping the selected data root.
+$PreReinstall = Get-Installed
+$PreReinstallRecord = Get-Content -Raw -Encoding UTF8 -LiteralPath $PreReinstall.VersionPath | ConvertFrom-Json
+Assert-OwnedPath $PreReinstallRecord.python
+foreach ($Property in $PreReinstallRecord.env.PSObject.Properties) { [Environment]::SetEnvironmentVariable($Property.Name, [string]$Property.Value, 'Process') }
+& $PreReinstallRecord.python -I -m astrid install --uninstall --root $ProgramRoot --data-root $DataRoot
+if ($LASTEXITCODE -ne 0) { throw "Owned reinstall pre-uninstall failed: $LASTEXITCODE" }
+if (Test-Path -LiteralPath (Join-Path $ProgramRoot 'current')) { throw 'Pre-reinstall uninstall retained current.' }
+if (Get-ScheduledTask | Where-Object { $_.TaskName -eq 'Astrid Runtime' -and $_.TaskPath -eq '\' }) { throw 'Pre-reinstall uninstall retained the scheduled task.' }
+if ([IO.File]::ReadAllText($Sentinel) -cne $Payload) { throw 'Pre-reinstall uninstall changed user data.' }
 Invoke-Install @()
 $Reinstalled = Get-Installed
 Assert-Running $Reinstalled

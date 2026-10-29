@@ -55,14 +55,23 @@ for (const manifestFlag of ['--manifest', '--manifest=']) {
     localPins.runtime.sha = 'b'.repeat(40);
     await writeFile(localManifest, JSON.stringify(localPins));
     const supplied = manifestFlag === '--manifest' ? [manifestFlag, localManifest] : [`${manifestFlag}${localManifest}`];
-    const managerArgs = ['--managed-by', 'pinokio', '--root', '/Pinokio Apps/Astrid'];
+    const managerArgs = ['--root', '/Astrid Program/Selected', '--data-root', '/Astrid Data/Selected', '--update-job', 'f'.repeat(32)];
     const result = await run(context, [...managerArgs, ...supplied]);
     assert.equal(result.code, 0, result.stderr);
     await assert.rejects(readFile(context.env.MOCK_FETCHED), { code: 'ENOENT' });
-    const core = (await context.calls()).at(-1);
+    const calls = await context.calls();
+    const coreCalls = calls.filter((args) => args.includes('-m') && args.includes('astrid'));
+    assert.equal(coreCalls.length, 1, 'the fresh installer CLI must run exactly once');
+    const core = coreCalls[0];
     assert.deepEqual(core.slice(-managerArgs.length - supplied.length), [...managerArgs, ...supplied]);
     assert.equal(core.filter((argument) => argument === '--manifest' || argument.startsWith('--manifest=')).length, 1);
-    const localInstall = (await context.calls()).find((args) => args[0] === 'pip' && args.includes('--no-deps'));
+    assert.equal(core.filter((argument) => argument === '--update-job').length, 1);
+    assert.equal(core.filter((argument) => argument === 'f'.repeat(32)).length, 1);
+    assert.equal(core.filter((argument) => argument === '--root').length, 1);
+    assert.equal(core.filter((argument) => argument === '--data-root').length, 1);
+    const localInstallCalls = calls.filter((args) => args[0] === 'pip' && args.includes('--no-deps'));
+    assert.equal(localInstallCalls.length, 1, 'the selected manifest pins must be installed once');
+    const localInstall = localInstallCalls[0];
     assert.ok(localInstall.includes(`https://github.com/banodoco/astrid-agent/archive/${localPins.agent.sha}.tar.gz`));
     assert.ok(localInstall.includes(`https://github.com/banodoco/astrid-runtime/archive/${localPins.runtime.sha}.tar.gz#subdirectory=packages/python`));
   }));
@@ -74,6 +83,14 @@ test('POSIX defaults to hosted manifest and pinned source archive URLs', () => s
   assert.equal(await readFile(context.env.MOCK_FETCHED, 'utf8'), 'https://astrid.haus/install-manifest.json');
   const localInstall = (await context.calls()).find((args) => args[0] === 'pip' && args.includes('--no-deps'));
   for (const name of ['runtime', 'agent']) assert.ok(localInstall.includes(`https://github.com/banodoco/astrid-${name}/archive/${context.manifest[name].sha}.tar.gz`));
+}));
+
+test('POSIX bootstrap accepts unknown top-level manifest keys', () => scenario(async (context) => {
+  context.manifest.release = 1;
+  context.manifest.required = { release: 1, reason: 'Required update' };
+  const result = await run(context);
+  assert.equal(result.code, 0, result.stderr);
+  assert.equal((await context.calls()).at(-1)[0], 'run');
 }));
 
 for (const repoValue of ['relative/path', '', null, 'https://example.com/source', 'file://remote/tmp/repo', 'file:///tmp/repo?branch=main', 'file:///tmp/repo#main', 'file://user@localhost/tmp/repo', 'file://localhost:123/tmp/repo', 'file://localhost:-1/tmp/repo', 'file://localhost']) {

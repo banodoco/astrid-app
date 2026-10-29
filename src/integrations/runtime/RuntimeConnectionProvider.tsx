@@ -66,7 +66,7 @@ type RealmSummary = Pick<Realm, 'realm_id' | 'display_name'>;
 export type RuntimeProbeOutcome =
   | { kind: 'connected'; realm: RealmSummary; schemaDigest: string | null; managedByPinokio: boolean }
   | { kind: 'restart' }
-  | { kind: 'update_needed'; managedByPinokio: boolean }
+  | { kind: 'update_needed'; managedByPinokio: boolean; authenticated: boolean }
   | { kind: 'down' }
   /** Something answered the CORS-less follow-up probe, but this page may not read it: Astrid is up and refuses this origin. */
   | { kind: 'refused' }
@@ -137,7 +137,7 @@ export async function probeRuntime(
   const managedByPinokio = managedBy === 'pinokio';
   const schemaDigest = (health.body as { schema_digest?: unknown }).schema_digest;
   if (typeof schemaDigest !== 'string' || !RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(schemaDigest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])) {
-    return { kind: 'update_needed', managedByPinokio };
+    return { kind: 'update_needed', managedByPinokio, authenticated: typeof schemaDigest === 'string' };
   }
   const realm = await get('/v1/realm');
   if ('kind' in realm) return realm;
@@ -179,6 +179,8 @@ export interface RuntimeConnectionValue {
   gated: boolean;
   state: RuntimeConnectionState | { status: 'restart' } | { status: 'browser_update_needed' };
   isConnected: boolean;
+  /** Authenticated health can be readable even when workspace schema negotiation is incompatible. */
+  isAuthenticated: boolean;
   /** This browser has reached Astrid before, so missing-work guidance can distinguish a return visit from first setup. */
   connectedBefore: boolean;
   /** Last known installer provenance for this browser; null when unknown or storage is unavailable. */
@@ -458,6 +460,7 @@ export function RuntimeConnectionProvider({
         gated: false,
         state: { status: 'connected', realm: { realm_id: '', display_name: '' } },
         isConnected: true,
+        isAuthenticated: true,
         connectedBefore: true,
         managedByPinokio: currentManagedByPinokio,
         isBooting: false,
@@ -473,6 +476,8 @@ export function RuntimeConnectionProvider({
     }
     const base = {
       gated: true,
+      isAuthenticated: !permissionLost && (outcome?.kind === 'connected'
+        || outcome?.kind === 'update_needed' && outcome.authenticated),
       isChecking,
       connect,
       askUnanswered,
@@ -510,6 +515,9 @@ export function RuntimeConnectionProvider({
 
 export const useRuntimeConnection = (): RuntimeConnectionValue =>
   requireContextValue(useContext(RuntimeConnectionContext), 'useRuntimeConnection', 'RuntimeConnectionProvider');
+
+/** Recovery UI can also be rendered outside the boot/auth provider. */
+export const useRuntimeConnectionSafe = (): RuntimeConnectionValue | undefined => useContext(RuntimeConnectionContext);
 
 /** Placeholder until the real panel is plugged in (A2.P): the state name and nothing else. */
 function PlaceholderPanel({ state, exit }: RuntimeConnectionValue & { exit: RuntimeConnectionPanelExit | null }) {

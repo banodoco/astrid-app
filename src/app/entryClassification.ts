@@ -75,7 +75,7 @@ export function followIntoInstalledApp(): void {
   query.addEventListener('change', () => {
     if (!isRunningInstalled()) return;
     rememberAppEntryPreference();
-    window.location.replace(APP_ENTRY_PATH);
+    window.location.replace(`${APP_ENTRY_PATH}${window.location.search}${window.location.hash}`);
   });
 }
 
@@ -85,5 +85,5 @@ export function followIntoInstalledApp(): void {
  */
 export function resolveReturningAppEntry(url: URL, prefersApp: boolean): string | null {
   if (!prefersApp || url.pathname !== '/') return null;
-  return APP_ENTRY_PATH;
+  return `${APP_ENTRY_PATH}${url.search}${url.hash}`;
 }

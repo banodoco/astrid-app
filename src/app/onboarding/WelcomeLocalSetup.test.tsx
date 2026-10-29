@@ -12,7 +12,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe('local setup card', () => {
   it('copies instructions and shows copied feedback', async () => {
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Copy agent instructions' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
     expect(await screen.findByRole('button', { name: 'Copied. Paste them into your agent.' })).toBeInTheDocument();
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(localSetupInstructions());
   });
@@ -21,8 +21,8 @@ describe('local setup card', () => {
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
     expect(Array.from(document.querySelectorAll('pre')).some(pre => pre.textContent === localSetupInstructions())).toBe(false);
     expect(screen.queryByRole('button', { name: 'Show the instructions' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Copy agent instructions' })).toBeInTheDocument();
-    expect(screen.getByText('Or do it yourself')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(screen.getByText('Run it yourself')).toBeInTheDocument();
   });
 
   it('shows five ordered macOS/Linux steps using commands from the shared setup source', () => {
@@ -33,7 +33,7 @@ describe('local setup card', () => {
     const list = screen.getByRole('list');
     expect(list.tagName).toBe('OL');
     expect(within(list).getAllByRole('listitem')).toHaveLength(5);
-    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Install Astrid: in Terminal run');
+    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Install or update Astrid: in Terminal run');
     expect(localSetupSteps().map(step => step.command).filter(Boolean)).toEqual([
       ASTRID_COMMANDS.macLinux,
       [LOCAL_SETUP.cloneCommand, LOCAL_SETUP.changeDirectoryCommand, LOCAL_SETUP.installDependenciesCommand].join('\n'),
@@ -109,7 +109,7 @@ describe('local setup card', () => {
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
 
     const firstStep = within(screen.getByRole('list')).getAllByRole('listitem')[0];
-    expect(firstStep).toHaveTextContent('Install Astrid: in PowerShell run');
+    expect(firstStep).toHaveTextContent('Install or update Astrid: in PowerShell run');
     expect(firstStep.querySelector('pre code')?.textContent).toBe(ASTRID_COMMANDS.windows);
     expect(within(firstStep).getByText('If pasting gives nothing, select the command and press Ctrl+C.')).toBeInTheDocument();
   });

@@ -43,6 +43,16 @@ export const ASTRID_COMMANDS = {
   windowsUpdate: '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update',
 } as const;
 
+/** K8's shared label for the standard install line, which also updates and repairs. */
+export const INSTALL_LINE_LABEL = 'Install or update Astrid';
+
+/** One owner for G1's offline diagnostics fallback, shared by Settings and recovery surfaces. */
+export const DIAGNOSTICS_FALLBACK_COPY = {
+  intro: 'Runtime could not answer. You can still collect diagnostics:',
+  agent: 'Run `astrid-runtime doctor` and read the log directory named in its report.',
+  command: 'astrid-runtime doctor > astrid-diagnostics.txt',
+} as const;
+
 export const ASTRID_REPO_URL = 'https://github.com/banodoco/astrid-app';
 const LOCAL_SETUP_DIRECTORY = 'astrid-app';
 
@@ -80,7 +90,7 @@ export function localSetupSteps(): readonly LocalSetupStep[] {
   const windows = detectPlatform() === 'windows';
   return [
     {
-      line: `Install Astrid: in ${windows ? 'PowerShell' : 'Terminal'} run`,
+      line: `${INSTALL_LINE_LABEL}: in ${windows ? 'PowerShell' : 'Terminal'} run`,
       command: windows ? L.windowsInstaller : L.macLinuxInstaller,
       commandLabel: 'Copy the install command',
       ...(windows ? { hint: 'If pasting gives nothing, select the command and press Ctrl+C.' } : {}),
@@ -174,7 +184,11 @@ export function describeFailure(value: unknown, platform: Platform = detectPlatf
     return { summary, lastExit: null, logPath: null };
   }
   if (value instanceof RuntimeCompatibilityError) {
-    return { summary: "This Astrid Runtime doesn't match this workspace or this version of the editor.", lastExit: null, logPath: null };
+    return { summary: value.kind === 'schema'
+      ? "This Astrid Runtime doesn't support the schema this editor needs."
+      : value.kind === 'identity'
+        ? 'The connected Astrid Runtime identity changed.'
+        : 'This Astrid Runtime does not provide a required capability.', lastExit: null, logPath: null };
   }
   if (value instanceof Error && value.message.trim()) {
     return { summary: value.message.trim(), lastExit: null, logPath: null };
@@ -247,6 +261,20 @@ export function agentInstructions(mode: CommandMode, pageOrigin: string, localBu
     "If the installer couldn't open a browser, open https://astrid.haus/?connect=1.",
     'My astrid.haus tab connects by itself once Astrid answers; if it shows a Connect button, click it.',
   ].filter((part): part is string => part !== null).join('\n\n');
+}
+
+/**
+ * The handoff for a fully local Astrid: its own checkout updates itself with `npm run update`, and the installer is
+ * never part of it. A refusal the command names is resolved without discarding edits.
+ */
+export function localUpdateInstructions(command: string, pageOrigin: string): string {
+  return [
+    `Please update my fully local Astrid so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
+    `Run \`${command}\` in the running Astrid checkout, the clone this page is served from.`,
+    'If it refuses, resolve the refusal it names (for example uncommitted edits, local commits that block a fast-forward, or an update already running) without discarding my edits. Keep my uncommitted changes and commits; do not reset, clean or overwrite them.',
+    'Do not reinstall Astrid or replace my workspace, projects, media, credentials or agent instructions.',
+    'When it finishes, confirm the page shows Connected. If anything did not finish, tell me the actual result.',
+  ].join('\n\n');
 }
 
 /**
@@ -342,6 +370,8 @@ export interface RuntimeConnectionCopy {
     readonly terminalAlternative: string;
     /** Update only, where the installer is one of two routes. */
     readonly terminalAlternativeUpdate: string;
+    /** Update of a fully local Astrid: the command runs in its checkout. */
+    readonly terminalAlternativeLocal: string;
   };
   /** Next to the compose controls the hosted build disables. */
   readonly composeDisabled: string;
@@ -402,7 +432,7 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
   updateNeeded: {
     title: 'Update Astrid',
     sentence: 'This page needs a newer Astrid. Give these instructions to your coding agent to update it.',
-    pinokioSentence: 'This page needs a newer Astrid. In Pinokio, choose Stop, then Update, then Start.',
+    pinokioSentence: 'This page needs a newer Astrid. Update in Pinokio.',
   },
 
   /** Lead-in above the shared update screen when a chat reply from this computer's Astrid is out of date. */
@@ -465,14 +495,15 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
   },
 
   agent: {
-    copy: 'Copy agent instructions',
+    copy: 'Copy for your agent',
     copied: 'Copied. Paste them into your agent.',
     pasteNext: 'Steps copied. Paste them into your agent.',
     copyFailed: "Copying didn't work. Select the text below and copy it.",
     commandCopy: 'Copy command',
     commandCopied: 'Command copied',
     terminalAlternative: 'Or run this yourself in a terminal:',
-    terminalAlternativeUpdate: 'If you installed Astrid with the installer, run this in a terminal:',
+    terminalAlternativeUpdate: 'No coding agent? Run this in a terminal:',
+    terminalAlternativeLocal: 'No coding agent? Run this in a terminal in the Astrid checkout:',
   },
 
   composeDisabled: "Making new images isn't on this page yet.",

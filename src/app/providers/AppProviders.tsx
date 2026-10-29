@@ -22,6 +22,7 @@ import {
 } from '@/shared/state/selectionStore';
 import { queryClient } from '@/app/providers/queryClient';
 import { RuntimeDocumentBoundary } from '@/app/runtime/RuntimeDocumentBoundary';
+import { AppBuildProvider } from '@/shared/components/RuntimeConnection/AppBuildProvider';
 
 interface AppProvidersProps {
   children: React.ReactNode;
@@ -130,7 +131,7 @@ export function AppProviders({ children }: AppProvidersProps) {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delayDuration={300}>
-        <AppProviderTree>{children}</AppProviderTree>
+        <AppBuildProvider><AppProviderTree>{children}</AppProviderTree></AppBuildProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

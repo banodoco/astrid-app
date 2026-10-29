@@ -4,6 +4,7 @@ const HTML_CACHE_CONTROL = 'no-cache';
 const HASHED_ASSET_CACHE_CONTROL = 'public, max-age=31536000, immutable';
 
 export function previewCacheControlForPath(pathname: string, accept = ''): string | null {
+  if (pathname === '/build.json') return 'no-store';
   if (/^\/assets\/.+[-.][A-Za-z0-9_-]{8,}\.[^/]+$/.test(pathname)) {
     return HASHED_ASSET_CACHE_CONTROL;
   }

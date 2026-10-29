@@ -1,15 +1,28 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, useLocation } from 'react-router-dom';
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { BrowserRouter, MemoryRouter, useLocation } from 'react-router-dom';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppHeader } from '@/shared/components/AppHeader.tsx';
 
 const runtimeMock = vi.hoisted(() => ({
   discovery: null as any,
+  connection: { isConnected: false, managedByPinokio: false },
+  pageStale: false,
+  pageStatus: vi.fn(),
 }));
 vi.mock('@/tools/video-editor/hooks/useRuntimeEditorDiscovery.ts', () => ({
   useRuntimeEditorDiscovery: () => runtimeMock.discovery,
+}));
+vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({
+  useRuntimeConnection: () => runtimeMock.connection,
+  useRuntimeConnectionSafe: () => runtimeMock.connection,
+}));
+vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => 'https://astrid.test' }));
+vi.mock('@/shared/components/RuntimeConnection/AppBuildProvider.tsx', () => ({ usePageStale: () => runtimeMock.pageStale }));
+vi.mock('@/shared/lib/updates/pageUpdateStatus.ts', () => ({
+  loadPageUpdateStatus: (...args: unknown[]) => runtimeMock.pageStatus(...args),
+  resolvePageUpdateStatus: (status: any) => ({ card: status?.behind ? 'notice' : 'none' }),
 }));
 vi.mock('@/shared/components/ProjectHeaderActions.tsx', () => ({
   ProjectHeaderActions: () => null,
@@ -23,6 +36,12 @@ beforeAll(() => {
 });
 
 describe('AppHeader', () => {
+  beforeEach(() => {
+    runtimeMock.connection = { isConnected: false, managedByPinokio: false };
+    runtimeMock.pageStale = false;
+    runtimeMock.pageStatus.mockReset();
+  });
+
   afterEach(() => {
     vi.unstubAllEnvs();
   });
@@ -104,6 +123,34 @@ describe('AppHeader', () => {
     expect(screen.queryByRole('button', { name: 'Open tools' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Go home' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Settings' })).toBeInTheDocument();
+  });
+
+  it('shows the Settings dot for an available update and opens the Updates section from that trigger', async () => {
+    runtimeMock.connection = { isConnected: true, managedByPinokio: false };
+    runtimeMock.pageStatus.mockResolvedValue({ behind: true });
+    window.history.replaceState({}, '', '/tools/video-editor?project=film#edit');
+    const onOpen = vi.fn();
+    window.addEventListener('openSettings', (event) => onOpen((event as CustomEvent).detail), { once: true });
+    render(<BrowserRouter><RouteSearch /><AppHeader /></BrowserRouter>);
+    expect(await screen.findByTestId('settings-update-indicator')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Settings' }));
+    expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
+    expect(window.location.search).toContain('settings=updates');
+    expect(window.location.hash).toBe('#edit');
+    window.history.replaceState({}, '', '/tools/video-editor');
+  });
+
+  it.each([
+    ['up to date', { behind: false }, false],
+    ['failed', null, false],
+    ['stale App page', { behind: true }, true],
+  ])('keeps the Settings dot absent when status is %s', async (_label, status, pageStale) => {
+    runtimeMock.connection = { isConnected: true, managedByPinokio: false };
+    runtimeMock.pageStale = pageStale;
+    runtimeMock.pageStatus.mockResolvedValue(status);
+    render(<AppHeader />);
+    await waitFor(() => expect(runtimeMock.pageStatus).toHaveBeenCalledOnce());
+    expect(screen.queryByTestId('settings-update-indicator')).toBeNull();
   });
 
   it('selects Runtime project IDs and writes canonical project navigation', async () => {

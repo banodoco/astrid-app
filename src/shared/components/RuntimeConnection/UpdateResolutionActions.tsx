@@ -1,0 +1,56 @@
+import { useContext, useState } from 'react';
+import { QueryClientContext } from '@tanstack/react-query';
+import { Button } from '@/shared/components/ui/button.tsx';
+import { ConfirmDialog } from '@/shared/components/dialogs/ConfirmDialog.tsx';
+import { hasAnyActiveAgentTurn } from '@/tools/video-editor/hooks/useAgentSession.ts';
+import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN_PINOKIO_ACTION, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
+import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
+import { CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
+import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+
+/** Opens Settings on its Updates tab; the header and the update cards share this route. */
+export function openUpdatesSettings() {
+  const url = new URL(window.location.href);
+  url.searchParams.set('settings', 'updates');
+  window.history.pushState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  dispatchAppEvent('openSettings', { tab: 'updates' });
+}
+
+/** Render only the actions selected by K6; source and Pinokio must never fall through to installer commands. */
+export function UpdateResolutionActions({ resolution, operation }: { readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView }) {
+  const guarded = useGuardedReload();
+  // Optional read: surfaces such as Settings and the recovery banner can render without a QueryClient.
+  const queryClient = useContext(QueryClientContext);
+  const [turnConfirmOpen, setTurnConfirmOpen] = useState(false);
+  const actions = [resolution.primary, resolution.secondary].filter((action) => action !== null);
+  if (actions.length === 0 && !operation?.pending && !operation?.status?.result && !operation?.error) return null;
+
+  const commandOptions = actions.some((action) => action.label === COPY_FOR_AGENT_ACTION || action.label === RUN_IT_YOURSELF_ACTION);
+  const route = actions.find((action) => action.destination === 'settings-updates');
+  const installSpecific = actions.find((action) => action.label === UPDATE_IN_PINOKIO_ACTION || action.label === SOURCE_SCHEMA_MISMATCH_ACTION);
+  const reload = actions.find((action) => action.label === RELOAD_ACTION);
+  const execute = actions.find((action) => action.execute === 'installer-update');
+  const localCommand = actions.find((action) => action.label === RUN_IT_YOURSELF_ACTION)?.command;
+
+  return <div className="space-y-2">
+    {reload && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{reload.label}</Button>}
+    {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={operation.pending} onClick={() => {
+      // Read at click time: an update restart interrupts any agent turn that is still running.
+      if (queryClient && hasAnyActiveAgentTurn(queryClient)) setTurnConfirmOpen(true);
+      else void operation.start();
+    }}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
+    {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
+    {(resolution.card === 'update' || resolution.card === 'notice') && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
+    {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
+    {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} />}
+    {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
+    {operation?.error && <p role="alert">{operation.error}</p>}
+    {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
+    {operation?.fresh && !operation.error && operation.status?.result && !operation.pending && <p role="status">{operation.status.result}</p>}
+    {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
+    {guarded.error && <p role="alert">{guarded.error}</p>}
+    <ConfirmDialog open={turnConfirmOpen} onOpenChange={setTurnConfirmOpen} title="An agent turn is running; updating will interrupt it" confirmText="Update anyway" cancelText="Wait" onConfirm={() => { setTurnConfirmOpen(false); void operation?.start(); }} />
+  </div>;
+}

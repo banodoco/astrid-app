@@ -1,9 +1,10 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
-import { RuntimeAuthenticationError, RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
+import { RuntimeAuthenticationError, RuntimeCompatibilityError, RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { setRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
 import { RuntimeConnectorRecoveryBanner, buildWorkspaceRestartBrief } from './RuntimeConnectorRecoveryBanner';
+import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 
 const harness = vi.hoisted(() => ({ origin: '' }));
 vi.mock('@/integrations/runtime/connection.ts', async (importOriginal) => ({
@@ -53,6 +54,23 @@ describe('RuntimeConnectorRecoveryBanner overlay and quiet retry', () => {
 });
 
 describe('RuntimeConnectorRecoveryBanner', () => {
+  it('keeps the recovery hard-card install action and routes Details to Settings Updates', () => {
+    harness.origin = 'https://astrid.test';
+    const onOpen = vi.fn();
+    function Capture() {
+      useAppEventListener('openSettings', onOpen);
+      return <RuntimeConnectorRecoveryBanner error={new RuntimeCompatibilityError('schema', 'Update required', 'http://localhost:17340')} onRetry={vi.fn()} />;
+    }
+    render(<Capture />);
+    expect(screen.getByText('Update Astrid')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(screen.getByText(/curl -fsSL https:\/\/astrid\.haus\/install \| sh -s -- --update/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
+    expect(window.location.search).toContain('settings=updates');
+    window.history.replaceState({}, '', '/');
+  });
+
   it('offers retry and both restart paths, with a truthful idle and retrying state', async () => {
     const onRetry = vi.fn();
     const view = render(<RuntimeConnectorRecoveryBanner retrying={false} error={new Error("Connection refused.")} onRetry={onRetry} />);

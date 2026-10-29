@@ -2,6 +2,8 @@ import { RUNTIME_ACCEPTED_SCHEMA_DIGESTS } from '@/integrations/runtime/contract
 import { type RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { type SetupChecks } from '@/shared/components/RuntimeConnection/SetupStatusLine.tsx';
 import { RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from '@/shared/components/RuntimeConnection/copy.ts';
+import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
+import type { InstallType, UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 
 interface ConnectionStatus {
   readonly title: string;
@@ -12,11 +14,18 @@ interface ConnectionStatus {
   readonly connect?: boolean;
   /** Which part of Astrid on this computer is older than this page; the update routes belong under the status. */
   readonly outOfDate?: 'runtime' | 'chat';
+  readonly updateResolution?: UpdateResolution;
 }
 
 const REACHED: SetupChecks = { runtime: 'pass', workspace: 'pass', ready: true };
 /** The provider keeps looking until Astrid answers, so these spin rather than fail. */
 const LOOKING: SetupChecks = { runtime: 'checking', workspace: 'checking', ready: false };
+
+/** The caller supplies the install type from the Runtime's identity (`installTypeOf`), never from the connection alone. */
+function schemaUpdateStatus(checks: SetupChecks, installType: InstallType): ConnectionStatus {
+  const resolution = resolveUpdate({ compatibility: { kind: 'schema', detail: COPY.updateNeeded.sentence }, installType });
+  return { title: resolution.title ?? COPY.updateNeeded.title, detail: resolution.body ?? COPY.updateNeeded.sentence, checks, outOfDate: 'runtime', updateResolution: resolution };
+}
 
 /** Same digests the Runtime client accepts: anything else, and the page can't open a session with this Astrid. */
 function needsUpdate(schemaDigest: string | null): boolean {
@@ -24,12 +33,12 @@ function needsUpdate(schemaDigest: string | null): boolean {
 }
 
 /** Each gate state's title and one line: the connection screens' own words, without their buttons and guides. */
-export function connectionStatus(connection: RuntimeConnectionValue): ConnectionStatus {
+export function connectionStatus(connection: RuntimeConnectionValue, installType: InstallType): ConnectionStatus {
   const { state } = connection;
   switch (state.status) {
     case 'connected':
       if (needsUpdate(connection.schemaDigest)) {
-        return { title: COPY.updateNeeded.title, detail: COPY.updateNeeded.sentence, checks: REACHED, outOfDate: 'runtime' };
+        return schemaUpdateStatus(REACHED, installType);
       }
       // The Runtime itself is fine; only the chat service is older than this page.
       if (connection.localServiceOutOfDate) {
@@ -59,7 +68,7 @@ export function connectionStatus(connection: RuntimeConnectionValue): Connection
     case 'restart':
       return { title: COPY.restarted.title, detail: COPY.restarted.sentence, checks: LOOKING };
     case 'update_needed':
-      return { title: COPY.updateNeeded.title, detail: COPY.updateNeeded.sentence, checks: LOOKING, outOfDate: 'runtime' };
+      return schemaUpdateStatus(LOOKING, installType);
     case 'refused':
       return { title: COPY.refused.title, detail: withOrigin(COPY.refused.sentence, window.location.origin), checks: LOOKING };
     case 'not_running':

@@ -3,7 +3,7 @@
 // name, and the helper (src/test/declaredSkip.ts, tests/e2e/support/declaredSkip.ts, scripts/quality/declared-skip.mjs)
 // evaluates the condition here. A condition checks the one thing it names and rethrows anything else, so an
 // unrelated error is a failing test and never a declared skip.
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -61,6 +61,15 @@ export function symlinkCreationRefused() {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Why the PowerShell installer tests cannot run here (no pwsh to spawn; ASTRID_TEST_PWSH overrides the name), or null. */
+export function pwshUnavailableReason() {
+  const command = process.env.ASTRID_TEST_PWSH || 'pwsh';
+  const probe = spawnSync(command, ['-NoProfile', '-Command', 'exit 0'], { stdio: 'ignore' });
+  if (probe.error?.code === 'ENOENT') return `${command} is not on PATH (set ASTRID_TEST_PWSH to a PowerShell binary)`;
+  if (probe.error) throw probe.error;
+  return null;
 }
 
 export const isWindows = () => process.platform === 'win32';

@@ -155,7 +155,7 @@ describe('PublicAstridInstallDialog', () => {
     expect(screen.getByText(new RegExp(copy))).toBeInTheDocument();
     // The app step is the only step: no computer step, no Back, no agent instructions here.
     expect(screen.queryByText(/curl -fsSL/)).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copy agent instructions' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
     // Safari cannot reach Astrid on this computer, so it is not offered the browser route.
     const isSafari = userAgent === MAC_SAFARI;
     expect(screen.queryByRole('button', BROWSER) === null).toBe(isSafari);

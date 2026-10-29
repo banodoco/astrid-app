@@ -29,4 +29,12 @@ describe('useSettingsModal', () => {
     expect(result.current.isSettingsModalOpen).toBe(true);
     expect(result.current.settingsInitialTab).toBe('extensions');
   });
+
+  it('opens Settings Updates from the stable query deep link', () => {
+    window.history.replaceState({}, '', '/tools/video-editor?settings=updates');
+    const { result } = renderHook(() => useSettingsModal());
+    expect(result.current.isSettingsModalOpen).toBe(true);
+    expect(result.current.settingsInitialTab).toBe('updates');
+    window.history.replaceState({}, '', '/tools/video-editor');
+  });
 });

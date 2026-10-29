@@ -22,7 +22,8 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
  * reaches browser code.
  *
  * On the hosted build (a Runtime origin is configured) the boot gate owns the probe instead:
- * the session is "the gate is connected" (`RuntimeConnectionProvider`), the permission is
+ * a readable authenticated health response establishes transport authentication, while workspace
+ * features still wait for a successful connection (`RuntimeConnectionProvider`). Permission is
  * checked before anything is sent, and `isLoading` holds until the gate has an answer. */
 export const AuthProvider = ({ children }: { children: ReactNode }) => (
   <RuntimeConnectionProvider onConnected={invalidateRuntimeQueries}>
@@ -80,19 +81,19 @@ const AuthSession = ({ children }: { children: ReactNode }) => {
     if (!gated) await runBridgeProbe(true);
   }, [gated, runBridgeProbe]);
 
-  const { isConnected, isBooting } = connection;
+  const { isAuthenticated, isBooting } = connection;
   const value = useMemo(
     () => gated
       ? {
-          userId: isConnected ? LOCAL_USER_ID : null,
-          isAuthenticated: isConnected,
+          userId: isAuthenticated ? LOCAL_USER_ID : null,
+          isAuthenticated,
           isLoading: isBooting,
           authError: null,
           isRetryingAuth: false,
           retryAuth: async () => {},
         }
       : { userId, isAuthenticated: !!userId, isLoading, authError, isRetryingAuth, retryAuth },
-    [gated, isConnected, isBooting, userId, isLoading, authError, isRetryingAuth, retryAuth],
+    [gated, isAuthenticated, isBooting, userId, isLoading, authError, isRetryingAuth, retryAuth],
   );
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

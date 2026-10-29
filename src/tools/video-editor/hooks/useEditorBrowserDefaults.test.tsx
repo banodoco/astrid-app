@@ -1,9 +1,15 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook } from '@testing-library/react';
 import { useEditorBrowserDefaults } from '@/tools/video-editor/hooks/useEditorBrowserDefaults.ts';
 import type { SaveStatus } from '@/tools/video-editor/hooks/useTimelinePersistence.ts';
+import { flushDraftsBeforeReload } from '@/shared/lib/updates/draftSafeReload.ts';
 
-function mount(saveStatus: SaveStatus, flushPendingSave = vi.fn(() => Promise.resolve(1))) {
+function mount(
+  saveStatus: SaveStatus,
+  flushPendingSave = vi.fn(() => Promise.resolve(1)),
+  preserveTimelineDraftForReload = vi.fn(() => Promise.resolve()),
+  isTimelineDraftDurableForReload = vi.fn(() => false),
+) {
   const shellRoot = document.createElement('div');
   const inner = document.createElement('button');
   shellRoot.appendChild(inner);
@@ -12,8 +18,10 @@ function mount(saveStatus: SaveStatus, flushPendingSave = vi.fn(() => Promise.re
     shellRoot,
     saveStatus: props.status,
     flushPendingSave,
+    preserveTimelineDraftForReload,
+    isTimelineDraftDurableForReload,
   }), { initialProps: { status: saveStatus } });
-  return { shellRoot, inner, flushPendingSave, view };
+  return { shellRoot, inner, flushPendingSave, preserveTimelineDraftForReload, isTimelineDraftDurableForReload, view, setStatus: (status: SaveStatus) => view.rerender({ status }) };
 }
 
 function key(target: EventTarget, init: KeyboardEventInit) {
@@ -87,5 +95,47 @@ describe('useEditorBrowserDefaults', () => {
     expect(unload().defaultPrevented).toBe(false);
     view.unmount();
     expect(unload().defaultPrevented).toBe(false);
+  });
+
+  it('registers the mounted timeline flush as a durable update reload guard', async () => {
+    let setStatus = (_status: SaveStatus) => undefined;
+    const flushPendingSave = vi.fn(async () => { setStatus('saved'); return 4; });
+    const mounted = mount('dirty', flushPendingSave);
+    setStatus = mounted.setStatus;
+    await flushDraftsBeforeReload();
+    expect(flushPendingSave).toHaveBeenCalledOnce();
+    mounted.view.unmount();
+  });
+
+  it('flushes again when the first barrier only acknowledged an older edit sequence', async () => {
+    let setStatus = (_status: SaveStatus) => undefined;
+    let attempts = 0;
+    const flushPendingSave = vi.fn(async () => {
+      attempts++;
+      if (attempts === 2) setStatus('saved');
+      return attempts;
+    });
+    const mounted = mount('dirty', flushPendingSave);
+    setStatus = mounted.setStatus;
+
+    await flushDraftsBeforeReload();
+
+    expect(flushPendingSave).toHaveBeenCalledTimes(2);
+    mounted.view.unmount();
+  });
+
+  it('admits reload after a failed Runtime acknowledgement only when the owner verifies a durable recovery draft', async () => {
+    const flushPendingSave = vi.fn(async () => { throw new Error('Runtime instance changed'); });
+    let durable = false;
+    const preserveTimelineDraftForReload = vi.fn(async () => { durable = true; });
+    const mounted = mount('error', flushPendingSave, preserveTimelineDraftForReload, () => durable);
+    await act(async () => { await flushDraftsBeforeReload(); });
+    expect(flushPendingSave).toHaveBeenCalledOnce();
+    expect(preserveTimelineDraftForReload).toHaveBeenCalledOnce();
+    mounted.view.unmount();
+
+    const failedPreservation = mount('error', flushPendingSave, vi.fn(async () => { throw new Error('IndexedDB full'); }), () => false);
+    await expect(flushDraftsBeforeReload()).rejects.toThrow('IndexedDB full');
+    failedPreservation.view.unmount();
   });
 });

@@ -22,7 +22,14 @@ describe('Runtime schema guard', () => {
   it('rejects a Runtime health response from a different contract', () => {
     assert.match(
       schemaDigestMismatch('sha256:stale', 'sha256:latest'),
-      /does not match Astrid generated contract sha256:latest/,
+      /does not match Astrid generated contract \(expected one of sha256:latest\)/,
     );
+  });
+
+  it('accepts a shared compatible digest and rejects absent or malformed values', () => {
+    const accepted = ['sha256:latest', 'sha256:older-compatible'];
+    assert.equal(schemaDigestMismatch('sha256:older-compatible', accepted), null);
+    assert.match(schemaDigestMismatch(undefined, accepted), /expected one of sha256:latest, sha256:older-compatible/);
+    assert.match(schemaDigestMismatch('not-a-digest', accepted), /does not match Astrid generated contract/);
   });
 });

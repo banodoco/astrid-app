@@ -37,6 +37,8 @@ export const BRIDGE_REQUEST_TIMEOUT_MS = ASTRID_BRIDGE_REQUEST_TIMEOUT_MS;
 
 /** Error code the bridge must return (with HTTP 409) when `expected_version` is stale. */
 export const BRIDGE_VERSION_CONFLICT_CODE = 'timeline_version_conflict';
+/** Explicit service refusal used when its bridge protocol version differs from this App. */
+export const BRIDGE_CONTRACT_VERSION_MISMATCH_CODE = 'bridge_contract_version_mismatch';
 
 /** Thrown when a bridge response does not match this contract. */
 export class BridgeContractError extends Error {

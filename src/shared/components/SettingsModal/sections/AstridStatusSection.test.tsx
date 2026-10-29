@@ -1,27 +1,42 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AstridStatusSection } from './AstridStatusSection.tsx';
 import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY, installCommand } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
+import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 
 const mocks = vi.hoisted(() => ({
   readStatus: vi.fn(),
+  readInstallerUpdateHealth: vi.fn(),
   clipboard: vi.fn(),
   connect: vi.fn(),
+  origin: '',
   connection: {
     state: { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } },
-    isChecking: false, schemaDigest: null, localServiceOutOfDate: false, connect: () => {},
-  } as { state: { status: string; realm?: { realm_id: string; display_name: string } }; isChecking: boolean; schemaDigest: string | null; localServiceOutOfDate: boolean; connect: () => void },
+    isChecking: false, isConnected: true, managedByPinokio: false, schemaDigest: null, localServiceOutOfDate: false, connect: () => {},
+  } as { state: { status: string; realm?: { realm_id: string; display_name: string } }; isChecking: boolean; isConnected: boolean; managedByPinokio: boolean; schemaDigest: string | null; localServiceOutOfDate: boolean; connect: () => void },
 }));
 
 vi.mock('@/integrations/runtime/client.ts', () => ({
   AstridRuntimeClient: class {
     readStatus = mocks.readStatus;
+    readInstallerUpdateHealth = mocks.readInstallerUpdateHealth;
+    readInstallerUpdateStatus = async () => ({ available: false, state: 'none' });
   },
 }));
 
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({
   useRuntimeConnection: () => mocks.connection,
+}));
+
+vi.mock('@/integrations/runtime/connection.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/integrations/runtime/connection.ts')>()),
+  runtimeOrigin: () => mocks.origin,
+}));
+
+vi.mock('@/shared/contexts/AuthContext.tsx', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/contexts/AuthContext.tsx')>()),
+  useAuthSafe: () => ({ isAuthenticated: true, authError: null }),
 }));
 
 vi.mock('@/shared/lib/browser/clipboard.ts', () => ({
@@ -36,7 +51,12 @@ describe('AstridStatusSection', () => {
   beforeEach(() => {
     mocks.connection.state = { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } };
     mocks.connection.isChecking = false;
+    mocks.connection.schemaDigest = null;
     mocks.connection.localServiceOutOfDate = false;
+    mocks.connection.isConnected = true;
+    mocks.connection.managedByPinokio = false;
+    mocks.origin = '';
+    mocks.readInstallerUpdateHealth.mockReset().mockResolvedValue({ status: 'ok', release: 0, runtime_instance_id: 'runtime-1', identity: { managed_by: null, release: 0 } });
     mocks.connection.connect = mocks.connect.mockReset();
     mocks.clipboard.mockReset().mockResolvedValue(true);
     mocks.readStatus.mockReset().mockResolvedValue({
@@ -67,6 +87,32 @@ describe('AstridStatusSection', () => {
     expect(screen.getByText('Runtime')).toHaveAttribute('data-state', 'pass');
     expect(document.querySelector('[data-check="workspace"]')).toHaveAttribute('data-state', 'pass');
     expect(screen.queryByRole('heading', { name: 'Connection' })).not.toBeInTheDocument();
+  });
+
+  it('uses the shared resolver action in Settings for a source checkout schema mismatch', () => {
+    mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
+    render(<AstridStatusSection isOpen />);
+
+    expect(screen.getByText(/This page needs a newer Astrid/)).toBeInTheDocument();
+    expect(screen.getByText('update your checkouts')).toBeInTheDocument();
+    expect(screen.queryByRole('code')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: CONNECTION_COPY.agent.commandCopy })).not.toBeInTheDocument();
+  });
+
+  it('keeps the Settings hard mismatch action and routes its Details button to Updates', () => {
+    const onOpen = vi.fn();
+    function Capture() {
+      useAppEventListener('openSettings', onOpen);
+      return <AstridStatusSection isOpen />;
+    }
+    mocks.readStatus.mockReturnValue(new Promise(() => undefined));
+    mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
+    render(<Capture />);
+    expect(screen.getByText('update your checkouts')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
+    expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
+    expect(window.location.search).toContain('settings=updates');
+    window.history.replaceState({}, '', '/');
   });
 
   it('offers the browser permission action before checking Runtime details', () => {
@@ -197,7 +243,7 @@ describe('AstridStatusSection', () => {
 
   it('copies a complete agent brief separately from the repair command', async () => {
     render(<AstridStatusSection isOpen />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy agent instructions' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy for your agent' }));
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
     const brief = mocks.clipboard.mock.calls[0][0];
     expect(brief).toContain('selected workspace and data root');
@@ -319,5 +365,36 @@ describe('AstridStatusSection', () => {
     expect(screen.getByRole('status')).toHaveTextContent('Chat needs an update');
     expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
     expect(await screen.findByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('AstridStatusSection schema mismatch install type', () => {
+  beforeEach(() => {
+    mocks.connection.state = { status: 'update_needed' } as typeof mocks.connection.state;
+    mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('does not give a hosted source checkout the installer command for a schema mismatch', async () => {
+    mocks.origin = 'https://astrid.test';
+    mocks.readInstallerUpdateHealth.mockResolvedValue({ status: 'ok', release: 0, runtime_instance_id: 'runtime-1', identity: { managed_by: 'source', release: 0 } });
+    render(<AstridStatusSection isOpen />);
+
+    expect(await screen.findByText('update your checkouts')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Run it yourself')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
+  });
+
+  it('gives a fully local page the npm update command, not the installer command', async () => {
+    vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
+    render(<AstridStatusSection isOpen />);
+
+    expect(await screen.findByText('npm run update')).toBeInTheDocument();
+    expect(screen.queryByText('update your checkouts')).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
   });
 });

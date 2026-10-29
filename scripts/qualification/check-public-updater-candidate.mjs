@@ -8,7 +8,7 @@ const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../
 const candidatePath = path.join(repoRoot, 'config/qualification/public-updater-candidate.json');
 const baselinePath = path.join(repoRoot, 'public/install-manifest.json');
 const expected = {
-  agent: { repo: 'banodoco/astrid-agent', sha: '50e3dc5480ebf8fbb860ac3d37bf5d98ab58b3fc' },
+  agent: { repo: 'banodoco/astrid-agent', sha: '9e7032e41ddf3d270fe9cff5d164fd84f30ac0b8' },
   runtime: { repo: 'banodoco/astrid-runtime', sha: 'ebd412199a9c1e53c3a984d27d335de8b40654a1' },
 };
 

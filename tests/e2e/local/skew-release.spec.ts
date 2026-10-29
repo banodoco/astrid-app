@@ -29,9 +29,6 @@ test('installed Runtime newer than served has a quiet notice', async ({ page, ha
   await openApp(page, harness);
   await expectConnected(page);
   await manifestRead;
-  // Known product gap: QuietUpdateNotice only renders notice/update, not newer.
-  // Mark only after infrastructure and status reads succeeded.
-  test.fail(true, 'QuietUpdateNotice does not render the newer resolution');
   await expect(page.getByTestId('quiet-update-notice')).toContainText('newer than astrid.haus');
 });
 

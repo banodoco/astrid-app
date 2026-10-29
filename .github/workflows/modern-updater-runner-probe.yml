@@ -1,0 +1,26 @@
+name: Modern updater runner probe
+on:
+  push:
+    branches: [codex/modern-updater-macos-ci-20261029]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: macos-latest
+    timeout-minutes: 10
+    steps:
+      - name: Inspect disposable macOS runner prerequisites
+        shell: bash
+        run: |
+          set -u
+          sw_vers
+          id
+          echo 'GUI launchd domain:'
+          launchctl print "gui/$(id -u)" >/dev/null && echo available || echo unavailable
+          echo 'Passwordless sudo:'
+          sudo -n true && echo available || echo unavailable
+          echo 'Release fixture port:'
+          sudo lsof -nP -iTCP:443 -sTCP:LISTEN || true
+          echo 'System SSL bundle:'
+          ls -l /etc/ssl/cert.pem
+          df -h /

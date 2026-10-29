@@ -25,6 +25,12 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      run_skew_only:
+        description: Run only Runtime skew coverage
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -35,6 +41,7 @@ concurrency:
 
 jobs:
   direct-journey:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_skew_only }}
     runs-on: ubuntu-latest
     steps:
       # The harness finds the Runtime at ../astrid-runtime (ASTRID_RUNTIME_CHECKOUT overrides),
@@ -131,6 +138,7 @@ jobs:
   # Until the Astrid branch carrying astrid/core/dev/cross_client.py (tidy-w2) merges to its main, this job checks out an Astrid
   # without that module, so any PR touching tests/e2e/local/** (or the paths above) is red here until that merge.
   three-products:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.run_skew_only }}
     runs-on: ubuntu-latest
     concurrency:
       group: three-products-${{ github.ref }}
@@ -265,7 +273,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '959ce04fcf91351903c361d03e6b19eb0bbe8587' }}
+          ref: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '2b57de0482961509d22fe01d886922ae6e803c3f' }}
           path: astrid-runtime
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -293,7 +301,7 @@ jobs:
         env:
           ASTRID_SKEW_MODE: ${{ matrix.mode }}
           ASTRID_SKEW_APP_SHA: ${{ matrix.mode == 'old-app' && 'b96c41fca2da7993b41324aedf61eb297dc34f10' || github.sha }}
-          ASTRID_SKEW_RUNTIME_SHA: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '959ce04fcf91351903c361d03e6b19eb0bbe8587' }}
+          ASTRID_SKEW_RUNTIME_SHA: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '2b57de0482961509d22fe01d886922ae6e803c3f' }}
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/skew.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/skew-results

@@ -4,7 +4,7 @@ import { resolveUpdate } from './resolveUpdate.ts';
 
 // Digests from the checked-in metadata at the pinned real Runtime revisions.
 const preUpdater = 'sha256:9061d4982c786e04d99e45470b8ea4f3d9c9ff9855c4a2f83d751a93408c205b'; // 11443b0b5b34bd5b36725504fb083146192a759d
-const candidate = 'sha256:5d229bf66ffaeb0b4937844a3c2b08ddd21f97cbcc305101a5cc19a95c971194'; // 959ce04fcf91351903c361d03e6b19eb0bbe8587
+const candidate = 'sha256:5d229bf66ffaeb0b4937844a3c2b08ddd21f97cbcc305101a5cc19a95c971194'; // 2b57de0482961509d22fe01d886922ae6e803c3f
 
 describe('pinned Runtime skew decisions', () => {
   it('admits the pre-updater digest and rejects the candidate digest', () => {

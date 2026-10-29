@@ -262,6 +262,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.run_skew_only && '0bdba813bf4ba496ae7286beb65219153d92da09' || github.sha }}
           path: astrid-app
           persist-credentials: false
       # The release inventory in astrid-agent tests/upgrade/releases.json identifies this pair.
@@ -300,7 +301,7 @@ jobs:
         working-directory: astrid-app
         env:
           ASTRID_SKEW_MODE: ${{ matrix.mode }}
-          ASTRID_SKEW_APP_SHA: ${{ matrix.mode == 'old-app' && 'b96c41fca2da7993b41324aedf61eb297dc34f10' || github.sha }}
+          ASTRID_SKEW_APP_SHA: ${{ matrix.mode == 'old-app' && 'b96c41fca2da7993b41324aedf61eb297dc34f10' || (github.event_name == 'workflow_dispatch' && inputs.run_skew_only && '0bdba813bf4ba496ae7286beb65219153d92da09' || github.sha) }}
           ASTRID_SKEW_RUNTIME_SHA: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '2b57de0482961509d22fe01d886922ae6e803c3f' }}
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/skew.json

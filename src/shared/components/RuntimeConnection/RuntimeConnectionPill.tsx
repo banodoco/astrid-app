@@ -11,6 +11,7 @@ import { QuietUpdateNotice } from './QuietUpdateNotice.tsx';
 import { DownloadDiagnosticsButton } from './DownloadDiagnosticsButton.tsx';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 
 export interface RuntimeConnectionPillProps {
   readonly connection: RuntimeConnectionValue;
@@ -101,8 +102,8 @@ export function RuntimeConnectionPill({
     <div data-testid="runtime-connection-status" data-state="restarted" role="alert" className={CARD_CLASS} style={CARD_STYLE}>
       <CardText title={COPY.restarted.title} sentence={COPY.restarted.sentence} />
       {operation.pending && <p role="status">Update in progress. Checking its result…</p>}
-      {operation.fresh && operation.status?.result && <p role="status">{operation.status.result}</p>}
-      {operation.error && <p role="alert">{operation.error}</p>}
+      {operation.fresh && installerUpdateStatusMessage(operation.status) && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
+      {operation.error && <p role="alert">Could not confirm the update status. Download diagnostics before trying again.</p>}
       <Button type="button" className="w-full sm:w-auto" disabled={guarded.pending} onClick={() => void guarded.reload()}>{COPY.restarted.reload}</Button>
       {guarded.error && <p role="alert">{guarded.error}</p>}
     </div>

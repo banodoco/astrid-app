@@ -10,7 +10,7 @@ import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpd
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
+import { installerUpdateStatusMessage, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 
@@ -84,10 +84,12 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
       setStatus(next);
       setResolution(resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings'));
       setState('ready');
-    } catch (cause) {
+    } catch {
       setStatus(null);
       setResolution(null);
-      setError(cause instanceof Error ? cause.message : 'Update status could not be checked.');
+      setError(!connection.isConnected && connection.state?.status !== 'update_needed'
+        ? 'Connect to Astrid before checking its release.'
+        : 'Could not check Astrid update status. Check your connection and try again.');
       setState('error');
     }
   };
@@ -110,7 +112,18 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
   const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, installType: statusInstallType, updateNowAvailable: operation.available }, 'settings') : resolution;
   const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
-  const lastResult = operation.error ? 'Update status could not be confirmed.' : operation.status?.result ?? reportResult ?? 'No update has run yet.';
+  const resultLabels: Record<string, string> = {
+    none: 'No update has run yet.',
+    updated: 'Astrid updated.',
+    rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
+    failed: 'The update did not complete. Check diagnostics before trying again.',
+    recovery_needed: 'Astrid needs repair. Download diagnostics and run the installer update command.',
+  };
+  const operationResult = installerUpdateStatusMessage(operation.status);
+  const lastResult = operation.pending ? 'Update in progress. Checking its result…' : operation.error ? operation.error : operationResult ?? (reportResult ? resultLabels[reportResult] ?? 'An update result is available in the diagnostics log.' : 'No update has run yet.');
+  const statusLine = operation.status?.state === 'recovery-needed'
+    ? 'Astrid needs repair. Download diagnostics and run the installer update command.'
+    : state === 'checking' ? 'Checking for updates…' : state === 'error' ? error : currentResolution?.card === 'newer' ? currentResolution.body : currentStatus && (currentResolution?.card === 'notice' || currentResolution?.card === 'update') ? `Update available · Release ${currentStatus.servedRelease}` : 'Astrid is up to date';
 
   return <section id="settings-updates" aria-labelledby="astrid-updates-title" className="mb-6 rounded-lg border p-4">
     <h2 id="astrid-updates-title" className="text-base font-semibold">Updates</h2>
@@ -123,7 +136,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         {state === 'checking' ? 'Checking for updates…' : 'Check for updates'}
       </Button>
       <p role="status" aria-live="polite" className="text-sm">
-        {state === 'checking' ? 'Checking for updates…' : state === 'error' ? error : currentResolution?.card === 'newer' ? currentResolution.body : currentStatus && (currentResolution?.card === 'notice' || currentResolution?.card === 'update') ? `Update available · Release ${currentStatus.servedRelease}` : 'Astrid is up to date'}
+        {statusLine}
       </p>
       {state === 'ready' && currentResolution?.title && <div className="text-sm"><p className="font-medium">{currentResolution.title}</p>{currentResolution.body && <p className="text-muted-foreground">{currentResolution.body}</p>}</div>}
       {state === 'ready' && installType === 'fully-local' && currentStatus?.behind && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={localState.phase === 'running'} onClick={() => void updateNow()}>{localState.phase === 'running' ? 'Updating Astrid…' : 'Update now'}</Button>}

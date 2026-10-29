@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AstridRuntimeClient, type InstallerUpdateHealth, type InstallerUpdateStatus } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import { LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
+import { installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
 
 vi.mock('./updateStatus.ts', () => ({ checkHostedUpdate: vi.fn(async () => null) }));
@@ -13,6 +13,17 @@ const HEALTH: InstallerUpdateHealth = {
 };
 
 const NONE: InstallerUpdateStatus = { available: true, state: 'none' };
+
+describe('installerUpdateStatusMessage', () => {
+  it.each([
+    [{ state: 'active' }, 'Update in progress. Astrid may disconnect while it restarts.'],
+    [{ state: 'terminal', outcome: 'updated', result: 'internal completed marker' }, 'Astrid updated. Reload to continue.'],
+    [{ state: 'terminal', outcome: 'rolled_back', result: 'rolled_back' }, 'The update did not finish. Astrid was restored to its previous version.'],
+    [{ state: 'recovery-needed', result: 'repair_required' }, 'Astrid needs repair. Download diagnostics and run the installer update command.'],
+  ] as const)('presents %j as clear user-facing status', (status, expected) => {
+    expect(installerUpdateStatusMessage({ available: true, ...status } as InstallerUpdateStatus)).toBe(expected);
+  });
+});
 
 type ClientMethods = Pick<AstridRuntimeClient, 'readInstallerUpdateHealth' | 'readInstallerUpdateStatus' | 'startInstallerUpdate'>;
 
@@ -49,7 +60,7 @@ describe('UpdateOperation', () => {
     await operation.start();
 
     expect(operation.getSnapshot()).toMatchObject({ health: HEALTH, releaseStatus, fresh: false });
-    expect(operation.getSnapshot().error).toMatch(/not_found/i);
+    expect(operation.getSnapshot().error).toBe('Could not check Astrid update status. Check your connection and try again.');
     expect(client.startInstallerUpdate).not.toHaveBeenCalled();
   });
 
@@ -97,7 +108,7 @@ describe('UpdateOperation', () => {
 
     expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
     expect(operation.getSnapshot().pending).toBe(false);
-    expect(operation.getSnapshot().error).toMatch(/not eligible/i);
+    expect(operation.getSnapshot().error).toBe('Astrid could not start the update. Check its status before trying again.');
   });
 
   it('keeps authentication failure status stale and does not retry after a denied POST', async () => {
@@ -112,7 +123,7 @@ describe('UpdateOperation', () => {
 
     expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
     expect(operation.getSnapshot()).toMatchObject({ fresh: false, pending: false });
-    expect(operation.getSnapshot().error).toMatch(/unauthorized/i);
+    expect(operation.getSnapshot().error).toBe('Could not check Astrid update status. Check your connection and try again.');
   });
 
   it('reuses a page-owned operation across component remounts', () => {
@@ -135,7 +146,7 @@ describe('LocalPageUpdate', () => {
     const seen: string[] = [];
     update.subscribe(() => seen.push(update.getSnapshot().phase));
     const outcome = await update.start();
-    expect(outcome).toEqual({ phase: 'done', status: 'updated', message: 'Restart Astrid when convenient' });
+    expect(outcome).toEqual({ phase: 'done', status: 'updated', message: 'Astrid updated.' });
     expect(seen).toEqual(['running', 'done']);
     expect(post).toHaveBeenCalledOnce();
     const init = post.mock.calls[0]![0] as RequestInit;
@@ -151,7 +162,7 @@ describe('LocalPageUpdate', () => {
 
   it('treats a replay 409 and other 4xx/422 as failures, not refusals', async () => {
     expect((await make(() => json(409, { error: 'used', code: 'replay' })).update.start()).phase).toBe('failed');
-    expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'build failed' });
+    expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
   });
 
   it('reports recovered (rollback) as a completed outcome', async () => {

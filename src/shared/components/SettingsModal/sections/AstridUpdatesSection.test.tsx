@@ -33,7 +33,7 @@ describe('Astrid Updates Settings section', () => {
   it('shows the report-backed last result and expandable update log', async () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('rolled_back')).toBeInTheDocument();
+    expect(await within(section).findByText('The update did not finish. Astrid was restored to its previous version.')).toBeInTheDocument();
     fireEvent.click(within(section).getByText('View log'));
     expect(within(section).getByText('transaction line')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
@@ -78,11 +78,12 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockRejectedValue(new Error('offline'));
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    await waitFor(() => expect(within(section).getByRole('status')).toHaveTextContent('offline'));
+    await waitFor(() => expect(within(section).getByRole('status')).toHaveTextContent('Could not check Astrid update status. Check your connection and try again.'));
+    expect(within(section).queryByText('offline')).toBeNull();
     expect(within(section).queryByText('Astrid is up to date')).toBeNull();
     fireEvent.click(within(section).getByRole('button', { name: 'Check for updates' }));
     expect(within(section).getByRole('status')).toHaveTextContent('Checking for updates…');
-    await waitFor(() => expect(within(section).getByRole('status')).toHaveTextContent('offline'));
+    await waitFor(() => expect(within(section).getByRole('status')).toHaveTextContent('Could not check Astrid update status. Check your connection and try again.'));
   });
 
   it('uses the resolver command actions for a soft hosted installer update', async () => {
@@ -143,7 +144,7 @@ describe('Astrid Updates Settings section', () => {
     localCheckMock.mockRejectedValue(new Error('launcher unavailable'));
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByRole('status')).toHaveTextContent('launcher unavailable');
+    expect(await within(section).findByRole('status')).toHaveTextContent('Could not check Astrid update status. Check your connection and try again.');
     expect(within(section).queryByText('Astrid is up to date')).toBeNull();
   });
 
@@ -223,7 +224,7 @@ describe('fully-local Update now', () => {
     fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
     await waitFor(() => expect(reload).toHaveBeenCalledOnce());
     expect(flush.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0]!);
-    expect(within(section).getByText(/went back to the previous version/)).toBeInTheDocument();
+    expect(within(section).getByText(/Astrid was restored to its previous version/)).toBeInTheDocument();
     unregister();
   });
 
@@ -259,7 +260,7 @@ describe('fully-local Update now', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
-    expect(await within(section).findByRole('alert')).toHaveTextContent('npm ci failed');
+    expect(await within(section).findByRole('alert')).toHaveTextContent('The update did not complete. Check diagnostics before trying again.');
     expect(reload).not.toHaveBeenCalled();
     expect(launcher).toHaveBeenCalledOnce();
   });

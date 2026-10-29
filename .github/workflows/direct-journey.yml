@@ -2,11 +2,8 @@
 # a real Runtime daemon on throwaway SQLite serving it through its own browser door, and Chromium.
 # Local equivalent: npm run test:e2e:direct (tests/e2e/local/support/harness.ts).
 #
-# Runtime checkout: the Runtime repo is private, so actions/checkout needs a token that can read it. Add a
-# repository secret RUNTIME_READ_TOKEN (a fine-grained PAT, or a deploy-key-backed token, with read access
-# to banodoco/astrid-runtime). When the secret is not set, the job falls back to github.token,
-# which only works if the Runtime repo is readable by this repository. Pull requests from forks get no
-# secrets, so this lane cannot run for them.
+# The pinned Runtime refs are public. The skew lane uses read-only workflow
+# permissions and does not pass a personal token to the installer or browser.
 #
 # Pass rule (a skip means a missing harness, R-9): exactly M tests expected to fail (M is the journey
 # file's budget in scripts/quality/check-known-failures.mjs), none unexpected, none flaky, none skipped.
@@ -23,10 +20,14 @@ on:
       - "tests/e2e/local/**"
       - "tests/e2e/support/**"
       - "playwright.direct.config.ts"
+      - "playwright.skew.config.ts"
       - "playwright.three-products.config.ts"
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: direct-journey-${{ github.ref }}
@@ -41,11 +42,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: astrid-app
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
           ref: main
           path: astrid-runtime
+          persist-credentials: false
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
 
       - uses: actions/setup-node@v4
@@ -142,6 +145,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: astrid-app
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
@@ -244,3 +248,73 @@ jobs:
           name: three-products-traces
           path: ${{ runner.temp }}/three-products-results/
           if-no-files-found: ignore
+
+  skew:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [old-runtime, old-app, candidate-rejected]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: astrid-app
+      # The release inventory in astrid-agent tests/upgrade/releases.json identifies this pair.
+      - uses: actions/checkout@v4
+        with:
+          ref: b96c41fca2da7993b41324aedf61eb297dc34f10
+          path: old-app
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/astrid-runtime
+          ref: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '959ce04fcf91351903c361d03e6b19eb0bbe8587' }}
+          path: astrid-runtime
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Runtime and App dependencies
+        run: |
+          python -m venv astrid-runtime/.venv
+          astrid-runtime/.venv/bin/python -m pip install -e astrid-runtime
+          cd astrid-app
+          npm ci --legacy-peer-deps
+          npx playwright install --with-deps chromium
+          sudo apt-get install -y --no-install-recommends ffmpeg
+      - name: Build historical App
+        if: ${{ matrix.mode == 'old-app' }}
+        working-directory: old-app
+        run: |
+          npm ci --legacy-peer-deps
+          npm run build:hosted
+      - name: Run skew journey
+        working-directory: astrid-app
+        env:
+          ASTRID_SKEW_MODE: ${{ matrix.mode }}
+          ASTRID_SKEW_APP_SHA: ${{ matrix.mode == 'old-app' && 'b96c41fca2da7993b41324aedf61eb297dc34f10' || github.sha }}
+          ASTRID_SKEW_RUNTIME_SHA: ${{ matrix.mode == 'old-runtime' && '11443b0b5b34bd5b36725504fb083146192a759d' || '959ce04fcf91351903c361d03e6b19eb0bbe8587' }}
+          ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
+          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/skew.json
+          PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/skew-results
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: |
+          if [ "$ASTRID_SKEW_MODE" = "old-app" ]; then
+            export ASTRID_APP_DIRECT_DIST="$GITHUB_WORKSPACE/old-app/dist"
+          fi
+          npx playwright test -c playwright.skew.config.ts --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+      - name: Require an executed passing case
+        if: ${{ !cancelled() }}
+        run: |
+          jq -e '[.. | objects | select(has("expectedStatus") and has("results"))] as $t | ($t | length) > 0 and ([ $t[] | select(.status != "expected" or .expectedStatus != "passed") ] | length) == 0 and .stats.skipped == 0 and .stats.flaky == 0 and .stats.unexpected == 0' "$RUNNER_TEMP/skew.json"
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: skew-${{ matrix.mode }}
+          path: |
+            ${{ runner.temp }}/skew.json
+            ${{ runner.temp }}/skew-results/
+          if-no-files-found: warn

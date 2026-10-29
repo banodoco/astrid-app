@@ -14,21 +14,40 @@ function readDoorAudit(harness: DirectHarness) {
   return readFileSync(harness.auditPath, 'utf8').split('\n').filter(Boolean).map(line => JSON.parse(line) as { method: string; path: string; status: number });
 }
 
+async function waitForDoorAudit(harness: DirectHarness, predicate: (entries: ReturnType<typeof readDoorAudit>) => boolean, timeoutMs = 3000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      const entries = readDoorAudit(harness);
+      if (predicate(entries)) return entries;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (Date.now() >= deadline) throw new Error(`Door audit did not record the expected request within ${timeoutMs}ms`);
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+}
+
 test('real App and Runtime artifacts connect or show their recovery action', async ({ page, harness }) => {
   const health = await (await harness.runtimeFetch('/v1/health')).json() as { schema_digest?: string };
   const expectedDigest = mode === 'old-runtime'
     ? 'sha256:9061d4982c786e04d99e45470b8ea4f3d9c9ff9855c4a2f83d751a93408c205b' // Runtime 11443b0
     : 'sha256:5d229bf66ffaeb0b4937844a3c2b08ddd21f97cbcc305101a5cc19a95c971194'; // Runtime 959ce04
   expect(health.schema_digest).toBe(expectedDigest);
-  const before = readDoorAudit(harness).length;
+  let before = 0;
   let outcome: 'connected' | 'recovery' | 'incomplete' = 'incomplete';
   try {
+    const doorHealth = await harness.doorRequest('/v1/health');
+    expect(doorHealth.status).toBe(200);
+    const probeAudit = await waitForDoorAudit(harness, entries => entries.some(entry => entry.path === '/v1/health' && entry.status === 200));
+    before = probeAudit.length;
     await openApp(page, harness);
     const connected = page.locator(`${UI.status}[data-state="connected"]`);
     const update = page.getByText('Update Astrid', { exact: true });
     const reload = page.getByRole('button', { name: 'Reload' });
     await expect.poll(async () => (await connected.count()) > 0 || (await update.isVisible().catch(() => false)) || (await reload.isVisible().catch(() => false))).toBe(true);
-    const observedAudit = readDoorAudit(harness).slice(before);
+    const allAudit = await waitForDoorAudit(harness, entries => entries.slice(before).some(entry => entry.path === '/v1/health' && entry.status === 200));
+    const observedAudit = allAudit.slice(before);
     expect(observedAudit.some(({ path: requestPath }) => requestPath === '/v1/health'), 'the real door recorded a health read').toBe(true);
     if (mode === 'old-runtime' && RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(health.schema_digest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])) {
       await expect(connected).toHaveCount(1);

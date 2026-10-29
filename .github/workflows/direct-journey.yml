@@ -2,8 +2,8 @@
 # a real Runtime daemon on throwaway SQLite serving it through its own browser door, and Chromium.
 # Local equivalent: npm run test:e2e:direct (tests/e2e/local/support/harness.ts).
 #
-# The pinned Runtime refs are public. The skew lane uses read-only workflow
-# permissions and does not pass a personal token to the installer or browser.
+# The source repositories are public. This workflow needs read-only contents
+# permission and does not pass personal tokens to the installer or browser.
 #
 # Pass rule (a skip means a missing harness, R-9): exactly M tests expected to fail (M is the journey
 # file's budget in scripts/quality/check-known-failures.mjs), none unexpected, none flaky, none skipped.
@@ -49,7 +49,6 @@ jobs:
           ref: main
           path: astrid-runtime
           persist-credentials: false
-          token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -129,9 +128,6 @@ jobs:
 
   # Three products on one realm (testing plan F2, thin slice): the same hosted build and real Runtime (with its browser door) as the
   # job above, plus the real Astrid CLI as a second client. Local equivalent: npm run test:e2e:three-products.
-  # Astrid is private to this lane's token: add a repository secret ASTRID_READ_TOKEN (a fine-grained PAT with read access to
-  # banodoco/astrid-agent, or whichever repository holds Astrid). Without it the job falls back to github.token, which
-  # only reads Astrid if this repository can. A missing checkout or interpreter fails the job by name (R-9); it never skips.
   # Until the Astrid branch carrying astrid/core/dev/cross_client.py (tidy-w2) merges to its main, this job checks out an Astrid
   # without that module, so any PR touching tests/e2e/local/** (or the paths above) is red here until that merge.
   three-products:
@@ -151,13 +147,13 @@ jobs:
           repository: banodoco/astrid-runtime
           ref: main
           path: astrid-runtime
-          token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+          persist-credentials: false
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
           ref: main
           path: astrid-agent
-          token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -259,6 +255,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: astrid-app
+          persist-credentials: false
       # The release inventory in astrid-agent tests/upgrade/releases.json identifies this pair.
       - uses: actions/checkout@v4
         with:

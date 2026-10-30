@@ -9,11 +9,11 @@
   "release": 1,
   "agent": {
     "repo": "banodoco/astrid-agent",
-    "sha": "9e7032e41ddf3d270fe9cff5d164fd84f30ac0b8"
+    "sha": "1d0e32a88691f9591291586c0fcfeefb91531dc6"
   },
   "runtime": {
     "repo": "banodoco/astrid-runtime",
-    "sha": "ebd412199a9c1e53c3a984d27d335de8b40654a1",
+    "sha": "a6a95d77fcc7b2aae5aa39b3efa4ed545cf4f2f2",
     "schema_digest": "sha256:5d229bf66ffaeb0b4937844a3c2b08ddd21f97cbcc305101a5cc19a95c971194"
   }
 }

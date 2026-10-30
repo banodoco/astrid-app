@@ -29,7 +29,7 @@ async function gitRepo() {
     },
     async commitBytes(bytes) {
       await writeFile(path.join(repo, manifestPath), bytes);
-      git('add', manifestPath);
+      git('add', manifestPath, 'config/qualification/published-release-baseline.json');
       git('commit', '-m', 'pin manifest');
     },
     branch(name) { git('branch', name); },
@@ -99,7 +99,7 @@ test('candidate mode allows replacing an unpublished candidate at the same relea
   t.after(() => fixture.close());
   await fixture.commit({ release: 1, field: 'first unpublished candidate' });
   assert.match(
-    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'replacement candidate' }), candidateMode: true }),
+    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'replacement candidate' }), candidateMode: true, publishedBaselineRef: 'main' }),
     /unpublished candidate release 1 exceeds last published release 0/,
   );
   await assert.rejects(
@@ -113,7 +113,7 @@ test('candidate mode allows the exact frozen Release-0 manifest before the first
   t.after(() => fixture.close());
   await fixture.commitBytes(release0ManifestBytes);
   assert.match(
-    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: release0ManifestBytes, candidateMode: true }),
+    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: release0ManifestBytes, candidateMode: true, publishedBaselineRef: 'main' }),
     /bytes match frozen Release-0 baseline/,
   );
 });
@@ -124,7 +124,7 @@ test('candidate mode rejects release-0 bytes once a later release is published',
   await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
   await fixture.commit({ release: 1 });
   const release0 = await readFile(path.join(fixture.repo, 'config/qualification/release-0-public-manifest.json'));
-  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: release0, candidateMode: true }), /does not exceed last published release 1/);
+  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: release0, candidateMode: true, publishedBaselineRef: 'main' }), /does not exceed last published release 1/);
 });
 
 test('candidate mode rejects a changed frozen Release-0 baseline', async (t) => {
@@ -132,7 +132,7 @@ test('candidate mode rejects a changed frozen Release-0 baseline', async (t) => 
   t.after(() => fixture.close());
   await fixture.commit({ release: 1 });
   await writeFile(path.join(fixture.repo, 'config/qualification/release-0-public-manifest.json'), '{"release":0}\n');
-  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1 }), candidateMode: true }), /Frozen Release-0 manifest bytes have changed/);
+  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1 }), candidateMode: true, publishedBaselineRef: 'main' }), /Frozen Release-0 manifest bytes have changed/);
 });
 
 test('candidate mode still rejects a downgrade below the frozen published release', async (t) => {
@@ -141,8 +141,34 @@ test('candidate mode still rejects a downgrade below the frozen published releas
   await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
   await fixture.commit({ release: 2, field: 'unpublished candidate' });
   await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'downgrade' }), candidateMode: true }),
+    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'downgrade' }), candidateMode: true, publishedBaselineRef: 'main' }),
     /does not exceed last published release 1/,
+  );
+});
+
+test('legacy main without a baseline permits only the Release-0 fallback', async (t) => {
+  const fixture = await gitRepo();
+  t.after(() => fixture.close());
+  await fixture.commit({ release: 0 });
+  const git = (...args) => execFileSync('git', args, { cwd: fixture.repo, stdio: 'pipe' });
+  git('rm', '--cached', 'config/qualification/published-release-baseline.json');
+  git('commit', '-m', 'legacy main');
+  assert.match(await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', publishedBaselineRef: 'main', candidateBytes: await fixture.candidate({ release: 1 }), candidateMode: true }), /last published release 0/);
+  await writeFile(path.join(fixture.repo, manifestPath), '{"release":1}\n');
+  git('add', manifestPath);
+  git('commit', '-m', 'advance without baseline');
+  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', publishedBaselineRef: 'main', candidateBytes: await fixture.candidate({ release: 2 }), candidateMode: true }), /Published baseline is missing from main after Release 0/);
+});
+
+test('candidate cannot lower the published baseline from main', async (t) => {
+  const fixture = await gitRepo();
+  t.after(() => fixture.close());
+  await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
+  await fixture.commit({ release: 1, field: 'published' });
+  await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":0}\n');
+  await assert.rejects(
+    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', publishedBaselineRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'downgrade' }), candidateMode: true }),
+    /Candidate published release baseline differs from main/,
   );
 });
 
@@ -152,7 +178,7 @@ test('candidate mode rejects unchanged main bytes when that release is already p
   await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
   await fixture.commit({ release: 1, field: 'published release' });
   await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateMode: true }),
+    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateMode: true, publishedBaselineRef: 'main' }),
     /Manifest release 1 does not exceed last published release 1/,
   );
 });

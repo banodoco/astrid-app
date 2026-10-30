@@ -44,7 +44,7 @@ function readRequiredRelease(bytes, label) {
   return required.release;
 }
 
-export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'origin/main', candidateBytes, candidateMode = false } = {}) {
+export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'origin/main', candidateBytes, candidateMode = false, publishedBaselineRef = 'origin/main' } = {}) {
   const current = candidateBytes ?? await readFile(path.join(repo, manifestPath));
   const baseline = git(repo, 'show', `${baseRef}:${manifestPath}`);
   const baselineRelease = readRelease(baseline, `${baseRef} install-manifest.json`);
@@ -63,7 +63,24 @@ export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'or
   const release = readRelease(current, 'candidate install-manifest.json');
   let publishedRelease;
   if (candidateMode) {
-    const publishedBaseline = JSON.parse(await readFile(path.join(repo, publishedBaselinePath), 'utf8'));
+    // The candidate branch cannot lower its own published floor. Until main
+    // first contains this file, the only valid fallback is Release 0.
+    let publishedBytes;
+    try {
+      publishedBytes = git(repo, 'show', `${publishedBaselineRef}:${publishedBaselinePath}`);
+    } catch (error) {
+      const mainManifest = git(repo, 'show', `${publishedBaselineRef}:${manifestPath}`);
+      if (readRelease(mainManifest, `${publishedBaselineRef} install-manifest.json`) !== 0) {
+        throw new Error(`Published baseline is missing from ${publishedBaselineRef} after Release 0`);
+      }
+      publishedBytes = Buffer.from('{"schema_version":1,"release":0}\n');
+    }
+    const candidateBaselineBytes = await readFile(path.join(repo, publishedBaselinePath));
+    const publishedBaseline = JSON.parse(publishedBytes.toString('utf8'));
+    const candidateBaseline = JSON.parse(candidateBaselineBytes.toString('utf8'));
+    if (candidateBaseline.schema_version !== publishedBaseline.schema_version || candidateBaseline.release !== publishedBaseline.release) {
+      throw new Error(`Candidate published release baseline differs from ${publishedBaselineRef}`);
+    }
     if (publishedBaseline.schema_version !== 1 || !Number.isSafeInteger(publishedBaseline.release) || publishedBaseline.release < 0) {
       throw new Error(`${publishedBaselinePath} must contain schema_version 1 and a non-negative release`);
     }

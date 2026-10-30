@@ -28,7 +28,7 @@ jobs:
           else
             node scripts/installer/release-check.mjs "$RELEASE_BASE_REF"
           fi
-      - run: node --test scripts/installer/release.test.mjs
+      - run: node --test scripts/installer/release.test.mjs scripts/qualification/check-public-updater-candidate.test.mjs
       - run: npm ci --legacy-peer-deps
       - run: npm test
       - run: npm run test:sdk-boundary

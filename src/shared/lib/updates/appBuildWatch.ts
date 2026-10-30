@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { isReleaseNumber } from './installedRelease.ts';
 
 export const APP_BUILD_CHECK_INTERVAL_MS = 10 * 60 * 1000;
+export const APP_BUILD_FETCH_TIMEOUT_MS = 8_000;
 export const APP_BUILD = typeof __ASTRID_APP_BUILD__ === 'undefined' ? '' : __ASTRID_APP_BUILD__;
 
 export type BuildInfo = { app: string; release: number };
@@ -20,16 +21,29 @@ export function scheduleFocusAndInterval(check: () => void, intervalMs: number, 
 }
 
 export async function fetchBuildInfo(fetchImpl: BuildFetch): Promise<BuildInfo | null> {
+  const controller = new AbortController();
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   try {
-    const response = await fetchImpl('/build.json', { cache: 'no-store' });
-    if (!response.ok) return null;
-    const payload: unknown = await response.json();
-    if (typeof payload !== 'object' || payload === null) return null;
-    const { app, release } = payload as Partial<BuildInfo>;
-    if (typeof app !== 'string' || !app || !isReleaseNumber(release)) return null;
-    return { app, release };
+    const timedOut = new Promise<null>((resolve) => {
+      timeout = setTimeout(() => {
+        controller.abort();
+        resolve(null);
+      }, APP_BUILD_FETCH_TIMEOUT_MS);
+    });
+    const readBuild = async (): Promise<BuildInfo | null> => {
+      const response = await fetchImpl('/build.json', { cache: 'no-store', signal: controller.signal });
+      if (!response.ok) return null;
+      const payload: unknown = await response.json();
+      if (typeof payload !== 'object' || payload === null) return null;
+      const { app, release } = payload as Partial<BuildInfo>;
+      if (typeof app !== 'string' || !app || !isReleaseNumber(release)) return null;
+      return { app, release };
+    };
+    return await Promise.race([readBuild(), timedOut]);
   } catch {
     return null;
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
   }
 }
 

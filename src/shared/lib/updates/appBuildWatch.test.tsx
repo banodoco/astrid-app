@@ -17,7 +17,7 @@ describe('App build watcher', () => {
     const fetchImpl = vi.fn(() => new Promise<Response>((resolve) => { finish = resolve; }));
     const view = renderHook(() => useAppBuildWatch({ fetchImpl, intervalMs: 600_000 }));
     expect(fetchImpl).toHaveBeenCalledTimes(1);
-    expect(fetchImpl).toHaveBeenCalledWith('/build.json', { cache: 'no-store' });
+    expect(fetchImpl).toHaveBeenCalledWith('/build.json', expect.objectContaining({ cache: 'no-store', signal: expect.any(AbortSignal) }));
     act(() => { window.dispatchEvent(new Event('focus')); document.dispatchEvent(new Event('visibilitychange')); });
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     await act(async () => { finish(new Response(JSON.stringify({ app: 'app-a', release: 4 }), { status: 200 })); });
@@ -44,6 +44,20 @@ describe('App build watcher', () => {
     await act(async () => { await Promise.resolve(); });
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(view.result.current).toBe(false);
+    view.unmount();
+  });
+
+  it('keeps the local page available and retries when build.json hangs', async () => {
+    const { APP_BUILD_FETCH_TIMEOUT_MS, useAppBuildWatch } = await import('./appBuildWatch.ts');
+    const fetchImpl = vi.fn(() => new Promise<Response>(() => {}));
+    const view = renderHook(() => useAppBuildWatch({ fetchImpl, intervalMs: 600_000 }));
+
+    await act(async () => { vi.advanceTimersByTime(APP_BUILD_FETCH_TIMEOUT_MS); await Promise.resolve(); });
+    expect(view.result.current).toBe(false);
+
+    act(() => { window.dispatchEvent(new Event('focus')); });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenLastCalledWith('/build.json', expect.objectContaining({ signal: expect.any(AbortSignal) }));
     view.unmount();
   });
 });

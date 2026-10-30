@@ -34,13 +34,16 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
   const reload = actions.find((action) => action.label === RELOAD_ACTION);
   const execute = actions.find((action) => action.execute === 'installer-update');
   const localCommand = actions.find((action) => action.label === RUN_IT_YOURSELF_ACTION)?.command;
+  const startUpdate = async () => {
+    if (await guarded.flush()) await operation?.start();
+  };
 
   return <div className="space-y-2">
     {reload && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{reload.label}</Button>}
-    {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={operation.pending} onClick={() => {
+    {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={operation.pending || guarded.pending} onClick={() => {
       // Read at click time: an update restart interrupts any agent turn that is still running.
       if (queryClient && hasAnyActiveAgentTurn(queryClient)) setTurnConfirmOpen(true);
-      else void operation.start();
+      else void startUpdate();
     }}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
     {(resolution.card === 'update' || resolution.card === 'notice') && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
@@ -52,6 +55,6 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
     {operation?.fresh && !operation.error && installerUpdateStatusMessage(operation.status) && !operation.pending && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
     {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
     {guarded.error && <p role="alert">{guarded.error}</p>}
-    <ConfirmDialog open={turnConfirmOpen} onOpenChange={setTurnConfirmOpen} title="An agent turn is running; updating will interrupt it" confirmText="Update anyway" cancelText="Wait" onConfirm={() => { setTurnConfirmOpen(false); void operation?.start(); }} />
+    <ConfirmDialog open={turnConfirmOpen} onOpenChange={setTurnConfirmOpen} title="An agent turn is running; updating will interrupt it" confirmText="Update anyway" cancelText="Wait" onConfirm={() => { setTurnConfirmOpen(false); void startUpdate(); }} />
   </div>;
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
@@ -10,8 +10,7 @@ import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpd
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { installerUpdateStatusMessage, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
-import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 
 type CheckState = 'checking' | 'ready' | 'error';
@@ -25,9 +24,6 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const operation = useInstallerUpdate(connection);
   const pageStale = usePageStale();
   const local = localUpdateStatus();
-  const localUpdate = pageLocalUpdate();
-  const localState = useSyncExternalStore(localUpdate.subscribe, localUpdate.getSnapshot, localUpdate.getSnapshot);
-  const guarded = useGuardedReload();
   const [status, setStatus] = useState<UpdateStatus | null>(null);
   const [state, setState] = useState<CheckState>('checking');
   const [error, setError] = useState('');
@@ -55,13 +51,6 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   };
 
   const installType = operation.installType;
-
-  const updateNow = async () => {
-    if (!await guarded.flush()) return;
-    const outcome = await localUpdate.start();
-    // A rolled-back editor is also replaced, so both outcomes flush drafts first.
-    if (outcome.phase === 'done' && outcome.status !== 'up-to-date') await guarded.reload();
-  };
 
   const check = async () => {
     setState('checking');
@@ -140,14 +129,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         {statusLine}
       </p>
       {state === 'ready' && currentResolution?.title && <div className="text-sm"><p className="font-medium">{currentResolution.title}</p>{currentResolution.body && <p className="text-muted-foreground">{currentResolution.body}</p>}</div>}
-      {state === 'ready' && installType === 'fully-local' && currentStatus?.behind && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={localState.phase === 'running'} onClick={() => void updateNow()}>{localState.phase === 'running' ? 'Updating Astrid…' : 'Update now'}</Button>}
-      {localState.phase === 'running' && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
-      {localState.phase === 'done' && <p role="status">{localState.message || (localState.status === 'up-to-date' ? 'Astrid is up to date.' : localState.status === 'recovered' ? 'The update did not finish, so Astrid went back to the previous version.' : 'Astrid updated.')}</p>}
-      {localState.phase === 'done' && localState.status !== 'up-to-date' && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>Reload</Button>}
-      {localState.phase === 'failed' && <p role="alert">{localState.message}</p>}
-      {guarded.error && <p role="alert">{guarded.error}</p>}
-      {localState.phase === 'refused' && <><p role="alert">{localState.message}</p><UpdateResolutionActions resolution={resolveUpdate({ installType: 'fully-local', releaseBehind: true }, 'settings')} /></>}
-      {state === 'ready' && localState.phase !== 'refused' && currentResolution && (currentResolution.card !== 'none' || operation.status?.state !== 'none') && <UpdateResolutionActions resolution={currentResolution} operation={operation} />}
+      {state === 'ready' && currentResolution && (currentResolution.card !== 'none' || operation.status?.state !== 'none') && <UpdateResolutionActions resolution={currentResolution} operation={operation} />}
       <div className="border-t pt-2 text-sm">
         <p><span className="text-muted-foreground">Last result:</span> {lastResult}</p>
         <details className="mt-1"><summary className="cursor-pointer underline">View log</summary>{operation.status?.log_path && <p>{operation.status.log_path}</p>}<pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{operation.status?.result && reportResult !== operation.status.result ? 'The latest log is not available in diagnostics yet. Check again.' : diagnostics.match(/Installer transaction log:\n([\s\S]*?)\nRetained back-end copies:/)?.[1] || 'No update log yet.'}</pre></details>

@@ -10,11 +10,9 @@ vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: host
 
 import { AstridUpdatesSection } from './AstridUpdatesSection.tsx';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
-import { pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
-import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
+import { installCommand } from '@/shared/components/RuntimeConnection/copy.ts';
 
 beforeEach(() => {
-  pageLocalUpdate().reset();
   vi.unstubAllEnvs();
   connectionMock.value = { isConnected: true, managedByPinokio: false };
   readStatusMock.mockReset().mockResolvedValue({ health: { status: 'ok', release: 3 } });
@@ -119,6 +117,20 @@ describe('Astrid Updates Settings section', () => {
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
   });
 
+  it('does not expose the fully-local in-app updater or stale npm route', async () => {
+    originMock.value = '';
+    vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
+    localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
+    expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
+    expect(within(section).getByRole('code')).toHaveTextContent(installCommand('update'));
+    expect(within(section).queryByText(/npm run update/)).toBeNull();
+  });
+
   it.each([
     ['Pinokio', 'pinokio', false, 'Update in Pinokio'],
     ['fully-local', 'fully-local', true, 'Copy for your agent'],
@@ -172,119 +184,5 @@ describe('Astrid Updates Settings section', () => {
     fireEvent.click(within(section).getByRole('button', { name: 'Check for updates' }));
     expect(await within(section).findByText('Astrid is up to date')).toBeInTheDocument();
     view.unmount();
-  });
-});
-
-describe('fully-local Update now', () => {
-  const behind = { release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } };
-  const TARGET = { url: 'http://127.0.0.1:5000/page-update', token: 'cd'.repeat(32) };
-  let launcher: ReturnType<typeof vi.fn>;
-  let reload: ReturnType<typeof vi.fn>;
-
-  function setupLocal(reply: () => Response | Promise<Response>) {
-    originMock.value = '';
-    vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
-    localCheckMock.mockResolvedValue(behind);
-    launcher = vi.fn(reply);
-    reload = vi.fn();
-    vi.stubGlobal('location', { ...window.location, reload });
-    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request, init?: RequestInit) => {
-      const url = String(input);
-      if (url === '/__astrid/local-update-page') return Promise.resolve(new Response(JSON.stringify(TARGET), { status: 200 }));
-      if (url === TARGET.url) return Promise.resolve(launcher(init));
-      return Promise.resolve(new Response(JSON.stringify({ report: 'Astrid diagnostics' }), { status: 200 }));
-    }));
-  }
-  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
-
-  it('posts once to the launcher with the receipt secret, flushes drafts, then reloads on success', async () => {
-    setupLocal(() => json(200, { result: { status: 'updated', message: 'Astrid updated.' } }));
-    const flush = vi.fn(async () => undefined);
-    const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush });
-    render(<AstridUpdatesSection isOpen />);
-    const section = screen.getByRole('region', { name: 'Updates' });
-    fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
-    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
-    expect(flush).toHaveBeenCalled();
-    expect(launcher).toHaveBeenCalledOnce();
-    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(launcher.mock.invocationCallOrder[0]!);
-    const init = launcher.mock.calls[0]![0] as RequestInit;
-    expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TARGET.token}`);
-    expect(JSON.parse(init.body as string)).toEqual({ requestId: expect.stringMatching(/^[0-9a-f]{32}$/) });
-    expect(within(section).getByText('Astrid updated.')).toBeInTheDocument();
-    unregister();
-  });
-
-  it('keeps the draft on rollback: flushes before reloading the restored editor', async () => {
-    setupLocal(() => json(200, { result: { status: 'recovered', message: 'The update failed and Astrid went back to the previous version.' } }));
-    const flush = vi.fn(async () => undefined);
-    const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush });
-    render(<AstridUpdatesSection isOpen />);
-    const section = screen.getByRole('region', { name: 'Updates' });
-    fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
-    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
-    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0]!);
-    expect(within(section).getByText(/Astrid was restored to its previous version/)).toBeInTheDocument();
-    unregister();
-  });
-
-  it('does not post or reload when the draft cannot be saved', async () => {
-    setupLocal(() => json(200, { result: { status: 'updated', message: 'Astrid updated.' } }));
-    const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush: async () => { throw new Error('disk full'); } });
-    render(<AstridUpdatesSection isOpen />);
-    const section = screen.getByRole('region', { name: 'Updates' });
-    fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
-    expect(await within(section).findByText(/disk full/)).toBeInTheDocument();
-    expect(launcher).not.toHaveBeenCalled();
-    expect(reload).not.toHaveBeenCalled();
-    unregister();
-  });
-
-  it.each([
-    ['update_busy', 409, /already running/],
-    ['non_fast_forward', 409, /local commits/],
-    ['dirty', 409, /local edits overlap/],
-  ] as const)('maps the %s refusal to its message with both command options and no reload', async (refusal, status, message) => {
-    setupLocal(() => json(status, { error: 'refused', code: refusal, refusal }));
-    render(<AstridUpdatesSection isOpen />);
-    const section = screen.getByRole('region', { name: 'Updates' });
-    fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
-    expect(await within(section).findByRole('alert')).toHaveTextContent(message);
-    expect(within(section).getAllByRole('button', { name: 'Copy for your agent' })).toHaveLength(1);
-    expect(within(section).getAllByText('Run it yourself')).toHaveLength(1);
-    expect(reload).not.toHaveBeenCalled();
-    expect(launcher).toHaveBeenCalledOnce();
-  });
-
-  it('shows other failures without reloading or retrying', async () => {
-    setupLocal(() => json(422, { error: 'npm ci failed', step: 'prepare', code: 'update_failed' }));
-    render(<AstridUpdatesSection isOpen />);
-    const section = screen.getByRole('region', { name: 'Updates' });
-    fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
-    expect(await within(section).findByRole('alert')).toHaveTextContent('The update did not complete. Check diagnostics before trying again.');
-    expect(reload).not.toHaveBeenCalled();
-    expect(launcher).toHaveBeenCalledOnce();
-  });
-
-  it('offers no Update now button under Pinokio or when up to date', async () => {
-    connectionMock.value = { isConnected: true, managedByPinokio: true };
-    setupLocal(() => json(200, {}));
-    const view = render(<AstridUpdatesSection isOpen />);
-    const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update in Pinokio')).toBeInTheDocument();
-    expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
-    view.unmount();
-    connectionMock.value = { isConnected: true, managedByPinokio: false };
-    localCheckMock.mockResolvedValue({ ...behind, behind: false, resolution: { installedRelease: 4, servedRelease: 4, releaseBehind: false } });
-    render(<AstridUpdatesSection isOpen />);
-    expect(await screen.findByText('Astrid is up to date')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
-  });
-
-  it('does not offer the launcher button on hosted installs', async () => {
-    hostedCheckMock.mockResolvedValue({ release: 3, app: 'a', servedRelease: 4, servedApp: 'b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
-    render(<AstridUpdatesSection isOpen />);
-    await screen.findByText('Update available · Release 4');
-    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
   });
 });

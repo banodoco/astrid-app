@@ -59,6 +59,20 @@ describe('resolveUpdate', () => {
     expect(resolveUpdate({ ...status, installType: 'pinokio' }, 'settings').primary).toEqual({ label: 'Update in Pinokio' });
   });
 
+  it('uses the install command for fully-local guidance and preserves Pinokio routing', () => {
+    const schema = { compatibility: { kind: 'schema' as const, detail: 'old' } };
+    expect(resolveUpdate({ ...schema, installType: 'fully-local' }, 'settings')).toMatchObject({
+      primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
+    });
+    expect(resolveUpdate({ ...schema, installType: 'fully-local' }, 'settings').secondary).not.toHaveProperty('command');
+    expect(resolveUpdate({ releaseBehind: true, installType: 'fully-local' })).toMatchObject({
+      primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
+    });
+    expect(resolveUpdate({ ...schema, installType: 'pinokio' }, 'settings')).toMatchObject({
+      primary: { label: 'Update in Pinokio' }, secondary: null,
+    });
+  });
+
   it('uses the hard Reload action for a stale page ahead of update states', () => {
     for (const input of [
       { compatibility: { kind: 'schema' as const, detail: 'old schema' } },

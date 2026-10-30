@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
+import { installCommand } from './copy.ts';
 
 function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>) {
   const onOpen = vi.fn();
@@ -32,5 +33,11 @@ describe('update resolution Settings actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
     expect(window.location.search).toContain('settings=updates');
+  });
+
+  it('shows the install update command for fully-local installs', () => {
+    mountWithEventCapture(resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'fully-local' }));
+    expect(screen.getByRole('code')).toHaveTextContent(installCommand('update'));
+    expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
   });
 });

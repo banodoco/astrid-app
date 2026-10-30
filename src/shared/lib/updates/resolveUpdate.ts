@@ -52,8 +52,6 @@ export const RUN_IT_YOURSELF_ACTION = 'Run it yourself';
 export const RELOAD_ACTION = 'Reload';
 
 const settingsAction: UpdateAction = { label: 'Update now', destination: 'settings-updates' };
-/** A fully local install updates its own checkout; the installer would leave that checkout behind. */
-const FULLY_LOCAL_UPDATE_COMMAND = 'npm run update';
 const COPY_FOR_AGENT: UpdateAction = { label: COPY_FOR_AGENT_ACTION };
 const commandActions = (input: UpdateResolutionInput): Pick<UpdateResolution, 'primary' | 'secondary'> => ({
   primary: COPY_FOR_AGENT,
@@ -65,11 +63,8 @@ type ActionContext = 'page' | 'settings';
 function updateActions(input: UpdateResolutionInput, context: ActionContext, softRelease = false): Pick<UpdateResolution, 'primary' | 'secondary'> {
   if (input.installType === 'pinokio') return { primary: { label: UPDATE_IN_PINOKIO_ACTION }, secondary: null };
   if (input.installType === 'source') return { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
-  if (input.installType === 'fully-local') {
-    const runIt: UpdateAction = { label: RUN_IT_YOURSELF_ACTION, command: FULLY_LOCAL_UPDATE_COMMAND };
-    if (context === 'page') return { primary: settingsAction, secondary: softRelease ? null : runIt };
-    return { primary: COPY_FOR_AGENT, secondary: runIt };
-  }
+  // The editor does not perform updates for a fully local install; give the same install command guidance as other local users.
+  if (input.installType === 'fully-local') return commandActions(input);
   if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: COPY_FOR_AGENT };
   if (softRelease && context === 'page') return { primary: settingsAction, secondary: null };
   return commandActions(input);

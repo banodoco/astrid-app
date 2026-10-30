@@ -6,10 +6,12 @@ import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const candidatePath = path.join(repoRoot, 'config/qualification/public-updater-candidate.json');
-const baselinePath = path.join(repoRoot, 'public/install-manifest.json');
+const baselinePath = path.join(repoRoot, 'config/qualification/release-0-public-manifest.json');
+const finalManifestPath = path.join(repoRoot, 'public/install-manifest.json');
+const baselineDigest = 'fe12781e4da60d441595c08f84cb8d0390d840ab7c71227b8c4eff791553795e';
 const expected = {
-  agent: { repo: 'banodoco/astrid-agent', sha: '9e7032e41ddf3d270fe9cff5d164fd84f30ac0b8' },
-  runtime: { repo: 'banodoco/astrid-runtime', sha: 'ebd412199a9c1e53c3a984d27d335de8b40654a1' },
+  agent: { repo: 'banodoco/astrid-agent' },
+  runtime: { repo: 'banodoco/astrid-runtime' },
 };
 
 function assert(condition, message) {
@@ -64,34 +66,59 @@ async function runtimeSchemaDigest(runtimeSha) {
   return `sha256:${hash.digest('hex')}`;
 }
 
-async function main(args = process.argv.slice(2)) {
-  assert(args.length === 2 && args[0] === '--expected-app-sha', 'Usage: node scripts/qualification/check-public-updater-candidate.mjs --expected-app-sha <full-40-hex-sha>');
-  const actualAppSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
-  assertExpectedAppSha(args[1], actualAppSha);
-  const candidateRelative = path.relative(repoRoot, candidatePath).split(path.sep).join('/');
-  assert(candidateRelative.startsWith('config/qualification/'), 'Candidate metadata must remain outside public/');
-  const [candidate, baseline] = await Promise.all([readJson(candidatePath), readJson(baselinePath)]);
+// The candidate metadata is the recorded Agent/Runtime tuple. The App SHA is
+// supplied separately because a commit cannot contain its own SHA.
+export function validateTuple({ candidate, baseline, mode, manifest }) {
+  assert(mode === 'candidate' || mode === 'final', 'Mode must be candidate or final');
   exactKeys(candidate, ['schema_version', 'candidate_only', 'baseline', 'release', 'agent', 'runtime'], 'candidate');
   assert(candidate.schema_version === 1 && candidate.candidate_only === true, 'Candidate metadata marker is invalid');
   exactKeys(candidate.baseline, ['release', 'agent_sha', 'runtime_sha'], 'candidate baseline');
   exactKeys(candidate.agent, ['repo', 'sha'], 'candidate agent pin');
   exactKeys(candidate.runtime, ['repo', 'sha', 'schema_digest'], 'candidate Runtime pin');
-  assert(baseline.release === undefined || (Number.isSafeInteger(baseline.release) && baseline.release >= 0), 'Public baseline release is invalid');
   const baselineRelease = baseline.release ?? 0;
-  assert(candidate.baseline.release === baselineRelease, `Candidate baseline release ${candidate.baseline.release} does not match public baseline ${baselineRelease}`);
-  assert(candidate.baseline.agent_sha === baseline.agent?.sha && candidate.baseline.runtime_sha === baseline.runtime?.sha, 'Candidate baseline source pins do not match public install manifest');
-  assert(Number.isSafeInteger(candidate.release) && candidate.release > candidate.baseline.release, 'Candidate release must be an integer strictly above the public baseline');
+  assert(Number.isSafeInteger(baselineRelease) && baselineRelease >= 0, 'Frozen baseline release is invalid');
+  assert(candidate.baseline.release === baselineRelease, 'Candidate baseline release does not match frozen release-0 baseline');
+  assert(candidate.baseline.agent_sha === baseline.agent?.sha && candidate.baseline.runtime_sha === baseline.runtime?.sha, 'Candidate baseline source pins do not match frozen release-0 baseline');
+  assert(Number.isSafeInteger(candidate.release) && candidate.release > baselineRelease, 'Candidate release must be an integer strictly above the frozen baseline');
   for (const component of ['agent', 'runtime']) {
     const pin = candidate[component];
     assert(pin.repo === expected[component].repo && /^[0-9a-f]{40}$/.test(pin.sha ?? ''), `${component} must use a full immutable GitHub SHA`);
-    assert(pin.sha === expected[component].sha, `${component} SHA differs from the approved candidate pin`);
-    // Exact object shape above forbids local source paths, branches, refs, and overrides.
   }
+  assert(/^sha256:[0-9a-f]{64}$/.test(candidate.runtime.schema_digest ?? ''), 'Candidate Runtime schema digest is invalid');
+  if (mode === 'final') {
+    assert(manifest && manifest.release === candidate.release, 'Final manifest release differs from recorded candidate');
+    assert(manifest.agent?.sha === candidate.agent.sha, 'Final manifest Agent SHA differs from recorded candidate');
+    assert(manifest.runtime?.sha === candidate.runtime.sha, 'Final manifest Runtime SHA differs from recorded candidate');
+    assert(manifest.runtime?.schema_digest === candidate.runtime.schema_digest, 'Final manifest Runtime schema digest differs from recorded candidate');
+  }
+  return baselineRelease;
+}
+
+async function main(args = process.argv.slice(2)) {
+  let mode = 'candidate';
+  let expectedAppSha;
+  while (args.length) {
+    const flag = args.shift();
+    if (flag === '--mode' && args.length) mode = args.shift();
+    else if (flag === '--expected-app-sha' && args.length) expectedAppSha = args.shift();
+    else throw new Error('Usage: node scripts/qualification/check-public-updater-candidate.mjs [--mode candidate|final] --expected-app-sha <full-40-hex-sha>');
+  }
+  const actualAppSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoRoot, encoding: 'utf8' }).trim();
+  assertExpectedAppSha(expectedAppSha, actualAppSha);
+  const trackedInputs = ['config/qualification/public-updater-candidate.json', 'config/qualification/release-0-public-manifest.json', 'public/install-manifest.json'];
+  const dirty = execFileSync('git', ['status', '--porcelain', '--', ...trackedInputs], { cwd: repoRoot, encoding: 'utf8' });
+  assert(!dirty.trim(), 'Qualification inputs must match the recorded App commit');
+  const baselineBytes = await readFile(baselinePath);
+  assert(createHash('sha256').update(baselineBytes).digest('hex') === baselineDigest, 'Frozen release-0 baseline bytes have changed');
+  const baseline = JSON.parse(baselineBytes.toString('utf8'));
+  const candidate = await readJson(candidatePath);
+  const manifest = mode === 'final' ? await readJson(finalManifestPath) : undefined;
+  const baselineRelease = validateTuple({ candidate, baseline, mode, manifest });
   const agentLock = JSON.parse((await readRaw(expected.agent.repo, candidate.agent.sha, 'runtime.lock.json')).toString('utf8'));
   assert(agentLock.source_commit === candidate.runtime.sha, 'Agent runtime.lock.json does not select the candidate Runtime SHA');
   const digest = await runtimeSchemaDigest(candidate.runtime.sha);
   assert(candidate.runtime.schema_digest === digest, `Candidate Runtime schema digest ${candidate.runtime.schema_digest} does not match pinned Runtime source ${digest}`);
-  process.stdout.write(`Candidate coherent: App ${actualAppSha}; release ${candidate.release} > baseline ${baselineRelease}; Agent ${candidate.agent.sha}; Runtime ${candidate.runtime.sha}; ${digest}.\n`);
+  process.stdout.write(`${mode} tuple coherent: App ${actualAppSha}; release ${candidate.release} > baseline ${baselineRelease}; Agent ${candidate.agent.sha}; Runtime ${candidate.runtime.sha}; ${digest}.\n`);
 }
 
 if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? '')) {

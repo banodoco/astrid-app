@@ -1,9 +1,12 @@
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const manifestPath = 'public/install-manifest.json';
+const publishedBaselinePath = 'config/qualification/published-release-baseline.json';
+const release0ManifestPath = 'config/qualification/release-0-public-manifest.json';
 
 function git(repo, ...args) {
   return execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -41,7 +44,7 @@ function readRequiredRelease(bytes, label) {
   return required.release;
 }
 
-export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'origin/main', candidateBytes } = {}) {
+export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'origin/main', candidateBytes, candidateMode = false } = {}) {
   const current = candidateBytes ?? await readFile(path.join(repo, manifestPath));
   const baseline = git(repo, 'show', `${baseRef}:${manifestPath}`);
   const baselineRelease = readRelease(baseline, `${baseRef} install-manifest.json`);
@@ -57,11 +60,32 @@ export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'or
   if (candidateRequiredRelease < requiredHighWater) {
     throw new Error(`Manifest required.release ${candidateRequiredRelease} is below App main history high-water ${requiredHighWater}`);
   }
+  const release = readRelease(current, 'candidate install-manifest.json');
+  let publishedRelease;
+  if (candidateMode) {
+    const publishedBaseline = JSON.parse(await readFile(path.join(repo, publishedBaselinePath), 'utf8'));
+    if (publishedBaseline.schema_version !== 1 || !Number.isSafeInteger(publishedBaseline.release) || publishedBaseline.release < 0) {
+      throw new Error(`${publishedBaselinePath} must contain schema_version 1 and a non-negative release`);
+    }
+    publishedRelease = publishedBaseline.release;
+    const release0Manifest = await readFile(path.join(repo, release0ManifestPath));
+    if (createHash('sha256').update(release0Manifest).digest('hex') !== 'fe12781e4da60d441595c08f84cb8d0390d840ab7c71227b8c4eff791553795e') {
+      throw new Error('Frozen Release-0 manifest bytes have changed');
+    }
+    if (publishedRelease === 0 && current.equals(release0Manifest)) {
+      return `Manifest bytes match frozen Release-0 baseline; unpublished candidate phase has not changed the public manifest; required.release ${candidateRequiredRelease} preserves or exceeds history high-water ${requiredHighWater}.`;
+    }
+    if (release <= publishedRelease) {
+      throw new Error(`Manifest release ${release} does not exceed last published release ${publishedRelease}`);
+    }
+  }
   if (current.equals(baseline)) {
     return `Manifest bytes match ${baseRef}; release unchanged; required.release ${candidateRequiredRelease} preserves or exceeds history high-water ${requiredHighWater}.`;
   }
 
-  const release = readRelease(current, 'candidate install-manifest.json');
+  if (candidateMode) {
+    return `Manifest bytes changed; unpublished candidate release ${release} exceeds last published release ${publishedRelease}; required.release ${candidateRequiredRelease} preserves or exceeds history high-water ${requiredHighWater}.`;
+  }
   if (release <= baselineRelease) {
     throw new Error(`Manifest bytes changed but release ${release} does not exceed previous main release ${baselineRelease}`);
   }
@@ -72,8 +96,12 @@ export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'or
 }
 
 async function main() {
-  const [baseRef = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : 'origin/main'] = process.argv.slice(2);
-  process.stdout.write(`${await checkManifestRelease({ baseRef })}\n`);
+  const args = process.argv.slice(2);
+  const candidateMode = args.includes('--candidate');
+  const refs = args.filter((arg) => arg !== '--candidate');
+  if (refs.length > 1) throw new Error('Usage: node scripts/installer/release-check.mjs [base-ref] [--candidate]');
+  const [baseRef = process.env.GITHUB_BASE_REF ? `origin/${process.env.GITHUB_BASE_REF}` : 'origin/main'] = refs;
+  process.stdout.write(`${await checkManifestRelease({ baseRef, candidateMode })}\n`);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

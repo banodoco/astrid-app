@@ -11,17 +11,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The release check compares against the previous main manifest and its full release history.
+          # Candidate PRs compare against the durable last-published release baseline; main pushes retain full monotonicity checks.
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
           cache: npm
       - name: Check manifest release against main history
-        if: (github.event_name == 'pull_request' && github.base_ref == 'main') || github.ref == 'refs/heads/main'
+        if: (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'release-1')) || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release-1'
         env:
-          RELEASE_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before }}
-        run: node scripts/installer/release-check.mjs "$RELEASE_BASE_REF"
+          RELEASE_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'origin/main' }}
+          RELEASE_CANDIDATE_MODE: ${{ (github.event_name == 'pull_request' && github.base_ref == 'release-1') || github.ref == 'refs/heads/release-1' }}
+        run: |
+          if [ "$RELEASE_CANDIDATE_MODE" = "true" ]; then
+            node scripts/installer/release-check.mjs "$RELEASE_BASE_REF" --candidate
+          else
+            node scripts/installer/release-check.mjs "$RELEASE_BASE_REF"
+          fi
       - run: node --test scripts/installer/release.test.mjs
       - run: npm ci --legacy-peer-deps
       - run: npm test

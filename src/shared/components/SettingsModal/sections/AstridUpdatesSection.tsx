@@ -57,6 +57,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const installType = operation.installType;
 
   const updateNow = async () => {
+    if (!await guarded.flush()) return;
     const outcome = await localUpdate.start();
     // A rolled-back editor is also replaced, so both outcomes flush drafts first.
     if (outcome.phase === 'done' && outcome.status !== 'up-to-date') await guarded.reload();

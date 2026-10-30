@@ -206,8 +206,8 @@ describe('fully-local Update now', () => {
     fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
     await waitFor(() => expect(reload).toHaveBeenCalledOnce());
     expect(flush).toHaveBeenCalled();
-    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(reload.mock.invocationCallOrder[0]!);
     expect(launcher).toHaveBeenCalledOnce();
+    expect(flush.mock.invocationCallOrder[0]).toBeLessThan(launcher.mock.invocationCallOrder[0]!);
     const init = launcher.mock.calls[0]![0] as RequestInit;
     expect((init.headers as Record<string, string>).Authorization).toBe(`Bearer ${TARGET.token}`);
     expect(JSON.parse(init.body as string)).toEqual({ requestId: expect.stringMatching(/^[0-9a-f]{32}$/) });
@@ -228,13 +228,14 @@ describe('fully-local Update now', () => {
     unregister();
   });
 
-  it('does not reload when the draft cannot be saved', async () => {
+  it('does not post or reload when the draft cannot be saved', async () => {
     setupLocal(() => json(200, { result: { status: 'updated', message: 'Astrid updated.' } }));
     const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush: async () => { throw new Error('disk full'); } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
     expect(await within(section).findByText(/disk full/)).toBeInTheDocument();
+    expect(launcher).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
     unregister();
   });

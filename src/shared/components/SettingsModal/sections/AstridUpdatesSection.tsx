@@ -83,7 +83,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         next = await checkHostedUpdate(health);
       }
       setStatus(next);
-      setResolution(resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false }, 'settings'));
+      setResolution(resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false, updateReason: operation.updateReason }, 'settings'));
       setState('ready');
     } catch {
       setStatus(null);
@@ -111,19 +111,19 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const currentStatus = operation.releaseStatus ?? status;
   // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
-  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, installType: statusInstallType, updateNowAvailable: operation.available }, 'settings') : resolution;
+  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, installType: statusInstallType, updateNowAvailable: operation.available, updateReason: operation.updateReason }, 'settings') : resolution;
   const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
   const resultLabels: Record<string, string> = {
     none: 'No update has run yet.',
     updated: 'Astrid updated.',
     rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
     failed: 'The update did not complete. Check diagnostics before trying again.',
-    recovery_needed: 'Astrid needs repair. Download diagnostics and run the installer update command.',
+    recovery_needed: 'Astrid needs recovery. Select Update to check the previous operation before continuing.',
   };
   const operationResult = installerUpdateStatusMessage(operation.status);
   const lastResult = operation.pending ? 'Update in progress. Checking its result…' : operation.error ? operation.error : operationResult ?? (reportResult ? resultLabels[reportResult] ?? 'An update result is available in the diagnostics log.' : 'No update has run yet.');
-  const statusLine = operation.status?.state === 'recovery-needed'
-    ? 'Astrid needs repair. Download diagnostics and run the installer update command.'
+  const statusLine = operation.status && installerUpdateStatusMessage(operation.status) && !operation.pending
+    ? installerUpdateStatusMessage(operation.status)
     : state === 'checking' ? 'Checking for updates…' : state === 'error' ? error : currentResolution?.card === 'newer' ? currentResolution.body : currentStatus && (currentResolution?.card === 'notice' || currentResolution?.card === 'update') ? `Update available · Release ${currentStatus.servedRelease}` : 'Astrid is up to date';
 
   return <section id="settings-updates" aria-labelledby="astrid-updates-title" className="mb-6 rounded-lg border p-4">

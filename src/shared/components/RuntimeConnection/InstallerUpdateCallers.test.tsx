@@ -1,8 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { agentSessionQueryKey } from '@/tools/video-editor/hooks/useAgentSession.ts';
 
 const harness = vi.hoisted(() => ({
   auth: { isAuthenticated: true },
@@ -11,6 +9,7 @@ const harness = vi.hoisted(() => ({
   manager: null as string | null,
   statusAvailable: true,
   statusState: 'none' as string,
+  statusReason: null as string | null,
   operationId: null as string | null,
   result: 'Update accepted.',
   outcome: 'updated' as 'updated' | 'rolled_back' | 'failed',
@@ -50,6 +49,7 @@ beforeEach(() => {
   harness.manager = null;
   harness.statusAvailable = true;
   harness.statusState = 'none';
+  harness.statusReason = null;
   harness.operationId = null;
   harness.result = 'Update accepted.';
   harness.outcome = 'updated';
@@ -70,6 +70,7 @@ beforeEach(() => {
     } else if (url.endsWith('/v1/update/status')) {
       body = {
         available: harness.statusAvailable, state: harness.statusState,
+        ...(harness.statusReason ? { reason: harness.statusReason } : {}),
         ...(harness.operationId ? { operation_id: harness.operationId, result: harness.result } : {}),
         ...(harness.statusState === 'terminal' ? { outcome: harness.outcome } : {}),
       };
@@ -235,7 +236,7 @@ describe('installer update callers', () => {
     ['Pinokio managed', () => { harness.connection = { isConnected: true, managedByPinokio: true }; }],
     ['source managed', () => { harness.manager = 'source'; }],
     ['launcher unavailable', () => { harness.statusAvailable = false; }],
-    ['recovery required', () => { harness.statusState = 'recovery-needed'; }],
+    ['recovery required', () => { harness.statusState = 'recovery-needed'; harness.statusAvailable = false; }],
   ])('does not expose an installer POST action when %s', async (_label, configure) => {
     configure();
     render(<AstridUpdatesSection isOpen />);
@@ -245,10 +246,36 @@ describe('installer update callers', () => {
       // A source checkout has no release to install: the status line follows the resolver, which has no update to offer.
       await screen.findAllByText('Astrid is up to date');
       expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
-    } else if (_label === 'recovery required') await screen.findAllByText('Astrid needs repair. Download diagnostics and run the installer update command.');
+    } else if (_label === 'recovery required') await screen.findAllByText('Astrid needs recovery. Select Update to check the previous operation before continuing.');
     else await screen.findAllByText('Update available · Release 4');
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
+  });
+
+  it.each([
+    ['busy', 'Astrid is busy. Wait for the current operation to finish before trying again.'],
+    ['autostart-off', 'Automatic startup is off. Turn it on before updating Astrid here.'],
+    ['unsupported-service-manager', 'In-app updates require user systemd 254 or newer on Linux.'],
+  ] as const)('shows the exact %s refusal reason and never posts', async (reason, message) => {
+    harness.statusAvailable = false;
+    harness.statusReason = reason;
+    render(<AstridUpdatesSection isOpen />);
+    await screen.findAllByText(message);
+    expect(screen.queryByRole('button', { name: 'Update' })).not.toBeInTheDocument();
+    expect(screen.queryByText('Update anyway')).not.toBeInTheDocument();
+    expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
+  });
+
+  it('keeps recovery-needed read-only until the explicit Update action and then uses one normal POST', async () => {
+    harness.statusState = 'recovery-needed';
+    harness.statusAvailable = false;
+    render(<AstridUpdatesSection isOpen />);
+    await screen.findAllByText('Astrid needs recovery. Select Update to check the previous operation before continuing.');
+    expect(screen.getByRole('button', { name: 'Update' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update anyway' })).not.toBeInTheDocument();
+    expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: 'Update' }));
+    await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
   });
 
   it('keeps page-stale reload precedence over the available installer update', async () => {
@@ -322,42 +349,8 @@ describe('installer update callers', () => {
   });
 });
 
-describe('installer update while an agent turn runs', () => {
-  const TURN_WARNING = 'An agent turn is running; updating will interrupt it';
-  const postCount = () => calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
-  const renderWithSession = (status: 'processing' | 'waiting_user') => {
-    const client = new QueryClient();
-    client.setQueryData(agentSessionQueryKey('session-1', 'project-1'), { id: 'session-1', status, turns: [], taskLinks: [] });
-    return render(<QueryClientProvider client={client}><AstridUpdatesSection isOpen /></QueryClientProvider>);
-  };
-
-  it('sends Update now without a dialog when no agent turn is running', async () => {
-    renderWithSession('waiting_user');
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
-    await waitFor(() => expect(postCount()).toBe(1));
-    expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
-  });
-
-  it('asks before Update now interrupts a running agent turn', async () => {
-    renderWithSession('processing');
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
-    expect(await screen.findByText(TURN_WARNING)).toBeInTheDocument();
-    expect(postCount()).toBe(0);
-  });
-
-  it('Wait closes the agent-turn confirmation and sends no update', async () => {
-    renderWithSession('processing');
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Wait' }));
-    await waitFor(() => expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument());
-    expect(postCount()).toBe(0);
-  });
-
-  it('Update anyway sends the update after the agent-turn confirmation', async () => {
-    renderWithSession('processing');
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Update anyway' }));
-    await waitFor(() => expect(postCount()).toBe(1));
-    expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
+describe('installer update action wording', () => {
+  it('has no force-update confirmation path', () => {
+    expect(document.body.textContent).not.toContain('Update anyway');
   });
 });

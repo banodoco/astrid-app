@@ -126,7 +126,7 @@ export function RuntimeConnectorRecoveryBanner({
   const failure = describeFailure(error);
   const restartBrief = buildWorkspaceRestartBrief({ error, connectionUrl: safeUrl, projectId, timelineId });
   const authenticationFailed = error instanceof RuntimeAuthenticationError;
-  const updateResolution = resolveUpdate({ ...operation.releaseStatus?.resolution, runtime: error instanceof RuntimeUnavailableError ? 'unreachable' : undefined, pageStale, compatibility: error instanceof RuntimeCompatibilityError ? error : undefined, installType: operation.installType, updateNowAvailable: operation.available });
+  const updateResolution = resolveUpdate({ ...operation.releaseStatus?.resolution, runtime: error instanceof RuntimeUnavailableError ? 'unreachable' : undefined, pageStale, compatibility: error instanceof RuntimeCompatibilityError ? error : undefined, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason });
   const schemaUpdate = updateResolution.card === 'update';
   const typedFailure = authenticationFailed || error instanceof RuntimeCompatibilityError || error instanceof RuntimeUnavailableError && (error.failureKind === "admission" || error.failureKind === "storage");
   const visibleFailureSummary = failureSummary?.trim()

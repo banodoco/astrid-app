@@ -13,6 +13,25 @@ describe('installTypeOf', () => {
 });
 
 describe('resolveUpdate', () => {
+  it.each([
+    ['busy', 'Astrid is busy. Wait for the current operation to finish before trying again.'],
+    ['autostart-off', 'Automatic startup is off. Turn it on before updating Astrid here.'],
+    ['unsupported-service-manager', 'In-app updates require user systemd 254 or newer on Linux.'],
+  ] as const)('maps the %s refusal reason to its exact explanation without an action', (updateReason, body) => {
+    expect(resolveUpdate({ installType: 'installer', updateReason, releaseBehind: true, updateNowAvailable: false })).toMatchObject({
+      card: 'notice', body, primary: null, secondary: null, updateReason,
+    });
+  });
+
+  it('offers only the normal Update action for recovery-needed', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: true })).toMatchObject({
+      card: 'update',
+      body: 'Astrid needs recovery. Select Update to check the previous operation before continuing.',
+      primary: { label: 'Update', execute: 'installer-update' },
+      secondary: null,
+    });
+  });
+
   it('skips the release rules for a source checkout, which has no release, but keeps its schema action', () => {
     expect(resolveUpdate({ installType: 'source', installedRelease: 0, requiredRelease: 5, requiredReason: 'security fix' })).toMatchObject({ card: 'none', primary: null });
     expect(resolveUpdate({ installType: 'source', installedRelease: 0, servedRelease: 5, releaseBehind: true })).toMatchObject({ card: 'none', primary: null });

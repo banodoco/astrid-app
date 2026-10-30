@@ -19,7 +19,10 @@ describe('installerUpdateStatusMessage', () => {
     [{ state: 'active' }, 'Update in progress. Astrid may disconnect while it restarts.'],
     [{ state: 'terminal', outcome: 'updated', result: 'internal completed marker' }, 'Astrid updated. Reload to continue.'],
     [{ state: 'terminal', outcome: 'rolled_back', result: 'rolled_back' }, 'The update did not finish. Astrid was restored to its previous version.'],
-    [{ state: 'recovery-needed', result: 'repair_required' }, 'Astrid needs repair. Download diagnostics and run the installer update command.'],
+    [{ state: 'recovery-needed', result: 'repair_required' }, 'Astrid needs recovery. Select Update to check the previous operation before continuing.'],
+    [{ state: 'none', reason: 'busy' }, 'Astrid is busy. Wait for the current operation to finish before trying again.'],
+    [{ state: 'none', reason: 'autostart-off' }, 'Automatic startup is off. Turn it on before updating Astrid here.'],
+    [{ state: 'none', reason: 'unsupported-service-manager' }, 'In-app updates require user systemd 254 or newer on Linux.'],
   ] as const)('presents %j as clear user-facing status', (status, expected) => {
     expect(installerUpdateStatusMessage({ available: true, ...status } as InstallerUpdateStatus)).toBe(expected);
   });

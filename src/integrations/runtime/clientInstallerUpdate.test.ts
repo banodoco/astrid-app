@@ -21,6 +21,17 @@ afterEach(() => {
 });
 
 describe('AstridRuntimeClient installer update adapter', () => {
+  it.each([
+    ['none', 'busy'],
+    ['none', 'autostart-off'],
+    ['none', 'unsupported-service-manager'],
+    ['recovery-needed', undefined],
+  ] as const)('accepts the contract %s state/reason without inventing another operation state', async (state, reason) => {
+    const transport: Transport = async () => ({ status: 200, headers: {}, body: bytes({ available: state === 'none' && reason === undefined, state, ...(reason ? { reason } : {}) }) });
+    const client = new AstridRuntimeClient({ baseUrl: 'https://connector.test', transport });
+    await expect(client.readInstallerUpdateStatus()).resolves.toMatchObject({ state, ...(reason ? { reason } : {}) });
+  });
+
   it('reads an older status payload without requiring a workspace schema handshake', async () => {
     const calls: Array<{ method: string; path: string; headers: Record<string, string>; body?: unknown }> = [];
     const transport: Transport = async (method, path, headers, body) => {

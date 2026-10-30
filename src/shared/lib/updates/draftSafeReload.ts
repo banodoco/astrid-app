@@ -53,6 +53,7 @@ export function useDraftSafeReload(label: string, flush: () => Promise<void>, en
 
 /** Run a caller's reload only after every registered draft has reached durable storage. */
 export function useGuardedReload(reloadImpl: () => void = () => window.location.reload()): {
+  flush: () => Promise<boolean>;
   reload: () => Promise<void>;
   error: string | null;
   pending: boolean;
@@ -60,6 +61,22 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const pendingRef = useRef(false);
+  const flush = useCallback(async () => {
+    if (pendingRef.current) return false;
+    pendingRef.current = true;
+    setPending(true);
+    setError(null);
+    try {
+      await flushDraftsBeforeReload();
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+      return false;
+    } finally {
+      pendingRef.current = false;
+      setPending(false);
+    }
+  }, []);
   const reload = useCallback(async () => {
     if (pendingRef.current) return;
     pendingRef.current = true;
@@ -75,5 +92,5 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
       setPending(false);
     }
   }, [reloadImpl]);
-  return { reload, error, pending };
+  return { flush, reload, error, pending };
 }

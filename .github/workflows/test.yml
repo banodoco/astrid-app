@@ -13,10 +13,16 @@ jobs:
         with:
           # Candidate PRs compare against the durable last-published release baseline; main pushes retain full monotonicity checks.
           fetch-depth: 0
+          filter: blob:none
+      - name: Restore npm cache (C-08)
+        id: c08-app-test-1
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-          cache: npm
       - name: Check manifest release against main history
         if: (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'release-1')) || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release-1'
         env:
@@ -36,6 +42,13 @@ jobs:
   # The release tooling is macOS-only by design (lockf broker, BSD ps eww, darwin-pinned attestation), so the vitest job
   # declares these cases as skipped (config/testing/skipRegistry.mjs: macos-release-process-containment, macos-lockf-broker)
   # and this job runs exactly those files where the condition holds. Plain node: these files import only the repo.
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-test-1.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
   release-tooling-macos:
     runs-on: macos-latest
     steps:

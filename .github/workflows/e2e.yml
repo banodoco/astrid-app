@@ -22,8 +22,15 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Restore npm cache (C-08)
+        id: c08-app-e2e-6
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: actions/setup-node@v4
-        with: { node-version: "20.19.0", cache: npm }
+        with:
+          node-version: "20.19.0"
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium
       # The browser-renderer parity test reads the exported MP4 with ffprobe.
@@ -35,13 +42,27 @@ jobs:
         if: always()
         with: { name: playwright-default-results, path: test-results, if-no-files-found: ignore }
 
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-6.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
   playwright-timeline:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Restore npm cache (C-08)
+        id: c08-app-e2e-5
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: actions/setup-node@v4
-        with: { node-version: "20.19.0", cache: npm }
+        with:
+          node-version: "20.19.0"
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:timeline
@@ -50,13 +71,27 @@ jobs:
         with: { name: playwright-timeline-results, path: test-results, if-no-files-found: ignore }
 
   # The timeline lane's second project: H.264 cases that need installed Google Chrome.
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-5.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
   playwright-timeline-chrome-export:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Restore npm cache (C-08)
+        id: c08-app-e2e-4
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: actions/setup-node@v4
-        with: { node-version: "20.19.0", cache: npm }
+        with:
+          node-version: "20.19.0"
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chrome
       # The H.264 export specs read frames with ffmpeg/ffprobe and compare pixels with ImageMagick 7's `magick`
@@ -77,13 +112,27 @@ jobs:
         if: always()
         with: { name: playwright-timeline-chrome-export-results, path: test-results, if-no-files-found: ignore }
 
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-4.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
   extension-accessibility:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Restore npm cache (C-08)
+        id: c08-app-e2e-3
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: actions/setup-node@v4
-        with: { node-version: "20.19.0", cache: npm }
+        with:
+          node-version: "20.19.0"
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:e2e:extension-accessibility
@@ -91,13 +140,27 @@ jobs:
         if: always()
         with: { name: extension-accessibility-results, path: artifacts, if-no-files-found: ignore }
 
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-3.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
   extension-visual:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Restore npm cache (C-08)
+        id: c08-app-e2e-2
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: actions/setup-node@v4
-        with: { node-version: "20.19.0", cache: npm }
+        with:
+          node-version: "20.19.0"
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:extension-visual
@@ -105,16 +168,36 @@ jobs:
         if: always()
         with: { name: extension-visual-results, path: artifacts, if-no-files-found: ignore }
 
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-2.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+
   extension-cross-browser:
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Restore npm cache (C-08)
+        id: c08-app-e2e-1
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
       - uses: actions/setup-node@v4
-        with: { node-version: "20.19.0", cache: npm }
+        with:
+          node-version: "20.19.0"
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chrome chromium firefox webkit
       - run: npm run test:e2e:extension-cross-browser
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: extension-cross-browser-results, path: artifacts, if-no-files-found: ignore }
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-1.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}

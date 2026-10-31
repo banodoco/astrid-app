@@ -34,7 +34,7 @@ concurrency:
 
 jobs:
   direct-journey:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       # The harness finds the Runtime at ../astrid-runtime (ASTRID_RUNTIME_CHECKOUT overrides),
       # so both repos are checked out as siblings under $GITHUB_WORKSPACE/..: App in astrid-app, Runtime beside it.
@@ -132,7 +132,7 @@ jobs:
   # Until the Astrid branch carrying astrid/core/dev/cross_client.py (tidy-w2) merges to its main, this job checks out an Astrid
   # without that module, so any PR touching tests/e2e/local/** (or the paths above) is red here until that merge.
   three-products:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency:
       group: three-products-${{ github.ref }}
       cancel-in-progress: true

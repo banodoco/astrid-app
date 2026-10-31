@@ -18,7 +18,7 @@ env:
 
 jobs:
   playwright-default:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -36,7 +36,7 @@ jobs:
         with: { name: playwright-default-results, path: test-results, if-no-files-found: ignore }
 
   playwright-timeline:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +51,7 @@ jobs:
 
   # The timeline lane's second project: H.264 cases that need installed Google Chrome.
   playwright-timeline-chrome-export:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -78,7 +78,7 @@ jobs:
         with: { name: playwright-timeline-chrome-export-results, path: test-results, if-no-files-found: ignore }
 
   extension-accessibility:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -92,7 +92,7 @@ jobs:
         with: { name: extension-accessibility-results, path: artifacts, if-no-files-found: ignore }
 
   extension-visual:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
@@ -106,7 +106,7 @@ jobs:
         with: { name: extension-visual-results, path: artifacts, if-no-files-found: ignore }
 
   extension-cross-browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4

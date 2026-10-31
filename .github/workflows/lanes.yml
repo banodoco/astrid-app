@@ -89,7 +89,7 @@ jobs:
   # reference realm, adopts it, starts the Runtime with its browser door, writes the descriptor and runs that one case
   # (playwright.three-products.config.ts greps it in when the variable is set), then renders the saved revision.
   quick-journey:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # A hang guard only: the journey has no deadline of its own, and a stalled apt download once held a runner for 30 minutes.
     timeout-minutes: 60
     steps:

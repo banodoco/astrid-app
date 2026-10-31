@@ -54,6 +54,7 @@ export class UpdateOperation {
   private operationId: string | null = null;
   private releaseIdentity: string | null = null;
   private acknowledgementBaseline: string | undefined;
+  private readEpoch = 0;
   private refusal: string | null = null;
   constructor(private readonly client = new AstridRuntimeClient()) {}
   getSnapshot = () => this.snapshot;
@@ -65,12 +66,14 @@ export class UpdateOperation {
   refresh = (checkRelease = false): Promise<void> => {
     if (checkRelease) this.releaseIdentity = null;
     if (this.reading) return this.reading;
-    this.reading = this.read().finally(() => { this.reading = null; });
+    const epoch = this.readEpoch;
+    this.reading = this.read(epoch).finally(() => { this.reading = null; });
     return this.reading;
   };
-  private async read() {
+  private async read(epoch: number) {
     try {
       const [healthRead, statusRead] = await Promise.allSettled([this.client.readInstallerUpdateHealth(), this.client.readInstallerUpdateStatus()]);
+      if (epoch !== this.readEpoch || this.posting) return;
       if (healthRead.status === 'rejected') throw healthRead.reason;
       const health = healthRead.value;
       if (this.snapshot.health && health.runtime_instance_id !== this.snapshot.health.runtime_instance_id) this.publish({ restartRequired: true });
@@ -83,9 +86,11 @@ export class UpdateOperation {
       if (this.releaseIdentity !== identity || !this.snapshot.releaseStatus) {
         try {
           const releaseStatus = await checkHostedUpdate(health);
+          if (epoch !== this.readEpoch) return;
           this.releaseIdentity = identity;
           this.publish({ releaseStatus });
         } catch {
+          if (epoch !== this.readEpoch) return;
           // Release checks cannot manufacture a success or an executable action.
           this.publish({ releaseStatus: null });
         }
@@ -97,7 +102,7 @@ export class UpdateOperation {
         return;
       }
       // An unknown acknowledgement cannot be resolved by an old terminal result.
-      if (this.uncertain && (!status.operation_id || status.operation_id === this.acknowledgementBaseline)) {
+      if (this.uncertain && (!status.operation_id || (!this.operationId && status.operation_id === this.acknowledgementBaseline))) {
         this.publish({ health, status: null, fresh: false, error: 'The update acknowledgement was lost. Its result is not confirmed; check again before taking another action.' });
         return;
       }
@@ -108,18 +113,26 @@ export class UpdateOperation {
       const pending = this.posting || status.state === 'active';
       this.publish({ health, status, pending, fresh: true, error: this.refusal });
     } catch {
+      if (epoch !== this.readEpoch) return;
       this.publish({ fresh: false, error: UPDATE_STATUS_UNAVAILABLE });
     }
   }
   start = async (): Promise<void> => {
-    if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !canStartInstallerUpdate(this.snapshot.status)) return;
+    const previous = this.snapshot.status;
+    if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !previous || !canStartInstallerUpdate(previous)) return;
     this.posting = true;
     this.refusal = null;
-    this.operationId = null;
-    this.acknowledgementBaseline = this.snapshot.status.operation_id;
+    this.operationId = previous.state === 'recovery-needed' ? previous.operation_id ?? null : null;
+    this.acknowledgementBaseline = previous.state === 'terminal' ? previous.operation_id : undefined;
+    // Reads started before the click cannot establish what happened after it.
+    this.readEpoch += 1;
     this.publish({ pending: true, error: null });
     try {
       const accepted = await this.client.startInstallerUpdate();
+      if ((this.operationId && accepted.operation_id !== this.operationId)
+        || (!this.operationId && accepted.operation_id === this.acknowledgementBaseline)) {
+        throw new Error('Update acknowledgement does not match the expected operation.');
+      }
       this.operationId = accepted.operation_id;
       this.publish({ status: { available: true, state: 'active', operation_id: accepted.operation_id, result: accepted.message } });
     } catch (cause) {
@@ -132,6 +145,9 @@ export class UpdateOperation {
       this.publish({ pending: !definiteRefusal, fresh: false, error });
     } finally {
       this.posting = false;
+      this.readEpoch += 1;
+      // Do not reuse an in-flight read from before the POST.
+      if (this.reading) await this.reading;
       await this.refresh();
     }
   };

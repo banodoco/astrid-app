@@ -13,7 +13,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { lstat, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute, join, normalize } from 'node:path';
 import process from 'node:process';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -63,7 +63,7 @@ function commit(value, label) {
 
 function absoluteDirectory(value, label) {
   const result = text(value, label);
-  if (!isAbsolute(result)) throw new SurfaceError(`${label} must be an absolute path`);
+  if (!isAbsolute(result) && !/^[A-Za-z]:[\\/]/.test(result) && !/^\\\\[^\\/]+[\\/][^\\/]+/.test(result)) throw new SurfaceError(`${label} must be an absolute path`);
   return result;
 }
 
@@ -170,38 +170,133 @@ function loopbackHost(hostname) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1' || hostname === '[::1]';
 }
 
-export function validateInstalledProcessObservation({ command, cwd }) {
+function platformAbsolutePath(value, platform) {
+  if (platform === 'windows') return /^[A-Za-z]:[\\/]/.test(value) || /^\\\\[^\\/]+[\\/][^\\/]+/.test(value);
+  return isAbsolute(value);
+}
+
+function pathWithinRoot(path, root, platform) {
+  const separator = platform === 'windows' ? '\\' : '/';
+  const fold = (value) => normalize(value).replace(/[\\/]+/g, separator).replace(/[\\/]$/, '').toLowerCase();
+  const child = fold(path);
+  const parent = fold(root);
+  return child === parent || child.startsWith(`${parent}${separator}`);
+}
+
+export function validateInstalledProcessObservation({ command, cwd = null, executable, installRoot, platform = hostOs() }) {
   text(command, 'installed process command');
-  text(cwd, 'installed process working directory');
-  const value = `${command}\n${cwd}`.toLowerCase();
+  text(executable, 'installed process executable');
+  absoluteDirectory(installRoot, 'installed process install root');
+  if (!['macos', 'linux', 'windows'].includes(platform)) throw new SurfaceError('installed process observation platform is not admitted');
+  if (!platformAbsolutePath(executable, platform)) throw new SurfaceError('installed process executable must be an absolute path');
+  if (!pathWithinRoot(executable, installRoot, platform)) throw new SurfaceError('installed process executable is outside the requested install root');
+  if (platform === 'windows') {
+    if (cwd !== null && cwd !== undefined) throw new SurfaceError('Windows process observation must not claim current-directory evidence');
+  } else {
+    text(cwd, 'installed process working directory');
+    if (!platformAbsolutePath(cwd, platform)) throw new SurfaceError('installed process working directory must be absolute');
+  }
+  const value = `${command}\n${cwd || ''}\n${executable}`.toLowerCase();
   if (/(?:vite|webpack|parcel|next dev|npm run dev|pnpm dev|bun run dev|dev-local-workspace|node_modules[\\/]\.bin[\\/]vite)/.test(value)) {
     throw new SurfaceError('installed App origin is a source/dev server, not an installed product process');
   }
 }
 
-async function runningInstalledProcess(installedUrl, timeout) {
+export function parseLsofListenerPids(output) {
+  text(output, 'lsof listener output');
+  return [...new Set(output.split(/\r?\n/).filter((line) => /^p\d+$/.test(line)).map((line) => line.slice(1)))];
+}
+
+export function uniqueLsofListenerPid(output) {
+  const pids = parseLsofListenerPids(output);
+  if (pids.length !== 1) throw new SurfaceError(`installed App process observation is ${pids.length === 0 ? 'missing' : 'ambiguous'}`);
+  return Number(pids[0]);
+}
+
+function parseLsofSingleName(output, label) {
+  const names = output.split(/\r?\n/).filter((line) => line.startsWith('n')).map((line) => line.slice(1)).filter(Boolean);
+  if (names.length !== 1) throw new SurfaceError(`${label} evidence is ${names.length === 0 ? 'missing' : 'ambiguous'}`);
+  return names[0];
+}
+
+function commandResult(result, label) {
+  if (result.stderr?.trim()) throw new SurfaceError(`${label} wrote unexpected stderr`);
+  if (!result.stdout?.trim()) throw new SurfaceError(`${label} returned empty output`);
+  return result.stdout;
+}
+
+function validatePort(url) {
+  const port = Number(url.port || (url.protocol === 'https:' ? '443' : '80'));
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw new SurfaceError('installed URL port is invalid');
+  return port;
+}
+
+export function parseWindowsNativeObservation(output, { port, installRoot }) {
+  let value;
+  try { value = JSON.parse(text(output, 'Windows listener/process output')); } catch (error) { throw new SurfaceError(`Windows listener/process output is invalid JSON: ${error.message}`); }
+  object(value, 'Windows listener/process output');
+  exactKeys(value, ['listener', 'process'], 'Windows listener/process output');
+  if (!Array.isArray(value.listener) || value.listener.length === 0) throw new SurfaceError('Windows listener observation is missing');
+  const listenerRows = value.listener.map((row) => {
+    object(row, 'Windows listener row');
+    exactKeys(row, ['LocalAddress', 'LocalPort', 'OwningProcess'], 'Windows listener row');
+    if (typeof row.LocalAddress !== 'string' || !loopbackHost(row.LocalAddress) && !['0.0.0.0', '::'].includes(row.LocalAddress)) throw new SurfaceError('Windows listener address is not admitted');
+    if (row.LocalPort !== port || !Number.isInteger(row.OwningProcess) || row.OwningProcess < 1) throw new SurfaceError('Windows listener row does not match the exact port/PID contract');
+    return row;
+  });
+  const pids = [...new Set(listenerRows.map((row) => row.OwningProcess))];
+  if (pids.length !== 1) throw new SurfaceError(`Windows listener observation is ambiguous for port ${port}`);
+  object(value.process, 'Windows process row');
+  exactKeys(value.process, ['ProcessId', 'ExecutablePath', 'CommandLine'], 'Windows process row');
+  if (value.process.ProcessId !== pids[0] || typeof value.process.ExecutablePath !== 'string' || value.process.ExecutablePath.length === 0 || typeof value.process.CommandLine !== 'string' || value.process.CommandLine.length === 0) {
+    throw new SurfaceError('Windows process observation does not match the exact listener PID');
+  }
+  validateInstalledProcessObservation({ command: value.process.CommandLine, cwd: null, executable: value.process.ExecutablePath, installRoot, platform: 'windows' });
+  return { pid: pids[0], command: value.process.CommandLine, executable: value.process.ExecutablePath, cwd: null, cwd_evidence: 'unknown', native_evidence: 'unknown', port };
+}
+
+async function runningWindowsInstalledProcess(url, timeout, installRoot) {
+  const port = validatePort(url);
+  const script = `$ErrorActionPreference='Stop'; $rows=@(Get-NetTCPConnection -State Listen -LocalPort ${port} | Where-Object { $_.LocalAddress -in @('127.0.0.1','::1','0.0.0.0','::') } | Select-Object LocalAddress,LocalPort,OwningProcess); if ($rows.Count -eq 0) { throw 'listener missing' }; $pids=@($rows | Select-Object -ExpandProperty OwningProcess -Unique); if ($pids.Count -ne 1) { throw 'listener PID ambiguous' }; $process=@(Get-CimInstance Win32_Process -Filter ("ProcessId = " + [int]$pids[0]) | Select-Object ProcessId,ExecutablePath,CommandLine); if ($process.Count -ne 1) { throw 'process missing or ambiguous' }; [pscustomobject]@{ listener=$rows; process=$process[0] } | ConvertTo-Json -Compress -Depth 4`;
+  let result;
+  try {
+    result = await execFile('powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script], { timeout, maxBuffer: 128 * 1024, shell: false, windowsHide: true });
+  } catch (error) {
+    throw new SurfaceError(`Windows installed App process observation is unavailable: ${error.message}`);
+  }
+  return parseWindowsNativeObservation(commandResult(result, 'Windows listener/process observer'), { port, installRoot });
+}
+
+async function runningInstalledProcess(installedUrl, timeout, installRoot) {
   const url = parseUrl(installedUrl);
   if (!loopbackHost(url.hostname)) throw new SurfaceError('installed App origin must expose a local running installed process for boundary authentication');
-  const port = url.port || (url.protocol === 'https:' ? '443' : '80');
+  const port = validatePort(url);
+  if (hostOs() === 'windows') {
+    const observation = await runningWindowsInstalledProcess(url, timeout, installRoot);
+    return { ...observation, origin: url.origin };
+  }
   let listening;
   try {
-    listening = await execFile('lsof', ['-nP', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'], { timeout });
+    listening = await execFile('lsof', ['-nP', '-a', `-iTCP:${port}`, '-sTCP:LISTEN', '-Fp'], { timeout, shell: false, maxBuffer: 128 * 1024 });
   } catch (error) {
     throw new SurfaceError(`installed App process observation is unavailable: ${error.message}`);
   }
-  const pids = [...new Set((listening.stdout.match(/p(\\d+)/g) || []).map((value) => value.slice(1)))];
-  if (pids.length !== 1) throw new SurfaceError(`installed App process observation is ${pids.length === 0 ? 'missing' : 'ambiguous'} for ${url.hostname}:${port}`);
-  const pid = Number(pids[0]);
+  let pid;
+  try { pid = uniqueLsofListenerPid(commandResult(listening, 'lsof listener observer')); } catch (error) {
+    if (error instanceof SurfaceError) throw new SurfaceError(`${error.message} for ${url.hostname}:${port}`);
+    throw error;
+  }
   try {
-    const [processInfo, cwdInfo] = await Promise.all([
-      execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout }),
-      execFile('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { timeout }),
+    const [processInfo, cwdInfo, executableInfo] = await Promise.all([
+      execFile('ps', ['-p', String(pid), '-o', 'command='], { timeout, shell: false, maxBuffer: 128 * 1024 }),
+      execFile('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'], { timeout, shell: false, maxBuffer: 128 * 1024 }),
+      execFile('lsof', ['-a', '-p', String(pid), '-d', 'txt', '-Fn'], { timeout, shell: false, maxBuffer: 128 * 1024 }),
     ]);
-    const command = processInfo.stdout.trim();
-    const cwd = (cwdInfo.stdout.match(/n(.+)/)?.[1] || '').trim();
-    if (!command || !cwd) throw new Error('process command or working directory is missing');
-    validateInstalledProcessObservation({ command, cwd });
-    return { pid, command, cwd, port: Number(port), origin: url.origin };
+    const command = commandResult(processInfo, 'process command observer').trim();
+    const cwd = parseLsofSingleName(commandResult(cwdInfo, 'process working-directory observer'), 'working-directory');
+    const executable = parseLsofSingleName(commandResult(executableInfo, 'process executable observer'), 'executable');
+    validateInstalledProcessObservation({ command, cwd, executable, installRoot, platform: hostOs() });
+    return { pid, command, executable, cwd, cwd_evidence: 'observed', native_evidence: 'observed', port, origin: url.origin };
   } catch (error) {
     if (error instanceof SurfaceError) throw error;
     throw new SurfaceError(`installed App process observation is unavailable: ${error.message}`);
@@ -348,43 +443,82 @@ function pathName(value) {
   try { return new URL(value).pathname; } catch { return ''; }
 }
 
-function observePage(page) {
+const NATIVE_HANDOFF_PROTOCOL = 'astrid-update-platform/v1';
+
+function boundaryRecord(pageId, handoffId, kind, actionId = null, operationId = null) {
+  return {
+    boundary_id: randomUUID(),
+    page_id: pageId,
+    handoff_id: handoffId,
+    action_id: actionId,
+    expected_operation_id: operationId,
+    operation_id: null,
+    trigger: kind === 'click' ? 'user' : 'automatic',
+    boundary: kind,
+  };
+}
+
+function requestOperationId(request) {
+  try {
+    const value = request.postDataJSON?.();
+    return value && typeof value === 'object' && typeof value.operation_id === 'string' ? value.operation_id : null;
+  } catch {
+    return null;
+  }
+}
+
+function observePage(page, { handoffId }) {
   const pageId = randomUUID();
-  let activeAction = null;
+  const currentHandoff = text(handoffId, 'browser observation handoff ID');
+  let activeBoundary = null;
   const requestRecords = new WeakMap();
   const state = {
     pageId,
+    handoffId: currentHandoff,
     build: null,
     manifest: null,
+    installedHandoff: null,
     updateRequests: [],
     updateResponses: [],
     statusResponses: [],
     draftSaveResponses: [],
+    nativeJobObservations: [],
     pagesOpened: 1,
-    beginAction(actionId) {
-      activeAction = text(actionId, 'browser action correlation ID');
-      return { page_id: pageId, action_id: activeAction };
+    beginNavigation(operationId = null, actionId = null) {
+      activeBoundary = boundaryRecord(pageId, currentHandoff, 'navigation', actionId, operationId);
+      return { ...activeBoundary };
+    },
+    beginAction(actionId, { operationId = null } = {}) {
+      activeBoundary = boundaryRecord(pageId, currentHandoff, 'click', text(actionId, 'browser action correlation ID'), operationId);
+      return { ...activeBoundary };
     },
   };
   const jsonResponse = async (response) => {
     try { return await response.json(); } catch { return null; }
   };
   page.on('request', (request) => {
-    const record = { request_id: randomUUID(), page_id: pageId, action_id: activeAction };
+    const boundary = activeBoundary ? { ...activeBoundary } : boundaryRecord(pageId, currentHandoff, 'unattributed');
+    const record = { ...boundary, request_id: randomUUID(), operation_id: requestOperationId(request), method: request.method(), pathname: pathName(request.url()), url: request.url(), observed: Date.now() };
     requestRecords.set(request, record);
-    const pathname = pathName(request.url());
-    if (request.method() === 'POST' && /\/v1\/update$/.test(pathname)) state.updateRequests.push({ ...record, url: request.url(), observed: Date.now() });
+    if (record.method === 'POST' && /\/v1\/update$/.test(record.pathname)) state.updateRequests.push(record);
   });
   page.on('response', (response) => {
     void (async () => {
       const pathname = pathName(response.url());
       const body = await jsonResponse(response);
-      const record = requestRecords.get(response.request()) || { request_id: null, page_id: pageId, action_id: null };
+      const request = response.request();
+      const record = requestRecords.get(request) || { ...boundaryRecord(pageId, currentHandoff, 'unattributed'), request_id: null, method: request.method(), pathname };
+      if (body && typeof body === 'object' && typeof body.operation_id === 'string') record.operation_id = body.operation_id;
       if (pathname === '/build.json' && response.ok() && body && typeof body === 'object') state.build = body;
-      if (pathname === '/install-manifest.json' && response.ok() && body && typeof body === 'object') state.manifest = body;
-      if (/\/v1\/update$/.test(pathname)) state.updateResponses.push({ ...record, status: response.status(), body });
-      if (/\/v1\/update\/status$/.test(pathname) && body && typeof body === 'object') state.statusResponses.push({ ...record, ...body });
-      if (requestLooksLikeDraftSave(response.request()) || response.request().method() === 'POST' && /\/v1\/app-state\//.test(pathname)) state.draftSaveResponses.push({ ...record, status: response.status(), body });
+      if (pathname === '/install-manifest.json' && response.ok() && body && typeof body === 'object') {
+        state.manifest = body;
+        if (body.installed_surface_handoff && typeof body.installed_surface_handoff === 'object') state.installedHandoff = body.installed_surface_handoff;
+      }
+      if (pathname === '/v1/installed-surface/handoff' && response.ok() && body && typeof body === 'object') state.installedHandoff = body;
+      if (/\/v1\/update$/.test(pathname)) state.updateResponses.push({ ...record, kind: 'update-response', status: response.status(), body });
+      if (/\/v1\/update\/status$/.test(pathname) && body && typeof body === 'object') state.statusResponses.push({ ...record, kind: 'status-response', ...body });
+      if (body && typeof body.native_job_observation === 'object') state.nativeJobObservations.push({ ...record, observation: body.native_job_observation });
+      if (requestLooksLikeDraftSave(request) || request.method() === 'POST' && /\/v1\/app-state\//.test(pathname)) state.draftSaveResponses.push({ ...record, status: response.status(), body });
     })().catch(() => undefined);
   });
   return state;
@@ -421,31 +555,55 @@ async function closeOwnedBrowser(owned) {
   try { await owned.context.close(); } finally { owned.lifecycle.closed_by_command = true; }
 }
 
-async function openUpdatesPage(owned, installedUrl, timeout) {
-  const installedProcess = await runningInstalledProcess(installedUrl, timeout);
-  const page = await owned.context.newPage();
-  owned.lifecycle.pages_opened = (owned.lifecycle.pages_opened || 0) + 1;
-  const observed = observePage(page);
-  await page.goto(updatesUrl(installedUrl), { waitUntil: 'domcontentloaded', timeout });
-  await page.getByRole('region', { name: 'Updates' }).waitFor({ state: 'visible', timeout });
-  await waitFor(() => observed.build && observed.manifest, timeout, 'installed build and manifest responses');
-  return { page, observed, installedProcess };
+function validateInstalledSurfaceHandoff(handoff, { candidate, installRoot, dataRoot, scenario }) {
+  object(handoff, 'installed-surface handoff');
+  exactKeys(handoff, ['protocol', 'owner', 'install_root', 'data_root', 'managed_by', 'pinokio'], 'installed-surface handoff');
+  if (handoff.protocol !== 'astrid-installed-surface-handoff/v1' || handoff.owner !== 'astrid-installed-product') throw new SurfaceError('installed-surface handoff owner is not approved');
+  if (handoff.install_root !== installRoot || handoff.data_root !== dataRoot) throw new SurfaceError('installed-surface handoff roots differ from the request');
+  if (scenario.mode !== 'direct' || handoff.managed_by !== null) throw new SurfaceError('installed-surface handoff owner mode differs from the direct scenario');
+  object(handoff.pinokio, 'installed-surface Pinokio identity');
+  exactKeys(handoff.pinokio, ['sha'], 'installed-surface Pinokio identity');
+  if (!COMMIT.test(handoff.pinokio.sha) || handoff.pinokio.sha !== candidate.pinokio) throw new SurfaceError('installed-surface Pinokio identity differs from the candidate');
+  return { managed_by: handoff.managed_by, pinokio: handoff.pinokio.sha };
 }
 
-export function validateInstalledIdentityObservation({ observed, candidateApp, visibleRelease, visibleBuild }) {
+async function openUpdatesPage(owned, installedUrl, timeout, installRoot, dataRoot, candidate, scenario, handoffId, preflightProcess) {
+  const installedProcess = await runningInstalledProcess(installedUrl, timeout, installRoot);
+  if (preflightProcess && (installedProcess.pid !== preflightProcess.pid || installedProcess.executable !== preflightProcess.executable)) throw new SurfaceError('installed App listener owner changed during browser handoff');
+  const page = await owned.context.newPage();
+  owned.lifecycle.pages_opened = (owned.lifecycle.pages_opened || 0) + 1;
+  const observed = observePage(page, { handoffId });
+  const navigation = observed.beginNavigation();
+  await page.goto(updatesUrl(installedUrl), { waitUntil: 'domcontentloaded', timeout });
+  await page.getByRole('region', { name: 'Updates' }).waitFor({ state: 'visible', timeout });
+  await waitFor(() => observed.build && observed.manifest && observed.installedHandoff, timeout, 'installed build, manifest, and owner handoff responses');
+  const identity = await installedIdentity(page, observed, candidate, installedProcess, installRoot, dataRoot, scenario);
+  return { page, observed, installedProcess, navigation, identity };
+}
+
+export function validateInstalledIdentityObservation({ observed, candidate, candidateApp, expectedManifest, visibleRelease, visibleBuild, installedProcess, pageOrigin, installRoot, dataRoot, scenario }) {
+  const expectedCandidate = candidate || { app: candidateApp };
+  object(expectedCandidate, 'candidate identity');
+  for (const name of ['app', 'agent', 'runtime', 'pinokio']) commit(expectedCandidate[name], `candidate ${name}`);
+  const manifestIdentity = expectedManifest || { agent: expectedCandidate.agent, runtime: expectedCandidate.runtime };
+  commit(manifestIdentity.agent, 'expected installed Agent identity');
+  commit(manifestIdentity.runtime, 'expected installed Runtime identity');
+  if (!installedProcess || installedProcess.origin !== pageOrigin) throw new SurfaceError('installed page origin is not bound to the observed listener owner');
+  validateInstalledProcessObservation({ ...installedProcess, installRoot, platform: hostOs() });
   const build = observed.build;
   const app = build?.app;
   const buildRelease = build?.release;
   const manifestRelease = observed.manifest?.release;
   if (!app || !COMMIT.test(app)) throw new SurfaceError('installed UI did not expose an authenticated App build identity');
-  if (app !== candidateApp) throw new SurfaceError(`installed App build ${app} differs from requested candidate ${candidateApp}`);
+  if (app !== expectedCandidate.app) throw new SurfaceError(`installed App build ${app} differs from requested candidate ${expectedCandidate.app}`);
   if (!Number.isSafeInteger(buildRelease) || buildRelease !== manifestRelease || !Number.isSafeInteger(manifestRelease) || manifestRelease < 1) throw new SurfaceError('installed build and manifest release identities differ');
-  if (!observed.manifest?.agent?.sha || !COMMIT.test(observed.manifest.agent.sha) || !observed.manifest?.runtime?.sha || !COMMIT.test(observed.manifest.runtime.sha)) throw new SurfaceError('installed manifest did not expose approved Agent and Runtime identities');
+  if (observed.manifest?.agent?.sha !== manifestIdentity.agent || observed.manifest?.runtime?.sha !== manifestIdentity.runtime) throw new SurfaceError('installed manifest Agent or Runtime identity differs from the expected installed identity');
   if (visibleRelease !== manifestRelease || typeof visibleBuild !== 'string' || visibleBuild.length === 0) throw new SurfaceError('installed Updates UI disagrees with the network build/manifest observations');
-  return { app, release: manifestRelease, visible_release: visibleRelease, visible_build: visibleBuild };
+  const handoff = validateInstalledSurfaceHandoff(observed.installedHandoff, { candidate: expectedCandidate, installRoot, dataRoot, scenario });
+  return { app, agent: manifestIdentity.agent, runtime: manifestIdentity.runtime, pinokio: expectedCandidate.pinokio, managed_by: handoff.managed_by, release: manifestRelease, visible_release: visibleRelease, visible_build: visibleBuild, origin: pageOrigin, executable: installedProcess.executable, process_pid: installedProcess.pid, installedProcess, install_root: installRoot, data_root: dataRoot };
 }
 
-async function installedIdentity(page, observed, candidateApp) {
+async function installedIdentity(page, observed, candidate, installedProcess, installRoot, dataRoot, scenario, expectedManifest) {
   const region = page.getByRole('region', { name: 'Updates' });
   const releaseRow = region.locator('dt').filter({ hasText: 'Release' }).locator('..');
   const releaseText = (await releaseRow.locator('dd').textContent())?.trim() || '';
@@ -453,7 +611,7 @@ async function installedIdentity(page, observed, candidateApp) {
   const buildNode = buildRow.locator('dd');
   const build = (await buildNode.getAttribute('title')) || (await buildNode.textContent())?.trim() || '';
   const release = Number((releaseText.match(/\d+/) || [])[0] || 0);
-  return validateInstalledIdentityObservation({ observed, candidateApp, visibleRelease: release, visibleBuild: build });
+  return validateInstalledIdentityObservation({ observed, candidate, expectedManifest, visibleRelease: release, visibleBuild: build, installedProcess, pageOrigin: new URL(page.url()).origin, installRoot, dataRoot, scenario });
 }
 
 async function updateButton(page, name, timeout) {
@@ -462,18 +620,20 @@ async function updateButton(page, name, timeout) {
   return button;
 }
 
-function statusStates(observed) {
+function statusStates(observed, boundaryIds = null) {
   const states = [];
   for (const response of observed.statusResponses) {
+    if (boundaryIds && !boundaryIds.includes(response.boundary_id)) continue;
     if (!['active', 'recovery-needed', 'terminal'].includes(response.state)) continue;
     if (states.at(-1) !== response.state) states.push(response.state);
   }
   return states;
 }
 
-function matchingOperationId(observed) {
+function matchingOperationId(observed, { pageId = observed.pageId, boundaryIds = null } = {}) {
   const values = [];
   for (const response of [...observed.updateResponses, ...observed.statusResponses]) {
+    if (pageId !== null && response.page_id !== pageId || boundaryIds && !boundaryIds.includes(response.boundary_id)) continue;
     if (response.body && typeof response.body.operation_id === 'string') values.push(response.body.operation_id);
     if (typeof response.operation_id === 'string') values.push(response.operation_id);
   }
@@ -482,7 +642,30 @@ function matchingOperationId(observed) {
   return unique[0] || null;
 }
 
-async function runUnsavedDraft({ page, observed, timeout, identity }) {
+export function validateNativeJobObservation(observation, { handoffId, operationId }) {
+  object(observation, 'native update owner observation');
+  exactKeys(observation, ['protocol', 'owner', 'handoff_id', 'operation_id', 'count'], 'native update owner observation');
+  if (observation.protocol !== NATIVE_HANDOFF_PROTOCOL || observation.owner !== 'native-update-owner' || observation.handoff_id !== handoffId || observation.operation_id !== (operationId ?? null) || !Number.isInteger(observation.count) || ![0, 1].includes(observation.count)) throw new SurfaceError('native update owner observation is not authenticated');
+  return observation.count;
+}
+
+function authenticatedNativeJobs(observed, boundaryId, handoffId, operationId) {
+  const matches = observed.nativeJobObservations.filter((record) => record.page_id === observed.pageId && record.boundary_id === boundaryId && record.handoff_id === handoffId && (record.observation?.operation_id ?? null) === (operationId ?? null));
+  if (matches.length !== 1) throw new SurfaceError(`native update owner observation is ${matches.length === 0 ? 'missing' : 'ambiguous'} for the current browser boundary`);
+  return validateNativeJobObservation(matches[0].observation, { handoffId, operationId });
+}
+
+function assertCurrentOperation(observed, operationId, boundaryIds) {
+  for (const record of [...observed.updateRequests, ...observed.updateResponses, ...observed.statusResponses]) {
+    if (record.page_id !== observed.pageId || !boundaryIds.includes(record.boundary_id)) continue;
+    if (record.operation_id !== null && record.operation_id !== operationId) throw new SurfaceError('browser event operation identity differs from the current operation');
+    if (record.kind === 'update-response' || record.kind === 'status-response') {
+      if (record.operation_id !== operationId) throw new SurfaceError('browser response is not correlated to the current operation');
+    }
+  }
+}
+
+async function runUnsavedDraft({ page, observed, timeout, identity, handoffId, navigation }) {
   if (identity.release !== 1) throw new SurfaceError(`unsaved-draft control requires installed Release 1, observed ${identity.release}`);
   const action = observed.beginAction(`button-unsaved-draft:${randomUUID()}`);
   const button = await updateButton(page, 'Update now', timeout);
@@ -492,93 +675,107 @@ async function runUnsavedDraft({ page, observed, timeout, identity }) {
   await waitFor(() => currentUpdates().length > 0 || currentDraftSaves().length > 0 || page.getByRole('alert').count().then((count) => count > 0), timeout, 'the real draft flush result');
   const failedDraftSave = currentDraftSaves().some((response) => response.status >= 400);
   const updateRequests = currentUpdates().length;
-  if (!failedDraftSave || updateRequests !== 0) throw new SurfaceError(`installed UI did not produce an authentic failed draft flush before Update (failed_save=${failedDraftSave}, update_requests=${updateRequests})`);
-  return { surface: 'browser', save: 'failed', update_requests: 0, installed_release: identity.release };
+  const automaticUpdateRequests = observed.updateRequests.filter((request) => request.page_id === observed.pageId && request.boundary_id === navigation.boundary_id && request.trigger === 'automatic').length;
+  if (!failedDraftSave || updateRequests !== 0 || automaticUpdateRequests !== 0) throw new SurfaceError(`installed UI did not produce an authentic failed draft flush before Update (failed_save=${failedDraftSave}, update_requests=${updateRequests}, automatic_update_requests=${automaticUpdateRequests})`);
+  const nativeJobs = authenticatedNativeJobs(observed, action.boundary_id, handoffId, null);
+  if (nativeJobs !== 0) throw new SurfaceError(`native update owner observed ${nativeJobs} jobs during failed draft save`);
+  return { surface: 'browser', save: 'failed', update_requests: updateRequests, native_jobs: nativeJobs, installed_release: identity.release };
 }
 
-async function runLostAck({ page, observed, context, timeout, identity, installedUrl, candidateApp }) {
+async function runLostAck({ page, observed, context, timeout, identity, installedUrl, candidate, installRoot, dataRoot, scenario, handoffId, navigation }) {
   if (identity.release !== 1) throw new SurfaceError(`lost-ack control requires installed Release 1, observed ${identity.release}`);
-  const beforeRequests = observed.updateRequests.filter((request) => request.page_id === observed.pageId).length;
+  const automaticUpdateRequests = observed.updateRequests.filter((request) => request.page_id === observed.pageId && request.boundary_id === navigation.boundary_id && request.trigger === 'automatic').length;
   const actionId = `button-update-lost-ack:${randomUUID()}`;
   const action = observed.beginAction(actionId);
   const button = await updateButton(page, 'Update now', timeout);
   await button.click();
   await waitFor(() => observed.updateRequests.some((request) => request.page_id === action.page_id && request.action_id === action.action_id), timeout, 'the real explicit Update request');
-  if (beforeRequests !== 0) throw new SurfaceError(`browser observed ${beforeRequests} automatic update requests before the explicit click`);
+  const clickRequests = observed.updateRequests.filter((request) => request.page_id === action.page_id && request.boundary_id === action.boundary_id && request.action_id === action.action_id);
+  if (clickRequests.length !== 1) throw new SurfaceError(`explicit lost-ack click produced ${clickRequests.length} observed Update POST requests; expected exactly one`);
+  if (automaticUpdateRequests !== 0) throw new SurfaceError(`browser observed ${automaticUpdateRequests} automatic update requests during the current page navigation`);
   // The handoff is deliberately not accepted from the POST response. Leave the
   // page, then observe the producer-owned recovery state from a fresh page in
   // the same owned profile. If the real product cannot reconcile the request,
   // this command fails rather than inventing a lost-ack receipt.
   await page.close();
   const reopened = await context.newPage();
-  const reopenedObserved = observePage(reopened);
-  reopenedObserved.beginAction(actionId);
+  const reopenedObserved = observePage(reopened, { handoffId });
+  const reopenedNavigation = reopenedObserved.beginNavigation(null, actionId);
   const reopenedUrl = updatesUrl(installedUrl);
   await reopened.goto(reopenedUrl, { waitUntil: 'domcontentloaded', timeout });
   await reopened.getByRole('region', { name: 'Updates' }).waitFor({ state: 'visible', timeout });
-  const reopenedIdentity = await installedIdentity(reopened, reopenedObserved, candidateApp);
-  if (reopenedIdentity.release !== 1 || reopenedIdentity.app !== candidateApp) throw new SurfaceError('lost-ack recovery reopened a different installed candidate');
-  await waitFor(() => statusStates(reopenedObserved).includes('recovery-needed'), timeout, 'producer-owned recovery-needed state');
-  const states = [...statusStates(observed), ...statusStates(reopenedObserved)].filter((state, index, all) => index === 0 || state !== all[index - 1]);
+  const reopenedProcess = await runningInstalledProcess(installedUrl, timeout, installRoot);
+  if (reopenedProcess.pid !== identity.process_pid || reopenedProcess.executable !== identity.executable) throw new SurfaceError('lost-ack recovery observed a replaced installed process');
+  const reopenedIdentity = await installedIdentity(reopened, reopenedObserved, candidate, reopenedProcess, installRoot, dataRoot, scenario);
+  if (reopenedIdentity.release !== 1 || reopenedIdentity.app !== candidate.app) throw new SurfaceError('lost-ack recovery reopened a different installed candidate');
+  await waitFor(() => statusStates(reopenedObserved, [reopenedNavigation.boundary_id]).includes('recovery-needed'), timeout, 'producer-owned recovery-needed state');
+  const states = [...statusStates(observed, [navigation.boundary_id, action.boundary_id]), ...statusStates(reopenedObserved, [reopenedNavigation.boundary_id])].filter((state, index, all) => index === 0 || state !== all[index - 1]);
   if (JSON.stringify(states.slice(-2)) !== JSON.stringify(['active', 'recovery-needed'])) throw new SurfaceError(`browser observed unexpected lost-ack lifecycle: ${JSON.stringify(states)}`);
   const operationId = matchingOperationId({
     updateResponses: [...observed.updateResponses, ...reopenedObserved.updateResponses],
     statusResponses: [...observed.statusResponses, ...reopenedObserved.statusResponses],
-  });
+  }, { pageId: null });
   if (!operationId || !OPERATION.test(operationId)) throw new SurfaceError('browser did not observe a valid lost-ack operation ID');
-  return { observation: { states: ['active', 'recovery-needed'], automatic_update_requests: 0, terminal_inferred: false, operation_id: operationId }, operationId };
+  assertCurrentOperation(observed, operationId, [navigation.boundary_id, action.boundary_id]);
+  assertCurrentOperation(reopenedObserved, operationId, [reopenedNavigation.boundary_id]);
+  return { observation: { states: ['active', 'recovery-needed'], automatic_update_requests: automaticUpdateRequests, terminal_inferred: false, operation_id: operationId }, operationId };
 }
 
-async function runExplicit({ page, observed, timeout, identity, operationId, scenario, candidateApp }) {
+async function runExplicit({ page, observed, timeout, identity, operationId, scenario, candidate, standInTarget, handoffId, navigation, installedUrl }) {
   if (identity.release !== 1) throw new SurfaceError(`explicit recovery control requires installed Release 1 before Update, observed ${identity.release}`);
-  const priorStates = statusStates(observed);
+  const priorStates = statusStates(observed, [navigation.boundary_id]);
   if (!priorStates.includes('recovery-needed')) throw new SurfaceError('explicit Update was not preceded by an observed recovery-needed state');
-  const action = observed.beginAction(`button-update-explicit:${randomUUID()}`);
+  const automaticUpdateRequests = observed.updateRequests.filter((request) => request.page_id === observed.pageId && request.boundary_id === navigation.boundary_id && request.trigger === 'automatic').length;
+  if (automaticUpdateRequests !== 0) throw new SurfaceError(`browser observed ${automaticUpdateRequests} automatic Update POST requests before the current explicit click`);
+  const action = observed.beginAction(`button-update-explicit:${randomUUID()}`, { operationId });
   const button = await updateButton(page, 'Update', timeout);
   await button.click();
-  await waitFor(() => statusStates(observed).includes('terminal'), timeout, 'terminal explicit Update state');
-  const states = statusStates(observed);
+  await waitFor(() => statusStates(observed, [action.boundary_id]).includes('terminal') && observed.updateResponses.some((response) => response.boundary_id === action.boundary_id), timeout, 'terminal explicit Update state and response');
+  const states = [...priorStates.slice(-1), ...statusStates(observed, [action.boundary_id])].filter((state, index, all) => index === 0 || state !== all[index - 1]);
   if (JSON.stringify(states.slice(-3)) !== JSON.stringify(['recovery-needed', 'active', 'terminal'])) throw new SurfaceError(`browser observed unexpected explicit Update lifecycle: ${JSON.stringify(states)}`);
-  const observedOperation = matchingOperationId(observed);
+  const observedOperation = matchingOperationId(observed, { pageId: observed.pageId, boundaryIds: [navigation.boundary_id, action.boundary_id] });
   if (observedOperation !== operationId) throw new SurfaceError('explicit Update operation identity differs from the lost-ack operation');
-  const updateRequests = observed.updateRequests.filter((request) => request.page_id === action.page_id && request.action_id === action.action_id).length;
-  if (updateRequests !== 1) throw new SurfaceError(`explicit Update produced ${updateRequests} observed POST requests; expected exactly one`);
+  const updateRequests = observed.updateRequests.filter((request) => request.page_id === action.page_id && request.boundary_id === action.boundary_id && request.action_id === action.action_id);
+  const updateResponses = observed.updateResponses.filter((response) => response.page_id === action.page_id && response.boundary_id === action.boundary_id && response.request_id === updateRequests[0]?.request_id);
+  if (updateRequests.length !== 1 || updateResponses.length !== 1) throw new SurfaceError(`explicit Update produced ${updateRequests.length} requests and ${updateResponses.length} matching responses; expected exactly one of each`);
+  assertCurrentOperation(observed, operationId, [navigation.boundary_id, action.boundary_id]);
+  const currentProcess = await runningInstalledProcess(installedUrl, timeout, identity.install_root);
   let finalIdentity = identity;
   if (scenario.os === 'linux') {
     await waitFor(() => observed.build?.app && observed.manifest?.release === 2, timeout, 'installed Release 2 identity after saved-draft Update');
-    finalIdentity = await installedIdentity(page, observed, candidateApp);
+    finalIdentity = await installedIdentity(page, observed, candidate, currentProcess, identity.install_root, identity.data_root, scenario, { agent: standInTarget.agent, runtime: standInTarget.runtime });
     if (finalIdentity.release !== 2) throw new SurfaceError(`saved-draft Update did not expose installed Release 2 (observed ${finalIdentity.release})`);
   }
-  const savePassed = observed.draftSaveResponses.some((response) => response.page_id === action.page_id && response.action_id === action.action_id && response.status >= 200 && response.status < 300);
+  const savePassed = observed.draftSaveResponses.some((response) => response.page_id === action.page_id && response.boundary_id === action.boundary_id && response.action_id === action.action_id && response.status >= 200 && response.status < 300);
   const observation = { states: ['recovery-needed', 'active', 'terminal'], action: 'explicit-update', operation_id: operationId };
-  if (scenario.os === 'linux') observation.draft_control = { surface: 'browser', save: savePassed ? 'pass' : 'failed', update_requests: updateRequests, installed_release: finalIdentity.release };
+  if (scenario.os === 'linux') observation.draft_control = { surface: 'browser', save: savePassed ? 'pass' : 'failed', update_requests: updateRequests.length, native_jobs: authenticatedNativeJobs(observed, action.boundary_id, handoffId, operationId), installed_release: finalIdentity.release };
   if (scenario.os === 'linux' && !savePassed) throw new SurfaceError('saved-draft control lacked an authentic correlated browser save response');
   return observation;
 }
 
 async function runAction({ envelope, action, request, inputs, scenario, profileRoot, installedUrl, browserPath, timeout }) {
   if (hostOs() !== scenario.os) throw new SurfaceError(`request scenario OS ${scenario.os} does not match host ${hostOs() || process.platform}`);
-  const candidateApp = inputs.candidate.app;
-  const profile = await ensureProfile(profileRoot, candidateApp, scenario, { action, value: envelope.handoff_id }, { installRoot: inputs.root, dataRoot: inputs.data_root });
+  const candidate = inputs.candidate;
+  const preflightProcess = await runningInstalledProcess(installedUrl, timeout, inputs.root);
+  const profile = await ensureProfile(profileRoot, candidate.app, scenario, { action, value: envelope.handoff_id }, { installRoot: inputs.root, dataRoot: inputs.data_root });
   const browser = await launchOwnedBrowser(profile.root, browserPath, timeout);
   try {
-    const { page, observed, installedProcess } = await openUpdatesPage(browser, installedUrl, timeout);
-    const identity = await installedIdentity(page, observed, candidateApp);
-    browser.lifecycle.installed_identity = { app: identity.app, release: identity.release };
+    const { page, observed, installedProcess, navigation, identity } = await openUpdatesPage(browser, installedUrl, timeout, inputs.root, inputs.data_root, candidate, scenario, envelope.handoff_id, preflightProcess);
+    browser.lifecycle.installed_identity = { app: identity.app, agent: identity.agent, runtime: identity.runtime, pinokio: identity.pinokio, managed_by: identity.managed_by, release: identity.release, origin: identity.origin, executable: identity.executable, install_root: identity.install_root };
     browser.lifecycle.installed_process = installedProcess;
-    if (action === 'button-unsaved-draft') return { observation: await runUnsavedDraft({ page, observed, timeout, identity }), marker: profile.marker, lifecycle: browser.lifecycle };
+    if (action === 'button-unsaved-draft') return { observation: await runUnsavedDraft({ page, observed, timeout, identity, handoffId: envelope.handoff_id, navigation }), marker: profile.marker, lifecycle: browser.lifecycle };
     if (action === 'button-update-lost-ack') {
-      const lost = await runLostAck({ page, observed, context: browser.context, timeout, identity, installedUrl, candidateApp });
+      const lost = await runLostAck({ page, observed, context: browser.context, timeout, identity, installedUrl, candidate, installRoot: inputs.root, dataRoot: inputs.data_root, scenario, handoffId: envelope.handoff_id, navigation });
       const nextMarker = { ...profile.marker, operation_id: lost.operationId };
       await writeMarker(profile.root, nextMarker);
       return { observation: lost.observation, marker: nextMarker, lifecycle: browser.lifecycle };
     }
-    const markerIdentity = { candidateApp, scenario, profileRoot: profileRoot, installRoot: inputs.root, dataRoot: inputs.data_root };
+    const markerIdentity = { candidateApp: candidate.app, scenario, profileRoot: profileRoot, installRoot: inputs.root, dataRoot: inputs.data_root };
     const marker = await readMarker(profile.root, { ...markerIdentity, sessionKey: sessionKey(markerIdentity) });
     if (!marker?.operation_id) throw new SurfaceError('explicit Update is not bound to the previously observed operation');
     const operationId = request.payload.operation_id;
     if (marker.operation_id !== operationId) throw new SurfaceError('explicit Update operation ID differs from owned profile state');
-    return { observation: await runExplicit({ page, observed, timeout, identity, operationId, scenario, candidateApp }), marker, lifecycle: browser.lifecycle };
+    return { observation: await runExplicit({ page, observed, timeout, identity, operationId, scenario, candidate, standInTarget: inputs.stand_in.target, handoffId: envelope.handoff_id, navigation, installedUrl }), marker, lifecycle: browser.lifecycle };
   } finally {
     await closeOwnedBrowser(browser);
   }

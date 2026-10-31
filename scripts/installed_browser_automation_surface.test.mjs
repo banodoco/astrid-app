@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, writeFile, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -11,9 +12,13 @@ import {
   browserUnavailableMessage,
   cleanupOwnedProfile,
   ensureProfile,
+  parseLsofListenerPids,
+  parseWindowsNativeObservation,
   profileChildPath,
+  uniqueLsofListenerPid,
   validateInstalledIdentityObservation,
   validateInstalledProcessObservation,
+  validateNativeJobObservation,
   validateEnvelope,
 } from './installed_browser_automation_surface.mjs';
 
@@ -79,14 +84,54 @@ test('binds explicit Update to a real operation-shaped identity', () => {
   assert.throws(() => validateEnvelope(bad), /operation ID is invalid/);
 });
 
-test('authenticates origin from the observed running process, build, and manifest', () => {
-  const candidateApp = commit('1');
-  const observed = { build: { app: candidateApp, release: 1 }, manifest: { release: 1, agent: { sha: commit('2') }, runtime: { sha: commit('3') } } };
-  assert.deepEqual(validateInstalledIdentityObservation({ observed, candidateApp, visibleRelease: 1, visibleBuild: candidateApp }), { app: candidateApp, release: 1, visible_release: 1, visible_build: candidateApp });
-  assert.throws(() => validateInstalledIdentityObservation({ observed: { ...observed, build: { app: commit('f'), release: 1 } }, candidateApp, visibleRelease: 1, visibleBuild: candidateApp }), /differs from requested candidate/);
-  assert.throws(() => validateInstalledIdentityObservation({ observed: { ...observed, build: { release: 1 } }, candidateApp, visibleRelease: 1, visibleBuild: candidateApp }), /authenticated App build identity/);
-  assert.throws(() => validateInstalledProcessObservation({ command: 'node node_modules/.bin/vite --host', cwd: '/source/astrid-app' }), /source\/dev server/);
-  assert.doesNotThrow(() => validateInstalledProcessObservation({ command: '/Applications/Astrid.app/Contents/MacOS/Astrid', cwd: '/Applications/Astrid.app' }));
+test('parses real lsof -Fp fields and fails closed for missing or ambiguous listeners', () => {
+  const real = 'p4242\nf123\nn127.0.0.1:4173\n';
+  assert.deepEqual(parseLsofListenerPids(real), ['4242']);
+  assert.equal(uniqueLsofListenerPid(real), 4242);
+  assert.deepEqual(parseLsofListenerPids('p\\4242\nf123\n'), []);
+  assert.throws(() => uniqueLsofListenerPid('p\\4242\nf123\n'), /missing/);
+  assert.throws(() => uniqueLsofListenerPid('p4242\np4343\n'), /ambiguous/);
+});
+
+test('accepts the PID emitted by the host lsof -Fp implementation', { skip: process.platform === 'win32' }, () => {
+  const result = spawnSync('lsof', ['-nP', '-a', '-p', String(process.pid), '-Fp'], { encoding: 'utf8' });
+  assert.equal(result.error, undefined);
+  assert.equal(result.status, 0);
+  assert.equal(uniqueLsofListenerPid(result.stdout), process.pid);
+});
+
+test('authenticates the serving process, origin, all candidate identities, and owner handoff', () => {
+  const candidate = { app: commit('1'), agent: commit('2'), runtime: commit('3'), pinokio: commit('4') };
+  const process = { pid: 42, command: '/Applications/Astrid.app/Contents/MacOS/Astrid', executable: '/Applications/Astrid.app/Contents/MacOS/Astrid', cwd: '/Applications/Astrid.app', origin: 'http://127.0.0.1:4173' };
+  const observed = { build: { app: candidate.app, release: 1 }, manifest: { release: 1, agent: { sha: candidate.agent }, runtime: { sha: candidate.runtime } }, installedHandoff: { protocol: 'astrid-installed-surface-handoff/v1', owner: 'astrid-installed-product', install_root: '/Applications/Astrid.app', data_root: '/Users/test/Astrid', managed_by: null, pinokio: { sha: candidate.pinokio } } };
+  const identity = validateInstalledIdentityObservation({ observed, candidate, visibleRelease: 1, visibleBuild: candidate.app, installedProcess: process, pageOrigin: process.origin, installRoot: '/Applications/Astrid.app', dataRoot: '/Users/test/Astrid', scenario: { mode: 'direct' } });
+  assert.deepEqual({ app: identity.app, agent: identity.agent, runtime: identity.runtime, pinokio: identity.pinokio, managed_by: identity.managed_by, release: identity.release }, { app: candidate.app, agent: candidate.agent, runtime: candidate.runtime, pinokio: candidate.pinokio, managed_by: null, release: 1 });
+  assert.throws(() => validateInstalledIdentityObservation({ observed: { ...observed, build: { app: commit('f'), release: 1 } }, candidate, visibleRelease: 1, visibleBuild: candidate.app, installedProcess: process, pageOrigin: process.origin, installRoot: '/Applications/Astrid.app', dataRoot: '/Users/test/Astrid', scenario: { mode: 'direct' } }), /differs from requested candidate/);
+  assert.throws(() => validateInstalledIdentityObservation({ observed: { ...observed, manifest: { ...observed.manifest, agent: { sha: commit('f') } } }, candidate, visibleRelease: 1, visibleBuild: candidate.app, installedProcess: process, pageOrigin: process.origin, installRoot: '/Applications/Astrid.app', dataRoot: '/Users/test/Astrid', scenario: { mode: 'direct' } }), /Agent or Runtime identity/);
+  assert.throws(() => validateInstalledIdentityObservation({ observed: { ...observed, installedHandoff: { ...observed.installedHandoff, pinokio: { sha: commit('f') } } }, candidate, visibleRelease: 1, visibleBuild: candidate.app, installedProcess: process, pageOrigin: process.origin, installRoot: '/Applications/Astrid.app', dataRoot: '/Users/test/Astrid', scenario: { mode: 'direct' } }), /Pinokio identity/);
+  assert.throws(() => validateInstalledProcessObservation({ command: 'node node_modules/.bin/vite --host', cwd: '/source/astrid-app', executable: '/source/astrid-app/node_modules/.bin/vite', installRoot: '/source/astrid-app', platform: 'macos' }), /source\/dev server/);
+  assert.throws(() => validateInstalledProcessObservation({ command: process.command, cwd: process.cwd, executable: '/tmp/replaced/Astrid', installRoot: '/Applications/Astrid.app', platform: 'macos' }), /outside/);
+  assert.doesNotThrow(() => validateInstalledProcessObservation(process ? { ...process, installRoot: '/Applications/Astrid.app', platform: 'macos' } : process));
+});
+
+test('Windows native observation is strict, exact, and does not claim cwd evidence', () => {
+  const output = JSON.stringify({ listener: [{ LocalAddress: '127.0.0.1', LocalPort: 4173, OwningProcess: 77 }], process: { ProcessId: 77, ExecutablePath: 'C:\\Astrid\\Astrid.exe', CommandLine: 'C:\\Astrid\\Astrid.exe --installed' } });
+  const observed = parseWindowsNativeObservation(output, { port: 4173, installRoot: 'C:\\Astrid' });
+  assert.equal(observed.pid, 77);
+  assert.equal(observed.cwd, null);
+  assert.equal(observed.cwd_evidence, 'unknown');
+  assert.equal(observed.native_evidence, 'unknown');
+  assert.throws(() => parseWindowsNativeObservation(JSON.stringify({ listener: [{ LocalAddress: '127.0.0.1', LocalPort: 4174, OwningProcess: 77 }], process: { ProcessId: 77, ExecutablePath: 'C:\\Astrid\\Astrid.exe', CommandLine: 'C:\\Astrid\\Astrid.exe' } }), { port: 4173, installRoot: 'C:\\Astrid' }), /exact port/);
+  assert.throws(() => parseWindowsNativeObservation(JSON.stringify({ listener: [{ LocalAddress: '127.0.0.1', LocalPort: 4173, OwningProcess: 77 }, { LocalAddress: '::1', LocalPort: 4173, OwningProcess: 78 }], process: { ProcessId: 77, ExecutablePath: 'C:\\Astrid\\Astrid.exe', CommandLine: 'C:\\Astrid\\Astrid.exe' } }), { port: 4173, installRoot: 'C:\\Astrid' }), /ambiguous/);
+});
+
+test('native_jobs is accepted only from the separately authenticated native owner', () => {
+  const handoffId = sha('b');
+  const operationId = 'b'.repeat(32);
+  const base = { protocol: 'astrid-update-platform/v1', owner: 'native-update-owner', handoff_id: handoffId, operation_id: operationId, count: 1 };
+  assert.equal(validateNativeJobObservation(base, { handoffId, operationId }), 1);
+  assert.throws(() => validateNativeJobObservation({ ...base, handoff_id: sha('c') }, { handoffId, operationId }), /authenticated/);
+  assert.throws(() => validateNativeJobObservation({ ...base, owner: 'browser' }, { handoffId, operationId }), /authenticated/);
 });
 
 test('reports the authentic-host browser limitation without creating a profile', async () => {

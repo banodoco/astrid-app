@@ -48,11 +48,15 @@ jobs:
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
 
+      - name: Restore npm cache (C-08)
+        id: c08-app-direct-journey-2
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-          cache: npm
-          cache-dependency-path: astrid-app/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -131,6 +135,13 @@ jobs:
   # only reads Astrid if this repository can. A missing checkout or interpreter fails the job by name (R-9); it never skips.
   # Until the Astrid branch carrying astrid/core/dev/cross_client.py (tidy-w2) merges to its main, this job checks out an Astrid
   # without that module, so any PR touching tests/e2e/local/** (or the paths above) is red here until that merge.
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-direct-journey-2.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+
   three-products:
     runs-on: ubuntu-latest
     concurrency:
@@ -155,11 +166,15 @@ jobs:
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 
+      - name: Restore npm cache (C-08)
+        id: c08-app-direct-journey-1
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-          cache: npm
-          cache-dependency-path: astrid-app/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -244,3 +259,9 @@ jobs:
           name: three-products-traces
           path: ${{ runner.temp }}/three-products-results/
           if-no-files-found: ignore
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-direct-journey-1.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}

@@ -35,11 +35,15 @@ jobs:
           ref: main
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+      - name: Restore npm cache (C-08)
+        id: c08-app-lanes-1
+        uses: actions/cache/restore@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: astrid-app/.nvmrc
-          cache: npm
-          cache-dependency-path: astrid-app/package-lock.json
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -60,6 +64,13 @@ jobs:
 
   # scripts/installer/bootstrap.test.mjs: the POSIX installer against a fixture, on both OSes it supports
   # (macOS keeps its data under HOME, Linux honours XDG_*).
+      - name: Save npm cache on main or int branches (C-08)
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-lanes-1.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@v4
+        with:
+          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
+          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+
   installer-posix:
     strategy:
       fail-fast: false
@@ -97,12 +108,14 @@ jobs:
         with:
           path: astrid-app
           fetch-depth: 0
+          filter: blob:none
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
           ref: main
           path: astrid-runtime
           fetch-depth: 0
+          filter: blob:none
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         with:
@@ -110,6 +123,7 @@ jobs:
           ref: main
           path: astrid-agent
           fetch-depth: 0
+          filter: blob:none
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
       # The renderer's Node is pinned by astrid-agent/remotion (=20.19.4); the journey refuses any other.
       - uses: actions/setup-node@v4

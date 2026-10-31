@@ -389,12 +389,12 @@ describe('AstridStatusSection schema mismatch install type', () => {
     expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
   });
 
-  it('gives a fully local page the npm update command, not the installer command', async () => {
+  it('gives a fully local page the installer update command, not the stale npm route', async () => {
     vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
     render(<AstridStatusSection isOpen />);
 
-    expect(await screen.findByText('npm run update')).toBeInTheDocument();
+    expect(await screen.findByText(installCommand('update'))).toBeInTheDocument();
     expect(screen.queryByText('update your checkouts')).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
+    expect(document.body.textContent).not.toContain('npm run update');
   });
 });

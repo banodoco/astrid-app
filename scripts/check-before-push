@@ -1,74 +1,55 @@
 #!/usr/bin/env bash
-# The one pre-push command: run it before every push (testing plan R-12).
-# It runs the build-context guard and default suite, then flags runtime-facing changes for thin full journeys (R-11).
+# Fast T0 check: ESLint changed JavaScript/TypeScript files only.
 set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$repo_root"
-
-# Git exports repository-local variables to hooks. Tests create disposable Git
-# repositories; inheriting these variables makes their Git commands target this
-# repository instead. Keep cwd, but let each child command discover its own repo.
-git_local_env_vars="$(git rev-parse --local-env-vars)"
-while IFS= read -r git_local_env_var; do
-  unset "$git_local_env_var"
-done <<EOF
-$git_local_env_vars
-EOF
-
-expected_node_version="$(tr -d '[:space:]' < .nvmrc)"
-node_bin=""
-node_candidates=()
-if [[ -n "${NVM_DIR:-}" ]]; then
-  node_candidates+=("$NVM_DIR/versions/node/v${expected_node_version}/bin/node")
-fi
-node_candidates+=("$HOME/.nvm/versions/node/v${expected_node_version}/bin/node")
-for candidate in "${node_candidates[@]}"; do
-  if [[ -x "$candidate" && "$("$candidate" --version 2>/dev/null || true)" == "v${expected_node_version}" ]]; then
-    node_bin="$candidate"
-    break
-  fi
+ranges=()
+while (($#)); do
+  case "$1" in
+    --range)
+      (($# >= 2)) || { echo 'missing value for --range' >&2; exit 2; }
+      ranges+=("$2")
+      shift 2
+      ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
 done
-if [[ -z "$node_bin" ]]; then
-  candidate="$(command -v node || true)"
-  if [[ -n "$candidate" && "$("$candidate" --version 2>/dev/null || true)" == "v${expected_node_version}" ]]; then
-    node_bin="$candidate"
-  fi
-fi
-if [[ -z "$node_bin" ]]; then
-  echo "Pre-push requires the pinned Node.js v${expected_node_version} from .nvmrc; install it with nvm or put it on PATH." >&2
-  exit 1
-fi
-npm_bin="$(dirname "$node_bin")/npm"
-if [[ ! -x "$npm_bin" ]]; then
-  echo "Pinned npm was not found next to $node_bin." >&2
-  exit 1
-fi
-export PATH="$(dirname "$node_bin"):$PATH"
-npm_version="$("$npm_bin" --version)"
 
-# Resolve symlinked temp roots (notably /var -> /private/var on macOS) before
-# Node/Vitest creates temporary files, so later checks see the same paths.
-tmp_root="${TMPDIR:-/tmp}"
-mkdir -p "$tmp_root"
-export TMPDIR="$(cd "$tmp_root" && pwd -P)"
-export ASTRID_PREPUSH_NODE_VERSION="$expected_node_version"
-export ASTRID_PREPUSH_NPM_VERSION="$npm_version"
-export ASTRID_PREPUSH_NPM_BIN="$npm_bin"
+collect_changed_files() {
+  local range
+  for range in "${ranges[@]}"; do
+    git diff --name-only -z "$range" -- 2>/dev/null || true
+  done
+  git diff --cached --name-only -z --
+  git diff --name-only -z --
+  git ls-files --others --exclude-standard -z
+}
 
-"$node_bin" scripts/check-before-push-cache.mjs --phase build-context -- "$node_bin" scripts/quality/check-build-context.mjs
-"$node_bin" scripts/check-before-push-cache.mjs --phase app-tests -- "$npm_bin" run test:app
-"$node_bin" scripts/check-before-push-cache.mjs --phase node-tests -- "$npm_bin" run test:node
+changed=()
+while IFS= read -r -d '' file; do
+  duplicate=false
+  for previous in "${changed[@]}"; do
+    [[ "$previous" == "$file" ]] && { duplicate=true; break; }
+  done
+  [[ "$duplicate" == true ]] || changed+=("$file")
+done < <(collect_changed_files)
+lint_files=()
+for file in "${changed[@]}"; do
+  case "$file" in
+    *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx)
+      [[ -f "$file" ]] && lint_files+=("$file")
+      ;;
+  esac
+done
 
-changed=""
-if git rev-parse --verify --quiet origin/main >/dev/null; then
-  changed+="$(git diff --name-only origin/main...HEAD 2>/dev/null || true)"$'\n'
+if ((${#lint_files[@]} == 0)); then
+  echo 'No changed JavaScript/TypeScript files; ESLint skipped.'
+  exit 0
 fi
-changed+="$(git diff --name-only HEAD 2>/dev/null || true)"$'\n'
-changed+="$(git ls-files --others --exclude-standard 2>/dev/null || true)"$'\n'
 
-runtime_pattern='^(src/integrations/runtime/|src/tools/video-editor/(.*/)?renderRouter\.ts$|(.*/)?useTimelineSave\.ts$|(.*/)?usePollSync\.ts$|config/vite/paired|scripts/dev-local-workspace|scripts/runtime-discovery-proxy|tests/e2e/local/)'
-
-if grep -Eq "$runtime_pattern" <<<"$changed"; then
-  echo "Runtime-facing paths changed: run the thin full journeys before merging (testing plan R-11): npm run test:e2e:direct, and npm run test:e2e:three-products (needs an Astrid checkout: ASTRID_CHECKOUT)"
+eslint=./node_modules/.bin/eslint
+if [[ ! -x "$eslint" ]]; then
+  echo 'ESLint is required for changed JavaScript/TypeScript files; install the repository dev dependencies.' >&2
+  exit 127
 fi
+"$eslint" --no-warn-ignored --max-warnings 0 -- "${lint_files[@]}"

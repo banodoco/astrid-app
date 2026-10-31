@@ -5,12 +5,12 @@ name: E2E
 
 on:
   push:
-    branches: ["**"]
+    branches: [main, release-1, "int/**"]
   workflow_dispatch:
 
 concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI: "true"

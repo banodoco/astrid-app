@@ -2,11 +2,16 @@ name: Dockerfile Check
 
 on:
   pull_request:
+  merge_group:
   push:
     branches:
       - main
-      - "sprint-*"
-      - "codex/**"
+      - release-1
+      - "int/**"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   dockerfile-check:

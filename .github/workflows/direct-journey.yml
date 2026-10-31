@@ -24,13 +24,14 @@ on:
       - "tests/e2e/support/**"
       - "playwright.direct.config.ts"
       - "playwright.three-products.config.ts"
+  merge_group:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: direct-journey-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   direct-journey:

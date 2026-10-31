@@ -2,7 +2,7 @@ name: Windows installer
 
 on:
   push:
-    branches: [feat/pinokio, main]
+    branches: [main, release-1, "int/**"]
     paths:
       - .github/workflows/installer-windows.yml
       - public/install.ps1
@@ -16,13 +16,14 @@ on:
       - public/install
       - public/install/**
       - scripts/installer/**
+  merge_group:
 
 permissions:
   contents: read
 
 concurrency:
-  group: installer-windows-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   installer-windows:

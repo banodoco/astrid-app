@@ -11,7 +11,7 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
   const page = usePageUpdateResolution(connection);
 
   const current = operation.releaseStatus;
-  const decision = current ? resolveUpdate({ ...current.resolution, installType: operation.installType, updateNowAvailable: operation.available }) : page?.resolution ?? null;
+  const decision = current ? resolveUpdate({ ...current.resolution, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason }) : page?.resolution ?? null;
   if (pageStale || !decision || (decision.card !== 'notice' && decision.card !== 'update')) return null;
   // A required update (K6 rule 6) uses this same card, with its own title and reason.
   const required = decision.card === 'update';

@@ -1,4 +1,4 @@
-import { AstridRuntimeClient, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
+import { AstridRuntimeClient, INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
@@ -14,11 +14,24 @@ export interface UpdateOperationSnapshot {
   readonly restartRequired: boolean;
 }
 
+export function installerUpdateReasonOf(status: InstallerUpdateStatus | null | undefined): InstallerUpdateReason | null {
+  if (!status) return null;
+  if (status.state === 'recovery-needed') return 'recovery-needed';
+  if (status.reason === 'busy' || status.reason === 'autostart-off' || status.reason === 'unsupported-service-manager') return status.reason;
+  return null;
+}
+
+export function canStartInstallerUpdate(status: InstallerUpdateStatus | null | undefined): boolean {
+  const refusal = installerUpdateReasonOf(status);
+  return Boolean(status && (status.state === 'recovery-needed' || (status.available && !refusal)));
+}
+
 /** Translate the Runtime's transaction vocabulary into a status a person can act on. */
 export function installerUpdateStatusMessage(status: InstallerUpdateStatus | null | undefined): string | null {
   if (!status) return null;
+  const reason = installerUpdateReasonOf(status);
+  if (reason) return INSTALLER_UPDATE_REASON_MESSAGES[reason];
   if (status.state === 'active') return 'Update in progress. Astrid may disconnect while it restarts.';
-  if (status.state === 'recovery-needed') return 'Astrid needs repair. Download diagnostics and run the installer update command.';
   if (status.state === 'terminal') {
     if (status.outcome === 'updated') return 'Astrid updated. Reload to continue.';
     if (status.outcome === 'rolled_back') return 'The update did not finish. Astrid was restored to its previous version.';
@@ -99,7 +112,7 @@ export class UpdateOperation {
     }
   }
   start = async (): Promise<void> => {
-    if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !this.snapshot.status?.available) return;
+    if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !canStartInstallerUpdate(this.snapshot.status)) return;
     this.posting = true;
     this.refusal = null;
     this.operationId = null;

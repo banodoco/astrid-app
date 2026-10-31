@@ -3,7 +3,7 @@ import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConne
 import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { useAuthSafe } from '@/shared/contexts/AuthContext.tsx';
 import { scheduleFocusAndInterval } from './appBuildWatch.ts';
-import { pageUpdateOperation } from './updateOperation.ts';
+import { canStartInstallerUpdate, installerUpdateReasonOf, pageUpdateOperation } from './updateOperation.ts';
 import { localUpdateStatus, pageInstallType } from './pageUpdateStatus.ts';
 
 export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
@@ -40,12 +40,13 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   const installType = pageInstallType(manager, connection?.managedByPinokio);
   // Missing identity is never evidence of an installer-owned installation. The
   // Runtime performs the full ownership/lock/busy admission on the explicit POST.
+  const recovery = snapshot.status?.state === 'recovery-needed';
   const available = enabled && installType === 'installer' && manager === null
     && typeof snapshot.health?.runtime_instance_id === 'string'
-    && snapshot.releaseStatus?.behind === true
+    && (recovery || snapshot.releaseStatus?.behind === true)
     && !snapshot.restartRequired
-    && snapshot.fresh && snapshot.status?.available === true && snapshot.status.state !== 'recovery-needed';
-  return { ...snapshot, installType, available,
+    && snapshot.fresh && canStartInstallerUpdate(snapshot.status);
+  return { ...snapshot, installType, available, updateReason: installerUpdateReasonOf(snapshot.status),
     refresh: async () => { if (enabled) await operation.refresh(true); },
     start: async () => {
       if (!available || !latest.current.enabled) return;

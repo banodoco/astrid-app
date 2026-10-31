@@ -332,7 +332,7 @@ function UpdateNeededCard({ connection, onBack }: { readonly connection: Runtime
   const operation = useInstallerUpdate(connection);
   const { updateNeeded } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
-  const resolution = resolveUpdate({ ...operation.releaseStatus?.resolution, pageStale, compatibility: { kind: 'schema', detail: pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence }, installType: operation.installType, updateNowAvailable: operation.available });
+  const resolution = resolveUpdate({ ...operation.releaseStatus?.resolution, pageStale, compatibility: { kind: 'schema', detail: pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence }, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason });
   return <Card title={resolution.card === 'newer' ? 'Astrid on this computer is newer' : resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} operation={operation} />} status={COPY.waiting} showHelp />;
 }
 

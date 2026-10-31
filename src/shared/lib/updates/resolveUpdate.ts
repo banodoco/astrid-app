@@ -1,4 +1,4 @@
-import type { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason, type RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '../../../integrations/runtime/runtime-update-contract.mjs';
 
 export type UpdateAction = {
@@ -14,6 +14,7 @@ export type UpdateResolution = {
   readonly body: string | null;
   readonly primary: UpdateAction | null;
   readonly secondary: UpdateAction | null;
+  readonly updateReason?: InstallerUpdateReason;
 };
 
 export type InstallType = 'pinokio' | 'source' | 'fully-local' | 'installer';
@@ -33,6 +34,7 @@ export interface UpdateResolutionInput {
   readonly installType?: InstallType;
   readonly command?: string;
   readonly realError?: string;
+  readonly updateReason?: InstallerUpdateReason;
 }
 
 /**
@@ -63,6 +65,9 @@ type ActionContext = 'page' | 'settings';
 function updateActions(input: UpdateResolutionInput, context: ActionContext, softRelease = false): Pick<UpdateResolution, 'primary' | 'secondary'> {
   if (input.installType === 'pinokio') return { primary: { label: UPDATE_IN_PINOKIO_ACTION }, secondary: null };
   if (input.installType === 'source') return { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
+  if (input.updateReason === 'recovery-needed' && input.installType === 'installer' && input.updateNowAvailable) {
+    return { primary: { label: 'Update', execute: 'installer-update' }, secondary: null };
+  }
   // The editor does not perform updates for a fully local install; give the same install command guidance as other local users.
   if (input.installType === 'fully-local') return commandActions(input);
   if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: COPY_FOR_AGENT };
@@ -75,6 +80,15 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   if (input.runtime) return { card: 'not-running', title: 'Astrid isn’t running', body: input.failure ?? 'Start Astrid Runtime to continue.', primary: { label: 'Start Astrid' }, secondary: { label: 'Repair' } };
   if (input.pageStale) return { card: 'reload', title: 'Editor updated', body: 'Reload this page to use the latest editor.', primary: { label: 'Reload' }, secondary: null };
   if (input.compatibility?.kind === 'identity') return { card: 'identity', title: 'Restart Astrid', body: 'An older Astrid is still running. Restart the selected Runtime, then reconnect.', primary: null, secondary: null };
+  if (input.updateReason && input.installType === 'installer') {
+    return {
+      card: input.updateReason === 'recovery-needed' ? 'update' : 'notice',
+      title: input.updateReason === 'recovery-needed' ? 'Update Astrid' : 'Update unavailable',
+      body: INSTALLER_UPDATE_REASON_MESSAGES[input.updateReason],
+      ...(input.updateReason === 'recovery-needed' ? updateActions(input, context) : { primary: null, secondary: null }),
+      updateReason: input.updateReason,
+    };
+  }
   // A source checkout has no release: its startup identity is fixed at 0, so the release rules (newer, required, behind) never apply.
   const releaseRules = input.installType !== 'source';
   if (releaseRules && input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {

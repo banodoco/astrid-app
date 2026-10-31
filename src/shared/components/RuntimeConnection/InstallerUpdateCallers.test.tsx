@@ -236,7 +236,7 @@ describe('installer update callers', () => {
     ['source managed', () => { harness.manager = 'source'; }],
     ['launcher unavailable', () => { harness.statusAvailable = false; }],
     ['recovery required', () => { harness.statusState = 'recovery-needed'; }],
-  ])('does not expose an installer POST action when %s', async (_label, configure) => {
+  ])('respects installer action availability and explicit recovery Update when %s', async (_label, configure) => {
     configure();
     render(<AstridUpdatesSection isOpen />);
     await screen.findByRole('button', { name: 'Check for updates' });
@@ -245,10 +245,21 @@ describe('installer update callers', () => {
       // A source checkout has no release to install: the status line follows the resolver, which has no update to offer.
       await screen.findAllByText('Astrid is up to date');
       expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
-    } else if (_label === 'recovery required') await screen.findAllByText('Astrid needs repair. Download diagnostics and run the installer update command.');
+    } else if (_label === 'recovery required') {
+      const recoveryCopy = 'Astrid needs recovery. Select Update to check the previous operation before continuing.';
+      await screen.findAllByText(recoveryCopy);
+      const update = screen.getByRole('button', { name: 'Update', exact: true });
+      expect(update).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Update anyway' })).not.toBeInTheDocument();
+      expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
+      fireEvent.click(update);
+      await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
+    }
     else await screen.findAllByText('Update available · Release 4');
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
-    expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
+    const postCount = calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
+    expect(postCount).toBe(_label === 'recovery required' ? 1 : 0);
   });
 
   it('keeps page-stale reload precedence over the available installer update', async () => {
@@ -338,25 +349,30 @@ describe('installer update while an agent turn runs', () => {
     expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
   });
 
-  it('asks before Update now interrupts a running agent turn', async () => {
+  it('sends Update now directly without an agent-turn confirmation', async () => {
     renderWithSession('processing');
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
-    expect(await screen.findByText(TURN_WARNING)).toBeInTheDocument();
+    const updateNow = await screen.findByRole('button', { name: 'Update now' });
+    expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
+    fireEvent.click(updateNow);
+    await waitFor(() => expect(postCount()).toBe(1));
+    expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update anyway' })).not.toBeInTheDocument();
+  });
+
+  it('does not automatically post or expose legacy agent-turn controls', async () => {
+    renderWithSession('processing');
+    await screen.findByRole('button', { name: 'Update now' });
+    expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Wait' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update anyway' })).not.toBeInTheDocument();
     expect(postCount()).toBe(0);
   });
 
-  it('Wait closes the agent-turn confirmation and sends no update', async () => {
+  it('uses the normal Update action instead of an Update anyway bypass', async () => {
     renderWithSession('processing');
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Wait' }));
-    await waitFor(() => expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument());
-    expect(postCount()).toBe(0);
-  });
-
-  it('Update anyway sends the update after the agent-turn confirmation', async () => {
-    renderWithSession('processing');
-    fireEvent.click(await screen.findByRole('button', { name: 'Update now' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Update anyway' }));
+    const updateNow = await screen.findByRole('button', { name: 'Update now' });
+    expect(screen.queryByRole('button', { name: 'Update anyway' })).not.toBeInTheDocument();
+    fireEvent.click(updateNow);
     await waitFor(() => expect(postCount()).toBe(1));
     expect(screen.queryByText(TURN_WARNING)).not.toBeInTheDocument();
   });

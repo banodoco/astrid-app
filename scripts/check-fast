@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# Fast T0 check: ESLint changed JavaScript/TypeScript files only.
+set -euo pipefail
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+ranges=()
+while (($#)); do
+  case "$1" in
+    --range)
+      (($# >= 2)) || { echo 'missing value for --range' >&2; exit 2; }
+      ranges+=("$2")
+      shift 2
+      ;;
+    *) echo "unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+collect_changed_files() {
+  local range
+  for range in "${ranges[@]}"; do
+    git diff --name-only -z "$range" -- 2>/dev/null || true
+  done
+  git diff --cached --name-only -z --
+  git diff --name-only -z --
+  git ls-files --others --exclude-standard -z
+}
+
+changed=()
+while IFS= read -r -d '' file; do
+  duplicate=false
+  for previous in "${changed[@]}"; do
+    [[ "$previous" == "$file" ]] && { duplicate=true; break; }
+  done
+  [[ "$duplicate" == true ]] || changed+=("$file")
+done < <(collect_changed_files)
+lint_files=()
+for file in "${changed[@]}"; do
+  case "$file" in
+    *.js|*.jsx|*.mjs|*.cjs|*.ts|*.tsx)
+      [[ -f "$file" ]] && lint_files+=("$file")
+      ;;
+  esac
+done
+
+if ((${#lint_files[@]} == 0)); then
+  echo 'No changed JavaScript/TypeScript files; ESLint skipped.'
+  exit 0
+fi
+
+eslint=./node_modules/.bin/eslint
+if [[ ! -x "$eslint" ]]; then
+  echo 'ESLint is required for changed JavaScript/TypeScript files; install the repository dev dependencies.' >&2
+  exit 127
+fi
+"$eslint" --no-warn-ignored --max-warnings 0 -- "${lint_files[@]}"

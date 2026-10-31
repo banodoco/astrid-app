@@ -8,6 +8,7 @@ on:
 jobs:
   vitest:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
         with:
@@ -38,6 +39,7 @@ jobs:
   # and this job runs exactly those files where the condition holds. Plain node: these files import only the repo.
   release-tooling-macos:
     runs-on: macos-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -48,6 +50,7 @@ jobs:
   # Cross-repo copies: every vendored artifact must match its selected producer commit.
   boundary:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

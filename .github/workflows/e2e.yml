@@ -32,8 +32,12 @@ jobs:
           sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg
       - run: npx playwright test --config playwright.config.ts
       - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: playwright-default-results, path: test-results, if-no-files-found: ignore }
+        if: failure()
+        with:
+          name: playwright-default-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 3
 
   playwright-timeline:
     runs-on: ubuntu-latest
@@ -46,8 +50,12 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:timeline
       - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: playwright-timeline-results, path: test-results, if-no-files-found: ignore }
+        if: failure()
+        with:
+          name: playwright-timeline-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 3
 
   # The timeline lane's second project: H.264 cases that need installed Google Chrome.
   playwright-timeline-chrome-export:
@@ -74,8 +82,12 @@ jobs:
           magick -version
       - run: npm run test:e2e:chrome-export
       - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: playwright-timeline-chrome-export-results, path: test-results, if-no-files-found: ignore }
+        if: failure()
+        with:
+          name: playwright-timeline-chrome-export-results
+          path: test-results
+          if-no-files-found: ignore
+          retention-days: 3
 
   extension-accessibility:
     runs-on: ubuntu-latest
@@ -88,8 +100,12 @@ jobs:
       - run: npx playwright install --with-deps chromium firefox webkit
       - run: npm run test:e2e:extension-accessibility
       - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: extension-accessibility-results, path: artifacts, if-no-files-found: ignore }
+        if: failure()
+        with:
+          name: extension-accessibility-results
+          path: artifacts
+          if-no-files-found: ignore
+          retention-days: 3
 
   extension-visual:
     runs-on: ubuntu-latest
@@ -102,8 +118,12 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e:extension-visual
       - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: extension-visual-results, path: artifacts, if-no-files-found: ignore }
+        if: failure()
+        with:
+          name: extension-visual-results
+          path: artifacts
+          if-no-files-found: ignore
+          retention-days: 3
 
   extension-cross-browser:
     runs-on: ubuntu-latest
@@ -116,5 +136,9 @@ jobs:
       - run: npx playwright install --with-deps chrome chromium firefox webkit
       - run: npm run test:e2e:extension-cross-browser
       - uses: actions/upload-artifact@v4
-        if: always()
-        with: { name: extension-cross-browser-results, path: artifacts, if-no-files-found: ignore }
+        if: failure()
+        with:
+          name: extension-cross-browser-results
+          path: artifacts
+          if-no-files-found: ignore
+          retention-days: 3

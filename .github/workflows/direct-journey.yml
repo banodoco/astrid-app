@@ -35,6 +35,7 @@ concurrency:
 jobs:
   direct-journey:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     steps:
       # The harness finds the Runtime at ../astrid-runtime (ASTRID_RUNTIME_CHECKOUT overrides),
       # so both repos are checked out as siblings under $GITHUB_WORKSPACE/..: App in astrid-app, Runtime beside it.
@@ -114,12 +115,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
+          retention-days: 14
           name: direct-journey
           path: ${{ runner.temp }}/direct-artifacts/
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
+          retention-days: 3
           name: direct-journey-traces
           path: ${{ runner.temp }}/direct-results/
           if-no-files-found: ignore
@@ -133,6 +136,7 @@ jobs:
   # without that module, so any PR touching tests/e2e/local/** (or the paths above) is red here until that merge.
   three-products:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
     concurrency:
       group: three-products-${{ github.ref }}
       cancel-in-progress: true
@@ -235,12 +239,14 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
+          retention-days: 14
           name: three-products
           path: ${{ runner.temp }}/three-products-artifacts/
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
+          retention-days: 3
           name: three-products-traces
           path: ${{ runner.temp }}/three-products-results/
           if-no-files-found: ignore

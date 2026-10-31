@@ -1,0 +1,76 @@
+name: G3 app installer-windows
+'on':
+  workflow_call:
+    inputs:
+      runtime_sha:
+        required: true
+        type: string
+      agent_sha:
+        required: true
+        type: string
+      app_sha:
+        required: true
+        type: string
+      pinokio_sha:
+        required: true
+        type: string
+      vibecomfy_sha:
+        required: true
+        type: string
+    secrets:
+      RUNTIME_READ_TOKEN:
+        required: false
+      ASTRID_READ_TOKEN:
+        required: false
+permissions:
+  contents: read
+jobs:
+  installer-windows:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - shell: Windows PowerShell 5.1
+          executable: powershell.exe
+        - shell: PowerShell 7
+          executable: pwsh
+    name: PowerShell (${{ matrix.shell }})
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Verify selected PowerShell
+      env:
+        ASTRID_TEST_PWSH: ${{ matrix.executable }}
+      run: $env:ASTRID_TEST_PWSH; & $env:ASTRID_TEST_PWSH -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
+    - name: Run PowerShell bootstrap tests
+      shell: cmd
+      env:
+        ASTRID_TEST_PWSH: ${{ matrix.executable }}
+      run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs
+        --test-reporter-destination=stdout scripts/installer/bootstrap-powershell.test.mjs

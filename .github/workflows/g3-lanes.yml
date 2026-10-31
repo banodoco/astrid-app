@@ -1,0 +1,333 @@
+name: G3 app lanes
+'on':
+  workflow_call:
+    inputs:
+      runtime_sha:
+        required: true
+        type: string
+      agent_sha:
+        required: true
+        type: string
+      app_sha:
+        required: true
+        type: string
+      pinokio_sha:
+        required: true
+        type: string
+      vibecomfy_sha:
+        required: true
+        type: string
+    secrets:
+      RUNTIME_READ_TOKEN:
+        required: false
+      ASTRID_READ_TOKEN:
+        required: false
+permissions:
+  contents: read
+jobs:
+  checkout-lanes:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        path: astrid-app
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: astrid-app
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-runtime
+        ref: ${{ inputs.runtime_sha }}
+        path: astrid-runtime
+        token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+        persist-credentials: false
+    - name: Assert and record runtime checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.runtime_sha }}
+        CHECKOUT_PATH: astrid-runtime
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "runtime" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-agent
+        ref: ${{ inputs.agent_sha }}
+        path: astrid-agent
+        token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+        persist-credentials: false
+    - name: Assert and record agent checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.agent_sha }}
+        CHECKOUT_PATH: astrid-agent
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "agent" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-lanes-1
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: astrid-app/.nvmrc
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Install App dependencies
+      working-directory: astrid-app
+      run: npm ci --legacy-peer-deps
+    - name: Checkout lane
+      working-directory: astrid-app
+      env:
+        ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
+        ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
+      run: npm run test:checkout
+    - name: Astrid composition lane
+      working-directory: astrid-app
+      env:
+        ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
+      run: npm run test:astrid-composition
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-lanes-1.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+  installer-posix:
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+        - ubuntu-latest
+        - macos-latest
+    runs-on: ${{ matrix.os }}
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+    - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs
+        --test-reporter-destination=stdout scripts/installer/bootstrap.test.mjs
+  installer-powershell:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+    - run: pwsh --version
+    - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs
+        --test-reporter-destination=stdout scripts/installer/bootstrap-powershell.test.mjs
+  quick-journey:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        path: astrid-app
+        fetch-depth: 0
+        filter: blob:none
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: astrid-app
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-runtime
+        ref: ${{ inputs.runtime_sha }}
+        path: astrid-runtime
+        fetch-depth: 0
+        filter: blob:none
+        token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+        persist-credentials: false
+    - name: Assert and record runtime checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.runtime_sha }}
+        CHECKOUT_PATH: astrid-runtime
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "runtime" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-agent
+        ref: ${{ inputs.agent_sha }}
+        path: astrid-agent
+        fetch-depth: 0
+        filter: blob:none
+        token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+        persist-credentials: false
+    - name: Assert and record agent checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.agent_sha }}
+        CHECKOUT_PATH: astrid-agent
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "agent" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.4
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Harden apt
+      run: 'printf ''Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n'' | sudo tee /etc/apt/apt.conf.d/99-lanes-retries
+
+        sudo apt-get update
+
+        '
+    - name: Install ffmpeg
+      run: sudo apt-get install -y --no-install-recommends ffmpeg
+    - name: Build the Runtime venv
+      working-directory: astrid-runtime
+      run: 'python -m venv .venv
+
+        .venv/bin/python -m pip install -e .
+
+        .venv/bin/python -m runtime_protocol.cli --help > /dev/null
+
+        '
+    - name: Build the Astrid venv (with the sibling Runtime)
+      working-directory: astrid-agent
+      run: 'python -m venv .venv
+
+        .venv/bin/python -m pip install -e .
+
+        .venv/bin/python -m pip install --no-deps -e ../astrid-runtime -e ../astrid-runtime/packages/python
+
+        npm ci --prefix remotion
+
+        (cd remotion && npx remotion browser ensure)
+
+        '
+    - name: Install App dependencies and Chrome
+      working-directory: astrid-app
+      run: 'npm ci --legacy-peer-deps
+
+        npx playwright install --with-deps chrome
+
+        '
+    - name: Run the quick journey
+      working-directory: astrid-agent
+      env:
+        ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
+      run: .venv/bin/python -m astrid.core.dev.journey --tier quick --reference generated --app-checkout ../astrid-app --summary
+        "$RUNNER_TEMP/quick-journey.json"
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: quick-journey
+        path: '${{ runner.temp }}/quick-journey.json
+
+          ${{ runner.temp }}/quick-journey.txt
+
+          '
+        if-no-files-found: warn

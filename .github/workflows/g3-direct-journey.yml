@@ -1,0 +1,325 @@
+name: G3 app direct-journey
+'on':
+  workflow_call:
+    inputs:
+      runtime_sha:
+        required: true
+        type: string
+      agent_sha:
+        required: true
+        type: string
+      app_sha:
+        required: true
+        type: string
+      pinokio_sha:
+        required: true
+        type: string
+      vibecomfy_sha:
+        required: true
+        type: string
+    secrets:
+      RUNTIME_READ_TOKEN:
+        required: false
+      ASTRID_READ_TOKEN:
+        required: false
+permissions:
+  contents: read
+jobs:
+  direct-journey:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        path: astrid-app
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: astrid-app
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-runtime
+        ref: ${{ inputs.runtime_sha }}
+        path: astrid-runtime
+        token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+        persist-credentials: false
+    - name: Assert and record runtime checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.runtime_sha }}
+        CHECKOUT_PATH: astrid-runtime
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "runtime" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-direct-journey-2
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Build the Runtime venv
+      working-directory: astrid-runtime
+      run: 'python -m venv .venv
+
+        .venv/bin/python -m pip install -e .
+
+        .venv/bin/python -m runtime_protocol.cli --help > /dev/null
+
+        '
+    - name: Install App dependencies, Chromium and ffmpeg
+      working-directory: astrid-app
+      run: 'npm ci --legacy-peer-deps
+
+        npx playwright install --with-deps chromium
+
+        sudo apt-get install -y --no-install-recommends ffmpeg
+
+        '
+    - name: Run the journey
+      working-directory: astrid-app
+      env:
+        PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/direct-journey.json
+        PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/direct-results
+        NODE_OPTIONS: --max-old-space-size=4096
+        ASTRID_APP_DIRECT_DOOR_PORT: '17341'
+        ASTRID_REQUIRE_LANES: direct-journey
+      run: npx playwright test -c playwright.direct.config.ts --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+    - name: Check the outcome counts
+      if: ${{ !cancelled() }}
+      working-directory: astrid-app
+      env:
+        REPORT: ${{ runner.temp }}/direct-journey.json
+      run: "jq '\n  [.. | objects | select(has(\"expectedStatus\") and has(\"results\"))] as $tests\n  | {\n      total: ($tests\
+        \ | length),\n      expected_failures: ($tests | map(select(.expectedStatus == \"failed\")) | length),\n      expected_failures_that_failed:\
+        \ ($tests | map(select(.expectedStatus == \"failed\" and .status == \"expected\")) | length),\n      unexpected: .stats.unexpected,\n\
+        \      flaky: .stats.flaky,\n      skipped: .stats.skipped\n    }\n  | . as $r | $r, (\n      if $r.total > 0 and\
+        \ $r.expected_failures == 0 and $r.expected_failures_that_failed == 0\n         and $r.unexpected == 0 and $r.flaky\
+        \ == 0 and $r.skipped == 0\n      then empty else error(\"direct journey: want 0 expected failures, 0 unexpected,\
+        \ 0 flaky, 0 skipped; got \\($r)\") end)\n' \"$REPORT\"\n"
+    - name: Collect artifacts
+      if: ${{ !cancelled() }}
+      run: 'mkdir -p "$RUNNER_TEMP/direct-artifacts"
+
+        cp "${{ runner.temp }}/direct-journey.json" "$RUNNER_TEMP/direct-artifacts/" || true
+
+        find "${{ runner.temp }}/direct-results" -name ''direct-measurements.json'' -exec cp {} "$RUNNER_TEMP/direct-artifacts/"
+        \; || true
+
+        '
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: direct-journey
+        path: ${{ runner.temp }}/direct-artifacts/
+        if-no-files-found: warn
+    - uses: actions/upload-artifact@v4
+      if: ${{ failure() }}
+      with:
+        name: direct-journey-traces
+        path: ${{ runner.temp }}/direct-results/
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-direct-journey-2.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+  three-products:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: three-products-${{ github.ref }}
+      cancel-in-progress: true
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        path: astrid-app
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: astrid-app
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-runtime
+        ref: ${{ inputs.runtime_sha }}
+        path: astrid-runtime
+        token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+        persist-credentials: false
+    - name: Assert and record runtime checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.runtime_sha }}
+        CHECKOUT_PATH: astrid-runtime
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "runtime" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-agent
+        ref: ${{ inputs.agent_sha }}
+        path: astrid-agent
+        token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+        persist-credentials: false
+    - name: Assert and record agent checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.agent_sha }}
+        CHECKOUT_PATH: astrid-agent
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "agent" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-direct-journey-1
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    - name: Build the Runtime venv
+      working-directory: astrid-runtime
+      run: 'python -m venv .venv
+
+        .venv/bin/python -m pip install -e .
+
+        .venv/bin/python -m runtime_protocol.cli --help > /dev/null
+
+        '
+    - name: Build the Astrid venv
+      working-directory: astrid-agent
+      run: 'python -m venv .venv
+
+        .venv/bin/python -m pip install -e .
+
+        # Astrid imports runtime_protocol but does not declare it: the installer puts the Runtime beside it with --no-deps
+
+        # (astrid/installer/backend.py, scripts/ci_install_runtime.py). Here the Runtime under test is the sibling checkout.
+
+        .venv/bin/python -m pip install --no-deps -e ../astrid-runtime
+
+        .venv/bin/python -m astrid.core.dev.cross_client --help > /dev/null
+
+        '
+    - name: Install App dependencies, Chrome and ffmpeg
+      working-directory: astrid-app
+      run: 'npm ci --legacy-peer-deps
+
+        npx playwright install --with-deps chrome
+
+        sudo apt-get install -y --no-install-recommends ffmpeg
+
+        '
+    - name: Run the three-product journey
+      working-directory: astrid-app
+      env:
+        ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
+        ASTRID_REQUIRE_LANES: direct-journey
+        ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
+        PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
+        PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
+        NODE_OPTIONS: --max-old-space-size=4096
+      run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+    - name: Check the outcome counts
+      if: ${{ !cancelled() }}
+      working-directory: astrid-app
+      env:
+        REPORT: ${{ runner.temp }}/three-products.json
+      run: "jq '\n  [.. | objects | select(has(\"expectedStatus\") and has(\"results\"))] as $tests\n  | {\n      total: ($tests\
+        \ | length),\n      expected_failures: ($tests | map(select(.expectedStatus == \"failed\")) | length),\n      expected_failures_that_failed:\
+        \ ($tests | map(select(.expectedStatus == \"failed\" and .status == \"expected\")) | length),\n      unexpected: .stats.unexpected,\n\
+        \      flaky: .stats.flaky,\n      skipped: .stats.skipped\n    }\n  | . as $r | $r, (\n      if $r.total > 0 and\
+        \ $r.expected_failures == 0 and $r.expected_failures_that_failed == 0\n         and $r.unexpected == 0 and $r.flaky\
+        \ == 0 and $r.skipped == 0\n      then empty else error(\"three-product journey: want cases, 0 expected failures,\
+        \ 0 unexpected, 0 flaky, 0 skipped; got \\($r)\") end)\n' \"$REPORT\"\n"
+    - name: Collect artifacts
+      if: ${{ !cancelled() }}
+      run: 'mkdir -p "$RUNNER_TEMP/three-products-artifacts"
+
+        cp "${{ runner.temp }}/three-products.json" "$RUNNER_TEMP/three-products-artifacts/" || true
+
+        find "${{ runner.temp }}/three-products-results" -name ''three-products-summary.json'' -exec cp {} "$RUNNER_TEMP/three-products-artifacts/"
+        \; || true
+
+        '
+    - uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: three-products
+        path: ${{ runner.temp }}/three-products-artifacts/
+        if-no-files-found: warn
+    - uses: actions/upload-artifact@v4
+      if: ${{ failure() }}
+      with:
+        name: three-products-traces
+        path: ${{ runner.temp }}/three-products-results/
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-direct-journey-1.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}

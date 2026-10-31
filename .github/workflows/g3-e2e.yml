@@ -1,0 +1,353 @@
+name: G3 app e2e
+'on':
+  workflow_call:
+    inputs:
+      runtime_sha:
+        required: true
+        type: string
+      agent_sha:
+        required: true
+        type: string
+      app_sha:
+        required: true
+        type: string
+      pinokio_sha:
+        required: true
+        type: string
+      vibecomfy_sha:
+        required: true
+        type: string
+    secrets:
+      RUNTIME_READ_TOKEN:
+        required: false
+      ASTRID_READ_TOKEN:
+        required: false
+permissions:
+  contents: read
+jobs:
+  playwright-default:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-e2e-6
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - run: npm ci --legacy-peer-deps
+    - run: npx playwright install --with-deps chromium
+    - run: 'sudo apt-get -o Acquire::Retries=3 update
+
+        sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg
+
+        '
+    - run: npx playwright test --config playwright.config.ts
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-default-results
+        path: test-results
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-6.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+  playwright-timeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-e2e-5
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - run: npm ci --legacy-peer-deps
+    - run: npx playwright install --with-deps chromium
+    - run: npm run test:e2e:timeline
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-timeline-results
+        path: test-results
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-5.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+  playwright-timeline-chrome-export:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-e2e-4
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - run: npm ci --legacy-peer-deps
+    - run: npx playwright install --with-deps chrome
+    - name: Install ffmpeg and ImageMagick 7
+      run: 'sudo apt-get -o Acquire::Retries=3 update
+
+        sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg
+
+        curl -fsSL -o magick.AppImage https://github.com/ImageMagick/ImageMagick/releases/download/7.1.1-47/ImageMagick-82572af-gcc-x86_64.AppImage
+
+        echo "dcdd2e135dd5f0701d992ccbbf744f51624441b5bc8eedcabe21516996e210ab  magick.AppImage" | sha256sum -c -
+
+        chmod +x magick.AppImage
+
+        sudo mv magick.AppImage /opt/magick.AppImage
+
+        printf ''#!/bin/sh\nexec /opt/magick.AppImage --appimage-extract-and-run "$@"\n'' | sudo tee /usr/local/bin/magick
+        > /dev/null
+
+        sudo chmod +x /usr/local/bin/magick
+
+        magick -version
+
+        '
+    - run: npm run test:e2e:chrome-export
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: playwright-timeline-chrome-export-results
+        path: test-results
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-4.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+  extension-accessibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-e2e-3
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - run: npm ci --legacy-peer-deps
+    - run: npx playwright install --with-deps chromium firefox webkit
+    - run: npm run test:e2e:extension-accessibility
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: extension-accessibility-results
+        path: artifacts
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-3.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+  extension-visual:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-e2e-2
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - run: npm ci --legacy-peer-deps
+    - run: npx playwright install --with-deps chromium
+    - run: npm run test:e2e:extension-visual
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: extension-visual-results
+        path: artifacts
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-2.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+  extension-cross-browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-e2e-1
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - run: npm ci --legacy-peer-deps
+    - run: npx playwright install --with-deps chrome chromium firefox webkit
+    - run: npm run test:e2e:extension-cross-browser
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: extension-cross-browser-results
+        path: artifacts
+        if-no-files-found: ignore
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-e2e-1.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}

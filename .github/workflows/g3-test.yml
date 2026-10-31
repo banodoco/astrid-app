@@ -1,0 +1,190 @@
+name: G3 app test
+'on':
+  workflow_call:
+    inputs:
+      runtime_sha:
+        required: true
+        type: string
+      agent_sha:
+        required: true
+        type: string
+      app_sha:
+        required: true
+        type: string
+      pinokio_sha:
+        required: true
+        type: string
+      vibecomfy_sha:
+        required: true
+        type: string
+    secrets:
+      RUNTIME_READ_TOKEN:
+        required: false
+      ASTRID_READ_TOKEN:
+        required: false
+permissions:
+  contents: read
+jobs:
+  vitest:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        filter: blob:none
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - name: Restore npm cache (C-08)
+      id: c08-app-test-1
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - name: Check manifest release against main history
+      if: (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'release-1')) || github.ref
+        == 'refs/heads/main' || github.ref == 'refs/heads/release-1'
+      env:
+        RELEASE_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before
+          != '0000000000000000000000000000000000000000' && github.event.before) || 'origin/main' }}
+        RELEASE_CANDIDATE_MODE: ${{ (github.event_name == 'pull_request' && github.base_ref == 'release-1') || github.ref
+          == 'refs/heads/release-1' }}
+      run: "if [ \"$RELEASE_CANDIDATE_MODE\" = \"true\" ]; then\n  node scripts/installer/release-check.mjs \"$RELEASE_BASE_REF\"\
+        \ --candidate\nelse\n  node scripts/installer/release-check.mjs \"$RELEASE_BASE_REF\"\nfi\n"
+    - run: node --test scripts/installer/release.test.mjs scripts/qualification/check-public-updater-candidate.test.mjs
+    - run: npm ci --legacy-peer-deps
+    - run: npm test
+    - run: npm run test:sdk-boundary
+    - name: Save npm cache on main or int branches (C-08)
+      if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-test-1.outputs.cache-hit
+        != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}
+        key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+  release-tooling-macos:
+    runs-on: macos-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/setup-node@v4
+      with:
+        node-version-file: .nvmrc
+    - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs
+        --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs
+        scripts/release/verify-extension-ship.test.mjs
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-app
+        ref: ${{ inputs.app_sha }}
+        persist-credentials: false
+    - name: Assert and record app checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.app_sha }}
+        CHECKOUT_PATH: .
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "app" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20.19.0
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-runtime
+        ref: ${{ inputs.runtime_sha }}
+        path: runtime-producer
+        persist-credentials: false
+    - name: Assert and record runtime checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.runtime_sha }}
+        CHECKOUT_PATH: runtime-producer
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "runtime" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - uses: actions/checkout@v4
+      with:
+        repository: banodoco/astrid-agent
+        ref: ${{ inputs.agent_sha }}
+        path: astrid-producer
+        persist-credentials: false
+    - name: Assert and record agent checkout
+      shell: bash
+      env:
+        EXPECTED: ${{ inputs.agent_sha }}
+        CHECKOUT_PATH: astrid-producer
+      run: 'set -euo pipefail
+
+        [[ "$EXPECTED" =~ ^[0-9a-f]{40}$ ]]
+
+        actual=$(git -C "$GITHUB_WORKSPACE/$CHECKOUT_PATH" rev-parse HEAD)
+
+        printf "%s: %s\n" "agent" "$actual" | tee -a "$GITHUB_STEP_SUMMARY"
+
+        [[ "$actual" == "$EXPECTED" ]]
+
+        '
+    - run: 'node scripts/vendor-lock.mjs check runtime.lock.json --producer runtime-producer
+
+        '
+    - run: node scripts/vendor-lock.mjs check config/astrid-cli-surface/vendor.lock.json --producer astrid-producer
+    - run: node --test scripts/quality/astrid-public-boundary.test.mjs
+    - run: node scripts/build/verify-astrid-vendor-sources.mjs

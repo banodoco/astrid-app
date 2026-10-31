@@ -197,7 +197,7 @@ export function validateInstalledProcessObservation({ command, cwd = null, execu
     if (!platformAbsolutePath(cwd, platform)) throw new SurfaceError('installed process working directory must be absolute');
   }
   const value = `${command}\n${cwd || ''}\n${executable}`.toLowerCase();
-  if (/(?:vite|webpack|parcel|next dev|npm run dev|pnpm dev|bun run dev|dev-local-workspace|node_modules[\\/]\.bin[\\/]vite)/.test(value)) {
+  if (/(?:vite|webpack|parcel|next dev|npm run dev|pnpm dev|bun run dev|dev-local-workspace|node_modules[\\/]\.bin[\\/]vite|(?:^|[\\/])(?:source|workspace|worktree|checkout|astrid-app)(?:[\\/]|$)|[\\/]\.git(?:[\\/]|$))/.test(value)) {
     throw new SurfaceError('installed App origin is a source/dev server, not an installed product process');
   }
 }

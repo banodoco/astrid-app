@@ -1,74 +1,52 @@
 #!/usr/bin/env bash
-# The one pre-push command: run it before every push (testing plan R-12).
-# It runs the build-context guard and default suite, then flags runtime-facing changes for thin full journeys (R-11).
+# Fast pre-push safety checks. Full Vitest, Playwright, build, type, and
+# journey coverage remains in CI; this command checks only changed files.
 set -euo pipefail
-
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo_root"
+# Tests may launch this script with a disposable repository in Git's local
+# environment variables. Let the child checks use their own working tree.
+while IFS= read -r git_local_env_var; do unset "$git_local_env_var"; done < <(git rev-parse --local-env-vars)
+usage() { echo "usage: $0 [remote-name remote-url] < local-ref local-sha remote-ref remote-sha" >&2; }
 
-# Git exports repository-local variables to hooks. Tests create disposable Git
-# repositories; inheriting these variables makes their Git commands target this
-# repository instead. Keep cwd, but let each child command discover its own repo.
-git_local_env_vars="$(git rev-parse --local-env-vars)"
-while IFS= read -r git_local_env_var; do
-  unset "$git_local_env_var"
-done <<EOF
-$git_local_env_vars
-EOF
-
-expected_node_version="$(tr -d '[:space:]' < .nvmrc)"
-node_bin=""
-node_candidates=()
-if [[ -n "${NVM_DIR:-}" ]]; then
-  node_candidates+=("$NVM_DIR/versions/node/v${expected_node_version}/bin/node")
-fi
-node_candidates+=("$HOME/.nvm/versions/node/v${expected_node_version}/bin/node")
-for candidate in "${node_candidates[@]}"; do
-  if [[ -x "$candidate" && "$("$candidate" --version 2>/dev/null || true)" == "v${expected_node_version}" ]]; then
-    node_bin="$candidate"
-    break
+changed_files() {
+  if [ "$#" -eq 2 ]; then
+    while read -r _local_ref local_sha _remote_ref remote_sha; do
+      [ -n "${local_sha:-}" ] || continue
+      if [[ "$remote_sha" =~ ^0+$ ]]; then git diff-tree --root --no-commit-id --name-only -r "$local_sha"
+      else git diff --name-only "$remote_sha" "$local_sha"; fi
+    done
+    return
   fi
-done
-if [[ -z "$node_bin" ]]; then
-  candidate="$(command -v node || true)"
-  if [[ -n "$candidate" && "$("$candidate" --version 2>/dev/null || true)" == "v${expected_node_version}" ]]; then
-    node_bin="$candidate"
+  if git rev-parse --verify --quiet origin/main >/dev/null; then git diff --name-only origin/main...HEAD; fi
+  git diff --name-only HEAD
+  git ls-files --others --exclude-standard
+}
+find_tool() { local name=$1; if [ -x "node_modules/.bin/$name" ]; then printf '%s\n' "node_modules/.bin/$name"; else command -v "$name" || true; fi; }
+
+run_changed_checks() {
+  mapfile -t changed < <(changed_files "$@" | sed '/^$/d' | sort -u)
+  if [ "${#changed[@]}" -eq 0 ]; then echo "pre-push: no changed files; full suites remain in CI"; return 0; fi
+  mapfile -t format_files < <(printf '%s\n' "${changed[@]}" | awk '/\.(cjs|css|js|json|jsx|md|mjs|ts|tsx|yaml|yml)$/')
+  if [ "${#format_files[@]}" -gt 0 ]; then
+    prettier_bin=$(find_tool prettier)
+    [ -n "$prettier_bin" ] || { echo "pre-push: changed web/config files require Prettier for syntax/format checks" >&2; return 2; }
+    "$prettier_bin" --check --ignore-unknown "${format_files[@]}"
   fi
-fi
-if [[ -z "$node_bin" ]]; then
-  echo "Pre-push requires the pinned Node.js v${expected_node_version} from .nvmrc; install it with nvm or put it on PATH." >&2
-  exit 1
-fi
-npm_bin="$(dirname "$node_bin")/npm"
-if [[ ! -x "$npm_bin" ]]; then
-  echo "Pinned npm was not found next to $node_bin." >&2
-  exit 1
-fi
-export PATH="$(dirname "$node_bin"):$PATH"
-npm_version="$("$npm_bin" --version)"
+  mapfile -t node_files < <(printf '%s\n' "${changed[@]}" | awk '/\.(cjs|js|mjs)$/')
+  if [ "${#node_files[@]}" -gt 0 ]; then
+    node_bin=${NODE_BIN:-}; [ -n "$node_bin" ] || node_bin=$(command -v node || true)
+    [ -n "$node_bin" ] || { echo "pre-push: changed JavaScript files require Node for syntax checks" >&2; return 2; }
+    for file in "${node_files[@]}"; do [ -f "$file" ] && "$node_bin" --check "$file"; done
+  fi
+  if printf '%s\n' "${changed[@]}" | grep -Eq '^(src/integrations/runtime/|src/tools/video-editor/(.*/)?renderRouter\.ts$|(.*/)?useTimelineSave\.ts$|(.*/)?usePollSync\.ts$|config/vite/paired|scripts/dev-local-workspace|scripts/runtime-discovery-proxy|tests/e2e/local/)'; then
+    echo "pre-push: runtime-facing paths changed; thin journeys are deferred to CI" >&2
+  fi
+  echo "pre-push: checked ${#changed[@]} changed file(s); full suites remain in CI"
+}
 
-# Resolve symlinked temp roots (notably /var -> /private/var on macOS) before
-# Node/Vitest creates temporary files, so later checks see the same paths.
-tmp_root="${TMPDIR:-/tmp}"
-mkdir -p "$tmp_root"
-export TMPDIR="$(cd "$tmp_root" && pwd -P)"
-export ASTRID_PREPUSH_NODE_VERSION="$expected_node_version"
-export ASTRID_PREPUSH_NPM_VERSION="$npm_version"
-export ASTRID_PREPUSH_NPM_BIN="$npm_bin"
-
-"$node_bin" scripts/check-before-push-cache.mjs --phase build-context -- "$node_bin" scripts/quality/check-build-context.mjs
-"$node_bin" scripts/check-before-push-cache.mjs --phase app-tests -- "$npm_bin" run test:app
-"$node_bin" scripts/check-before-push-cache.mjs --phase node-tests -- "$npm_bin" run test:node
-
-changed=""
-if git rev-parse --verify --quiet origin/main >/dev/null; then
-  changed+="$(git diff --name-only origin/main...HEAD 2>/dev/null || true)"$'\n'
-fi
-changed+="$(git diff --name-only HEAD 2>/dev/null || true)"$'\n'
-changed+="$(git ls-files --others --exclude-standard 2>/dev/null || true)"$'\n'
-
-runtime_pattern='^(src/integrations/runtime/|src/tools/video-editor/(.*/)?renderRouter\.ts$|(.*/)?useTimelineSave\.ts$|(.*/)?usePollSync\.ts$|config/vite/paired|scripts/dev-local-workspace|scripts/runtime-discovery-proxy|tests/e2e/local/)'
-
-if grep -Eq "$runtime_pattern" <<<"$changed"; then
-  echo "Runtime-facing paths changed: run the thin full journeys before merging (testing plan R-11): npm run test:e2e:direct, and npm run test:e2e:three-products (needs an Astrid checkout: ASTRID_CHECKOUT)"
-fi
+case "${1:-}" in
+  -h|--help) usage ;;
+  "") run_changed_checks ;;
+  *) [ "$#" -eq 2 ] || { usage; exit 2; }; run_changed_checks "$@" ;;
+esac

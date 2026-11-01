@@ -12,6 +12,8 @@
 name: Direct Journey
 
 on:
+  push:
+    branches: ['venue/M-VENUE-V-11-THREE-PRODUCTS-1']
   pull_request:
     paths:
       - ".github/workflows/direct-journey.yml"
@@ -27,12 +29,17 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
 
+permissions:
+  contents: write
+  actions: read
+
 concurrency:
   group: direct-journey-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   direct-journey:
+    if: ${{ github.event_name != 'push' }}
     runs-on: ubuntu-24.04
     steps:
       # The harness finds the Runtime at ../astrid-runtime and Agent at ../astrid-agent,
@@ -166,26 +173,35 @@ jobs:
     steps:
       # The harness finds Astrid at ../astrid-agent (ASTRID_CHECKOUT overrides) and the Runtime at ../astrid-runtime,
       # so all three checkouts are siblings under $GITHUB_WORKSPACE.
-      - uses: actions/checkout@v4
+      - id: app_checkout
+        uses: actions/checkout@v4
         with:
+          ref: 2f7ae66b25f2031ac9d28fe87d557e1147b5a074
           path: astrid-app
-      - uses: actions/checkout@v4
+      - id: runtime_checkout
+        uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
-          ref: main
+          ref: 1e6d899efa77a2d6ec247c38250f9748330bb587
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
-      - uses: actions/checkout@v4
+      - id: agent_checkout
+        uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
-          ref: main
+          ref: 020877f12ea490308a9e5f9564c8f4a4bf77ede1
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 
       - name: Record checkout identities
-        id: checkout-identities
+        id: checkout_identities
         shell: bash
         run: |
+          mkdir -p "$RUNNER_TEMP/venue-evidence"
+          git -C astrid-app rev-parse HEAD > "$RUNNER_TEMP/venue-evidence/app-head.txt"
+          git -C astrid-agent rev-parse HEAD > "$RUNNER_TEMP/venue-evidence/agent-head.txt"
+          git -C astrid-runtime rev-parse HEAD > "$RUNNER_TEMP/venue-evidence/runtime-head.txt"
+          cp astrid-agent/runtime.lock.json "$RUNNER_TEMP/venue-evidence/runtime.lock.json"
           printf 'agent_head=%s\n' "$(git -C astrid-agent rev-parse HEAD)" >> "$GITHUB_OUTPUT"
           printf 'runtime_head=%s\n' "$(git -C astrid-runtime rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
@@ -203,15 +219,21 @@ jobs:
           python-version: "3.11"
 
       - name: Build the Runtime venv
+        id: runtime_venv
         working-directory: astrid-runtime
         run: |
+          mkdir -p "$RUNNER_TEMP/venue-evidence/exits"
+          trap 'rc=$?; printf "%s\n" "$rc" > "$RUNNER_TEMP/venue-evidence/exits/runtime_venv.txt"' EXIT
           python -m venv .venv
           .venv/bin/python -m pip install -e .
           .venv/bin/python -m runtime_protocol.cli --help > /dev/null
 
       - name: Build the Astrid venv
+        id: agent_venv
         working-directory: astrid-agent
         run: |
+          mkdir -p "$RUNNER_TEMP/venue-evidence/exits"
+          trap 'rc=$?; printf "%s\n" "$rc" > "$RUNNER_TEMP/venue-evidence/exits/agent_venv.txt"' EXIT
           python -m venv .venv
           .venv/bin/python -m pip install -e .
           # Astrid imports runtime_protocol but does not declare it: the installer puts the Runtime beside it with --no-deps
@@ -222,34 +244,44 @@ jobs:
       # Chrome, not Chromium: the render case plays an H.264 film (the bundled Chromium cannot decode it) and a missing Chrome
       # fails at browser launch. ffmpeg makes the case's real VP8 and Opus media, and the host's ffmpeg renderer makes the render.
       - name: Install App dependencies, Chrome and ffmpeg
+        id: app_dependencies
         working-directory: astrid-app
         run: |
+          mkdir -p "$RUNNER_TEMP/venue-evidence/exits"
+          trap 'rc=$?; printf "%s\n" "$rc" > "$RUNNER_TEMP/venue-evidence/exits/app_dependencies.txt"' EXIT
           npm ci --legacy-peer-deps
           npx playwright install --with-deps chrome
           sudo apt-get install -y --no-install-recommends ffmpeg
 
       - name: Run the three-product journey
+        id: journey
         working-directory: astrid-app
         env:
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
           ASTRID_REQUIRE_LANES: direct-journey
           ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
-          TIMELINE_BUNDLE_AGENT_HEAD: ${{ steps.checkout-identities.outputs.agent_head }}
-          TIMELINE_BUNDLE_RUNTIME_HEAD: ${{ steps.checkout-identities.outputs.runtime_head }}
+          TIMELINE_BUNDLE_AGENT_HEAD: ${{ steps.checkout_identities.outputs.agent_head }}
+          TIMELINE_BUNDLE_RUNTIME_HEAD: ${{ steps.checkout_identities.outputs.runtime_head }}
           # Written by the JSON reporter itself (the globalSetup prints to stdout, so a shell redirect would corrupt the file).
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
           NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+        run: |
+          mkdir -p "$RUNNER_TEMP/venue-evidence/exits"
+          trap 'rc=$?; printf "%s\n" "$rc" > "$RUNNER_TEMP/venue-evidence/exits/journey.txt"' EXIT
+          npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
 
       # Pass rule (R-9, same as the direct journey): no quarantined cases exist for this spec, so every case must pass. Durations are
       # written to three-products-summary.json and recorded, never judged (R-10).
       - name: Check the outcome counts
+        id: counts
         if: ${{ !cancelled() }}
         working-directory: astrid-app
         env:
           REPORT: ${{ runner.temp }}/three-products.json
         run: |
+          mkdir -p "$RUNNER_TEMP/venue-evidence/exits"
+          trap 'rc=$?; printf "%s\n" "$rc" > "$RUNNER_TEMP/venue-evidence/exits/counts.txt"' EXIT
           jq '
             [.. | objects | select(has("expectedStatus") and has("results"))] as $tests
             | {
@@ -290,3 +322,58 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+
+      - name: Capture venue evidence
+        if: ${{ always() && github.event_name == 'push' }}
+        env:
+          STEP_DATA: ${{ toJSON(steps) }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/venue-evidence"
+          printf '%s\n' "$STEP_DATA" > "$RUNNER_TEMP/venue-evidence/steps.json"
+          cp "$RUNNER_TEMP/three-products.json" "$RUNNER_TEMP/venue-evidence/" 2>/dev/null || true
+          if [ -d "$RUNNER_TEMP/three-products-results" ]; then
+            cp -a "$RUNNER_TEMP/three-products-results" "$RUNNER_TEMP/venue-evidence/results"
+          fi
+      - name: Upload venue evidence
+        if: ${{ always() && github.event_name == 'push' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: venue-three-products-evidence
+          path: ${{ runner.temp }}/venue-evidence/
+          if-no-files-found: error
+
+  publish-venue-results:
+    if: ${{ always() && github.event_name == 'push' }}
+    needs: [three-products]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Publish canonical logs, artifacts and Actions identities
+        env:
+          GH_TOKEN: ${{ github.token }}
+          JOB_RESULT: ${{ needs.three-products.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          root="$RUNNER_TEMP/results"
+          dest="$root/runs/$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$dest/artifacts" "$dest/logs"
+          api="$GITHUB_API_URL/repos/$GITHUB_REPOSITORY"
+          auth=(-H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' -H 'X-GitHub-Api-Version: 2022-11-28')
+          curl --fail --silent --show-error --retry 4 "${auth[@]}" "$api/actions/runs/$GITHUB_RUN_ID" > "$dest/run.json"
+          curl --fail --silent --show-error --retry 4 "${auth[@]}" "$api/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs?per_page=100" > "$dest/jobs.json"
+          curl --fail --silent --show-error --retry 4 "${auth[@]}" "$api/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" > "$dest/artifacts.json"
+          jq -n --arg job_result "$JOB_RESULT" --arg workflow_sha "$GITHUB_SHA" --arg run_id "$GITHUB_RUN_ID" --arg attempt "$GITHUB_RUN_ATTEMPT" --arg workflow_ref "$GITHUB_WORKFLOW_REF" '{job_result:$job_result,workflow_sha:$workflow_sha,run_id:$run_id,attempt:$attempt,workflow_ref:$workflow_ref}' > "$dest/identity.json"
+          job_id=$(jq -er '[.jobs[] | select(.name == "three-products")][0].id' "$dest/jobs.json")
+          curl --fail --silent --show-error --location --retry 4 "${auth[@]}" "$api/actions/jobs/$job_id/logs" > "$dest/logs/three-products.log"
+          while IFS=$'\t' read -r id name; do
+            [ -n "$id" ] || continue
+            curl --fail --silent --show-error --location --retry 4 "${auth[@]}" "$api/actions/artifacts/$id/zip" > "$dest/artifacts/$id-$name.zip"
+          done < <(jq -r '.artifacts[] | select(.expired == false) | [.id, .name] | @tsv' "$dest/artifacts.json")
+          (cd "$dest" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS && sha256sum -c SHA256SUMS)
+          git init -q "$root"
+          git -C "$root" config user.name 'github-actions[bot]'
+          git -C "$root" config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git -C "$root" add runs
+          git -C "$root" commit -qm "Record three-products run $GITHUB_RUN_ID attempt $GITHUB_RUN_ATTEMPT"
+          header=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          git -C "$root" -c "http.extraheader=AUTHORIZATION: basic $header" push "https://github.com/$GITHUB_REPOSITORY.git" HEAD:refs/heads/venue-results/M-VENUE-V-11-THREE-PRODUCTS-1

@@ -148,8 +148,25 @@ export class UpdateOperation {
       this.publish({ status: { available: true, state: 'active', operation_id: accepted.operation_id, result: accepted.message } });
     } catch (cause) {
       // Never retry a POST, even when its acknowledgement never arrived.
+      const details = cause instanceof ApiError ? cause.details : null;
+      const reconciliation = cause instanceof ApiError && cause.status === 409 && cause.code === 'conflict'
+        && details?.kind === 'update-reconciliation';
+      const resultId = details?.operation_id;
+      const outcome = details?.outcome;
+      if (reconciliation && typeof resultId === 'string' && /^[0-9a-f]{32}$/.test(resultId)
+        && (resultId === this.operationId || (!this.operationId && resultId === this.acknowledgementBaseline))
+        && (details?.disposition === 'recovered-this-request' || details?.disposition === 'confirmed-prior')
+        && (outcome === 'updated' || outcome === 'rolled_back' || outcome === 'failed')
+        && details?.confirmed === true && details?.blocker === 'cleared'
+        && details?.new_admission === false && details?.next_action === 'observe') {
+        this.operationId = resultId;
+        this.uncertain = false;
+        this.publish({ status: { available: false, state: 'terminal', operation_id: resultId, outcome,
+          result: cause.message.replace(/^conflict: /, '') }, pending: false, fresh: false, error: null });
+        return;
+      }
       const definiteRefusal = cause instanceof ApiError && cause.status >= 400 && cause.status < 500
-        && !String(cause.details?.reason).includes('acknowledgement-unknown');
+        && !reconciliation && !String(cause.details?.reason).includes('acknowledgement-unknown');
       this.uncertain = !definiteRefusal;
       const error = UPDATE_START_UNAVAILABLE;
       if (definiteRefusal) this.refusal = error;

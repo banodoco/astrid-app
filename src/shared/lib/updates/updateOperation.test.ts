@@ -93,6 +93,35 @@ describe('UpdateOperation', () => {
     expect(client.startInstallerUpdate).toHaveBeenCalledTimes(2);
   });
 
+  it('shows a validated recovery-only result while waiting for a fresh observation', async () => {
+    const id = 'a'.repeat(32);
+    const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: id };
+    const error = new ApiError(409, 'conflict', 'Recovered your previous version — run Update again', 'req', {
+      kind: 'update-reconciliation', disposition: 'recovered-this-request', operation_id: id,
+      outcome: 'rolled_back', confirmed: true, blocker: 'cleared', new_admission: false, next_action: 'observe',
+    });
+    const { operation, client } = makeOperation({ statuses: [recovery, new Error('offline')], start: async () => { throw error; } });
+    await operation.refresh();
+    await operation.start(() => true);
+    expect(operation.getSnapshot()).toMatchObject({ pending: false, fresh: false, status: {
+      state: 'terminal', operation_id: id, outcome: 'rolled_back', result: 'Recovered your previous version — run Update again',
+    } });
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('does not settle an unrelated recovery-only result', async () => {
+    const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: 'a'.repeat(32) };
+    const error = new ApiError(409, 'conflict', 'Recovered.', 'req', {
+      kind: 'update-reconciliation', disposition: 'recovered-this-request', operation_id: 'b'.repeat(32),
+      outcome: 'rolled_back', confirmed: true, blocker: 'cleared', new_admission: false, next_action: 'observe',
+    });
+    const { operation, client } = makeOperation({ statuses: [recovery, new Error('offline')], start: async () => { throw error; } });
+    await operation.refresh();
+    await operation.start(() => true);
+    expect(operation.getSnapshot()).toMatchObject({ pending: true, fresh: false, status: recovery });
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+  });
+
   it('does not settle a lost acknowledgement with a read started before the click', async () => {
     const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: 'a'.repeat(32) };
     let resolveOld!: (status: InstallerUpdateStatus) => void;

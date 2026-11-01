@@ -1,0 +1,22 @@
+{
+  "repos": {
+    "banodoco/astrid-app": "d8b6985d664cb92a92d9001e1952c88e370aca2b"
+  },
+  "gpu": false,
+  "cpu": {
+    "vcpu": 8
+  },
+  "max_minutes": 25,
+  "setup": [
+    "mkdir -p /workspace/out/I-AP-04-R1-R1-baseline && cd /workspace/astrid-app && git rev-parse HEAD | tee /workspace/out/I-AP-04-R1-R1-baseline/head.txt && test \"$(git rev-parse HEAD)\" = d8b6985d664cb92a92d9001e1952c88e370aca2b",
+    "cd /workspace/astrid-app && npm ci --cache /tmp/i-ap-04-r1-r1-npm-cache"
+  ],
+  "run": [
+    "cd /workspace/astrid-app\nset -o pipefail\n./node_modules/.bin/vitest run --config config/testing/vitest.config.ts --maxWorkers=1 src/tools/video-editor/components/AgentChat/AgentChatMenu.test.tsx --reporter=verbose --reporter=json --outputFile.json=/workspace/out/I-AP-04-R1-R1-baseline/vitest.json 2>&1 | tee /workspace/out/I-AP-04-R1-R1-baseline/vitest.log\ncode=${PIPESTATUS[0]}\nprintf \"%s\\n\" \"$code\" > /workspace/out/I-AP-04-R1-R1-baseline/test-exit-code.txt\nexit \"$code\""
+  ],
+  "artifacts": [
+    "/workspace/out/I-AP-04-R1-R1-baseline"
+  ],
+  "task_id": "I-AP-04-R1-R1",
+  "notes": "Baseline retry only; preserve actual results even on failure. Test checkout is pinned independently of request branch."
+}

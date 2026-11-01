@@ -1,0 +1,7 @@
+{
+  "job_result": "failure",
+  "workflow_sha": "47b7255706a3cb463cd878ce1f41f67cfc25c2e0",
+  "run_id": "41346522198",
+  "attempt": "1",
+  "workflow_ref": "banodoco/astrid-app/.github/workflows/direct-journey.yml@refs/heads/venue/M-VENUE-V-11-THREE-PRODUCTS-1"
+}

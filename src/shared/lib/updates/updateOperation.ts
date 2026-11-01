@@ -22,8 +22,10 @@ export function installerUpdateReasonOf(status: InstallerUpdateStatus | null | u
 }
 
 export function canStartInstallerUpdate(status: InstallerUpdateStatus | null | undefined): boolean {
+  if (!status || status.state === 'active') return false;
+  if (status.state === 'recovery-needed') return /^[0-9a-f]{32}$/.test(status.operation_id ?? '');
   const refusal = installerUpdateReasonOf(status);
-  return Boolean(status && (status.state === 'recovery-needed' || (status.available && !refusal)));
+  return Boolean(status.available && !refusal);
 }
 
 /** Translate the Runtime's transaction vocabulary into a status a person can act on. */
@@ -120,8 +122,6 @@ export class UpdateOperation {
   start = async (): Promise<void> => {
     const previous = this.snapshot.status;
     if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !previous || !canStartInstallerUpdate(previous)) return;
-    // An unresolved operation without its identity cannot be continued safely.
-    if (previous.state === 'recovery-needed' && !/^[0-9a-f]{32}$/.test(previous.operation_id ?? '')) return;
     this.posting = true;
     this.refusal = null;
     this.operationId = previous.state === 'recovery-needed' ? previous.operation_id ?? null : null;

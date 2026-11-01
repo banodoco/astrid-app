@@ -93,6 +93,18 @@ describe('UpdateOperation', () => {
     expect(client.startInstallerUpdate).toHaveBeenCalledTimes(2);
   });
 
+  it('does not use a click captured before recovery was observed', async () => {
+    const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: 'a'.repeat(32) };
+    const { operation, client } = makeOperation({ statuses: [NONE, recovery, recovery] });
+    await operation.refresh();
+    const oldClick = operation.captureAction();
+    await operation.refresh();
+    await operation.start(() => true, oldClick);
+    expect(client.startInstallerUpdate).not.toHaveBeenCalled();
+    await operation.start(() => true, operation.captureAction());
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+  });
+
   it('shows a validated recovery-only result while waiting for a fresh observation', async () => {
     const id = 'a'.repeat(32);
     const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: id };

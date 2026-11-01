@@ -39,6 +39,10 @@ import { RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { connectionFor } from './connectionFixture.ts';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
+import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
+import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
+import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 
 const connection = () => ({ isConnected: true, managedByPinokio: false } as RuntimeConnectionValue);
 const calls = () => vi.mocked(fetch).mock.calls.map(([input, init]) => ({ url: String(input), method: init?.method ?? 'GET', body: init?.body }));
@@ -101,6 +105,58 @@ afterEach(() => {
 });
 
 describe('installer update callers', () => {
+  it('requires a newly saved click after each lost continuation acknowledgement', async () => {
+    const id = '0123456789abcdef0123456789abcdef';
+    harness.statusState = 'recovery-needed';
+    harness.operationId = id;
+    let releaseOld!: () => void;
+    const oldSave = new Promise<void>((resolve) => { releaseOld = resolve; });
+    const events: string[] = [];
+    let saves = 0;
+    const unregister = registerDraftSafeReloadGuard({ label: 'draft', isDirty: () => false, flush: async () => {
+      const save = ++saves;
+      events.push(`save-${save}-start`);
+      if (save === 1) await oldSave;
+      events.push(`save-${save}-done`);
+    } });
+    const original = vi.mocked(fetch).getMockImplementation()!;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      if (String(input).endsWith('/v1/update') && init?.method === 'POST') {
+        events.push('post');
+        throw new TypeError('lost continuation acknowledgement');
+      }
+      return original(input, init);
+    }));
+    function Surface() {
+      const operation = useInstallerUpdate(connection());
+      return <UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: true })} operation={operation} />;
+    }
+    const posts = () => calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST');
+    try {
+      render(<><Surface /><Surface /></>);
+      await waitFor(() => expect(screen.getAllByRole('button', { name: 'Update' })).toHaveLength(2));
+      fireEvent.click(screen.getAllByRole('button', { name: 'Update' })[0]);
+      await waitFor(() => expect(events).toContain('save-1-start'));
+      fireEvent.click(screen.getAllByRole('button', { name: 'Update' })[1]);
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      await waitFor(() => expect(screen.getAllByText('Astrid needs recovery. Select Update to check the previous operation before continuing.').length).toBeGreaterThan(0));
+      await act(async () => { releaseOld(); await oldSave; });
+      await act(async () => { fireEvent.focus(window); });
+      expect(posts()).toHaveLength(1);
+      expect(events.indexOf('save-2-done')).toBeLessThan(events.indexOf('post'));
+      fireEvent.click(screen.getAllByRole('button', { name: 'Update' })[0]);
+      await waitFor(() => expect(posts()).toHaveLength(2));
+      await waitFor(() => expect(screen.getAllByText('Astrid needs recovery. Select Update to check the previous operation before continuing.').length).toBeGreaterThan(0));
+      await act(async () => { fireEvent.focus(window); });
+      expect(posts()).toHaveLength(2);
+      expect(events).toEqual(['save-1-start', 'save-2-start', 'save-2-done', 'post', 'save-1-done', 'save-3-start', 'save-3-done', 'post']);
+      expect(harness.operationId).toBe(id);
+      expect(posts().every((post) => post.body === undefined)).toBe(true);
+    } finally {
+      unregister();
+    }
+  });
+
   it('removes execution after permission/auth loss and keeps both command options', async () => {
     const view = render(<AstridUpdatesSection isOpen />);
     const staleButton = await screen.findByRole('button', { name: 'Update now' });

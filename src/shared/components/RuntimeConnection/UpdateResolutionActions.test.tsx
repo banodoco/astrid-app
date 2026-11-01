@@ -14,7 +14,7 @@ const installerResolutions = [
 ] as const;
 
 function installerOperation(start = vi.fn(async () => undefined)): InstallerUpdateView {
-  return { available: true, pending: false, start } as unknown as InstallerUpdateView;
+  return { available: true, pending: false, captureAction: () => 0, start } as unknown as InstallerUpdateView;
 }
 
 function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>) {

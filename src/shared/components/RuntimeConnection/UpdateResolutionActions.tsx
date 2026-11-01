@@ -28,8 +28,11 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
   const execute = actions.find((action) => action.execute === 'installer-update');
   const localCommand = actions.find((action) => action.label === RUN_IT_YOURSELF_ACTION)?.command;
   const startUpdate = async () => {
+    if (!operation) return;
+    // A save can outlive another surface's update and recovery observation.
+    const actionEpoch = operation.captureAction();
     const validate = await guarded.flush();
-    if (validate) await operation?.start(validate);
+    if (validate) await operation.start(validate, actionEpoch);
   };
 
   return <div className="space-y-2">

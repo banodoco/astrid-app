@@ -57,9 +57,11 @@ export class UpdateOperation {
   private releaseIdentity: string | null = null;
   private acknowledgementBaseline: string | undefined;
   private readEpoch = 0;
+  private actionEpoch = 0;
   private refusal: string | null = null;
   constructor(private readonly client = new AstridRuntimeClient()) {}
   getSnapshot = () => this.snapshot;
+  captureAction = () => this.actionEpoch;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(patch: Partial<UpdateOperationSnapshot>) {
     this.snapshot = { ...this.snapshot, ...patch };
@@ -113,15 +115,18 @@ export class UpdateOperation {
         this.uncertain = false;
       }
       const pending = this.posting || status.state === 'active';
+      // A click saved for a different observed operation or phase cannot
+      // authorize an action on a newly observed recovery state.
+      if (status.state !== this.snapshot.status?.state || status.operation_id !== this.snapshot.status?.operation_id) this.actionEpoch += 1;
       this.publish({ health, status, pending, fresh: true, error: this.refusal });
     } catch {
       if (epoch !== this.readEpoch) return;
       this.publish({ fresh: false, error: UPDATE_STATUS_UNAVAILABLE });
     }
   }
-  start = async (validateDrafts: () => boolean): Promise<void> => {
+  start = async (validateDrafts: () => boolean, actionEpoch = this.actionEpoch): Promise<void> => {
     const previous = this.snapshot.status;
-    if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !previous || !canStartInstallerUpdate(previous)) return;
+    if (actionEpoch !== this.actionEpoch || this.posting || this.snapshot.pending || !this.snapshot.fresh || !previous || !canStartInstallerUpdate(previous)) return;
     this.posting = true;
     this.publish({ pending: true, error: null });
     // Publishing can invoke subscribers synchronously. Recheck after it and
@@ -137,6 +142,7 @@ export class UpdateOperation {
     this.operationId = previous.state === 'recovery-needed' ? previous.operation_id ?? null : null;
     this.acknowledgementBaseline = previous.state === 'terminal' ? previous.operation_id : undefined;
     // Reads started before the click cannot establish what happened after it.
+    this.actionEpoch += 1;
     this.readEpoch += 1;
     try {
       const accepted = await this.client.startInstallerUpdate();

@@ -59,7 +59,7 @@ beforeEach(() => {
     if (url.endsWith('/v1/health')) body = { status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test',
       runtime_instance_id: 'strict-runtime', runtime_session_id: 'session', runtime_epoch: 1, release: 3, identity: { managed_by: null, release: 3 } };
     else if (url.endsWith('/v1/update/status')) body = { available: true, state: runtimeState,
-      ...(runtimeState === 'active' ? { operation_id: '0123456789abcdef0123456789abcdef' } : {}) };
+      ...(runtimeState === 'active' || runtimeState === 'recovery-needed' ? { operation_id: '0123456789abcdef0123456789abcdef' } : {}) };
     else if (url.endsWith('/v1/update') && init?.method === 'POST') {
       updatePosts.push(init); runtimeState = 'active';
       body = { accepted: true, state: 'accepted', operation_id: '0123456789abcdef0123456789abcdef', message: 'Update accepted.' };

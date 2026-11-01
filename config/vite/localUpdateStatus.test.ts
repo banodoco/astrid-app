@@ -117,8 +117,14 @@ describe('local update status endpoint boundary', () => {
       expect(offline).toEqual(unavailable('upstream_fetch'));
       expect(offline.rawBody).not.toContain('very-secret-token');
 
-      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ app: 'not-a-commit', release: 3 }), { status: 200 })));
-      expect(await run()).toEqual(unavailable('served_manifest_validation'));
+      vi.stubGlobal('fetch', vi.fn(async (input: unknown) => new Response(JSON.stringify(
+        String(input) === 'https://astrid.haus/build.json'
+          ? { app: '0000000000000000000000000000000000000000', release: 3 }
+          : { release: 2, required: { release: 'credential-path-token', reason: 'invalid' } },
+      ), { status: 200 })));
+      const invalidServedManifest = await run();
+      expect(invalidServedManifest).toEqual(unavailable('served_manifest_validation'));
+      expect(invalidServedManifest.rawBody).not.toContain('credential-path-token');
 
       vi.stubGlobal('fetch', vi.fn(async (input: unknown) => new Response(JSON.stringify(
         String(input) === 'https://astrid.haus/build.json'

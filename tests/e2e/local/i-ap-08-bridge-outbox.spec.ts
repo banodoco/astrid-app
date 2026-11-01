@@ -13,9 +13,9 @@ import path from 'node:path';
 import { commandOutboxes, dragTimelineClip, expectConnected, holdCommandRequests, openApp, openSeededTimeline, test as appTest } from './support/app.ts';
 import { harnessUnavailableReason, RUNTIME_CHECKOUT, type DirectHarness } from './support/harness.ts';
 
-const RUNTIME_SHA = '1a275bb339ae897e52a5be5e1da99e846e402037';
-const AGENT_SHA = 'ddd5d278796641901bd11508863a8ea21e6c9697';
-const APP_SHA = '0c36714a267b1d65b2e10adda1c7ff22c4500a66';
+const RUNTIME_SHA = '47e5949465cb6f3afdfd1cb8a0e90009fd9d4020';
+const AGENT_SHA = 'af5ae8afdb9829beb2bba4f811dbe97765bd72b2';
+const APP_SHA = 'a55bec9ff384b5bbfee5535962880084ab2adb1b';
 const INSTALL_OWNER = 'haus.astrid.runtime';
 const RECOVERY_OPERATION = 'a'.repeat(32);
 const CEILING = { timeout: 60_000 };

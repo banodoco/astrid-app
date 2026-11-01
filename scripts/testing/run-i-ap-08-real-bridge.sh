@@ -2,9 +2,9 @@
 # I-AP-08: exact-published-tuple browser bridge/outbox proof.
 set -euo pipefail
 
-readonly APP_SHA='0c36714a267b1d65b2e10adda1c7ff22c4500a66'
-readonly RUNTIME_SHA='1a275bb339ae897e52a5be5e1da99e846e402037'
-readonly AGENT_SHA='ddd5d278796641901bd11508863a8ea21e6c9697'
+readonly APP_SHA='a55bec9ff384b5bbfee5535962880084ab2adb1b'
+readonly RUNTIME_SHA='47e5949465cb6f3afdfd1cb8a0e90009fd9d4020'
+readonly AGENT_SHA='af5ae8afdb9829beb2bba4f811dbe97765bd72b2'
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app_root="$(cd -- "$script_dir/../.." && pwd)"

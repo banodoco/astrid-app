@@ -29,7 +29,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: direct-journey-${{ github.ref }}
+  group: direct-journey-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:

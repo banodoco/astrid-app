@@ -235,7 +235,10 @@ describe('installer update callers', () => {
     ['Pinokio managed', () => { harness.connection = { isConnected: true, managedByPinokio: true }; }],
     ['source managed', () => { harness.manager = 'source'; }],
     ['launcher unavailable', () => { harness.statusAvailable = false; }],
-    ['recovery required', () => { harness.statusState = 'recovery-needed'; }],
+    ['recovery required', () => {
+      harness.statusState = 'recovery-needed';
+      harness.operationId = '0123456789abcdef0123456789abcdef';
+    }],
   ])('respects installer action availability and explicit recovery Update when %s', async (_label, configure) => {
     configure();
     render(<AstridUpdatesSection isOpen />);

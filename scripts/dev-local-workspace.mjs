@@ -71,6 +71,12 @@ const ENGINE_CHANGED = pinokioManaged
   ? 'Astrid changed on this computer. Stop and start Astrid in Pinokio.'
   : `Astrid changed on this computer. Restart its engine: ${runtimeUpCommand}`;
 const CANT_START = "Astrid can't start with the setup on this computer.";
+// The browser client accepts this published additive workspace.v1 contract as
+// well as the generated schema and the legacy transition list below. Keep the
+// plain-Node local launcher on the same compatibility policy.
+const PAGE_COMPATIBLE_RUNTIME_SCHEMA_DIGESTS = [
+  'sha256:a36913ece941dce500344487aec682ce692411a4922c0382afc380b6caa959e0',
+];
 
 /**
  * One friendly line, then one `Details:` line with the technical message. Returns null so callers can `return fail(...)`.
@@ -447,7 +453,8 @@ async function verifyRuntime(endpoint, token, expectedIdentity, allowStart = fal
     if (health?.runtime_instance_id !== expectedIdentity.runtimeInstanceId) {
       return fail(ENGINE_CHANGED, 'Runtime health instance does not match the selected Astrid profile');
     }
-    const acceptedSchemaDigests = [expectedSchemaDigest, ...LEGACY_RUNTIME_SCHEMA_DIGESTS];
+    const acceptedSchemaDigests = [expectedSchemaDigest, ...LEGACY_RUNTIME_SCHEMA_DIGESTS,
+      ...PAGE_COMPATIBLE_RUNTIME_SCHEMA_DIGESTS];
     const digestError = schemaDigestMismatch(health?.schema_digest, acceptedSchemaDigests);
     if (digestError) return incompatible(health, 'runtime schema digest mismatch');
 
@@ -627,10 +634,15 @@ const doorPort = hostedOrigin && !checkOnly && !buildOnly ? requireDoor(discover
 if (hostedOrigin && !checkOnly && !buildOnly && !doorPort) exit(1);
 if (paired && !pairedRelayOrigin) exit(fail(CANT_START, '--paired requires ASTRID_APP_PAIRED_RELAY_ORIGIN') ? 1 : 1);
 
-const runtimeProxyPort = process.env.VITE_ASTRID_DYNAMIC_PROXY_PORT?.trim() || '17336';
-if (!/^\d+$/.test(runtimeProxyPort) || Number(runtimeProxyPort) < 1 || Number(runtimeProxyPort) > 65535) {
+const configuredRuntimeProxyPort = process.env.VITE_ASTRID_DYNAMIC_PROXY_PORT?.trim();
+if (configuredRuntimeProxyPort && (!/^\d+$/.test(configuredRuntimeProxyPort)
+  || Number(configuredRuntimeProxyPort) < 1 || Number(configuredRuntimeProxyPort) > 65535)) {
   exit(fail(CANT_START, 'VITE_ASTRID_DYNAMIC_PROXY_PORT must be an integer from 1 to 65535') ? 1 : 1);
 }
+// Builds and checks do not launch the discovery proxy, so use the already-verified
+// Runtime endpoint there. A live local launch lets the proxy ask the OS for an
+// available loopback port.
+let runtimeProxyPort = configuredRuntimeProxyPort || (checkOnly || buildOnly ? endpoint.port : null);
 
 /** Resolves true once something listens on the port, false at the deadline or when `aborted()` turns true. */
 function waitForPort(portValue, timeoutMs = 3000, aborted = () => false) {
@@ -665,15 +677,12 @@ const env = {
   ...(configuredAstridPublicCheckout ? { ASTRID_PUBLIC_CHECKOUT: configuredAstridPublicCheckout } : {}),
   PORT: port,
   ASTRID_RUNTIME_OPERATION_ORIGIN: `http://127.0.0.1:${port}`,
-  VITE_ASTRID_BRIDGE_PORT: runtimeProxyPort,
-  VITE_ASTRID_ACP_BRIDGE_PORT: runtimeProxyPort,
   ASTRID_ACP_VIA_DISCOVERY_PROXY: '1',
   ASTRID_BRIDGE_TOKEN: credential.token,
   // The editor's RuntimeDataProvider talks to `/api/runtime`, which is a
   // separate Vite proxy from the historical `/api/astrid` bridge. Keep the
   // Runtime endpoint and credential server-side so the browser never sees the
   // owner token.
-  VITE_WORKSPACE_RUNTIME_URL: `http://127.0.0.1:${runtimeProxyPort}`,
   WORKSPACE_RUNTIME_TOKEN_FILE: credentialPath,
   // Fallback for builds without a live workspace config endpoint. Local preview
   // refreshes these non-secret identifiers from discovery on each page load.
@@ -682,6 +691,13 @@ const env = {
   VITE_WORKSPACE_RUNTIME_EXPECTED_INSTANCE_ID: expectedIdentity.runtimeInstanceId,
   ASTRID_LOCAL_COMPOSE_URL: `http://127.0.0.1:${port}/api/astrid/generation/compose`,
 };
+const setRuntimeProxyPort = (selectedPort) => {
+  env.VITE_ASTRID_DYNAMIC_PROXY_PORT = selectedPort;
+  env.VITE_ASTRID_BRIDGE_PORT = selectedPort;
+  env.VITE_ASTRID_ACP_BRIDGE_PORT = selectedPort;
+  env.VITE_WORKSPACE_RUNTIME_URL = `http://127.0.0.1:${selectedPort}`;
+};
+if (runtimeProxyPort) setRuntimeProxyPort(runtimeProxyPort);
 
 const healthyLine = `workspace.v1 runtime healthy at ${endpoint.origin}; Astrid App will use ${launcherOptions.preview ? `preview output ${previewDirectory} on port ${port}` : `port ${port}`}`;
 if (checkOnly) {
@@ -723,6 +739,11 @@ if (port !== '0' && await waitForPort(port, 0)) {
   }
   if (holder === 'other_astrid') exit(fail(OTHER_ASTRID_RUNNING, `port ${port} is in use by Astrid's app for another realm`) ? 1 : 1);
   exit(fail(PROGRAM_IN_THE_WAY, `port ${port} is in use`) ? 1 : 1);
+}
+// An explicit integration override must be available before the launcher
+// prints its Open block or starts the proxy, connector, or Vite.
+if (runtimeProxyPort && await waitForPort(runtimeProxyPort, 0)) {
+  exit(fail(PROGRAM_IN_THE_WAY, `VITE_ASTRID_DYNAMIC_PROXY_PORT ${runtimeProxyPort} is already in use on 127.0.0.1. Close the program using it, or unset VITE_ASTRID_DYNAMIC_PROXY_PORT to let Astrid choose a free loopback port.`) ? 1 : 1);
 }
 if (interrupted) exit(130);
 
@@ -780,15 +801,29 @@ let connector;
 // only the hosted origin.
 const runtimeProxy = spawnService(process.execPath, ['scripts/runtime-discovery-proxy.mjs'], {
   stdio: piped,
-  env: serviceEnvironment({ ASTRID_RUNTIME_PROXY_PORT: runtimeProxyPort, ASTRID_WORKSPACE_DISCOVERY: discoveryPath }),
+  env: serviceEnvironment({ ASTRID_RUNTIME_PROXY_PORT: runtimeProxyPort ?? '0', ASTRID_WORKSPACE_DISCOVERY: discoveryPath }),
 });
-const proxyOutput = watch(runtimeProxy);
-const proxyReady = await waitForPort(runtimeProxyPort);
+let announceProxyPort;
+const proxyPortAnnouncement = runtimeProxyPort ? null : new Promise((resolvePort) => { announceProxyPort = resolvePort; });
+const proxyOutput = watch(runtimeProxy, (line) => {
+  const match = /^Runtime discovery proxy listening on 127\.0\.0\.1:(\d+)$/.exec(line);
+  if (match && announceProxyPort) announceProxyPort(match[1]);
+});
+let proxyAnnouncementTimeout;
+if (!runtimeProxyPort) {
+  const timeout = new Promise((resolvePort) => {
+    proxyAnnouncementTimeout = setTimeout(() => resolvePort(null), 3000);
+  });
+  runtimeProxyPort = await Promise.race([proxyPortAnnouncement, timeout]);
+  clearTimeout(proxyAnnouncementTimeout);
+}
+const proxyReady = runtimeProxyPort && await waitForPort(runtimeProxyPort);
 if (interrupted) exit(130);
 if (!proxyReady) {
   flushHeld();
-  exit(fail(COULDNT_START, `runtime discovery proxy did not start on port ${runtimeProxyPort}${withLast(proxyOutput)}`) ? 1 : 1);
+  exit(fail(COULDNT_START, `runtime discovery proxy did not select a port${runtimeProxyPort ? ` (${runtimeProxyPort})` : ''}${withLast(proxyOutput)}`) ? 1 : 1);
 }
+setRuntimeProxyPort(runtimeProxyPort);
 if (hostedOrigin) technical(`browser door ${discovery.door_endpoint} for ${hostedOrigin}`);
 if (paired) {
   const invocation = packageManagerInvocation('npx', ['tsx', 'scripts/astrid-local-connector.ts', '--discovery', discoveryPath, '--relay-origin', pairedRelayOrigin, ...(resetPairing ? ['--reset-pairing'] : [])], { env });

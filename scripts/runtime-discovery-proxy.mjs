@@ -6,7 +6,7 @@ import { dirname, resolve } from 'node:path';
 import { objectCacheControl } from '../config/vite/objectCachePolicy.mjs';
 
 const discoveryPath = process.env.ASTRID_WORKSPACE_DISCOVERY?.trim();
-const port = Number(process.env.ASTRID_RUNTIME_PROXY_PORT ?? '17336');
+const requestedPort = process.env.ASTRID_RUNTIME_PROXY_PORT?.trim() || '0';
 // Connecting to the loopback Runtime is near-instant, so a long wait is a real failure.
 // Once connected, only silence is an error: media streams may take as long as they keep
 // producing bytes (same idea as the paired relay's idle timeout).
@@ -352,7 +352,7 @@ export function createRuntimeProxyServer({
   const server = createServer((incoming, response) => {
   if (incoming.url?.includes(OPERATION_PREFIX) || incoming.headers[HANDLE_HEADER] !== undefined) {
     void (async () => {
-      if (!operationRequestAllowed(incoming, allowedOrigin, expectedHost)) {
+      if (!operationRequestAllowed(incoming, allowedOrigin, typeof expectedHost === 'function' ? expectedHost() : expectedHost)) {
         writeFailure(response, operationFailure(403, 'operation_origin_forbidden')); return;
       }
       const target = operationTarget(incoming.url);
@@ -484,15 +484,25 @@ export function createRuntimeProxyServer({
 
 const isMain = process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1];
 if (isMain) {
-const server = createRuntimeProxyServer({ discoveryPath,
-  allowedOrigin: process.env.ASTRID_RUNTIME_OPERATION_ORIGIN,
-  expectedHost: `127.0.0.1:${port}` });
-server.on('error', (error) => {
-  console.error(`runtime discovery proxy failed: ${error.message}`);
-  process.exitCode = 1;
-});
+  const port = Number(requestedPort);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    console.error('runtime discovery proxy failed: ASTRID_RUNTIME_PROXY_PORT must be an integer from 0 to 65535');
+    process.exitCode = 1;
+  } else {
+    let listeningPort = port;
+    const server = createRuntimeProxyServer({ discoveryPath,
+      allowedOrigin: process.env.ASTRID_RUNTIME_OPERATION_ORIGIN,
+      expectedHost: () => `127.0.0.1:${listeningPort}` });
+    server.on('error', (error) => {
+      if (error.code === 'EADDRINUSE') {
+        console.error(`runtime discovery proxy failed: port ${port} is already in use on 127.0.0.1. Close the program using it, or choose another ASTRID_RUNTIME_PROXY_PORT.`);
+      } else console.error(`runtime discovery proxy failed: ${error.message}`);
+      process.exitCode = 1;
+    });
 
-server.listen(port, '127.0.0.1', () => {
-  console.log(`Runtime discovery proxy listening on 127.0.0.1:${port}`);
-});
+    server.listen(port, '127.0.0.1', () => {
+      listeningPort = server.address().port;
+      console.log(`Runtime discovery proxy listening on 127.0.0.1:${listeningPort}`);
+    });
+  }
 }

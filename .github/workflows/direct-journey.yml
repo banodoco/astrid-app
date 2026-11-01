@@ -14,27 +14,53 @@ name: Direct Journey
 
 on:
   pull_request:
-    paths:
-      - ".github/workflows/direct-journey.yml"
-      - "scripts/runtime-discovery-proxy.mjs"
-      - "scripts/dev-local-workspace*"
-      - "src/integrations/runtime/**"
-      - "src/shared/lib/media/**"
-      - "tests/e2e/local/**"
-      - "tests/e2e/support/**"
-      - "playwright.direct.config.ts"
-      - "playwright.three-products.config.ts"
   merge_group:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  changes:
+    name: Direct Journey / Select affected paths
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.paths.outputs.docs }}
+      typescript: ${{ steps.paths.outputs.typescript }}
+      appui: ${{ steps.paths.outputs.appui }}
+    steps:
+      - id: paths
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            // An absent output means run everything. Never trust a partial file list.
+            const {owner, repo} = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const pr = await github.rest.pulls.get({owner, repo, pull_number});
+            const count = pr.data.changed_files;
+            if (!Number.isInteger(count) || count < 1 || count >= 3000) return;
+            const files = await github.paginate(github.rest.pulls.listFiles,
+              {owner, repo, pull_number, per_page: 100});
+            if (files.length !== count || files.some(f =>
+              !['added', 'modified'].includes(f.status) || typeof f.filename !== 'string')) return;
+            const paths = files.map(f => f.filename);
+            core.setOutput('docs', String(paths.every(p =>
+              p === 'README.md' || /^docs\/.*\.md$/i.test(p))));
+            core.setOutput('typescript', String(paths.every(p => p.startsWith('packages/typescript/'))));
+            core.setOutput('appui', String(paths.every(p =>
+              p.startsWith('src/features/') || p.startsWith('src/pages/'))));
   direct-journey:
+    needs: changes
+    if: ${{ always() && (github.event_name != 'pull_request' || (needs.changes.outputs.docs != 'true' && needs.changes.outputs.appui != 'true')) }}
     runs-on: ubuntu-latest
     steps:
       # The harness finds the Runtime at ../astrid-runtime (ASTRID_RUNTIME_CHECKOUT overrides),
@@ -133,10 +159,12 @@ jobs:
   # Until the Astrid branch carrying astrid/core/dev/cross_client.py (tidy-w2) merges to its main, this job checks out an Astrid
   # without that module, so any PR touching tests/e2e/local/** (or the paths above) is red here until that merge.
   three-products:
+    needs: changes
+    if: ${{ always() && (github.event_name != 'pull_request' || (needs.changes.outputs.docs != 'true' && needs.changes.outputs.appui != 'true')) }}
     runs-on: ubuntu-latest
     concurrency:
-      group: three-products-${{ github.ref }}
-      cancel-in-progress: true
+      group: three-products-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       # The harness finds Astrid at ../astrid-agent (ASTRID_CHECKOUT overrides) and the Runtime at ../astrid-runtime,
       # so all three checkouts are siblings under $GITHUB_WORKSPACE.
@@ -245,3 +273,29 @@ jobs:
           name: three-products-traces
           path: ${{ runner.temp }}/three-products-results/
           if-no-files-found: ignore
+
+  pr-gate:
+    name: Direct Journey / PR aggregate
+    if: ${{ always() }}
+    needs: [changes, direct-journey, three-products]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify selected jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          needs = json.loads(os.environ['RESULTS'])
+          outputs = needs['changes'].get('outputs', {})
+          is_pr = os.environ['EVENT'] == 'pull_request'
+          classes = {'direct-journey': 'appui', 'three-products': 'appui'}
+          for job, special in classes.items():
+              skipped = is_pr and (outputs.get('docs') == 'true' or
+                                    (special and outputs.get(special) == 'true'))
+              expected = 'skipped' if skipped else 'success'
+              result = needs[job]['result']
+              if result != expected:
+                  raise SystemExit(f"{job}: expected {expected}, got {result}")
+          PYCODE

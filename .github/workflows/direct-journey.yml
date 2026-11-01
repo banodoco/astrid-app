@@ -236,6 +236,7 @@ jobs:
         working-directory: astrid-app
         run: |
           npm ci --legacy-peer-deps
+          npx playwright install --with-deps chromium
           npx playwright install --with-deps chrome
           sudo apt-get install -y --no-install-recommends ffmpeg
 

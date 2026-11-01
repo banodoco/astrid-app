@@ -4,7 +4,7 @@
 // evaluates the condition here. A condition checks the one thing it names and rethrows anything else, so an
 // unrelated error is a failing test and never a declared skip.
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { accessSync, constants as fsConstants, existsSync, mkdtempSync, rmSync, statSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -13,11 +13,47 @@ const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..
 
 /** Where the direct journey finds the sibling Runtime checkout and the production build. */
 export const RUNTIME_CHECKOUT = path.resolve(process.env.ASTRID_RUNTIME_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-runtime'));
+export const AGENT_CHECKOUT = path.resolve(process.env.ASTRID_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-agent'));
 export const DIST_DIR = path.resolve(process.env.ASTRID_APP_DIRECT_DIST ?? path.join(REPO_ROOT, 'dist'));
+
+function isExecutableFile(candidate) {
+  try {
+    accessSync(candidate, fsConstants.X_OK);
+    return statSync(candidate).isFile();
+  } catch {
+    return false;
+  }
+}
+
+export function authoringPythonPath() {
+  return path.resolve(process.env.ASTRID_PYTHON ?? path.join(AGENT_CHECKOUT, '.venv', 'bin', 'python'));
+}
+
+/** Why the Agent authoring interpreter cannot run, or null when the candidate is usable. */
+export function authoringPythonUnavailableReason(candidate = authoringPythonPath()) {
+  if (isExecutableFile(candidate)) return null;
+  if (process.env.ASTRID_PYTHON !== undefined) return `ASTRID_PYTHON is not an executable file: ${path.resolve(candidate)} (set ASTRID_PYTHON to an executable Agent authoring interpreter)`;
+  return `Agent authoring venv interpreter not found or not executable at ${path.resolve(candidate)} (set ASTRID_CHECKOUT to the Agent checkout or ASTRID_PYTHON to an executable interpreter)`;
+}
+
+/** Why the Agent checkout/authoring venv cannot support the direct journey, or null when both are usable. */
+export function agentAuthoringUnavailableReason() {
+  let checkout;
+  try {
+    checkout = statSync(AGENT_CHECKOUT);
+  } catch (error) {
+    if (error?.code === 'ENOENT') return `Agent checkout not found at ${AGENT_CHECKOUT} (set ASTRID_CHECKOUT)`;
+    throw error;
+  }
+  if (!checkout.isDirectory()) return `Agent checkout is not a directory at ${AGENT_CHECKOUT} (set ASTRID_CHECKOUT)`;
+  return authoringPythonUnavailableReason();
+}
 
 /** Why the direct-journey harness cannot run here, or null when it can. */
 export function harnessUnavailableReason() {
   if (!existsSync(path.join(RUNTIME_CHECKOUT, '.venv', 'bin', 'python'))) return `Runtime venv not found at ${RUNTIME_CHECKOUT}/.venv (set ASTRID_RUNTIME_CHECKOUT)`;
+  const agentReason = agentAuthoringUnavailableReason();
+  if (agentReason) return agentReason;
   if (!existsSync(path.join(DIST_DIR, 'index.html'))) return `no production build at ${DIST_DIR} (run npm run build, or use npm run test:e2e:direct)`;
   try {
     execFileSync('openssl', ['version'], { stdio: 'ignore' });

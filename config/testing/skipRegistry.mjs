@@ -24,8 +24,8 @@ import { ffmpegUnavailableReason, harnessUnavailableReason, isWindows, macosLock
  */
 export const SKIP_REGISTRY = {
   'direct-journey-harness': {
-    skipWhen: 'harnessUnavailableReason() !== null: no Runtime venv, no hosted dist/ build, or no openssl',
-    reason: 'the direct journey needs a Runtime venv, a production build and openssl on the machine',
+    skipWhen: 'harnessUnavailableReason() !== null: no Runtime/Agent authoring venv, no hosted dist/ build, or no openssl',
+    reason: 'the direct journey needs Runtime and Agent authoring venvs, a production build and openssl on the machine',
     applies: harnessUnavailableReason,
     ci: ['direct-journey'],
     requireInLane: 'direct-journey',

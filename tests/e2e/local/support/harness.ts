@@ -19,7 +19,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deflateSync } from 'node:zlib';
-import { DIST_DIR, RUNTIME_CHECKOUT, ffmpegUnavailableReason } from '../../../../config/testing/skipConditions.mjs';
+import { DIST_DIR, RUNTIME_CHECKOUT, agentAuthoringUnavailableReason, authoringPythonPath, authoringPythonUnavailableReason, ffmpegUnavailableReason } from '../../../../config/testing/skipConditions.mjs';
 import { EDITOR_TOUR_VERSION } from '../../../../src/shared/lib/editorTourVersion.ts';
 import { loadQuickDescriptor, type QuickDescriptor } from './quick-descriptor.ts';
 import { attachPlaywrightRuntimeLifecycle, HungRequestStackCapture, linuxProcessInspector, type StackTarget } from './hung-request-stack.ts';
@@ -210,6 +210,8 @@ function runtimeStreamLogName(stream: 'stdout' | 'stderr', launchOrdinal: number
 export function harnessUnavailableReason(): string | null {
   if (process.env.ASTRID_RUNTIME_PYTHON && !runtimePython()) return `ASTRID_RUNTIME_PYTHON is not an executable file: ${path.resolve(process.env.ASTRID_RUNTIME_PYTHON)}`;
   if (!runtimePython()) return `Runtime venv not found at ${RUNTIME_CHECKOUT}/.venv (set ASTRID_RUNTIME_CHECKOUT)`;
+  const agentReason = agentAuthoringUnavailableReason();
+  if (agentReason) return agentReason;
   if (!existsSync(path.join(DIST_DIR, 'index.html'))) return `no production build at ${DIST_DIR} (run npm run build, or use npm run test:e2e:direct)`;
   try { execFileSync('openssl', ['version'], { stdio: 'ignore' }); } catch { return 'openssl is required to make the test certificate'; }
   return null;
@@ -788,8 +790,9 @@ export class DirectHarness {
   /** Restart with the Agent-authoring provider used by the retained commit journeys. */
   async enableTimelineAuthoring(python: string): Promise<void> {
     if (this.timelineAuthoring) return;
+    const unavailable = authoringPythonUnavailableReason(python);
+    if (unavailable) throw new Error(unavailable);
     await this.stopRuntime();
-    if (!existsSync(python)) throw new Error(`Authoring Python not found at ${python}`);
     this.authoringPython = python;
     this.timelineAuthoring = true;
     await this.startRuntime();
@@ -1162,7 +1165,7 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     if (project.status !== 201) throw new Error(`seed project: ${project.status} ${JSON.stringify(project.body)}`);
     const projectId: string = project.body.data.project_id;
     const timelineId = randomUUID();
-    const python = process.env.ASTRID_PYTHON ?? path.resolve(process.env.ASTRID_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-agent'), '.venv/bin/python');
+    const python = authoringPythonPath();
     await this.enableTimelineAuthoring(python);
     const created = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines`, { timeline_id: timelineId, name: 'Main' });
     if (created.status !== 201) throw new Error(`seed timeline: ${created.status} ${JSON.stringify(created.body)}`);
@@ -1309,7 +1312,7 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     const { projectId, timelineId, image, video } = this.seed;
     const project = await this.runtimeJson('GET', `/v1/projects/${projectId}`);
     if (project.status !== 200) throw new Error(`seed three products project: ${project.status} ${JSON.stringify(project.body)}`);
-    const authoringPython = process.env.ASTRID_PYTHON ?? path.resolve(process.env.ASTRID_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-agent'), '.venv/bin/python');
+    const authoringPython = authoringPythonPath();
     await this.enableTimelineAuthoring(authoringPython);
     const timeline = await this.runtimeJson('GET', `/v1/projects/${projectId}/timelines/${timelineId}`);
     if (timeline.status !== 200) throw new Error(`read three-products bootstrap: ${timeline.status} ${JSON.stringify(timeline.body)}`);

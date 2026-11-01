@@ -294,7 +294,7 @@ describe('useTimelinePersistence — interaction gating', () => {
     // A2/P2 requires ordinary parent moves with retained child closures and
     // top-level authored clips to reach the outbox. Keep the success contract.
     it(`P2 parent ${gesture} reaches the durable outbox (children=${children}, topLevel=${topLevel})`, async () => {
-      contractFixture.digest = 'sha256:35c2d9c5e0b51ab8d8b7a4f4dbafbdfcb13d232d7bd22fff21cf73e250398d4c';
+      contractFixture.digest = 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c';
       const config = createDefaultTimelineConfig();
       config.clips = [{ id: 'clip-parent-move', at: 0, track: 'V1', clipType: 'media', asset: 'parent-image', from: 0, to: 3, speed: 1,
         transition: { type: 'crossfade', duration: 0.5 } },
@@ -2918,7 +2918,7 @@ describe('useTimelinePersistence — mounted pointer to outbox', () => {
   it.each(['ready', 'pending-original-read', 'pending-identity'] as const)(
     'mounted 0→5 parent pointer/save boundary: %s', async mode => {
       vi.useFakeTimers();
-      contractFixture.digest = 'sha256:35c2d9c5e0b51ab8d8b7a4f4dbafbdfcb13d232d7bd22fff21cf73e250398d4c';
+      contractFixture.digest = 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c';
       resetFakeIndexedDB();
       vi.stubGlobal('indexedDB', createFakeIndexedDB());
       Object.defineProperty(navigator, 'locks', { configurable: true, value: {

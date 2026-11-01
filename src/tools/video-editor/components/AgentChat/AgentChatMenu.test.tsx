@@ -6,7 +6,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { LOCAL_AGENT_IDS, LOCAL_AGENT_TABLE, type LocalAgentChoice } from '@/integrations/astrid/localAgents.ts';
 import { toast } from '@/shared/components/ui/toast.tsx';
 import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
-import { BridgeContractError } from '@/tools/video-editor/data/bridgeContract.ts';
+import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data/bridgeContract.ts';
+import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
 import { AgentChatMenu, type AgentChatMenuHandle, type NewChatAgentModels } from './AgentChatMenu.tsx';
 
 beforeAll(() => {
@@ -669,7 +670,7 @@ describe('AgentChatMenu with an out-of-date local Astrid', () => {
   ])('shows the update prompt and %s update command instead of the raw error', (platform, os, command) => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(os);
-    const error = new BridgeContractError('List local agents', 'agents.0.models: Invalid input');
+    const error = new BridgeRouteError('List local agents', 409, { error: BRIDGE_CONTRACT_VERSION_MISMATCH_CODE });
     openMenu({ agentsError: error });
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent(RUNTIME_CONNECTION_COPY.chatNeedsUpdate);
@@ -682,7 +683,7 @@ describe('AgentChatMenu with an out-of-date local Astrid', () => {
   });
 
   it('places the update prompt above the Chats group', () => {
-    const error = new BridgeContractError('List local agents', 'agents.0.models: Invalid input');
+    const error = new BridgeRouteError('List local agents', 409, { error: BRIDGE_CONTRACT_VERSION_MISMATCH_CODE });
     openMenu({ agentsError: error, sessions: sessionsTwo, activeSessionId: 'one' });
     const alert = screen.getByRole('alert');
     const chats = screen.getByText('Chats');

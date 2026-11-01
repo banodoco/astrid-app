@@ -76,5 +76,35 @@ describe('mediaCrossOrigin', () => {
       const { container } = render(createElement('img', { alt: '', src, crossOrigin: mediaCrossOrigin(src) }));
       expect(container.querySelector('img')?.getAttribute('crossorigin')).toBe('anonymous');
     });
+
+    it.each([
+      'blob:http://127.0.0.1:17340/local-object-id',
+      'blob:https://astrid.haus/local-object-id',
+      'data:audio/wav;base64,AAAA',
+      'https://signed.example/media?signature=abc',
+      'custom:media-id',
+      '//127.0.0.1:17340/media',
+      'http://127.0.0.1:17341/media',
+    ])('preserves the existing custom media mode for %s', (url) => {
+      expect(mediaCrossOrigin(url)).toBeUndefined();
+      expect(mediaFetchCredentials(url, 'include')).toBe('include');
+    });
+  });
+});
+
+describe('mediaCrossOrigin with an HTTPS gateway origin', () => {
+  const HTTPS_GATEWAY = 'https://runtime.example.test';
+
+  beforeEach(async () => {
+    vi.resetModules();
+    connection = await import('@/integrations/runtime/connection');
+    ({ mediaCrossOrigin, mediaFetchCredentials } = await import('./mediaCrossOrigin'));
+    connection.setRuntimeOrigin({ VITE_RUNTIME_ORIGIN: HTTPS_GATEWAY });
+  });
+
+  it('uses anonymous CORS and omits browser credentials for a configured HTTPS gateway URL', () => {
+    const url = `${HTTPS_GATEWAY}/api/runtime/v1/objects/a/content`;
+    expect(mediaCrossOrigin(url)).toBe('anonymous');
+    expect(mediaFetchCredentials(url, 'include')).toBe('omit');
   });
 });

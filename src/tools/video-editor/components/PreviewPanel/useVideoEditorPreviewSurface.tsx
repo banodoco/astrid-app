@@ -9,9 +9,10 @@ import {
 } from 'react';
 import { shallow } from 'zustand/shallow';
 import { RemotionPreview } from '@/tools/video-editor/components/PreviewPanel/RemotionPreview.tsx';
-import { useTimelineDataSelector, useTimelinePlaybackSelector } from '@/tools/video-editor/hooks/timelineStore.ts';
+import { useTimelineChromeSelector, useTimelineDataSelector, useTimelinePlaybackSelector } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { useOptionalVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import { useVideoEditorPreviewComposition } from './useVideoEditorPreviewComposition.ts';
+import type { PreviewRevision } from './previewRevision.ts';
 
 export interface VideoEditorPreviewSurface {
   slotRef: RefCallback<HTMLDivElement>;
@@ -27,10 +28,62 @@ export function useVideoEditorPreviewSurface({
   touchChrome?: boolean;
 } = {}): VideoEditorPreviewSurface {
   const resolvedConfig = useTimelineDataSelector((timeline) => timeline.resolvedConfig);
+  const timelineData = useTimelineDataSelector((timeline) => timeline.data);
+  const saveStatus = useTimelineChromeSelector((chrome) => chrome.saveStatus);
   const runtime = useOptionalVideoEditorRuntime();
   const compositionResolution = useVideoEditorPreviewComposition(resolvedConfig);
   const previewConfig = compositionResolution.config;
   const previewSource = compositionResolution.source;
+  const previewRevision = useMemo<PreviewRevision>(() => {
+    const error = runtime?.userId === null ? runtime.shots?.canonicalCompositionError : null;
+    const unavailableTarget = error && typeof error === 'object'
+      && 'targetRevisionId' in error && typeof error.targetRevisionId === 'string'
+      ? { targetRevisionId: error.targetRevisionId, reason: error.message }
+      : error ? { reason: error.message } : undefined;
+    const canonicalDraft = runtime?.userId === null ? runtime.shots?.canonicalDraft : null;
+    const canonicalComposition = runtime?.userId === null ? runtime.shots?.canonicalComposition : null;
+
+    if (previewSource === 'canonical') {
+      if (canonicalDraft) {
+        return {
+          kind: 'local',
+          baseRevisionId: canonicalComposition?.headRevisionId ?? canonicalDraft.composition.headRevisionId,
+          ...(unavailableTarget ? { unavailableTarget } : {}),
+        };
+      }
+      if (canonicalComposition) {
+        return {
+          kind: 'committed',
+          revisionId: canonicalComposition.headRevisionId,
+          ...(unavailableTarget ? { unavailableTarget } : {}),
+        };
+      }
+      return unavailableTarget
+        ? { kind: 'unavailable', unavailableTarget }
+        : { kind: 'unknown', reason: compositionResolution.error?.message };
+    }
+
+    const baseRevisionId = timelineData?.head?.headRevisionId;
+    if (saveStatus !== 'saved') {
+      return {
+        kind: 'local',
+        baseRevisionId: baseRevisionId ?? null,
+        ...(unavailableTarget ? { unavailableTarget } : {}),
+      };
+    }
+    if (baseRevisionId) {
+      return {
+        kind: 'committed',
+        revisionId: baseRevisionId,
+        ...(unavailableTarget ? { unavailableTarget } : {}),
+      };
+    }
+    return unavailableTarget
+      ? { kind: 'unavailable', unavailableTarget }
+      : { kind: 'unknown', reason: 'The loaded timeline has no committed revision identity.' };
+  }, [compositionResolution.error?.message, previewSource, runtime?.shots?.canonicalComposition,
+    runtime?.shots?.canonicalCompositionError, runtime?.shots?.canonicalDraft, runtime?.userId,
+    saveStatus, timelineData?.head?.headRevisionId]);
   const {
     currentTime,
     previewRef,
@@ -84,6 +137,7 @@ export function useVideoEditorPreviewSurface({
         key={`${runtime?.project?.projectId ?? ''}:${runtime?.timelineId ?? ''}:${previewSource}`}
         ref={previewRef}
         config={previewConfig}
+        previewRevision={previewRevision}
         compact={compact}
         touchChrome={touchChrome}
         initialTime={currentTime}
@@ -102,6 +156,7 @@ export function useVideoEditorPreviewSurface({
     playerContainerRef,
     previewRef,
     previewConfig,
+    previewRevision,
     previewSource,
     runtime?.project?.projectId,
     runtime?.timelineId,

@@ -82,6 +82,29 @@ const buildSequenceConfig = (): TimelineConfig => ({
 });
 
 describe('timeline data sequence clip persistence', () => {
+  it.each([
+    { hold: 3 },
+    { hold: 3, from: null, to: null, speed: null },
+    { from: 1, to: 7, speed: 2 },
+  ])('moves a raw clip without changing opaque, null, absent or sibling data: %j', (source) => {
+    const config = buildSequenceConfig();
+    config.clips = [{
+      id: 'selected', at: 0, track: 'V1', clipType: 'media', ...source,
+      opaqueClip: { ordered: [false, 0, '', null, { keep: true }] },
+      app: { opaque: null },
+    }, { id: 'sibling', at: 20.0123, track: 'V1', hold: 2.0123, opaqueClip: null }] as unknown as TimelineConfig['clips'];
+    const original = structuredClone(config);
+    const { rows, meta, clipOrder, tracks } = configToRows(config);
+    meta.selected.label = 'Derived display label';
+    rows[0].actions[0].start += 5;
+    rows[0].actions[0].end += 5;
+    const moved = rowsToConfig(rows, meta, config.output, clipOrder, tracks, config.pinnedShotGroups, config);
+    expect(moved.clips).toEqual([{ ...original.clips[0], at: 5 }, original.clips[1]]);
+    expect(moved.clips[0]).not.toHaveProperty('label');
+    expect(JSON.stringify(moved.pinnedShotGroups)).toEqual(JSON.stringify(original.pinnedShotGroups));
+    expect(config).toEqual(original);
+  });
+
   it('preserves sequence clip schema-lift fields and top-level extras through buildTimelineData and rowsToConfig', async () => {
     const config = buildSequenceConfig();
 

@@ -1,4 +1,5 @@
 import type { DataLaneView } from '@/tools/video-editor/data/typed/envelope.ts';
+import type { TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
 import { reorderTimelineRows } from '@/tools/video-editor/lib/timeline-row-layout.ts';
 import { trackRole } from '@/tools/video-editor/data/timelineOutputProjection.ts';
 import { useCallback, useMemo } from 'react';
@@ -55,6 +56,7 @@ export interface UseTimelineTrackManagementResult {
     start: number,
     needsNewTrack: boolean,
     transactionId?: string,
+    gestureBasis?: TimelineGestureReadBasis,
   ) => void;
   moveClipToRow: (clipId: string, targetRowId: string, newStartTime?: number, transactionId?: string) => void;
   createTrackAndMoveClip: (clipId: string, kind: TrackKind, newStartTime?: number, insertAtTop?: boolean) => void;
@@ -253,6 +255,7 @@ export function useTimelineTrackManagement({
     start: number,
     needsNewTrack: boolean,
     transactionId?: string,
+    gestureBasis?: TimelineGestureReadBasis,
   ) => {
     let current = dataRef.current;
     if (!current) return;
@@ -331,7 +334,7 @@ export function useTimelineTrackManagement({
       rows: nextRows,
       metaUpdates: { [clipId]: { track: finalTrackId } },
       clipOrderOverride: moveClipBetweenTracks(current.clipOrder, clipId, sourceRow.id, finalTrackId),
-    }, { transactionId });
+    }, { transactionId, gestureBasis });
   }, [applyEdit, dataRef, editability]);
   /**
    * Move a clip to `targetRowId`, optionally landing it at `newStartTime`.
@@ -463,6 +466,8 @@ export function useTimelineTrackManagement({
     }
 
     const duration = action.end - action.start;
+    const gestureBasis = structuredClone({ kind: 'move' as const, clipId, trackId: sourceRow.id,
+      config: current.config, registry: current.registry });
     const nextStart = typeof newStartTime === 'number' ? Math.max(0, newStartTime) : action.start;
 
     // Find a free track (target first, then nearest above/below), or create one
@@ -533,7 +538,7 @@ export function useTimelineTrackManagement({
         [clipId]: { track: finalTrackId },
       },
       clipOrderOverride: nextClipOrder,
-    }, { transactionId });
+    }, { transactionId, ...(targetRowId === sourceRow.id && finalTrackId === sourceRow.id ? { gestureBasis } : {}) });
   }, [applyEdit, dataRef, editability, eventBus]);
 
   const createTrackAndMoveClip = useCallback((clipId: string, kind: TrackKind, newStartTime?: number, insertAtTop = false) => {

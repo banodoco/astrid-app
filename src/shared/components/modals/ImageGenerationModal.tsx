@@ -1,4 +1,4 @@
-import React, { useCallback, Suspense, useId } from 'react';
+import React, { useCallback, Suspense, useId, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -17,10 +17,12 @@ import { Skeleton } from '@/shared/components/ui/skeleton';
 import { ExternalLinkTooltipButton } from '@/shared/components/ui/composed/ExternalLinkTooltipButton';
 import { useNavigate } from 'react-router-dom';
 import { TOOL_ROUTES } from '@/shared/lib/tooling/toolRoutes';
+import type { ImageGenerationPlacement, ImageGenerationTaskOptions } from '@/shared/lib/taskCreation/imageGeneration.ts';
 import type { BatchImageGenerationTaskParams } from '@/shared/types/imageGeneration';
 import { composeDisabledReason } from '@/shared/components/RuntimeConnection/copy.ts';
 
 interface ImageGenerationModalProps {
+  timelinePlacement?: ImageGenerationPlacement;
   isOpen: boolean;
   onClose: () => void;
   /** Pre-select a specific shot when the modal opens */
@@ -31,7 +33,13 @@ export const ImageGenerationModal: React.FC<ImageGenerationModalProps> = ({
   isOpen,
   onClose,
   initialShotId,
+  timelinePlacement,
 }) => {
+  const [autoPlace, setAutoPlace] = useState(false);
+  const [ownerRef, setOwnerRef] = useState('');
+  const [lane, setLane] = useState('');
+  const [anchor, setAnchor] = useState('');
+  const [placementError, setPlacementError] = useState<string | null>(null);
   const modal = useExtraLargeModal();
   const footerPortalId = useId();
   const { selectedProjectId } = useProjectSelectionContext();
@@ -50,18 +58,42 @@ export const ImageGenerationModal: React.FC<ImageGenerationModalProps> = ({
       return [];
     }
 
+    let placementOptions: ImageGenerationTaskOptions | undefined;
+    if (autoPlace) {
+      try {
+        if (!timelinePlacement || timelinePlacement.projectId !== selectedProjectId) {
+          throw new Error('The original editor project changed. Keep this draft for manual use.');
+        }
+        if (taskParams.prompts.length !== 1 || taskParams.imagesPerPrompt !== 1) {
+          throw new Error('Automatic placement requires one prompt and one image.');
+        }
+        placementOptions = await timelinePlacement.prepare({ ownerRef, lane, anchor: anchor || null });
+        setPlacementError(null);
+      } catch (error) {
+        setPlacementError(error instanceof Error ? error.message : String(error));
+        return [];
+      }
+    }
     await run({
       taskType: 'image_generation',
       label: taskParams.prompts?.[0]?.fullPrompt?.substring(0, 50) || 'Generating images...',
       context: 'ImageGenerationModal',
       toastTitle: 'Failed to create tasks',
-      create: () => createImageGenerationTasks(selectedProjectId, taskParams),
+      create: async () => {
+        try {
+          return placementOptions ? await createImageGenerationTasks(selectedProjectId, taskParams, placementOptions)
+            : await createImageGenerationTasks(selectedProjectId, taskParams);
+        } catch (error) {
+          if (autoPlace) setPlacementError(error instanceof Error ? error.message : String(error));
+          throw error;
+        }
+      },
       onSuccess: () => {
         queryClient.invalidateQueries({ queryKey: queryKeys.unified.projectPrefix(selectedProjectId) });
       },
     });
     return [];
-  }, [selectedProjectId, queryClient, run]);
+  }, [selectedProjectId, queryClient, run, autoPlace, timelinePlacement, ownerRef, lane, anchor]);
 
   const handleNavigateToTool = useCallback(() => {
     onClose();
@@ -94,6 +126,30 @@ export const ImageGenerationModal: React.FC<ImageGenerationModalProps> = ({
         </DialogHeader>
 
         <div className={`${modal.scrollClass} -mx-6 px-6 flex-1 min-h-0 pb-4`}>
+          {timelinePlacement && (
+            <fieldset className="space-y-2 mb-4">
+              <label className="flex items-center gap-2">
+                <input type="checkbox" checked={autoPlace} onChange={(event) => setAutoPlace(event.target.checked)} />
+                Add the generated image to this timeline (5 seconds)
+              </label>
+              {autoPlace && (
+                <div className="space-y-2">
+                  <label className="block">Raw occurrence reference
+                    <input className="block border bg-background text-foreground" value={ownerRef} onChange={(event) => setOwnerRef(event.target.value)} placeholder="occurrence:…" />
+                  </label>
+                  <label className="block">Raw lane ID
+                    <input className="block border bg-background text-foreground" value={lane} onChange={(event) => setLane(event.target.value)} />
+                  </label>
+                  <label className="block">Raw anchor clip ID (optional)
+                    <input className="block border bg-background text-foreground" value={anchor} onChange={(event) => setAnchor(event.target.value)} />
+                  </label>
+                  <p>Place after this anchor, or at the end of the selected lane if the anchor is absent. One prompt and one image only.</p>
+                </div>
+              )}
+              {timelinePlacement.unavailableReason && <p role="status">{timelinePlacement.unavailableReason}</p>}
+              {placementError && <p role="alert">{placementError}</p>}
+            </fieldset>
+          )}
           <Suspense fallback={
             <div className="flex flex-col h-full">
               <div className="space-y-6 py-4 flex-1">

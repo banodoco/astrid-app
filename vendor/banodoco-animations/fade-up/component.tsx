@@ -1,6 +1,6 @@
 import type {ReactElement} from 'react';
 import {interpolate, spring} from 'remotion';
-import type {WrapperAnimationProps} from '../../tools/remotion/src/effects.types';
+import type {WrapperAnimationProps} from '@banodoco/timeline-composition/theme-api';
 
 export const FadeUp = ({
   children,

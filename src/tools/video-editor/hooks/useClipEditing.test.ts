@@ -111,6 +111,26 @@ function makeConfigTimelineData(config: TimelineConfig, registry: AssetRegistry)
 }
 
 describe('useClipEditing duration recalculation', () => {
+  it.each(['single', 'bulk'] as const)('captures the causal %s transition None selection before mutation', (kind) => {
+    const config: TimelineConfig = { output: { resolution: '1920x1080', fps: 30, file: 'out.mp4' },
+      tracks: [{ id: 'V1', kind: 'visual' }],
+      clips: ['selected', 'sibling'].map((id, index) => ({ id, track: 'V1', at: index * 3, clipType: 'hold', hold: 2,
+        transition: { type: 'crossfade', duration: 0.5 } })) };
+    const data = makeConfigTimelineData(config, { assets: {} });
+    const applyEdit = vi.fn();
+    const { result, unmount } = renderHook(() => useClipEditing({ dataRef: { current: data }, resolvedConfig: data.resolvedConfig,
+      selectedClipId: 'selected', selectedTrack: null, currentTime: 0, selectClip: vi.fn(), setSelectedTrackId: vi.fn(), applyEdit }));
+    act(() => {
+      if (kind === 'single') result.current.handleSelectedClipChange({ transition: undefined });
+      else result.current.handleUpdateClipsDeep(['selected', 'sibling'], () => ({ transition: undefined }));
+    });
+    expect(applyEdit).toHaveBeenCalledTimes(1);
+    expect(applyEdit.mock.calls[0][1]?.gestureBasis).toEqual({ kind: 'transition-clear', clipId: 'selected',
+      clipIds: kind === 'single' ? ['selected'] : ['selected', 'sibling'], config: data.config, registry: data.registry });
+    expect(data.config.clips[0].transition).toBeDefined();
+    unmount();
+  });
+
   it('recalcActionEnd handles speed, from, to, and hold patches', () => {
     const action = { id: 'clip-1', start: 5, end: 9, effectId: 'effect-clip-1' };
 

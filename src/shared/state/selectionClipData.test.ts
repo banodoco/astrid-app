@@ -11,6 +11,7 @@ import {
   editorReplaceTimelineSelection,
   editorClearTimelineSelection,
   editorSetSelectedTrackId,
+  getShotPlacementTarget,
   systemPruneTimelineSelection,
   systemResetTimelineSelection,
   useTimelineMultiSelect,
@@ -22,6 +23,8 @@ import {
   systemResetSelectionForProjectChange,
   userSelectGalleryItem,
 } from './selectionStore';
+import { createShotCompositionAdapter } from '@/tools/video-editor/data/shotCompositionAdapter';
+import compositionFixture from '@/tools/video-editor/data/shotComposition.fixture.json';
 
 const clip = (timeline: string): SelectedMediaClip => ({
   clipId: 'shared-clip-id',
@@ -33,6 +36,55 @@ const clip = (timeline: string): SelectedMediaClip => ({
 const currentClip = () => __getSelectionStateForTests().clipDataById.get('shared-clip-id');
 
 beforeEach(__resetSelectionStoreForTests);
+
+describe('canonical placement selection', () => {
+  const composition = createShotCompositionAdapter({ load: async () => compositionFixture }).prepare(compositionFixture);
+  const context = { projectId: composition.projectId, timelineId: composition.parentDocumentId, composition };
+
+  it('requires one selected occurrence, retaining its identity across shared physical shot roots', () => {
+    const owner = Symbol('editor');
+    setTimelineClipData([], owner, context);
+    userSelectTimelineClips(['occ-2:alpha-audio', 'occ-2:alpha-video'], {}, owner);
+    const target = getShotPlacementTarget(composition.projectId, 'shot-alpha');
+    expect(target).toEqual({ shot_id: expect.any(String), ownerRef: 'occurrence:occ-2', timelineRef: composition.parentDocumentId });
+    expect(target.shot_id).not.toBe('shot-alpha');
+  });
+
+  it.each([
+    ['missing', []],
+    ['foreign clip', ['unknown']],
+    ['ambiguous occurrences', ['occ-1:alpha-video', 'occ-2:alpha-video']],
+    ['foreign shot', ['occ-4:beta-video']],
+  ])('refuses %s selection without falling back to the parent', (_name, selected) => {
+    const owner = Symbol('editor');
+    setTimelineClipData([], owner, context);
+    userSelectTimelineClips(selected, {}, owner);
+    expect(() => getShotPlacementTarget(composition.projectId, 'shot-alpha')).toThrow();
+  });
+
+  it('refuses missing graphs and foreign project or timeline bindings', () => {
+    const owner = Symbol('editor');
+    setTimelineClipData([], owner, context);
+    userSelectTimelineClips(['occ-2:alpha-video'], {}, owner);
+    expect(() => getShotPlacementTarget('foreign-project', 'shot-alpha')).toThrow();
+    setTimelineClipData([], owner, { ...context, timelineId: 'foreign-timeline' });
+    expect(() => getShotPlacementTarget(composition.projectId, 'shot-alpha')).toThrow();
+    setTimelineClipData([], owner, { ...context, composition: null });
+    expect(() => getShotPlacementTarget(composition.projectId, 'shot-alpha')).toThrow();
+  });
+
+  it('uses only the active mounted editor and preserves parent-only behavior after release', () => {
+    const active = Symbol('active');
+    const background = Symbol('background');
+    const release = setTimelineClipData([], active, context);
+    userSelectTimelineClips(['occ-2:alpha-video'], {}, active);
+    setTimelineClipData([], background, { ...context, projectId: 'foreign-project' });
+    expect(getShotPlacementTarget(composition.projectId, 'shot-alpha').ownerRef).toBe('occurrence:occ-2');
+    clearTimelineClipData(background);
+    release();
+    expect(getShotPlacementTarget(composition.projectId, 'shot-alpha')).toEqual({ shot_id: 'shot-alpha' });
+  });
+});
 
 describe('timeline clip catalog ownership', () => {
   it('uses the explicitly activated owner for colliding clip IDs and composer removal', () => {

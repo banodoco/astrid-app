@@ -497,7 +497,7 @@ describe('CompilerCanary', () => {
       // The first proposal should be replaced by the second
       const secondProposalId = result2!.proposal!.id;
       expect(secondProposalId).not.toBe(firstProposalId);
-      
+
       // There should be exactly 1 pending proposal from this source
       const pendingProposals = services.proposals._createdProposals.filter(p => p.state === 'pending' && p.source === 'com.example.canary');
       expect(pendingProposals.length).toBe(1);

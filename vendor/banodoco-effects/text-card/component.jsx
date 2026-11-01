@@ -1,5 +1,5 @@
 import { AbsoluteFill, useCurrentFrame, useVideoConfig } from 'remotion';
-import { composeAnimations } from '../../tools/remotion/src/lib/animations';
+import { composeAnimations } from '@banodoco/timeline-composition/theme-api';
 const JUSTIFY_CONTENT = {
     left: 'flex-start',
     center: 'center',

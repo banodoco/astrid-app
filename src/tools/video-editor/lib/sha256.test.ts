@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { computeSHA256, fillMissingContentSHA256 } from '@/tools/video-editor/lib/sha256';
 import { buildTimelineCommandData } from '@/tools/video-editor/commands/timelineData';
-import { applyTimelineCommandEffect } from '@/tools/video-editor/commands/runner';
 import {
   buildDataFromCurrentRegistry,
   buildDataFromSnapshot,
@@ -10,7 +9,6 @@ import {
 import { assembleTimelineData } from '@/tools/video-editor/lib/timeline-data';
 import type {
   AssetRegistry,
-  TimelineClip,
   TimelineConfig,
   TrackDefinition,
 } from '@/tools/video-editor/types/index';
@@ -680,37 +678,6 @@ describe('sync boundary — no synchronous hashing in import/materialization/loa
     };
 
     buildDataFromCurrentRegistry(nextConfig, current);
-
-    expect(digestSpy).not.toHaveBeenCalled();
-  });
-
-  // -----------------------------------------------------------------------
-  // applyTimelineCommandEffect (materialization path)
-  // -----------------------------------------------------------------------
-
-  it('applyTimelineCommandEffect does not call crypto.subtle.digest synchronously', () => {
-    const current = makeSnapshotTimelineData();
-    const clip: TimelineClip = {
-      id: 'clip-1',
-      at: 0,
-      track: 'V1',
-      clipType: 'hold',
-      asset: 'asset-1',
-      hold: 2,
-    };
-
-    const effect = {
-      mutation: {
-        type: 'rows' as const,
-        rows: current.rows,
-        metaUpdates: {
-          'clip-1': { ...clip },
-        },
-      },
-      summary: 'no-op test',
-    };
-
-    applyTimelineCommandEffect(current, effect);
 
     expect(digestSpy).not.toHaveBeenCalled();
   });

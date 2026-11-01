@@ -202,8 +202,7 @@ export type ProposalPanelAction =
   | { type: 'toggleVisibility' };
 
 /**
- * Serialized proposal envelope returned by edge functions (e.g. the
- * ai-timeline-agent) when operating in proposal mode.
+ * Serialized proposal envelope returned by a proposal-producing integration.
  *
  * This shape is wire-stable and consumed by the client-side
  * `normalizeInvokeResponse` path to hydrate the ProposalPanel UI without

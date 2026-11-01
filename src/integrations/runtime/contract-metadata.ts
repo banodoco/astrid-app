@@ -3,7 +3,7 @@
  * Runtime remains the wire/schema authority.
  */
 
-import { PROTOCOL, SCHEMA_DIGEST, COMPONENT_MANIFEST_SHA256 } from './generated-contract-metadata.ts';
+import { CONTRACT_VERSION, PROTOCOL, SCHEMA_DIGEST, COMPONENT_MANIFEST_SHA256, OPERATIONS } from './generated-contract-metadata.ts';
 import { LEGACY_RUNTIME_SCHEMA_DIGESTS } from './runtime-update-contract.mjs';
 
 export const RUNTIME_PROTOCOL = PROTOCOL;
@@ -18,7 +18,11 @@ export const RUNTIME_ACCEPTED_SCHEMA_DIGESTS = [
 export const RUNTIME_COMPONENT_MANIFEST_SHA256 = COMPONENT_MANIFEST_SHA256;
 export const RUNTIME_TARGETED_EXECUTION_CAPABILITY = 'execution_binding.targeted.v1' as const;
 
-/** The published R1+M Runtime does not expose the full v2 Timeline commit ABI. */
+/** Full-v2 Timeline ABI, restricted to the published round-1b generated contract. */
 export function supportsFullV2Commit(): boolean {
-  return false;
+  return PROTOCOL === 'workspace.v1' && (CONTRACT_VERSION as string) === '0.2.14'
+    && COMPONENT_MANIFEST_SHA256 === 'sha256:7b74a8df08c86bbd8168d11272f13abd3e76becc2bcb4cbed799f11dc2f85f34'
+    && SCHEMA_DIGEST === 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c'
+    && (OPERATIONS as readonly string[]).includes('commitTimeline')
+    && (OPERATIONS as readonly string[]).includes('listTimelineCommits');
 }

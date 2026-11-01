@@ -2,6 +2,7 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { applyAudioEnvelope, audioEnvelopeAt, compileAudioEnvelope } from '@banodoco/timeline-composition/evaluation';
 import {
   AUDIO_RETRY_DELAYS_MS,
   AUDIO_HOLD_LIMIT_MS,
@@ -11,9 +12,6 @@ import { PreviewAudioFailureProvider } from '@/tools/video-editor/compositions/P
 import { PreviewAudioFailureNotice } from '@/tools/video-editor/components/PreviewPanel/PreviewAudioFailureNotice';
 import { getClipDurationInFrames, secondsToFrames } from '@/tools/video-editor/lib/config-utils';
 import type { ResolvedTimelineClip, TrackDefinition } from '@/tools/video-editor/types';
-// Astrid's renderer component, vendored verbatim from @banodoco/timeline-composition.
-import { AudioTrack as RendererAudioTrack } from '../../../../vendor/timeline-composition/typescript/src/AudioTrack';
-
 const sequenceProps: Array<Record<string, unknown>> = [];
 const html5AudioProps: Array<Record<string, unknown>> = [];
 const mediaAudioProps: Array<Record<string, unknown>> = [];
@@ -163,28 +161,76 @@ describe('AudioTrack', () => {
       { name: 'fade-in and fade-out (music-piano)', fps: 30, clip: { ...clip, at: 28.5, from: 28.5, to: 88.4, volume: 0.7674, params: { fadeIn: 3, fadeOut: 4 } } },
       { name: 'trimmed source (music-orch)', fps: 30, clip: { ...clip, at: 84.4, from: 123.46, to: 199.393331, volume: 0.263, params: { fadeIn: 4, fadeOut: 3 } } },
       { name: 'overlapping ramps at 24 fps', fps: 24, clip: { ...clip, params: { fadeIn: 2, fadeOut: 2.5 } } },
+      { name: 'curved fade-in and fade-out', fps: 30, clip: { ...clip, params: { fadeIn: 2, fadeOut: 2.5, fadeInCurve: 'equal-power', fadeOutCurve: 's-curve' } } },
       { name: 'fractional fade lengths at 60 fps', fps: 60, clip: { ...clip, speed: 1.5, params: { fadeIn: 0.41, fadeOut: 0.77 } } },
       { name: 'track gain applies under the ramp', fps: 30, clip: { ...clip, params: { fadeIn: 1 } }, track: { ...track, volume: 0.5 } },
       { name: 'muted track stays silent', fps: 30, clip: { ...clip, params: { fadeOut: 1 } }, track: { ...track, muted: true } },
       { name: 'no fade keeps a plain gain', fps: 30, clip: { ...clip, params: { fadeIn: 0, fadeOut: -1 } } },
     ];
 
-    it.each(fadeCases)('matches the renderer\'s gain envelope at every frame: $name', ({ fps, clip: fadeClip, track: fadeTrack = track }) => {
-      render(<RendererAudioTrack clip={fadeClip} track={fadeTrack} assetEntry={{ file: 'https://example.com/audio.mp3' }} fps={fps} />);
-      const rendererVolume = html5AudioProps.at(-1)?.volume;
-      html5AudioProps.length = 0;
+    it.each(fadeCases)('matches Composition envelope math at every mounted frame: $name', ({ fps, clip: fadeClip, track: fadeTrack = track }) => {
+      currentEnvironment = { isRendering: true, isClientSideRendering: false };
       render(<AudioTrack track={fadeTrack} clips={[fadeClip]} fps={fps} />);
-      const previewVolume = html5AudioProps.at(-1)?.volume;
-
-      expect(typeof previewVolume).toBe(typeof rendererVolume);
-      if (typeof rendererVolume !== 'function' || typeof previewVolume !== 'function') {
-        expect(previewVolume).toBe(rendererVolume);
+      const appVolume = mediaAudioProps.at(-1)?.volume;
+      const envelope = compileAudioEnvelope(fadeClip, fps);
+      const baseVolume = fadeTrack.muted ? 0 : (fadeTrack.volume ?? 1) * (fadeClip.volume ?? 1);
+      if (typeof appVolume !== 'function') {
+        expect(envelope).toBeUndefined();
+        expect(appVolume).toBe(baseVolume);
         return;
       }
       const durationFrames = getClipDurationInFrames(fadeClip, fps);
       for (let frame = 0; frame <= durationFrames; frame += 1) {
-        expect(previewVolume(frame), `frame ${frame}`).toBeCloseTo(rendererVolume(frame), 12);
+        const packageGain = envelope ? audioEnvelopeAt(envelope, frame / fps) : 1;
+        expect(appVolume(frame), `frame ${frame}`).toBeCloseTo(baseVolume * packageGain, 12);
       }
+    });
+
+    it.each(['linear', 'equal-power'] as const)('maps a mounted %s canonical volume callback to package PCM gains after trim and speed', (curve) => {
+      currentEnvironment = { isRendering: true, isClientSideRendering: false };
+      const fps = 30;
+      const playbackRate = 1.5;
+      const trimBeforeSeconds = 2.25;
+      const frameOffset = 30;
+      const authoredClip: ResolvedTimelineClip = {
+        ...clip,
+        at: 4,
+        from: trimBeforeSeconds,
+        to: 10.25,
+        speed: playbackRate,
+        volume: 0.8,
+        params: { fadeIn: 2, fadeOut: 1, fadeInCurve: curve, fadeOutCurve: curve },
+        app: { canonicalTiming: { occurrenceStartMs: 5_000, occurrenceDurationMs: 2_000 } },
+      };
+      render(<AudioTrack track={{ ...track, volume: 0.5 }} clips={[authoredClip]} fps={fps} />);
+
+      const appVolume = mediaAudioProps.at(-1)?.volume as (frame: number) => number;
+      const envelope = compileAudioEnvelope(authoredClip, fps);
+      expect(envelope).toBeDefined();
+      const sampleRate = 48_000;
+      const sourceSamples = new Float32Array(sampleRate * 12).fill(1);
+      const channels = [sourceSamples];
+      const trimBeforeFrames = secondsToFrames(trimBeforeSeconds, fps);
+      const trimBefore = trimBeforeFrames / fps;
+      // The bounded Sequence starts one second after the authored clip. Shift
+      // the PCM envelope origin by that clip-local offset, then sample the
+      // actual trimmed/playback-rate source position for each mounted frame.
+      applyAudioEnvelope(
+        channels,
+        sampleRate,
+        envelope!,
+        trimBefore - frameOffset * playbackRate / fps,
+        playbackRate,
+      );
+      const baseVolume = 0.5 * 0.8;
+
+      for (const frame of [0, 7, 15, 29]) {
+        const sampleIndex = Math.round(trimBefore * sampleRate + frame * playbackRate * sampleRate / fps);
+        const expectedGain = sourceSamples[sampleIndex];
+        expect(appVolume(frame), `frame ${frame}`).toBeCloseTo(baseVolume * expectedGain, 6);
+      }
+      expect(appVolume(0)).toBeCloseTo(curve === 'linear' ? 0.2 : 0.4 * Math.sin(Math.PI / 4), 6);
+      expect(appVolume(15)).toBeCloseTo(curve === 'linear' ? 0.3 : 0.4 * Math.sin(3 * Math.PI / 8), 6);
     });
 
     it('applies the same fades when the editor renders an export', () => {
@@ -205,6 +251,17 @@ describe('AudioTrack', () => {
 
       expect(html5AudioProps).toHaveLength(2);
       expect(html5AudioProps[1]?.volume).toBe(html5AudioProps[0]?.volume);
+    });
+
+    it('refreshes the preview volume callback when only the fade curve changes', () => {
+      const fadeClip = { ...clip, params: { fadeIn: 1, fadeInCurve: 'linear' } };
+      const { rerender } = render(<AudioTrack track={track} clips={[fadeClip]} fps={30} />);
+      const linearVolume = html5AudioProps.at(-1)?.volume as (frame: number) => number;
+      rerender(<AudioTrack track={track} clips={[{ ...fadeClip, params: { ...fadeClip.params, fadeInCurve: 'equal-power' } }]} fps={30} />);
+      const curvedVolume = html5AudioProps.at(-1)?.volume as (frame: number) => number;
+      expect(curvedVolume).not.toBe(linearVolume);
+      expect(linearVolume(15)).toBeCloseTo(0.4, 12);
+      expect(curvedVolume(15)).toBeCloseTo(0.8 * Math.sin(Math.PI / 4), 12);
     });
   });
 

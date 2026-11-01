@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import {verifyElementAdmissions, type VerifiedElementAdmission, type ElementVerificationCache} from './astridElementAdmissions';
 export type ElementRef = {packId:string;kind:'effect'|'animation'|'transition';id:string;revision:string};
 export type ProjectPackDocument = {document_id:string;project_id:string;kind:string;version:number;content:unknown};
-type Admission = {id:string;kind:string;revision:string;snapshot_digest:string};
+type Admission = {id:string;kind:string;revision:string;snapshot_digest:string;snapshot_object?:unknown};
 type Binding = {schema:string;pack_id:string;source_binding_key:string;relative_manifest:string;admissions:Admission[]};
 export function stableJson(value: unknown): string {
   if(Array.isArray(value))return '['+value.map(stableJson).join(',')+']';
@@ -79,8 +79,9 @@ export async function selectProjectElements(projectId:string,refs:ElementRef[],o
       if(resolved.authoring.packRoot!==expectedPackRoot||resolved.snapshot.root!==path.join(artifactRoot,options.realmId,projectId,ref.packId,'snapshots',selected.snapshot_digest))throw new Error('Snapshot or authoring paths are not selected by the canonical project document');
       const closure=[...resolved.snapshot.files].sort((a,b)=>a.path<b.path?-1:a.path>b.path?1:0);
       if(sha256(stableJson(closure))!==selected.snapshot_digest)throw new Error('Snapshot closure does not match canonical admission');
+      const selectedRecord=selected.snapshot_object===undefined?resolved:{...resolved,snapshot_object:selected.snapshot_object};
       verified=verifyElementAdmissions(undefined,{schema:'astrid.element-admissions/v1',realmId:options.realmId,
-        projects:[{...project,packId:ref.packId,packRoot:expectedPackRoot}],elements:[resolved]},options.verificationCache);
+        projects:[{...project,packId:ref.packId,packRoot:expectedPackRoot}],elements:[selectedRecord]},options.verificationCache);
       options.resolvedCache?.set(cacheKey,verified);
     }
     const entry=verified.elements[0];

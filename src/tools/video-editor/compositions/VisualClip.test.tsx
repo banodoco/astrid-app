@@ -10,7 +10,7 @@ import {
   useTransitionRegistryContext,
   type TransitionRegistryRecord,
 } from '@/tools/video-editor/transitions/registry/index.ts';
-import { VisualClip } from '@/tools/video-editor/compositions/VisualClip.tsx';
+import { VisualClip, VisualClipSequence } from '@/tools/video-editor/compositions/VisualClip.tsx';
 import type { ResolvedTimelineClip, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import type { RenderMaterialRef } from '@astrid/editor-sdk';
 import type { ShaderEffectRegistryRecord, ShaderEffectRegistrySnapshot } from '@/tools/video-editor/shaders/registry/types.ts';
@@ -98,6 +98,15 @@ function mediaClip(overrides?: Partial<ResolvedTimelineClip>): ResolvedTimelineC
     ...overrides,
   };
 }
+
+it('ends a transition preroll sequence at the authored clip boundary', () => {
+  const predecessor = mediaClip({ id: 'previous', at: 0 });
+  const clip = mediaClip({ id: 'incoming', at: 1, transition: { type: 'crossfade', duration: 0.2 } });
+  render(<VisualClipSequence clip={clip} track={track} fps={30} predecessor={predecessor} />);
+  const sequence = screen.getByTestId('sequence');
+  expect(sequence.getAttribute('from')).toBe('24');
+  expect(sequence.getAttribute('durationinframes')).toBe('36');
+});
 
 function makeTransitionRecord(
   transitionId: string,
@@ -440,6 +449,45 @@ describe('VisualClip transition rendering', () => {
     const style = JSON.parse(fill.getAttribute('data-style') ?? '{}');
     expect(style.overflow).toBe('hidden');
   });
+
+  it('renders canonical package transition references with frame durations', async () => {
+    const { container } = render(
+      <VisualClip
+        clip={mediaClip({ transition: { id: 'cross-fade', durationFrames: 15 } as never })}
+        track={track}
+        fps={30}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="missing-transition-placeholder"]')).toBeNull();
+    });
+    const transitionFill = screen.getAllByTestId('absolute-fill').find((node) => {
+      const style = node.getAttribute('data-style') ?? '';
+      return style.includes('opacity');
+    });
+    expect(transitionFill).toBeDefined();
+  });
+
+  it.each(['fade', 'cross-fade'])(
+    'renders %s from the incoming clip transition reference',
+    async (id) => {
+      const incoming = mediaClip({
+        id: 'incoming',
+        transition: { id, durationFrames: 8 } as never,
+      });
+      const { container } = render(
+        <VisualClip clip={incoming} track={track} fps={30} predecessor={mediaClip({ id: 'outgoing' })} />,
+      );
+
+      await waitFor(() => expect(screen.getByTestId('image-asset')).toBeInTheDocument());
+      expect(screen.getAllByTestId('absolute-fill').some((node) => {
+        const style = JSON.parse(node.getAttribute('data-style') ?? '{}') as Record<string, unknown>;
+        return typeof style.opacity === 'number';
+      })).toBe(true);
+      expect(container.querySelector('[data-testid="missing-transition-placeholder"]')).toBeNull();
+    },
+  );
 
   it('resolves and renders built-in wipe transition', async () => {
     render(

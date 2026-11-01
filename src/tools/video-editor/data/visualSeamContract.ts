@@ -3,7 +3,7 @@ import type {
   ResolvedTimelineConfig,
   TrackDefinition,
 } from '@/tools/video-editor/types/index.ts';
-import { coversFrame } from './visualSeamCoverage.ts';
+import { coversFrame, visualSeamSourceTrack } from './visualSeamCoverage.ts';
 import { timelineClipDurationMs } from './shotCompositionTiming.ts';
 import { portableVisualSeamIntent, visualSeamOwners, type DisclosedOwner } from './portableVisualSeamIntent.ts';
 import type {SeamIntent} from '../../../../vendor/astrid-browser/astrid/packs/local/rendering/elements/seam-intent';
@@ -352,13 +352,38 @@ function buildSpans(config: ResolvedTimelineConfig): ClipSpan[] {
       const startFrame = Math.round(Math.max(0, clip.at) * fps);
       const durationFrames = Math.max(1, Math.round(clipDurationSeconds(clip) * fps));
       return {
-        clip,
+        clip: track?.app?.group ? { ...clip, track: visualSeamSourceTrack(track, clip.track) } : clip,
         track,
         startFrame,
         endFrame: startFrame + durationFrames,
         primary: isPrimaryVisualClip(clip, track),
       };
     });
+}
+
+/** Compare completed shots on the parent lane, independently of their inner lanes. */
+function withOccurrenceSpans(config: ResolvedTimelineConfig, spans: readonly ClipSpan[]): ClipSpan[] {
+  const occurrences = new Map<string, ClipSpan>();
+  for (const span of spans) {
+    const groupId = text(record(span.track?.app?.group)?.id);
+    const parentTrack = text(record(span.clip.app?.canonicalTiming)?.occurrenceTrackId);
+    if (!groupId || !parentTrack || !span.primary || !coversFrame(span.clip, span.track, config)) continue;
+    const previous = occurrences.get(groupId);
+    if (previous) {
+      occurrences.set(groupId, {
+        ...previous,
+        startFrame: Math.min(previous.startFrame, span.startFrame),
+        endFrame: Math.max(previous.endFrame, span.endFrame),
+      });
+    } else {
+      occurrences.set(groupId, {
+        ...span,
+        clip: { ...span.clip, track: parentTrack },
+        track: { id: parentTrack, kind: 'visual', label: config.tracks.find((track) => track.id === parentTrack)?.label ?? parentTrack },
+      });
+    }
+  }
+  return [...spans, ...occurrences.values()];
 }
 
 function buildCues(spans: readonly ClipSpan[], owners: readonly DisclosedOwner[]): Cue[] {
@@ -390,7 +415,7 @@ function continuityTracksFor(
   if (authoredTracks) return authoredTracks;
   const candidateTracks = new Set<string>();
   for (const span of spans) {
-    if (span.primary && coversFrame(span.clip, span.track, config)) candidateTracks.add(span.clip.track);
+    if (span.primary && coversFrame(span.clip, span.track, config)) candidateTracks.add(visualSeamSourceTrack(span.track, span.clip.track));
   }
   return candidateTracks;
 }
@@ -409,23 +434,23 @@ function projectedOccurrenceId(id: string): string {
 }
 
 function visualGapEdges(config: ResolvedTimelineConfig): VisualGapEdge[] {
-  const spans = buildSpans(config);
+  const spans = withOccurrenceSpans(config, buildSpans(config));
   const tracks = continuityTracksFor(spans, {}, config);
   const spansByTrack = new Map<string, ClipSpan[]>();
   for (const span of spans) {
-    if (!span.primary || !span.track || !tracks.has(span.clip.track) || !coversFrame(span.clip, span.track, config)) continue;
-    const current = spansByTrack.get(span.clip.track) ?? [];
+    if (!span.primary || !span.track || !tracks.has(visualSeamSourceTrack(span.track, span.clip.track)) || !coversFrame(span.clip, span.track, config)) continue;
+    const current = spansByTrack.get(span.track.id) ?? [];
     current.push(span);
-    spansByTrack.set(span.clip.track, current);
+    spansByTrack.set(span.track.id, current);
   }
   const gaps: VisualGapEdge[] = [];
-  for (const [track, spans] of spansByTrack) {
+  for (const spans of spansByTrack.values()) {
     spans.sort((left, right) => left.startFrame - right.startFrame || left.clip.id.localeCompare(right.clip.id));
     for (let index = 1; index < spans.length; index += 1) {
       const previous = spans[index - 1]!;
       const next = spans[index]!;
       gaps.push({
-        track,
+        track: visualSeamSourceTrack(next.track, next.clip.track),
         previousOccurrenceId: projectedOccurrenceId(previous.clip.id),
         nextOccurrenceId: projectedOccurrenceId(next.clip.id),
         startFrame: previous.endFrame,
@@ -492,7 +517,8 @@ export function analyzeVisualSeams(
   const fps = finite(config.output.fps) && config.output.fps > 0 ? config.output.fps : 30;
   const requestedGuardFrames = finite(options.guardFrames);
   const guardFrames = Math.max(0, Math.floor(requestedGuardFrames ?? 2));
-  const spans = buildSpans(config);
+  const localSpans = buildSpans(config);
+  const spans = withOccurrenceSpans(config, localSpans);
   const owners = visualSeamOwners(config, true);
   const ownerTracks = trackMap(config);
   const opaqueSpans = owners.filter(o => o.disclosure.opaque.length > 0)
@@ -506,7 +532,7 @@ export function analyzeVisualSeams(
         : coversFrame(o.clip as ResolvedTimelineClip, ownerTracks.get(String(o.clip.track ?? '')), config);
     })
     .sort((a, b) => a.startFrame - b.startFrame || a.clipId.localeCompare(b.clipId));
-  const cues = buildCues(spans, owners).sort((left, right) => left.frame - right.frame);
+  const cues = buildCues(localSpans, owners).sort((left, right) => left.frame - right.frame);
   const opaqueElements = opaqueSpans.map(opaqueElement);
   const gaps = record(record(config.app)?.visualSeamContract)?.gaps;
   const continuityTracks = continuityTracksFor(spans, options, config);
@@ -514,10 +540,10 @@ export function analyzeVisualSeams(
   const structuralIssues: string[] = [];
   const spansByTrack = new Map<string, ClipSpan[]>();
   for (const span of spans) {
-    if (!span.primary || !continuityTracks.has(span.clip.track) || !coversFrame(span.clip, span.track, config)) continue;
-    const current = spansByTrack.get(span.clip.track) ?? [];
+    if (!span.primary || !continuityTracks.has(visualSeamSourceTrack(span.track, span.clip.track)) || !coversFrame(span.clip, span.track, config)) continue;
+    const current = spansByTrack.get(span.track?.id ?? span.clip.track) ?? [];
     current.push(span);
-    spansByTrack.set(span.clip.track, current);
+    spansByTrack.set(span.track?.id ?? span.clip.track, current);
   }
 
   for (const [trackId, trackSpans] of spansByTrack) {
@@ -529,7 +555,7 @@ export function analyzeVisualSeams(
       const delta = next.startFrame - previous.endFrame;
       // Every undeclared gap or overlap is structural regardless of the cue
       // guard. Explicit pause metadata is the only gap exemption.
-      const gapDeclared = pauseCovers(gaps, trackId, previous.endFrame, next.startFrame);
+      const gapDeclared = pauseCovers(gaps, visualSeamSourceTrack(next.track, trackId), previous.endFrame, next.startFrame);
       const transitionDuration = transitionFrames(next.clip.transition, fps);
       const transitionDeclared = delta < 0 && transitionDuration !== null && -delta <= transitionDuration
         && transitionDuration <= Math.min(previous.endFrame - previous.startFrame, next.endFrame - next.startFrame);
@@ -656,7 +682,7 @@ export function withVisualSeamIntent(
 }
 
 export function withVisualSeamPause(config: ResolvedTimelineConfig, track: string, startFrame: number, endFrame: number): ResolvedTimelineConfig {
-  if (!config.tracks.some(t => t.id === track && t.kind === 'visual')
+  if (!config.tracks.some(t => visualSeamSourceTrack(t) === track && t.kind === 'visual')
     || !Number.isInteger(startFrame) || !Number.isInteger(endFrame) || startFrame < 0 || endFrame <= startFrame) {
     throw new Error('visual pause must name a picture track and a positive frame interval');
   }

@@ -4,6 +4,7 @@ import { getDragType } from '@/shared/lib/dnd/dragDrop.ts';
 import { rawRowIndexFromY } from '@/tools/video-editor/lib/coordinate-utils.ts';
 import { planClipDrag, type ClipDragPlan } from '@/tools/video-editor/lib/clip-drag-planner.ts';
 import { createTimelineScale } from '@/tools/video-editor/lib/timeline-scale.ts';
+import { planAssetDropTarget } from '@/tools/video-editor/lib/timeline-asset-plans.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import type { TrackKind } from '@/tools/video-editor/types/index.ts';
 import type { TimelineEditability } from '@/tools/video-editor/lib/timeline-editability.ts';
@@ -30,6 +31,8 @@ export interface DropPosition {
   time: number;
   rowIndex: number;
   trackId: string | undefined;
+  /** The rendered track directly under the pointer before collision resolution. */
+  pointerTrackId?: string;
   trackKind: TrackKind | null;
   trackName: string;
   isNewTrack: boolean;
@@ -63,6 +66,8 @@ export interface ComputeDropPositionParams {
   excludeClipIds?: Set<string>;
   editability?: TimelineEditability;
   clipId?: string;
+  /** Use the managed image asset planner used by the single-image import commit. */
+  managedImage?: boolean;
 }
 
 interface PublishedRowLayout { layout: TimelineRowLayout; data: TimelineData | null }
@@ -118,6 +123,7 @@ export const computeDropPosition = ({
     excludeClipIds,
   editability,
   clipId = '__drop-preview__',
+  managedImage = false,
 }: ComputeDropPositionParams): DropPosition => {
   const current = dataRef.current;
   const { editArea, grid } = getTimelineDomNodes(wrapper);
@@ -130,13 +136,33 @@ export const computeDropPosition = ({
   const leftInGrid = clientX - editRect.left + scrollLeft - effectiveOffsetX;
   const time = Math.max(0, pixelToTime(leftInGrid));
 
-  const rowCount = current?.rows.length ?? 0;
+  // Geometry is published from the rendered track order. Keep the planner's
+  // row actions in that same order when a mutable row snapshot lags a track
+  // projection; otherwise a hit on the first rendered track can inherit the
+  // owner of a differently indexed row. A partial or unknown row snapshot is
+  // invalid rather than an empty actionable target.
+  const trackIds = new Set(current?.tracks.map((track) => track.id) ?? []);
+  const rowIds = new Set(current?.rows.map((row) => row.id) ?? []);
+  const hasInvalidRowOwnership = current !== null && (
+    current.rows.length !== current.tracks.length
+    || rowIds.size !== current.rows.length
+    || current.tracks.some((track) => !rowIds.has(track.id))
+    || current.rows.some((row) => !trackIds.has(row.id))
+  );
+  const plannerRows = current
+    ? current.tracks.flatMap((track) => {
+        const row = current.rows.find((candidate) => candidate.id === track.id);
+        return row ? [row] : [];
+      })
+    : [];
+  const rowCount = current?.tracks.length ?? 0;
   const layout = getPublishedTimelineRowLayout(editArea, current);
   const requiresLayout = editArea?.dataset.timelineRowLayout === 'managed';
   const relativeY = clientY - editRect.top + scrollTop;
   const visualRow = layout?.rows.find(row => relativeY >= row.top && relativeY < row.top + row.height);
   const invalidTarget = requiresLayout && !layout ? 'timeline_layout_unavailable'
-    : visualRow?.kind === 'dataLane' ? 'data_lane_target' : null;
+    : visualRow?.kind === 'dataLane' ? 'data_lane_target'
+    : hasInvalidRowOwnership ? 'timeline_layout_unavailable' : null;
   const rawRowIndex = layout
     ? (relativeY < 0 ? -1 : visualRow?.mediaRowIndex ?? rowCount)
     : rawRowIndexFromY(clientY, editRect.top, scrollTop, rowHeight);
@@ -151,7 +177,7 @@ export const computeDropPosition = ({
     excludeClipIds,
     sourceKind: sourceKind ?? 'visual',
     tracks: current?.tracks ?? [],
-    rows: current?.rows ?? [],
+    rows: plannerRows,
     pointerRowIndex: rawRowIndex,
     pixelSnapThreshold: EDGE_SNAP_THRESHOLD_PX,
     pixelsPerSecond,
@@ -162,7 +188,42 @@ export const computeDropPosition = ({
     ...computedPlan, valid: false, rejectReason: invalidTarget, invalidReason: invalidTarget,
     targetTrackId: null, needsNewTrack: false, newTrackPlacement: null,
   } : computedPlan;
-  const rowIndex = plan.targetRowIndex;
+  const pointerTrack = visualRow?.kind === 'track'
+    ? current?.tracks.find((track) => track.id === visualRow.id)
+    : layout
+      ? undefined
+      : rawRowIndex >= 0 && rawRowIndex < plannerRows.length
+        ? current?.tracks.find((track) => track.id === plannerRows[rawRowIndex]?.id)
+        : undefined;
+  // A Runtime-backed single image has no authoritative media identity until
+  // drop, but its duration and placement semantics are already owned by the
+  // existing managed-media planner. Use that planner against the rendered
+  // pointer track so hover and the eventual prepared-media command settle on
+  // the same target. Other drops retain the generic drag planner above.
+  const managedPlacement = !invalidTarget && managedImage && current && pointerTrack?.kind === 'visual'
+    ? planAssetDropTarget({
+        current,
+        assetKind: 'visual',
+        trackId: pointerTrack.id,
+        selectedTrackId: pointerTrack.id,
+        time,
+        duration: clipDuration,
+      })
+    : null;
+  const resolvedPlan: ClipDragPlan = managedPlacement?.ok
+    ? {
+        ...plan,
+        resolvedStart: managedPlacement.snappedTime ?? time,
+        targetTrackId: managedPlacement.trackId,
+        targetRowIndex: current?.tracks.findIndex((track) => track.id === managedPlacement.trackId) ?? -1,
+        trackKind: 'visual',
+        needsNewTrack: false,
+        newTrackPlacement: null,
+        snapped: managedPlacement.snappedTime !== undefined,
+        snapEdgeType: managedPlacement.snappedTime !== undefined ? 'sibling-end' : 'none',
+      }
+    : plan;
+  const rowIndex = resolvedPlan.targetRowIndex;
   const visualRowIndex = rowCount > 0 ? Math.min(rowIndex, rowCount - 1) : -1;
   const targetTrack = rowIndex >= 0 && rowIndex < (current?.tracks.length ?? 0)
     ? current?.tracks[rowIndex]
@@ -175,7 +236,7 @@ export const computeDropPosition = ({
   // beyond the visible viewport). The ghost visual is clamped to the visible
   // viewport; the line/label anchors to trueLeft so the time label stays
   // accurate when the ghost rectangle is clipped offscreen.
-  const trueLeft = editRect.left + timeToPixel(plan.resolvedStart) - scrollLeft;
+  const trueLeft = editRect.left + timeToPixel(resolvedPlan.resolvedStart) - scrollLeft;
   const trueRight = trueLeft + clipDuration * pixelsPerSecond;
   const visibleLeft = editRect.left;
   const visibleRight = editRect.right;
@@ -196,12 +257,12 @@ export const computeDropPosition = ({
   const clipWidth = ghostWidth;
   const ghostCenter = trueLeft;
 
-  const resolvedTrack = plan.targetTrackId
-    ? current?.tracks.find((track) => track.id === plan.targetTrackId) ?? targetTrack
+  const resolvedTrack = resolvedPlan.targetTrackId
+    ? current?.tracks.find((track) => track.id === resolvedPlan.targetTrackId) ?? targetTrack
     : undefined;
   const resolvedTrackName = resolvedTrack?.label ?? resolvedTrack?.id ?? '';
-  const finalRowTop = layout && plan.needsNewTrack
-    ? editRect.top + (plan.newTrackPlacement === 'bottom' ? layout.totalHeight : 0) - scrollTop
+  const finalRowTop = layout && resolvedPlan.needsNewTrack
+    ? editRect.top + (resolvedPlan.newTrackPlacement === 'bottom' ? layout.totalHeight : 0) - scrollTop
     : rowIndex >= 0 && rowIndex < rowCount
     ? editRect.top + (layout?.trackRects.get(current?.tracks[rowIndex]?.id ?? '')?.top ?? rowIndex * rowHeight) - scrollTop
     : rowTop;
@@ -210,15 +271,18 @@ export const computeDropPosition = ({
   const finalGhostCenter = ghostCenter;
 
   return {
-    time: plan.resolvedStart,
+    time: resolvedPlan.resolvedStart,
     rowIndex,
-    trackId: plan.targetTrackId ?? undefined,
-    trackKind: plan.needsNewTrack ? (sourceKind ?? plan.trackKind) : plan.trackKind,
+    trackId: resolvedPlan.targetTrackId ?? undefined,
+    ...(invalidTarget || !pointerTrack || pointerTrack.kind !== (sourceKind ?? 'visual')
+      ? {}
+      : { pointerTrackId: pointerTrack.id }),
+    trackKind: resolvedPlan.needsNewTrack ? (sourceKind ?? resolvedPlan.trackKind) : resolvedPlan.trackKind,
     trackName: resolvedTrackName,
-    isNewTrack: plan.needsNewTrack,
-    isNewTrackTop: plan.needsNewTrack && plan.newTrackPlacement === 'top',
-    isReject: plan.rejectReason !== null,
-    newTrackKind: plan.needsNewTrack ? plan.trackKind : null,
+    isNewTrack: resolvedPlan.needsNewTrack,
+    isNewTrackTop: resolvedPlan.needsNewTrack && resolvedPlan.newTrackPlacement === 'top',
+    isReject: resolvedPlan.rejectReason !== null,
+    newTrackKind: resolvedPlan.needsNewTrack ? resolvedPlan.trackKind : null,
     screenCoords: {
       rowTop: finalRowTop,
       rowLeft: wrapperRect.left,
@@ -228,7 +292,7 @@ export const computeDropPosition = ({
       clipWidth: finalClipWidth,
       ghostCenter: finalGhostCenter,
     },
-    plan,
+    plan: resolvedPlan,
   };
 };
 

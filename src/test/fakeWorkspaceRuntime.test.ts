@@ -74,19 +74,12 @@ describe('runtimeFixture object ranges', () => {
 });
 
 describe('runtimeFixture revision history', () => {
-  const publish = (fixture: ReturnType<typeof runtimeFixture>, expectedHead: string, parentRevisionId: string, key: string) =>
-    fixture.transport('POST', `${TIMELINE}/composition-revisions`, { 'Idempotency-Key': key }, new TextEncoder().encode(JSON.stringify({
-      expected_head: expectedHead,
-      parent_revision_id: parentRevisionId,
-      parent_composition: { config: fixture.read().config, registry: fixture.read().registry, clips: [] },
-    })));
-
-  it('lists the revisions it holds, newest first, with the head flagged and a later publish on top', async () => {
+  it('lists the revisions it holds, newest first, with the head flagged and a later seeded head on top', async () => {
     const fixture = runtimeFixture({ priorRevisions: [], headRevisionId: 'seed-r1' });
     const initial = decode((await fixture.transport('GET', `${TIMELINE}/composition-revisions?limit=50`, {})).body);
     expect(initial.items.map((item: any) => [item.revision_id, item.is_current_head])).toEqual([['seed-r1', true]]);
 
-    await publish(fixture, 'seed-r1', 'next', 'publish-1');
+    fixture.setHead('next', { config: fixture.read().config, registry: fixture.read().registry, clips: [], occurrences: [] });
     const after = decode((await fixture.transport('GET', `${TIMELINE}/composition-revisions?limit=1`, {})).body);
     expect(after.items.map((item: any) => [item.revision_id, item.is_current_head])).toEqual([['next', true]]);
     expect(after.next_cursor).toBe('1');
@@ -97,7 +90,7 @@ describe('runtimeFixture revision history', () => {
 
   it('restores any revision it holds, and 404s one it does not', async () => {
     const fixture = runtimeFixture({ priorRevisions: [], headRevisionId: 'seed-r1' });
-    await publish(fixture, 'seed-r1', 'next', 'publish-1');
+    fixture.setHead('next', { config: fixture.read().config, registry: fixture.read().registry, clips: [], occurrences: [] });
     const restore = (revision: string, expectedHead: string) => fixture.transport(
       'POST', `${TIMELINE}/composition-revisions/${revision}/restore`, { 'Idempotency-Key': `restore-${revision}` },
       new TextEncoder().encode(JSON.stringify({ expected_head: expectedHead })),
@@ -109,4 +102,67 @@ describe('runtimeFixture revision history', () => {
     expect((await restore('never-existed', 'restore-seed-r1')).status).toBe(404);
     expect((await restore('seed-r1', 'next')).status).toBe(409);
   });
+});
+
+describe('runtimeFixture retired timeline routes', () => {
+  it.each([
+    ['POST', `${TIMELINE}/composition-revisions`],
+    ['POST', `${TIMELINE}/replace-parent-media`],
+    ['POST', `/v1/projects/${PROJECT_ID}/timeline-documents`],
+    ['GET', `/v1/projects/${PROJECT_ID}/documents/timeline%3A${TIMELINE_ID}`],
+    ['PATCH', `/v1/projects/${PROJECT_ID}/documents/timeline%3A${TIMELINE_ID}`],
+    ['PATCH', `/v1/timelines/${TIMELINE_ID}`],
+    ['POST', `/v1/timelines/${TIMELINE_ID}/replace-clip`],
+    ['POST', `/v1/timelines/${TIMELINE_ID}/shots`],
+    ['POST', `/v1/timelines/${TIMELINE_ID}/references`],
+    ['PATCH', '/v1/shots/shot'],
+    ['POST', '/v1/shots/shot/archive'],
+    ['POST', '/v1/shots/shot/recover'],
+    ['PATCH', '/v1/references/reference'],
+    ['POST', '/v1/references/reference/archive'],
+    ['POST', '/v1/references/reference/recover'],
+    ['POST', '/v1/attempts/attempt/publish-timeline-render'],
+  ])('%s %s refuses without changing the timeline', async (method, path) => {
+    const fixture = runtimeFixture();
+    const original = structuredClone(fixture.read());
+    const response = await fixture.transport(method, path, { 'Idempotency-Key': 'retired' },
+      new TextEncoder().encode(JSON.stringify({ expected_head: 'stale' })));
+    expect(response.status).toBe(410);
+    expect(decode(response.body).code).toBe('retired_route');
+    expect(fixture.read()).toEqual(original);
+  });
+
+  it('refuses composition writes before decoding malformed JSON', async () => {
+    const fixture = runtimeFixture();
+    const response = await fixture.transport('POST', `${TIMELINE}/composition-revisions`, {}, new TextEncoder().encode('invalid JSON'));
+    expect(response.status).toBe(410);
+    expect(decode(response.body)).toMatchObject({ code: 'retired_route', details: { reason: 'timeline_commit_required' } });
+  });
+
+  it('keeps timeline catalog rename supported', async () => {
+    const fixture = runtimeFixture();
+    const response = await fixture.transport('PATCH', TIMELINE, { 'Idempotency-Key': 'rename' },
+      new TextEncoder().encode(JSON.stringify({ name: 'New name' })));
+    expect(response.status).toBe(200);
+    expect(decode(response.body).data.name).toBe('New name');
+    expect(fixture.read().headRevisionId).toBe('parent-r1');
+  });
+
+  it('refuses historical film recovery through the catalog route', async () => {
+    const fixture = runtimeFixture();
+    const response = await fixture.transport('POST', `/v1/timelines/${TIMELINE_ID}/recover`, {},
+      new TextEncoder().encode(JSON.stringify({ expected_version: 1, version: 2 })));
+    expect(response.status).toBe(410);
+    expect(decode(response.body)).toMatchObject({ code: 'retired_route', details: { reason: 'timeline_restore_required' } });
+    expect(fixture.read().headRevisionId).toBe('parent-r1');
+  });
+
+  it.each([{ timeline_id: TIMELINE_ID }, { document_id: `timeline:${TIMELINE_ID}` }, { kind: 'timeline.composition' }])(
+    'refuses timeline payloads through generic document creation: %j', async (body) => {
+      const fixture = runtimeFixture();
+      const response = await fixture.transport('POST', `/v1/projects/${PROJECT_ID}/documents`, {},
+        new TextEncoder().encode(JSON.stringify(body)));
+      expect(response.status).toBe(410);
+      expect(decode(response.body)).toMatchObject({ code: 'retired_route', details: { reason: 'timeline_commit_required' } });
+    });
 });

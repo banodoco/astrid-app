@@ -1,3 +1,4 @@
+import { getShotPlacementTarget } from '@/shared/state/selectionStore';
 import { useCallback } from 'react';
 import type { Dispatch, SetStateAction } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
@@ -102,7 +103,7 @@ export function useShotImageMutations(input: UseShotImageMutationsInput): UseSho
 
     try {
       await addImageToShotMutation.mutateAsync({
-        shot_id: currentShotId,
+        ...getShotPlacementTarget(selectedProjectId, currentShotId),
         generation_id: generationId,
         imageUrl,
         thumbUrl,
@@ -129,7 +130,7 @@ export function useShotImageMutations(input: UseShotImageMutationsInput): UseSho
 
     try {
       await addImageToShotMutation.mutateAsyncWithoutPosition({
-        shot_id: currentShotId,
+        ...getShotPlacementTarget(selectedProjectId, currentShotId),
         generation_id: generationId,
         imageUrl,
         thumbUrl,

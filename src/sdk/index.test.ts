@@ -3178,7 +3178,7 @@ describe('M14: validateManifest', () => {
     expect(Object.isFrozen(result.warnings)).toBe(true);
   });
 
-  // ---- Kind-specific placement rules ---- 
+  // ---- Kind-specific placement rules ----
 
   it('accepts valid panel placement', () => {
     const manifest: ExtensionManifest = {

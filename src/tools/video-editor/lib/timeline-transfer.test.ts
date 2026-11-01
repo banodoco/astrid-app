@@ -244,10 +244,34 @@ describe('timeline transfer workflows', () => {
     admissionKeys.forEach((key) => expect(key).toMatch(/^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$/));
     expect(client.listProjectObjects).toHaveBeenCalledWith('target-project', undefined, 100);
     expect(commits).toHaveLength(1);
+    expect(commits[0]).toMatchObject({ source: { via: 'app' }, timeline_id: 'prepared-id' });
     expect(commitKeys).toHaveLength(1);
     commitKeys.forEach((key) => expect(key).toMatch(/^[A-Za-z0-9][A-Za-z0-9._~-]{0,255}$/));
     expect(imported.timeline_id).toBe('new-timeline');
     expect((client.ingestProjectObject as unknown as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
+  });
+
+  it('marks an oversized prepared object commit as an App import', async () => {
+    const { client, commits, uploads } = fakeClient();
+    let actionIndex = 0;
+    const fetchImpl = actionFetch({});
+    fetchImpl.mockImplementation(async () => {
+      actionIndex += 1;
+      const value = actionIndex === 1
+        ? { check_only: true, missing_effects: [], different_effects: [] }
+        : { ...preparedJson(), padding: 'x'.repeat(800 * 1024) };
+      return new Response(JSON.stringify(value), { status: 200 });
+    });
+    await importTimelineArchive(new File([await archiveBlob()], 'timeline.astrid'), 'target-project', {
+      client: client as never, fetchImpl, xhrFactory: xhrFactory(uploads),
+    });
+    expect(commits).toHaveLength(1);
+    expect(commits[0]).toMatchObject({ prepared_object_id: `sha256:${'c'.repeat(64)}`, source: { via: 'app' } });
+    expect(commits[0]).not.toHaveProperty('timeline_id');
+    const staged = JSON.parse(await client.ingestProjectObject.mock.calls.at(-1)![1].text());
+    expect(staged.timeline_id).toBe('prepared-id');
+    // Runtime validates the prepared object separately from request provenance.
+    expect(staged).not.toHaveProperty('source');
   });
 
   it('numbers a taken timeline name like "Timeline N"', () => {

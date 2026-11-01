@@ -23,11 +23,11 @@ describe('Runtime compatibility metadata', () => {
     );
   });
 
-  it('does not advertise full v2 commits for the published R1+M Runtime', () => {
+  it('enables the inspected provisional Timeline ABI without claiming a published Runtime pin', () => {
     expect(PROTOCOL).toBe('workspace.v1');
-    expect(CONTRACT_VERSION).toBe('0.1.0');
-    expect(OPERATIONS as readonly string[]).not.toContain('commitTimeline');
-    expect(OPERATIONS as readonly string[]).not.toContain('listTimelineCommits');
-    expect(supportsFullV2Commit()).toBe(false);
+    expect(CONTRACT_VERSION).toBe('0.2.14');
+    expect(OPERATIONS as readonly string[]).toContain('commitTimeline');
+    expect(OPERATIONS as readonly string[]).toContain('listTimelineCommits');
+    expect(supportsFullV2Commit()).toBe(true);
   });
 });

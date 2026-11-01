@@ -36,8 +36,14 @@ export type PlannedAssetDropTarget =
     }
   | {
       ok: false;
-      error: 'missing_timeline';
+      error: 'missing_timeline' | 'preserved_track_unavailable';
     };
+
+/** Placement rules owned by a caller that has captured an authoritative track. */
+export type TimelineAssetPlacementPolicy = {
+  kind: 'occurrence-raw-track';
+  trackId: string;
+};
 
 /** Retains the source's human name and generation prompt on a timeline asset. */
 export function getGenerationAssetDisplayMetadata(generation: {
@@ -251,6 +257,7 @@ export function planAssetDropTarget({
   insertAtTop = false,
   time,
   duration,
+  placementPolicy,
 }: {
   current: TimelineData | null;
   assetKind: 'audio' | 'visual';
@@ -260,9 +267,34 @@ export function planAssetDropTarget({
   insertAtTop?: boolean;
   time?: number;
   duration?: number;
+  placementPolicy?: TimelineAssetPlacementPolicy;
 }): PlannedAssetDropTarget {
   if (!current) {
     return { ok: false, error: 'missing_timeline' };
+  }
+
+  if (placementPolicy) {
+    const preservedTrack = current.tracks.find((track) => track.id === placementPolicy.trackId);
+    const trackState = preservedTrack as (typeof preservedTrack & {
+      active?: unknown;
+      enabled?: unknown;
+      disabled?: unknown;
+      hidden?: unknown;
+      deleted?: unknown;
+    }) | undefined;
+    if (forceNewTrack
+      || (trackId !== undefined && trackId !== placementPolicy.trackId)
+      || !trackState
+      || trackState.kind !== assetKind
+      || trackState.role === 'source'
+      || trackState.active === false
+      || trackState.enabled === false
+      || trackState.disabled === true
+      || trackState.hidden === true
+      || trackState.deleted === true) {
+      return { ok: false, error: 'preserved_track_unavailable' };
+    }
+    return { ok: true, current, preparedCurrent: current, trackId: placementPolicy.trackId };
   }
 
   let resolvedTrackId = forceNewTrack

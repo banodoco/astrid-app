@@ -38,6 +38,19 @@ function fixtureError(code: string, message: string): Uint8Array {
   return json({ code, message, request_id: 'fake-request' });
 }
 
+function retiredTimelineResponse(document = false) {
+  return { status: 410, headers: {}, body: json({ code: 'retired_route', request_id: 'fake-request',
+    message: document
+      ? 'timeline-document reads and CAS writes are retired; use inspectTimeline and canonical publication'
+      : 'legacy timeline writes are retired; submit EditCommands through commitTimeline',
+    details: document
+      ? { replacement: 'POST /v1/projects/{project_id}/timelines/{timeline_id}/inspect' }
+      : { status: 'refused', reason: 'timeline_commit_required',
+        hint: 'Submit a timeline commit instead of the retired save route.', suggested_command: 'timeline commit',
+        replacement: 'POST /v1/projects/{project_id}/timelines/{timeline_id}/commit' },
+  }) };
+}
+
 /**
  * Single-range reads as the real daemon and the router answer them: a suffix range (`bytes=-N`) is the
  * last N bytes, an unsatisfiable range is 416 whose Content-Range is `bytes`, a star and the size, and an unparseable header
@@ -81,6 +94,8 @@ type FixtureRevision = {
 };
 
 export type RuntimeFixtureOptions = {
+  /** A fresh project has no timeline until the catalog create route bootstraps it. */
+  timelineExists?: boolean;
   runtimeInstanceId?: string;
   mediaEtag?: string;
   objectReadOverrides?: Map<string, Uint8Array>;
@@ -110,9 +125,13 @@ export type RuntimeFixtureOptions = {
 
 export function runtimeFixture(options: RuntimeFixtureOptions = {}) {
   const projectId = options.projectId ?? PROJECT_ID;
-  const timelineId = options.timelineId ?? TIMELINE_ID;
+  let timelineId = options.timelineId ?? TIMELINE_ID;
+  let timelineExists = options.timelineExists ?? true;
+  let timelineName = timelineId;
+  let projectVersion = 1;
+  let projectMetadata: Record<string, unknown> = {};
   const contentAddressed = options.objects !== undefined;
-  let documentVersion = 1;
+  const documentVersion = 1;
   const receipts = new Map<string, { request: string; body: Uint8Array }>();
   let headRevisionId = options.headRevisionId ?? 'parent-r1';
   const initialConfig = createDefaultTimelineConfig();
@@ -154,7 +173,6 @@ export function runtimeFixture(options: RuntimeFixtureOptions = {}) {
   const objects: FakeObjectStore = options.objects ?? new Map<string, FixtureObject>();
   const mediaEtag = options.mediaEtag;
   const requests: Array<{ method: string; path: string; headers: Record<string, string>; body?: unknown }> = [];
-  const timelinePath = `/v1/projects/${projectId}/timelines/${timelineId}`;
   const staleHead = (expected: string | null) => ({
     status: 409,
     headers: {},
@@ -167,6 +185,20 @@ export function runtimeFixture(options: RuntimeFixtureOptions = {}) {
     headers: Record<string, string>,
     body?: RequestBody,
   ): ReturnType<Transport> => {
+    const timelinePath = `/v1/projects/${projectId}/timelines/${timelineId}`;
+    const route = decodeURIComponent(path.split('?')[0]);
+    const retiredDocument = ['GET', 'PATCH'].includes(method) && /^\/v1\/projects\/[^/]+\/documents\/timeline:/.test(route);
+    const retired = (method === 'POST' && /^\/v1\/projects\/[^/]+\/(timeline-documents|timelines\/[^/]+\/(composition-revisions|replace-parent-media))$/.test(route))
+      || (method === 'PATCH' && /^\/v1\/timelines\/[^/]+$/.test(route))
+      || (method === 'POST' && /^\/v1\/timelines\/[^/]+\/(shots|references|replace-clip)$/.test(route))
+      || (['PATCH', 'POST'].includes(method) && /^\/v1\/(shots|references)\/[^/]+(?:\/(archive|recover))?$/.test(route))
+      || (method === 'POST' && /^\/v1\/attempts\/[^/]+\/publish-timeline-render$/.test(route))
+      || retiredDocument;
+    // The daemon refuses these routes before decoding their body or checking CAS.
+    if (retired) {
+      if (options.recordRequests !== false) requests.push({ method, path, headers });
+      return retiredTimelineResponse(retiredDocument);
+    }
     const projectObjectPath = /^\/v1\/projects\/([^/]+)\/objects$/.exec(path);
     const isMediaImport = path.endsWith('/media-imports');
     const parsedBody = body && !projectObjectPath && !isMediaImport
@@ -174,6 +206,17 @@ export function runtimeFixture(options: RuntimeFixtureOptions = {}) {
       : undefined;
     if (options.recordRequests !== false) {
       requests.push({ method, path, headers, ...(parsedBody ? { body: parsedBody } : {}) });
+    }
+    if (method === 'POST' && /^\/v1\/projects\/[^/]+\/documents$/.test(route) && parsedBody
+      && ('timeline_id' in parsedBody || String(parsedBody.document_id ?? '').startsWith('timeline:') || parsedBody.kind === 'timeline.composition')) {
+      return retiredTimelineResponse();
+    }
+    if (method === 'POST' && route === `/v1/timelines/${timelineId}/recover`
+      && typeof parsedBody?.version === 'number' && parsedBody.version !== 1) {
+      return { status: 410, headers: {}, body: json({ code: 'retired_route', request_id: 'fake-request',
+        message: 'legacy timeline recover cannot restore a historical film version; restore a revision with timeline.restore',
+        details: { status: 'refused', reason: 'timeline_restore_required', replacement: 'timeline.restore',
+          requested_version: parsedBody.version, current_version: 1 } }) };
     }
 
     if (path === '/v1/health') {
@@ -184,6 +227,51 @@ export function runtimeFixture(options: RuntimeFixtureOptions = {}) {
     }
     if (path === '/v1/realm') {
       return { status: 200, headers: {}, body: json({ realm_id: FAKE_RUNTIME_REALM_ID, display_name: 'R1 fixture', version: 1, created_at: '2026-09-11T00:00:00Z' }) };
+    }
+    const project = () => ({ project_id: projectId, realm_id: FAKE_RUNTIME_REALM_ID, slug: projectId,
+      name: 'Fresh project', metadata: projectMetadata, version: projectVersion, created_at: FIXTURE_CREATED_AT, updated_at: FIXTURE_CREATED_AT });
+    const timeline = () => ({ project_id: projectId, timeline_id: timelineId, version: 1, name: timelineName,
+      archived: false, shots: [], references: [], head_revision_id: headRevisionId, head_publication_id: 'publication-current' });
+    if (path === `/v1/projects/${projectId}`) {
+      if (method === 'PATCH') {
+        if (parsedBody?.expected_version !== projectVersion) return { status: 409, headers: {}, body: fixtureError('version_conflict', 'project changed') };
+        projectMetadata = parsedBody.metadata as Record<string, unknown>;
+        projectVersion += 1;
+      }
+      return { status: 200, headers: {}, body: json(project()) };
+    }
+    if (method === 'GET' && route === `/v1/projects/${projectId}/timelines`) {
+      return { status: 200, headers: {}, body: json({ items: timelineExists ? [timeline()] : [], next_cursor: null }) };
+    }
+    if (method === 'POST' && path === `/v1/projects/${projectId}/timelines`) {
+      const request = JSON.stringify(parsedBody);
+      const key = headers['Idempotency-Key'];
+      const saved = receipts.get(key);
+      if (saved) return saved.request === request
+        ? { status: 201, headers: {}, body: saved.body }
+        : { status: 409, headers: {}, body: fixtureError('conflict', 'idempotency payload mismatch') };
+      if (timelineExists) return { status: 409, headers: {}, body: fixtureError('conflict', 'timeline already exists') };
+      timelineId = parsedBody!.timeline_id as string;
+      timelineName = (parsedBody!.name as string | undefined) ?? timelineId;
+      timelineExists = true;
+      headRevisionId = `bootstrap-${timelineId}`;
+      revisions.clear();
+      revisionOrder.length = 0;
+      config = { ...createDefaultTimelineConfig(), clips: [], tracks: [] };
+      registry = { assets: {} };
+      addRevision(headRevisionId, { payload: { config, registry: {}, clips: [], occurrences: [] },
+        createdAt: nextCreatedAt(), contentDigest: FIXTURE_DIGEST_1 });
+      const data = timeline();
+      const responseBody = json({ data, receipt: { receipt_id: 'receipt-create', command_kind: 'timeline.create',
+        idempotency_key: key, project_id: projectId, project_seq: [1, 1], event_ids: [], result: data, created_at: FIXTURE_CREATED_AT } });
+      receipts.set(key, { request, body: responseBody });
+      return { status: 201, headers: {}, body: responseBody };
+    }
+    if (method === 'PATCH' && path === timelinePath && typeof parsedBody?.name === 'string' && Object.keys(parsedBody).length === 1) {
+      timelineName = parsedBody.name;
+      const data = timeline();
+      return { status: 200, headers: {}, body: json({ data, receipt: { receipt_id: 'receipt-rename', command_kind: 'timeline.rename',
+        idempotency_key: headers['Idempotency-Key'], project_id: projectId, result: data } }) };
     }
     if (method === 'POST' && path === `/v1/projects/${projectId}/media-imports`) {
       const operationId = headers['Idempotency-Key'] ?? '';
@@ -439,64 +527,28 @@ export function runtimeFixture(options: RuntimeFixtureOptions = {}) {
         }),
       };
     }
-    if (method === 'POST' && path === `${timelinePath}/composition-revisions`) {
-      const request = parsedBody as {
-        expected_head: string | null;
-        parent_revision_id: string;
-        parent_composition: { config: typeof config; registry: typeof registry; clips?: TimelineConfig['clips'] };
-      };
-      const requestJson = JSON.stringify(parsedBody);
-      const receipt = receipts.get(headers['Idempotency-Key']);
-      if (receipt) {
-        if (receipt.request !== requestJson) throw new Error('idempotency payload mismatch');
-        return { status: 200, headers: {}, body: receipt.body };
-      }
-      // Compare and swap: nothing between this check and the head assignment may await.
-      if (request.expected_head !== headRevisionId) return staleHead(request.expected_head);
-      documentVersion += 1;
-      headRevisionId = request.parent_revision_id;
-      config = request.parent_composition.config;
-      registry = request.parent_composition.registry;
-      const clips = request.parent_composition.clips ?? request.parent_composition.config.clips;
-      addRevision(headRevisionId, {
-        payload: structuredClone({ ...request.parent_composition, clips, occurrences: [] }),
-        createdAt: nextCreatedAt(),
-        contentDigest: FIXTURE_DIGEST_1,
-      });
-      const response = {
+    if (method === 'GET' && path === timelinePath) {
+      if (!timelineExists) return { status: 404, headers: {}, body: fixtureError('not_found', 'timeline not found') };
+      // The public timeline resource carries identity/head metadata only. The
+      // mutable document projection remains retired below.
+      return {
         status: 200,
         headers: {},
         body: json({
-          data: {
-            project_id: projectId,
-            timeline_id: timelineId,
-            revision_id: headRevisionId,
-            parent_revision_id: headRevisionId,
-            new_head: headRevisionId,
-            content_digest: FIXTURE_DIGEST_1,
-            payload: { config, registry, clips, occurrences: [] },
-          },
-          receipt: {
-            receipt_id: `receipt-${documentVersion}`,
-            command_kind: 'parent_composition.publish',
-            idempotency_key: headers['Idempotency-Key'],
-            request_hash: 'hash',
-            project_id: projectId,
-            project_seq: [documentVersion, documentVersion],
-            event_ids: [`event-${documentVersion}`],
-            result: {},
-            created_at: '2026-09-11T00:00:00Z',
-          },
+          project_id: projectId,
+          timeline_id: timelineId,
+          version: 1,
+          name: timelineName,
+          archived: false,
+          shots: [],
+          references: [],
+          head_revision_id: headRevisionId,
+          head_publication_id: 'publication-current',
         }),
       };
-      receipts.set(headers['Idempotency-Key'], { request: requestJson, body: response.body });
-      return response;
     }
     if (path === timelinePath) {
-      throw new Error('retired mutable timeline GET must not be used');
-    }
-    if (path.includes('/documents/timeline%3A')) {
-      throw new Error('retired mutable timeline document route must not be used');
+      return { status: 400, headers: {}, body: fixtureError('invalid_request', 'rename requires only name') };
     }
     throw new Error(`unexpected ${method} ${path}`);
   };

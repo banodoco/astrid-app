@@ -9,7 +9,7 @@ import { toast } from '@/shared/components/ui/runtime/sonner';
 import { normalizeAndPresentError } from '@/shared/lib/errorHandling/runtimeError';
 import { useGalleryFilterState } from '@/shared/hooks/gallery/useGalleryFilterState';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents';
-import { useCurrentShot, useLastAffectedShot } from '@/shared/state/selectionStore';
+import { getShotPlacementTarget, useCurrentShot, useLastAffectedShot } from '@/shared/state/selectionStore';
 
 interface UseGenerationsPageLogicOptions {
   itemsPerPage?: number;
@@ -153,13 +153,13 @@ function useGenerationsPageLogic({
     try {
       if (shouldPositionExisting) {
         await positionExistingGenerationMutation.mutateAsync({
-          shot_id: resolvedTargetShotId,
+          ...getShotPlacementTarget(selectedProjectId, resolvedTargetShotId),
           generation_id: generationId,
           project_id: selectedProjectId,
         });
       } else {
         await addImageToShotMutation.mutateAsync({
-          shot_id: resolvedTargetShotId,
+          ...getShotPlacementTarget(selectedProjectId, resolvedTargetShotId),
           generation_id: generationId,
           imageUrl: imageUrl,
           thumbUrl: thumbUrl,
@@ -189,7 +189,7 @@ function useGenerationsPageLogic({
 
     try {
       await addImageToShotMutation.mutateAsyncWithoutPosition({
-        shot_id: resolvedTargetShotId,
+        ...getShotPlacementTarget(selectedProjectId, resolvedTargetShotId),
         generation_id: generationId,
         imageUrl: imageUrl,
         thumbUrl: thumbUrl,

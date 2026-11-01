@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { setRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AstridTimelineEditor } from '@/tools/video-editor/components/AstridTimelineEditor';
@@ -270,7 +270,6 @@ function createTestStore(data: TimelineData = timelineData) {
     },
     chrome: {
       handleAddTrack: vi.fn(),
-      handleAddTextAt: vi.fn(),
       handleClearUnusedTracks: vi.fn(),
       unusedTrackCount: 0,
     },
@@ -281,17 +280,19 @@ function createTestStore(data: TimelineData = timelineData) {
 function renderEditor(options: { data?: TimelineData; runtime?: Record<string, unknown> } = {}) {
   const store = createTestStore(options.data);
   const result = render(
-    <TimelineStoreProvider store={store}>
-      <VideoEditorRuntimeProvider value={{
-        userId: null,
-        timelineId: 'timeline-1',
-        project: { projectId: 'project-1' },
-        provider: {},
-        ...options.runtime,
-      } as never}>
-        <AstridTimelineEditor />
-      </VideoEditorRuntimeProvider>
-    </TimelineStoreProvider>,
+    <div data-video-editor-instance="test-shell">
+      <TimelineStoreProvider store={store}>
+        <VideoEditorRuntimeProvider value={{
+          userId: null,
+          timelineId: 'timeline-1',
+          project: { projectId: 'project-1' },
+          provider: {},
+          ...options.runtime,
+        } as never}>
+          <AstridTimelineEditor />
+        </VideoEditorRuntimeProvider>
+      </TimelineStoreProvider>
+    </div>,
   );
   return { ...result, store };
 }
@@ -326,7 +327,7 @@ describe('AstridTimelineEditor canonical shot opening', () => {
     vi.clearAllMocks();
   });
 
-  it('opens the existing shot popup for an ordinary-mode canonical occurrence double-click', () => {
+  it('opens the existing shot popup for an ordinary-mode canonical occurrence double-click', async () => {
     const occurrenceId = 'occurrence-ordinary';
     const clipId = occurrenceId;
     const occurrence = {
@@ -361,12 +362,21 @@ describe('AstridTimelineEditor canonical shot opening', () => {
     });
     const clip = container.querySelector(`[data-clip-id="${clipId}"]`);
     expect(clip).toBeTruthy();
+    const gallery = document.createElement('div');
+    document.body.append(gallery);
 
     fireEvent.doubleClick(clip!);
 
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     expect(screen.getByText('Edit shot-ordinary')).toBeInTheDocument();
+    expect(container.querySelector('[data-video-editor-instance]')).toHaveAttribute('inert');
+    expect(gallery).not.toHaveAttribute('inert');
     expect(container.querySelector('[data-action-id="shot-group-label"]')).toBeNull();
+    await act(async () => {
+      screen.getByRole('button', { name: 'Close' }).click();
+    });
+    await waitFor(() => expect(container.querySelector('[data-video-editor-instance]')).not.toHaveAttribute('inert'));
+    gallery.remove();
   });
 });
 

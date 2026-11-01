@@ -9,6 +9,8 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from 'react';
+import type { TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
+import { invalidateDraftReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { VideoEditorRuntimeContext } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import {
   editorClearTimelineSelection,
@@ -19,7 +21,7 @@ import {
 import { TimelineEventBus } from '@/tools/video-editor/hooks/useTimelineEventBus.ts';
 import { buildTrackClipOrder } from '@/tools/video-editor/lib/coordinate-utils.ts';
 import { migrateToFlatTracks } from '@/tools/video-editor/lib/migrate.ts';
-import { serializeResolvedConfigForSave } from '@/tools/video-editor/lib/timeline-mutation-engine.ts';
+import { serializeResolvedTimelineEdit, withHeldClipSourceFields, TIMELINE_CLIP_FIELDS } from '@/tools/video-editor/lib/serialize.ts';
 import { getConfigSignature } from '@/tools/video-editor/lib/config-utils.ts';
 import { buildDataFromCurrentRegistry } from '@/tools/video-editor/lib/timeline-save-utils.ts';
 import { buildAssetReferenceMap, getAssetMediaId, getAssetResolutionToken, getAssetSourceForLocalEdit } from '@/tools/video-editor/lib/asset-registry.ts';
@@ -55,6 +57,7 @@ export type CommitHistoryOptions = {
 };
 
 export type CommitDataOptions = {
+  gestureBasis?: TimelineGestureReadBasis;
   save?: boolean;
   selectedClipId?: string | null;
   selectedTrackId?: string | null;
@@ -67,7 +70,7 @@ export type CommitDataOptions = {
 
 export type ScheduleSaveFn = (
   nextData: TimelineData,
-  options?: { preserveStatus?: boolean },
+  options?: { preserveStatus?: boolean; gestureBasis?: TimelineGestureReadBasis },
 ) => void;
 
 /**
@@ -128,6 +131,7 @@ export type TimelineEditMutation =
     };
 
 export type ApplyEditOptions = {
+  gestureBasis?: TimelineGestureReadBasis;
   /**
    * Persist this edit (default: the commit layer's own scheduling). Set `false`
    * for intermediate states you do not want written back — e.g. a step inside a
@@ -196,6 +200,31 @@ export interface UseTimelineCommitResult {
   selectedClipIdRef: MutableRefObject<string | null>;
   selectedTrackIdRef: MutableRefObject<string | null>;
 }
+
+const TIMELINE_CLIP_FIELD_SET = new Set<string>(TIMELINE_CLIP_FIELDS);
+
+/**
+ * Rows are a display projection. A rows edit must overlay its canonical fields
+ * on the authored clip while carrying forward source-owned extension fields
+ * that are intentionally outside the editor's closed clip schema.
+ */
+const preserveAuthoredClipExtensions = (
+  authoredConfig: TimelineData['config'],
+  materializedConfig: TimelineData['config'],
+): TimelineData['config'] => {
+  const authoredClips = new Map(authoredConfig.clips.map((clip) => [clip.id, clip] as const));
+  return {
+    ...materializedConfig,
+    clips: materializedConfig.clips.map((clip) => {
+      const authored = authoredClips.get(clip.id);
+      if (!authored) return clip;
+      const extensions = Object.fromEntries(
+        Object.entries(structuredClone(authored)).filter(([key]) => !TIMELINE_CLIP_FIELD_SET.has(key)),
+      );
+      return { ...extensions, ...clip };
+    }),
+  };
+};
 
 export function useTimelineCommit({
   eventBus,
@@ -310,7 +339,7 @@ export function useTimelineCommit({
     // rowsToConfig receives the untouched pinnedShotGroups from the current config;
     // callers that need to update group membership must pass `pinnedShotGroupsOverride`
     // explicitly on the mutation, which `applyEdit` handles below.
-    const config = rowsToConfig(
+    const materializedConfig = withHeldClipSourceFields(rowsToConfig(
       rows,
       meta,
       current.output,
@@ -318,7 +347,8 @@ export function useTimelineCommit({
       current.tracks,
       current.config.pinnedShotGroups,
       current.config,
-    );
+    ), meta);
+    const config = preserveAuthoredClipExtensions(current.config, materializedConfig);
 
     const registry = registryOverride ?? current.registry;
     const resolvedRegistry = Object.fromEntries(
@@ -339,6 +369,9 @@ export function useTimelineCommit({
     options?: CommitDataOptions,
   ) => {
     const shouldSave = options?.save ?? true;
+    // History/selection listeners are re-entrant. Invalidate admission before
+    // publishing anything that can run code against the old saved sequence.
+    if (shouldSave) invalidateDraftReload();
     const currentData = dataRef.current;
     if (options?.skipHistory && options?.updateLastSavedSignature) registryOwnersRef.current.clear();
     for (const [assetId, receipt] of registryOwnersRef.current) {
@@ -397,7 +430,9 @@ export function useTimelineCommit({
 
     if (shouldSave) {
       editSeqRef.current += 1;
-      eventBus.emit('scheduleSave', nextData);
+      eventBus.emit('localCommit', currentData, nextData);
+      if (options?.gestureBasis) eventBus.emit('scheduleSave', nextData, { gestureBasis: options.gestureBasis });
+      else eventBus.emit('scheduleSave', nextData);
     }
   }, [eventBus, lastSavedSignatureRef, selectionOwner]);
 
@@ -428,6 +463,11 @@ export function useTimelineCommit({
       }
 
       commitData(prepared.nextData, {
+        ...(!current.registry.assets[mutation.command.payload.asset.assetKey]
+          || (mutation.command.payload.afterClipId && mutation.command.payload.asset.mediaType === 'video') ? {
+          gestureBasis: { kind: 'prepared-media' as const, config: current.config, registry: current.registry,
+            clipId: prepared.commandResult!.detail!.clipId as string, command: mutation.command },
+        } : {}),
         save: options?.save,
         selectedClipId: options?.selectedClipId,
         selectedTrackId: options?.selectedTrackId,
@@ -461,6 +501,7 @@ export function useTimelineCommit({
           semantic: options?.semantic,
           skipHistory: options?.skipHistory,
           commandHistory: options?.commandHistory,
+          gestureBasis: options?.gestureBasis,
         },
       );
       return;
@@ -514,6 +555,7 @@ export function useTimelineCommit({
           semantic: options?.semantic,
           skipHistory: options?.skipHistory,
           commandHistory: options?.commandHistory,
+          gestureBasis: options?.gestureBasis,
         },
       );
       return;
@@ -523,10 +565,12 @@ export function useTimelineCommit({
       preserveUploadingClips(
         current,
         buildDataFromCurrentRegistry(
-          serializeResolvedConfigForSave(
-            current,
+          serializeResolvedTimelineEdit(
             mutation.resolvedConfig,
             mutation.pinnedShotGroupsOverride ?? current.config.pinnedShotGroups,
+            current.config,
+            undefined,
+            current.resolvedConfig,
           ),
           current,
         ),
@@ -539,6 +583,7 @@ export function useTimelineCommit({
         semantic: options?.semantic,
         skipHistory: options?.skipHistory,
         commandHistory: options?.commandHistory,
+        gestureBasis: options?.gestureBasis,
       },
     );
   }, [commitData, materializeData, withPinnedShotGroups, eventBus, editability]);

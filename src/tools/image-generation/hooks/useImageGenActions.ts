@@ -1,3 +1,4 @@
+import { getShotPlacementTarget } from '@/shared/state/selectionStore';
 import { useMemo, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/shared/components/ui/runtime/sonner';
@@ -62,13 +63,13 @@ export function useImageGenActions({
     try {
       if (shouldPositionExisting) {
         await positionExistingGenerationMutation?.mutateAsync({
-          shot_id: resolvedTargetShotId,
+          ...getShotPlacementTarget(projectId, resolvedTargetShotId),
           generation_id: generationId,
           project_id: projectId,
         });
       } else {
         await addImageToShotMutation?.mutateAsync({
-          shot_id: resolvedTargetShotId,
+          ...getShotPlacementTarget(projectId, resolvedTargetShotId),
           generation_id: generationId,
           imageUrl,
           thumbUrl,
@@ -101,7 +102,7 @@ export function useImageGenActions({
 
     try {
       await addImageToShotMutation?.mutateAsyncWithoutPosition({
-        shot_id: resolvedTargetShotId,
+        ...getShotPlacementTarget(projectId, resolvedTargetShotId),
         generation_id: generationId,
         imageUrl,
         thumbUrl,

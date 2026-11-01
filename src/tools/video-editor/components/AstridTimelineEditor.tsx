@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { shallow } from 'zustand/shallow';
 import type { Shot } from '@/domains/generation/types/index.ts';
 import { Dialog, DialogContent, DialogTitle } from '@/shared/components/ui/dialog.tsx';
@@ -52,6 +52,7 @@ import type {
 import type { CanonicalShotTimelinePublication } from '@/tools/video-editor/runtime/ports.ts';
 import { managedOutputMatchesOccurrence } from '@/tools/video-editor/data/shotCompositionProjection.ts';
 import { useEditorTourRunning } from '@/shared/state/editorTourStore.ts';
+import { usePanesStore } from '@/shared/state/panesStore.ts';
 
 interface AstridTimelineEditorProps {
   onOpenSequenceCreator?: () => void;
@@ -95,6 +96,7 @@ export function shouldKeepPublishedCanonicalCompositionOverride(
 }
 
 function AstridTimelineEditorComponent({ onOpenSequenceCreator, onOpenElementCreationPrompt, onOpenExtensionManager }: AstridTimelineEditorProps) {
+  const editorContentRef = useRef<HTMLDivElement>(null);
   const [videoModalShot, setVideoModalShot] = useState<Shot | null>(null);
   const [videoModalShowImages, setVideoModalShowImages] = useState(false);
   const [canonicalShotEditor, setCanonicalShotEditor] = useState<CanonicalShotOccurrence | null>(null);
@@ -102,6 +104,9 @@ function AstridTimelineEditorComponent({ onOpenSequenceCreator, onOpenElementCre
   const { navigateToShot } = useShotNavigation();
   const { selectedProjectId } = useProjectSelectionContext();
   const { shots } = useShots();
+  const isGenerationsPaneLocked = usePanesStore((state) => state.isGenerationsPaneLocked);
+  const isGenerationsPaneOpen = usePanesStore((state) => state.isGenerationsPaneOpen);
+  const effectiveGenerationsPaneHeight = usePanesStore((state) => state.effectiveGenerationsPaneHeight);
   const runtime = useVideoEditorRuntime();
   // The hosted build's "Astrid stopped" / "restarted" card is what tells the person what to do; this banner stays quiet then.
   const recoveryCardShowing = useRecoveryCardShowing();
@@ -131,6 +136,18 @@ function AstridTimelineEditorComponent({ onOpenSequenceCreator, onOpenElementCre
     error: runtime.shots?.canonicalCompositionError ?? runtime.shots?.error,
   });
   const [publishedCanonicalComposition, setPublishedCanonicalComposition] = useState<PublishedCanonicalCompositionOverride | null>(null);
+  useEffect(() => {
+    const shellRoot = editorContentRef.current?.closest<HTMLElement>('[data-video-editor-instance]');
+    if (!shellRoot) return undefined;
+    const previousInert = shellRoot.inert;
+    const hadInertAttribute = shellRoot.hasAttribute('inert');
+    shellRoot.inert = Boolean(canonicalShotEditor);
+    shellRoot.toggleAttribute('inert', Boolean(canonicalShotEditor));
+    return () => {
+      shellRoot.inert = previousInert;
+      shellRoot.toggleAttribute('inert', hadInertAttribute);
+    };
+  }, [canonicalShotEditor]);
   useEffect(() => {
     setPublishedCanonicalComposition(null);
   }, [runtime.timelineId]);
@@ -545,7 +562,7 @@ function AstridTimelineEditorComponent({ onOpenSequenceCreator, onOpenElementCre
   }, [commands, dataRef, selectedProjectId]);
 
   return (
-    <>
+    <div ref={editorContentRef} className="contents">
       {!hosted && !tourRunning && isDocumentShotMode && !isCanonicalEditor ? (
         <div role="status" data-canonical-load-state="legacy" className="border-b px-3 py-1.5 text-center text-xs">
           Canonical shot composition is unavailable; showing the explicit legacy shot view.
@@ -615,12 +632,21 @@ function AstridTimelineEditorComponent({ onOpenSequenceCreator, onOpenElementCre
 
       <Dialog
         open={Boolean(canonicalShotEditor)}
+        modal={false}
+        disablePointerDismissal
         onOpenChange={(open) => {
           if (!open) setCanonicalShotEditor(null);
         }}
       >
         <DialogContent
+          modal={false}
+          showBackdrop={false}
           className="h-[min(90vh,900px)] max-h-[90vh] w-[calc(100vw-2rem)] max-w-4xl overflow-hidden p-0"
+          style={{
+            top: '1rem',
+            transform: 'translateX(-50%)',
+            maxHeight: `calc(100dvh - ${isGenerationsPaneLocked || isGenerationsPaneOpen ? effectiveGenerationsPaneHeight : 0}px - 1rem)`,
+          }}
           finalFocus={false}
           onKeyDown={(event) => {
             // This dialog has no trigger element. Handle Escape here so the
@@ -659,7 +685,7 @@ function AstridTimelineEditorComponent({ onOpenSequenceCreator, onOpenElementCre
           )}
         </DialogContent>
       </Dialog>
-    </>
+    </div>
   );
 }
 

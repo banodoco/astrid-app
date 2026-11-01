@@ -441,6 +441,7 @@ function TimelineEditorShellCoreComponent({
     flushPendingSave: chrome.flushPendingSave,
     preserveTimelineDraftForReload: chrome.preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload: chrome.isTimelineDraftDurableForReload,
+    isTimelineSavePending: chrome.isTimelineSavePending,
   });
   const activateInstance = useCallback(() => {
     runtime.agentChat?.activateTimeline?.();

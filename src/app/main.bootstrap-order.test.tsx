@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -49,23 +49,40 @@ describe('main entry bootstrap order', () => {
     window.history.replaceState({}, '', '/tools/video-editor?localProject=demo');
   });
 
-  afterEach(() => {
-    vi.unstubAllEnvs();
-  });
-
-  it('initializes the extension runtime before rendering the app', async () => {
+  it('installs the extension runtime before awaiting identity and rendering the app', async () => {
     bootstrapMocks.migrateAstridBrowserStorage.mockResolvedValue({ success: true });
-    const order: string[] = [];
-    bootstrapMocks.initializeVideoEditorExtensionRuntime.mockImplementation(() => { order.push('initialize'); });
-    bootstrapMocks.renderApp.mockImplementation(() => { order.push('render'); });
+    const bootstrapEvents: string[] = [];
+    let resolveIdentity!: () => void;
+    bootstrapMocks.initializeVideoEditorExtensionRuntime.mockImplementation(() => {
+      bootstrapEvents.push('extension-runtime-install');
+    });
+    bootstrapMocks.initializeWorkspaceRuntimeIdentity.mockImplementation(() => {
+      bootstrapEvents.push('workspace-runtime-identity');
+      return new Promise<void>((resolve) => {
+        resolveIdentity = resolve;
+      });
+    });
+    bootstrapMocks.renderApp.mockImplementation(() => {
+      bootstrapEvents.push('render-app');
+    });
+
     const root = document.createElement('div');
     root.id = 'root';
     document.body.append(root);
 
     await import('@/app/main');
+
+    // main() is fire-and-forget: its dynamic imports settle after the module
+    // evaluates, so wait for the initialization call instead of racing it.
+    await vi.waitFor(() => expect(bootstrapMocks.initializeVideoEditorExtensionRuntime).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(bootstrapMocks.initializeWorkspaceRuntimeIdentity).toHaveBeenCalledOnce());
+    expect(bootstrapEvents).toEqual(['extension-runtime-install', 'workspace-runtime-identity']);
+    expect(bootstrapMocks.renderApp).not.toHaveBeenCalled();
+
+    resolveIdentity();
     await vi.waitFor(() => expect(bootstrapMocks.renderApp).toHaveBeenCalledOnce());
-    expect(order).toEqual(['initialize', 'render']);
     expect(bootstrapMocks.renderApp).toHaveBeenCalledWith(root);
+    expect(bootstrapEvents).toEqual(['extension-runtime-install', 'workspace-runtime-identity', 'render-app']);
   });
 
   it('blocks app initialization on migration failure and renders after a successful retry', async () => {
@@ -100,23 +117,20 @@ describe('main entry bootstrap order', () => {
     expect(bootstrapMocks.renderApp).toHaveBeenCalledWith(root);
   });
 
-  it.each(['WEB', 'APP', 'DEV', 'LOCAL', 'PRODUCTION'])(
-    'injects no remote font link in a %s build: typography is self-hosted',
-    async (appEnvironment) => {
-      vi.stubEnv('VITE_APP_ENV', appEnvironment);
-      bootstrapMocks.migrateAstridBrowserStorage.mockResolvedValue({ success: true });
-      bootstrapMocks.initializeVideoEditorExtensionRuntime.mockResolvedValue(undefined);
-      const root = document.createElement('div');
-      root.id = 'root';
-      document.body.append(root);
+  it('injects no remote font link: typography is self-hosted', async () => {
+    bootstrapMocks.migrateAstridBrowserStorage.mockResolvedValue({ success: true });
+    bootstrapMocks.initializeVideoEditorExtensionRuntime.mockResolvedValue(undefined);
 
-      await import('@/app/main');
-      await vi.waitFor(() => expect(bootstrapMocks.renderApp).toHaveBeenCalledOnce());
+    const root = document.createElement('div');
+    root.id = 'root';
+    document.body.append(root);
 
-      const remoteHrefs = [...document.querySelectorAll('link')]
-        .map((link) => link.getAttribute('href') ?? '')
-        .filter((href) => /^https:\/\/(fonts\.(googleapis|gstatic)\.com|unpkg\.com|cdn\.jsdelivr\.net)/.test(href));
-      expect(remoteHrefs).toEqual([]);
-    },
-  );
+    await import('@/app/main');
+    await vi.waitFor(() => expect(bootstrapMocks.renderApp).toHaveBeenCalledOnce());
+
+    const remoteHrefs = [...document.querySelectorAll('link')]
+      .map((link) => link.getAttribute('href') ?? '')
+      .filter((href) => /^https:\/\/(fonts\.(googleapis|gstatic)\.com|unpkg\.com|cdn\.jsdelivr\.net)/.test(href));
+    expect(remoteHrefs).toEqual([]);
+  });
 });

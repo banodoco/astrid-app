@@ -21,7 +21,7 @@ interface AgentChatModelLineProps {
   /** Why the thinking level can't change right now, such as a reply in progress. */
   thinkingLockedReason?: string | null;
   onChangeThinkingLevel: (value: string) => Promise<unknown>;
-  /** Opens the new-chat menu on this agent's models: a chat keeps its model, so another model means another chat. */
+  /** Opens New chat on this agent's models: a chat keeps its model, so another model means another chat. */
   onChooseAnotherModel: () => void;
   onOpenChange?: (open: boolean) => void;
 }
@@ -48,7 +48,7 @@ export function AgentChatModelLine({ agent, modelName, thoughtLevel = null, thou
 
   const changeOpen = (next: boolean) => {
     setOpen(next);
-    if (next) { setError(null); handingOff.current = false; }
+    if (next) setError(null);
     onOpenChange?.(next);
   };
   const chooseLevel = async (value: string) => {
@@ -99,13 +99,12 @@ export function AgentChatModelLine({ agent, modelName, thoughtLevel = null, thou
             <CommandGroup>
               <CommandItem value="another-model" className="gap-2 text-xs [@media(pointer:coarse)]:min-h-[44px]"
                 onSelect={() => {
-                  // Until it next opens, this popover hands focus on rather than back to its trigger: its close animation
-                  // ends after the new-chat menu has focused its search.
                   handingOff.current = true;
                   changeOpen(false);
-                  requestAnimationFrame(() => onChooseAnotherModel());
+                  // After this popover lets go of focus, so the chat menu keeps it.
+                  requestAnimationFrame(() => { handingOff.current = false; onChooseAnotherModel(); });
                 }}>
-                <span>Change model for new chats</span>
+                <span>New chat with another model</span>
                 <ChevronRight className="ml-auto h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
               </CommandItem>
             </CommandGroup>

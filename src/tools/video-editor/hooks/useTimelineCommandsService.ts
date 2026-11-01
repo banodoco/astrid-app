@@ -1,4 +1,5 @@
 import type { TimelineEditability } from '@/tools/video-editor/lib/timeline-editability.ts';
+import type { MediaSelection } from '@/integrations/runtime/timeline-commit-types.ts';
 import { getAssetImmediateSource } from '../lib/asset-registry.ts';
 import { canonicalJsonStringify } from '../data/typed/timelineBundle.ts';
 import { useMemo } from 'react';
@@ -20,6 +21,7 @@ import {
   getPlayableAssetKind,
   planAssetDropTarget,
   planGenerationAssetRegistration,
+  type TimelineAssetPlacementPolicy,
 } from '@/tools/video-editor/lib/timeline-asset-plans.ts';
 import { readPositiveDurationSeconds } from '@/tools/video-editor/lib/timeline-asset-durations.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
@@ -40,6 +42,7 @@ import type { ManagedObjectGuard, ManagedObjectInfo } from '@/tools/video-editor
 import { detachManagedApp } from '@/tools/video-editor/lib/managed-object-guard';
 import {
   applyPreparedMediaCommand,
+  type PreparedMediaDiagnostic,
   type PlacePreparedMediaCommand,
 } from '@/tools/video-editor/commands/media.ts';
 import type { TimelineProvisionedAsset } from '@/tools/video-editor/commands/provisioning.ts';
@@ -66,6 +69,7 @@ export interface TimelineCommandError {
   level?: string;
   issues?: unknown[];
   cause?: unknown;
+  diagnostic?: PreparedMediaDiagnostic;
   /** Managed-object metadata when code is 'managed_object_blocked'. */
   managedInfo?: ManagedObjectInfo;
 }
@@ -83,11 +87,14 @@ export interface AddClipCommandInput {
   insertAtTop?: boolean;
   clipSpanSeconds?: number | null;
   afterClipId?: string;
+  oldMediaSelection?: MediaSelection;
   clipId?: string;
   removeClipId?: string;
   removeClipIds?: string[];
   replaceClipId?: string;
   pinnedShotGroupsOverride?: PinnedShotGroup[];
+  /** Preserve a caller-captured occurrence raw track during prepared placement. */
+  placementPolicy?: TimelineAssetPlacementPolicy;
 }
 
 export interface UpdateClipCommandInput {
@@ -167,7 +174,7 @@ export interface TimelineCommands {
   updateClip: (input: UpdateClipCommandInput) => TimelineCommandResult<{ clipId: string }>;
   /**
    * Move a clip by timeline time and/or track using the canonical config path.
-   * Pinned-group drag semantics stay internal.
+   * Pinned-group drag semantics stay internal for Sprint 2.
    */
   moveClip: (input: MoveClipCommandInput) => TimelineCommandResult<{ clipId: string; trackId: string; time: number }>;
   /**
@@ -212,7 +219,7 @@ export interface TimelineCommands {
 }
 
 /**
- * Public command surface for non-gesture callers.
+ * Sprint 2 public command surface for non-gesture callers.
  *
  * Keep this list narrow so developers and agents mutate timelines through the
  * facade without depending on raw rows/meta/clipOrder internals.
@@ -232,7 +239,7 @@ export const PUBLIC_TIMELINE_COMMAND_NAMES = [
 ] as const satisfies ReadonlyArray<keyof TimelineCommands>;
 
 /**
- * The public facade intentionally stays on non-gesture entrypoints.
+ * Sprint 2 intentionally keeps the public facade on non-gesture entrypoints.
  * Gesture-driven timeline edits continue to reuse shared planners internally.
  */
 export const PUBLIC_TIMELINE_COMMAND_SCOPE = 'non-gesture' as const;
@@ -267,6 +274,7 @@ const failure = (
     ...(extra?.level ? { level: extra.level } : {}),
     ...(extra?.issues ? { issues: extra.issues } : {}),
     ...(extra?.cause !== undefined ? { cause: extra.cause } : {}),
+    ...(extra?.diagnostic ? { diagnostic: extra.diagnostic } : {}),
     ...(extra?.managedInfo ? { managedInfo: extra.managedInfo } : {}),
   },
 });
@@ -353,6 +361,8 @@ export interface CreateTimelineCommandsOptions {
   managedObjectGuard?: ManagedObjectGuard | null;
   /** Optional host-owned policy that can deny all timeline mutations. */
   timelineEditability?: TimelineEditability;
+  /** Runtime save hosts need the original selection before admitting new media. */
+  preparedMediaRequiresSelection?: boolean;
 }
 
 /**
@@ -453,6 +463,10 @@ export function createTimelineCommands(
       }
 
       if (input.preparedAsset) {
+        if (options?.preparedMediaRequiresSelection && !current.registry.assets[input.preparedAsset.assetKey]
+          && !input.preparedAsset.mediaSelection) {
+          return failure('invalid_argument', 'Could not resolve the Runtime project media selection. Import the media again.');
+        }
         let preparedAt = input.time;
         const preparedTrackId = input.trackId;
         if (input.afterClipId) {
@@ -478,6 +492,7 @@ export function createTimelineCommands(
               : {}),
             at: Math.max(0, preparedAt),
             ...(input.afterClipId !== undefined ? { afterClipId: input.afterClipId } : {}),
+            ...(input.oldMediaSelection !== undefined ? { oldMediaSelection: input.oldMediaSelection } : {}),
             forceNewTrack: input.forceNewTrack ?? false,
             insertAtTop: input.insertAtTop ?? false,
             ...(input.clipSpanSeconds !== undefined ? { clipSpanSeconds: input.clipSpanSeconds } : {}),
@@ -488,12 +503,18 @@ export function createTimelineCommands(
             ...(input.pinnedShotGroupsOverride !== undefined
               ? { pinnedShotGroupsOverride: input.pinnedShotGroupsOverride }
               : {}),
+            ...(input.placementPolicy !== undefined ? { placementPolicy: input.placementPolicy } : {}),
           },
         };
-        const preview = applyPreparedMediaCommand(current, command);
+        let diagnostic: PreparedMediaDiagnostic | undefined;
+        const preview = applyPreparedMediaCommand(current, command, {
+          onFailure: (failureDiagnostic) => {
+            diagnostic = failureDiagnostic;
+          },
+        });
         const detail = preview?.commandResult?.detail;
         if (!detail || typeof detail.clipId !== 'string' || typeof detail.trackId !== 'string') {
-          return failure('mutation_failed', 'Failed to place the prepared asset on the timeline.');
+          return failure('mutation_failed', 'Failed to place the prepared asset on the timeline.', diagnostic ? { diagnostic } : undefined);
         }
         state.ops.applyEdit({ type: 'prepared-media', command }, {
           selectedClipId: detail.clipId,
@@ -619,7 +640,7 @@ export function createTimelineCommands(
         return failure('clip_not_found', `Clip '${input.clipId}' was not found.`);
       }
 
-      // --- managed-object guard ---
+      // --- M3 managed-object guard ---
       const managedBlock = checkManagedClip(input.clipId);
       if (managedBlock) return managedBlock;
 
@@ -679,7 +700,7 @@ export function createTimelineCommands(
         return failure('invalid_argument', 'moveClip requires a target track, a target time, or both.');
       }
 
-      // --- managed-object guard ---
+      // --- M3 managed-object guard ---
       const managedBlock = checkManagedClip(input.clipId);
       if (managedBlock) return managedBlock;
 
@@ -738,7 +759,7 @@ export function createTimelineCommands(
         return failure('pinned_group_edit_blocked', 'Pinned shot-group clip trimming stays on the internal gesture path in Sprint 2.');
       }
 
-      // --- managed-object guard ---
+      // --- M3 managed-object guard ---
       const managedBlock = checkManagedClip(input.clipId);
       if (managedBlock) return managedBlock;
 
@@ -812,7 +833,7 @@ export function createTimelineCommands(
         return failure('pinned_group_edit_blocked', 'Pinned shot-group clip splitting stays on the internal gesture path in Sprint 2.');
       }
 
-      // --- managed-object guard ---
+      // --- M3 managed-object guard ---
       const managedBlock = checkManagedClip(input.clipId);
       if (managedBlock) return managedBlock;
 
@@ -858,7 +879,7 @@ export function createTimelineCommands(
         return failure('pinned_group_edit_blocked', 'Use the shot-group delete flow for pinned shot clips.');
       }
 
-      // --- managed-object guard ---
+      // --- M3 managed-object guard ---
       const managedBlock = checkManagedClip(input.clipId);
       if (managedBlock) return managedBlock;
 
@@ -1003,7 +1024,7 @@ export function createTimelineCommands(
     setClipParams(input) {
       const readOnly = checkTimelineEditable();
       if (readOnly) return readOnly;
-      // --- managed-object guard ---
+      // --- M3 managed-object guard ---
       const managedBlock = checkManagedClip(input.clipId);
       if (managedBlock) return managedBlock;
 
@@ -1064,7 +1085,7 @@ export function createTimelineCommands(
 /**
  * Mounted-only public timeline command facade.
  *
- * This is the recommended mutation surface for non-gesture callers.
+ * This is the Sprint 2 recommended mutation surface for non-gesture callers.
  *
  * *Builds* the `TimelineCommands` facade from the store api. Components
  * rendering inside the editor normally want `useTimelineCommands` in
@@ -1072,8 +1093,10 @@ export function createTimelineCommands(
  */
 export function useTimelineCommandsService(): TimelineCommands {
   const store = useTimelineStoreApi();
-  const editability = useOptionalVideoEditorRuntime()?.timelineEditability;
-  return useMemo(() => createTimelineCommands(store, {timelineEditability: editability}), [store, editability]);
+  const runtime = useOptionalVideoEditorRuntime();
+  const editability = runtime?.timelineEditability;
+  const preparedMediaRequiresSelection = Boolean(runtime?.provider.commitTimeline);
+  return useMemo(() => createTimelineCommands(store, {timelineEditability: editability, preparedMediaRequiresSelection}), [store, editability, preparedMediaRequiresSelection]);
 }
 
 /**
@@ -1083,7 +1106,9 @@ export function useTimelineCommandsService(): TimelineCommands {
  * preserve their existing fallback behavior.
  */
 export function useTimelineCommandsServiceSafe(): TimelineCommands | null {
-  const editability = useOptionalVideoEditorRuntime()?.timelineEditability;
+  const runtime = useOptionalVideoEditorRuntime();
+  const editability = runtime?.timelineEditability;
+  const preparedMediaRequiresSelection = Boolean(runtime?.provider.commitTimeline);
   const store = useTimelineStoreApiSafe();
   const availability = useTimelineAvailabilityState();
 
@@ -1091,6 +1116,6 @@ export function useTimelineCommandsServiceSafe(): TimelineCommands | null {
     if (!store || !hasMountedTimelineAvailability(availability)) {
       return null;
     }
-    return createTimelineCommands(store, {timelineEditability: editability});
-  }, [availability.hasProvider, availability.mounted, store, editability]);
+    return createTimelineCommands(store, {timelineEditability: editability, preparedMediaRequiresSelection});
+  }, [availability.hasProvider, availability.mounted, store, editability, preparedMediaRequiresSelection]);
 }

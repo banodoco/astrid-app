@@ -157,6 +157,29 @@ describe('addImageToShotHelpers', () => {
       });
     });
 
+    it('passes the authenticated canonical occurrence owner through to placement', async () => {
+      mockPlaceGeneration.mockResolvedValue({
+        entryId: 'sg-shot-1-gen-new',
+        shotId: 'shot-1',
+        generationId: 'gen-new',
+        timelineFrame: 75,
+        assetKey: 'gen:gen-new',
+      });
+
+      await runAddImageMutation(makeVariables({
+        ownerRef: 'occurrence:selected-occurrence',
+        timelineFrame: 75,
+      }));
+
+      expect(mockPlaceGeneration).toHaveBeenCalledWith({
+        projectSlug: 'project-1',
+        shotId: 'shot-1',
+        generationId: 'gen-new',
+        ownerRef: 'occurrence:selected-occurrence',
+        timelineFrame: 75,
+      });
+    });
+
     it('falls back to the project selection store when project_id is empty', async () => {
       mockPlaceGeneration.mockResolvedValue({
         entryId: 'sg-shot-1-gen-new',

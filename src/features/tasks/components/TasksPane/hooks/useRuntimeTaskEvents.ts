@@ -14,6 +14,15 @@ const FULL_LIST_RESYNC_MS = 5 * 60_000;
 export const runtimeTaskQueryKey = (projectId: string | null) =>
   ['runtime-tasks', projectId ?? '__no-project__'] as const;
 
+/** Wake durable continuations from task reads; cached tasks grant no commit authority. */
+export function subscribeRuntimeTaskUpdates(queryClient: QueryClient, projectId: string, notify: () => void): () => void {
+  return queryClient.getQueryCache().subscribe((event) => {
+    const key = event.query.queryKey;
+    if (event.type === 'updated' && event.action.type === 'success'
+      && key[0] === runtimeTaskQueryKey(projectId)[0] && key[1] === projectId) notify();
+  });
+}
+
 type EventClient = Pick<AstridRuntimeClient, 'listEvents' | 'getTask'>;
 type Timer = ReturnType<typeof setTimeout>;
 

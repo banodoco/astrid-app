@@ -6,6 +6,7 @@ import { mediaCrossOrigin } from '@/shared/lib/media/mediaCrossOrigin';
 import { Button } from '@/shared/components/ui/button.tsx';
 import type { Generation, ManagedOutput, Page, Task } from '@/integrations/runtime/generated';
 import type { AstridTaskRef } from '../../runtime/agentTaskLinks';
+import { EditorErrorMessage } from '../EditorErrorMessage.tsx';
 
 export type LinkedTaskResult = { id: string; name: string; url: string; mediaType: string; generationId?: string };
 
@@ -119,8 +120,7 @@ function LinkedTaskResults({ taskRef }: { taskRef: AstridTaskRef }) {
   if (task.state === 'failed') {
     const failure = taskFailure(task);
     return <div className="mt-2 text-xs" data-linked-task-id={taskRef.task_id} role="status">
-      <p className="font-medium text-destructive">Task failed: {failure.message}</p>
-      {failure.nextAction && <p className="mt-1 text-muted-foreground">Next: {failure.nextAction}</p>}
+      <EditorErrorMessage message={failure.message} nextAction={failure.nextAction} headlinePrefix="Task failed: " fixLabel="Next" />
     </div>;
   }
   if (task.state === 'cancelled') {

@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 /**
  * Launcher for the fake Runtime (`server.ts`). One mechanism: `server.ts` runs as a child process under
- * `node_modules/.bin/tsx --tsconfig tests/e2e/fake-runtime/tsconfig.json` (the fakes import `@workspace-animations/*`,
- * which only that tsconfig maps) and prints `FAKE_RUNTIME_READY <port>` on stdout once it is bound.
+ * `node_modules/.bin/tsx --tsconfig tests/e2e/fake-runtime/tsconfig.json` and prints `FAKE_RUNTIME_READY <port>` on stdout once it is bound.
  *
  * Three faces:
  *   fakeRuntimeEnv({ port })   for Playwright configs. Plain config-time work: allocates nothing, starts nothing.

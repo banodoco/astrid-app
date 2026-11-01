@@ -105,6 +105,20 @@ describe('repairTimelineClipTransitions', () => {
     expect(issues).toHaveLength(0);
   });
 
+  it('preserves canonical id and frame-duration transition references', () => {
+    const transition = { id: 'cross-fade', durationFrames: 12, params: { easing: 'ease-in-out' } };
+    const config = makeTimelineConfig([
+      makeClip({ transition: transition as unknown as ClipTransition }),
+    ]);
+    const issues: TimelineDomainIssue[] = [];
+
+    const result = repairTimelineClipTransitions(config, undefined, issues);
+
+    expect(result).toBe(config);
+    expect(result.clips[0].transition).toBe(transition);
+    expect(issues).toHaveLength(0);
+  });
+
   // -- Legacy: missing type --------------------------------------------------
 
   it('clears transition with missing type and reports diagnostic', () => {

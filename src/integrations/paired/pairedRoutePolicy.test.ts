@@ -400,6 +400,13 @@ describe('paired route policy vs the App\'s Workspace v1 calls', () => {
 
   // Reached through /api/astrid (nativeEditorConnection.ts:6); the Runtime alias deliberately has no capability catalog.
   const astridOnly = new Set(['listCapabilities']);
+  // Verified media follows getProjectMediaSelection: both are local Runtime-door reads.
+  // Previously getProjectVerifiedMedia fell into pairedCalls, which expected
+  // /api/runtime -> runtime and /api/astrid -> astrid; the explicit mapping below
+  // replaces that with refusal through both aliases.
+  const localDoorOnly = new Set(['commitTimeline', 'listTimelineCommits', 'createTimeline', 'getProjectMediaSelection', 'getProjectVerifiedMedia']);
+  const pairedCalls = calls.filter(({ op }) => !localDoorOnly.has(op));
+  const localDoorOnlyCalls = calls.filter(({ op }) => localDoorOnly.has(op));
 
   it('derives the App\'s calls from source, including the B1 routes', () => {
     const derived = calls.map(({ method, path }) => `${method} ${path.split('?')[0]}`);
@@ -411,9 +418,11 @@ describe('paired route policy vs the App\'s Workspace v1 calls', () => {
     expect(calls.length).toBeGreaterThan(25);
     expect(calls.every(({ path }) => path.startsWith('/v1/') && !path.includes('${'))).toBe(true);
     expect(calls.flatMap((call) => call.headers)).toEqual(expect.arrayContaining(['content-type', 'idempotency-key', 'x-original-name', 'range']));
+    expect(new Set(localDoorOnlyCalls.map(({ op }) => op))).toEqual(localDoorOnly);
+    expect(localDoorOnlyCalls).toHaveLength(5);
   });
 
-  describe.each(calls)('$op: $method $path', ({ method, path, headers, op }) => {
+  describe.each(pairedCalls)('$op: $method $path', ({ method, path, op }) => {
     const prefixes = astridOnly.has(op) ? ['/api/astrid'] : ['/api/runtime', '/api/astrid'];
     it.each(prefixes)('is allowed through %s', (prefix) => {
       const service = prefix === '/api/runtime' ? 'runtime' : 'astrid';
@@ -421,6 +430,15 @@ describe('paired route policy vs the App\'s Workspace v1 calls', () => {
       expect(route?.service).toBe(service);
       expect(route?.upstreamPath).toBe(decodeURIComponent(path.split('?')[0]) + (path.includes('?') ? `?${path.split('?')[1]}` : ''));
     });
+  });
+
+  describe.each(localDoorOnlyCalls)('$op: local door only $method $path', ({ method, path }) => {
+    it.each(['/api/runtime', '/api/astrid'])('refuses local door only call through %s', (prefix) => {
+      expect(classifyPairedRoute(`${prefix}${path}`, method, { 'content-length': '12' })).toBeNull();
+    });
+  });
+
+  describe.each(calls)('$op: $method $path headers', ({ headers }) => {
     it('keeps every header the call sends', () => {
       const sent = Object.fromEntries(headers.map((name) => [name, 'v']));
       expect(Object.keys(forwardHeaders(sent)).sort()).toEqual(Object.keys(sent).sort());

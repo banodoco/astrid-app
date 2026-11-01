@@ -302,11 +302,14 @@ export function verifyFixture({ fixtureRoot, schemaPath }) {
     properties: {
       assets: {
         type: "object",
-        additionalProperties: schemaParsed.value.definitions?.AssetEntry,
+        additionalProperties: {
+          $ref: "#/definitions/AssetEntry",
+        },
       },
     },
     required: ["assets"],
     additionalProperties: false,
+    definitions: schemaParsed.value.definitions,
   };
   const validateRegistry = ajv.compile(registrySchema);
   if (!validateRegistry(registry)) {

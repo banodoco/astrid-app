@@ -203,7 +203,7 @@ describe('AgentChatModelLine another model', () => {
     const user = userEvent.setup();
     const { onChooseAnotherModel, onOpenChange } = renderLine();
     openLine();
-    await user.click(within(popover()!).getByRole('option', { name: 'Change model for new chats' }));
+    await user.click(within(popover()!).getByRole('option', { name: 'New chat with another model' }));
     expect(onOpenChange).toHaveBeenLastCalledWith(false);
     expect(popover()).toBeNull();
     await waitFor(() => expect(onChooseAnotherModel).toHaveBeenCalledOnce());
@@ -212,7 +212,7 @@ describe('AgentChatModelLine another model', () => {
   it('still offers another model when the chat has no thinking control', () => {
     renderLine({ thoughtLevel: null });
     openLine();
-    expect(within(popover()!).getByRole('option', { name: 'Change model for new chats' })).toBeInTheDocument();
+    expect(within(popover()!).getByRole('option', { name: 'New chat with another model' })).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Thinking level' })).toBeNull();
   });
 });

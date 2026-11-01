@@ -1,15 +1,6 @@
 import type { ComponentType } from 'react';
 import { ASTRID_RENDERING_ELEMENTS } from '@astrid-public/packs/rendering/elements/public-catalog.ts';
-import FadeAnimation from '@astrid-public/packs/rendering/rendering/elements/animations/fade/component.tsx';
-import FadeUpAnimation from '@astrid-public/packs/rendering/rendering/elements/animations/fade-up/component.tsx';
-import ScaleInAnimation from '@astrid-public/packs/rendering/rendering/elements/animations/scale-in/component.tsx';
-import SlideLeftAnimation from '@astrid-public/packs/rendering/rendering/elements/animations/slide-left/component.tsx';
-import SlideUpAnimation from '@astrid-public/packs/rendering/rendering/elements/animations/slide-up/component.tsx';
-import TypeOnAnimation from '@astrid-public/packs/rendering/rendering/elements/animations/type-on/component.tsx';
 import AudioReactiveColour from '@astrid-public/packs/rendering/rendering/elements/effects/audio-reactive-colour/component.tsx';
-import TextCard from '@astrid-public/packs/rendering/rendering/elements/effects/text-card/component.tsx';
-import CrossFadeTransition from '@astrid-public/packs/rendering/rendering/elements/transitions/cross-fade/component.tsx';
-import FadeTransition from '@astrid-public/packs/rendering/rendering/elements/transitions/fade/component.tsx';
 import EndSpanningLayer from '@astrid-public/packs/local/rendering/elements/effects/end-spanning-layer/component.tsx';
 import FrameOverlay from '@astrid-public/packs/local/rendering/elements/effects/frame-overlay/component.tsx';
 import card0 from '@astrid-public/packs/local/rendering/elements/effects/end-spanning-layer/assets/card-0.png?url';
@@ -20,6 +11,7 @@ import card4 from '@astrid-public/packs/local/rendering/elements/effects/end-spa
 import card5 from '@astrid-public/packs/local/rendering/elements/effects/end-spanning-layer/assets/card-5.png?url';
 import frame from '@astrid-public/packs/local/rendering/elements/effects/frame-overlay/assets/frame.png?url';
 import { createAstridPreviewAssetWrapper } from '@/tools/video-editor/sequences/components/createAstridPreviewAssetWrapper.tsx';
+import { PUBLIC_COMPOSITION_ELEMENT_COMPONENTS } from '@/tools/video-editor/runtime/publicCompositionElementRegistry.ts';
 import type {
   AstridDynamicSequenceEntry,
   AstridElementComponentProps,
@@ -34,17 +26,13 @@ const EndSpanningLayerPreview = createAstridPreviewAssetWrapper(
 const FrameOverlayPreview = createAstridPreviewAssetWrapper(FrameOverlay, {frame});
 
 const asComponent = (value: unknown) => value as ComponentType<AstridElementComponentProps>;
+const compositionComponentEntries = Object.entries(PUBLIC_COMPOSITION_ELEMENT_COMPONENTS) as Array<[
+  string,
+  ComponentType<AstridElementComponentProps>,
+]>;
 const componentEntries: Array<[string, ComponentType<AstridElementComponentProps>]> = [
-  ['animation:fade', asComponent(FadeAnimation)],
-  ['animation:fade-up', asComponent(FadeUpAnimation)],
-  ['animation:scale-in', asComponent(ScaleInAnimation)],
-  ['animation:slide-left', asComponent(SlideLeftAnimation)],
-  ['animation:slide-up', asComponent(SlideUpAnimation)],
-  ['animation:type-on', asComponent(TypeOnAnimation)],
+  ...compositionComponentEntries,
   ['effect:audio-reactive-colour', asComponent(AudioReactiveColour)],
-  ['effect:text-card', asComponent(TextCard)],
-  ['transition:cross-fade', asComponent(CrossFadeTransition)],
-  ['transition:fade', asComponent(FadeTransition)],
   ['effect:end-spanning-layer', asComponent(EndSpanningLayerPreview)],
   ['effect:frame-overlay', asComponent(FrameOverlayPreview)],
 ];

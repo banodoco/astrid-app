@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createFakeIndexedDB } from 'fake-indexeddb';
 
 import type {
   BridgeGenerationDetailPayload,
@@ -44,21 +45,89 @@ vi.mock('@/integrations/runtime/dataProvider', () => ({
     async loadAssetRegistry() {
       return structuredClone(runtime.registry);
     }
-    async saveTimelineAtHead(
-      timelineId: string,
-      config: unknown,
-      expectedHead: { headRevisionId: string | null },
-      registry: unknown,
-    ) {
-      if (expectedHead.headRevisionId !== runtime.head) throw new TimelineVersionConflictError('stale_head');
-      runtime.config = structuredClone(config);
-      runtime.registry = structuredClone(registry);
-      runtime.version += 1;
-      runtime.head = `rev-${runtime.publishes.length + 2}`;
-      runtime.publishes.push(runtime.head);
+    async loadTimelineCommandBasis(timelineId: string) {
+      runtime.loads += 1;
       return {
-        configVersion: runtime.version,
-        head: { projectId: this.options.projectId, timelineId, headRevisionId: runtime.head },
+        head: { revisionId: runtime.head, publicationId: `pub-${runtime.head}` },
+        canonicalDocument: {
+          schema_version: 1 as const,
+          project_id: this.options.projectId,
+          timeline_id: timelineId,
+          parent_revision: { revision_id: runtime.head, content_digest: `digest-${runtime.head}`, payload: {
+            config: structuredClone(runtime.config), registry: structuredClone(runtime.registry), occurrences: [],
+          } },
+          shot_revisions: [], internal_timeline_revisions: [],
+          dependency_manifest: { shots: [], internal_timeline: [], internal_timelines: [], media: [], documents: [] },
+        },
+        graph: {},
+      };
+    }
+    async loadTimelineCommandBasisWithDisplay(timelineId: string) {
+      const basis = await this.loadTimelineCommandBasis(timelineId);
+      if (basis.head.revisionId !== runtime.head || basis.head.publicationId !== `pub-${runtime.head}`) {
+        throw new TimelineVersionConflictError('Timeline document changed while pairing authoring basis and display');
+      }
+      return {
+        basis,
+        timeline: {
+          config: structuredClone(runtime.config),
+          configVersion: runtime.version,
+          head: { projectId: this.options.projectId, timelineId,
+            headRevisionId: runtime.head, headPublicationId: `pub-${runtime.head}` },
+        },
+        registry: structuredClone(runtime.registry),
+      };
+    }
+    async getRecoverableIdentity() {
+      return { realmId: 'realm', actorId: 'actor' };
+    }
+    async commitTimeline(request: any) {
+      if (request.base_revision_id !== runtime.head) throw new TimelineVersionConflictError('stale_head');
+      const document = await this.loadTimelineCommandBasis(request.timeline_id);
+      // Build the accepted closure from the request without counting this local
+      // response assembly as another caller-side head load.
+      runtime.loads -= 1;
+      const changes = request.commands[0].args.changes as any[];
+      for (const change of changes) {
+        let owner = document.canonicalDocument.parent_revision.payload;
+        for (const token of change.path.slice(0, -1)) {
+          owner = token.startsWith('id:')
+            ? owner.find((row: any) => row.id === token.slice(3))
+            : owner[token];
+        }
+        const key = change.path[change.path.length - 1];
+        if (change.op === 'set') owner[key] = structuredClone(change.value);
+        else if (change.op === 'remove') delete owner[key];
+        else if (change.op === 'list.insert') {
+          const list = owner[key] as any[];
+          const index = change.after_id === null ? 0 : list.findIndex((row) => row.id === change.after_id) + 1;
+          list.splice(index, 0, structuredClone(change.value));
+        } else if (change.op === 'list.remove') {
+          const list = owner[key] as any[];
+          const index = list.findIndex((row) => row.id === change.id);
+          if (index >= 0) list.splice(index, 1);
+        } else if (change.op === 'list.move') {
+          const list = owner[key] as any[];
+          const index = list.findIndex((row) => row.id === change.id);
+          const [row] = list.splice(index, 1);
+          const after = change.after_id === null ? -1 : list.findIndex((item) => item.id === change.after_id);
+          list.splice(after + 1, 0, row);
+        }
+      }
+      const nextHead = `rev-${runtime.publishes.length + 2}`;
+      document.canonicalDocument.parent_revision.revision_id = nextHead;
+      runtime.config = structuredClone(document.canonicalDocument.parent_revision.payload.config);
+      runtime.registry = structuredClone(document.canonicalDocument.parent_revision.payload.registry);
+      runtime.version += 1;
+      runtime.head = nextHead;
+      runtime.publishes.push(runtime.head);
+      document.head = { revisionId: runtime.head, publicationId: `pub-${runtime.head}` };
+      return {
+        response: { data: { status: 'accepted', canonical_document: document.canonicalDocument }, receipt: { receipt_id: runtime.head } },
+        accepted: document.head,
+        canonicalDocument: document.canonicalDocument,
+        graph: {},
+        receipt: { receipt_id: runtime.head },
       };
     }
   },
@@ -191,6 +260,10 @@ function commandClient(overrides: Partial<ShotPackCommandClient> = {}): ShotPack
 }
 
 describe('shot-group pack commands', () => {
+  beforeEach(() => {
+    vi.stubGlobal('indexedDB', createFakeIndexedDB());
+    vi.stubGlobal('navigator', { locks: { request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}) } });
+  });
   afterEach(() => vi.unstubAllGlobals());
 
   it('deep-copies document nodes and registry refs with final-video lineage and no shared objects', () => {

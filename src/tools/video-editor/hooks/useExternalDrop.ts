@@ -36,6 +36,7 @@ import {
   handleMultiGenerationDrop,
   handleSingleGenerationDrop,
   isGenerationDragType,
+  isImageFile,
   type TimelineDropPosition,
 } from '@/tools/video-editor/lib/external-drop-utils.ts';
 import { RafLoopDetector } from '@/tools/video-editor/lib/perf-diagnostics.ts';
@@ -517,6 +518,7 @@ export function useExternalDrop({
     clientX: number;
     clientY: number;
     sourceKind: TrackKind | null;
+    managedImage?: boolean;
   } | null>(null);
   const latestExternalPositionRef = useRef<ReturnType<DragCoordinator['update']> | null>(null);
   const getDataRef = useCallback(() => {
@@ -532,6 +534,14 @@ export function useExternalDrop({
   const getApplyEdit = useCallback(() => {
     return store?.getState().ops.applyEdit ?? applyEdit;
   }, [applyEdit, store]);
+  const isManagedImageFileDrag = useCallback((event: React.DragEvent<HTMLDivElement>): boolean => {
+    if (!mediaImportForImageVideo) return false;
+    const files = Array.from(event.dataTransfer.files);
+    if (files.length === 1) return isImageFile(files[0]);
+    const imageItems = Array.from(event.dataTransfer.items)
+      .filter(item => item.kind === 'file' && item.type.startsWith('image/'));
+    return files.length === 0 && imageItems.length === 1;
+  }, [mediaImportForImageVideo]);
   const placePanelClip = useCallback(async (
     dropPosition: TimelineDropPosition,
     drag: NonNullable<ReturnType<typeof readPanelClipDrag>>,
@@ -600,6 +610,7 @@ export function useExternalDrop({
       clientX: event.clientX,
       clientY: event.clientY,
       sourceKind: inferDragKind(event),
+      managedImage: isManagedImageFileDrag(event),
     };
     if (!autoScrollerRef.current && coordinator.editAreaRef.current) {
       autoScrollerRef.current = createAutoScroller(coordinator.editAreaRef.current, (clientX, clientY) => {
@@ -612,6 +623,7 @@ export function useExternalDrop({
           clientX,
           clientY,
           sourceKind: currentDrag.sourceKind,
+          managedImage: currentDrag.managedImage,
         });
       });
     }
@@ -633,9 +645,10 @@ export function useExternalDrop({
         clientX: currentDrag.clientX,
         clientY: currentDrag.clientY,
         sourceKind: currentDrag.sourceKind,
+        managedImage: currentDrag.managedImage,
       });
     });
-  }, [coordinator]);
+  }, [coordinator, isManagedImageFileDrag]);
 
   const onTimelineDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     const relatedTarget = event.relatedTarget as Node | null;
@@ -666,6 +679,7 @@ export function useExternalDrop({
       externalDragFrameRef,
       latestExternalDragRef,
       latestExternalPositionRef,
+      managedImage: isManagedImageFileDrag(event),
     });
     if (isInvalidTimelineRowTarget(dropPosition.plan?.rejectReason)) return;
     await dispatchTimelineDrop({
@@ -711,6 +725,7 @@ export function useExternalDrop({
     resolveAssetUrl,
     directAssetUploadAllFiles,
     mediaImportForImageVideo,
+    isManagedImageFileDrag,
     runtime.timelineEditability,
     runtime.toast,
     shots,

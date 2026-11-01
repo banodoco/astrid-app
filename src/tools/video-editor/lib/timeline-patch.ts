@@ -49,6 +49,8 @@ import {
 
 import type { TimelineEditMutation } from '@/tools/video-editor/hooks/useTimelineCommit';
 
+import { compileClipScalarPreview } from './clip-scalar-preview.ts';
+
 import { buildDataFromCurrentRegistry } from '@/tools/video-editor/lib/timeline-save-utils';
 
 import type {
@@ -170,9 +172,18 @@ function validateClipUpdate(
     }
   }
 
+  if (op.clear !== undefined && (!Array.isArray(op.clear)
+    || op.clear.some((key) => !['hold', 'asset', 'transition'].includes(key))
+    || new Set(op.clear).size !== op.clear.length
+    || Object.keys(p ?? {}).some((key) => key !== 'hold' || op.clear!.includes(key as 'hold')))) {
+    diags.push(diag('error', 'timeline-patch/invalid-payload', 'clip.update: clear requires disjoint scalar leaves', {
+      operationIndex: idx, op: op.op, target: op.target,
+    }));
+  }
+
   // clip.update should have at least one updateable field (not just mode)
   const updateableKeys = p ? Object.keys(p).filter((k) => k !== 'mode') : [];
-  if (!p || updateableKeys.length === 0) {
+  if ((!p || updateableKeys.length === 0) && !op.clear?.length) {
     diags.push(
       diag('warning', 'timeline-patch/empty-payload', 'clip.update: payload has no updateable fields', {
         operationIndex: idx,
@@ -751,6 +762,12 @@ export function validateTimelinePatch(
       );
     }
 
+    if (op.clear !== undefined && op.op !== 'clip.update') {
+      diagnostics.push(diag('error', 'timeline-patch/invalid-payload', 'clear is local clip.update metadata only', {
+        operationIndex: i, op: op.op, target: op.target,
+      }));
+    }
+
     // -- payload -----------------------------------------------------------
     if (op.payload !== undefined) {
       if (op.payload === null) {
@@ -1028,6 +1045,11 @@ export function compileTimelinePatch(
       },
       diagnostics: validation.diagnostics,
     };
+  }
+
+  if (patch.operations.some((op) => op.clear !== undefined)) {
+    // Scalar previews retain the authored row: row serialization normalizes timing and drops opaque leaves.
+    return compileClipScalarPreview(patch, data);
   }
 
   // ── Clone mutable working copies ──────────────────────────────────────
@@ -1934,7 +1956,7 @@ export function compileTimelinePatch(
     clipOrder,
     tracks,
     data.config.pinnedShotGroups,
-    { theme: data.config.theme, theme_overrides: data.config.theme_overrides, generation_defaults: data.config.generation_defaults },
+    { ...data.config, app: undefined },
   );
 
   // Attach config.app

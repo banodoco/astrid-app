@@ -98,4 +98,49 @@ describe('documentPlacement — pure document ops', () => {
   it('entry ids are deterministic per (shot, generation)', () => {
     expect(placementEntryId('shot-x', 'gen-9')).toBe(placementEntryId('shot-x', 'gen-9'));
   });
+
+  it('auto-position uses only the selected shot extent, even on a shared lane', () => {
+    const d = doc();
+    placeGenerationInDocument(d, { shotId: 'sibling', generationId: 'long', ...MEDIA, timelineFrame: 900 });
+    placeGenerationInDocument(d, { shotId: 'target', generationId: 'first', ...MEDIA, timelineFrame: 30 });
+    const appended = placeGenerationInDocument(d, { shotId: 'target', generationId: 'second', ...MEDIA });
+
+    expect(appended.timelineFrame).toBe(150);
+    expect(readPlacements(d.config, d.registry).get('sibling')?.[0]?.timelineFrame).toBe(900);
+  });
+
+  it('a new shot inherits the first existing group lane without creating a track', () => {
+    const d = doc();
+    d.config.tracks!.push({ id: 'V2', kind: 'visual', label: 'V2' });
+    d.config.pinnedShotGroups = [{ shotId: 'existing', trackId: 'V2', clipIds: [], poolGenerationIds: [] }];
+    const tracks = structuredClone(d.config.tracks);
+    const placed = placeGenerationInDocument(d, { shotId: 'new', generationId: 'g', ...MEDIA });
+
+    expect(d.config.clips.find((clip) => clip.id === clipIdForEntry(placed.entryId))?.track).toBe('V2');
+    expect(d.config.tracks).toEqual(tracks);
+  });
+
+  it('shared video placement keeps the four-second hold even when the media is longer', () => {
+    const d = doc();
+    const placed = placeGenerationInDocument(d, {
+      shotId: 's', generationId: 'video', mediaRef: 'video.mp4', mimeType: 'video/mp4', duration: 9,
+    });
+    const next = placeGenerationInDocument(d, { shotId: 's', generationId: 'image', ...MEDIA });
+
+    expect(d.config.clips.find((clip) => clip.id === clipIdForEntry(placed.entryId)))
+      .toMatchObject({ clipType: 'media', at: 0, hold: 4, asset: 'gen:video' });
+    expect(d.registry.assets['gen:video']).toMatchObject({ type: 'video/mp4', duration: 9 });
+    expect(next.timelineFrame).toBe(120);
+  });
+
+  it('collision shifting tests start frames rather than the whole occupied interval', () => {
+    const d = doc();
+    placeGenerationInDocument(d, { shotId: 's', generationId: 'a', ...MEDIA, timelineFrame: 0 });
+    const overlapping = placeGenerationInDocument(d, { shotId: 's', generationId: 'b', ...MEDIA, timelineFrame: 30 });
+    const shifted = placeGenerationInDocument(d, { shotId: 's', generationId: 'c', ...MEDIA, timelineFrame: 30 });
+
+    expect(overlapping.timelineFrame).toBe(30);
+    expect(shifted.timelineFrame).toBe(31);
+    expect(d.config.clips).toHaveLength(3);
+  });
 });

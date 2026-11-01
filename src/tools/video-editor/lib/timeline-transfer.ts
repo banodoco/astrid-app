@@ -513,15 +513,16 @@ export async function importTimelineArchive(file: File, projectId: string, optio
     options.toast?.update(toastId, 'Preparing imported timeline…');
     const preparedAction = await getActionJson(client, projectId, 'rendering.timeline_prepare_import', actionInputs, 'prepared', fetchImpl, options.client !== undefined);
     validatePreparedMedia(preparedAction.value, media, transcripts);
+    const inlineRequest = { ...preparedAction.value, source: { via: 'app' } };
     const preparedBytes = encoder.encode(JSON.stringify(preparedAction.value));
     if (preparedBytes.byteLength > MAX_JSON_ENTRY) throw new Error('Prepared timeline metadata exceeds 64 MiB.');
     let receipt: Record<string, unknown>;
     if (preparedBytes.byteLength <= INLINE_COMMIT_LIMIT) {
-      const result = await client.importTimeline(projectId, preparedAction.value, randomKey('timeline-import'));
+      const result = await client.importTimeline(projectId, inlineRequest, randomKey('timeline-import'));
       receipt = result;
     } else {
       const preparedObject = await uploadJson(client, projectId, new Blob([preparedBytes], { type: 'application/json' }), 'timeline-prepared-import.json');
-      receipt = await client.importTimeline(projectId, { prepared_object_id: preparedObject }, randomKey('timeline-import'));
+      receipt = await client.importTimeline(projectId, { prepared_object_id: preparedObject, source: { via: 'app' } }, randomKey('timeline-import'));
     }
     const timelineId = typeof receipt.timeline_id === 'string' ? receipt.timeline_id : undefined;
     const mediaNames = new Map(media.map((item) => [String(item.sha256 ?? '').toLowerCase(), String(item.original_name ?? '')]));

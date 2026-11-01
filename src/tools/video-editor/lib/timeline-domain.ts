@@ -52,6 +52,7 @@ export type TimelineDomainIssueCode =
   | 'malformed_non_hold_trim_repaired'
   | 'malformed_non_hold_trim_zero_duration'
   | 'unexpected_top_level_key'
+  | 'unsafe_top_level_key'
   | 'unexpected_clip_key'
   | 'unexpected_track_key'
   | 'invalid_track_role'
@@ -225,6 +226,10 @@ const ALLOWED_TOP_LEVEL_KEYS = new Set([
   'app',
 ]);
 
+const UNSAFE_TOP_LEVEL_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+const NORMALIZED_TOP_LEVEL_KEYS = new Set(['output', 'tracks', 'clips', 'pinnedShotGroups']);
+
 const ASSET_REGISTRY_ENTRY_FIELDS = [
   'file',
   'original_name',
@@ -284,12 +289,15 @@ export const cloneAppExtension = (app: Record<string, unknown>): Record<string, 
   return cloneAppValue(app) as Record<string, unknown>;
 };
 
-const cloneTimelineExtras = (config: TimelineConfig): TimelineExtras => ({
-  ...(config.theme !== undefined ? { theme: config.theme } : {}),
-  ...(config.theme_overrides !== undefined ? { theme_overrides: config.theme_overrides } : {}),
-  ...(config.generation_defaults !== undefined ? { generation_defaults: config.generation_defaults } : {}),
-  ...(config.app !== undefined ? { app: cloneAppExtension(config.app) } : {}),
-});
+// Own entries and fromEntries keep prototype-looking opaque keys as data.
+export const cloneTimelineExtras = (config: TimelineExtras): TimelineExtras => Object.fromEntries(
+  Object.entries(config)
+    .filter(([key, value]) => !NORMALIZED_TOP_LEVEL_KEYS.has(key)
+      && (value !== undefined || !ALLOWED_TOP_LEVEL_KEYS.has(key)))
+    .map(([key, value]) => [key, key === 'app'
+      ? cloneAppExtension(value as Record<string, unknown>)
+      : ALLOWED_TOP_LEVEL_KEYS.has(key) ? value : cloneAppValue(value)]),
+);
 
 const clonePinnedShotImageSnapshots = (
   imageClipSnapshot: PinnedShotGroup['imageClipSnapshot'],
@@ -963,7 +971,9 @@ export const migrateToFlatTracks = (
   issues?: TimelineDomainIssue[],
   level: TimelineDomainContractLevel = 'config-only',
 ): TimelineConfig => {
-  if (config.tracks?.length) {
+  // An explicit empty bootstrap is already flat; default tracks would invent
+  // display identities that have no authored parent binding at save time.
+  if (config.tracks?.length || (Array.isArray(config.tracks) && Array.isArray(config.clips) && config.clips.length === 0)) {
     return {
       output: { ...config.output },
       tracks: config.tracks.map((track) => ({ ...track })),
@@ -2350,6 +2360,15 @@ export function repairTimelineClipTransitions(
   let repairedParamsCount = 0;
 
   const clips: TimelineClip[] = config.clips.map((clip) => {
+    const rawTransition = clip.transition as unknown;
+
+    // Package references are already canonical and must survive repair intact.
+    // The app's legacy repair validator only understands type + seconds.
+    if (rawTransition && typeof rawTransition === 'object' && !Array.isArray(rawTransition)) {
+      const reference = rawTransition as { id?: unknown; durationFrames?: unknown };
+      if (typeof reference.id === 'string' && typeof reference.durationFrames === 'number') return clip;
+    }
+
     const transition = clip.transition as ClipTransition | undefined;
 
     // Skip clips without a transition
@@ -2506,6 +2525,12 @@ export const sanitizeTrackDefinitionSnapshot = (track: TrackDefinition): TrackDe
   return serializedTrack as TrackDefinition;
 };
 
+/** Closed editor view only; the session retains the complete canonical document. */
+export const projectTimelineTracksForDisplay = (config: TimelineConfig): TimelineConfig => ({
+  ...config,
+  tracks: (config.tracks ?? []).map(sanitizeTrackDefinitionSnapshot),
+});
+
 export const sanitizeAssetRegistryEntry = (entry: AssetRegistryEntry): AssetRegistryEntry => {
   const sanitizedEntries: [string, unknown][] = [];
   for (const field of ASSET_REGISTRY_ENTRY_FIELDS) {
@@ -2539,12 +2564,21 @@ export const sanitizeAssetRegistryEntry = (entry: AssetRegistryEntry): AssetRegi
 const validateSerializedConfig = (
   config: TimelineConfig,
   level: TimelineDomainContractLevel,
+  validateRootKeys = true,
 ): TimelineDomainValidationResult => {
   const issues: TimelineDomainIssue[] = [];
 
   const topLevelKeys = Object.keys(config);
   for (const key of topLevelKeys) {
-    if (!ALLOWED_TOP_LEVEL_KEYS.has(key)) {
+    if (UNSAFE_TOP_LEVEL_KEYS.has(key)) {
+      issues.push(createIssue(
+        level,
+        'error',
+        'unsafe_top_level_key',
+        `Serialized timeline has forbidden top-level key '${key}'.`,
+        { path: key },
+      ));
+    } else if (validateRootKeys && !ALLOWED_TOP_LEVEL_KEYS.has(key)) {
       issues.push(createIssue(
         level,
         'error',
@@ -2682,7 +2716,18 @@ export const validateTimelinePair = (
 };
 
 export const assertValidTimelineConfigSnapshot = (config: TimelineConfig): void => {
-  const validation = validateTimelineConfigSnapshot(config);
+  // The mounted editor command validator must retain foreign document roots;
+  // the serializer emits only modeled roots, while unsafe object keys remain
+  // rejected in every validation mode above.
+  const validation = validateSerializedConfig(config, 'config-only', false);
+  if (!validation.ok) {
+    throw new TimelineDomainError(validation.level, validation.issues);
+  }
+};
+
+/** Internal edits allow opaque roots while retaining every serialized-field guard. */
+export const assertValidTimelineEditSnapshot = (config: TimelineConfig): void => {
+  const validation = validateSerializedConfig(config, 'config-only', false);
   if (!validation.ok) {
     throw new TimelineDomainError(validation.level, validation.issues);
   }
@@ -2699,7 +2744,8 @@ export const serializeTimelineConfigSnapshot = (
   config: TimelineConfig,
 ): CanonicalTimelineConfigSnapshot => {
   const canonical = canonicalizeTimelineConfigSnapshot(config);
-  const validation = validateTimelineConfigSnapshot(canonical.config);
+  // Display snapshots retain opaque roots; the public wire validator stays strict.
+  const validation = validateSerializedConfig(canonical.config, 'config-only', false);
   if (!validation.ok) {
     throw new TimelineDomainError(validation.level, validation.issues);
   }
@@ -2724,7 +2770,7 @@ export const serializeTimelinePair = (
   registry: AssetRegistry,
 ): CanonicalTimelinePair => {
   const canonical = canonicalizeTimelinePair(config, registry);
-  const validation = validateTimelinePair(canonical.config, canonical.registry);
+  const validation = validateSerializedConfig(canonical.config, 'pair-aware', false);
   if (!validation.ok) {
     throw new TimelineDomainError(validation.level, validation.issues);
   }

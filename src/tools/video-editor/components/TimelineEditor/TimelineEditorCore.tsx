@@ -497,9 +497,9 @@ function TimelineEditorCoreComponent({
   }, [resolvedConfig]);
 
   const handleClipSelect = useCallback((clipId: string, trackId: string) => {
-    userSelectTimelineClip(clipId, { additive: false });
+    userSelectTimelineClip(clipId, { additive: false }, marqueeOwner);
     setSelectedTrackId(trackId);
-  }, [setSelectedTrackId]);
+  }, [marqueeOwner, setSelectedTrackId]);
   const handleShotGroupSelect = useCallback((group: PositionedShotGroup) => {
     clearSelection();
     setSelectedTrackId(group.rowId);

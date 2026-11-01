@@ -38,6 +38,12 @@ const destination = path.resolve(args.destination ?? path.join(appRoot, 'vendor/
 const declaredPath = path.resolve(args.files ?? path.join(appRoot, 'config/astrid-vendor-files.json'));
 const declared = JSON.parse(fs.readFileSync(declaredPath, 'utf8'));
 if (declared.schema !== 'astrid-vendor-files/v1') throw new Error(`Unsupported declared file set schema: ${declared.schema}`);
+const excluded = new Set(declared.exclude ?? []);
+for (const p of excluded) {
+  if (typeof p !== 'string' || path.posix.normalize(p) !== p || p.startsWith('/') || p.includes('..')) {
+    throw new Error(`Unsafe excluded Astrid source path: ${p}`);
+  }
+}
 
 const git = (...a) => execFileSync('git', ['-C', repo, ...a], { maxBuffer: 1 << 30 });
 const commit = git('rev-parse', '--verify', `${args.commit}^{commit}`).toString().trim();
@@ -55,11 +61,14 @@ const add = (p, bytes) => out.set(p, bytes);
 
 add('LICENSE', blob(declared.license));
 for (const dir of declared.directories) {
-  const matches = allPaths.filter((p) => p.startsWith(`${dir.path}/`) && dir.extensions.includes(path.extname(p)));
+  const matches = allPaths.filter((p) => p.startsWith(`${dir.path}/`) && dir.extensions.includes(path.extname(p)) && !excluded.has(p));
   if (!matches.length) throw new Error(`No ${dir.extensions.join('/')} files under ${dir.path} in ${commit}`);
   for (const p of matches) add(p, blob(p));
 }
-for (const p of declared.files) add(p, blob(p));
+for (const p of declared.files) {
+  if (excluded.has(p)) throw new Error(`Astrid source path is declared in both files and exclude: ${p}`);
+  add(p, blob(p));
+}
 
 // Whole-Tool catalog: the catalog plus every pack file it binds by digest.
 const toolCatalogBytes = blob(declared.tool_catalog);
@@ -119,6 +128,7 @@ const provenance = {
   astrid_tree: tree,
   refresh_command: `node scripts/astrid-landing/refresh-vendor.mjs --astrid-repo <Astrid checkout> --commit ${commit}`,
   declared_files: path.relative(appRoot, declaredPath),
+  excluded_files: [...excluded].sort(),
   verify_command: 'node scripts/build/verify-astrid-vendor-sources.mjs',
   files,
 };

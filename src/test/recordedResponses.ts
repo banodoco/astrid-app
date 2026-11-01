@@ -3,8 +3,8 @@
  * helper every consumer needs: turning the Runtime's normalized placeholders
  * ("<task_id>", "<digest>", ...) back into schema-valid example values.
  *
- * The fixture files are vendored from the Runtime (see
- * `runtime.lock.json`); never edit them.
+ * Current fixtures are pinned by `runtime.lock.json`; the pre-D39 publish
+ * recording remains unchanged for historical tests. Never edit these recordings.
  */
 
 export type RecordedResponse = {
@@ -40,6 +40,10 @@ export const PLACEHOLDER_VALUES: Record<string, string> = {
   association_id: '01JZASSOC00000000000000001',
   receipt_id: 'task.create:task',
   project_id: 'project-example',
+  base_revision_id: 'revision-base',
+  base_publication_id: 'publication-base',
+  current_revision_id: 'revision-current',
+  current_publication_id: 'publication-current',
   request_id: 'req-example',
   cursor: 'cursor-2',
   timestamp: '2026-09-06T00:00:00Z',

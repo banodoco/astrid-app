@@ -92,6 +92,8 @@ export interface TimelinePatchOperation {
   readonly target: string;
   /** Family-dependent payload. */
   readonly payload?: Record<string, unknown>;
+  /** Local clip.update scalar preview metadata; removes these leaves without authoring a field. */
+  readonly clear?: readonly ('hold' | 'asset' | 'transition')[];
   /**
    * Sortable anchor for ordering-dependent operations (clip.move, etc.).
    * Interpreted by the patch compiler; ignored for order-independent ops.

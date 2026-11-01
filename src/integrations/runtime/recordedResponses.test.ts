@@ -9,7 +9,7 @@ import { AstridBridgeTransport, BridgeRouteError } from '@/integrations/astrid/t
 import { AstridLocalTaskRoutes } from '@/integrations/astrid/taskRoutes.ts';
 import { getManagedOutputExportExpectedIdentity } from '@/tools/video-editor/hooks/useFinalVideoAvailable.ts';
 import { filled, PLACEHOLDER_VALUES, RECORDED_RESPONSES, type RecordedResponse } from '@/test/recordedResponses.ts';
-import { isRuntimeCanonicalPayloadConflict, isRuntimeConflict } from './client.ts';
+import { classifyRuntimeCommitFailure, isRuntimeCanonicalPayloadConflict, isRuntimeConflict } from './client.ts';
 import { ApiError, WorkspaceClient, type Transport } from './generated.ts';
 
 const TASK_ID = PLACEHOLDER_VALUES.task_id;
@@ -18,9 +18,9 @@ const ERROR_CASES = ['not_found_404', 'validation_error_422', 'invalid_cursor_40
 
 /** A WorkspaceClient whose transport answers with `fixture`; `sent` records what the client asked for. */
 function clientAnswering(fixture: RecordedResponse) {
-  const sent: { method: string; path: string; body: unknown }[] = [];
-  const transport: Transport = async (method, path, _headers, body) => {
-    sent.push({ method, path, body: body ? JSON.parse(new TextDecoder().decode(body as Uint8Array)) : null });
+  const sent: { method: string; path: string; headers: Record<string, string>; body: unknown }[] = [];
+  const transport: Transport = async (method, path, headers, body) => {
+    sent.push({ method, path, headers: { ...headers }, body: body ? JSON.parse(new TextDecoder().decode(body as Uint8Array)) : null });
     return {
       status: fixture.status,
       headers: fixture.headers,
@@ -42,8 +42,9 @@ async function caught(operation: Promise<unknown>): Promise<unknown> {
 describe('recorded fixtures are all exercised', () => {
   it('covers every vendored response', () => {
     expect(Object.keys(RECORDED_RESPONSES).sort()).toEqual([
+      'commit_conflict_409',
       'events_page_1_200', 'events_page_2_200', 'invalid_cursor_400', 'managed_outputs_200',
-      'not_found_404', 'publish_conflict_409', 'task_admission_201', 'task_read_200', 'validation_error_422',
+      'not_found_404', 'publish_conflict_409', 'retired_route_410', 'task_admission_201', 'task_read_200', 'validation_error_422',
     ]);
   });
 });
@@ -104,6 +105,42 @@ describe('generated WorkspaceClient parses real success responses', () => {
 });
 
 describe('the App classifies real error responses', () => {
+  it('commit_conflict_409: canonical commit preserves the request, key and structured current head', async () => {
+    const fixture = filled('commit_conflict_409');
+    const { client, sent } = clientAnswering(fixture);
+    const request = fixture.request.body as Parameters<WorkspaceClient['commitTimeline']>[2];
+
+    const error = await caught(client.commitTimeline(PROJECT_ID, 'main', request, 'commit-conflict-409'));
+
+    expect(sent).toEqual([{
+      method: fixture.request.method,
+      path: fixture.request.path,
+      headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'Idempotency-Key': 'commit-conflict-409' },
+      body: request,
+    }]);
+    expect(error).toBeInstanceOf(ApiError);
+    const body = fixture.body as { code: string; message: string };
+    expect(error).toMatchObject({ ...body, status: 409, message: `${body.code}: ${body.message}` });
+    expect(classifyRuntimeCommitFailure(error)).toBe('refused');
+    expect(isRuntimeConflict(error)).toBe(false);
+    expect(isRuntimeCanonicalPayloadConflict(error)).toBe(false);
+  });
+
+  it('retired_route_410: a retired publisher is refused rather than classified as a commit conflict', async () => {
+    const fixture = filled('retired_route_410');
+    const { client, sent } = clientAnswering(fixture);
+
+    const error = await caught(client.publishParentComposition(PROJECT_ID, 'main', fixture.request.body as Record<string, unknown>, 'retired-route-410'));
+
+    expect(sent[0]).toMatchObject({ method: fixture.request.method, path: fixture.request.path });
+    expect(error).toBeInstanceOf(ApiError);
+    const body = fixture.body as { code: string; message: string };
+    expect(error).toMatchObject({ ...body, status: 410, message: `${body.code}: ${body.message}` });
+    expect(isRuntimeConflict(error)).toBe(false);
+    expect(isRuntimeCanonicalPayloadConflict(error)).toBe(false);
+  });
+
+  // Keep the pre-D39 recording and its behavior tests as historical compatibility coverage.
   it('publish_conflict_409: ApiError carries the structured stale_head details and is a conflict', async () => {
     const fixture = filled('publish_conflict_409');
     const { client, sent } = clientAnswering(fixture);

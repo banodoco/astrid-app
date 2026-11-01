@@ -19,6 +19,7 @@ interface EditingControllerCore {
 
 interface EditingControllerNameState {
   onUpdateShotName?: (newName: string) => void;
+  onBeforeNameEdit?: () => void;
   state: {
     isEditingName: boolean;
     editingName: string;
@@ -119,6 +120,7 @@ export function useEditingController({
       setEditingNameValue: nameEditing.actions.setEditingNameValue,
     },
     onUpdateShotName: nameEditing.onUpdateShotName,
+    onBeforeNameEdit: nameEditing.onBeforeNameEdit,
   });
 
   // Join segments setup

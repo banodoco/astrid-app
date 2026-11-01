@@ -7,6 +7,13 @@ import {
 } from '@/shared/state/selectionStore';
 import { applyTimelineMutation, previewTimelineMutation } from '@/tools/video-editor/lib/timeline-mutation-engine';
 import { useTimelineCommit } from './useTimelineCommit';
+import { useClipEditing } from './useClipEditing';
+import { createTimelineLocalSaveHandoff } from './timelineLocalSaveHandoff';
+import { createCommitOutbox, toOutboxJson } from '../commands/commitOutbox';
+import { createLocalSaveSession } from '../commands/localSaveSession';
+import { createFakeIndexedDB } from 'fake-indexeddb';
+import { acceptedCommit, fixtureDigest } from '@/integrations/runtime/__tests__/timelineCommitFixture';
+import { withDefaultTimelineOutput } from '../lib/defaults';
 import { TimelineEventBus } from './useTimelineEventBus';
 import { buildTimelineData, configToRows, type TimelineData } from '../lib/timeline-data';
 import { getConfigSignature, getStableConfigSignature } from '../lib/config-utils';
@@ -131,6 +138,77 @@ function makeSelectionForwardingData(): TimelineData {
 describe('useTimelineCommit — delete-shot / auto-restore regression', () => {
   beforeEach(() => {
     __resetSelectionStoreForTests();
+  });
+
+  it.each([undefined, 'Authored title', 'p1-video.mp4'])('splits the original raw seed without authoring display defaults (label %s)', async (label) => {
+    const clip = {
+      id: 'p1-chain-source', at: 0, track: 'V1', clipType: 'media', asset: 'p1-video', from: 0, to: 8, speed: 1, hold: 8,
+      app: { opaque: { keep: null, ordered: [false, 0, ''] }, astrid: { for: 8 }, 'org.example': { literal: 'p1-chain-source', clear: null } },
+      ...(label === undefined ? {} : { label }),
+    };
+    const config: TimelineConfig = {
+      output: { resolution: '1280x720', fps: 30, file: 'out.mp4' },
+      tracks: [{ id: 'V1', kind: 'visual', label: 'V1' }], clips: [clip],
+    };
+    Object.assign(config, { opaque: { root: null, order: [0, false] } });
+    const registry = { assets: { 'p1-video': { file: 'p1-video.mp4', type: 'video/mp4', duration: 8 } } };
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' }).data.canonical_document;
+    document.parent_revision.payload = { config, clips: structuredClone(config.clips), registry, opaque: { root: null, order: [0, false] } };
+    document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+    const head = { projectId: document.project_id, timelineId: document.timeline_id, headRevisionId: 'r0', headPublicationId: 'p0' };
+    const initial = { ...await buildTimelineData({ ...config, ...withDefaultTimelineOutput(config) }, registry), head };
+    expect(initial.resolvedConfig.clips[0].label).toBe(label ?? 'p1-video.mp4');
+    const basis = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: head.projectId, timelineId: head.timelineId };
+    const outboxes = createCommitOutbox({ indexedDB: createFakeIndexedDB(), exclusiveLock: async (_key, work) => work() });
+    const session = await createLocalSaveSession({ scope, initial: basis, document: toOutboxJson(document), outboxes,
+      send: vi.fn(), loadLatest: vi.fn(), prepareDisplay: vi.fn(), changed: vi.fn() });
+    const source = { config: initial.config, registry, head };
+    const handoff = createTimelineLocalSaveHandoff({ initial: basis, source, session, adopted: vi.fn() });
+    const eventBus = new TimelineEventBus();
+    const saves: Promise<void>[] = [];
+    eventBus.on('scheduleSave', (next, options) => { saves.push(handoff.capture({ config: next.config, registry: next.registry, head }, options?.gestureBasis)); });
+    const { result, unmount } = renderHook(() => {
+      const commit = useTimelineCommit({ eventBus, lastSavedSignatureRef: { current: '' }, initialData: initial });
+      const editing = useClipEditing({ dataRef: commit.dataRef, resolvedConfig: commit.data?.resolvedConfig ?? null,
+        selectedClipId: clip.id, selectedTrack: null, currentTime: 2, selectClip: vi.fn(),
+        setSelectedTrackId: commit.setSelectedTrackId, applyEdit: commit.applyEdit });
+      return { commit, editing };
+    });
+    try {
+      act(() => result.current.editing.handleSplitSelectedClip());
+      await Promise.all(saves);
+      const next = result.current.commit.dataRef.current!;
+      const rightId = next.config.clips[1].id;
+      expect(rightId).not.toBe(clip.id);
+      expect(next.config.output).toEqual(initial.config.output);
+      expect(next.config.clips).toEqual([{ ...clip, hold: 2 }, { ...clip, id: rightId, at: 2, hold: 6 }]);
+      if (label === undefined) for (const row of next.config.clips) expect(row).not.toHaveProperty('label');
+      const [stored] = await outboxes.list(scope);
+      const intent = stored.intents[0].payload.documentIntent as Record<string, unknown>;
+      expect(intent.changes).toEqual([
+        { op: 'list.insert', ref: 'parent', path: ['clips'], id: rightId, after_id: clip.id,
+          before: { state: 'absent' }, order_before: [clip.id], value: { ...clip, id: rightId, at: 2, hold: 6 } },
+        { op: 'set', ref: 'parent', path: ['clips', `id:${clip.id}`, 'hold'], before: { state: 'present', value: 8 }, value: 2 },
+      ]);
+      expect(intent.reads).toEqual([
+        ...['id', 'track', 'at', 'clipType', 'hold', 'from', 'to', 'speed', 'asset'].map((key) => ({
+          kind: 'field', ref: 'parent', path: ['config', 'clips', `id:${clip.id}`, key],
+          state: { state: 'present', value: Reflect.get(clip, key) },
+        })),
+        { kind: 'field', ref: 'parent', path: ['config', 'output', 'fps'], state: { state: 'present', value: 30 } },
+        { kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'p1-video'], state: { state: 'present', value: registry.assets['p1-video'] } },
+        { kind: 'collection', ref: 'parent', path: ['config', 'clips'], members: [clip.id], order: [clip.id] },
+        { kind: 'field', ref: 'parent', path: ['config', 'pinnedShotGroups'], state: { state: 'absent' } },
+      ]);
+      expect(session.getDocument()).toMatchObject({ parent_revision: { payload: { config: { output: config.output, clips: next.config.clips }, clips: next.config.clips } } });
+      act(() => result.current.commit.applyEdit({ type: 'config', resolvedConfig: {
+        ...next.resolvedConfig, output: { ...next.resolvedConfig.output, file: 'intentional.mp4' },
+        clips: next.resolvedConfig.clips.map((row) => row.id === clip.id ? { ...row, label: 'Edited title' } : row),
+      } }));
+      await Promise.all(saves);
+      expect(session.getDocument()).toMatchObject({ parent_revision: { payload: { config: { output: { file: 'intentional.mp4' }, clips: [{ id: clip.id, label: 'Edited title' }, { id: rightId }] } } } });
+    } finally { unmount(); await session.dispose(); }
   });
 
   it('retains managed image URLs through track reorder followed by a row edit without persisting URLs', async () => {
@@ -642,5 +720,30 @@ describe('useTimelineCommit owned registry receipts', () => {
     act(() => result.current.commitData({ ...current, config: { ...current.config, clips: [...current.config.clips, { id: 'ref', at: 0, track: 'V1', clipType: 'media', asset: 'asset-own', from: 0, to: 1 }] } }));
     expect(result.current.rollbackRegistryMutation(newer)).toBe(false);
     expect(result.current.dataRef.current?.registry.assets['asset-own'].file).toBe('new.png');
+  });
+});
+
+describe('useTimelineCommit local save boundary', () => {
+  it('exposes each upstream local predecessor before debounce while leaving save scheduling intact', () => {
+    const eventBus = new TimelineEventBus();
+    const local = vi.fn();
+    const scheduled = vi.fn();
+    eventBus.on('localCommit', local);
+    eventBus.on('scheduleSave', scheduled);
+    const initial = makeVideoModeGroupData();
+    const { result } = renderHook(() => useTimelineCommit({ eventBus, lastSavedSignatureRef: { current: '' }, initialData: initial }));
+    const first = { ...initial, config: { ...initial.config, theme: 'first' } };
+    const second = { ...first, config: { ...first.config, theme: 'second' } };
+    act(() => {
+      result.current.commitData(first);
+      result.current.commitData(second);
+    });
+    expect(local.mock.calls).toEqual([[initial, first], [first, second]]);
+    expect(scheduled.mock.calls).toEqual([[first], [second]]);
+    expect(result.current.dataRef.current).toBe(second);
+    expect(result.current.editSeqRef.current).toBe(2);
+    act(() => result.current.commitData(initial, { save: false, skipHistory: true, updateLastSavedSignature: true }));
+    expect(local).toHaveBeenCalledTimes(2);
+    expect(scheduled).toHaveBeenCalledTimes(2);
   });
 });

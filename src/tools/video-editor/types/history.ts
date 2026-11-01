@@ -1,7 +1,3 @@
-import type {
-  TimelineCommandHistoryMetadata,
-  TimelineCommandTransaction,
-} from '@/tools/video-editor/commands/index.ts';
 import type { AssetRegistry, TimelineConfig } from './index.ts';
 import type { TimelineData } from '../lib/timeline-data.ts';
 
@@ -17,11 +13,6 @@ export type UndoEntry = {
   timestamp: string;
   label?: string;
   transactionId?: string;
-  command?: {
-    history: TimelineCommandHistoryMetadata;
-    undoTransaction: TimelineCommandTransaction;
-    redoTransaction: TimelineCommandTransaction;
-  };
 };
 
 export type CheckpointTriggerType =

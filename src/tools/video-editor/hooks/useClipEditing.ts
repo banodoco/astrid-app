@@ -1,5 +1,7 @@
 import { useCallback, useLayoutEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
+import type { AgentChatEditorContext } from '@/shared/contexts/AgentChatContext.tsx';
+import { canonicalJsonStringify } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import { toast } from '@/shared/components/ui/runtime/sonner.tsx';
 import type { SelectClipOptions } from '@/shared/state/selectionStore.ts';
 import {
@@ -11,6 +13,7 @@ import {
   type ClipMeta,
   type TimelineData,
 } from '@/tools/video-editor/lib/timeline-data.ts';
+import type { TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
 import type { ApplyEditOptions } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
 import type {
   TimelineApplyEdit,
@@ -21,7 +24,6 @@ import {
   useClipDeletion,
   useClipPositioning,
   useClipSplitting,
-  useClipTextOverlay,
 } from './clip-editing/index.ts';
 import type { ClipEditingContext } from './clip-editing/index.ts';
 import type { DeleteClipOptions } from './clip-editing/types.ts';
@@ -43,7 +45,7 @@ export interface UseClipEditingResult {
   handleUpdateClipsDeep: (clipIds: string[], patchFn: (existing: ClipMeta) => Partial<ClipMeta>) => void;
   handleDeleteClips: (clipIds: string[], options?: DeleteClipOptions) => void;
   handleDeleteClip: (clipId: string, options?: DeleteClipOptions) => void;
-  handleSelectedClipChange: (patch: Partial<ClipMeta> & { at?: number }) => void;
+  handleSelectedClipChange: (patch: Partial<ClipMeta> & { at?: number }, elementOwner?: AgentChatEditorContext | null) => void;
   handleResetClipPosition: () => void;
   handleResetClipsPosition: (clipIds: string[]) => void;
   handleSplitSelectedClip: () => void;
@@ -52,8 +54,6 @@ export interface UseClipEditingResult {
   handleToggleMuteClips: (clipIds: string[]) => void;
   handleToggleMute: () => void;
   handleDetachAudioClip: (clipId: string) => void;
-  handleAddText: () => void;
-  handleAddTextAt: (trackId: string, time: number) => void;
 }
 
 export { DURATION_KEYS, patchAffectsDuration, recalcActionEnd } from '@/tools/video-editor/lib/clip-editing-utils.ts';
@@ -157,6 +157,15 @@ export function useClipEditing({
     return [...uniqueClipIds];
   }, [dataRef]);
 
+  const transitionClearBasis = useCallback((metaUpdates: Record<string, Partial<ClipMeta>>): TimelineGestureReadBasis | undefined => {
+    const current = dataRef.current;
+    const clipIds = Object.keys(metaUpdates);
+    if (!current || current.resolvedConfig !== resolvedConfig || !clipIds.length
+      || clipIds.some(id => Object.keys(metaUpdates[id]).length !== 1
+        || !Object.prototype.hasOwnProperty.call(metaUpdates[id], 'transition') || metaUpdates[id].transition !== undefined)) return undefined;
+    return structuredClone({ kind: 'transition-clear', clipId: clipIds[0], clipIds, config: current.config, registry: current.registry });
+  }, [dataRef, resolvedConfig]);
+
   const handleUpdateClips = useCallback((clipIds: string[], patch: Partial<ClipMeta>) => {
     const current = dataRef.current;
     if (!current) {
@@ -173,7 +182,8 @@ export function useClipEditing({
     ) as Record<string, Partial<ClipMeta>>;
 
     if (!patchAffectsDuration(patch)) {
-      applyRowsEdit(current.rows, metaUpdates);
+      const gestureBasis = transitionClearBasis(metaUpdates);
+      applyRowsEdit(current.rows, metaUpdates, undefined, undefined, gestureBasis ? { gestureBasis } : undefined);
       return;
     }
 
@@ -198,7 +208,7 @@ export function useClipEditing({
     }));
 
     applyRowsEdit(nextRows, metaUpdates);
-  }, [applyRowsEdit, dataRef, getValidClipIds]);
+  }, [applyRowsEdit, dataRef, getValidClipIds, transitionClearBasis]);
 
   const handleUpdateClipsDeep = useCallback((
     clipIds: string[],
@@ -229,10 +239,11 @@ export function useClipEditing({
       return;
     }
 
-    applyRowsEdit(current.rows, metaUpdates);
-  }, [applyRowsEdit, dataRef, getValidClipIds]);
+    const gestureBasis = transitionClearBasis(metaUpdates);
+    applyRowsEdit(current.rows, metaUpdates, undefined, undefined, gestureBasis ? { gestureBasis } : undefined);
+  }, [applyRowsEdit, dataRef, getValidClipIds, transitionClearBasis]);
 
-  const handleSelectedClipChange = useCallback((patch: Partial<ClipMeta> & { at?: number }) => {
+  const handleSelectedClipChange = useCallback((patch: Partial<ClipMeta> & { at?: number }, elementOwner?: AgentChatEditorContext | null) => {
     const current = dataRef.current;
     if (!current || !selectedClipId) {
       return;
@@ -243,6 +254,38 @@ export function useClipEditing({
       return;
     }
 
+    let elementBasis: TimelineGestureReadBasis | undefined;
+    const selected = current.config.clips.filter(clip => clip.id === selectedClipId);
+    if (selected[0]?.elementRef && Object.keys(patch).length === 1 && patch.params) {
+      const clip = selected[0];
+      const selection = elementOwner?.elementContext?.selectedClips.filter(item => item.id === selectedClipId);
+      const same = (left: unknown, right: unknown) => left === undefined || right === undefined
+        ? left === right : canonicalJsonStringify(left) === canonicalJsonStringify(right);
+      if (selected.length !== 1 || !resolvedConfig || current.resolvedConfig !== resolvedConfig
+        || !current.head || !elementOwner?.projectSlug || !elementOwner.timelineId
+        || elementOwner.projectId !== current.head.projectId || elementOwner.timelineId !== current.head.timelineId
+        || elementOwner.timelineSummary?.configVersion !== current.configVersion
+        || selection?.length !== 1 || selection[0].scope !== 'parent-timeline'
+        || selection[0].trackId !== clip.track || !same(selection[0].elementRef, clip.elementRef)
+        || !same(selection[0].params, clip.params) || findEnclosingPinnedGroup(current.config, clip.id)) {
+        toast.error('Element parameter ownership changed or is unavailable; reload the timeline before editing.');
+        return;
+      }
+      elementBasis = { ...structuredClone({ kind: 'element' as const, clipId: selectedClipId, config: current.config, registry: current.registry,
+        operation: { name: 'timeline.update_element' as const, project: elementOwner.projectSlug,
+          timeline: elementOwner.timelineId, expected_version: current.configVersion, clip_id: selectedClipId, params: patch.params } }),
+        context: elementOwner.elementContext! };
+    }
+
+    if (elementBasis) {
+      applyConfigEdit({ ...resolvedConfig!, clips: resolvedConfig!.clips.map(clip => clip.id === selectedClipId
+        ? { ...clip, params: { ...clip.params, ...patch.params } } : clip) }, { gestureBasis: elementBasis });
+      return;
+    }
+
+    const gestureBasis = transitionClearBasis({ [selectedClipId]: patch }) ?? (resolvedConfig && current.resolvedConfig === resolvedConfig
+      && Object.keys(patch).length > 0 && Object.keys(patch).every((key) => ['from', 'to', 'hold', 'speed'].includes(key))
+      ? structuredClone({ kind: 'trim' as const, clipId: selectedClipId, patch, config: current.config, registry: current.registry }) : undefined);
     const { at: _at, ...metaPatch } = patch;
     const affectsDuration = patchAffectsDuration(metaPatch);
     const nextRows = current.rows.map((row) => {
@@ -279,8 +322,9 @@ export function useClipEditing({
       };
     });
 
-    applyRowsEdit(nextRows, { [selectedClipId]: metaPatch });
-  }, [applyRowsEdit, dataRef, selectedClipId]);
+    if (gestureBasis) applyRowsEdit(nextRows, { [selectedClipId]: metaPatch }, undefined, undefined, { gestureBasis });
+    else applyRowsEdit(nextRows, { [selectedClipId]: metaPatch });
+  }, [applyConfigEdit, applyRowsEdit, dataRef, resolvedConfig, selectedClipId, transitionClearBasis]);
 
   const clipEditingContext: ClipEditingContext = {
     dataRef,
@@ -301,7 +345,6 @@ export function useClipEditing({
   const clipPositioning = useClipPositioning(clipEditingContext);
   const clipSplitting = useClipSplitting(clipEditingContext);
   const clipAudioManagement = useClipAudioManagement(clipEditingContext);
-  const clipTextOverlay = useClipTextOverlay(clipEditingContext);
 
   return {
     onOverlayChange,
@@ -312,6 +355,5 @@ export function useClipEditing({
     ...clipPositioning,
     ...clipSplitting,
     ...clipAudioManagement,
-    ...clipTextOverlay,
   };
 }

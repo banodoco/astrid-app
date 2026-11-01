@@ -1,0 +1,240 @@
+{
+  "schema_version": 1,
+  "purpose": "P1 App real-document cases and H3 chain handoff; this is a corpus, not an H3 GO claim.",
+  "source_repositories": {
+    "app": {
+      "root": ".",
+      "sha": "c85da5427944d26242c71e503516d8d203a5f7a7"
+    },
+    "agent": {
+      "root": "/home/user/work/agent",
+      "sha": "a086cc6db7928dc4a3516d304dd9a472b050f1cf"
+    }
+  },
+  "cases": [
+    {
+      "id": "app-native-trim-real-document",
+      "kind": "app-command-fixture",
+      "source": {
+        "repo": "app",
+        "path": "src/tools/video-editor/commands/fixtures/recipe_m2_clip_trim.json",
+        "commit": "afb774c875d9344132c697b1357a259e8f32f010",
+        "sha256": "4d71a9d184db1b85c220de10842b2dc68e5eb9b48afee180b6c29cf0d5b06152"
+      },
+      "command": {
+        "op": "clip.trim",
+        "select": "parent/clip:clip-a",
+        "args": { "in_s": 1, "out_s": 5 }
+      },
+      "effects": {
+        "set": {
+          "parent/clip:clip-a.from": 1,
+          "parent/clip:clip-a.to": 5,
+          "parent/clip:clip-a.hold": 4
+        },
+        "clear": ["parent/clip:clip-a.app.astrid.for", "parent/clip:clip-a.app.astrid.until"],
+        "preserve": ["parent/clip:clip-a.speed", "parent/clip:clip-a.opaque", "parent/registry"]
+      }
+    },
+    {
+      "id": "app-track-label-real-document",
+      "kind": "app-command-fixture",
+      "source": {
+        "repo": "app",
+        "path": "src/tools/video-editor/commands/fixtures/recipe_m2_app_track_label.json",
+        "commit": "927545cf52fdfbb273afbe7f190e00e11e5e2d70",
+        "sha256": "5aa9aed23a9764e4a9fb0d56fd5efc47368711933adbfaa224f2f725a766ed00"
+      },
+      "command": {
+        "op": "track.set",
+        "select": "parent/track:picture",
+        "args": { "values": { "label": "Picture é 🎬" }, "clear": [] }
+      },
+      "effects": {
+        "set": { "parent/track:picture.label": "Picture é 🎬" },
+        "preserve": ["parent/clip:*", "parent/registry", "unknown/null/absent fields"]
+      }
+    },
+    {
+      "id": "app-move-real-document",
+      "kind": "app-command-fixture",
+      "source": {
+        "repo": "app",
+        "path": "src/tools/video-editor/commands/fixtures/recipe_m1_move.json",
+        "commit": "2048d8ddf04f23648aa86ca061f20e265350409c",
+        "sha256": "b2d3b5c43d495d3c53c741a1665b7c1afa7a95537938b54d35d3c498c2ad72a4"
+      },
+      "command": {
+        "op": "clip.move",
+        "select": "parent/clip:c",
+        "args": { "on": 4 }
+      },
+      "effects": {
+        "set": { "parent/clip:c.at": 4.004 },
+        "clear": ["parent/clip:c.app.on", "parent/clip:c.app.astrid.on", "parent/clip:c.app.astrid.until"],
+        "preserve": ["parent/clip:c.from", "parent/clip:c.to", "parent/clip:c.speed", "parent/clip:c.app.opaque", "parent/clip:c.app.astrid.cut"],
+        "set_intent": { "parent/clip:c.app.astrid.fixed_start": true, "parent/clip:c.app.astrid.for": 2 }
+      }
+    },
+    {
+      "id": "app-ordinary-real-batch",
+      "kind": "app-command-fixture",
+      "source": {
+        "repo": "app",
+        "path": "src/tools/video-editor/commands/fixtures/ordinary_real_batch.json",
+        "commit": "b1887f206f454cfa0f998d93c0327e23dfbe6270",
+        "sha256": "3190d1e3bac13bb69941477d1672b0d97a1dcad4465660e3f4535f584701ba46"
+      },
+      "command": {
+        "op": "timeline.patch",
+        "operations": 10,
+        "targets": [
+          "parent/clip:f2-app-clip",
+          "parent/clip:f2-transition-clip",
+          "occurrence:f2-occurrence/clip:f2-plate",
+          "occurrence:f2-occurrence/clip:f2-agent-clip",
+          "occurrence:f2-occurrence/clip:f2-agent-clear-clip"
+        ]
+      },
+      "effects": {
+        "set": {
+          "each targeted clip.at": "the patch's move payload",
+          "each targeted clip.hold": "the patch's update payload"
+        },
+        "preserve": ["unmentioned fields", "opaque data", "id-addressed targets"]
+      }
+    },
+    {
+      "id": "agent-split-created-id",
+      "kind": "agent-editing-conformance-fixture",
+      "source": {
+        "repo": "agent",
+        "path": "tests/editing_conformance/fixtures/recipe_m2_clip_split.json",
+        "commit": "cda4d18ca1e0369ee2e1398f5d594ffda75647dc",
+        "sha256": "46bce505cbba3d72f7eb6c060ed9f1cf890e0c50c42a8f50a8edee7d6287e204"
+      },
+      "command": {
+        "op": "clip.split",
+        "select": "parent/clip:clip-a",
+        "args": { "on": 3, "right_id": "right" }
+      },
+      "effects": {
+        "id_map": { "right": "parent/clip:right" },
+        "set": {
+          "parent/clip:clip-a.to": 6,
+          "parent/clip:clip-a.hold": 4,
+          "parent/clip:right.from": 6,
+          "parent/clip:right.to": 10,
+          "parent/clip:right.hold": 4
+        },
+        "preserve": ["parent/clip:clip-a.opaque", "parent/clip:right.opaque", "parent/registry"]
+      }
+    },
+    {
+      "id": "agent-trim-real-document",
+      "kind": "agent-editing-conformance-fixture",
+      "source": {
+        "repo": "agent",
+        "path": "tests/editing_conformance/fixtures/recipe_m2_clip_trim.json",
+        "commit": "c61e892b9f6fe1ba0b5627a89fcd74254c16a745",
+        "sha256": "0d12aacf5b88f769a2cebef0279f251e045326fe1089a6030479a29c423b23df"
+      },
+      "command": {
+        "op": "clip.trim",
+        "select": "parent/clip:clip-a",
+        "args": { "in_s": 1, "out_s": 5 }
+      },
+      "effects": {
+        "set": {
+          "parent/clip:clip-a.from": 1,
+          "parent/clip:clip-a.to": 5,
+          "parent/clip:clip-a.hold": 2
+        },
+        "preserve": ["parent/clip:clip-a.params", "parent/clip:clip-b", "shot_revisions", "internal_timeline_revisions"]
+      }
+    },
+    {
+      "id": "agent-sample-project-tiny3",
+      "kind": "agent-sample-project",
+      "source": {
+        "repo": "agent",
+        "path": "tests/editing_scenarios/fixtures/tiny3.json",
+        "commit": "ded79f6dc2da14eb756064ad1ef1a8ffc0229e67",
+        "sha256": "f9348626c43de93409e25244ea1f81f6e86563a2f8650614fe862d618bcab51f"
+      },
+      "document": {
+        "project_id": "p",
+        "timeline_id": "t",
+        "required_keys": ["base_parent", "parent", "placements", "shots", "source_mapping"]
+      }
+    },
+    {
+      "id": "three-products-seed-and-recovery",
+      "kind": "e2e-seed-and-harness",
+      "source": {
+        "repo": "app",
+        "path": "tests/e2e/local/support/harness.ts",
+        "commit": "3a10199e78e5a41ee6f6d7f4573ce2f11b33a87b",
+        "sha256": "2ba2164ba7fd2d76ccca94d0645e6b79236c85ab4e53e82e84ae1af250c7d815"
+      },
+      "document": {
+        "parent_ids": ["f2-app-clip", "f2-transition-clip"],
+        "agent_ids": ["f2-agent-clip", "f2-agent-clear-clip"],
+        "occurrence_id": "f2-occurrence",
+        "opaque_namespaces": ["x_f2_opaque", "app"]
+      },
+      "journey_sources": [
+        {
+          "path": "tests/e2e/local/parent-split-command.spec.ts",
+          "commit": "f627477e55656b2146a8374e81b8df8e944caff5",
+          "sha256": "48938cfeffed2f3d6180206a4e7744c00979b31a14021f61c66ff98638f1f574"
+        },
+        {
+          "path": "tests/e2e/local/parent-trim-command.spec.ts",
+          "commit": "76be83b1a572360838c5ab0cb925a157ae103b34",
+          "sha256": "110b705e9d97283333fc914731732f7c4a94e21894fed5480117efeb67ce8750"
+        },
+        {
+          "path": "tests/e2e/local/three-products.spec.ts",
+          "commit": "6707a30f14bf3a5ee19cb9e481b7dbd95b77522a",
+          "sha256": "40f35d7d09471b8a255724b4330e61128c9fd4f94733ce55dc30b0d9fafb837d"
+        }
+      ]
+    }
+  ],
+  "h3_chain": {
+    "id": "split-trim-agent-edit-lost-ack-restart",
+    "status": "authored-not-go",
+    "steps": [
+      { "ordinal": 1, "actor": "agent", "op": "clip.split", "source_case": "agent-split-created-id", "output": "allocate right_id and persist id_map" },
+      { "ordinal": 2, "actor": "app", "op": "clip.trim", "source_case": "app-native-trim-real-document", "target": "the mapped parent/clip:right", "output": "from/to/hold plus intent clears" },
+      { "ordinal": 3, "actor": "agent", "op": "track.set", "source_case": "app-track-label-real-document", "output": "canonical head advances while App intent is pending" },
+      { "ordinal": 4, "actor": "runtime", "event": "lost acknowledgement", "output": "persist exact request body and idempotency key" },
+      { "ordinal": 5, "actor": "app", "event": "restart and recover", "output": "replay exact key/payload, then dependent intent at canonical head" }
+    ],
+    "replies": [
+      {
+        "kind": "accepted",
+        "runtime_wire": "accepted",
+        "expected": "canonical trim and id_map applied; queue drains; dependent uses accepted head"
+      },
+      {
+        "kind": "merged",
+        "runtime_wire": "rebased",
+        "expected": "Agent field survives; Runtime returns canonical head/id_map; dependent is revalidated against that head"
+      },
+      {
+        "kind": "refused",
+        "runtime_wire": "refused/conflict",
+        "expected": "canonical head remains authoritative; predecessor is surfaced; dependent is revalidated or rolled back with a message"
+      }
+    ],
+    "required_seams": [
+      "App split capture/submit port for clip.split and created-id binding",
+      "App mixed-command queue acceptance of clip.trim against a newly created id",
+      "Runtime reply payload distinguishing merged/rebased from accepted and returning canonical id_map",
+      "A2 dependent revalidation or rollback after predecessor refusal",
+      "R1 doc.patch execution and field-level conflict/previous-value details"
+    ]
+  }
+}

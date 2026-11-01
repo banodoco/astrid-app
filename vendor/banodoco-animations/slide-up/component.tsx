@@ -1,6 +1,6 @@
 import type {ReactElement} from 'react';
 import {interpolate} from 'remotion';
-import type {WrapperAnimationProps} from '../../tools/remotion/src/effects.types';
+import type {WrapperAnimationProps} from '@banodoco/timeline-composition/theme-api';
 
 export const SlideUp = ({
   children,

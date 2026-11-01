@@ -1,4 +1,4 @@
-import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
+import { invalidateDraftReload, recordDraftReloadFailure, registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 
 export type ProjectDraftSnapshot<T> = { text: string; queue: T[] };
 
@@ -45,6 +45,7 @@ export class ProjectChatDraftPersistence<T> {
 
   /** Keep this project's latest draft and a project-bound durable writer owned across component lifetimes. */
   track(snapshot: ProjectDraftSnapshot<T>, writer: (snapshot: ProjectDraftSnapshot<T>) => Promise<void>): void {
+    if (!sameProjectDraft(this.latest, snapshot)) invalidateDraftReload();
     this.latest = snapshot;
     this.writer = writer;
     this.syncReloadGuard();
@@ -127,7 +128,8 @@ export class ProjectChatDraftPersistence<T> {
         if (sameProjectDraft(this.latest, snapshot)) this.latest = this.saved;
       }
       this.syncReloadGuard();
-    }).finally(() => { this.inflight--; this.activeWriteRequest = null; this.syncReloadGuard(); });
+    }).catch((error: unknown) => { recordDraftReloadFailure(); throw error; })
+      .finally(() => { this.inflight--; this.activeWriteRequest = null; this.syncReloadGuard(); });
     this.chain = pending;
     return pending;
   }

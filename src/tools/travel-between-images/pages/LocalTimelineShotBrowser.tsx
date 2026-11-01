@@ -47,6 +47,9 @@ type LocalTimelineShotBrowserProps = {
   onCanonicalDraftSessionChange?: (scope: CanonicalShotTimelineScope, active: boolean) => void;
   onCanonicalDraftProjectionChange?: (draft: CanonicalShotTimelineDraft) => void;
   onCanonicalDraftProjectionClear?: (scope: CanonicalShotTimelineScope, generation: number) => void;
+  /** Retained parent-editor ports until the A2/A3 save funnel replaces the popup surface. */
+  shotSetPort?: unknown;
+  mediaProvider?: unknown;
 };
 
 type LocalTimelineDocument = {
@@ -143,7 +146,7 @@ function useLocalTimelineDocument(
     },
   });
 
-  return { queryKey, compositionAdapter, ...query };
+  return { queryKey, provider, compositionAdapter, ...query };
 }
 
 function isCompositionForDocument(
@@ -291,6 +294,7 @@ export function LocalTimelineShotBrowser({ projectSlug, projectId, timelineRef, 
           shotToEdit={selectedShotModel}
           canonicalOccurrence={selectedShotModel}
           canonicalShotComposition={documentQuery.compositionAdapter ?? documentQuery.data?.compositionAdapter ?? shotCompositionAdapter}
+          timelineDataProvider={documentQuery.provider ?? undefined}
           canonicalComposition={composition}
           selectedProjectId={projectSlug}
           isNewlyCreatedShot={false}

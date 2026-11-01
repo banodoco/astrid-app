@@ -1,7 +1,6 @@
 import { AstridRuntimeClient } from './client.ts';
 import { ApiError } from './generated.ts';
 import { generateUUID } from '@/shared/lib/taskCreation/ids.ts';
-import { createDefaultTimelineConfig } from '@/tools/video-editor/lib/defaults.ts';
 
 type RuntimeTimeline = Record<string, unknown> & {
   timeline_id?: unknown;
@@ -48,39 +47,7 @@ async function stableUuid(seed: string): Promise<string> {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-async function publishEmptyTimeline(
-  projectId: string,
-  targetTimelineId: string,
-  name: string,
-  client: AstridRuntimeClient,
-  key: string,
-): Promise<void> {
-  const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'timeline';
-  const parentRevisionId = await stableUuid(`astrid-parent-revision:${projectId}:${targetTimelineId}`);
-  await client.publishParentComposition(
-    projectId,
-    targetTimelineId,
-    {
-      project_id: projectId,
-      timeline_id: targetTimelineId,
-      expected_head: null,
-      parent_revision_id: parentRevisionId,
-      parent_composition: {
-        slug,
-        name,
-        config: createDefaultTimelineConfig() as unknown as Record<string, unknown>,
-        registry: { assets: {} },
-        clips: [],
-        occurrences: [],
-      },
-      shot_revisions: [],
-      internal_timeline_revisions: [],
-    },
-    key,
-  );
-}
-
-/** Publish a new empty canonical parent composition through the current Runtime contract. */
+/** Catalog creation atomically installs Runtime's empty canonical bootstrap. */
 export async function createCanonicalTimeline(
   projectId: string,
   options: { name?: string; timelineId?: string; idempotencyKey?: string } = {},
@@ -90,12 +57,11 @@ export async function createCanonicalTimeline(
     ?? (options.idempotencyKey
       ? await stableUuid(`astrid-timeline:${options.idempotencyKey}`)
       : generateUUID());
-  await publishEmptyTimeline(
+  await client.createTimeline(
     projectId,
     targetTimelineId,
-    options.name ?? 'Timeline',
-    client,
     options.idempotencyKey ?? `astrid-timeline-create-${projectId}-${targetTimelineId}`,
+    options.name ?? 'Timeline',
   );
   return targetTimelineId;
 }
@@ -118,7 +84,8 @@ export async function ensureProjectHasTimeline(
   let target = timelineId(existing);
   if (target) {
     if (typeof existing?.head_revision_id !== 'string' || !existing.head_revision_id) {
-      await publishEmptyTimeline(projectId, target, 'Main', client, `astrid-first-timeline-${projectId}`);
+      // Omit name when adopting a shell so its existing catalog name survives.
+      await client.createTimeline(projectId, target, `astrid-first-timeline-${projectId}`);
     }
   } else {
     target = await createCanonicalTimeline(projectId, {

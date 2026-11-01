@@ -6,6 +6,10 @@ const finite = (value: unknown): number | undefined => typeof value === 'number'
 const text = (value: unknown): string | undefined => typeof value === 'string' && value.trim().length > 0 ? value : undefined;
 const clipType = (clip: ResolvedTimelineClip): string => text(clip.clipType) ?? 'media';
 
+export function visualSeamSourceTrack(track: TrackDefinition | undefined, fallback = ''): string {
+  return text(record(track?.app?.group)?.sourceTrack) ?? track?.id ?? fallback;
+}
+
 function declaredPictureTracks(config: ResolvedTimelineConfig): Set<string> {
   const value = record(record(config.app)?.visualSeamContract)?.pictureTracks;
   return new Set(Array.isArray(value) ? value.filter((track): track is string => typeof track === 'string') : []);
@@ -20,7 +24,7 @@ const MEDIA_CLIP_TYPES = new Set(['media', 'video', 'image']);
  */
 export function coversFrame(clip: ResolvedTimelineClip, track: TrackDefinition | undefined, config: ResolvedTimelineConfig): boolean {
   if (track?.kind !== 'visual' || track.role === 'source') return false;
-  if (!declaredPictureTracks(config).has(track.id)
+  if (!declaredPictureTracks(config).has(visualSeamSourceTrack(track))
     && !(MEDIA_CLIP_TYPES.has(clipType(clip)) && text(clip.asset))) return false;
   if ((finite(clip.opacity) ?? 1) < 1 || (finite(track.opacity) ?? 1) < 1) return false;
   const [outW, outH] = String(config.output.resolution).split('x').map(Number);

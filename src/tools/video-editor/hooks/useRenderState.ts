@@ -63,7 +63,7 @@ function renderConfigFingerprint(config: ResolvedTimelineConfig | null): string 
 
 export type RenderStatus = 'idle' | 'rendering' | 'done' | 'error';
 
-/** Export status for compile-only and render-dependent export operations. */
+/** M6: Export status for compile-only and render-dependent export operations. */
 export type ExportStatus = 'idle' | 'exporting' | 'done' | 'error';
 
 type RenderProgress = { current: number; total: number; percent: number; phase: string } | null;
@@ -103,7 +103,7 @@ export interface RenderResultInfo {
  * source. Keep useful error vocabulary while removing credentials and host
  * paths that a misconfigured/compromised bridge could echo back.
  */
-function redactDiagnosticText(value: string): string {
+function redactDiagnosticText(value: string, redactPaths = true): string {
   let redacted = value;
 
   // Remove the complete URL authority userinfo, including malformed values
@@ -147,11 +147,11 @@ function redactDiagnosticText(value: string): string {
 
   // Do not expose machine/user names or workspace locations. Restrict this
   // to local/staging roots so ordinary remote URL paths remain useful.
-  redacted = redacted.replace(
+  if (redactPaths) redacted = redacted.replace(
     /(?<![\w:])\/(?:Users|home|tmp|var|private|workspace|workspaces|staging|srv|opt|mnt|Volumes|root|app|build|dist|run|etc)(?=$|[/\s"'`<>;,)])(?:\/[^\s"'`<>;,)]*)?/gi,
     '[REDACTED_PATH]',
   );
-  redacted = redacted.replace(
+  if (redactPaths) redacted = redacted.replace(
     /(?<![\w])(?:[A-Za-z]:[\\/]|\\\\)[^\s"'`<>;,)]*/g,
     '[REDACTED_PATH]',
   );
@@ -166,6 +166,32 @@ function compactDiagnosticValue(value: unknown, maxChars = ASTRID_DIAGNOSTIC_FIE
   return text.length > maxChars ? `${text.slice(0, maxChars - 3)}...` : text;
 }
 
+function formatDiagnosticMessage(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const structured = /^\s*Headline\s*:/im.test(trimmed);
+  let inFix = false;
+  const sanitized = trimmed.split(/\r?\n/).map((line) => {
+    if (/^\s*Fix\s*:/i.test(line)) inFix = true;
+    else if (/^\s*(?:Headline|Detail)\s*:/i.test(line)) inFix = false;
+    return redactDiagnosticText(line, !structured || !inFix);
+  }).join('\n');
+  return capDiagnosticLine(sanitized, structured);
+}
+
+function capDiagnosticLine(value: string, preserveFix = false): string {
+  if (value.length <= ASTRID_DIAGNOSTIC_LOG_MAX_CHARS) return value;
+  const fixStart = preserveFix ? value.search(/^\s*Fix\s*:/im) : -1;
+  if (fixStart >= 0) {
+    const fix = value.slice(fixStart);
+    const keptFix = fix.length > 1_000 ? `${fix.slice(0, 997)}...` : fix;
+    const prefixEnd = Math.min(fixStart, ASTRID_DIAGNOSTIC_LOG_MAX_CHARS - keptFix.length - 4);
+    return `${value.slice(0, prefixEnd)}\n...\n${keptFix}`;
+  }
+  return `${value.slice(0, ASTRID_DIAGNOSTIC_LOG_MAX_CHARS - 3)}...`;
+}
+
 /** Render the bridge's small executor error projection without log flooding. */
 export function formatAstridExecutorDiagnostic(
   task: Pick<BridgeTaskDetailPayload['task'], 'attempts'> & { result?: unknown },
@@ -175,7 +201,7 @@ export function formatAstridExecutorDiagnostic(
   const error = attemptError ?? resultError;
   if (!error) return 'Astrid render failed. No executor diagnostic was provided.';
 
-  const message = compactDiagnosticValue(error.message, 4_000);
+  const message = formatDiagnosticMessage(error.message) ?? compactDiagnosticValue(error.message, 4_000);
   const fields = [
     ['code', error.code],
     ['reason', error.reason],
@@ -185,13 +211,22 @@ export function formatAstridExecutorDiagnostic(
     const compact = compactDiagnosticValue(value);
     return compact === null ? [] : [`${key}=${compact}`];
   });
-  const details = [message, ...fields].filter((part): part is string => Boolean(part)).join(' · ');
+  const labeledMessage = typeof message === 'string' && /^\s*Headline\s*:/im.test(message);
+  let details: string;
+  if (labeledMessage && message) {
+    const lines = message.split('\n');
+    const fixLine = lines.findIndex((part) => /^\s*Fix\s*:/i.test(part));
+    const detailLine = lines.findIndex((part) => /^\s*Detail\s*:/i.test(part));
+    const metadata = detailLine < 0 && fields.length ? [`Detail: ${fields.join(' · ')}`] : fields;
+    lines.splice(fixLine >= 0 ? fixLine : lines.length, 0, ...metadata);
+    details = lines.join('\n');
+  } else {
+    details = [message, ...fields].filter((part): part is string => Boolean(part)).join(' · ');
+  }
   if (!details) return 'Astrid render failed. No executor diagnostic was provided.';
 
-  const line = `Astrid render failed: ${details}`;
-  return line.length > ASTRID_DIAGNOSTIC_LOG_MAX_CHARS
-    ? `${line.slice(0, ASTRID_DIAGNOSTIC_LOG_MAX_CHARS - 3)}...`
-    : line;
+  const line = labeledMessage ? details : `Astrid render failed: ${details}`;
+  return capDiagnosticLine(line, labeledMessage);
 }
 
 function progressNumber(progress: Record<string, unknown> | undefined, key: string): number | undefined {
@@ -480,7 +515,7 @@ function toCollectionDiagnostic(
 }
 
 // ---------------------------------------------------------------------------
-// Export format categorization
+// M6: Export format categorization
 // ---------------------------------------------------------------------------
 
 /** Categorize output format descriptors into compile-only and render-dependent groups. */
@@ -545,7 +580,7 @@ export function useRenderState(
   const renderOperationIdRef = useRef<string | null>(null);
   const renderCancellationRef = useRef<RenderCancellation | null>(null);
   const renderClientRef = useRef<AstridLocalClient | null>(null);
-  // Export state
+  // M6: Export state
   const [exportStatus, setExportStatus] = useState<ExportStatus>('idle');
   const [exportLog, setExportLogState] = useState('');
   const [exportResultUrl, setExportResultUrl] = useState<string | null>(null);
@@ -553,7 +588,7 @@ export function useRenderState(
   const effectRegistrySnapshot = useEffectRegistrySnapshot();
   const transitionRegistrySnapshot = useTransitionRegistrySnapshot();
   const clipTypeRegistrySnapshot = useClipTypeRegistrySnapshot();
-  // Derive export format categories from extension runtime
+  // M6: Derive export format categories from extension runtime
   const exportFormats = useMemo(() => {
     const outputFormats = outputFormatsForPlanning(extensionRuntime);
     return categorizeExportFormats(outputFormats);
@@ -584,7 +619,7 @@ export function useRenderState(
       }
     };
   }, [renderResultUrl]);
-  // Cleanup export result URL on unmount
+  // M6: Cleanup export result URL on unmount
   useEffect(() => {
     return () => {
       if (exportResultUrl) {
@@ -1214,7 +1249,7 @@ export function useRenderState(
     runtimeContext,
   ]);
 
-  // ---- compile-only export ------------------------------------------------
+  // ---- M6: compile-only export ------------------------------------------------
   const startExport = useCallback(async (
     formatId: string,
     compileOnlyRegistry?: CompileOnlyOutputFormatRegistry,
@@ -1276,7 +1311,7 @@ export function useRenderState(
       return;
     }
 
-    // ---- Run export guard before compile-only export --------------------
+    // ---- M7: Run export guard before compile-only export --------------------
     // Compile-only exports don't need rendered pixels, but they still process
     // timeline data.  Unknown / missing-contribution effects should block
     // because the exported data would be invalid.  Route-specific capability
@@ -1398,7 +1433,7 @@ export function useRenderState(
     setRenderDirty,
     setRenderProgress,
     startRender,
-    // Export state
+    // M6: Export state
     exportStatus,
     exportLog,
     exportResultUrl,

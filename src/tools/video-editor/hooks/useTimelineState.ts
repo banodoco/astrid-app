@@ -40,15 +40,10 @@ import {
   seedTimelineStoreBeforeRender,
 } from '@/tools/video-editor/hooks/timelineStore.ts';
 import {
-  createTimelineCommandRunner,
-  MEDIA_COMMAND_DESCRIPTORS,
   provisionRegisteredTimelineMedia,
 } from '@/tools/video-editor/commands/index.ts';
 import type {
   TimelineChromeContextValue,
-  TimelineEditorCommandInput,
-  TimelineEditorCommandResult,
-  TimelineEditorCommand,
   TimelineEditorContextValue,
   TimelineEditorCommands,
   TimelinePlaybackContextValue,
@@ -101,8 +96,6 @@ export function useTimelineRenderRequest(
     renderRuntime: { projectId },
   }), [assetRegistry, projectId, renderMetadata, resolvedConfig, timelineId]);
 }
-
-const editorCommandRunner = createTimelineCommandRunner<TimelineEditorCommand>(MEDIA_COMMAND_DESCRIPTORS);
 
 function useTimelineEditorContextValue({
   data,
@@ -391,7 +384,6 @@ function useTimelineChromeContextValue({
   history,
   setScaleWidth,
   trackManagement,
-  clipEditing,
   reloadFromServer,
   retrySaveAfterConflict,
   startRender,
@@ -404,6 +396,7 @@ function useTimelineChromeContextValue({
   flushPendingSave,
   preserveTimelineDraftForReload,
   isTimelineDraftDurableForReload,
+  isTimelineSavePending,
   recoveryDraft,
   retryRecoveredDraft,
   discardRecoveredDraft,
@@ -420,7 +413,6 @@ function useTimelineChromeContextValue({
   history: Pick<TimelineHistoryHook, 'undo' | 'redo' | 'canUndo' | 'canRedo' | 'historyPausedForUploads' | 'checkpoints' | 'jumpToCheckpoint' | 'createManualCheckpoint' | 'canonicalHistory' | 'canonicalHistorySupported' | 'canonicalHistoryError' | 'refreshCanonicalHistory' | 'restoringCanonicalRevisionId' | 'restoreCanonicalRevision'>;
   setScaleWidth: ReturnType<typeof useEditorPreferences>['setScaleWidth'];
   trackManagement: Pick<TimelineTrackManagementHook, 'handleAddTrack' | 'handleClearUnusedTracks' | 'unusedTrackCount'>;
-  clipEditing: Pick<ClipEditingHook, 'handleAddText' | 'handleAddTextAt'>;
   reloadFromServer: ReturnType<typeof useTimelineSave>['reloadFromServer'];
   retrySaveAfterConflict: ReturnType<typeof useTimelineSave>['retrySaveAfterConflict'];
   startRender: ReturnType<typeof useRenderState>['startRender'];
@@ -431,6 +423,7 @@ function useTimelineChromeContextValue({
   flushPendingSave: () => Promise<number>;
   preserveTimelineDraftForReload: () => Promise<void>;
   isTimelineDraftDurableForReload: () => boolean;
+  isTimelineSavePending: () => boolean;
   recoveryDraft: ReturnType<typeof useTimelineSave>['recoveryDraft'];
   retryRecoveredDraft: ReturnType<typeof useTimelineSave>['retryRecoveredDraft'];
   discardRecoveredDraft: ReturnType<typeof useTimelineSave>['discardRecoveredDraft'];
@@ -476,8 +469,6 @@ function useTimelineChromeContextValue({
     handleAddTrack: trackManagement.handleAddTrack,
     handleClearUnusedTracks: trackManagement.handleClearUnusedTracks,
     unusedTrackCount: trackManagement.unusedTrackCount,
-    handleAddText: clipEditing.handleAddText,
-    handleAddTextAt: clipEditing.handleAddTextAt,
     reloadFromServer,
     retrySaveAfterConflict,
     watchdogTripped,
@@ -487,6 +478,7 @@ function useTimelineChromeContextValue({
     flushPendingSave,
     preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload,
+    isTimelineSavePending,
     recoveryDraft,
     retryRecoveredDraft,
     discardRecoveredDraft,
@@ -494,10 +486,8 @@ function useTimelineChromeContextValue({
     loadError,
     retryLoad,
   }), [
-    clipEditing.handleAddText,
     loadError,
     retryLoad,
-    clipEditing.handleAddTextAt,
     history.canRedo,
     history.canUndo,
     history.historyPausedForUploads,
@@ -539,6 +529,7 @@ function useTimelineChromeContextValue({
     flushPendingSave,
     preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload,
+    isTimelineSavePending,
     saveStatus,
     setScaleWidth,
     startRender,
@@ -652,6 +643,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     interactionStateRef,
     pendingOpsRef: save.pendingOpsRef,
     editability: runtime.timelineEditability,
+    remoteHistory: save.localDocumentSave,
   });
   const derived = useDerivedTimeline(save.data, save.selectedClipId, save.selectedTrackId);
   const timelineDataRef = save.dataRef;
@@ -999,55 +991,11 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
       };
     };
 
-    const validate = (input: TimelineEditorCommandInput | unknown, options?: Parameters<typeof editorCommandRunner.validate>[2]) => {
-      return editorCommandRunner.validate(getCurrentData(), input, options);
-    };
-
-    const dryRun = (input: TimelineEditorCommandInput | unknown, options?: Parameters<typeof editorCommandRunner.dryRun>[2]) => {
-      return editorCommandRunner.dryRun(getCurrentData(), input, options);
-    };
-
-    const apply = (input: TimelineEditorCommandInput | unknown, options?: Parameters<TimelineEditorCommands['apply']>[1]): TimelineEditorCommandResult => {
-      const current = getCurrentData();
-      const timelinePermission = runtime.timelineEditability?.checkTimeline?.();
-      const result = editorCommandRunner.apply(current, input, options);
-      if (timelinePermission && !timelinePermission.allowed) {
-        return {
-          ...result,
-          status: 'rejected',
-          nextData: current,
-          errors: [...result.errors, {
-            code: 'validation_failed',
-            message: 'Timeline edits are temporarily unavailable while canonical shot state is updating.',
-            path: '$',
-          }],
-        };
-      }
-      if (result.status !== 'rejected' && result.nextData.stableSignature !== current.stableSignature) {
-        save.commitData(result.nextData, {
-          save: options?.save,
-          selectedClipId: options?.selectedClipId,
-          selectedTrackId: options?.selectedTrackId,
-          semantic: options?.semantic,
-          transactionId: result.transaction.transactionId,
-          commandHistory: {
-            transaction: result.transaction,
-            history: result.history,
-          },
-        });
-      }
-
-      return result;
-    };
-
     return {
       buildAddMediaCommand,
       buildSwapCommand,
-      validate,
-      dryRun,
-      apply,
     };
-  }, [data, dataRef, runtime.timelineEditability, save]);
+  }, [data, dataRef]);
 
   const editor = useTimelineEditorContextValue({
     data,
@@ -1278,10 +1226,6 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
       handleClearUnusedTracks: trackManagement.handleClearUnusedTracks,
       unusedTrackCount: shotTracksSettling ? 0 : trackManagement.unusedTrackCount,
     },
-    clipEditing: {
-      handleAddText: clipEditing.handleAddText,
-      handleAddTextAt: clipEditing.handleAddTextAt,
-    },
     reloadFromServer,
     retrySaveAfterConflict,
     watchdogTripped: save.watchdogTripped,
@@ -1291,6 +1235,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     flushPendingSave: save.flushPendingSave,
     preserveTimelineDraftForReload: save.preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload: save.isTimelineDraftDurableForReload,
+    isTimelineSavePending: save.isTimelineSavePending,
     recoveryDraft: save.recoveryDraft,
     retryRecoveredDraft: save.retryRecoveredDraft,
     discardRecoveredDraft: save.discardRecoveredDraft,
@@ -1324,7 +1269,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
 
   return {
     store,
-    editor,
+    editor: { ...editor, elementTimelineRoutes: save.elementTimelineRoutes },
     editorData,
     editorOps,
     chrome,

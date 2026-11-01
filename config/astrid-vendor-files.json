@@ -82,6 +82,23 @@
     "remotion/public/fonts/OFL-1.1.txt",
     "remotion/public/fonts/FONT_PROVENANCE.md"
   ],
+  "exclude": [
+    "astrid/packs/rendering/editor/live-scenes/diagnostics.ts",
+    "astrid/packs/rendering/editor/live-scenes/runtime.ts",
+    "astrid/packs/rendering/rendering/elements/animations/fade/component.tsx",
+    "astrid/packs/rendering/rendering/elements/animations/fade-up/component.tsx",
+    "astrid/packs/rendering/rendering/elements/animations/scale-in/component.tsx",
+    "astrid/packs/rendering/rendering/elements/animations/slide-left/component.tsx",
+    "astrid/packs/rendering/rendering/elements/animations/slide-up/component.tsx",
+    "astrid/packs/rendering/rendering/elements/animations/type-on/component.tsx",
+    "astrid/packs/rendering/rendering/elements/effects/text-card/component.tsx",
+    "astrid/packs/rendering/rendering/elements/transitions/cross-fade/component.tsx",
+    "astrid/packs/rendering/rendering/elements/transitions/fade/component.tsx",
+    "astrid/packs/rendering/ui/live-scenes/SceneSurface.tsx",
+    "astrid/packs/rendering/ui/live-scenes/authoring.ts",
+    "astrid/packs/rendering/ui/live-scenes/extension.tsx",
+    "astrid/packs/rendering/ui/live-scenes/identity.ts"
+  ],
   "tool_catalog": "astrid/tools/catalog.json",
   "public_catalog": {
     "output": "astrid/packs/rendering/elements/public-catalog.ts",

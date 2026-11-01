@@ -4,7 +4,11 @@ import { getPublishedTimelineRowLayout, getTimelineDomNodes } from '@/tools/vide
 import { useEffect, useRef, useState } from 'react';
 import type { MutableRefObject } from 'react';
 import { shallow } from 'zustand/shallow';
-import { userSelectTimelineClip, getSelectedTimelineDataItems } from '@/shared/state/selectionStore.ts';
+import {
+  getSelectedTimelineDataItems,
+  getTimelineItemSelection,
+  userSelectTimelineClip,
+} from '@/shared/state/selectionStore.ts';
 import { computeSecondaryGhosts } from '@/tools/video-editor/lib/multi-drag-utils.ts';
 import { createAutoScroller } from '@/tools/video-editor/lib/auto-scroll.ts';
 import { getTimelineLabelWidth } from '@/tools/video-editor/lib/coordinate-utils.ts';
@@ -45,6 +49,7 @@ interface UseClipDragLatest {
   createTrackAndMoveClip: TimelineEditorOpsContextValue['createTrackAndMoveClip'];
   selectClip: TimelineEditorOpsContextValue['selectClip'];
   selectClips: TimelineEditorOpsContextValue['selectClips'];
+  setSelectedTrackId: TimelineEditorOpsContextValue['setSelectedTrackId'];
   selectedClipIdsRef: TimelineEditorDataContextValue['selectedClipIdsRef'];
   applyEdit: TimelineEditorOpsContextValue['applyEdit'];
   additiveSelectionRef: TimelineEditorDataContextValue['additiveSelectionRef'];
@@ -123,6 +128,7 @@ export const useClipDrag = (): UseClipDragResult => {
     createTrackAndMoveClip: ops.createTrackAndMoveClip,
     selectClip: ops.selectClip,
     selectClips: ops.selectClips,
+    setSelectedTrackId: ops.setSelectedTrackId,
     selectedClipIdsRef,
     applyEdit: ops.applyEdit,
     additiveSelectionRef,
@@ -196,6 +202,7 @@ export const useClipDrag = (): UseClipDragResult => {
     };
 
     const updateDragState = (session: InternalDragSession, clientX: number, clientY: number) => {
+      session.plannedData = dataRef.current ?? undefined;
       const adjustedClientY = clientY + session.pointerCoordinateYOffset;
       const nextPosition = latestRef.current.coordinator.update({
         clientX,
@@ -432,6 +439,13 @@ export const useClipDrag = (): UseClipDragResult => {
           return;
         }
 
+        const selectClipAtTrack = (clipId: string, trackId: string, opts: { additive: boolean; preserveIfSelected?: boolean }) => {
+          userSelectTimelineClip(clipId, opts, selectionOwner);
+          if (getTimelineItemSelection(selectionOwner).clipIds.includes(clipId)) {
+            latestRef.current.setSelectedTrackId(trackId);
+          }
+        };
+
         if (
           shouldPreserveTouchSelectionForMove(
             latestRef.current.deviceClass,
@@ -441,11 +455,11 @@ export const useClipDrag = (): UseClipDragResult => {
           && session.wasSelectedOnPointerDown
           && latestRef.current.selectedClipIdsRef.current.size > 1
         ) {
-          userSelectTimelineClip(session.clipId, { additive: false, preserveIfSelected: true }, selectionOwner);
+          selectClipAtTrack(session.clipId, session.sourceRowId, { additive: false, preserveIfSelected: true });
         } else if (session.metaKey || session.ctrlKey || upEvent.shiftKey) {
-          userSelectTimelineClip(session.clipId, { additive: true }, selectionOwner);
+          selectClipAtTrack(session.clipId, session.sourceRowId, { additive: true });
         } else {
-          userSelectTimelineClip(session.clipId, { additive: false }, selectionOwner);
+          selectClipAtTrack(session.clipId, session.sourceRowId, { additive: false });
         }
         endSession();
       };

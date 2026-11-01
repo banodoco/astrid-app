@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'node:url';
 import { createHash } from 'crypto';
 
 export type AstridSource = {
@@ -133,8 +134,10 @@ export function resolveAstridSource(
   configuredPath = process.env.ASTRID_CHECKOUT,
   environmentName = 'ASTRID_CHECKOUT',
 ): AstridSource | null {
-  const bundledCheckout = path.resolve(__dirname, '../../vendor/astrid-browser');
-  const value = configuredPath?.trim() || (fs.existsSync(bundledCheckout) ? bundledCheckout : '');
+  const value = configuredPath?.trim() || (() => {
+    const bundledCheckout = fileURLToPath(new URL('../../vendor/astrid-browser', import.meta.url));
+    return fs.existsSync(bundledCheckout) ? bundledCheckout : '';
+  })();
   if (!value) {
     return null;
   }

@@ -9,6 +9,7 @@ import {
   bridgeTaskAdmissionRequestSchema,
 } from '@/tools/video-editor/data/bridgeContract.ts';
 import type { TaskCreationRequest } from './types';
+import type { CreateTaskOptions } from './createTask';
 import { astridBase } from '@/integrations/runtime/connection.ts';
 import { composeDisabledReason } from '@/shared/components/RuntimeConnection/copy.ts';
 
@@ -260,24 +261,43 @@ export function compileImageGenerationParams(
   });
 }
 
+export type ImageGenerationTaskOptions = CreateTaskOptions & { preparedRequest?: TaskCreationRequest };
+export type ImagePlacementTarget = { ownerRef: string; lane: string; anchor: string | null };
+export type ImageGenerationPlacement = {
+  projectId: string;
+  unavailableReason?: string;
+  prepare(target: ImagePlacementTarget): Promise<ImageGenerationTaskOptions>;
+};
+
 /** Admit one prompt as one canonical task until batch admission is atomic. */
 export async function createImageGenerationTasks(
   project: string,
   params: BatchImageGenerationTaskParams,
+  options?: ImageGenerationTaskOptions,
 ): Promise<TaskCreationResult> {
   assertComposeAvailable();
   const compiled = compileImageGenerationParams(params);
-  const capability = await resolveTaskCapability(project, IMAGE_GENERATION_CAPABILITY_ID);
+  const spec = compiled[0];
+  if (!spec) throw new TaskValidationError('Image generation request compiled to no task', 'prompts');
+  if (options?.preparedRequest) {
+    const request = options.preparedRequest;
+    if (!options.reservation || request.project !== project || request.capability_id !== IMAGE_GENERATION_CAPABILITY_ID
+      || Object.keys(request.spec.params).length !== Object.keys(spec).length
+      || !Object.entries(spec).every(([key, value]) => request.spec.params[key] === value)) {
+      throw new TaskValidationError('Saved placement task differs from this generation draft');
+    }
+    return createTask(request, options);
+  }
+  const capability = options?.client ? await options.client.catalog.get(IMAGE_GENERATION_CAPABILITY_ID)
+    : await resolveTaskCapability(project, IMAGE_GENERATION_CAPABILITY_ID);
   if (capability.estimated_scratch_bytes <= 0 || capability.estimated_output_bytes <= 0) {
     throw new TaskValidationError(
       'Astrid image capability has no nonzero storage estimate; producer admission is blocked',
       'storage_estimate',
     );
   }
-  const spec = compiled[0];
-  if (!spec) throw new TaskValidationError('Image generation request compiled to no task', 'prompts');
   const request = await composeCreativeImageAdmission(project, capability.definition_digest, spec);
-  const result = await createTask(request);
+  const result = options ? await createTask(request, options) : await createTask(request);
   const taskIds = result.task_ids ?? [result.task_id];
   return {
     task_id: taskIds[0] ?? '',
@@ -285,7 +305,6 @@ export async function createImageGenerationTasks(
     status: result.status ?? 'Queued',
   };
 }
-
 /** Admit one narrow, CAS-backed z-image image-to-image task. */
 export async function createImageToImageTask(
   project: string,

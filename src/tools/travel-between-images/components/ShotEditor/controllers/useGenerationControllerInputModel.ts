@@ -61,6 +61,7 @@ interface RuntimeSettingsSlice {
   randomSeed: MotionSettings['randomSeed'];
   isShotUISettingsLoading: RuntimeSettings['isShotUISettingsLoading'];
   settingsLoadingFromContext: RuntimeSettings['settingsLoadingFromContext'];
+  canonicalPersistence: RuntimeSettings['canonicalPersistence'];
   updateShotUISettings: RuntimeSettings['updateShotUISettings'];
   setShowStepsNotification: RuntimeSettings['setShowStepsNotification'];
 }
@@ -152,6 +153,7 @@ export function useGenerationControllerInputModel({
       accelerated: runtime.accelerated,
       isShotUISettingsLoading: runtime.isShotUISettingsLoading,
       settingsLoadingFromContext: runtime.settingsLoadingFromContext,
+      canonicalPersistence: runtime.canonicalPersistence,
       updateShotUISettings: runtime.updateShotUISettings,
       setSteerableMotionSettings: steerableMotionSettings.setSteerableMotionSettings,
       setSteps: frameSettings.setSteps,
@@ -196,6 +198,7 @@ export function useGenerationControllerInputModel({
     runtime.randomSeed,
     runtime.isShotUISettingsLoading,
     runtime.settingsLoadingFromContext,
+    runtime.canonicalPersistence,
     runtime.updateShotUISettings,
     runtime.setShowStepsNotification,
   ]);

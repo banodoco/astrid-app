@@ -3,6 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   GENERATION_MULTI_DRAG_TYPE,
+  setGenerationDragData,
   setMultiGenerationDragData,
   setShotDragData,
   type GenerationDropData,
@@ -65,6 +66,21 @@ function createStoredDragPayload(items: GenerationDropData[]) {
   } as unknown as React.DragEvent;
 
   setMultiGenerationDragData(dragStartEvent, items);
+  return storedData;
+}
+
+function createStoredGenerationPayload(item: GenerationDropData) {
+  const storedData: Record<string, string> = {};
+  const dragStartEvent = {
+    dataTransfer: {
+      effectAllowed: 'none',
+      setData: (type: string, value: string) => {
+        storedData[type] = value;
+      },
+    },
+  } as unknown as React.DragEvent;
+
+  setGenerationDragData(dragStartEvent, item);
   return storedData;
 }
 
@@ -300,6 +316,98 @@ describe('useExternalDrop', () => {
     result.current.onTimelineDragLeave(dragLeaveEvent);
 
     expect(coordinator.end).not.toHaveBeenCalled();
+  });
+
+  it('accepts one single-generation gallery drag and drops one asset onto the existing track', async () => {
+    const dataRef = {
+      current: makeDropTestData({
+        tracks: [{ id: 'V1', kind: 'visual', label: 'V1' }],
+        rows: [{ id: 'V1', actions: [] }],
+        clipOrder: { V1: [] },
+        registry: { assets: {} as Record<string, { file: string; type?: string; duration?: number }> },
+      }),
+    } as React.MutableRefObject<DropTestData>;
+    const pendingOpsRef = { current: 0 } as React.MutableRefObject<number>;
+    const registerGenerationAsset = vi.fn((generation: GenerationDropData & { assetId?: string }) => {
+      const assetId = generation.assetId ?? `asset-${generation.generationId}`;
+      dataRef.current.registry.assets[assetId] = { file: generation.imageUrl, type: 'image/png' };
+      return assetId;
+    });
+    const handleAssetDrop = vi.fn();
+    const coordinator = {
+      update: vi.fn(),
+      showSecondaryGhosts: vi.fn(),
+      end: vi.fn(),
+      lastPosition: {
+        time: 12,
+        rowIndex: 0,
+        trackId: 'V1',
+        trackKind: 'visual',
+        trackName: 'V1',
+        isNewTrack: false,
+        isNewTrackTop: false,
+        isReject: false,
+        newTrackKind: null,
+        screenCoords: {
+          rowTop: 0,
+          rowLeft: 0,
+          rowWidth: 0,
+          rowHeight: 0,
+          clipLeft: 0,
+          clipWidth: 0,
+          ghostCenter: 0,
+        },
+      },
+      editAreaRef: { current: null },
+    };
+
+    const { result } = renderHook(() => useExternalDrop({
+      dataRef,
+      timelineId: 'timeline-1',
+      pendingOpsRef,
+      scale: 1,
+      scaleWidth: 1,
+      selectedTrackId: null,
+      applyEdit: vi.fn(),
+      patchRegistry: vi.fn(),
+      registerAsset: vi.fn(),
+      uploadAsset: vi.fn(),
+      invalidateAssetRegistry: vi.fn(),
+      assetResolver: { resolveAssetUrl: vi.fn() },
+      coordinator,
+      registerGenerationAsset,
+      uploadImageGeneration: vi.fn(),
+      uploadVideoGeneration: vi.fn(),
+      handleAssetDrop,
+      shots: mockUseShots().shots,
+      finalVideoMap: mockUseFinalVideoAvailable().finalVideoMap,
+    }));
+
+    const storedData = createStoredGenerationPayload({
+      generationId: 'gallery-generation',
+      variantId: 'gallery-variant',
+      variantType: 'image',
+      mediaId: 'gallery-media',
+      imageUrl: 'https://example.com/gallery.png',
+    });
+
+    await result.current.onTimelineDrop(createDropEvent(storedData, ['application/x-generation', 'text/plain']));
+
+    expect(registerGenerationAsset).toHaveBeenCalledTimes(1);
+    expect(handleAssetDrop).toHaveBeenCalledTimes(1);
+    const registeredAssetId = handleAssetDrop.mock.calls[0]?.[0];
+    expect(registeredAssetId).toEqual(expect.any(String));
+    expect(handleAssetDrop).toHaveBeenCalledWith(
+      registeredAssetId,
+      'V1',
+      12,
+      false,
+      false,
+      expect.objectContaining({
+        assetKey: registeredAssetId,
+        mediaType: 'image',
+      }),
+    );
   });
 
   it('clears drop state when dragleave leaves the wrapper entirely', () => {

@@ -1,0 +1,34 @@
+{
+  "source": {"app": "77ef266c2a87548adf6f50bd8931594a3e916210:src/tools/video-editor/commands/fixtures/recipe_m2_app_clip_scalar_fields.json", "agent": "d8749a9ce12a699672faf3ad96b4e4cbea9245c2:tests/editing_conformance/fixtures/recipe_m2_app_clip_scalar_fields.json"},
+  "original": {"asset": "f2-video", "at": 15, "clipType": "media", "from": 0, "id": "f2-transition-clip", "speed": 1, "to": 3, "track": "V1", "transition": {"duration": 0.5, "type": "crossfade"}},
+  "command": {
+    "args": {"clear": ["transition"], "values": {}},
+    "authorship": {"parent/clip:f2-transition-clip::transition": "direct"},
+    "bindings": {"scalar.target": "parent/clip:f2-transition-clip"},
+    "created": [],
+    "expect": {"parent/clip:f2-transition-clip::transition": {"state": "present", "value": {"duration": 0.5, "type": "crossfade"}}},
+    "intent": {},
+    "op": "clip.set",
+    "reads": [
+      {"path": ["id"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "present", "value": "f2-transition-clip"}},
+      {"path": ["clipType"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "present", "value": "media"}},
+      {"path": ["clip_type"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "absent"}},
+      {"path": ["asset"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "present", "value": "f2-video"}},
+      {"path": ["asset_id"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "absent"}},
+      {"path": ["media_id"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "absent"}},
+      {"path": ["object_id"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "absent"}},
+      {"path": ["elementRef"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "absent"}},
+      {"path": ["element_ref"], "ref": "parent/clip:f2-transition-clip", "state": {"state": "absent"}},
+      {"path": ["assets", "f2-video", "media_id"], "ref": "parent/registry", "state": {"state": "present", "value": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}},
+      {"path": ["assets", "f2-video", "object_id"], "ref": "parent/registry", "state": {"state": "absent"}},
+      {"path": ["assets", "f2-video", "digest"], "ref": "parent/registry", "state": {"state": "absent"}},
+      {"path": ["assets", "f2-video", "content_digest"], "ref": "parent/registry", "state": {"state": "absent"}},
+      {"path": ["assets", "f2-video", "content_sha256"], "ref": "parent/registry", "state": {"state": "present", "value": "sha256:1111111111111111111111111111111111111111111111111111111111111111"}}
+    ],
+    "resolved": ["parent/clip:f2-transition-clip"],
+    "schema_version": 1,
+    "select": "parent/clip:f2-transition-clip",
+    "selections": [],
+    "version": "1"
+  }
+}

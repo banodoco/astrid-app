@@ -1,3 +1,4 @@
+import { getShotPlacementTarget } from '@/shared/state/selectionStore';
 import { useCallback } from 'react';
 import type { DragEndEvent } from '@dnd-kit/core';
 import { normalizeAndPresentError } from '@/shared/lib/errorHandling/runtimeError';
@@ -56,7 +57,7 @@ export function useAppExternalDrop(options: UseAppExternalDropOptions) {
 
       if (droppableZone.type === 'shot-group' && droppableZone.shotId) {
         await addImageToShotMutation.mutateAsync({
-          shot_id: droppableZone.shotId,
+          ...getShotPlacementTarget(selectedProjectId, droppableZone.shotId),
           generation_id: generationId,
           imageUrl,
           thumbUrl,

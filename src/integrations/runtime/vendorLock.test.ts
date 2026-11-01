@@ -19,7 +19,7 @@ type VendorLock = {
 };
 type Fixture = { base: string; consumer: string; producer: string; lockFile: string; lock: VendorLock; commit: string };
 
-function fixture(options: { manifestHashMatches?: boolean; twoArtifacts?: boolean } = {}): Fixture {
+function fixture(options: { manifestHashMatches?: boolean; twoArtifacts?: boolean; d39Responses?: boolean } = {}): Fixture {
   const base = mkdtempSync(path.join(tmpdir(), 'vendor-lock-'));
   const consumer = path.join(base, 'consumer');
   const producer = path.join(base, 'producer');
@@ -31,6 +31,15 @@ function fixture(options: { manifestHashMatches?: boolean; twoArtifacts?: boolea
   writeFileSync(path.join(producer, 'a.txt'), first);
   if (options.twoArtifacts) writeFileSync(path.join(producer, 'b.txt'), second);
   const artifacts: Record<string, string> = { 'a.txt': hash(first) };
+  if (options.d39Responses) {
+    mkdirSync(path.join(producer, 'conformance/responses'), { recursive: true });
+    for (const [name, status] of [['commit_conflict_409', 409], ['retired_route_410', 410]] as const) {
+      const file = `conformance/responses/${name}.json`;
+      const bytes = JSON.stringify({ case: name, status });
+      writeFileSync(path.join(producer, file), bytes);
+      artifacts[file] = hash(bytes);
+    }
+  }
   if (options.twoArtifacts) artifacts['b.txt'] = options.manifestHashMatches === false ? hash('incorrect') : hash(second);
   const manifest = { producer: 'test-producer', version: hash('version one'), artifacts };
   writeFileSync(path.join(producer, 'artifacts.json'), `${JSON.stringify(manifest)}\n`);
@@ -77,20 +86,56 @@ describe('runtime.lock.json', () => {
   it('consolidates generated types, timeline schema, and every response fixture under the Runtime pin', () => {
     const lock = JSON.parse(readFileSync(path.join(ROOT, 'runtime.lock.json'), 'utf8')) as VendorLock;
     expect(lock.source_commit).toMatch(/^[0-9a-f]{40}$/);
-    expect(Object.keys(lock.files)).toHaveLength(12);
-    expect(Object.keys(lock.files).filter((file) => file.startsWith('src/integrations/runtime/fixtures/responses/'))).toHaveLength(9);
+    expect(Object.keys(lock.files)).toHaveLength(14);
+    expect(Object.keys(lock.files).filter((file) => file.startsWith('src/integrations/runtime/fixtures/responses/'))).toHaveLength(10);
     expect(Object.keys(lock.files)).toEqual(expect.arrayContaining([
       'src/integrations/runtime/generated-contract-metadata.ts',
       'src/integrations/runtime/generated.ts',
+      'src/integrations/runtime/timeline-commit-types.ts',
       'vendor/timeline-schema/python/banodoco_timeline_schema/timeline.schema.json',
       'src/integrations/runtime/fixtures/responses/events_page_1_200.json',
       'src/integrations/runtime/fixtures/responses/validation_error_422.json',
+      'src/integrations/runtime/fixtures/responses/commit_conflict_409.json',
+      'src/integrations/runtime/fixtures/responses/retired_route_410.json',
     ]));
+    expect(Object.values(lock.files).some((entry) => entry.from === 'conformance/responses/publish_conflict_409.json')).toBe(false);
     expect([
       'src/integrations/runtime/vendor.lock.json',
       'src/integrations/runtime/fixtures/responses/vendor.lock.json',
       'vendor/timeline-schema/vendor.lock.json',
     ].every((file) => !existsSync(path.join(ROOT, file)))).toBe(true);
+  });
+
+  it.each([true, false])('sync migrates D39 response mappings and restores the lock on failure (producer ready: %s)', (d39Responses) => {
+    const f = fixture({ d39Responses });
+    try {
+      cpSync(path.join(ROOT, 'scripts/sync-runtime-client.mjs'), path.join(f.consumer, 'scripts/sync-runtime-client.mjs'));
+      const prefix = 'src/integrations/runtime/fixtures/responses/';
+      const historical = `${prefix}publish_conflict_409.json`;
+      f.lock.files = { [historical]: { from: 'conformance/responses/publish_conflict_409.json', sha256: hash('historical') } };
+      writeFileSync(f.lockFile, JSON.stringify(f.lock));
+      mkdirSync(path.join(f.consumer, prefix), { recursive: true });
+      writeFileSync(path.join(f.consumer, historical), 'historical');
+      const before = readFileSync(f.lockFile);
+      const sync = () => execFileSync(process.execPath, [path.join(f.consumer, 'scripts/sync-runtime-client.mjs'), f.producer], { stdio: 'pipe' });
+      if (d39Responses) {
+        sync();
+        expect(run(f, 'check')).toMatchObject({ status: 0 });
+        const updated = readFileSync(f.lockFile);
+        const lock = JSON.parse(updated.toString()) as VendorLock;
+        expect(Object.keys(lock.files).sort()).toEqual([`${prefix}commit_conflict_409.json`, `${prefix}retired_route_410.json`]);
+        for (const name of ['commit_conflict_409', 'retired_route_410']) {
+          expect(readFileSync(path.join(f.consumer, prefix, `${name}.json`))).toEqual(readFileSync(path.join(f.producer, `conformance/responses/${name}.json`)));
+        }
+        sync();
+        expect(readFileSync(f.lockFile)).toEqual(updated);
+      } else {
+        expect(sync).toThrow();
+        expect(readFileSync(f.lockFile)).toEqual(before);
+        expect(existsSync(path.join(f.consumer, prefix, 'commit_conflict_409.json'))).toBe(false);
+      }
+      expect(readFileSync(path.join(f.consumer, historical), 'utf8')).toBe('historical');
+    } finally { clean(f); }
   });
 
   it('pins the entire Astrid public boundary and CLI export under one separate commit', () => {
@@ -105,6 +150,29 @@ describe('runtime.lock.json', () => {
       'schemas/public-boundary/bundle.json',
       ...Object.values(bundle.files),
     ].sort());
+  });
+
+  it.each([false, true])('provisional sync verifies exact Git bytes without qualifying a stale producer manifest (modified=%s)', modified => {
+    const f = fixture({ twoArtifacts: true, manifestHashMatches: false });
+    try {
+      cpSync(path.join(ROOT, 'scripts/sync-runtime-client.mjs'), path.join(f.consumer, 'scripts/sync-runtime-client.mjs'));
+      const before = readFileSync(f.lockFile);
+      if (modified) writeFileSync(path.join(f.producer, 'b.txt'), 'uncommitted bytes');
+      const sync = () => execFileSync(process.execPath, [path.join(f.consumer, 'scripts/sync-runtime-client.mjs'), f.producer, '--provisional'], { stdio: 'pipe' });
+      if (modified) {
+        expect(sync).toThrow();
+        expect(readFileSync(f.lockFile)).toEqual(before);
+        expect(readFileSync(path.join(f.consumer, 'consumer/b.txt'), 'utf8')).toBe('committed artifact B\n');
+      } else {
+        expect(sync().toString()).toContain('PROVISIONAL');
+        const lock = JSON.parse(readFileSync(f.lockFile, 'utf8'));
+        expect(lock.source_commit).toBe(f.commit);
+        expect(lock.producer_version).toBe(`provisional:${f.commit}`);
+        expect(lock.provisional.reason).toContain('I-AP-07');
+        expect(run(f, 'check', false).status).toBe(0);
+        expect(run(f, 'check', true).status).toBe(1);
+      }
+    } finally { clean(f); }
   });
 
   it('checks all consumer locks locally', () => {

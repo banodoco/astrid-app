@@ -8,6 +8,17 @@ import type { ProjectObjectStorage } from '@/sdk/video/assets/projectObjects.ts'
 
 import { TimelineVersionConflictError } from '@/sdk/video/timeline/errors.ts';
 
+/** A terminal local save refusal that did not establish a concurrent write. */
+export class TimelineSaveError extends Error {
+  readonly code = 'timeline_save_refused' as const;
+
+  constructor(message = 'Timeline save was refused') {
+    super(message);
+    this.name = 'TimelineSaveError';
+    Object.setPrototypeOf(this, new.target.prototype);
+  }
+}
+
 export {
   TimelineVersionConflictError,
   isTimelineVersionConflictError,
@@ -21,6 +32,16 @@ import type { AssetResolver } from '@/tools/video-editor/data/AssetResolver.ts';
 import type { TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { GenerationRow } from '@/domains/generation/types/index.ts';
 import type { ShotCompositionPort } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
+import type {
+  CanonicalDocument,
+  CommitAcceptedMutation,
+  CommitRequest,
+  DocumentPin,
+  HistoryPage,
+  MutationReceipt,
+  VerifiedDocument,
+  VerifiedDocumentObject,
+} from '@/integrations/runtime/generated.ts';
 export type {
   AssetProfile,
   SilenceRegion,
@@ -33,11 +54,53 @@ export interface TimelineHeadRevision {
   projectId: string;
   timelineId: string;
   headRevisionId: string | null;
+  /** Runtime acceptance identity. A revision without this pin is read-only. */
+  headPublicationId?: string | null;
+}
+
+export interface TimelineAcceptedIdentity {
+  revisionId: string;
+  publicationId: string;
+}
+
+export interface TimelineRecoveryIdentity {
+  actorId: string;
+  realmId: string;
+}
+
+export interface TimelineCommandBasis {
+  head: TimelineAcceptedIdentity;
+  canonicalDocument: CanonicalDocument;
+  graph?: Record<string, unknown>;
+  history?: HistoryPage;
+}
+
+export interface TimelineCommitResult {
+  response: CommitAcceptedMutation;
+  accepted: TimelineAcceptedIdentity;
+  canonicalDocument: CanonicalDocument;
+  /** The existing graph contract, projected from the accepted closure. */
+  graph: Record<string, unknown>;
+  /** Explicit enumerable copy; generated mutation receipts are non-enumerable elsewhere. */
+  receipt: MutationReceipt;
 }
 
 export interface TimelineSaveReceipt {
   configVersion: number;
   head: TimelineHeadRevision;
+}
+
+export interface TimelineCommitCapability {
+  commitTimeline(
+    request: CommitRequest,
+    idempotencyKey: string,
+  ): Promise<TimelineCommitResult>;
+  listTimelineCommits(timelineId: string, cursor?: string, limit?: number): Promise<HistoryPage>;
+  undoTimeline(
+    base: TimelineHeadRevision,
+    publications: readonly string[],
+    idempotencyKey: string,
+  ): Promise<TimelineCommitResult>;
 }
 
 export interface LoadedTimeline {
@@ -58,6 +121,13 @@ export interface LoadedReferencedTimeline {
   registry: AssetRegistry;
   /** Resolve child assets against the child timeline's registry/authority. */
   resolveAssetUrl: (file: string) => Promise<string>;
+}
+
+/** Verified authoring closure paired with this provider's actual display/version observation. */
+export interface TimelineCommandBasisWithDisplay {
+  basis: TimelineCommandBasis;
+  timeline: LoadedTimeline;
+  registry: AssetRegistry;
 }
 
 export class TimelineNotFoundError extends Error {
@@ -384,6 +454,20 @@ export interface ExtensionPersistenceService {
 // ---------------------------------------------------------------------------
 
 export interface DataProvider extends AssetResolver {
+  /** Command commits are supplied whole by gesture/command producers. */
+  timelineCommands?: TimelineCommitCapability;
+  loadTimelineCommandBasis?(timelineId: string): Promise<TimelineCommandBasis>;
+  resolveTimelineCommandAsset?(file: string, registry: AssetRegistry): Promise<string>;
+  commitTimeline?(request: CommitRequest, idempotencyKey: string): Promise<TimelineCommitResult>;
+  undoTimeline?(base: TimelineHeadRevision, publications: readonly string[], idempotencyKey: string): Promise<TimelineCommitResult>;
+  getRecoverableIdentity?(): Promise<TimelineRecoveryIdentity>;
+  /** Resume an existing native bootstrap owner without creating a new timeline or request. */
+  recoverNativeBootstrapTimeline?(timelineId: string, ownerId: string): Promise<TimelineCommandBasis>;
+  /** Exact retained inputs through this provider's authenticated project session. */
+  readonly paramReadClient?: {
+    getProjectVerifiedDocument(projectId: string, pin: DocumentPin): Promise<VerifiedDocument>;
+    getProjectVerifiedDocumentObject(projectId: string, pin: DocumentPin, objectId: string): Promise<VerifiedDocumentObject>;
+  };
   documents?: import('@/sdk/context.ts').ProjectDocumentSurface;
   projectTranscripts?: import('./typed/projectTranscript.ts').ProjectTranscriptRepository;
   /** When present, writes MUST use this immutable-head CAS path, never numeric versions. */
@@ -402,7 +486,9 @@ export interface DataProvider extends AssetResolver {
   projectObjects?: ProjectObjectStorage;
   persistenceEnabled?: boolean;
   /** Durable-recovery metadata captured synchronously at the first local edit. */
-  getTimelineDraftRecoveryMetadata?(): import('./timelineDraftIndexedDb.ts').TimelineDraftRecoveryMetadata;
+  getTimelineDraftRecoveryMetadata?(
+    rememberRaw?: (composition: import('./shotCompositionAdapter.ts').PreparedShotComposition) => void,
+  ): import('./timelineDraftIndexedDb.ts').TimelineDraftRecoveryMetadata;
   /** Explicit reload path that bypasses provider-local unsaved recovery state. */
   loadCanonicalTimeline?(timelineId: string): Promise<LoadedTimeline>;
 

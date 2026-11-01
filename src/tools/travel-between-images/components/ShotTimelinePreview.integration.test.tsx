@@ -10,11 +10,32 @@ import fixture from '@/tools/video-editor/data/shotComposition.fixture.json';
 import { createShotCompositionAdapter } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
 import { projectCanonicalComposition } from '@/tools/video-editor/data/shotCompositionProjection.ts';
 import { clearTimelineDraft, loadTimelineDraft, saveTimelineDraft } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
+import { VideoEditorProvider } from '@/tools/video-editor/contexts/VideoEditorProvider.tsx';
+import { TimelineEditorCore } from '@/tools/video-editor/components/TimelineEditor/TimelineEditorCore.tsx';
+import { useTimelineChromeContext } from '@/tools/video-editor/hooks/timelineStore.ts';
+import { allowTimelineEdits } from '@/tools/video-editor/lib/timeline-editability.ts';
 import { ShotTimelinePreview } from './ShotTimelinePreview.tsx';
 import * as shotTimelineDataProvider from './shotTimelineDataProvider.ts';
-import { shotTimelineRecoveryId } from './shotTimelineDataProvider.ts';
+import {
+  createShotTimelineDataProvider,
+  createShotTimelineInitialData,
+  shotTimelineRecoveryId,
+} from './shotTimelineDataProvider.ts';
+import { ShotTimelineRecoveryControls } from './ShotTimelinePreview.tsx';
+import { RuntimeDataProvider } from '@/integrations/runtime/dataProvider.ts';
+import { acceptedCommit, fixtureDigest } from '@/integrations/runtime/__tests__/timelineCommitFixture.ts';
+import { createCommitOutbox } from '@/tools/video-editor/commands/commitOutbox.ts';
+import type { CanonicalDocument } from '@/integrations/runtime/timeline-commit-types.ts';
+import { Dialog, DialogContent, DialogTitle } from '@/shared/components/ui/dialog.tsx';
 
 vi.stubGlobal('indexedDB', createFakeIndexedDB());
+
+const staleVariantRepository = vi.hoisted(() => ({
+  fetchCurrentPrimaryVariant: vi.fn(),
+  fetchPrimaryVariantLocations: vi.fn(),
+}));
+vi.mock('@/tools/video-editor/adapters/app/staleVariantRepository.ts', () => staleVariantRepository);
+
 vi.mock('@/tools/video-editor/components/PreviewPanel/RemotionPreview.tsx', () => ({
   RemotionPreview: React.forwardRef(() => <div data-testid="preview" />),
 }));
@@ -68,11 +89,120 @@ function editedGraph(atMs: number, headId: string) {
   return graph;
 }
 
+function graphWithGenerationBackedPopupAsset(headId: string) {
+  const graph = JSON.parse(JSON.stringify(fixture)) as typeof fixture;
+  graph.primary_timeline.head.revision_id = headId;
+  return graph;
+}
+
+function SaveStatusProbe() {
+  const chrome = useTimelineChromeContext();
+  return <output data-testid="popup-save-status">{chrome.isConflictExhausted ? 'conflict' : chrome.saveStatus}</output>;
+}
+
 describe('shot timeline popup real recovery integration', () => {
   beforeEach(async () => {
     vi.restoreAllMocks();
+    staleVariantRepository.fetchCurrentPrimaryVariant.mockReset();
+    staleVariantRepository.fetchPrimaryVariantLocations.mockReset();
     resetFakeIndexedDB();
     await clearTimelineDraft(recoveryKey);
+  });
+
+  it('saves a mounted popup gesture through the durable A2 handoff without invoking the snapshot writer', async () => {
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const initialGraph = structuredClone(fixture);
+    // Runtime revision IDs are globally unique; this display fixture reuses rev-a across shots.
+    for (const row of initialGraph.occurrences) {
+      const revisionId = `${row.shot_id}-${row.revision_id}`;
+      row.stable_deep_link = row.stable_deep_link.replace(`/revision/${row.revision_id}/`, `/revision/${revisionId}/`);
+      row.revision_id = revisionId;
+    }
+    for (const shot of initialGraph.shot_revisions) {
+      shot.revision_id = `${shot.shot_id}-${shot.revision_id}`;
+      for (const dependency of shot.dependencies) dependency.revision_id = `${dependency.shot_id}-${dependency.revision_id}`;
+    }
+    const oldPublish = vi.fn();
+    const adapter = createShotCompositionAdapter({ load: vi.fn(), publish: oldPublish });
+    const composition = adapter.prepare(initialGraph);
+    const canonical: CanonicalDocument = {
+      schema_version: 1, project_id: composition.projectId, timeline_id: composition.parentDocumentId,
+      parent_revision: { revision_id: composition.headRevisionId, content_digest: 'sha256:parent',
+        payload: { config: initialGraph.parent_composition.config, occurrences: initialGraph.occurrences.map(row => ({
+          ...row, shot_revision_id: row.revision_id,
+        })) } },
+      shot_revisions: initialGraph.shot_revisions.map(shot => ({ shot_id: shot.shot_id, revision_id: shot.revision_id,
+        content_digest: `sha256:${shot.revision_id}`, internal_timeline_revision_id: shot.internal_timeline_revision.revision_id,
+        payload: { internal_timeline_revision_id: shot.internal_timeline_revision.revision_id } })),
+      internal_timeline_revisions: initialGraph.shot_revisions.map(shot => ({ timeline_id: `timeline-${shot.shot_id}`,
+        revision_id: shot.internal_timeline_revision.revision_id, content_digest: shot.internal_timeline_revision.content_digest,
+        payload: shot.internal_timeline_revision.timeline })),
+      dependency_manifest: { shots: [], internal_timelines: [], media: [], documents: [] },
+    } as CanonicalDocument;
+    canonical.dependency_manifest.shots = canonical.shot_revisions.map(({ payload: _payload, ...pin }) => pin);
+    canonical.dependency_manifest.internal_timelines = canonical.internal_timeline_revisions.map(({ payload: _payload, ...pin }) => pin);
+    const identity = { actorId: 'mounted-popup', realmId: 'test' };
+    const runtime = new RuntimeDataProvider({ projectId: composition.projectId });
+    vi.spyOn(runtime, 'getRecoverableIdentity').mockResolvedValue(identity);
+    vi.spyOn(runtime, 'loadTimelineCommandBasis').mockResolvedValue({
+      head: { revisionId: composition.headRevisionId, publicationId: 'pub-mounted' }, canonicalDocument: canonical, graph: initialGraph,
+    });
+    const outboxes = createCommitOutbox();
+    const send = vi.spyOn(runtime, 'commitTimeline').mockImplementation(async (request, key) => {
+      const [record] = await outboxes.list({ ...identity, projectId: composition.projectId, timelineId: composition.parentDocumentId });
+      const intent = record.intents[0].payload as unknown as { before: CanonicalDocument; after: CanonicalDocument };
+      expect(intent.before).toEqual(canonical);
+      expect(intent.after.parent_revision).toEqual(canonical.parent_revision);
+      expect(intent.after.shot_revisions).toEqual(canonical.shot_revisions);
+      expect(intent.after.dependency_manifest).toEqual(canonical.dependency_manifest);
+      expect(JSON.parse(record.pending!.request.body)).toEqual(request);
+      expect(record.pending!.request.key).toBe(key);
+      expect(request).toMatchObject({ api_version: 1, base_revision_id: composition.headRevisionId,
+        base_publication_id: 'pub-mounted', dry_run: false, label: 'Edit shot timeline', merge: 'atomic', source: { via: 'app' } });
+      expect(request.commands[0].op).toBe('doc.patch');
+      expect(request.steps![0]).toMatchObject({ command_ordinals: [0], tags: ['shot-popup'] });
+      expect(request.reads).toContainEqual(expect.objectContaining({ ref: 'parent', path: ['occurrences'] }));
+      const response = acceptedCommit({ revision_id: 'mounted-accepted', publication_id: 'pub-accepted' },
+        { revision_id: request.base_revision_id, publication_id: request.base_publication_id },
+        { projectId: composition.projectId, timelineId: composition.parentDocumentId, commands: request.commands });
+      const document = structuredClone(canonical);
+      document.parent_revision.revision_id = 'mounted-accepted';
+      Object.assign(response.data, { canonical_document: document, document_digest: fixtureDigest(document), merge_mode: 'atomic' });
+      response.receipt.idempotency_key = key;
+      response.receipt.request_hash = fixtureDigest({ operation: 'commitTimeline',
+        path: `/v1/projects/${composition.projectId}/timelines/${composition.parentDocumentId}/commit`,
+        publisher: response.data.publisher, request }).slice(7);
+      response.receipt.result = response.data;
+      const graph = structuredClone(initialGraph);
+      graph.primary_timeline.head.revision_id = 'mounted-accepted';
+      return { response, accepted: { revisionId: 'mounted-accepted', publicationId: 'pub-accepted' },
+        canonicalDocument: document, graph, receipt: response.receipt };
+    });
+    const createRealProvider = shotTimelineDataProvider.createShotTimelineDataProvider;
+    const legacy = vi.fn(() => { throw new Error('Mounted popup reached legacy snapshot writer'); });
+    vi.spyOn(shotTimelineDataProvider, 'createShotTimelineDataProvider').mockImplementation((...args) => {
+      const provider = createRealProvider(...args);
+      vi.spyOn(provider, 'saveTimeline').mockImplementation(legacy);
+      return provider;
+    });
+    const view = render(<ShotTimelinePreview composition={composition} occurrenceId="occ-3"
+      shotCompositionAdapter={adapter} timelineDataProvider={runtime} />, { wrapper: wrapper() });
+    try {
+      await waitFor(() => expect(document.querySelector('.timeline-wrapper')).toBeTruthy());
+      const clip = document.querySelector('.clip-action')!;
+      fireEvent.keyDown(clip, { key: 'Enter' });
+      fireEvent.contextMenu(clip, { clientX: 20, clientY: 20 });
+      fireEvent.click(screen.getByText('Delete Clip'));
+      await waitFor(() => expect(send).toHaveBeenCalledTimes(1), { timeout: 3000 });
+      expect(legacy).not.toHaveBeenCalled();
+      expect(oldPublish).not.toHaveBeenCalled();
+      await waitFor(() => expect(screen.getByRole('region', { name: 'Shot timeline' }))
+        .toHaveAttribute('data-shot-timeline-head-revision-id', 'mounted-accepted'));
+      await waitFor(() => expect(document.querySelector('[data-shot-timeline-canvas="true"]'))
+        .toHaveAttribute('data-shot-timeline-clip-count', '1'));
+    } finally { view.unmount(); }
   });
 
   it('renders immediately from the supplied prepared composition without waiting for adapter freshness', async () => {
@@ -96,6 +226,31 @@ describe('shot timeline popup real recovery integration', () => {
     await waitFor(() => expect(load).toHaveBeenCalledTimes(1));
     expect(document.querySelector('[data-shot-timeline-canvas="true"]'))
       .toHaveAttribute('data-shot-timeline-clip-assets', expect.stringContaining(':0:'));
+  });
+
+  it('keeps the timeline drop target mounted for long shots', async () => {
+    const graph = structuredClone(fixture);
+    const revision = graph.shot_revisions.find((candidate) => candidate.shot_id === 'shot-alpha'
+      && candidate.revision_id === 'rev-a')!;
+    const sourceClip = structuredClone(revision.internal_timeline_revision.timeline.clips[0]!);
+    for (let index = 2; index <= 25; index += 1) {
+      revision.internal_timeline_revision.timeline.clips.push({
+        ...sourceClip,
+        id: `alpha-video-${index}`,
+        at_ms: 0,
+      });
+    }
+
+    const adapter = createShotCompositionAdapter({ load: vi.fn(), publish: vi.fn() });
+    const composition = adapter.prepare(graph);
+    render(
+      <ShotTimelinePreview composition={composition} occurrenceId="occ-1" shotCompositionAdapter={adapter} />,
+      { wrapper: wrapper() },
+    );
+
+    await waitFor(() => expect(document.querySelector('.timeline-wrapper')).toBeTruthy());
+    expect(screen.getByText(/drop media below to add it/)).toBeInTheDocument();
+    expect(document.querySelector('[data-shot-timeline-overview="true"]')).toBeNull();
   });
 
   it('renders projected visual and audio tracks before the popup provider finishes loading', async () => {
@@ -165,6 +320,81 @@ describe('shot timeline popup real recovery integration', () => {
       composition: expect.objectContaining({ parentDocumentId: composition.parentDocumentId }),
     }));
     expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('shows a Main CAS refusal and keeps the selected stale-variant replacement in recovery', async () => {
+    const graph = graphWithGenerationBackedPopupAsset('head-swap-refused');
+    const publish = vi.fn().mockRejectedValue(
+      Object.assign(new Error('Main timeline head advanced'), { status: 409 }),
+    );
+    const adapter = createShotCompositionAdapter({ load: vi.fn(), publish });
+    const composition = adapter.prepare(graph);
+    const projected = projectCanonicalComposition({
+      ...composition,
+      occurrences: [composition.occurrences.find((item) => item.occurrenceId === 'occ-1')!],
+    }, {
+      output: { resolution: '1920x1080', fps: 30, file: 'shot-occ-1.mp4' },
+      tracks: [], clips: [], registry: {},
+    }, { clampToOccurrenceDuration: false }).config!;
+    const config = {
+      ...projected,
+      registry: {
+        ...projected.registry,
+        'alpha-image': {
+          ...projected.registry['alpha-image'],
+          generationId: 'generation-alpha',
+          variantId: 'variant-old',
+        },
+      },
+    };
+    const provider = createShotTimelineDataProvider(config, composition, 'occ-1', adapter);
+    staleVariantRepository.fetchCurrentPrimaryVariant.mockResolvedValue({
+      id: 'variant-new',
+      location: 'https://media.example/variant-new.png',
+    });
+
+    render(
+      <VideoEditorProvider
+        dataProvider={provider}
+        projectId={composition.projectId}
+        projectSlug={composition.projectId}
+        timelineId="popup-swap-refusal"
+        userId={null}
+        timelineEditability={allowTimelineEdits}
+        initialTimelineData={createShotTimelineInitialData(config, 1, composition, 'occ-1')}
+      >
+        <TimelineEditorCore />
+        <ShotTimelineRecoveryControls />
+        <SaveStatusProbe />
+      </VideoEditorProvider>,
+      { wrapper: wrapper() },
+    );
+
+    const clip = await waitFor(() => {
+      const element = document.querySelector('.clip-action');
+      if (!element) throw new Error('timeline clip has not rendered');
+      return element;
+    });
+    fireEvent.keyDown(clip, { key: 'Enter' });
+    fireEvent.contextMenu(clip);
+    fireEvent.click(await screen.findByText('Update to current variant'));
+
+    expect(staleVariantRepository.fetchCurrentPrimaryVariant).toHaveBeenCalledWith('generation-alpha');
+    await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('popup-save-status')).toHaveTextContent('conflict'));
+
+    const recovery = await loadTimelineDraft(recoveryKey);
+    // RED: a refused Main save must keep the exact replacement selected by the user.
+    expect(recovery?.draft.registry).toMatchObject({
+      assets: {
+        'alpha-image': {
+          file: 'https://media.example/variant-new.png',
+          variantId: 'variant-new',
+        },
+      },
+    });
+    expect(recovery?.draft.config).toBeTruthy();
+    expect(screen.getByRole('alert')).toHaveTextContent('This timeline changed elsewhere');
   });
 
   it.each([

@@ -1,16 +1,29 @@
+import { timelineBasisDiagnostics } from '@/tools/video-editor/lib/timeline-basis-diagnostics.ts';
 import { PROJECT_TRANSCRIPT_KIND, parseProjectTranscriptDocument, projectTranscriptSchema, transcriptDocumentId, type ProjectTranscriptRepository } from '@/tools/video-editor/data/typed/projectTranscript.ts';
 import { ApiError, type ByteResponse, type MediaImportOperation as MediaImport, type RequestBody } from './generated.ts';
+import type {
+  CanonicalDocument,
+  CommitAcceptedMutation,
+  CommitRequest,
+  EditCommand,
+  HistoryPage,
+  MediaSelection,
+  MediaSelectionQuery,
+  VerifiedMedia,
+} from './generated.ts';
 import {
   AstridRuntimeClient,
   RuntimeAuthenticationError,
   RuntimeUnavailableError,
   isRuntimeCanonicalPayloadConflict,
+  classifyRuntimeCommitFailure,
   isRuntimeConflict,
   isRuntimeUnavailableFailure,
   type RuntimeConnectorError,
 } from './client.ts';
 import {
   TimelineNotFoundError,
+  TimelineSaveError,
   TimelineSchemaIncompatibleError,
   TimelineVersionConflictError,
   OwnUnacknowledgedSaveError,
@@ -18,6 +31,12 @@ import {
   type LoadedTimeline,
   type TimelineHeadRevision,
   type TimelineSaveReceipt,
+  type TimelineAcceptedIdentity,
+  type TimelineCommitCapability,
+  type TimelineCommitResult,
+  type TimelineCommandBasis,
+  type TimelineCommandBasisWithDisplay,
+  type TimelineRecoveryIdentity,
   type LoadedReferencedTimeline,
   type ProjectObjectStorage,
   type UploadedAssetResult,
@@ -60,17 +79,21 @@ import {
 import { listAllRuntimeVariants } from './generationAccess.ts';
 import { recordShotTimelinePhase } from '@/tools/video-editor/lib/shot-timeline-timing.ts';
 import { isTimelineDiagnosticsEnabled } from '@/tools/video-editor/lib/timeline-diagnostics.ts';
+import { initializeBootstrapTimeline as initializeNativeBootstrapTimeline, recoverBootstrapInitialization } from './bootstrapInitialization.ts';
+import { createCommitOutbox } from '@/tools/video-editor/commands/commitOutbox.ts';
 
 type RuntimeRecord = Record<string, unknown>;
 
 type CanonicalTimelineState = {
   headRevisionId: string | null;
+  headPublicationId: string | null;
   parentComposition: RuntimeRecord;
   version: number;
 };
 
 const HEAD_CHECK_DEDUPE_MS = 1_000;
 const CANONICAL_HEAD_REFRESH_MS = 6_000;
+const PUBLIC_HEAD_PAIR_ATTEMPTS = 2;
 
 export interface RuntimeDataProviderOptions {
   projectId: string;
@@ -78,9 +101,18 @@ export interface RuntimeDataProviderOptions {
   /** Direct clients may pass a disposable test credential; browser callers use the connector. */
   token?: string;
   transport?: Transport;
+  /** @internal Reuse the configured client for the private native-bootstrap seam. */
+  runtimeClient?: AstridRuntimeClient;
   /** UI-only observation of connector failures; Runtime remains the IO authority. */
   onRuntimeError?: (error: RuntimeConnectorError) => void;
 }
+
+type NativeBootstrapOptions = {
+  name: string;
+  createName: string | null;
+  createKey: string;
+  outboxes?: ReturnType<typeof createCommitOutbox>;
+};
 
 /**
  * Astrid's neutral-runtime provider. It owns no storage: the generated
@@ -88,6 +120,11 @@ export interface RuntimeDataProviderOptions {
  * parent-composition head is the editor's config/registry record.
  */
 export class RuntimeDataProvider implements DataProvider {
+  readonly timelineCommands: TimelineCommitCapability = {
+    commitTimeline: (request, idempotencyKey) => this.commitTimeline(request, idempotencyKey),
+    undoTimeline: (base, publications, idempotencyKey) => this.undoTimeline(base, publications, idempotencyKey),
+    listTimelineCommits: (timelineId, cursor, limit) => this.listTimelineCommits(timelineId, cursor, limit),
+  };
   readonly projectTranscripts: ProjectTranscriptRepository;
   readonly documents: NonNullable<DataProvider['documents']>;
   readonly persistenceEnabled = true;
@@ -205,34 +242,26 @@ export class RuntimeDataProvider implements DataProvider {
       return entries;
     },
     restoreHistory: async (request) => {
-      const inspection = await this.inspectCanonicalTimelineHead(request.projectId, request.parentDocumentId);
-      const expectedHead = nullableString(inspection.head_revision_id, 'canonical timeline inspection.head_revision_id');
-      if (!expectedHead) {
-        throw new ShotCompositionUnavailableError('Workspace Runtime timeline has no current head to compare before restoring history');
+      const timeline = await this.client.getProjectTimeline(request.projectId, request.parentDocumentId);
+      assertRuntimeIdentity(timeline, request.projectId, request.parentDocumentId, 'timeline');
+      const expectedHead = optionalNullableString(timeline.head_revision_id, 'timeline.head_revision_id');
+      const expectedPublication = optionalNullableString(timeline.head_publication_id, 'timeline.head_publication_id');
+      if (!expectedHead || !expectedPublication) {
+        throw new ShotCompositionUnavailableError('Workspace Runtime timeline requires a verified revision and publication before restoring history');
       }
       const restored = await this.client.restoreProjectParentCompositionRevision(
         request.projectId,
         request.parentDocumentId,
         request.revisionId,
         expectedHead,
+        expectedPublication,
         generateUUID(),
       );
-      const newHead = nullableString(
-        restored.revision_id ?? restored.parent_revision_id ?? restored.new_head,
-        'parent composition restore receipt.new_head',
-      );
-      if (!newHead) {
-        throw new ShotCompositionUnavailableError('Workspace Runtime restore receipt omitted the new canonical head');
-      }
+      // The ACK contains the exact restored closure, even if head has moved
+      // again before the response arrives.
+      const result = this.acceptedCommitResult(restored, request.parentDocumentId);
       this.invalidatePolledHead(request.projectId, request.parentDocumentId);
-      // Resolve the exact committed closure now so a malformed historical
-      // revision cannot appear to have restored successfully in the editor.
-      await this.loadRuntimeShotCompositionAtHead({
-        projectId: request.projectId,
-        parentDocumentId: request.parentDocumentId,
-        headRevisionId: newHead,
-      });
-      return { newHead };
+      return { newHead: result.accepted.revisionId };
     },
     publish: async (request) => {
       const publishStartedAt = import.meta.env.DEV ? performance.now() : 0;
@@ -318,6 +347,16 @@ export class RuntimeDataProvider implements DataProvider {
 
   private readonly projectId: string;
   private readonly client: AstridRuntimeClient;
+  readonly paramReadClient: NonNullable<DataProvider['paramReadClient']> = {
+    getProjectVerifiedDocument: (projectId, pin) => {
+      if (projectId !== this.projectId) throw new Error('Retained document read belongs to another project');
+      return this.client.getProjectVerifiedDocument(this.projectId, pin);
+    },
+    getProjectVerifiedDocumentObject: (projectId, pin, objectId) => {
+      if (projectId !== this.projectId) throw new Error('Retained document object read belongs to another project');
+      return this.client.getProjectVerifiedDocumentObject(this.projectId, pin, objectId);
+    },
+  };
   private readonly onRuntimeError?: (error: RuntimeConnectorError) => void;
   private activeRegistry: AssetRegistry | null = null;
   private readonly canonicalTimelineState = new Map<string, CanonicalTimelineState>();
@@ -357,7 +396,11 @@ export class RuntimeDataProvider implements DataProvider {
 
   constructor(options: RuntimeDataProviderOptions) {
     this.projectId = options.projectId;
-    this.client = new AstridRuntimeClient({ baseUrl: options.baseUrl, token: options.token, transport: options.transport });
+    this.client = options.runtimeClient ?? new AstridRuntimeClient({
+      baseUrl: options.baseUrl,
+      token: options.token,
+      transport: options.transport,
+    });
     const documentListeners = new Set<() => void>();
     const notifyDocumentsChanged = () => {
       for (const listener of [...documentListeners]) listener();
@@ -449,6 +492,49 @@ export class RuntimeDataProvider implements DataProvider {
     };
     this.onRuntimeError = options.onRuntimeError;
     this.apiBaseUrl = this.client.baseUrl;
+  }
+
+  /**
+   * @internal Private create/init seam. It owns no new storage or wire shape:
+   * bootstrapInitialization uses the existing command outbox and this provider's
+   * guarded generated-client methods for create, history, immutable reads, and
+   * native commit.
+   */
+  async initializeNativeBootstrapTimeline(
+    timelineId: string,
+    options: NativeBootstrapOptions,
+  ): Promise<TimelineCommandBasis> {
+    const identity = await this.client.getRecoverableIdentity();
+    return initializeNativeBootstrapTimeline(
+      { ...identity, projectId: this.projectId, timelineId },
+      {
+        ...options,
+        ports: {
+          createTimeline: (project, timeline, key, name) => this.client.createTimeline(project, timeline, key, name),
+          listTimelineCommits: (project, timeline, cursor, limit) => this.client.listTimelineCommits(project, timeline, cursor, limit),
+          getProjectParentCompositionRevision: (project, timeline, revision) =>
+            this.client.getProjectParentCompositionRevision(project, timeline, revision),
+          loadLatest: (id) => this.loadTimelineCommandBasis(id),
+          commitTimeline: (request, key) => this.commitTimeline(request, key),
+        },
+      },
+    );
+  }
+
+  async recoverNativeBootstrapTimeline(timelineId: string, ownerId: string): Promise<TimelineCommandBasis> {
+    const identity = await this.client.getRecoverableIdentity();
+    return recoverBootstrapInitialization(
+      { ...identity, projectId: this.projectId, timelineId },
+      ownerId,
+      {
+        createTimeline: (project, timeline, key, name) => this.client.createTimeline(project, timeline, key, name),
+        listTimelineCommits: (project, timeline, cursor, limit) => this.client.listTimelineCommits(project, timeline, cursor, limit),
+        getProjectParentCompositionRevision: (project, timeline, revision) =>
+          this.client.getProjectParentCompositionRevision(project, timeline, revision),
+        loadLatest: (id) => this.loadTimelineCommandBasis(id),
+        commitTimeline: (request, key) => this.commitTimeline(request, key),
+      },
+    );
   }
 
   private async loadRuntimeShotComposition(projectId: string, timelineId: string, poll = false): Promise<unknown> {
@@ -655,6 +741,270 @@ export class RuntimeDataProvider implements DataProvider {
     }
   }
 
+  async getRecoverableIdentity(): Promise<TimelineRecoveryIdentity> {
+    return this.client.getRecoverableIdentity();
+  }
+
+  /**
+   * Send a producer-built command batch and consume only its returned closure.
+   * This adapter deliberately does not inspect the mutable head or rebuild the
+   * command after the request: the Runtime response is the accepted basis.
+   */
+  async commitTimeline(request: CommitRequest, idempotencyKey: string): Promise<TimelineCommitResult> {
+    if (request.project_id !== this.projectId || !request.timeline_id) {
+      throw new TimelineSchemaIncompatibleError('Timeline commit request has an untrusted project or timeline identity');
+    }
+    if (!request.base_revision_id || !request.base_publication_id) {
+      throw new TimelineSchemaIncompatibleError('Timeline commit requires a verified revision and publication base');
+    }
+    const response = await this.client.commitTimeline(
+      request.project_id,
+      request.timeline_id,
+      request,
+      idempotencyKey,
+    );
+    if (response.receipt === null) {
+      throw new TimelineSchemaIncompatibleError('Timeline preview is not an accepted commit');
+    }
+    return this.acceptedCommitResult(response, request.timeline_id);
+  }
+
+  /** Build the canonical explicit inverse command, then use the same commit path. */
+  async undoTimeline(
+    base: TimelineHeadRevision,
+    publications: readonly string[],
+    idempotencyKey: string,
+  ): Promise<TimelineCommitResult> {
+    if (base.projectId !== this.projectId || !base.timelineId || !base.headRevisionId || !base.headPublicationId) {
+      throw new TimelineSchemaIncompatibleError('Timeline undo requires a verified revision and publication base');
+    }
+    const targets = [...publications];
+    if (targets.length === 0 || targets.some((value) => typeof value !== 'string' || value.length === 0)
+      || new Set(targets).size !== targets.length) {
+      throw new TimelineSchemaIncompatibleError('Timeline undo requires unique accepted publication IDs');
+    }
+    const command: EditCommand = {
+      schema_version: 1,
+      op: 'timeline.inverse',
+      version: '1',
+      select: null,
+      args: { publications: targets },
+    };
+    return this.commitTimeline({
+      api_version: 1,
+      project_id: base.projectId,
+      timeline_id: base.timelineId,
+      base_revision_id: base.headRevisionId,
+      base_publication_id: base.headPublicationId,
+      commands: [command],
+      source: { via: 'app' },
+    }, idempotencyKey);
+  }
+
+  async listTimelineCommits(timelineId: string, cursor?: string, limit = 50): Promise<HistoryPage> {
+    if (!timelineId) throw new TimelineSchemaIncompatibleError('Timeline history requires a timeline identity');
+    return this.client.listTimelineCommits(this.projectId, timelineId, cursor, limit);
+  }
+
+  private acceptedCommitResult(response: CommitAcceptedMutation, timelineId: string): TimelineCommitResult {
+    const data = response.data;
+    const receipt = response.receipt;
+    if (!['accepted', 'rebased', 'merged'].includes(data.status)
+      || receipt.project_id !== this.projectId || receipt.command_kind !== 'timeline.commit') {
+      throw new TimelineSchemaIncompatibleError('Workspace Runtime returned an invalid timeline acceptance envelope');
+    }
+    acceptedDigest(data.document_digest, 'document_digest');
+    const publicationId = requiredString(receipt.receipt_id, 'timeline commit receipt.receipt_id');
+    const canonicalDocument = validateAcceptedCanonicalDocument(data.canonical_document, this.projectId, timelineId, data.accepted_revision_id);
+    assertIdentityMap(data.id_map);
+    const graph = runtimeGraphToContractFromCanonicalDocument(
+      this.projectId,
+      timelineId,
+      canonicalDocument,
+      publicationId,
+    );
+    const accepted: TimelineAcceptedIdentity = {
+      revisionId: data.accepted_revision_id,
+      publicationId,
+    };
+    const current = this.canonicalTimelineState.get(timelineId);
+    // A replayed/late A acknowledgement may be older than a known current C.
+    // It remains an exact historical basis and must never regress the cache.
+    if (!current || (current.headRevisionId === data.base_revision_id
+      && current.headPublicationId === data.base_publication_id)) {
+      const parentPayload = data.canonical_document.parent_revision.payload as RuntimeRecord;
+      this.canonicalTimelineState.set(timelineId, {
+        headRevisionId: accepted.revisionId,
+        headPublicationId: accepted.publicationId,
+        parentComposition: parentPayload,
+        version: (current?.version ?? 0) + (current?.headRevisionId === accepted.revisionId
+          && current.headPublicationId === accepted.publicationId ? 0 : 1),
+      });
+      this.activeRegistry = normalizeRegistry(parentPayload.registry, this.client);
+    }
+    return { response, accepted, canonicalDocument, graph, receipt };
+  }
+
+  async resolveTimelineCommandAsset(file: string, registry: AssetRegistry): Promise<string> {
+    return this.resolveAssetUrlFromRegistry(file, registry);
+  }
+
+  async getProjectMediaSelection(
+    projectId: string,
+    selection: MediaSelectionQuery,
+  ): Promise<MediaSelection> {
+    if (projectId !== this.projectId) {
+      throw new Error(
+        `Workspace Runtime media selection read requires project ${this.projectId}, got ${projectId}`,
+      );
+    }
+    return this.client.getProjectMediaSelection(projectId, selection);
+  }
+
+  async getProjectVerifiedMedia(
+    projectId: string,
+    selection: MediaSelection,
+  ): Promise<VerifiedMedia> {
+    const originalSelection = Object.freeze({
+      asset: selection.asset,
+      generation_id: selection.generation_id,
+      variant_id: selection.variant_id,
+      object_id: selection.object_id,
+      catalog_digest: selection.catalog_digest,
+    });
+    if (projectId !== this.projectId) {
+      throw new Error(
+        `Workspace Runtime verified media read requires project ${this.projectId}, got ${projectId}`,
+      );
+    }
+    const verified = await this.client.getProjectVerifiedMedia(projectId, originalSelection);
+    if (!sameMediaSelection(verified.selection, originalSelection)) {
+      throw new Error('Workspace Runtime verified media read returned a mismatched selection');
+    }
+    return verified;
+  }
+
+  /** Public verified history pins plus scoped immutable reads, never projected rows. */
+  async loadTimelineCommandBasis(timelineId: string): Promise<TimelineCommandBasis> {
+    const observe = timelineBasisDiagnostics(this);
+    const finishLoader = observe('loader');
+    // Immutable reads are complete only when their assembled closure validates.
+    const pendingReads: Array<(completed: boolean) => void> = [];
+    try {
+      const requireHead = (page: HistoryPage): HistoryPage['head'] => {
+        const head = page?.head;
+        if (!head || typeof head.revision_id !== 'string' || !head.revision_id
+          || typeof head.publication_id !== 'string' || !head.publication_id) {
+          throw new TimelineSchemaIncompatibleError('Workspace Runtime returned a malformed timeline history head');
+        }
+        return head;
+      };
+      const finishFirstHistory = observe('history');
+      let firstHistory;
+      let firstHead;
+      try {
+        firstHistory = await this.listTimelineCommits(timelineId);
+        firstHead = requireHead(firstHistory);
+        finishFirstHistory(true);
+      } catch (error) {
+        finishFirstHistory(false);
+        throw error;
+      }
+      const pages = [firstHistory];
+      const seenCursors = new Set<string>();
+      while (pages[pages.length - 1]!.next_cursor !== null) {
+        const cursor = pages[pages.length - 1]!.next_cursor!;
+        if (seenCursors.has(cursor)) {
+          throw new TimelineSchemaIncompatibleError('Workspace Runtime returned a cyclic timeline history cursor');
+        }
+        seenCursors.add(cursor);
+        const finishNextPage = observe('history');
+        let nextPage;
+        try {
+          nextPage = await this.listTimelineCommits(timelineId, cursor);
+          const nextHead = requireHead(nextPage);
+          if (nextHead.revision_id !== firstHead.revision_id
+            || nextHead.publication_id !== firstHead.publication_id) {
+            throw new TimelineSchemaIncompatibleError('Workspace Runtime changed the captured timeline history head');
+          }
+          finishNextPage(true);
+        } catch (error) {
+          finishNextPage(false);
+          throw error;
+        }
+        pages.push(nextPage);
+      }
+      const history: HistoryPage = {
+        ...firstHistory,
+        items: pages.flatMap((page) => page.items),
+        next_cursor: null,
+      };
+      const head = history.head;
+      if (!head?.revision_id || !head.publication_id) {
+        throw new TimelineSchemaIncompatibleError('Timeline has no verified authoring history head');
+      }
+      const finishParent = observe('parent');
+      pendingReads.push(finishParent);
+      const parent = await this.readParentCompositionAtHead(this.projectId, timelineId, head.revision_id);
+      const manifest = requiredRecord(parent.dependency_manifest, 'verified parent dependency manifest');
+      const shots = await Promise.all(array(manifest.shots, 'baseline shots').map(async (value) => {
+        const pin = requiredRecord(value, 'baseline shot pin');
+        const shotId = requiredString(pin.shot_id, 'baseline shot_id');
+        const revision = requiredString(pin.revision_id, 'baseline shot revision_id');
+        const finishShot = observe('shot');
+        pendingReads.push(finishShot);
+        const shot = await this.client.getProjectShotRevision(this.projectId, shotId, revision);
+        assertRuntimeIdentity(shot, this.projectId, shotId, 'shot revision');
+        assertRevisionIdentity(shot, revision, 'shot revision');
+        if (shot.shot_id !== shotId || shot.content_digest !== pin.content_digest
+          || shot.internal_timeline_revision_id !== pin.internal_timeline_revision_id) {
+          throw new TimelineSchemaIncompatibleError('Baseline shot pin mismatch');
+        }
+        return { shot_id: pin.shot_id, revision_id: pin.revision_id, internal_timeline_revision_id: pin.internal_timeline_revision_id,
+          content_digest: pin.content_digest, payload: requiredRecord(shot.payload, 'shot payload') };
+      }));
+      const internals = await Promise.all(array(manifest.internal_timelines, 'baseline internals').map(async (value) => {
+        const pin = requiredRecord(value, 'baseline internal pin');
+        const scope = requiredString(pin.timeline_id, 'baseline internal timeline_id');
+        const revision = requiredString(pin.revision_id, 'baseline internal revision_id');
+        const finishInternal = observe('internal');
+        pendingReads.push(finishInternal);
+        const internal = await this.client.getProjectTimelineRevision(this.projectId, scope, revision);
+        assertRuntimeIdentity(internal, this.projectId, scope, 'internal timeline revision');
+        assertRevisionIdentity(internal, revision, 'internal timeline revision');
+        if (internal.content_digest !== pin.content_digest) throw new TimelineSchemaIncompatibleError('Baseline internal pin mismatch');
+        return { timeline_id: pin.timeline_id, revision_id: pin.revision_id, content_digest: pin.content_digest,
+          payload: requiredRecord(internal.payload, 'internal payload') };
+      }));
+      const raw = { schema_version: 1, project_id: this.projectId, timeline_id: timelineId,
+          parent_revision: { revision_id: head.revision_id, content_digest: parent.content_digest, payload: parent.payload },
+          shot_revisions: shots, internal_timeline_revisions: internals,
+          dependency_manifest: manifest };
+      const canonicalDocument = validateAcceptedCanonicalDocument(raw as CanonicalDocument, this.projectId, timelineId, head.revision_id);
+      const result = {
+        head: { revisionId: head.revision_id, publicationId: head.publication_id }, canonicalDocument, history,
+        graph: runtimeGraphToContractFromCanonicalDocument(this.projectId, timelineId, canonicalDocument, head.publication_id),
+      };
+      for (const finish of pendingReads) finish(true);
+      finishLoader(true);
+      return result;
+    } catch (error) {
+      for (const finish of pendingReads) finish(false);
+      finishLoader(false);
+      throw error;
+    }
+  }
+
+  async loadTimelineCommandBasisWithDisplay(timelineId: string): Promise<TimelineCommandBasisWithDisplay> {
+    const basis = await this.loadTimelineCommandBasis(timelineId);
+    const { timeline, registry } = await this.loadReferencedTimeline(timelineId);
+    if (timeline.head?.headRevisionId !== basis.head.revisionId
+      || timeline.head.headPublicationId !== basis.head.publicationId) {
+      throw new TimelineVersionConflictError('Timeline document changed while pairing authoring basis and display');
+    }
+    return { basis, timeline, registry };
+  }
+
   async loadTimeline(timelineId: string, options?: { poll?: boolean }): Promise<LoadedTimeline> {
     const record = await this.readTimeline(timelineId, options?.poll);
     const configRecord = asRecord(record.config);
@@ -667,7 +1017,7 @@ export class RuntimeDataProvider implements DataProvider {
     return {
       config: { ...configWithoutBundle, ...withDefaultTimelineOutput(configWithoutBundle as Partial<TimelineConfig>) },
       configVersion: runtimeVersion(record),
-      head: this.timelineHead(timelineId, record.head_revision_id as string | null),
+      head: this.timelineHead(timelineId, record.head_revision_id as string | null, optionalNullableString(record.head_publication_id, 'timeline.head_publication_id')),
       ...(bundle === null ? { bundle: null } : bundle === undefined ? {} : { bundle: bundle as TimelineBundleEnvelope }),
     };
   }
@@ -691,7 +1041,7 @@ export class RuntimeDataProvider implements DataProvider {
       timeline: {
         config: { ...configWithoutBundle, ...withDefaultTimelineOutput(configWithoutBundle as Partial<TimelineConfig>) },
         configVersion: runtimeVersion(record),
-        head: this.timelineHead(timelineId, record.head_revision_id as string | null),
+        head: this.timelineHead(timelineId, record.head_revision_id as string | null, optionalNullableString(record.head_publication_id, 'timeline.head_publication_id')),
         ...(bundle === null ? { bundle: null } : bundle === undefined ? {} : { bundle: bundle as TimelineBundleEnvelope }),
       },
       registry: normalizeRegistry(record.registry, this.client),
@@ -717,11 +1067,11 @@ export class RuntimeDataProvider implements DataProvider {
     _registry?: AssetRegistry,
     _bundle?: TimelineBundleEnvelope | null,
   ): Promise<number> {
-    throw new TimelineVersionConflictError('Workspace Runtime requires the original scoped timeline head; numeric versions cannot authorize a save.', expectedVersion);
+    throw new TimelineSaveError('Workspace Runtime requires the original scoped timeline head; numeric versions cannot authorize a save.');
   }
 
-  private timelineHead(timelineId: string, headRevisionId: string | null): TimelineHeadRevision {
-    return { projectId: this.projectId, timelineId, headRevisionId };
+  private timelineHead(timelineId: string, headRevisionId: string | null, headPublicationId: string | null = null): TimelineHeadRevision {
+    return { projectId: this.projectId, timelineId, headRevisionId, headPublicationId };
   }
 
   async saveTimelineAtHead(
@@ -733,7 +1083,7 @@ export class RuntimeDataProvider implements DataProvider {
   ): Promise<TimelineSaveReceipt> {
     if (expectedHead?.projectId !== this.projectId || expectedHead.timelineId !== timelineId
       || !(expectedHead.headRevisionId === null || (typeof expectedHead.headRevisionId === 'string' && expectedHead.headRevisionId.length > 0))) {
-      throw new TimelineVersionConflictError('Workspace Runtime save has missing or untrusted timeline head provenance.');
+      throw new TimelineSaveError('Workspace Runtime save has missing or untrusted timeline head provenance.');
     }
     const base = { ...expectedHead };
     return this.withTimelineOperation(timelineId, () =>
@@ -878,8 +1228,13 @@ export class RuntimeDataProvider implements DataProvider {
       }
       const savedRegistry = normalizeRegistry(parentComposition.registry, this.client);
       const nextVersion = current.headRevisionId === committedHead ? current.version : current.version + 1;
+      // The retired whole-document publication path does not prove the new
+      // commit-history publication pin. Keep it read-only until a verified
+      // command ACK or baseline supplies the pair.
+      const savedPublicationId = null;
       this.canonicalTimelineState.set(timelineId, {
         headRevisionId: committedHead,
+        headPublicationId: savedPublicationId,
         parentComposition: {
           ...parentComposition,
           registry: savedRegistry,
@@ -889,7 +1244,7 @@ export class RuntimeDataProvider implements DataProvider {
       this.invalidatePolledHead(this.projectId, timelineId);
       this.activeRegistry = savedRegistry;
       this.unacknowledgedSaves.delete(timelineId);
-      return { configVersion: nextVersion, head: this.timelineHead(timelineId, committedHead) };
+      return { configVersion: nextVersion, head: this.timelineHead(timelineId, committedHead, savedPublicationId) };
     } catch (error) {
       if (isTimelineDiagnosticsEnabled()) {
         const diagnostic = error && typeof error === 'object'
@@ -1000,6 +1355,14 @@ export class RuntimeDataProvider implements DataProvider {
     file: File,
     options: MediaImportOptions = {},
   ): Promise<PreparedMediaImport> {
+    return this.prepareMediaImportAtBoundary(file, options, true);
+  }
+
+  private async prepareMediaImportAtBoundary(
+    file: File,
+    options: MediaImportOptions,
+    captureNativeSelection: boolean,
+  ): Promise<PreparedMediaImport> {
     assertRuntimeMediaImportSize(file);
     const importOperationId = generateUUID();
     const mediaType = options.mediaType ?? file.type;
@@ -1039,12 +1402,13 @@ export class RuntimeDataProvider implements DataProvider {
       );
     }
 
-    const prepared = toPreparedMediaImport(
+    const prepared = await toPreparedMediaImport(
       this.client,
       imported,
       mediaType,
       filename,
       options.durationSeconds,
+      captureNativeSelection && typeof this.client.getProjectMediaSelection === 'function',
     );
     persistMediaImportOperation(this.projectId, importOperationId, prepared);
     this.activeRegistry = {
@@ -1059,9 +1423,9 @@ export class RuntimeDataProvider implements DataProvider {
   async prepareAsset(file: File, options: UploadAssetOptions): Promise<UploadedAssetResult> {
     // AssetPanel and external drops use this seam. User media must take the
     // same validated host import/catalog operation as gallery imports.
-    const prepared = await this.prepareMediaImport(file, {
+    const prepared = await this.prepareMediaImportAtBoundary(file, {
       filename: options.filename ?? file.name,
-    });
+    }, false);
     const entry: AssetRegistryEntry = {
       ...prepared.entry,
       metadata: {
@@ -1093,16 +1457,41 @@ export class RuntimeDataProvider implements DataProvider {
 
   private async readTimelineInOrder(timelineId: string, poll = false): Promise<RuntimeRecord> {
     try {
-      const inspection = await (poll
-        ? this.pollCanonicalTimelineHead(this.projectId, timelineId)
-        : this.inspectCanonicalTimelineHead(this.projectId, timelineId));
-      if (!poll) this.rememberFreshHead(this.projectId, timelineId, inspection);
-      const headRevisionId = nullableString(
-        inspection.head_revision_id,
-        'canonical timeline inspection.head_revision_id',
-      );
+      let inspection: TimelineInspectionResult | undefined;
+      let headRevisionId: string | null = null;
+      let headPublicationId: string | null = null;
+      let mismatch: string | undefined;
+      for (let attempt = 0; attempt < PUBLIC_HEAD_PAIR_ATTEMPTS; attempt += 1) {
+        inspection = attempt === 0
+          ? await (poll
+            ? this.pollCanonicalTimelineHead(this.projectId, timelineId)
+            : this.inspectCanonicalTimelineHead(this.projectId, timelineId))
+          : await this.inspectCanonicalTimelineHead(this.projectId, timelineId);
+        const inspectedRevisionId = nullableString(
+          inspection.head_revision_id,
+          'canonical timeline inspection.head_revision_id',
+        );
+        const publicHead = await this.client.getProjectTimeline(this.projectId, timelineId);
+        assertRuntimeIdentity(publicHead, this.projectId, timelineId, 'timeline');
+        const publicRevisionId = nullableString(publicHead.head_revision_id, 'timeline.head_revision_id');
+        const publicPublicationId = nullableString(publicHead.head_publication_id, 'timeline.head_publication_id');
+        if (publicRevisionId === inspectedRevisionId) {
+          headRevisionId = inspectedRevisionId;
+          headPublicationId = publicPublicationId;
+          mismatch = undefined;
+          break;
+        }
+        mismatch = `Workspace Runtime timeline head moved while pairing inspected revision ${inspectedRevisionId ?? 'null'} with public revision ${publicRevisionId ?? 'null'}`;
+        this.invalidatePolledHead(this.projectId, timelineId);
+      }
+      if (mismatch) throw new TimelineVersionConflictError(mismatch);
+      if (!inspection) throw new TimelineSaveError('Workspace Runtime timeline head pair is unavailable');
+      this.rememberFreshHead(this.projectId, timelineId, inspection);
       const previous = this.canonicalTimelineState.get(timelineId);
+      const sameVerifiedPublication = previous?.headPublicationId === null
+        || previous?.headPublicationId === headPublicationId;
       const parentComposition = previous?.headRevisionId === headRevisionId
+        && sameVerifiedPublication
         ? previous.parentComposition
         : headRevisionId === null
           ? { config: {}, registry: { assets: {} }, clips: [], occurrences: [] }
@@ -1120,10 +1509,12 @@ export class RuntimeDataProvider implements DataProvider {
       }
       const clips = canonicalParentClips(parentComposition, config);
       const version = previous && previous.headRevisionId === headRevisionId
+        && sameVerifiedPublication
         ? previous.version
         : (previous?.version ?? 0) + 1;
       this.canonicalTimelineState.set(timelineId, {
         headRevisionId,
+        headPublicationId,
         parentComposition,
         version,
       });
@@ -1132,6 +1523,7 @@ export class RuntimeDataProvider implements DataProvider {
         timeline_id: timelineId,
         version,
         head_revision_id: headRevisionId,
+        head_publication_id: headPublicationId,
         config: { ...config, clips },
         registry: parentComposition.registry ?? { assets: {} },
       };
@@ -1174,7 +1566,7 @@ export class RuntimeDataProvider implements DataProvider {
 
   private toProviderError(error: unknown, timelineId: string, expectedVersion?: number): Error {
     let providerError: Error;
-    if (error instanceof TimelineSchemaIncompatibleError || error instanceof TimelineVersionConflictError) {
+    if (error instanceof TimelineSaveError || error instanceof TimelineSchemaIncompatibleError || error instanceof TimelineVersionConflictError) {
       providerError = error;
     } else if (isRuntimeUnavailableFailure(error)) {
       providerError = error instanceof RuntimeUnavailableError
@@ -1185,12 +1577,17 @@ export class RuntimeDataProvider implements DataProvider {
         `Workspace Runtime rejected a non-canonical parent payload: ${error.message}`,
         [{ pointer: '/clips', code: 'canonical_duplicate_mismatch', message: error.message }],
       );
-    } else if (isRuntimeConflict(error)) {
+    } else if (error instanceof ApiError && (classifyRuntimeCommitFailure(error) === 'conflict' || isRuntimeConflict(error))) {
       const actual = asRecord(error.details)?.actual;
       providerError = new TimelineVersionConflictError(
         'Workspace Runtime rejected a stale timeline version; reload to review the canonical head.',
         expectedVersion,
         typeof actual === 'number' ? actual : undefined,
+      );
+    } else if (error instanceof ApiError && classifyRuntimeCommitFailure(error) === 'refused') {
+      const reason = asRecord(error.details)?.reason;
+      providerError = new TimelineSchemaIncompatibleError(
+        `Workspace Runtime refused the timeline commit${typeof reason === 'string' ? ` (${reason})` : ''}: ${error.message}`,
       );
     } else if (error instanceof ApiError && error.status === 404) {
       providerError = new TimelineNotFoundError(timelineId);
@@ -1352,13 +1749,14 @@ async function recoverMediaImportAfterLostAck(
   }
 }
 
-function toPreparedMediaImport(
+async function toPreparedMediaImport(
   client: AstridRuntimeClient,
   imported: MediaImport,
   fallbackMediaType: string,
   fallbackFilename: string,
   fallbackDuration?: number,
-): PreparedMediaImport {
+  captureNativeSelection = false,
+): Promise<PreparedMediaImport> {
   if (
     imported.provider !== 'runtime'
     || imported.status !== 'completed'
@@ -1369,6 +1767,25 @@ function toPreparedMediaImport(
     || typeof imported.asset_id !== 'string'
   ) {
     throw new Error('Workspace Runtime returned an incomplete media import descriptor');
+  }
+
+  let mediaSelection: PreparedMediaImport['mediaSelection'];
+  if (captureNativeSelection) {
+    const selected = await client.getProjectMediaSelection(imported.project, {
+      asset: imported.asset_id,
+      generation_id: imported.generation_id,
+      variant_id: imported.variant_id,
+    });
+    if (
+      selected.asset !== imported.asset_id
+      || selected.generation_id !== imported.generation_id
+      || selected.variant_id !== imported.variant_id
+      || selected.object_id !== imported.entry.object_id
+    ) {
+      throw new Error('Workspace Runtime media selection does not match the prepared import');
+    }
+    Object.freeze(selected);
+    mediaSelection = selected;
   }
 
   const mediaType = imported.entry.media_type || fallbackMediaType;
@@ -1403,10 +1820,35 @@ function toPreparedMediaImport(
     variantId: imported.variant_id,
     assetId: imported.asset_id,
     entry,
+    ...(mediaSelection ? { mediaSelection } : {}),
   };
 }
 
 export type { RuntimeUnavailableError };
+
+/** Shared acceptance decoder; it neither constructs a client nor updates provider state. */
+export function decodeAcceptedTimelineCommit(
+  response: CommitAcceptedMutation,
+  projectId: string,
+  timelineId: string,
+): TimelineCommitResult {
+  const data = response.data;
+  const receipt = response.receipt;
+  if ((data.status !== 'accepted' && data.status !== 'rebased' && data.status !== 'merged')
+    || receipt.project_id !== projectId || receipt.command_kind !== 'timeline.commit') {
+    throw new TimelineSchemaIncompatibleError('Workspace Runtime returned an invalid timeline acceptance envelope');
+  }
+  acceptedDigest(data.document_digest, 'document_digest');
+  const publicationId = requiredString(receipt.receipt_id, 'timeline commit receipt.receipt_id');
+  const canonicalDocument = validateAcceptedCanonicalDocument(data.canonical_document, projectId, timelineId, data.accepted_revision_id);
+  assertIdentityMap(data.id_map);
+  const graph = runtimeGraphToContractFromCanonicalDocument(projectId, timelineId, canonicalDocument, publicationId);
+  const accepted: TimelineAcceptedIdentity = {
+    revisionId: data.accepted_revision_id,
+    publicationId,
+  };
+  return { response, accepted, canonicalDocument, graph, receipt };
+}
 
 function requiredRecord(value: unknown, label: string): RuntimeRecord {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -1422,9 +1864,140 @@ function requiredString(value: unknown, label: string): string {
   return value;
 }
 
+function sameMediaSelection(value: unknown, right: MediaSelection): boolean {
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  const left = value as Record<string, unknown>;
+  const keys = ['asset', 'generation_id', 'variant_id', 'object_id', 'catalog_digest'] as const;
+  return Object.keys(left).length === keys.length
+    && keys.every((key) => left[key] === right[key]);
+}
+
 function nullableString(value: unknown, label: string): string | null {
   if (value === null) return null;
   return requiredString(value, label);
+}
+
+function optionalNullableString(value: unknown, label: string): string | null {
+  if (value === undefined || value === null) return null;
+  return requiredString(value, label);
+}
+
+function assertIdentityMap(idMap: Record<string, string>): void {
+  for (const [source, target] of Object.entries(idMap)) {
+    if (source !== target) {
+      throw new TimelineSchemaIncompatibleError(
+        `Workspace Runtime accepted a non-identity id_map entry for ${source}`,
+      );
+    }
+  }
+}
+
+function acceptedDigest(value: unknown, label: string): void {
+  if (typeof value !== 'string' || !/^sha256:[0-9a-f]{64}$/.test(value)) {
+    throw new TimelineSchemaIncompatibleError(`Workspace Runtime returned an invalid accepted ${label}`);
+  }
+}
+
+function acceptedManifest(entries: RuntimeRecord[], keyFor: (entry: RuntimeRecord) => string): Map<string, RuntimeRecord> {
+  const result = new Map<string, RuntimeRecord>();
+  for (const entry of entries) {
+    const key = keyFor(entry);
+    if (result.has(key)) throw new TimelineSchemaIncompatibleError(`Workspace Runtime returned duplicate manifest entry ${key}`);
+    result.set(key, entry);
+  }
+  return result;
+}
+
+export function validateAcceptedCanonicalDocument(
+  value: CanonicalDocument,
+  projectId: string,
+  timelineId: string,
+  acceptedRevisionId: string,
+): CanonicalDocument {
+  const document = requiredRecord(value, 'accepted canonical document') as unknown as CanonicalDocument;
+  if (document.schema_version !== 1 || document.project_id !== projectId || document.timeline_id !== timelineId) {
+    throw new TimelineSchemaIncompatibleError('Workspace Runtime returned an accepted closure outside the requested project/timeline');
+  }
+  const parent = requiredRecord(document.parent_revision, 'accepted canonical document.parent_revision');
+  if (requiredString(parent.revision_id, 'accepted canonical document.parent_revision.revision_id') !== acceptedRevisionId) {
+    throw new TimelineSchemaIncompatibleError('Workspace Runtime accepted revision does not match its canonical closure');
+  }
+  acceptedDigest(parent.content_digest, 'parent content_digest');
+  const parentPayload = requiredRecord(parent.payload, 'accepted canonical document.parent_revision.payload');
+  const manifest = requiredRecord(document.dependency_manifest, 'accepted canonical document.dependency_manifest');
+  const shots = array(document.shot_revisions, 'accepted canonical document.shot_revisions');
+  const internals = array(document.internal_timeline_revisions, 'accepted canonical document.internal_timeline_revisions');
+  const shotManifest = acceptedManifest(array(manifest.shots, 'accepted canonical document.dependency_manifest.shots'), (entry) =>
+    `${requiredString(entry.shot_id, 'accepted shot manifest.shot_id')}\u0000${requiredString(entry.revision_id, 'accepted shot manifest.revision_id')}`
+  );
+  const internalManifest = acceptedManifest(array(manifest.internal_timelines, 'accepted canonical document.dependency_manifest.internal_timelines'), (entry) =>
+    `${requiredString(entry.timeline_id, 'accepted internal manifest.timeline_id')}\u0000${requiredString(entry.revision_id, 'accepted internal manifest.revision_id')}`
+  );
+  const seenShots = new Set<string>();
+  for (const shot of shots) {
+    const shotId = requiredString(shot.shot_id, 'accepted shot image.shot_id');
+    const revisionId = requiredString(shot.revision_id, 'accepted shot image.revision_id');
+    acceptedDigest(shot.content_digest, 'shot content_digest');
+    const payload = requiredRecord(shot.payload, 'accepted shot image.payload');
+    const internalRevision = requiredString(shot.internal_timeline_revision_id, 'accepted shot image.internal_timeline_revision_id');
+    if (payload.internal_timeline_revision_id !== internalRevision) {
+      throw new TimelineSchemaIncompatibleError('Workspace Runtime shot payload disagrees with its internal revision pin');
+    }
+    const key = `${shotId}\u0000${revisionId}`;
+    if (seenShots.has(key)) throw new TimelineSchemaIncompatibleError(`Workspace Runtime returned duplicate shot closure ${shotId}/${revisionId}`);
+    seenShots.add(key);
+    const manifestEntry = shotManifest.get(key);
+    if (!manifestEntry || manifestEntry.content_digest !== shot.content_digest
+      || manifestEntry.internal_timeline_revision_id !== shot.internal_timeline_revision_id) {
+      throw new TimelineSchemaIncompatibleError(`Workspace Runtime shot closure/manifest mismatch for ${shotId}/${revisionId}`);
+    }
+  }
+  for (const key of shotManifest.keys()) {
+    if (!seenShots.has(key)) throw new TimelineSchemaIncompatibleError(`Workspace Runtime manifest has no shot image for ${key.replace('\u0000', '/')}`);
+  }
+  const seenInternals = new Set<string>();
+  for (const internal of internals) {
+    const timeline = requiredString(internal.timeline_id, 'accepted internal image.timeline_id');
+    const revision = requiredString(internal.revision_id, 'accepted internal image.revision_id');
+    acceptedDigest(internal.content_digest, 'internal content_digest');
+    requiredRecord(internal.payload, 'accepted internal image.payload');
+    const key = `${timeline}\u0000${revision}`;
+    if (seenInternals.has(key)) throw new TimelineSchemaIncompatibleError(`Workspace Runtime returned duplicate internal closure ${timeline}/${revision}`);
+    seenInternals.add(key);
+    const manifestEntry = internalManifest.get(key);
+    if (!manifestEntry || manifestEntry.content_digest !== internal.content_digest) {
+      throw new TimelineSchemaIncompatibleError(`Workspace Runtime internal closure/manifest mismatch for ${timeline}/${revision}`);
+    }
+  }
+  for (const key of internalManifest.keys()) {
+    if (!seenInternals.has(key)) throw new TimelineSchemaIncompatibleError(`Workspace Runtime manifest has no internal image for ${key.replace('\u0000', '/')}`);
+  }
+  const occurrences = array(parentPayload.occurrences, 'accepted parent occurrences');
+  const seenOccurrences = new Set<string>();
+  for (const occurrence of occurrences) {
+    const id = requiredString(occurrence.occurrence_id, 'accepted occurrence.occurrence_id');
+    if (seenOccurrences.has(id)) throw new TimelineSchemaIncompatibleError(`Workspace Runtime returned duplicate occurrence ${id}`);
+    seenOccurrences.add(id);
+    const shotId = requiredString(occurrence.shot_id, 'accepted occurrence.shot_id');
+    const revisionId = requiredString(occurrence.shot_revision_id, 'accepted occurrence.shot_revision_id');
+    if (!seenShots.has(`${shotId}\u0000${revisionId}`)) {
+      throw new TimelineSchemaIncompatibleError(`Workspace Runtime occurrence references an unresolved shot revision ${shotId}/${revisionId}`);
+    }
+  }
+  acceptedManifest(array(manifest.media, 'accepted canonical document.dependency_manifest.media'), (entry) => {
+    acceptedDigest(entry.media_id, 'media media_id');
+    acceptedDigest(entry.content_digest, 'media content_digest');
+    return String(entry.media_id);
+  });
+  acceptedManifest(array(manifest.documents, 'accepted canonical document.dependency_manifest.documents'), (entry) => {
+    const id = requiredString(entry.document_id, 'accepted document pin.document_id');
+    acceptedDigest(entry.content_digest, 'document content_digest');
+    if (!Number.isInteger(entry.version) || Number(entry.version) < 1) {
+      throw new TimelineSchemaIncompatibleError('Workspace Runtime returned an invalid document pin version');
+    }
+    return `${id}\u0000${entry.version}\u0000${entry.content_digest}`;
+  });
+  return value;
 }
 
 function array(value: unknown, label: string): RuntimeRecord[] {
@@ -1790,6 +2363,8 @@ function runtimeGraphToContract(
     const audio = canonicalAudio(shotPayload);
     return {
       ...shotPayload,
+      // Display normalization must not become authored successor payload data.
+      rawJson: shotPayload,
       shot_id: requiredString(shot.shot_id, 'shot revision.shot_id'),
       revision_id: requiredString(shot.revision_id, 'shot revision.revision_id'),
       document_role: 'shot_revision',
@@ -1820,6 +2395,7 @@ function runtimeGraphToContract(
     const durationMs = Number(occurrence.duration_ms ?? occurrence.duration ?? 0);
     const occurrenceId = requiredString(occurrence.occurrence_id, `parent composition occurrence[${ordinal}].occurrence_id`);
     return {
+      ...occurrence,
       occurrence_id: occurrenceId,
       parent_document_id: timelineId,
       shot_id: shotId,
@@ -1849,10 +2425,7 @@ function runtimeGraphToContract(
   }
   const headRevisionId = requiredString(parent.revision_id, 'parent composition revision.revision_id');
   const parentGraph = {
-    config: parentPayload.config ?? {},
-    registry: parentPayload.registry ?? {},
-    clips: parentPayload.clips ?? [],
-    occurrences: parentPayload.occurrences,
+    ...parentPayload,
   };
   return {
     schema_version: 1,
@@ -1873,7 +2446,73 @@ function runtimeGraphToContract(
   };
 }
 
+export function runtimeGraphToContractFromCanonicalDocument(
+  projectId: string,
+  timelineId: string,
+  document: CanonicalDocument,
+  publicationId: string,
+): RuntimeRecord {
+  const parent = {
+    project_id: projectId,
+    timeline_id: timelineId,
+    revision_id: document.parent_revision.revision_id,
+    content_digest: document.parent_revision.content_digest,
+    payload: document.parent_revision.payload,
+  } as RuntimeRecord;
+  const internalsByRevision = new Map<string, typeof document.internal_timeline_revisions[number]>();
+  for (const internal of document.internal_timeline_revisions) {
+    if (internalsByRevision.has(internal.revision_id)) {
+      throw new TimelineSchemaIncompatibleError(`Workspace Runtime returned ambiguous internal revision ${internal.revision_id}`);
+    }
+    internalsByRevision.set(internal.revision_id, internal);
+  }
+  const resolved = document.shot_revisions.map((shot) => {
+    const internalImage = internalsByRevision.get(shot.internal_timeline_revision_id);
+    if (!internalImage) {
+      throw new TimelineSchemaIncompatibleError(`Workspace Runtime shot closure is missing internal revision ${shot.internal_timeline_revision_id}`);
+    }
+    return {
+      shot: {
+        project_id: projectId,
+        shot_id: shot.shot_id,
+        revision_id: shot.revision_id,
+        internal_timeline_revision_id: shot.internal_timeline_revision_id,
+        content_digest: shot.content_digest,
+        payload: shot.payload,
+      } as RuntimeRecord,
+      internal: {
+        project_id: projectId,
+        timeline_id: internalImage.timeline_id,
+        revision_id: shot.internal_timeline_revision_id,
+        content_digest: internalImage.content_digest,
+        payload: internalImage.payload,
+      } as RuntimeRecord,
+    };
+  });
+  const graph = runtimeGraphToContract(
+    projectId,
+    timelineId,
+    {
+      project_id: projectId,
+      timeline_id: timelineId,
+      version: 1,
+      head_revision_id: document.parent_revision.revision_id,
+    },
+    parent,
+    resolved,
+  );
+  const primary = requiredRecord(graph.primary_timeline, 'accepted graph.primary_timeline');
+  const head = requiredRecord(primary.head, 'accepted graph.primary_timeline.head');
+  head.publication_id = publicationId;
+  return {
+    ...graph,
+    accepted_identity: { revision_id: document.parent_revision.revision_id, publication_id: publicationId },
+    canonical_document: document,
+  };
+}
+
 function runtimePayloadWithoutCanonicalEnvelope(revision: RuntimeRecord): RuntimeRecord {
+  if (revision.rawJson !== undefined) return requiredRecord(revision.rawJson, 'shot revision.rawJson');
   const { shot_id: _shotId, revision_id: _revisionId, document_role: _role, content_digest: _digest, internal_timeline_revision: _internal, publish: _publish, ...payload } = revision;
   return payload;
 }

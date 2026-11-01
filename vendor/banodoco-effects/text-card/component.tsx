@@ -4,8 +4,8 @@ import type {
   AnimationReference,
   AnimationReferenceList,
   EffectProps,
-} from '../../tools/remotion/src/effects.types';
-import {composeAnimations} from '../../tools/remotion/src/lib/animations';
+} from '@banodoco/timeline-composition/theme-api';
+import {composeAnimations} from '@banodoco/timeline-composition/theme-api';
 
 export type TextCardParams = {
   content?: string;

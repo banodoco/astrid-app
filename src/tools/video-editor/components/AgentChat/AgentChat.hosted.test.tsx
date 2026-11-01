@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TooltipProvider } from '@/shared/components/ui/tooltip.tsx';
 
 let origin = '';
 vi.mock('@/integrations/runtime/connection.ts', async (importOriginal) => ({
@@ -15,10 +16,13 @@ vi.mock('@/shared/contexts/AgentChatContext', () => ({
   useAgentChatBridge: () => ({ timelineId: null, editorContext: { projectId: 'project-1' } }),
   useAgentChatActionsRegistry: () => ({ registerHandlers: () => {}, publishState: () => {}, unregister: () => {} }),
 }));
+vi.mock('@/tools/video-editor/hooks/useAgentVoice', () => ({
+  useAgentVoice: () => ({ isRecording: false, isProcessing: false, cancelRecording: () => {} }),
+}));
 
 import { AgentChatPanel as AgentChatPanelWithoutProvider } from './AgentChat.tsx';
 import { RuntimeConnectionProvider } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
-import { useProjectAgentTaskLinks } from '@/tools/video-editor/hooks/useAgentSession.ts';
+import { isTimelineAgentSessionsAvailable, useProjectAgentTaskLinks } from '@/tools/video-editor/hooks/useAgentSession.ts';
 
 // The chat reads the runtime connection context; mount the real provider (ungated) around the real panel.
 function AgentChatPanel(props: React.ComponentProps<typeof AgentChatPanelWithoutProvider>) {
@@ -35,7 +39,7 @@ const agents = { defaultAgent: 'astrid', agents: [{ id: 'astrid', name: 'Astrid'
 
 function withQueryClient({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } });
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  return <QueryClientProvider client={client}><TooltipProvider>{children}</TooltipProvider></QueryClientProvider>;
 }
 
 describe('agent chat on the hosted build', () => {
@@ -65,6 +69,7 @@ afterEach(() => {
 
   it('mounts the composer and reads project chat and signed-in models through the local gateway', async () => {
     origin = GATEWAY;
+    expect(isTimelineAgentSessionsAvailable()).toBe(true);
     render(<AgentChatPanel />, { wrapper: withQueryClient });
 
     expect(screen.getByRole('textbox')).toBeInTheDocument();
@@ -111,6 +116,7 @@ afterEach(() => {
   });
 
   it('keeps same-origin chat available', async () => {
+    expect(isTimelineAgentSessionsAvailable()).toBe(true);
     const { result } = renderHook(() => useProjectAgentTaskLinks('project-1'), { wrapper: withQueryClient });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(fetchSpy).toHaveBeenCalledWith('/api/astrid/acp/projects/project-1/chat', expect.anything());

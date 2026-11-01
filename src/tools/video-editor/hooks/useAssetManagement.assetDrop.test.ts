@@ -22,11 +22,6 @@ const createTimelineData = (assetType: string, file: string): TimelineData => ({
     output: { width: 1280, height: 720, fps: 30 },
     tracks: [{ id: 'V1', kind: 'visual' }],
     clips: [],
-    registry: {
-      assets: {
-        asset1: { src: file, file, type: assetType, duration: 4 },
-      },
-    },
   },
   configVersion: 1,
   registry: {

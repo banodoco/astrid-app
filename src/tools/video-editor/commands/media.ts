@@ -1,16 +1,23 @@
+import { z } from 'zod';
 import { updateClipOrder } from '@/tools/video-editor/lib/coordinate-utils.ts';
+import type { MediaSelection } from '@/integrations/runtime/timeline-commit-types.ts';
 import { getNextClipId, rowsToConfig, type TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
-import { buildAssetDropEdit, planAssetDropTarget } from '@/tools/video-editor/lib/timeline-asset-plans.ts';
+import {
+  buildAssetDropEdit,
+  planAssetDropTarget,
+  type TimelineAssetPlacementPolicy,
+} from '@/tools/video-editor/lib/timeline-asset-plans.ts';
 import { buildDuplicateClipEdit } from '@/tools/video-editor/lib/duplicate-clip.ts';
 import { getAssetImmediateSource } from '@/tools/video-editor/lib/asset-registry.ts';
 import { buildDataFromCurrentRegistry } from '@/tools/video-editor/lib/timeline-save-utils.ts';
+import { validateSerializedConfig } from '@/tools/video-editor/lib/serialize.ts';
 import type { AssetRegistry, TimelineClip, ResolvedTimelineConfig, PinnedShotGroup } from '@/tools/video-editor/types/index.ts';
-import { applyTimelineCommandEffect, createTimelineCommandRunner } from './runner.ts';
-import { buildTimelineCommandData } from './timelineData.ts';
 import type {
   TimelineCommand,
   TimelineCommandDescriptor,
   TimelineCommandEffect,
+  TimelineCommandHistoryMetadata,
+  TimelineCommandStepResult,
 } from './types.ts';
 import {
   estimateProvisionedAssetDuration,
@@ -48,6 +55,7 @@ export type PlacePreparedMediaPayload = {
   clipId?: string;
   /** Duplicate an existing clip using the normal ripple and metadata rules. */
   afterClipId?: string;
+  oldMediaSelection?: MediaSelection;
   removeClipId?: string;
   /** Remove several clips as part of the same prepared-media mutation. */
   removeClipIds?: string[];
@@ -55,13 +63,49 @@ export type PlacePreparedMediaPayload = {
   replaceClipId?: string;
   /** Keep group membership/metadata in the same editor save as the media. */
   pinnedShotGroupsOverride?: PinnedShotGroup[];
+  placementPolicy?: TimelineAssetPlacementPolicy;
 };
 
 export type PlacePreparedMediaCommand = Omit<TimelineCommand<'place-prepared-media', PlacePreparedMediaPayload>, 'payload'> & {
   payload: PlacePreparedMediaPayload;
 };
 
+export type PreparedMediaDiagnosticStage =
+  | 'command-schema'
+  | 'provisioned-asset'
+  | 'placement'
+  | 'final-config';
+
+export type PreparedMediaDiagnosticReason =
+  | 'invalid-command'
+  | 'invalid-asset'
+  | 'invalid-placement'
+  | 'invalid-config';
+
+export type PreparedMediaDiagnosticFieldCategory =
+  | 'command'
+  | 'asset'
+  | 'placement'
+  | 'config';
+
+export type PreparedMediaDiagnostic = Readonly<{
+  stage: PreparedMediaDiagnosticStage;
+  reason: PreparedMediaDiagnosticReason;
+  fieldCategory: PreparedMediaDiagnosticFieldCategory;
+}>;
+
+export type ApplyPreparedMediaCommandOptions = Readonly<{
+  onFailure?: (diagnostic: PreparedMediaDiagnostic) => void;
+}>;
+
 const roundSeconds = (value: number): number => Math.round(value * 1000) / 1000;
+
+const preparedMediaInput = z.object({
+  type: z.string().trim().pipe(z.literal('place-prepared-media')),
+  payload: z.record(z.string(), z.json()),
+  commandId: z.string().optional(),
+  metadata: z.record(z.string(), z.json()).optional(),
+});
 
 const getTrackForClip = (
   data: TimelineData,
@@ -459,6 +503,21 @@ const removeClipFromWorkingData = (current: TimelineData, clipIds: readonly stri
   };
 };
 
+const stripDerivedAssetEntry = (base: TimelineData, clip: TimelineClip): TimelineClip => {
+  if (!Object.prototype.hasOwnProperty.call(clip, 'assetEntry') || !clip.asset) {
+    return clip;
+  }
+
+  const resolvedClip = base.resolvedConfig.clips.find((candidate) => candidate.id === clip.id);
+  const assetEntry = (clip as TimelineClip & { assetEntry?: unknown }).assetEntry;
+  if (resolvedClip?.assetEntry !== assetEntry || base.resolvedConfig.registry[clip.asset] !== assetEntry) {
+    return clip;
+  }
+
+  const { assetEntry: _assetEntry, ...authoredClip } = clip as TimelineClip & { assetEntry?: unknown };
+  return authoredClip;
+};
+
 const buildPreparedReplacementEdit = (
   current: TimelineData,
   payload: PlacePreparedMediaCommand['payload'],
@@ -535,6 +594,18 @@ const materializePreparedData = ({
   registry: AssetRegistry;
   resolvedRegistry: TimelineData['resolvedConfig']['registry'];
 }): TimelineData => {
+  // The editor preview uses seconds; raw command capture keeps the original
+  // source and validates its codecs separately. Normalize only a matching alias
+  // before rowsToConfig restores raw fields (including on rippled peers).
+  const editorClips = base.config.clips.map((rawClip) => {
+    const clip = stripDerivedAssetEntry(base, rawClip);
+    if (!Object.prototype.hasOwnProperty.call(clip, 'at_ms')) return clip;
+    const { at_ms: atMs, ...editorClip } = clip as typeof clip & { at_ms: unknown };
+    if (typeof atMs !== 'number' || !Number.isFinite(atMs) || clip.at !== atMs / 1000) {
+      throw new Error(`Prepared media clip '${clip.id}' has contradictory at/at_ms timing.`);
+    }
+    return editorClip;
+  });
   const config = rowsToConfig(
     rows,
     meta,
@@ -542,7 +613,7 @@ const materializePreparedData = ({
     clipOrder,
     base.tracks,
     pinnedShotGroups,
-    base.config,
+    { ...base.config, clips: editorClips },
   );
   const nextData = buildDataFromCurrentRegistry(config, base, {
     registry,
@@ -560,7 +631,7 @@ const materializePreparedData = ({
 const buildPlacePreparedMediaEffect = (
   currentData: TimelineData,
   payload: PlacePreparedMediaCommand['payload'],
-): TimelineCommandEffect => {
+): TimelineCommandEffect & { mutation: { type: 'data'; data: TimelineData } } => {
   const assetKind = payload.asset.mediaType === 'audio' ? 'audio' : 'visual';
   const duration = payload.clipSpanSeconds
     ?? estimateProvisionedAssetDuration(payload.asset);
@@ -655,9 +726,12 @@ const buildPlacePreparedMediaEffect = (
       insertAtTop: payload.insertAtTop ?? false,
       time: Math.max(0, payload.at),
       duration,
+      placementPolicy: payload.placementPolicy,
     });
     if (!targetPlan.ok) {
-      throw new Error('Timeline data is not available for prepared media placement.');
+      throw new Error(targetPlan.error === 'preserved_track_unavailable'
+        ? 'The captured occurrence raw track is unavailable.'
+        : 'Timeline data is not available for prepared media placement.');
     }
     const insertedEdit = buildAssetDropEdit({
       current: targetPlan.preparedCurrent,
@@ -740,79 +814,97 @@ export const MEDIA_COMMAND_DESCRIPTORS = [
   PLACE_PREPARED_MEDIA_COMMAND_DESCRIPTOR,
 ] as const;
 
-const mediaCommandRunner = createTimelineCommandRunner<AddMediaCommand | SwapMediaCommand | PlacePreparedMediaCommand>([
-  ADD_MEDIA_COMMAND_DESCRIPTOR,
-  SWAP_MEDIA_COMMAND_DESCRIPTOR,
-  PLACE_PREPARED_MEDIA_COMMAND_DESCRIPTOR,
-]);
-
-const getFailureMessage = (
-  result: ReturnType<typeof mediaCommandRunner.apply>,
-): string => {
-  const validationMessage = result.errors[0]?.validationErrors?.[0]?.message;
-  return validationMessage ?? result.errors[0]?.message ?? 'Command failed.';
-};
-
-export const applyProvisionedMediaCommandToConfig = (
-  config: TimelineData['config'],
-  registry: AssetRegistry,
-  command: AddMediaCommand | SwapMediaCommand,
-): { config?: TimelineData['config']; result: string } => {
-  const data = buildTimelineCommandData(config, registry);
-  const result = mediaCommandRunner.apply(data, { commands: [command] });
-  if (result.status === 'rejected') {
-    return { result: getFailureMessage(result) };
-  }
-
-  return {
-    config: result.nextData.config,
-    result: result.commandResults[0]?.summary ?? 'Applied media command.',
-  };
-};
-
-export const dryRunProvisionedMediaCommand = (
-  currentData: TimelineData,
-  command: AddMediaCommand | SwapMediaCommand,
-) => {
-  return mediaCommandRunner.dryRun(currentData, { commands: [command] });
-};
-
-export const applyProvisionedMediaCommand = (
-  currentData: TimelineData,
-  command: AddMediaCommand | SwapMediaCommand,
-) => {
-  const result = mediaCommandRunner.apply(currentData, { commands: [command] });
-  if (result.status === 'rejected') {
-    return null;
-  }
-
-  return {
-    nextData: result.nextData,
-    commandResult: result.commandResults[0],
-  };
-};
-
-export const materializeProvisionedMediaCommand = (
-  currentData: TimelineData,
-  effect: TimelineCommandEffect,
-) => {
-  return applyTimelineCommandEffect(currentData, effect);
-};
-
 export const applyPreparedMediaCommand = (
   currentData: TimelineData,
   command: PlacePreparedMediaCommand,
-) => {
-  const result = mediaCommandRunner.apply(currentData, { commands: [command] });
-  if (result.status === 'rejected') {
+  options?: ApplyPreparedMediaCommandOptions,
+): {
+  nextData: TimelineData;
+  commandResult: TimelineCommandStepResult<PlacePreparedMediaCommand>;
+  history: TimelineCommandHistoryMetadata;
+} | null => {
+  let diagnostic: PreparedMediaDiagnostic = {
+    stage: 'command-schema',
+    reason: 'invalid-command',
+    fieldCategory: 'command',
+  };
+  const refuse = () => {
+    try {
+      options?.onFailure?.(Object.freeze(diagnostic));
+    } catch {
+      // Diagnostics must never change the existing refusal behavior.
+    }
     return null;
+  };
+  if (!preparedMediaInput.safeParse(command).success) {
+    return refuse();
+  }
+  const payload = command.payload;
+  diagnostic = {
+    stage: 'provisioned-asset',
+    reason: 'invalid-asset',
+    fieldCategory: 'asset',
+  };
+  if (!payload || validateProvisionedAsset(payload.asset, '$.payload.asset').length > 0) {
+    return refuse();
+  }
+  if (!Number.isFinite(payload.at) || payload.at < 0) {
+    diagnostic = {
+      stage: 'command-schema',
+      reason: 'invalid-command',
+      fieldCategory: 'placement',
+    };
+    return refuse();
   }
 
-  return {
-    nextData: result.nextData,
-    commandResult: result.commandResults[0],
-    history: result.history,
+  diagnostic = {
+    stage: 'placement',
+    reason: 'invalid-placement',
+    fieldCategory: 'placement',
   };
+  try {
+    const effect = buildPlacePreparedMediaEffect(currentData, payload);
+    const nextData = effect.mutation.data;
+    diagnostic = {
+      stage: 'final-config',
+      reason: 'invalid-config',
+      fieldCategory: 'config',
+    };
+    validateSerializedConfig(nextData.config);
+    return {
+      nextData,
+      commandResult: {
+        command: {
+          type: 'place-prepared-media',
+          payload,
+          ...(command.commandId !== undefined ? { commandId: command.commandId } : {}),
+          ...(command.metadata !== undefined ? { metadata: command.metadata } : {}),
+        },
+        commandIndex: 0,
+        status: 'applied',
+        beforeSignature: currentData.stableSignature,
+        afterSignature: nextData.stableSignature,
+        summary: effect.summary,
+        detail: effect.detail,
+        inverse: null,
+      },
+      history: {
+        kind: 'command',
+        transactionId: undefined,
+        commandTypes: ['place-prepared-media'],
+        commandIds: command.commandId === undefined ? [] : [command.commandId],
+        strategy: 'snapshot_fallback',
+        inverseTransaction: null,
+        executionMode: 'atomic',
+        runMode: 'apply',
+        appliedCount: 1,
+        failedCount: 0,
+        partial: false,
+      },
+    };
+  } catch {
+    return refuse();
+  }
 };
 
 export const previewPreparedMediaCommand = applyPreparedMediaCommand;

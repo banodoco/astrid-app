@@ -1,5 +1,14 @@
 import type { FC, ReactNode } from 'react';
-import { secondsToFrames } from '@/tools/video-editor/lib/config-utils.ts';
+import { AbsoluteFill, useCurrentFrame } from 'remotion';
+import {
+  composeClipAnimationPhase,
+  normalizeAnimationRefs,
+  resolveAnimationReferences,
+  useTheme,
+  type AnimationPhase,
+} from '@banodoco/timeline-composition/theme-api';
+import { clipOpacity } from '@banodoco/timeline-composition/evaluation';
+import { getEffectValue, secondsToFrames } from '@/tools/video-editor/lib/config-utils.ts';
 import { DynamicEffectRegistry } from '@/tools/video-editor/effects/DynamicEffectRegistry.ts';
 import { EffectErrorBoundary } from '@/tools/video-editor/effects/EffectErrorBoundary.tsx';
 import {
@@ -173,6 +182,77 @@ export const wrapWithEffect = (
   );
 };
 
+type ClipAnimation = {
+  id?: string;
+  type?: string;
+  duration?: number;
+  durationFrames?: number;
+  easing?: string;
+  params?: Record<string, unknown>;
+};
+
+export const resolvePreviewAnimationReference = (
+  animation: ClipAnimation,
+  phase: AnimationPhase,
+  fps: number,
+) => {
+  const refs = normalizeAnimationRefs(animation, fps);
+  if (!refs) throw new Error('Preview animation references require an id or type');
+  return resolveAnimationReferences(refs, phase);
+};
+
+const PackageAnimation: FC<{
+  content: ReactNode;
+  clip: ResolvedTimelineClip;
+  animation: ClipAnimation;
+  durationInFrames: number;
+  fps: number;
+  phase: Extract<AnimationPhase, 'entrance' | 'exit'>;
+}> = ({ content, clip, animation, durationInFrames, fps, phase }) => {
+  const frame = useCurrentFrame();
+  const theme = useTheme();
+  return <>{composeClipAnimationPhase({
+    clip: clip as never,
+    reference: animation,
+    phase,
+    children: content,
+    theme,
+    fps,
+    clipFrames: durationInFrames,
+  }, frame)}</>;
+};
+
+// `effects.fade_in` / `fade_out` ramp the clip's opacity through the package's own
+// clipOpacity. `clip.opacity` is applied by each clip body, so it is dropped here.
+const ClipFadeOpacity: FC<{ clip: ResolvedTimelineClip; fps: number; children: ReactNode }> = ({ clip, fps, children }) => {
+  const opacity = clipOpacity({ ...clip, opacity: undefined } as never, useCurrentFrame(), fps);
+  return <AbsoluteFill style={{ opacity }}>{children}</AbsoluteFill>;
+};
+
+const hasClipFade = (clip: ResolvedTimelineClip): boolean => (
+  getEffectValue(clip.effects, 'fade_in') !== null || getEffectValue(clip.effects, 'fade_out') !== null
+);
+
+type PackageAnimationResolution = 'supported' | 'wrong-phase' | 'unknown';
+
+const resolvePackageAnimation = (
+  animation: ClipAnimation,
+  phase: AnimationPhase,
+  fps: number,
+): PackageAnimationResolution => {
+  try {
+    resolvePreviewAnimationReference(animation, phase, fps);
+    return 'supported';
+  } catch (error) {
+    // Unknown IDs belong to the contributed registry path below. A known ID
+    // in the wrong phase is intentionally not reinterpreted as another phase.
+    if (error instanceof Error && (error.message.startsWith('Unknown animation id')
+      || error.message.startsWith('Preview animation references'))) return 'unknown';
+    if (error instanceof Error && /^Animation '.+' is phase /.test(error.message)) return 'wrong-phase';
+    throw error;
+  }
+};
+
 export const wrapWithClipEffects = (
   content: ReactNode,
   clip: ResolvedTimelineClip,
@@ -206,42 +286,74 @@ export const wrapWithClipEffects = (
   }
 
   const entranceEffect = clip.entrance;
+  const entranceAnimation = entranceEffect as ClipAnimation | undefined;
+  const entranceType = entranceAnimation?.id ?? entranceAnimation?.type;
   const entranceRecord = entranceEffect && effectRegistrySnapshot
-    ? resolveSnapshotEffect(effectRegistrySnapshot, entranceEffect.type)
+    ? resolveSnapshotEffect(effectRegistrySnapshot, entranceType ?? '')
     : undefined;
-  const entrance = entranceEffect
+  // A provider-owned snapshot record takes precedence over the package built-in.
+  const packageEntrance = entranceAnimation && entranceEffect && !entranceRecord
+    ? resolvePackageAnimation(entranceAnimation, 'entrance', fps)
+    : 'unknown';
+  const entrance = packageEntrance === 'unknown' && entranceEffect
     ? entranceRecord?.component
-      ?? (legacyRegistry ? lookupEffect(entranceEffects, entranceEffect.type) : null)
+      ?? (legacyRegistry && entranceType ? lookupEffect(entranceEffects, entranceType) : null)
     : null;
-  if (entrance) {
+  if (entranceAnimation && packageEntrance === 'supported' && entranceType !== 'type-on') {
+    wrapped = <PackageAnimation
+      content={wrapped}
+      clip={clip}
+      animation={entranceAnimation}
+      durationInFrames={durationInFrames}
+      fps={fps}
+      phase="entrance"
+    />;
+  } else if (entrance) {
     wrapped = wrapWithEffect(wrapped, entrance, {
-      effectName: entranceEffect!.type,
+      effectName: entranceType ?? 'unknown',
       durationInFrames,
-      effectFrames: secondsToFrames(entranceEffect!.duration ?? 0.4, fps),
+      effectFrames: entranceAnimation?.durationFrames
+        ?? secondsToFrames(entranceAnimation?.duration ?? 0.4, fps),
       intensity: entranceEffect!.intensity,
       params: entranceEffect!.params,
-      schema: entranceRecord?.schema ?? legacyRegistry?.getSchema(entranceEffect!.type),
+      schema: entranceRecord?.schema ?? legacyRegistry?.getSchema(entranceType ?? ''),
     });
   }
 
   const exitEffect = clip.exit;
+  const exitAnimation = exitEffect as ClipAnimation | undefined;
+  const exitType = exitAnimation?.id ?? exitAnimation?.type;
   const exitRecord = exitEffect && effectRegistrySnapshot
-    ? resolveSnapshotEffect(effectRegistrySnapshot, exitEffect.type)
+    ? resolveSnapshotEffect(effectRegistrySnapshot, exitType ?? '')
     : undefined;
-  const exit = exitEffect
+  // A provider-owned snapshot record takes precedence over the package built-in.
+  const packageExit = exitAnimation && exitEffect && !exitRecord
+    ? resolvePackageAnimation(exitAnimation, 'exit', fps)
+    : 'unknown';
+  const exit = packageExit === 'unknown' && exitEffect
     ? exitRecord?.component
-      ?? (legacyRegistry ? lookupEffect(exitEffects, exitEffect.type) : null)
+      ?? (legacyRegistry && exitType ? lookupEffect(exitEffects, exitType) : null)
     : null;
-  if (exit) {
+  if (exitAnimation && packageExit === 'supported' && exitType !== 'type-on') {
+    wrapped = <PackageAnimation
+      content={wrapped}
+      clip={clip}
+      animation={exitAnimation}
+      durationInFrames={durationInFrames}
+      fps={fps}
+      phase="exit"
+    />;
+  } else if (exit) {
     wrapped = wrapWithEffect(wrapped, exit, {
-      effectName: exitEffect!.type,
+      effectName: exitType ?? 'unknown',
       durationInFrames,
-      effectFrames: secondsToFrames(exitEffect!.duration ?? 0.4, fps),
+      effectFrames: exitAnimation?.durationFrames
+        ?? secondsToFrames(exitAnimation?.duration ?? 0.4, fps),
       intensity: exitEffect!.intensity,
       params: exitEffect!.params,
-      schema: exitRecord?.schema ?? legacyRegistry?.getSchema(exitEffect!.type),
+      schema: exitRecord?.schema ?? legacyRegistry?.getSchema(exitType ?? ''),
     });
   }
 
-  return wrapped;
+  return hasClipFade(clip) ? <ClipFadeOpacity clip={clip} fps={fps}>{wrapped}</ClipFadeOpacity> : wrapped;
 };

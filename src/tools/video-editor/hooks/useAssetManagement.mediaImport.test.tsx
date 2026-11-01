@@ -7,6 +7,7 @@ import {
   VideoEditorRuntimeProvider,
   type VideoEditorRuntimeContextValue,
 } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
+import { buildPlacePreparedMediaCommand } from '@/tools/video-editor/hooks/useAssetManagement';
 import { useAssetManagement } from './useAssetManagement';
 import { RUNTIME_MEDIA_IMPORT_MAX_BYTES } from '@/tools/video-editor/data/AssetResolver.ts';
 
@@ -59,6 +60,52 @@ function renderAssetManagement(provider: Record<string, unknown>) {
 }
 
 describe('useAssetManagement Runtime media imports', () => {
+  it('carries an authentic Runtime selection through preparation and placement without inventing one', async () => {
+    const mediaSelection = {
+      asset: 'sha256:image',
+      generation_id: 'generation-image',
+      variant_id: 'variant-image',
+      object_id: 'sha256:object',
+      catalog_digest: 'sha256:catalog',
+    } as const;
+    const prepareMediaImport = vi.fn().mockResolvedValue({
+      provider: 'runtime',
+      project: 'runtime-project-id',
+      importOperationId: 'operation-image',
+      generationId: 'generation-image',
+      variantId: 'variant-image',
+      assetId: 'sha256:image',
+      entry: { file: 'https://runtime.test/image', type: 'image/png' },
+      mediaSelection,
+    });
+    const { result } = renderAssetManagement({
+      supportsDirectAssetUpload: true,
+      prepareMediaImport,
+      resolveAssetUrl: vi.fn(),
+    });
+    const image = new File(['image'], 'frame.png', { type: 'image/png' });
+    let uploaded!: Awaited<ReturnType<typeof result.current.uploadImageGeneration>>;
+    await act(async () => {
+      uploaded = await result.current.uploadImageGeneration(image);
+    });
+
+    const prepared = result.current.prepareGenerationAsset(uploaded);
+    expect(prepared?.mediaSelection).toBe(mediaSelection);
+    expect(buildPlacePreparedMediaCommand({
+      prepared: prepared!,
+      selectedTrackId: 'V1',
+      time: 0,
+      forceNewTrack: false,
+      insertAtTop: false,
+    }).payload.asset.mediaSelection).toBe(mediaSelection);
+
+    const unqualified = result.current.prepareGenerationAsset({
+      ...uploaded,
+      mediaImport: { ...uploaded.mediaImport!, mediaSelection: undefined },
+    });
+    expect(unqualified).not.toHaveProperty('mediaSelection');
+  });
+
   it('uses one Runtime import identity for image and video drops', async () => {
     extractVideoMetadataMock.mockResolvedValue({ duration_seconds: 2.5 });
     const prepareMediaImport = vi.fn()

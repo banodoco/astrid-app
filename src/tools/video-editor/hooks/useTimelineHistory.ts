@@ -1,17 +1,8 @@
 import { persistedTranscriptItems } from '../data/typed/projectTranscript.ts';
 import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
-import {
-  createTimelineCommandRunner,
-  MEDIA_COMMAND_DESCRIPTORS,
-  type AddMediaCommand,
-  type PlacePreparedMediaCommand,
-  type SwapMediaCommand,
-  type TimelineCommandHistoryMetadata,
-} from '@/tools/video-editor/commands/index.ts';
 import { useVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import { isDataProviderPersistenceEnabled } from '@/tools/video-editor/data/DataProvider.ts';
 import type {
-  CommandHistoryCommitMetadata,
   CommitDataOptions,
   CommitHistoryOptions,
 } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
@@ -33,6 +24,7 @@ import type {
   UndoSnapshot,
 } from '@/tools/video-editor/types/history.ts';
 import type { CanonicalShotCompositionHistoryEntry } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
+import type { TimelineLocalSaveHandoff } from './timelineLocalSaveHandoff.ts';
 
 const UNDO_STACK_LIMIT = 100;
 const CHECKPOINT_LIMIT = 30;
@@ -40,7 +32,6 @@ const CHECKPOINT_RETENTION_MS = 24 * 60 * 60 * 1000;
 const SESSION_IDLE_MS = 5 * 60 * 1000;
 const EDIT_DISTANCE_CHECKPOINT_THRESHOLD = 30;
 const UNTRANSACTED_COLLAPSE_WINDOW_MS = 300;
-const historyCommandRunner = createTimelineCommandRunner<AddMediaCommand | PlacePreparedMediaCommand | SwapMediaCommand>(MEDIA_COMMAND_DESCRIPTORS);
 
 export interface UseTimelineHistoryArgs {
   dataRef: MutableRefObject<TimelineData | null>;
@@ -57,6 +48,7 @@ export interface UseTimelineHistoryArgs {
    */
   pendingOpsRef: MutableRefObject<number>;
   editability?: TimelineEditability;
+  remoteHistory?: Pick<TimelineLocalSaveHandoff, 'remoteHistoryAvailable' | 'canUndo' | 'canRedo' | 'undo' | 'redo'>;
 }
 
 export interface UseTimelineHistoryResult {
@@ -120,92 +112,13 @@ function defaultCheckpointLabel(triggerType: CheckpointTriggerType): string {
   }
 }
 
-const buildCommandHistoryEntry = (
-  commandHistory: CommandHistoryCommitMetadata | undefined,
-) => {
-  if (
-    !commandHistory
-    || commandHistory.history.strategy !== 'inverse_transaction'
-    || commandHistory.history.inverseTransaction === null
-    || commandHistory.history.inverseTransaction.commands.length === 0
-    || commandHistory.transaction.commands.length === 0
-  ) {
-    return undefined;
-  }
-
-  return {
-    history: {
-      ...commandHistory.history,
-      inverseTransaction: structuredClone(commandHistory.history.inverseTransaction),
-    },
-    undoTransaction: structuredClone(commandHistory.history.inverseTransaction),
-    redoTransaction: structuredClone(commandHistory.transaction),
-  };
-};
-
-const mergeCommandHistoryMetadata = (
-  previous: TimelineCommandHistoryMetadata,
-  next: TimelineCommandHistoryMetadata,
-  undoTransaction: NonNullable<UndoEntry['command']>['undoTransaction'],
-): TimelineCommandHistoryMetadata => ({
-  ...next,
-  commandTypes: [...previous.commandTypes, ...next.commandTypes],
-  commandIds: [...previous.commandIds, ...next.commandIds],
-  inverseTransaction: structuredClone(undoTransaction),
-  appliedCount: previous.appliedCount + next.appliedCount,
-  failedCount: previous.failedCount + next.failedCount,
-  partial: previous.partial || next.partial,
-});
-
-const mergeCollapsedEntry = (
-  previous: UndoEntry,
-  next: UndoEntry,
-): UndoEntry => {
-  if (!previous.command || !next.command) {
-    return previous.command
-      ? { ...previous, command: undefined }
-      : previous;
-  }
-
-  const undoTransaction = {
-    ...(next.command.undoTransaction.transactionId
-      ? { transactionId: next.command.undoTransaction.transactionId }
-      : previous.command.undoTransaction.transactionId
-        ? { transactionId: previous.command.undoTransaction.transactionId }
-        : {}),
-    commands: [
-      ...next.command.undoTransaction.commands,
-      ...previous.command.undoTransaction.commands,
-    ],
-  };
-  const redoTransaction = {
-    ...(previous.command.redoTransaction.transactionId
-      ? { transactionId: previous.command.redoTransaction.transactionId }
-      : next.command.redoTransaction.transactionId
-        ? { transactionId: next.command.redoTransaction.transactionId }
-        : {}),
-    commands: [
-      ...previous.command.redoTransaction.commands,
-      ...next.command.redoTransaction.commands,
-    ],
-  };
-
-  return {
-    ...previous,
-    command: {
-      history: mergeCommandHistoryMetadata(previous.command.history, next.command.history, undoTransaction),
-      undoTransaction,
-      redoTransaction,
-    },
-  };
-};
-
 export function useTimelineHistory({
   dataRef,
   commitData,
   interactionStateRef,
   pendingOpsRef,
   editability,
+  remoteHistory,
 }: UseTimelineHistoryArgs): UseTimelineHistoryResult {
   const { provider, timelineId, project, toast } = useVideoEditorRuntime();
   const historyProjectId = project.projectId;
@@ -282,31 +195,20 @@ export function useTimelineHistory({
   const applyHistoryEntry = useCallback((
     current: TimelineData,
     entry: UndoEntry,
-    direction: 'undo' | 'redo',
   ) => {
-    if (entry.command) {
-      const transaction = direction === 'undo'
-        ? entry.command.undoTransaction
-        : entry.command.redoTransaction;
-      const result = historyCommandRunner.apply(current, transaction);
-      if (result.status === 'ok') {
-        return result.nextData;
-      }
-    }
-
     const nextConfig = cloneConfig(entry.snapshot.config);
     return entry.snapshot.registry
       ? buildDataFromSnapshot(nextConfig, entry.snapshot.registry, current, entry.snapshot.sourceItemsBySchemaRef)
       : buildDataFromCurrentRegistry(nextConfig, current, { sourceItemsBySchemaRef: entry.snapshot.sourceItemsBySchemaRef });
   }, []);
 
-  const restoreHistoryEntry = useCallback((entry: UndoEntry, direction: 'undo' | 'redo') => {
+  const restoreHistoryEntry = useCallback((entry: UndoEntry) => {
     const current = dataRef.current;
     if (!current) {
       return false;
     }
 
-    const nextData = applyHistoryEntry(current, entry, direction);
+    const nextData = applyHistoryEntry(current, entry);
     // Same protection every applyEdit path has: history snapshots never contain
     // transient `uploading-*` skeletons (rowsToConfig drops them from config),
     // so a restore during an in-flight upload would silently delete the
@@ -372,14 +274,13 @@ export function useTimelineHistory({
       snapshot: buildSnapshot(currentData),
       timestamp: new Date(now).toISOString(),
       transactionId: options.transactionId,
-      command: buildCommandHistoryEntry(options.commandHistory),
     };
 
     if (hasMatchingTransaction || isDebouncedUntransactedEdit) {
       if (topUndoEntry) {
         undoStackRef.current = [
           ...undoStackRef.current.slice(0, -1),
-          mergeCollapsedEntry(topUndoEntry, nextEntry),
+          topUndoEntry,
         ];
       }
     } else {
@@ -422,6 +323,15 @@ export function useTimelineHistory({
   }, [syncHistoryState]);
 
   const undo = useCallback(() => {
+    if (remoteHistory) {
+      if (!remoteHistory.remoteHistoryAvailable() || !remoteHistory.canUndo()
+        || pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
+        || (editability?.checkTimeline && !editability.checkTimeline().allowed)) return;
+      void remoteHistory.undo().catch((error: unknown) => {
+        toast.error('Could not undo timeline', { description: error instanceof Error ? error.message : String(error) });
+      });
+      return;
+    }
     if (editability?.checkTimeline && !editability.checkTimeline().allowed) return;
     if (pendingOpsRef.current > 0) {
       // Dev-only diagnostic (stripped in prod); the toolbar communicates the
@@ -438,7 +348,7 @@ export function useTimelineHistory({
       return;
     }
 
-    if (!restoreHistoryEntry(entry, 'undo')) {
+    if (!restoreHistoryEntry(entry)) {
       return;
     }
 
@@ -452,9 +362,18 @@ export function useTimelineHistory({
       },
     ].slice(-UNDO_STACK_LIMIT);
     syncHistoryState();
-  }, [dataRef, editability, interactionStateRef, pendingOpsRef, restoreHistoryEntry, syncHistoryState]);
+  }, [dataRef, editability, interactionStateRef, pendingOpsRef, remoteHistory, restoreHistoryEntry, syncHistoryState, toast]);
 
   const redo = useCallback(() => {
+    if (remoteHistory) {
+      if (!remoteHistory.remoteHistoryAvailable() || !remoteHistory.canRedo()
+        || pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
+        || (editability?.checkTimeline && !editability.checkTimeline().allowed)) return;
+      void remoteHistory.redo().catch((error: unknown) => {
+        toast.error('Could not redo timeline', { description: error instanceof Error ? error.message : String(error) });
+      });
+      return;
+    }
     if (editability?.checkTimeline && !editability.checkTimeline().allowed) return;
     if (pendingOpsRef.current > 0) {
       console.log('[TimelineHistory] redo ignored: paused while media uploads finish', {
@@ -469,7 +388,7 @@ export function useTimelineHistory({
       return;
     }
 
-    if (!restoreHistoryEntry(entry, 'redo')) {
+    if (!restoreHistoryEntry(entry)) {
       return;
     }
 
@@ -483,7 +402,7 @@ export function useTimelineHistory({
       },
     ].slice(-UNDO_STACK_LIMIT);
     syncHistoryState();
-  }, [dataRef, editability, interactionStateRef, pendingOpsRef, restoreHistoryEntry, syncHistoryState]);
+  }, [dataRef, editability, interactionStateRef, pendingOpsRef, remoteHistory, restoreHistoryEntry, syncHistoryState, toast]);
 
   const jumpToCheckpoint = useCallback((checkpointId: string) => {
     if (editability?.checkTimeline && !editability.checkTimeline().allowed) return;
@@ -504,7 +423,7 @@ export function useTimelineHistory({
         signature: checkpoint.id,
       },
       timestamp: new Date().toISOString(),
-    }, 'undo');
+    });
     editsSinceLastCheckpointRef.current = 0;
   }, [checkpoints, dataRef, editability, restoreHistoryEntry, syncHistoryState]);
 
@@ -615,8 +534,8 @@ export function useTimelineHistory({
   const historyPausedForUploads = pendingOpsRef.current > 0;
 
   return {
-    canUndo: canUndo && !historyPausedForUploads,
-    canRedo: canRedo && !historyPausedForUploads,
+    canUndo: (remoteHistory ? remoteHistory.canUndo() : canUndo) && !historyPausedForUploads,
+    canRedo: (remoteHistory ? remoteHistory.canRedo() : canRedo) && !historyPausedForUploads,
     historyPausedForUploads,
     checkpoints,
     canonicalHistory,

@@ -1,4 +1,4 @@
 #!/bin/sh
 set -eu
 
-exec "$(git rev-parse --show-toplevel)/scripts/check-before-push"
+exec "$(git rev-parse --show-toplevel)/scripts/check-fast" --hook "$@"

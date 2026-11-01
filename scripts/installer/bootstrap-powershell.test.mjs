@@ -328,6 +328,7 @@ Copy-Item -LiteralPath $env:MOCK_UV_SOURCE -Destination (Join-Path $env:UV_UNMAN
         Copy-Item $env:MOCK_MANIFEST $OutFile
     }
 }
+Remove-Item Alias:irm -Force -ErrorAction SilentlyContinue
 function irm { param([string]$Uri) [IO.File]::ReadAllText($env:MOCK_INSTALL_SCRIPT) }
 try {
     & ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update --managed-by pinokio --root '/Pinokio Apps/Astrid'

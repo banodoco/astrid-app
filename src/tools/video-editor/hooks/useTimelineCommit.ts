@@ -10,6 +10,7 @@ import {
   type SetStateAction,
 } from 'react';
 import type { TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
+import { invalidateDraftReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { VideoEditorRuntimeContext } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import {
   editorClearTimelineSelection,
@@ -368,6 +369,9 @@ export function useTimelineCommit({
     options?: CommitDataOptions,
   ) => {
     const shouldSave = options?.save ?? true;
+    // History/selection listeners are re-entrant. Invalidate admission before
+    // publishing anything that can run code against the old saved sequence.
+    if (shouldSave) invalidateDraftReload();
     const currentData = dataRef.current;
     if (options?.skipHistory && options?.updateLastSavedSignature) registryOwnersRef.current.clear();
     for (const [assetId, receipt] of registryOwnersRef.current) {

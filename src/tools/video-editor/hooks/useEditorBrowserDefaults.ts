@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useDraftSafeReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import type { SaveStatus } from '@/tools/video-editor/hooks/useTimelinePersistence.ts';
 
 interface UseEditorBrowserDefaultsOptions {
@@ -9,29 +9,40 @@ interface UseEditorBrowserDefaultsOptions {
   flushPendingSave: () => Promise<unknown>;
   preserveTimelineDraftForReload: () => Promise<void>;
   isTimelineDraftDurableForReload: () => boolean;
+  isTimelineSavePending?: () => boolean;
 }
 
 /**
  * Browser defaults the editor must not hand to Chrome: page zoom on Ctrl/Cmd+wheel (and trackpad pinch), "Save page
  * as" on Cmd/Ctrl+S, and closing or reloading with a timeline save still pending. Keyboard zoom (Cmd +/-/0) is left alone.
  */
-export function useEditorBrowserDefaults({ shellRoot, saveStatus, flushPendingSave, preserveTimelineDraftForReload, isTimelineDraftDurableForReload }: UseEditorBrowserDefaultsOptions): void {
-  const latest = useRef({ saveStatus, flushPendingSave, preserveTimelineDraftForReload, isTimelineDraftDurableForReload });
-  latest.current = { saveStatus, flushPendingSave, preserveTimelineDraftForReload, isTimelineDraftDurableForReload };
+export function useEditorBrowserDefaults({ shellRoot, saveStatus, flushPendingSave, preserveTimelineDraftForReload, isTimelineDraftDurableForReload, isTimelineSavePending }: UseEditorBrowserDefaultsOptions): void {
+  const latest = useRef({ saveStatus, flushPendingSave, preserveTimelineDraftForReload, isTimelineDraftDurableForReload, isTimelineSavePending });
+  latest.current = { saveStatus, flushPendingSave, preserveTimelineDraftForReload, isTimelineDraftDurableForReload, isTimelineSavePending };
   const currentSaveStatus = () => latest.current.saveStatus;
+  const pending = () => latest.current.isTimelineSavePending?.() ?? currentSaveStatus() !== 'saved';
 
-  useDraftSafeReload('Timeline', async () => {
-    // A barrier only covers the sequence it captured. An edit made while that write is in flight is queued behind
-    // it and the first barrier can resolve while the timeline is dirty again. Re-read React's committed status and
-    // acquire another barrier until the current sequence is acknowledged.
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (currentSaveStatus() === 'saved') return;
-      await latest.current.flushPendingSave();
-      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-      if (currentSaveStatus() === 'saved') return;
-    }
-    throw new Error('the timeline kept changing while it was being saved');
-  }, shellRoot !== null, () => currentSaveStatus() !== 'saved');
+  useEffect(() => {
+    // useTimelineSave owns authoritative registration, including unmounted work.
+    if (!shellRoot || isTimelineSavePending) return;
+    const flush = async () => {
+      // Compatibility for shells without an authoritative persistence owner.
+      for (let attempt = 0; attempt < 5; attempt++) {
+        if (!pending()) return;
+        await latest.current.flushPendingSave();
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        if (!pending()) return;
+      }
+      throw new Error('the timeline kept changing while it was being saved');
+    };
+    return registerDraftSafeReloadGuard({ label: 'Timeline', flush, isDirty: pending,
+      flushForReload: async () => {
+        try { await flush(); }
+        catch { await latest.current.preserveTimelineDraftForReload(); }
+      },
+      isDirtyForReload: () => pending() && !latest.current.isTimelineDraftDurableForReload(),
+    });
+  }, [shellRoot, isTimelineSavePending]);
 
   useEffect(() => {
     if (!shellRoot) return;
@@ -59,7 +70,7 @@ export function useEditorBrowserDefaults({ shellRoot, saveStatus, flushPendingSa
 
   useEffect(() => {
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (latest.current.saveStatus === 'saved') return;
+      if (!pending()) return;
       event.preventDefault();
       // Legacy browsers read returnValue to decide whether to prompt.
       event.returnValue = '';

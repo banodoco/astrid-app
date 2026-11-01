@@ -129,13 +129,13 @@ describe('useEditorBrowserDefaults', () => {
     let durable = false;
     const preserveTimelineDraftForReload = vi.fn(async () => { durable = true; });
     const mounted = mount('error', flushPendingSave, preserveTimelineDraftForReload, () => durable);
-    await act(async () => { await flushDraftsBeforeReload(); });
+    await act(async () => { await flushDraftsBeforeReload('reload'); });
     expect(flushPendingSave).toHaveBeenCalledOnce();
     expect(preserveTimelineDraftForReload).toHaveBeenCalledOnce();
     mounted.view.unmount();
 
     const failedPreservation = mount('error', flushPendingSave, vi.fn(async () => { throw new Error('IndexedDB full'); }), () => false);
-    await expect(flushDraftsBeforeReload()).rejects.toThrow('IndexedDB full');
+    await expect(flushDraftsBeforeReload('reload')).rejects.toThrow('IndexedDB full');
     failedPreservation.view.unmount();
   });
 });

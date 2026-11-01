@@ -4,7 +4,7 @@ import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-up
 import { CopyInstallCommand } from './CopyInstallCommand.tsx';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { captureDraftReloadWitness, useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 
 /** Opens Settings on its Updates tab; the header and the update cards share this route. */
@@ -28,7 +28,8 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
   const execute = actions.find((action) => action.execute === 'installer-update');
   const localCommand = actions.find((action) => action.label === RUN_IT_YOURSELF_ACTION)?.command;
   const startUpdate = async () => {
-    if (await guarded.flush()) await operation?.start(captureDraftReloadWitness());
+    const validate = await guarded.flush();
+    if (validate) await operation?.start(validate);
   };
 
   return <div className="space-y-2">

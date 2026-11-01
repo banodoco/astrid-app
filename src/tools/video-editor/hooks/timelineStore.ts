@@ -406,6 +406,7 @@ function createInitialChromeSlice(): TimelineChromeContextValue {
     flushPendingSave: () => Promise.resolve(0),
     preserveTimelineDraftForReload: noopAsync,
     isTimelineDraftDurableForReload: () => false,
+    isTimelineSavePending: () => true,
     recoveryDraft: null,
     retryRecoveredDraft: noop,
     discardRecoveredDraft: noop,

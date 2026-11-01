@@ -257,7 +257,7 @@ export function runtimeFixture(options: RuntimeFixtureOptions = {}) {
       headRevisionId = `bootstrap-${timelineId}`;
       revisions.clear();
       revisionOrder.length = 0;
-      config = { clips: [], tracks: [] } as typeof config;
+      config = { ...createDefaultTimelineConfig(), clips: [], tracks: [] };
       registry = { assets: {} };
       addRevision(headRevisionId, { payload: { config, registry: {}, clips: [], occurrences: [] },
         createdAt: nextCreatedAt(), contentDigest: FIXTURE_DIGEST_1 });

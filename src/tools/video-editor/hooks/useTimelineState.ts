@@ -396,6 +396,7 @@ function useTimelineChromeContextValue({
   flushPendingSave,
   preserveTimelineDraftForReload,
   isTimelineDraftDurableForReload,
+  isTimelineSavePending,
   recoveryDraft,
   retryRecoveredDraft,
   discardRecoveredDraft,
@@ -422,6 +423,7 @@ function useTimelineChromeContextValue({
   flushPendingSave: () => Promise<number>;
   preserveTimelineDraftForReload: () => Promise<void>;
   isTimelineDraftDurableForReload: () => boolean;
+  isTimelineSavePending: () => boolean;
   recoveryDraft: ReturnType<typeof useTimelineSave>['recoveryDraft'];
   retryRecoveredDraft: ReturnType<typeof useTimelineSave>['retryRecoveredDraft'];
   discardRecoveredDraft: ReturnType<typeof useTimelineSave>['discardRecoveredDraft'];
@@ -476,6 +478,7 @@ function useTimelineChromeContextValue({
     flushPendingSave,
     preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload,
+    isTimelineSavePending,
     recoveryDraft,
     retryRecoveredDraft,
     discardRecoveredDraft,
@@ -526,6 +529,7 @@ function useTimelineChromeContextValue({
     flushPendingSave,
     preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload,
+    isTimelineSavePending,
     saveStatus,
     setScaleWidth,
     startRender,
@@ -1231,6 +1235,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     flushPendingSave: save.flushPendingSave,
     preserveTimelineDraftForReload: save.preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload: save.isTimelineDraftDurableForReload,
+    isTimelineSavePending: save.isTimelineSavePending,
     recoveryDraft: save.recoveryDraft,
     retryRecoveredDraft: save.retryRecoveredDraft,
     discardRecoveredDraft: save.discardRecoveredDraft,

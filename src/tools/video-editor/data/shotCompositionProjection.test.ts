@@ -79,7 +79,7 @@ describe('canonical shot-composition downstream projection', () => {
     expect(guard.unknownClipTypes).toEqual(['unknown-custom']);
   });
 
-  it('merges shot-only lanes around shared picture layers and preserves authored properties', () => {
+  it('preserves fixture layer order and properties inside the occurrence while merging audio lanes', () => {
     const composition = withOccurrenceRevision(prepared, 0, (timeline) => ({
       ...timeline,
       tracks: orderFixture.shot_tracks,
@@ -89,10 +89,21 @@ describe('canonical shot-composition downstream projection', () => {
       tracks: orderFixture.film_tracks.map((track) => ({ ...track, kind: track.kind === 'audio' ? 'audio' as const : 'visual' as const })),
       clips: [], registry: {},
     });
-    expect(projection.config.tracks.map((track) => track.id)).toEqual([...orderFixture.expected_order, 'video', 'audio']);
-    expect(projection.config.tracks.find((track) => track.id === 'fx')).toMatchObject(
-      orderFixture.shot_tracks.find((track) => track.id === 'fx')!,
-    );
+    // The joined Timeline model isolates child visuals by occurrence; shared
+    // parent layer names must not collapse the child's authored stack.
+    expect(projection.config.tracks.map((track) => track.id)).toEqual([
+      'occ-1~chrome', 'occ-1~type', 'occ-1~fx', 'occ-1~sprite', 'occ-1~plate',
+      'occ-1~video', 'occ-1~audio', 'occ-2~video', 'occ-3~video', 'occ-4~video', 'occ-5~video',
+      'picture', 'sprite', 'plate', 'vo', 'music', 'sfx', 'audio',
+    ]);
+    expect(projection.config.tracks.find((track) => track.id === 'occ-1~fx')).toMatchObject({
+      ...orderFixture.shot_tracks.find((track) => track.id === 'fx')!,
+      id: 'occ-1~fx', app: { group: { id: 'occ-1', sourceTrack: 'fx' } },
+    });
+    const audioIds = new Set([...orderFixture.film_tracks, ...orderFixture.shot_tracks]
+      .filter(track => track.kind === 'audio').map(track => track.id));
+    expect(projection.config.tracks.filter(track => track.kind === 'audio').map(track => track.id))
+      .toEqual([...orderFixture.expected_order.filter(id => audioIds.has(id)), 'audio']);
   });
 
   it('keeps overlapping missing-row occurrences in occurrence order within one fallback block', () => {

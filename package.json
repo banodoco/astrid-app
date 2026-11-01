@@ -132,7 +132,7 @@
     "typecheck:strict-probe": "npm run typecheck:strict-islands"
   },
   "dependencies": {
-    "@banodoco/timeline-composition": "file:vendor/timeline-composition",
+    "@banodoco/timeline-composition": "file:vendor/artifacts/banodoco-timeline-composition-0.0.17.tgz",
     "@banodoco/timeline-ops": "file:vendor/timeline-ops",
     "@banodoco/timeline-schema": "file:vendor/timeline-schema",
     "@banodoco/timeline-theme-2rp": "file:vendor/timeline-theme-2rp",

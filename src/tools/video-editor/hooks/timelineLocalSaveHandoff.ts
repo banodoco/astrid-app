@@ -526,9 +526,12 @@ export function createTimelineLocalSaveHandoff(options: {
             commands!.splice(1, 0, { schema_version: 1, op: 'doc.patch', version: '1', select: null,
               args: { changes: patch.changes }, created: patch.created as string[] });
             mediaReads = [];
-            mediaSteps = commands!.map((_, index) => index === 1
+            const mappedSteps = commands!.map<NonNullable<CommitRequest['steps']>[number]>((_, index) => index === 1
               ? { ...patch.step as NonNullable<CommitRequest['steps']>[number], command_ordinals: [index], patch: patch.changes as NonNullable<CommitRequest['steps']>[number]['patch'] }
               : { id: crypto.randomUUID(), label: mediaLabel, intent: mediaLabel, tags: [], command_ordinals: [index], patch: [] });
+            const [firstStep, ...remainingSteps] = mappedSteps;
+            if (!firstStep) refuse('prepared media command has no steps');
+            mediaSteps = [firstStep, ...remainingSteps];
           }
         }
         // Verified parent recipes preserve the complete child closure cloned above.
@@ -634,8 +637,10 @@ export function createTimelineLocalSaveHandoff(options: {
           }
         }
         // The encoder supplies guards and created IDs; these bytes are never a wire DTO.
-        const pending = commands ? options.session.append({ before: toOutboxJson(before), after: toOutboxJson(after),
-          label: mediaLabel, commands,
+        const firstCommand = commands?.[0];
+        if (commands && !firstCommand) refuse('prepared media command is empty');
+        const pending = commands && firstCommand ? options.session.append({ before: toOutboxJson(before), after: toOutboxJson(after),
+          label: mediaLabel, commands: [firstCommand, ...commands.slice(1)],
           ...(mediaReads && mediaSteps ? { reads: mediaReads, steps: mediaSteps,
             rationale: mediaSteps[0].intent, group_id: mediaSteps[0].id } : {}) }) : options.session.appendDocument({ before, after,
           roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],

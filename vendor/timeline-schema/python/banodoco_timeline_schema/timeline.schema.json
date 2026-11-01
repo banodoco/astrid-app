@@ -283,11 +283,20 @@
         "entrance": {
           "type": "object",
           "properties": {
+            "id": {
+              "type": "string"
+            },
             "type": {
               "type": "string"
             },
             "duration": {
               "type": "number"
+            },
+            "durationFrames": {
+              "type": "number"
+            },
+            "easing": {
+              "type": "string"
             },
             "intensity": {
               "type": "number"
@@ -302,11 +311,20 @@
         "exit": {
           "type": "object",
           "properties": {
+            "id": {
+              "type": "string"
+            },
             "type": {
               "type": "string"
             },
             "duration": {
               "type": "number"
+            },
+            "durationFrames": {
+              "type": "number"
+            },
+            "easing": {
+              "type": "string"
             },
             "intensity": {
               "type": "number"

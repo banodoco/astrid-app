@@ -207,7 +207,7 @@ const PackageAnimation: FC<{
   animation: ClipAnimation;
   durationInFrames: number;
   fps: number;
-  phase: AnimationPhase;
+  phase: Extract<AnimationPhase, 'entrance' | 'exit'>;
 }> = ({ content, clip, animation, durationInFrames, fps, phase }) => {
   const frame = useCurrentFrame();
   const theme = useTheme();

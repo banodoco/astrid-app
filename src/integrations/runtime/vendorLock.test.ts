@@ -152,6 +152,29 @@ describe('runtime.lock.json', () => {
     ].sort());
   });
 
+  it.each([false, true])('provisional sync verifies exact Git bytes without qualifying a stale producer manifest (modified=%s)', modified => {
+    const f = fixture({ twoArtifacts: true, manifestHashMatches: false });
+    try {
+      cpSync(path.join(ROOT, 'scripts/sync-runtime-client.mjs'), path.join(f.consumer, 'scripts/sync-runtime-client.mjs'));
+      const before = readFileSync(f.lockFile);
+      if (modified) writeFileSync(path.join(f.producer, 'b.txt'), 'uncommitted bytes');
+      const sync = () => execFileSync(process.execPath, [path.join(f.consumer, 'scripts/sync-runtime-client.mjs'), f.producer, '--provisional'], { stdio: 'pipe' });
+      if (modified) {
+        expect(sync).toThrow();
+        expect(readFileSync(f.lockFile)).toEqual(before);
+        expect(readFileSync(path.join(f.consumer, 'consumer/b.txt'), 'utf8')).toBe('committed artifact B\n');
+      } else {
+        expect(sync().toString()).toContain('PROVISIONAL');
+        const lock = JSON.parse(readFileSync(f.lockFile, 'utf8'));
+        expect(lock.source_commit).toBe(f.commit);
+        expect(lock.producer_version).toBe(`provisional:${f.commit}`);
+        expect(lock.provisional.reason).toContain('I-AP-07');
+        expect(run(f, 'check', false).status).toBe(0);
+        expect(run(f, 'check', true).status).toBe(1);
+      }
+    } finally { clean(f); }
+  });
+
   it('checks all consumer locks locally', () => {
     expect(LOCKS).toContain('config/astrid-cli-surface/vendor.lock.json');
     for (const lock of LOCKS) {

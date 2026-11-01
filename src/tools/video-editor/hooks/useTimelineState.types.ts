@@ -250,6 +250,7 @@ export interface TimelineChromeContextValue {
   flushPendingSave: () => Promise<number>;
   preserveTimelineDraftForReload: () => Promise<void>;
   isTimelineDraftDurableForReload: () => boolean;
+  isTimelineSavePending: () => boolean;
   /**
    * One-slot recovery draft (plan-v5 B9): non-null when a previous session
    * left unsaved work. The shell offers Retry / Discard.

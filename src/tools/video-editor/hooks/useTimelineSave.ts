@@ -1,4 +1,5 @@
 import { withTimelineBasisDiagnostics } from '../lib/timeline-basis-diagnostics.ts';
+import { invalidateDraftReload, recordDraftReloadFailure, registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import { type AstridElementOperationAdapter, type ElementTimelineRoutes, type ElementTimelineDocument } from '../runtime/element-adapter.ts';
 import type { AstridAgentElementContext } from '../runtime/element-contract.ts';
 import { persistedTranscriptItems } from '../data/typed/projectTranscript.ts';
@@ -7,6 +8,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -126,12 +128,14 @@ export function useTimelineSave(
   >(null);
   const [localSaveState, setLocalSaveState] = useState<LocalSaveState | null>(null);
   const localOwner = useMemo(() => ({ provider, timelineId, closed: false, started: false, generation: 0,
+    initialization: 'pending' as 'pending' | 'ready' | 'error', operations: 0, operationError: false, failedOutbox: false,
     headKey: '', recovered: false,
     retirement: undefined as Promise<void> | undefined,
     ready: undefined as Promise<TimelineLocalSaveHandoff> | undefined,
     handoff: undefined as TimelineLocalSaveHandoff | undefined,
     session: undefined as LocalSaveSession | undefined }), [provider, timelineId]);
   const usesLocalDocumentSave = Boolean(provider.loadTimelineCommandBasis && provider.commitTimeline && provider.getRecoverableIdentity);
+  const localOperationBoundaryRef = useRef(invalidateDraftReload);
   // Stable from the first render: a gesture during assembly cannot fall through
   // to the old snapshot writer while the verified original is being loaded.
   const localDocumentSave = useMemo<TimelineLocalSaveHandoff | undefined>(() => usesLocalDocumentSave ? {
@@ -161,22 +165,33 @@ export function useTimelineSave(
       if (localOwner.closed || !localOwner.ready) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
       const handoff = await localOwner.ready;
       if (localOwner.closed) throw new TimelineSaveError('Local save session was replaced; draft retained');
-      return handoff.flush();
+      try { return await handoff.flush(); }
+      catch (error) { recordDraftReloadFailure(); throw error; }
     },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
     canUndo: () => localOwner.handoff?.canUndo() ?? false,
     canRedo: () => localOwner.handoff?.canRedo() ?? false,
     undo: async () => {
-      const handoff = await localOwner.ready;
-      if (localOwner.closed || !handoff) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
-      try { await handoff.undo(); }
-      finally { if (!localOwner.closed) setLocalSaveState((current) => current ? { ...current } : current); }
+      localOperationBoundaryRef.current();
+      localOwner.operations++;
+      try {
+        const handoff = await localOwner.ready;
+        if (localOwner.closed || !handoff) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
+        await handoff.undo();
+        localOwner.operationError = false;
+      } catch (error) { localOwner.operationError = true; recordDraftReloadFailure(); throw error; }
+      finally { localOwner.operations--; if (!localOwner.closed) setLocalSaveState((current) => current ? { ...current } : current); }
     },
     redo: async () => {
-      const handoff = await localOwner.ready;
-      if (localOwner.closed || !handoff) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
-      try { await handoff.redo(); }
-      finally { if (!localOwner.closed) setLocalSaveState((current) => current ? { ...current } : current); }
+      localOperationBoundaryRef.current();
+      localOwner.operations++;
+      try {
+        const handoff = await localOwner.ready;
+        if (localOwner.closed || !handoff) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
+        await handoff.redo();
+        localOwner.operationError = false;
+      } catch (error) { localOwner.operationError = true; recordDraftReloadFailure(); throw error; }
+      finally { localOwner.operations--; if (!localOwner.closed) setLocalSaveState((current) => current ? { ...current } : current); }
     },
   } : undefined, [localOwner, usesLocalDocumentSave]);
   useEffect(() => {
@@ -226,6 +241,8 @@ export function useTimelineSave(
       // A clean poll/reload establishes a new original, after retiring the old
       // display owner. Dirty chains retain their original physical bindings.
       localOwner.generation++;
+      localOwner.initialization = 'pending';
+      invalidateDraftReload();
       previousDisposal = localOwner.session.dispose();
       localOwner.session = undefined;
       localOwner.handoff = undefined;
@@ -322,6 +339,7 @@ export function useTimelineSave(
           send: (request, key) => provider.commitTimeline!(request, key),
           loadLatest: () => provider.loadTimelineCommandBasis!(timelineId),
           changed: (state) => {
+            if (isCurrent() && ['retry', 'blocked', 'conflict', 'error'].includes(state.status)) recordDraftReloadFailure();
             emitTimelineSaveDiagnostic('session-changed', () => ({ owner: localOwner, timelineId,
               state, current: isCurrent(), closed: localOwner.closed, generation,
               sessionPresent: Boolean(localOwner.session) }));
@@ -384,6 +402,7 @@ export function useTimelineSave(
               receipt: { configVersion: configVersionRef.current, head: adoptedSource.head! } };
           } });
         localOwner.handoff = handoff;
+        localOwner.initialization = 'ready';
         emitTimelineSaveDiagnostic('handoff-ready', () => ({ owner: localOwner, timelineId,
           basis: verified, basisStatus: 'ready', current: isCurrent(), generation, sessionPresent: Boolean(localOwner.session),
           mounted: localDataRef.current }));
@@ -391,6 +410,7 @@ export function useTimelineSave(
         return handoff;
       })();
       void localOwner.ready.catch((error: unknown) => {
+        if (isCurrent()) { localOwner.initialization = 'error'; recordDraftReloadFailure(); }
         emitTimelineSaveDiagnostic('owner-error', () => ({ error, owner: localOwner, timelineId,
           closed: localOwner.closed, current: isCurrent(), generation, sessionPresent: Boolean(localOwner.session) }));
         if (isCurrent()) setLocalSaveState({ status: 'error', recoverableOwners: [],
@@ -434,6 +454,49 @@ export function useTimelineSave(
     diagnosticOwner: localOwner,
   });
   const { clearDeferredRecoverySave, resumeDeferredRecoverySave } = persistence;
+  localOperationBoundaryRef.current = persistence.invalidateTimelineRecovery;
+  const isTimelineSavePending = useCallback(() => isDataProviderPersistenceEnabled(provider) && (persistence.isTimelineSavePending()
+    || Boolean(localDocumentSave && (localOwner.initialization !== 'ready'
+      || localOwner.session?.getState().status !== 'saved'))
+    || localOwner.operations > 0 || localOwner.operationError),
+  [persistence.isTimelineSavePending, localDocumentSave, localOwner, provider]);
+  const guardOwner = useMemo(() => ({
+    read: isTimelineSavePending,
+    flush: async () => {},
+    reload: async () => {},
+    durable: (): boolean => false,
+  }), [localOwner]);
+  guardOwner.read = isTimelineSavePending;
+  guardOwner.flush = async () => {
+    if (localOwner.closed) throw new Error('Timeline owner closed with unresolved work. Reopen and recover the draft.');
+    if (localOwner.operations) throw new Error('Timeline operation is still pending.');
+    if (localDocumentSave && !localOwner.ready) throw new Error('Timeline identity is not ready.');
+    const handoff = localDocumentSave ? await localOwner.ready : undefined;
+    // Captures must settle before a clean-session flush can adopt canonical data.
+    await persistence.flushTimelineSaveForUpdate();
+    if (handoff) {
+      if (localOwner.session?.getState().status !== 'saved') await handoff.flush();
+      if (localOwner.failedOutbox && localOwner.session?.getState().status === 'saved') {
+        localOwner.operationError = false;
+        localOwner.failedOutbox = false;
+      }
+    }
+    if (isTimelineSavePending()) throw new Error('Timeline owner has unresolved work.');
+  };
+  guardOwner.reload = async () => {
+    try { await guardOwner.flush(); }
+    catch {
+      if (localOwner.closed || localOwner.operations || localOwner.operationError) throw new Error('Timeline owner has unresolved work.');
+      await persistence.preserveTimelineDraftForReload();
+    }
+  };
+  guardOwner.durable = () => !isTimelineSavePending() || (!localOwner.operations
+    && !localOwner.operationError && persistence.isTimelineDraftDurableForReload());
+  useLayoutEffect(() => isDataProviderPersistenceEnabled(provider) ? registerDraftSafeReloadGuard({
+    label: 'Timeline owner', retainUnresolved: true,
+    flush: () => guardOwner.flush(), isDirty: () => guardOwner.read(),
+    flushForReload: () => guardOwner.reload(), isDirtyForReload: () => !guardOwner.durable(),
+  }) : undefined, [guardOwner, provider]);
   const resumeDeferredRecoverySaveRef = useRef(resumeDeferredRecoverySave);
   resumeDeferredRecoverySaveRef.current = resumeDeferredRecoverySave;
 
@@ -520,9 +583,11 @@ export function useTimelineSave(
     const actionGenerationAtCheck = recoveryActionGenerationRef.current;
     let cancelled = false;
     let completed = false;
-    // Best-effort: IndexedDB unavailable (private mode) or a corrupt store
-    // simply means no recovery offer; never an unhandled rejection.
-    void loadTimelineDraft(recoveryKey)
+    let discoveryFailed = false;
+    void Promise.resolve().then(() => {
+      if (typeof indexedDB === 'undefined') throw new Error('Timeline recovery storage is unavailable.');
+      return loadTimelineDraft(recoveryKey);
+    })
       .then((record) => {
         if (cancelled || !record
           || recoveryCheckedScopeRef.current !== recoveryScope
@@ -576,11 +641,12 @@ export function useTimelineSave(
         offerRecovery(record);
       })
       .catch(() => {
-        // no recovery offer
+        discoveryFailed = true;
+        recordDraftReloadFailure();
       }).finally(() => {
         completed = true;
         if (!cancelled && recoveryActionGenerationRef.current === actionGenerationAtCheck) {
-          recoveryActiveRef.current = recoveryPendingRef.current;
+          recoveryActiveRef.current = discoveryFailed || recoveryPendingRef.current;
           if (!recoveryActiveRef.current) resumeDeferredRecoverySaveRef.current();
         }
       });
@@ -738,6 +804,20 @@ export function useTimelineSave(
     ownsRegistryMutation, canRollbackRegistryMutation, rollbackRegistryMutation]);
 
   const { dataRef: elementDataRef, commitData: commitElementData } = commit;
+  const runElementSave = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
+    persistence.invalidateTimelineRecovery();
+    localOwner.operations++;
+    try {
+      const result = await operation();
+      localOwner.operationError = false;
+      return result;
+    } catch (error) {
+      localOwner.operationError = true;
+      localOwner.failedOutbox = Boolean(localOwner.session && localOwner.session.getState().status !== 'saved');
+      recordDraftReloadFailure();
+      throw error;
+    } finally { localOwner.operations--; }
+  }, [localOwner, persistence.invalidateTimelineRecovery]);
   const { canonicalReloadInProgressRef: elementReloadRef, isConflictExhaustedRef: elementConflictRef,
     flushPendingSave: flushElementSave } = persistence;
   const elementTimelineRoutes = useMemo<ElementTimelineRoutes>(() => {
@@ -756,7 +836,7 @@ export function useTimelineSave(
         if (id !== timelineId) throw new TimelineSaveError('Element timeline scope changed');
         return currentDocument();
       },
-      async save(id, input) {
+      save: (id, input) => runElementSave(async () => {
         const original = structuredClone(input.original);
         const checkCurrent = () => {
           input.assertAuthority?.();
@@ -796,11 +876,11 @@ export function useTimelineSave(
           await flushElementSave();
         }
         return currentDocument();
-      },
+      }),
     };
   }, [elementDataRef, commitElementData, timelineId, timelineEditability, localDocumentSave,
     localOwner, elementReloadRef,
-    elementConflictRef, flushElementSave, resolveAssetUrl]);
+    elementConflictRef, flushElementSave, resolveAssetUrl, runElementSave]);
 
   const commitApplyEdit = commit.applyEdit;
   const applyEdit = useCallback<ReturnType<typeof useTimelineCommit>['applyEdit']>((mutation, options) => {
@@ -811,9 +891,9 @@ export function useTimelineSave(
     if (!owner || owner.context !== options.gestureBasis.context) {
       toast.error('Element parameter editor owner changed or is unavailable; draft retained'); return;
     }
-    void saveElementParameterEdit(current, mutation, options.gestureBasis, elementTimelineRoutes, timelineId, owner.adapter.captureForTurn())
+    void runElementSave(() => saveElementParameterEdit(current, mutation, options.gestureBasis!, elementTimelineRoutes, timelineId, owner.adapter.captureForTurn()))
       .catch(error => toast.error(error instanceof Error ? error.message : String(error)));
-  }, [commitApplyEdit, elementDataRef, elementTimelineRoutes, timelineId, toast]);
+  }, [commitApplyEdit, elementDataRef, elementTimelineRoutes, timelineId, toast, runElementSave]);
 
   return {
     elementTimelineRoutes,
@@ -831,6 +911,7 @@ export function useTimelineSave(
     flushPendingSave: persistence.flushPendingSave,
     preserveTimelineDraftForReload: persistence.preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload: persistence.isTimelineDraftDurableForReload,
+    isTimelineSavePending,
     registrationOwner,
     setSelectedTrackId: commit.setSelectedTrackId,
     applyEdit,

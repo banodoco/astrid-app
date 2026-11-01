@@ -1,4 +1,5 @@
 import { toast } from '@/shared/components/ui/runtime/sonner.tsx';
+import { invalidateDraftReload, recordDraftReloadFailure } from '@/shared/lib/updates/draftSafeReload.ts';
 import { persistedTranscriptItems } from '../data/typed/projectTranscript.ts';
 import { useCallback, useContext, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { useMutation } from '@tanstack/react-query';
@@ -139,6 +140,12 @@ interface PersistenceSession {
   uncertainThroughSeq: number;
   activeAttempts: Set<SaveAttempt>;
   cancelledRanges: Array<{ from: number; through: number }>;
+  captures?: Set<Promise<void>>;
+  captureFailure?: unknown;
+  recoveryWrites?: number;
+  storageFailure?: unknown;
+  retiredPending?: boolean;
+  editFailure?: boolean;
 }
 
 interface ScheduledSave {
@@ -203,6 +210,9 @@ export interface UseTimelinePersistenceResult {
   /** Preserve the current document in the owned IndexedDB recovery slot when its Runtime cannot acknowledge a save. */
   preserveTimelineDraftForReload: () => Promise<void>;
   isTimelineDraftDurableForReload: () => boolean;
+  isTimelineSavePending: () => boolean;
+  flushTimelineSaveForUpdate: () => Promise<void>;
+  invalidateTimelineRecovery: () => void;
   captureSaveTarget: (targetSeq?: number) => TimelineSaveTarget;
   flushSaveTarget: (target: TimelineSaveTarget) => Promise<number>;
   discardUncommittedSaveTarget: (target: TimelineSaveTarget, error: unknown) => boolean;
@@ -305,6 +315,11 @@ export function useTimelinePersistence({
     || activeTargetRef.current.savedSeqRef !== savedSeqRef
     || activeTargetRef.current.configVersionRef !== configVersionRef
   ) {
+    const old = activeTargetRef.current;
+    old.retiredPending = Boolean(old.acknowledgedSeq < old.editSeqRef.current
+      || old.activeAttempts.size || old.captures?.size || old.captureFailure || old.recoveryWrites
+      || old.storageFailure || pendingSaveRef.current || deferredSaveRef.current || deferredDuringRecoveryRef.current
+      || deferredDuringReloadRef.current || reloadInProgressRef.current || saveTimer.current || old.editFailure);
     // Object identity also protects an A -> B -> A replacement: an old
     // request's receipt must never acknowledge the new session's sequence.
     activeTargetRef.current = { identity: {}, provider, localDocumentSave, timelineId, dataRef, editSeqRef, savedSeqRef, configVersionRef, acknowledgedSeq: -1, generation: 0, uncertainThroughSeq: -1, activeAttempts: new Set(), cancelledRanges: [] };
@@ -686,6 +701,8 @@ export function useTimelinePersistence({
 
     attempt.session.activeAttempts.add(attempt);
     try {
+      await Promise.all([...(attempt.session.captures ?? [])]);
+      if (attempt.session.captureFailure) throw attempt.session.captureFailure;
       await attempt.localCapture;
       await saveMutation.mutateAsync(
         {
@@ -786,6 +803,7 @@ export function useTimelinePersistence({
         },
       );
     } catch (error) {
+      recordDraftReloadFailure();
       // An obsolete request may settle after replacement/unmount. It cannot
       // reject a new session's waiters, update its state, or start a retry.
       if (!isMountedRef.current || activeTargetRef.current !== attempt.session) return;
@@ -1018,10 +1036,13 @@ export function useTimelinePersistence({
   // Recovery writes do not enqueue or recapture Timeline commands.
   const writeRecoverySnapshot = useCallback((snapshot: ReturnType<typeof buildRecoverySnapshot>) => {
     const { draft, draftBaseVersion, recoveryMetadata, draftOwnerId, draftIdentity, baseHead: head } = snapshot;
-    const draftWrite = persistenceEnabled
+    snapshot.session.recoveryWrites = (snapshot.session.recoveryWrites ?? 0) + 1;
+    const draftWrite = (persistenceEnabled
       ? draftWriteChainRef.current
         .catch(() => {})
-        .then(() => saveTimelineDraft(
+        .then(() => {
+          if (typeof indexedDB === 'undefined') throw new Error('Durable timeline storage is unavailable.');
+          return saveTimelineDraft(
           timelineId,
           draft,
           draftBaseVersion,
@@ -1035,8 +1056,12 @@ export function useTimelinePersistence({
             ownerId: draftOwnerId,
             draftIdentity,
           },
-        ))
-      : Promise.resolve();
+        ); })
+      : Promise.resolve()).then(() => { snapshot.session.storageFailure = undefined; }, (error: unknown) => {
+        snapshot.session.storageFailure = error;
+        recordDraftReloadFailure();
+        throw error;
+      }).finally(() => { snapshot.session.recoveryWrites = (snapshot.session.recoveryWrites ?? 1) - 1; });
     draftWriteChainRef.current = draftWrite;
     void draftWrite.catch(() => {});
     return draftWrite;
@@ -1051,9 +1076,21 @@ export function useTimelinePersistence({
     const snapshot = buildRecoverySnapshot(nextData, seq);
     const draftWrite = writeRecoverySnapshot(snapshot);
     // Capture every local edit before debounce coalescing. Retries reuse it.
-    const localCapture = session.localDocumentSave?.capture({
-      ...snapshot.draft, bundle: snapshot.wireBundle, head: snapshot.baseHead,
-    }, gestureBasis);
+    const captures = session.captures ??= new Set();
+    let localCapture: Promise<void> | undefined;
+    if (session.localDocumentSave) {
+      try {
+        localCapture = session.localDocumentSave.capture({
+          ...snapshot.draft, bundle: snapshot.wireBundle, head: snapshot.baseHead,
+        }, gestureBasis);
+      } catch (error) { localCapture = Promise.reject(error); }
+      localCapture = localCapture.catch((error: unknown) => {
+        session.captureFailure = error;
+        recordDraftReloadFailure();
+        throw error;
+      }).finally(() => { captures.delete(localCapture!); });
+      captures.add(localCapture);
+    }
     void localCapture?.catch(() => {});
     const scheduledSave: ScheduledSave = { ...snapshot, draftWrite, localCapture };
     latestScheduledSaveRef.current = scheduledSave;
@@ -1065,6 +1102,7 @@ export function useTimelinePersistence({
     options?: Parameters<ScheduleSaveFn>[1],
     captured?: ScheduledSave,
   ) => {
+    if (!captured) invalidateDraftReload();
     reloadPreservedSeqRef.current = null;
     emitTimelineSaveDiagnostic('schedule', () => ({ timelineId, owner: diagnosticOwner ?? session.identity,
       mounted: getDataRef().current, source: nextData, gesture: options?.gestureBasis,
@@ -1257,20 +1295,25 @@ export function useTimelinePersistence({
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
       }
-      if (isSavingRef.current) {
-        pendingSaveRef.current = createScheduledSave(latest, saveSeq);
-        return;
-      }
-      if (errorRetryTimer.current) {
-        pendingSaveRef.current = createScheduledSave(latest, saveSeq);
-        return;
-      }
       const latestScheduled = latestScheduledSaveRef.current;
       const save = latestScheduled?.session === session
+        && latestScheduled.generation === session.generation
         && latestScheduled.seq === saveSeq
         && latestScheduled.data.stableSignature === latest.stableSignature
         ? latestScheduled
         : createScheduledSave(latest, saveSeq);
+      if (isSavingRef.current || errorRetryTimer.current) {
+        // A barrier must reuse the original capture. In particular, a second
+        // flush of the in-flight sequence must not append the same edit again.
+        const alreadyAttempted = [...session.activeAttempts].some((attempt) =>
+          attempt.generation === session.generation && attempt.seq === saveSeq);
+        const retrying = errorRetryAttemptRef.current;
+        if (!alreadyAttempted && !(retrying?.session === session
+          && retrying.generation === session.generation && retrying.seq === saveSeq)) {
+          pendingSaveRef.current = save;
+        }
+        return;
+      }
       void doSave(save);
     });
   }, [
@@ -1345,6 +1388,33 @@ export function useTimelinePersistence({
       && reloadPreservedSeqRef.current.seq === editSeqRef.current
       && isMountedRef.current && activeTargetRef.current === session,
   [editSeqRef, session]);
+
+  // This read is synchronous; React's badge can still say saved after a mutation.
+  const isTimelineSavePending = useCallback(() => session.retiredPending ?? Boolean(
+    !getDataRef().current
+    || recoveryActiveRef?.current || recoveryPendingRef?.current
+    || reloadInProgressRef.current || isConflictExhaustedRef.current || isSchemaIncompatibleRef.current
+    || session.acknowledgedSeq < editSeqRef.current || savedSeqRef.current < editSeqRef.current
+    || session.captures?.size || session.captureFailure || session.recoveryWrites || session.storageFailure
+    || session.activeAttempts.size || saveTimer.current || pendingSaveRef.current || deferredSaveRef.current
+    || deferredDuringRecoveryRef.current || deferredDuringReloadRef.current || errorRetryTimer.current
+    || stalledAttemptRef.current
+    || session.editFailure
+  ), [editSeqRef, getDataRef, recoveryActiveRef, recoveryPendingRef, savedSeqRef, session]);
+
+  const flushTimelineSaveForUpdate = useCallback(async () => {
+    await Promise.all([...(session.captures ?? [])]);
+    if (session.captureFailure) throw session.captureFailure;
+    await flushPendingSave();
+    await waitForSaveDrain();
+    await draftWriteChainRef.current;
+    if (isTimelineSavePending()) throw new Error('Timeline edits or storage remain unresolved.');
+  }, [flushPendingSave, isTimelineSavePending, session, waitForSaveDrain]);
+
+  const invalidateTimelineRecovery = useCallback(() => {
+    reloadPreservedSeqRef.current = null;
+    invalidateDraftReload();
+  }, []);
 
   const discardUncommittedSaveTarget = useCallback((target: TimelineSaveTarget, error: unknown) => {
     if (!(error instanceof TimelineSaveBarrierError) || !issuedFailuresRef.current.has(error)
@@ -1523,6 +1593,10 @@ export function useTimelinePersistence({
         session.generation += 1;
         session.cancelledRanges = [];
         session.uncertainThroughSeq = -1;
+        session.captureFailure = undefined;
+        session.editFailure = false;
+        invalidateDraftReload();
+        reloadPreservedSeqRef.current = null;
         latestScheduledSaveRef.current = null;
         editSeqRef.current = savedSeqRef.current;
         session.acknowledgedSeq = savedSeqRef.current;
@@ -1613,7 +1687,12 @@ export function useTimelinePersistence({
     // A durable save receipt acknowledges the edit: clear the watchdog.
     const offSuccess = eventBus.on('saveSuccess', clearWatchdog);
     // An edit was dropped on the null-data path: surface it immediately.
-    const offLost = eventBus.on('lostEdit', () => armWatchdog('lost-edit'));
+    const offLost = eventBus.on('lostEdit', () => {
+      session.editFailure = true;
+      invalidateTimelineRecovery();
+      recordDraftReloadFailure();
+      armWatchdog('lost-edit');
+    });
     return () => {
       offSuccess();
       offLost();
@@ -1622,7 +1701,7 @@ export function useTimelinePersistence({
         watchdogTimer.current = null;
       }
     };
-  }, [armWatchdog, clearWatchdog, eventBus]);
+  }, [armWatchdog, clearWatchdog, eventBus, invalidateTimelineRecovery, session]);
 
   useEffect(() => {
     isConflictExhaustedRef.current = isConflictExhausted;
@@ -1684,6 +1763,9 @@ export function useTimelinePersistence({
     flushPendingSave,
     preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload,
+    isTimelineSavePending,
+    flushTimelineSaveForUpdate,
+    invalidateTimelineRecovery,
     captureSaveTarget,
     flushSaveTarget,
     discardUncommittedSaveTarget,

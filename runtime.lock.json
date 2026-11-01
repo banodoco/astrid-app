@@ -2,7 +2,7 @@
   "files": {
     "src/integrations/runtime/fixtures/responses/events_page_1_200.json": {
       "from": "conformance/responses/events_page_1_200.json",
-      "sha256": "sha256:6aaaabe512589beddddd5ef64f2307c39d365a99565c5a3291a15933a114be0d"
+      "sha256": "sha256:235b4de800c6a234d537c2607682f0ba9a03331af76c664e4bbf890acba285fb"
     },
     "src/integrations/runtime/fixtures/responses/events_page_2_200.json": {
       "from": "conformance/responses/events_page_2_200.json",
@@ -20,10 +20,6 @@
       "from": "conformance/responses/not_found_404.json",
       "sha256": "sha256:4a40fedbeccd345f24944e4af368c50430593d976a923c12af93ba21faa21af6"
     },
-    "src/integrations/runtime/fixtures/responses/publish_conflict_409.json": {
-      "from": "conformance/responses/publish_conflict_409.json",
-      "sha256": "sha256:19d664d035691202da03b22b858456c49983e253c7485a6347baa1cf350eea57"
-    },
     "src/integrations/runtime/fixtures/responses/task_admission_201.json": {
       "from": "conformance/responses/task_admission_201.json",
       "sha256": "sha256:108559a92c9e681e3ade37fa6b567e1eaac3edce221665a07a81c2c2c06bb48c"
@@ -38,19 +34,34 @@
     },
     "src/integrations/runtime/generated-contract-metadata.ts": {
       "from": "packages/typescript/src/contract-metadata.ts",
-      "sha256": "sha256:40d28512cc075627ef99eb76cae81f09d3884d444eeab01a290230a00d7ab1cb"
+      "sha256": "sha256:bdad4005bce0a63cb1ec0428b7e3dbe331c9e1d5c949862626b3f8be92a1581b"
     },
     "src/integrations/runtime/generated.ts": {
       "from": "packages/typescript/src/generated.ts",
-      "sha256": "sha256:e2c9cd98692f264574c7ff8aa17a94c1c3eb569dba6039e42b6f79cc0a9ad640"
+      "sha256": "sha256:11efe9705f5b8c6ae452141ef244ef84280adef13cfcdd860d5719c749e4e34b"
     },
     "vendor/timeline-schema/python/banodoco_timeline_schema/timeline.schema.json": {
       "from": "contract/schemas/timeline-config.schema.json",
-      "sha256": "sha256:f52b82024ecd44a5e6c9c68d5cb326d50d70efe9aaad6f8ac6352ea1c87b97b1"
+      "sha256": "sha256:f870150ffd0e42365c048965e2f7c08efc959c36db76ed4cba59de2e58ab4e08"
+    },
+    "src/integrations/runtime/fixtures/responses/commit_conflict_409.json": {
+      "from": "conformance/responses/commit_conflict_409.json",
+      "sha256": "sha256:e06c5818e9c37a1e1118d3e2df2447808277d148553bb3c418e48b1a3c6e4c08"
+    },
+    "src/integrations/runtime/fixtures/responses/retired_route_410.json": {
+      "from": "conformance/responses/retired_route_410.json",
+      "sha256": "sha256:e3b43083786aae88fe3aabaaf8de631803c6a11610607eb7c3527f999aa80292"
+    },
+    "src/integrations/runtime/timeline-commit-types.ts": {
+      "from": "packages/typescript/src/timeline-commit-types.ts",
+      "sha256": "sha256:b567dcc623d3b3047b931c4337d9f6688efdfa590c9108c3406d0659fa152674"
     }
   },
   "manifest": "contract/artifacts.json",
   "producer": "astrid-runtime",
-  "producer_version": "sha256:360800da9f4cd08cacf15afbb3b49386df295501473de7c024e1a2636559c083",
-  "source_commit": "f75517d86011140e737782f3f75206408ddc1cf9"
+  "producer_version": "provisional:c5991fc501bc8c43c90ef5daf8d15c7f2c5d25fd",
+  "source_commit": "c5991fc501bc8c43c90ef5daf8d15c7f2c5d25fd",
+  "provisional": {
+    "reason": "WIP producer artifact manifest is stale; exact Git bytes for focused tests only. Rebind at I-AP-07."
+  }
 }

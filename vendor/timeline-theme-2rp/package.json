@@ -41,6 +41,6 @@
     "@types/react": "^18.3.0",
     "remotion": "^4.0.434",
     "@remotion/layout-utils": "^4.0.434",
-    "@banodoco/timeline-composition": "file:../timeline-composition"
+    "@banodoco/timeline-composition": "file:../artifacts/banodoco-timeline-composition-0.0.17.tgz"
   }
 }

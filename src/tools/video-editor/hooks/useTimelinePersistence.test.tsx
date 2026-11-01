@@ -22,9 +22,9 @@ import { useClipEditing } from './useClipEditing';
 import { useTimelineCommit } from './useTimelineCommit';
 import { useTimelineOps } from './useTimelineOps';
 import { useEditorBrowserDefaults } from './useEditorBrowserDefaults';
-import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { resetDraftReloadGuardsForTest, useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { RuntimeDataProvider } from '@/integrations/runtime/dataProvider.ts';
-import { PROJECT_ID, TIMELINE_ID, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
+import { PROJECT_ID, TIMELINE_ID, json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
 import { TimelineEventBus } from './useTimelineEventBus';
 import {
   TimelineStoreProvider,
@@ -49,8 +49,6 @@ import { createCommitOutbox, toOutboxJson } from '../commands/commitOutbox.ts';
 import { createLocalSaveSession } from '../commands/localSaveSession.ts';
 import { createTimelineLocalSaveHandoff, type TimelineLocalSaveHandoff } from './timelineLocalSaveHandoff.ts';
 
-import { RuntimeDataProvider } from '@/integrations/runtime/dataProvider.ts';
-import { json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
 import { VideoEditorRuntimeProvider, type VideoEditorRuntimeContextValue } from '../contexts/VideoEditorRuntimeContext.tsx';
 import { useTimelineSave } from './useTimelineSave.ts';
 import { useTimelineTrackManagement } from './useTimelineTrackManagement.ts';
@@ -1067,6 +1065,38 @@ describe('useTimelinePersistence — interaction gating', () => {
     await act(async () => { receipts[1]!(3); });
     await expect(newer).resolves.toBe(3);
     expect(harness.savedSeqRef.current).toBe(2);
+  });
+
+  it('reuses each edit capture when a flush overlaps an in-flight save', async () => {
+    const receipts: Array<(receipt: { configVersion: number; head: { projectId: string; timelineId: string; headRevisionId: string; headPublicationId: string } }) => void> = [];
+    const handoff = {
+      capture: vi.fn(async () => {}),
+      flush: vi.fn(() => new Promise<{ configVersion: number; head: { projectId: string; timelineId: string; headRevisionId: string; headPublicationId: string } }>((resolve) => receipts.push(resolve))),
+      remoteHistoryAvailable: () => false, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(), redo: vi.fn(),
+    } satisfies TimelineLocalSaveHandoff;
+    const harness = setup({ localDocumentSave: handoff });
+    harness.scheduleSave(makeTimelineData('first-capture'));
+    let first!: Promise<number>;
+    let sameSequence!: Promise<number>;
+    await act(async () => { first = harness.result.current.flushPendingSave(); });
+    await act(async () => { sameSequence = harness.result.current.flushPendingSave(); });
+    expect(handoff.capture).toHaveBeenCalledTimes(1);
+
+    harness.editSeqRef.current = 2;
+    harness.scheduleSave(makeTimelineData('second-capture'));
+    let second!: Promise<number>;
+    await act(async () => { second = harness.result.current.flushPendingSave(); });
+    expect(handoff.capture).toHaveBeenCalledTimes(2);
+
+    const head = { projectId: 'project-1', timelineId: 'timeline-1', headRevisionId: 'r1', headPublicationId: 'p1' };
+    await act(async () => { receipts[0]!({ configVersion: 2, head }); });
+    await expect(first).resolves.toBe(2);
+    await expect(sameSequence).resolves.toBe(2);
+    await act(async () => { receipts[1]!({ configVersion: 3, head }); });
+    await expect(second).resolves.toBe(3);
+    expect(handoff.capture).toHaveBeenCalledTimes(2);
+    harness.unmount();
   });
 
   it('reuses a current acknowledged receipt without saving again, but not after session replacement', async () => {
@@ -2800,6 +2830,25 @@ describe('useTimelinePersistence — recovery draft gated by persistence', () =>
     expect(await loadTimelineDraft('timeline-1')).not.toBeNull();
   });
 
+  it('preserves recovery without recapturing an already scheduled edit', async () => {
+    const capture = vi.fn(async () => {});
+    const handoff = {
+      capture, flush: vi.fn(), remoteHistoryAvailable: () => false,
+      canUndo: () => false, canRedo: () => false, undo: vi.fn(), redo: vi.fn(),
+    } satisfies TimelineLocalSaveHandoff;
+    const harness = setup({ persistenceEnabled: true, localDocumentSave: handoff });
+    harness.scheduleSave(makeTimelineData('recovery-only'));
+    await flushMicrotasks();
+    expect(capture).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await harness.result.current.preserveTimelineDraftForReload(); });
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(handoff.flush).not.toHaveBeenCalled();
+    expect(harness.saveTimeline).not.toHaveBeenCalled();
+    expect(await loadTimelineDraft('timeline-1')).not.toBeNull();
+  });
+
   it('keeps guarded reload blocked when its durable recovery write fails', async () => {
     const harness = setup();
     const failure = new Error('IndexedDB full');
@@ -2821,6 +2870,7 @@ describe('useTimelinePersistence — recovery draft gated by persistence', () =>
 });
 
 describe('useTimelinePersistence — mounted pointer to outbox', () => {
+  afterEach(() => resetDraftReloadGuardsForTest());
   const projectId = 'project-commit';
   const timelineId = 'timeline-1';
   const head = { projectId, timelineId, headRevisionId: 'r0', headPublicationId: 'publication-current' };

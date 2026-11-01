@@ -64,6 +64,8 @@ import {
   registerEditorTourOverlay,
 } from "@/tools/video-editor/tour/timeline/editorTourSlot.tsx";
 
+import { runtimeFixture } from "@/test/fakeWorkspaceRuntime.ts";
+
 const browserStorage = new Map<string, string>();
 const localStorageFixture: Storage = {
   get length() {
@@ -584,6 +586,8 @@ const L04_PROJECT = "l04-project-id";
 const L04_TIMELINE = "l04-timeline";
 const L04_HEAD = "l04-head-1";
 const L04_NEXT_HEAD = "l04-head-2";
+const L04_PUBLICATION = "l04-publication-1";
+const L04_NEXT_PUBLICATION = "l04-publication-2";
 const L04_TOKEN = `sha256:${"a".repeat(64)}`;
 const L04_UNKNOWN = `sha256:${"b".repeat(64)}`;
 const L04_CARD_URL = `/api/runtime/v1/objects/${encodeURIComponent(L04_TOKEN)}`;
@@ -657,6 +661,25 @@ function makeL04Transport() {
           version: 1,
           created_at: "2026-10-08T00:00:00Z",
         });
+      if (
+        method === "GET" &&
+        path === `/v1/projects/${L04_PROJECT}/timelines/${L04_TIMELINE}`
+      ) {
+        const head = revised ? L04_NEXT_HEAD : L04_HEAD;
+        return response({
+          project_id: L04_PROJECT,
+          timeline_id: L04_TIMELINE,
+          version: 1,
+          name: "Opening name",
+          archived: false,
+          shots: [],
+          references: [],
+          head_revision_id: head,
+          head_publication_id: revised
+            ? L04_NEXT_PUBLICATION
+            : L04_PUBLICATION,
+        });
+      }
       const inspection =
         /^\/v1\/projects\/([^/]+)\/timelines\/([^/]+)\/inspect$/.exec(path);
       if (method === "POST" && inspection) {
@@ -1521,6 +1544,30 @@ describe("VideoEditorPage", () => {
     expect(state.runtimeCtor).toHaveBeenCalledWith(
       expect.objectContaining({ projectId: "project-canonical-id" }),
     );
+  });
+
+  it("creates the first timeline from a fresh project when legacy writes return 410", async () => {
+    const fixture = runtimeFixture({ projectId: "project-canonical-id", timelineExists: false });
+    const client = new AstridRuntimeClient({ baseUrl: "http://runtime.test", transport: fixture.transport });
+    const actual = await vi.importActual<typeof import("@/integrations/runtime/createDefaultTimeline.ts")>(
+      "@/integrations/runtime/createDefaultTimeline.ts");
+    state.discovery.projects = [{ slug: "fresh-project", name: "Fresh project", project_id: "project-canonical-id" }];
+    state.discovery.timelines = [];
+    state.ensureProjectHasTimeline.mockRejectedValueOnce(new Error("temporary connection failure")).mockImplementation(async () => {
+      const timelineId = await actual.ensureProjectHasTimeline("project-canonical-id", client);
+      state.discovery.timelines = [{ timeline_id: timelineId, name: "Main" }];
+      return timelineId;
+    });
+    // First automatic setup can be retried using the same visible action.
+    renderPage("/tools/video-editor?project=project-canonical-id");
+    await waitFor(() => expect(state.ensureProjectHasTimeline).toHaveBeenCalledTimes(1));
+    await userEvent.click(await screen.findByRole("button", { name: "Create first timeline" }));
+    const provider = await screen.findByTestId("video-editor-provider");
+    const created = fixture.requests.find((request) => request.method === "POST" && request.path.endsWith("/timelines"));
+    expect(provider).toHaveAttribute("data-timeline-id", (created?.body as { timeline_id: string }).timeline_id);
+    expect(fixture.read().parentComposition.clips).toEqual([]);
+    expect(fixture.read().parentComposition.config.tracks).toEqual([]);
+    expect(fixture.requests.filter(({ method, path }) => method === "POST" && path.endsWith("/composition-revisions"))).toEqual([]);
   });
 
   it("does not retry failed automatic Main timeline creation on every render", async () => {

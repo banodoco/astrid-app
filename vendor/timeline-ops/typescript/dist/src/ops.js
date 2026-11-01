@@ -52,10 +52,8 @@ export function removeClip(timeline, clipId) {
 }
 /**
  * Reposition a clip on its track. `newPosition` is the timeline start time
- * in seconds (the `at` field), matching the existing
- * `ai-timeline-agent/tools/timeline.ts moveClip` handler. Naming
- * preserved per Sprint 3 brief: "newPosition" matches the signature listed
- * in the brief.
+ * in seconds (the `at` field). Naming is preserved per the Sprint 3 brief:
+ * "newPosition" matches the signature listed there.
  */
 export function moveClip(timeline, clipId, newPosition) {
     const idx = findClipIndex(timeline, clipId);

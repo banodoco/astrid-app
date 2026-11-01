@@ -31,7 +31,7 @@ describe('Sprint 5 EFFECT_REGISTRY dispatch (Phase 4d)', () => {
     const entry = THEME_PACKAGE_REGISTRY['section-hook'];
     expect(entry).toBeDefined();
     expect(entry.themeId).toBe('2rp');
-    expect(entry.source).toMatch(/timeline-theme-2rp/);
+    expect(entry.source).toBe('bundled:2rp@0.1.0');
     expect(typeof entry.component).toBe('function');
   });
 

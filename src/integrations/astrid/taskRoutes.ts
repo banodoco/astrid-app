@@ -29,6 +29,15 @@ import { runtimeTaskReadPageSchema, runtimeTaskReadResourceSchema } from './task
 
 const runtimeTaskMutationSchema = runtimeMutationSchema(runtimeTaskResourceSchema);
 
+export type TaskAdmissionReservation = {
+  key: string;
+  reserve(request: { method: string; path: string; body: string; key: string }): Promise<void>;
+  assertCurrent(): void;
+  admitted?(task: BridgeTaskAdmissionResponse['task']): Promise<void>;
+  /** Notify the existing requester only after the whole managed admission settles. */
+  settled?(): Promise<void>;
+};
+
 export type TaskRoutesOptions = {
   /** The project slug every task route is scoped under (`/projects/:slug/…`). */
   projectSlug: string;
@@ -61,14 +70,17 @@ export class AstridLocalTaskRoutes {
   async admit(
     request: BridgeTaskAdmissionRequest,
     idempotencyKey: string,
+    reservation?: TaskAdmissionReservation,
   ): Promise<BridgeTaskAdmissionResponse>;
   async admit(
     request: LegacyBridgeTaskEnvelope,
     idempotencyKey: string,
+    reservation?: TaskAdmissionReservation,
   ): Promise<BridgeTaskAdmissionResponse>;
   async admit(
     request: BridgeTaskAdmissionRequest | LegacyBridgeTaskEnvelope,
     idempotencyKey: string,
+    reservation?: TaskAdmissionReservation,
   ): Promise<BridgeTaskAdmissionResponse> {
     if ('family' in request && !('project' in request)) {
       throw new Error(
@@ -99,16 +111,32 @@ export class AstridLocalTaskRoutes {
       generation_intent: parsed.generation_intent,
       settlement_effect: parsed.settlement_effect,
     };
+    const body = JSON.stringify(canonicalRequest);
+    if (reservation) {
+      if (reservation.key !== idempotencyKey) throw new Error('Placement admission key changed');
+      await reservation.reserve({ method: 'POST', path: '/v1/tasks', body, key: idempotencyKey });
+      reservation.assertCurrent();
+    }
     const response = await this.transport.requestJson(
       '/v1/tasks',
-      { method: 'POST', body: canonicalRequest, headers: { 'Idempotency-Key': idempotencyKey } },
+      { method: 'POST', rawBody: body, headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey } },
       runtimeTaskMutationSchema,
       'task admission',
     );
+    if (reservation && (response.data.project_id !== parsed.project
+      || response.data.idempotency_key !== idempotencyKey || response.data.capability_id !== parsed.capability_id
+      || response.data.capability_digest !== parsed.capability_digest)) {
+      throw new Error('Task response differs from the reserved admission');
+    }
     // Keep the app-facing admission projection stable while making the
     // neutral Runtime resource the only accepted wire shape at this boundary.
     const task = runtimeTaskToAdmittedTask(response.data, this.projectSlug);
     bridgeTaskAdmissionResponseSchema.parse({ task });
+    if (reservation?.admitted) {
+      reservation.assertCurrent();
+      await reservation.admitted(task);
+      reservation.assertCurrent();
+    }
     if (typeof window !== 'undefined') {
       dispatchAppEvent('runtime:task-admitted', { projectId: this.projectSlug });
     }

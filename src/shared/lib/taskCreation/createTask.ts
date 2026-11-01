@@ -1,3 +1,5 @@
+import type { AstridLocalClient } from '@/integrations/astrid/client.ts';
+import type { TaskAdmissionReservation } from '@/integrations/astrid/taskRoutes.ts';
 import { getBridgeTaskClient, mapBridgeTaskStatus } from '@/integrations/astrid/bridgeTaskReads';
 import { BridgeTransportFailure } from '@/integrations/astrid/transport';
 import {
@@ -20,9 +22,11 @@ import {
 import { unsupportedLegacyTaskError } from './legacyBoundary';
 
 const MAX_ATTEMPTS = 2;
-interface CreateTaskOptions {
+export interface CreateTaskOptions {
+  client?: Pick<AstridLocalClient, 'tasks' | 'catalog' | 'objects'>;
+  reservation?: TaskAdmissionReservation;
   signal?: AbortSignal;
-  /** Reserved for producer-side options until their HC-04 migration lands. */
+  /** Retained for existing producer-specific options. */
   [key: string]: unknown;
 }
 
@@ -251,7 +255,7 @@ export async function ingestProjectInputFromUrl(
 }
 
 /** Verify that an existing Runtime CAS ID is authorized for this project. */
-export async function verifyProjectInputObject(project: string, objectId: string): Promise<void> {
+export async function verifyProjectInputObject(project: string, objectId: string, client: Pick<AstridLocalClient, 'objects'> = getBridgeTaskClient(project)): Promise<void> {
   if (!runtimeSha256IdSchema.safeParse(objectId).success) {
     throw new TaskValidationError('Input must be a Runtime sha256 object ID', 'input_object_ids');
   }
@@ -264,7 +268,7 @@ export async function verifyProjectInputObject(project: string, objectId: string
       }
       seenCursors.add(cursor);
     }
-    const page = await getBridgeTaskClient(project).objects.list({ cursor });
+    const page = await client.objects.list({ cursor });
     if (page.items.some((object) => object.object_id === objectId)) return;
     if (page.next_cursor === null) break;
     cursor = page.next_cursor;
@@ -282,21 +286,22 @@ export async function resolveTaskCapability(project: string, capabilityId: strin
   return await getBridgeTaskClient(project).catalog.get(capabilityId);
 }
 
-async function validateAdmissionAuthority(taskParams: BaseTaskParams): Promise<BaseTaskParams> {
+async function validateAdmissionAuthority(taskParams: BaseTaskParams, client?: CreateTaskOptions['client']): Promise<BaseTaskParams> {
   const parsed = bridgeTaskAdmissionRequestSchema.safeParse(taskParams);
   if (!parsed.success) {
     throw new TaskValidationError('Task admission body is not a canonical HC-04 request');
   }
-  const boundDigest = await bindTaskCapability(
-    parsed.data.project,
-    parsed.data.capability_id,
-    parsed.data.capability_digest,
-  );
+  const boundDigest = client ? await client.catalog.bind(parsed.data.capability_id, parsed.data.capability_digest)
+    : await bindTaskCapability(
+      parsed.data.project,
+      parsed.data.capability_id,
+      parsed.data.capability_digest,
+    );
   if (boundDigest !== parsed.data.capability_digest) {
     throw new TaskValidationError('Capability digest does not match Runtime catalog', 'capability_digest');
   }
   for (const objectId of parsed.data.input_object_ids) {
-    await verifyProjectInputObject(parsed.data.project, objectId);
+    await verifyProjectInputObject(parsed.data.project, objectId, client);
   }
   return parsed.data;
 }
@@ -320,11 +325,10 @@ export async function createTask(
   taskParams: BaseTaskParams | LegacyTaskEnvelope,
   options?: CreateTaskOptions,
 ): Promise<TaskCreationResult> {
-  void options;
   if ('project_id' in taskParams) {
     throw unsupportedLegacyTaskError(taskParams.family);
   }
-  const validatedTaskParams = await validateAdmissionAuthority(taskParams);
+  const validatedTaskParams = await validateAdmissionAuthority(taskParams, options?.client);
   const startTime = Date.now();
   const requestId = `${startTime}-${Math.random().toString(36).slice(2, 8)}`;
   const requestContext = {
@@ -335,23 +339,30 @@ export async function createTask(
 
   // Idempotency key stays the same across retries so the bridge
   // deduplicates if the first attempt actually landed.
-  const idempotency_key = generateUUID();
+  const idempotency_key = options?.reservation?.key ?? generateUUID();
 
-  const client = getBridgeTaskClient(validatedTaskParams.project);
+  const client = options?.client ?? getBridgeTaskClient(validatedTaskParams.project);
 
   let lastError: unknown;
 
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      const response = await client.tasks.admit(validatedTaskParams, idempotency_key);
+      const response = options?.reservation
+        ? await client.tasks.admit(validatedTaskParams, idempotency_key, options.reservation)
+        : await client.tasks.admit(validatedTaskParams, idempotency_key);
 
-      return parseTaskCreationResponse(
+      const result = parseTaskCreationResponse(
         {
           task_id: response.task.id,
           status: mapBridgeTaskStatus(response.task.status),
         },
         requestContext,
       );
+      // The requester may observe the durable reservation before this
+      // invocation reaches the POST. Wake it only after the managed admission
+      // has completed successfully, when admitted() has saved the locator.
+      await options?.reservation?.settled?.();
+      return result;
     } catch (err: unknown) {
       lastError = err;
       const durationMs = Date.now() - startTime;

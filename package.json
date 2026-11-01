@@ -109,7 +109,27 @@
     "remotion:audio-resume:patch": "node scripts/patches/remotion-4.0.509-audio-resume.mjs --apply",
     "remotion:audio-resume:check": "node scripts/patches/remotion-4.0.509-audio-resume.mjs --check",
     "remotion:audio-resume:revert": "node scripts/patches/remotion-4.0.509-audio-resume.mjs --revert",
-    "test:remotion-audio-resume-patch": "node --test scripts/patches/remotion-4.0.509-audio-resume.test.mjs scripts/patches/remotion-4.0.509-audio-resume.semantic.test.mjs"
+    "test:remotion-audio-resume-patch": "node --test scripts/patches/remotion-4.0.509-audio-resume.test.mjs scripts/patches/remotion-4.0.509-audio-resume.semantic.test.mjs",
+    "lint:edge": "eslint supabase/functions --ext ts --max-warnings 0",
+    "preview:full": "npm run preview --port 5001",
+    "bun:dev": "bun run dev",
+    "bun:build": "bun run build",
+    "bun:preview": "bun run preview",
+    "bun:install": "bun install",
+    "test:edge": "npm run test:edge:unit && npm run test:edge:smoke",
+    "test:edge:unit": "vitest run --config config/testing/vitest.edge.config.ts",
+    "test:edge:smoke": "vitest run --config config/testing/vitest.edge.smoke.config.ts --testNamePattern=\"Smoke\"",
+    "test:creative-extension": "node scripts/quality/check-creative-lab-extension.mjs",
+    "test:slot:unit": "vitest run --config config/testing/vitest.config.ts src/shared/hooks/__tests__/usePromoteVariantToGeneration.test.ts src/domains/media-lightbox/hooks/useVariantPromotion.test.ts src/tools/video-editor/hooks/useAddVariantAsGeneration.test.tsx",
+    "test:slot:edge": "npm run test:edge:smoke",
+    "test:slot:db": "node scripts/quality/run-slot-pgtap.mjs",
+    "test:slot:e2e": "playwright test --config playwright.config.ts",
+    "slot:first:health": "node scripts/quality/check-slot-first-health.mjs",
+    "check:edge-budget": "node scripts/edge/quality-budget.mjs --check",
+    "quality:schema-drift": "node scripts/quality/check-schema-drift.mjs",
+    "quality:test-fixture-legacy": "node scripts/quality/check-test-fixture-legacy.mjs",
+    "quality:slot-first:audit": "npm run test:slot:unit && npm run test:slot:edge && npm run test:slot:db -- --audit && npm run quality:schema-drift -- --audit && npm run quality:test-fixture-legacy -- --audit && npm run slot:first:health -- --audit && npm run test:slot:e2e",
+    "typecheck:strict-probe": "npm run typecheck:strict-islands"
   },
   "dependencies": {
     "@banodoco/timeline-composition": "file:vendor/timeline-composition",
@@ -145,7 +165,9 @@
     "zustand": "^5.0.12",
     "@remotion/three": "4.0.509",
     "@react-three/fiber": "8.18.0",
-    "three": "0.185.1"
+    "three": "0.185.1",
+    "@supabase/supabase-js": "^2.49.4",
+    "react-joyride": "^2.9.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.9.0",

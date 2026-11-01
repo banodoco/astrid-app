@@ -183,4 +183,3 @@ it.each([
   expect(permissions.query).not.toHaveBeenCalled();
   expect(fetch).not.toHaveBeenCalled();
 });
-

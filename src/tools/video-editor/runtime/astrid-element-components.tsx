@@ -7,6 +7,7 @@ import {
   describeClipCapabilityWith,
   resolveSequenceClipEntry,
 } from '@/tools/video-editor/sequences/registry.ts';
+import { resolvePublicCompositionElementComponent } from './publicCompositionElementRegistry.ts';
 import type {
   AstridDynamicSequenceEntry,
   AstridElementComponentProps,
@@ -77,6 +78,14 @@ export function resolveAstridElementComponent(
   ) {
     const previewOverride = ASTRID_PREVIEW_COMPONENT_OVERRIDES[elementId];
     if (previewOverride) return previewOverride;
+  }
+
+  // Composition owns the public rendering-pack components. They are intentionally
+  // file-less in the installed host, so resolve them through the same package
+  // registry used by the public host before consulting the Astrid source glob.
+  if (descriptor.packId === 'rendering') {
+    const compositionComponent = resolvePublicCompositionElementComponent(elementId, kind);
+    if (compositionComponent) return compositionComponent;
   }
 
   const componentPath = descriptor.componentPath;

@@ -31,6 +31,7 @@ import type {
   TimelinePatchRegistry,
 } from '@/tools/video-editor/hooks/timeline-state-types.ts';
 import type { TimelineStoreApi } from '@/tools/video-editor/hooks/timelineStore.ts';
+import { canonicalJsonStringify } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 
 type UploadedGenerationData = GenerationDropData & {
   assetId?: string;
@@ -64,6 +65,8 @@ export interface UseAssetManagementArgs {
   patchRegistry: TimelinePatchRegistry;
   invalidateAssetRegistry: TimelineInvalidateAssetRegistry;
   resolveAssetUrl: (file: string) => Promise<string>;
+  /** Retained for the pre-A2 caller shape; Runtime-backed asset commands own placement. */
+  commands?: unknown;
 }
 
 export interface UseAssetManagementResult {
@@ -241,6 +244,9 @@ export function useAssetManagement({
       durationSeconds: assetEntry.duration ?? null,
       entry: assetEntry,
       source: 'registered',
+      ...(generationData.mediaImport?.mediaSelection
+        ? { mediaSelection: generationData.mediaImport.mediaSelection }
+        : {}),
     };
   }, []);
 
@@ -282,6 +288,58 @@ export function useAssetManagement({
       insertAtTop,
       removeClipId,
     });
+    if (removeClipId !== undefined && prepared.mediaType === 'image' && prepared.mediaSelection) {
+      const media = prepared.mediaSelection;
+      const existing = current.registry.assets[prepared.assetKey];
+      const composition = current.config.app?.canonicalComposition as {
+        projectId?: string; parentDocumentId?: string; headRevisionId?: string; occurrenceIds?: string[];
+      } | undefined;
+      const identities = current.config.clips.flatMap(clip => clip.app?.canonical ? [clip.app.canonical] : []) as Array<{
+        projectId?: string; parentDocumentId?: string; occurrenceId?: string;
+      }>;
+      if ((composition || identities.length) && (!composition || composition.projectId !== selectedProjectId
+        || composition.occurrenceIds?.length !== 1 || !composition.occurrenceIds[0]
+        || identities.some(identity => identity.projectId !== composition.projectId
+          || identity.parentDocumentId !== composition.parentDocumentId || identity.occurrenceId !== composition.occurrenceIds![0])
+        || (current.head && (current.head.projectId !== composition.projectId
+          || current.head.timelineId !== composition.parentDocumentId || current.head.headRevisionId !== composition.headRevisionId)))) return false;
+      const tracks = current.tracks.filter(track => track.id === trackId);
+      if (forceNewTrack || insertAtTop || tracks.length !== 1 || tracks[0].kind !== 'visual'
+        || tracks[0].role === 'source' || current.rows.filter(row => row.id === trackId).length !== 1
+        || ['active', 'enabled'].some(key => Reflect.get(tracks[0], key) === false)
+        || ['disabled', 'hidden', 'deleted'].some(key => Reflect.get(tracks[0], key) === true)
+        || (current.head && current.head.projectId !== selectedProjectId)
+        || !Number.isFinite(time) || time < 0 || media.asset !== prepared.assetKey
+        || Object.keys(media).sort().join() !== 'asset,catalog_digest,generation_id,object_id,variant_id'
+        || !media.generation_id || !media.variant_id || !/^sha256:[0-9a-f]{64}$/.test(media.object_id)
+        || !/^sha256:[0-9a-f]{64}$/.test(media.catalog_digest)
+        || prepared.entry.media_id !== media.object_id || prepared.entry.generationId !== media.generation_id
+        || prepared.entry.variantId !== media.variant_id
+        || (existing && canonicalJsonStringify(existing) !== canonicalJsonStringify(prepared.entry))) return false;
+      if (!removeClipId.startsWith('uploading-')
+        || current.config.clips.some(clip => clip.id === removeClipId)
+        || !current.meta[removeClipId]?.asset?.startsWith('uploading:')
+        || current.meta[removeClipId]?.track !== trackId
+        || current.rows.flatMap(row => row.actions).filter(action => action.id === removeClipId).length !== 1) return false;
+      // Use the mounted editor's row preview. Whole-config prepared-media
+      // validation cannot validate retained opaque or projected child fields.
+      // A2 still owns the semantic command, original basis and durable save.
+      const local = { ...current,
+        rows: current.rows.map(row => ({ ...row, actions: row.actions.filter(action => action.id !== removeClipId) })) };
+      const target = planAssetDropTarget({ current: local, assetKind: 'visual', trackId,
+        selectedTrackId: getSelectedTrackId(), time, duration: 5 });
+      if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) return false;
+      const edit = buildAssetDropEdit({ current: local, assetKey: prepared.assetKey, assetEntry: prepared.entry,
+        trackId: target.trackId, time: target.snappedTime ?? time });
+      if (!edit) return false;
+      getApplyEdit()({ type: 'rows', rows: edit.rows, metaUpdates: edit.metaUpdates,
+        metaDeletes: [removeClipId],
+        clipOrderOverride: edit.clipOrderOverride,
+        registryOverride: { ...current.registry, assets: { ...current.registry.assets, [prepared.assetKey]: prepared.entry } },
+      }, { selectedClipId: edit.clipId, selectedTrackId: target.trackId, semantic: true,
+        gestureBasis: { kind: 'prepared-media', config: current.config, registry: current.registry, clipId: edit.clipId, command } });
+      return true;
+    }
     const preview = previewPreparedMediaCommand(current, command);
     if (!preview?.commandResult?.detail) {
       return false;
@@ -302,7 +360,7 @@ export function useAssetManagement({
       semantic: true,
     });
     return true;
-  }, [getApplyEdit, getDataRef, getSelectedTrackId]);
+  }, [getApplyEdit, getDataRef, getSelectedTrackId, selectedProjectId]);
 
   const handleAssetDrop = useCallback((assetKey: string, trackId: string | undefined, time: number, forceNewTrack = false, insertAtTop = false, preparedAsset?: TimelineProvisionedAsset, removeClipId?: string) => {
     if (preparedAsset) {

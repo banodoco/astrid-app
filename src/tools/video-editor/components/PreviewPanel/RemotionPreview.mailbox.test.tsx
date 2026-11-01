@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import React, { createRef } from 'react';
-import { act, cleanup, render } from '@testing-library/react';
+import { act, cleanup, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { RemotionPreview, type PreviewHandle } from './RemotionPreview';
+import type { PreviewRevision } from './previewRevision.ts';
 import type { ResolvedTimelineConfig } from '@/tools/video-editor/types';
 
 vi.mock('@/tools/video-editor/compositions/TimelineRenderer', () => ({ TimelineRenderer: () => null }));
@@ -79,13 +80,21 @@ function settle() {
   }
   expect(raf.size, 'finite RAF work exhausted').toBe(0);
 }
-function preview(initial: ResolvedTimelineConfig) {
+function preview(initial: ResolvedTimelineConfig, initialRevision?: PreviewRevision) {
   const ref = createRef<PreviewHandle>();
   const container = createRef<HTMLDivElement>();
   const onTimeUpdate = vi.fn();
-  const draw = (c: ResolvedTimelineConfig) => <RemotionPreview ref={ref} config={c} onTimeUpdate={onTimeUpdate} playerContainerRef={container} />;
+  const draw = (c: ResolvedTimelineConfig, revision = initialRevision) => (
+    <RemotionPreview
+      ref={ref}
+      config={c}
+      previewRevision={revision}
+      onTimeUpdate={onTimeUpdate}
+      playerContainerRef={container}
+    />
+  );
   const view = render(draw(initial));
-  return { ref, view, replace: (c: ResolvedTimelineConfig) => view.rerender(draw(c)) };
+  return { ref, view, replace: (c: ResolvedTimelineConfig, revision?: PreviewRevision) => view.rerender(draw(c, revision)) };
 }
 beforeEach(() => {
   vi.useFakeTimers();
@@ -209,4 +218,25 @@ it('cancels pending mailbox and paused timer work on unmount', () => {
   expect(raf.size).toBe(0);
   settle();
   expect(boundary.applied).not.toContain(b);
+});
+
+it('keeps the committed revision identity out of the preview caption', () => {
+  const revisionId = `authoring-parent-revision-${'a'.repeat(64)}`;
+  const { view } = preview(config('accepted'), { kind: 'committed', revisionId });
+
+  expect(screen.queryByTestId('preview-revision-label')).not.toBeInTheDocument();
+  expect(view.container).not.toHaveTextContent(revisionId);
+  expect(boundary.props.inputProps.previewRevision).toEqual({ kind: 'committed', revisionId });
+});
+
+it('keeps a pending local preview from claiming the accepted revision', () => {
+  const h = preview(config('accepted'), { kind: 'committed', revisionId: 'accepted-before' });
+
+  h.replace(config('pending'), { kind: 'local', baseRevisionId: 'accepted-before' });
+  expect(screen.queryByTestId('preview-revision-label')).not.toBeInTheDocument();
+
+  advance(150);
+  expect(screen.getByTestId('preview-revision-label')).toHaveTextContent(/^Unsaved local$/);
+  expect(h.view.container).not.toHaveTextContent('accepted-before');
+  expect(boundary.props.inputProps.previewRevision).toEqual({ kind: 'local', baseRevisionId: 'accepted-before' });
 });

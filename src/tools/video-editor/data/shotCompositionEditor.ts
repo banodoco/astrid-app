@@ -10,6 +10,15 @@ import { remapDeclaredVisualPauseEdges } from './visualSeamContract.ts';
 
 type JsonObject = Record<string, unknown>;
 
+function defineOwn(target: JsonObject, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    configurable: true,
+    writable: true,
+  });
+}
+
 const canonicalPublishQueues = new Map<string, Promise<unknown>>();
 
 /** Serialize all canonical edits for one project/timeline CAS head. */
@@ -135,11 +144,11 @@ function remapOwnedItemReferences(value: unknown, itemIds: Map<string, string>):
   const next: JsonObject = {};
   for (const [childKey, child] of Object.entries(row)) {
     if ((childKey === 'item_id' || childKey.endsWith('_item_id')) && typeof child === 'string') {
-      next[childKey] = itemIds.get(child) ?? child;
+      defineOwn(next, childKey, itemIds.get(child) ?? child);
     } else if ((childKey === 'item_ids' || childKey.endsWith('_item_ids')) && Array.isArray(child)) {
-      next[childKey] = child.map((item) => typeof item === 'string' ? (itemIds.get(item) ?? item) : item);
+      defineOwn(next, childKey, child.map((item) => typeof item === 'string' ? (itemIds.get(item) ?? item) : item));
     } else {
-      next[childKey] = remapOwnedItemReferences(child, itemIds);
+      defineOwn(next, childKey, remapOwnedItemReferences(child, itemIds));
     }
   }
   return next;
@@ -313,7 +322,9 @@ export async function updateCanonicalShotRevision(
     }
     const remapped = remapOwnedItemReferences(updatedRevision, itemIds);
     if (remapped && typeof remapped === 'object') {
-      Object.assign(updatedRevision, remapped as JsonObject);
+      for (const [key, value] of Object.entries(remapped as JsonObject)) {
+        defineOwn(updatedRevision, key, value);
+      }
     }
   }
   const finalInternal = record(updatedRevision.internal_timeline_revision);

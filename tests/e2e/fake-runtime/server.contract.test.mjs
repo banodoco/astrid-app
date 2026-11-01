@@ -185,8 +185,8 @@ describe('identity and auth', () => {
     assert.equal((await outside.json()).code, 'not_found');
   });
 
-  test('a fixture that throws (the retired mutable timeline GET) answers 500 fake_internal and the server keeps serving', async () => {
-    const response = await call(`/v1/projects/${SLUG}/timelines/${FIXTURE_TIMELINE_ID}`);
+  test('a fixture that throws (the retired mutable timeline write) answers 500 fake_internal and the server keeps serving', async () => {
+    const response = await call(`/v1/projects/${SLUG}/timelines/${FIXTURE_TIMELINE_ID}`, { method: 'POST' });
     assert.equal(response.status, 500);
     assert.equal((await response.json()).code, 'fake_internal');
     assert.equal((await call('/v1/health')).status, 200);

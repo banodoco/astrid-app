@@ -70,6 +70,7 @@ describe('useGenerationControllerInputModel', () => {
         randomSeed: false,
         isShotUISettingsLoading: false,
         settingsLoadingFromContext: true,
+        canonicalPersistence: false,
         updateShotUISettings: vi.fn(),
         setShowStepsNotification: vi.fn(),
       },

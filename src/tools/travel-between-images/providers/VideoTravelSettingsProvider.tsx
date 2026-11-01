@@ -54,6 +54,7 @@ import {
 } from '../settings';
 import { TOOL_IDS } from '@/shared/lib/tooling/toolIds';
 import { queryKeys } from '@/shared/lib/queryKeys';
+import type { ShotSetSettingsValues } from '@/tools/video-editor/commands/shotSetGesture.ts';
 
 // =============================================================================
 // CONTEXT TYPES
@@ -148,6 +149,8 @@ interface VideoTravelSettingsProviderProps {
   updateShotMode: (shotId: string, mode: 'batch' | 'timeline' | 'by-pair') => void;
   /** Optional document-native persistence used by embedded canonical shot editors. */
   shotSettingsPersistence?: ShotSettingsPersistenceOptions['customLoadSave'];
+  /** Capture the supported prompt before its local form update. */
+  onSettingsIntent?: (settings: Pick<ShotSetSettingsValues, 'prompt'>) => void;
   children: React.ReactNode;
 }
 
@@ -157,6 +160,7 @@ export const VideoTravelSettingsProvider: React.FC<VideoTravelSettingsProviderPr
   selectedShot,
   updateShotMode,
   shotSettingsPersistence,
+  onSettingsIntent,
   children,
 }) => {
   // Seed the useToolSettings React Query cache from the shot object that's already
@@ -185,6 +189,7 @@ export const VideoTravelSettingsProvider: React.FC<VideoTravelSettingsProviderPr
     currentShotId: shotId || null,
     selectedShot,
     updateShotMode,
+    onSettingsIntent,
   });
 
   const setSelectedModel = useCallback((nextModel: SelectedModel) => {

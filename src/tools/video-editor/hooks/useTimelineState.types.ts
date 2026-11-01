@@ -9,11 +9,7 @@ import type { useTimelinePlayback } from '@/tools/video-editor/hooks/useTimeline
 import type { useTimelineTrackManagement } from '@/tools/video-editor/hooks/useTimelineTrackManagement.ts';
 import type {
   AddMediaCommand,
-  PlacePreparedMediaCommand,
   SwapMediaCommand,
-  TimelineCommandExecutionResult,
-  TimelineCommandInput,
-  TimelineCommandRunOptions,
 } from '@/tools/video-editor/commands/index.ts';
 import type {
   TimelineApplyEdit,
@@ -71,30 +67,9 @@ type TimelineSetRightPanelLayoutSlot = (panelId: string, slot: RightPanelLayoutS
 type TimelineSetShowDataLanes = (show: boolean) => void;
 export type TimelineActionResizeStart = ClipResizeHook['onActionResizeStart'];
 export type TimelineClipEdgeResizeEnd = ClipResizeHook['onClipEdgeResizeEnd'];
-export type TimelineEditorCommand = AddMediaCommand | PlacePreparedMediaCommand | SwapMediaCommand;
-export type TimelineEditorCommandInput = TimelineCommandInput<TimelineEditorCommand>;
-export type TimelineEditorCommandResult = TimelineCommandExecutionResult<TimelineEditorCommand>;
-export type TimelineEditorCommandApplyOptions = TimelineCommandRunOptions & {
-  save?: boolean;
-  selectedClipId?: string | null;
-  selectedTrackId?: string | null;
-  semantic?: boolean;
-};
 export type TimelineEditorCommands = {
   buildAddMediaCommand: (input: { trackId: string; at: number; assetKey: string }) => AddMediaCommand | null;
   buildSwapCommand: (input: { clipId: string; assetKey: string }) => SwapMediaCommand | null;
-  validate: (
-    input: TimelineEditorCommandInput | unknown,
-    options?: TimelineCommandRunOptions,
-  ) => TimelineEditorCommandResult;
-  dryRun: (
-    input: TimelineEditorCommandInput | unknown,
-    options?: TimelineCommandRunOptions,
-  ) => TimelineEditorCommandResult;
-  apply: (
-    input: TimelineEditorCommandInput | unknown,
-    options?: TimelineEditorCommandApplyOptions,
-  ) => TimelineEditorCommandResult;
 };
 
 export interface TimelineEditorDataContextValue {
@@ -256,8 +231,6 @@ export interface TimelineChromeContextValue {
   handleAddTrack: TimelineTrackManagementHook['handleAddTrack'];
   handleClearUnusedTracks: TimelineTrackManagementHook['handleClearUnusedTracks'];
   unusedTrackCount: TimelineTrackManagementHook['unusedTrackCount'];
-  handleAddText: ClipEditingHook['handleAddText'];
-  handleAddTextAt: ClipEditingHook['handleAddTextAt'];
   reloadFromServer: TimelineReloadFromServer;
   retrySaveAfterConflict: TimelineRetrySaveAfterConflict;
   /**
@@ -297,7 +270,7 @@ export interface TimelinePlaybackContextValue {
 
 export interface UseTimelineStateResult {
   store: TimelineStoreApi;
-  editor: TimelineEditorContextValue;
+  editor: TimelineEditorContextValue & { elementTimelineRoutes?: import('../runtime/element-adapter.ts').ElementTimelineRoutes };
   editorData: TimelineEditorDataContextValue;
   editorOps: TimelineEditorOpsContextValue;
   chrome: TimelineChromeContextValue;

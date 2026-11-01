@@ -14,6 +14,7 @@ interface UseShotEditorMediaAndOutputControllersParams {
   effectiveAspectRatio?: string;
   swapButtonRef: React.RefObject<HTMLButtonElement>;
   onUpdateShotName?: (name: string) => void;
+  onBeforeNameEdit?: () => void;
   state: Pick<ShotEditorState, 'isEditingName' | 'editingName'>;
   actions: ShotEditorActions;
   generationTypeMode: 'i2v' | 'vace';
@@ -30,6 +31,7 @@ export function useShotEditorMediaAndOutputControllers({
   effectiveAspectRatio,
   swapButtonRef,
   onUpdateShotName,
+  onBeforeNameEdit,
   state,
   actions,
   generationTypeMode,
@@ -54,6 +56,7 @@ export function useShotEditorMediaAndOutputControllers({
     },
     nameEditing: {
       onUpdateShotName,
+      onBeforeNameEdit,
       state,
       actions,
     },

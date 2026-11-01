@@ -1,4 +1,4 @@
-import type { DataProvider, TimelineHeadRevision } from '@/tools/video-editor/data/DataProvider.ts';
+import type { TimelineHeadRevision } from '@/tools/video-editor/data/DataProvider.ts';
 import type { AssetRegistry, TimelineClip, TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import { getClipTimelineDuration } from '@/tools/video-editor/lib/config-utils.ts';
 import {
@@ -40,7 +40,7 @@ export type AstridElementOperationResult = {
   };
 };
 
-type ElementTimelineDocument = {
+export type ElementTimelineDocument = {
   config: unknown;
   registry: unknown;
   config_version: number;
@@ -50,67 +50,34 @@ type ElementTimelineDocument = {
 
 export type ElementTimelineRoutes = {
   get(timelineId: string): Promise<ElementTimelineDocument>;
+  getGeneration?(): string;
   save(
     timelineId: string,
-    input: { config: unknown; registry: unknown; expectedVersion: number; expectedHead?: TimelineHeadRevision; bundle?: TimelineBundleEnvelope | null },
+    input: { config: unknown; registry: unknown; expectedVersion: number; expectedHead?: TimelineHeadRevision; bundle?: TimelineBundleEnvelope | null; original?: ElementTimelineDocument; operation?: TimelineElementOperation; context?: AstridAgentElementContext; assertAuthority?: () => void },
   ): Promise<ElementTimelineDocument>;
 };
 
-/**
- * Keep element mutations on the same provider and CAS boundary as ordinary
- * editor saves. In particular, the Workspace Runtime editor must not fall
- * back to Astrid's retired timeline bridge routes just to apply a catalog
- * element.
- */
+/** Bind the registered adapter to the mounted editor's current save owner. */
 export function createElementTimelineRoutes(
-  provider: Pick<DataProvider, 'loadTimeline' | 'loadAssetRegistry' | 'saveTimeline' | 'saveTimelineAtHead'>,
+  owner: ElementTimelineRoutes,
   assertAuthority: () => void = () => {},
 ): ElementTimelineRoutes {
   return {
+    getGeneration: owner.getGeneration,
     async get(timelineId) {
       assertAuthority();
-      const timeline = await provider.loadTimeline(timelineId);
+      const document = await owner.get(timelineId);
       assertAuthority();
-      const registry = await provider.loadAssetRegistry(timelineId);
-      // DataProvider exposes the registry separately. Re-read the version
-      // after that read so a concurrent save cannot pair one head's config
-      // with another head's registry for the following CAS mutation.
-      assertAuthority();
-      const confirmedTimeline = await provider.loadTimeline(timelineId);
-      assertAuthority();
-      if (confirmedTimeline.configVersion !== timeline.configVersion
-        || JSON.stringify(confirmedTimeline.head) !== JSON.stringify(timeline.head)) {
-        throw new AstridElementOperationError(
-          `Timeline changed while loading element operation data: ${timelineId}`,
-        );
-      }
-      return {
-        config: confirmedTimeline.config,
-        registry,
-        config_version: confirmedTimeline.configVersion,
-        head: confirmedTimeline.head,
-        bundle: confirmedTimeline.bundle,
-      };
+      return document;
     },
     async save(timelineId, input) {
       assertAuthority();
-      const config = input.config as TimelineConfig;
-      const registry = input.registry as AssetRegistry;
-      if (provider.saveTimelineAtHead) {
-        if (!input.expectedHead) throw new AstridElementOperationError('Element save requires the original scoped timeline head');
-        const receipt = await provider.saveTimelineAtHead(timelineId, config, input.expectedHead, registry, input.bundle);
-        return { config, registry, config_version: receipt.configVersion, head: receipt.head, bundle: input.bundle };
-      }
-      const configVersion = await provider.saveTimeline(
-        timelineId,
-        config,
-        input.expectedVersion,
-        registry,
-      );
-      return { config, registry, config_version: configVersion };
+      return owner.save(timelineId, { ...input, assertAuthority });
     },
   };
 }
+
+export type TimelineElementOperation = Extract<AstridElementOperation, { name: `timeline.${string}` }>;
 
 export class AstridElementOperationError extends Error {
   constructor(message: string) {
@@ -242,7 +209,7 @@ function assertTransitionFits(
   }
 }
 
-function applyTimelineOperation(
+export function applyTimelineOperation(
   context: AstridAgentElementContext,
   config: TimelineConfig,
   operation: Extract<AstridElementOperation, { name: `timeline.${string}` }>,
@@ -334,11 +301,17 @@ function applyTimelineOperation(
     case 'timeline.set_clip_fade':
       return replaceClip(config, operation.clip_id, (clip) => ({
         ...clip,
-        effects: {
-          ...(clip.effects && !Array.isArray(clip.effects) ? clip.effects : {}),
-          ...(operation.fade_in === undefined ? {} : { fade_in: operation.fade_in }),
-          ...(operation.fade_out === undefined ? {} : { fade_out: operation.fade_out }),
-        },
+        ...(Array.isArray(clip.effects)
+          ? { effects: clip.effects }
+          : clip.effects || operation.fade_in !== undefined || operation.fade_out !== undefined
+            ? {
+                effects: {
+                  ...(clip.effects ?? {}),
+                  ...(operation.fade_in === undefined ? {} : { fade_in: operation.fade_in }),
+                  ...(operation.fade_out === undefined ? {} : { fade_out: operation.fade_out }),
+                },
+              }
+            : {}),
         ...(operation.fade_in === undefined ? {} : { entrance: { type: 'fade', duration: operation.fade_in } }),
         ...(operation.fade_out === undefined ? {} : { exit: { type: 'fade-out', duration: operation.fade_out } }),
       }));
@@ -416,13 +389,12 @@ function applyTimelineOperation(
 /**
  * The one execution boundary for Elements mutations.
  *
- * The adapter deliberately accepts the existing timeline route rather than a
- * second persistence path: every mutation reads the current document and
- * performs exactly one expected-version save. A stale save therefore enters
- * the same CAS/conflict machinery as ordinary editor edits.
+ * Every mutation reads the mounted document and uses its current save owner.
+ * Runtime acceptance, merge and refusal follow the ordinary persisted outbox.
  */
 export class AstridElementOperationAdapter {
   private acknowledgedHead?: TimelineHeadRevision;
+  private capturedGeneration?: string;
 
   constructor(
     private context: AstridAgentElementContext,
@@ -435,6 +407,7 @@ export class AstridElementOperationAdapter {
     const head = this.authority?.getHead?.() ?? this.authority?.capturedHead;
     const captured = new AstridElementOperationAdapter(this.context, this.routes, this.projectSlug,
       this.authority ? { ...this.authority, capturedHead: head ? { ...head } : undefined } : undefined);
+    captured.capturedGeneration = this.routes.getGeneration?.();
     return captured;
   }
 
@@ -487,11 +460,16 @@ export class AstridElementOperationAdapter {
   private async executeTimelineMutation(
     operation: Extract<AstridElementOperation, { name: `timeline.${string}` }>,
   ): Promise<AstridElementOperationResult> {
+    const generation = this.routes.getGeneration?.();
+    if (this.capturedGeneration !== undefined && generation !== this.capturedGeneration) {
+      throw new AstridElementOperationError('The captured local timeline changed. Inspect the current timeline before recovering this operation.');
+    }
     const document = await this.routes.get(operation.timeline) as TimelineDocument;
     if (document.head) {
       const capturedHead = this.acknowledgedHead ?? this.authority?.capturedHead;
       if (!capturedHead || capturedHead.projectId !== document.head.projectId || capturedHead.timelineId !== document.head.timelineId
-        || capturedHead.headRevisionId !== document.head.headRevisionId) {
+        || capturedHead.headRevisionId !== document.head.headRevisionId
+        || capturedHead.headPublicationId !== document.head.headPublicationId) {
         throw new AstridElementOperationError('The captured timeline head changed or is missing. Inspect the current timeline before recovering this operation.');
       }
     }
@@ -511,7 +489,9 @@ export class AstridElementOperationAdapter {
       expectedVersion: operation.expected_version,
       expectedHead: document.head,
       bundle: document.bundle,
+      original: document, operation, context: this.context,
     }) as TimelineDocument;
+    this.capturedGeneration = this.routes.getGeneration?.();
     if (saved.head) this.acknowledgedHead = { ...saved.head };
     return {
       operation: operation.name,

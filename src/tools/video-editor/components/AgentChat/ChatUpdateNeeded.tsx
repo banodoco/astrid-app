@@ -1,5 +1,5 @@
 import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
-import { RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
 import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data/bridgeContract.ts';
 
@@ -13,9 +13,12 @@ export function isChatUpdateError(error: unknown): error is BridgeRouteError {
  * for anyone debugging.
  */
 export function ChatUpdateNeeded({ detail }: { readonly detail: string }) {
+  const copy = RUNTIME_CONNECTION_COPY.updateNeeded;
   return (
     <div className="space-y-2 text-left text-foreground">
-      <p className="font-medium">{RUNTIME_CONNECTION_COPY.chatNeedsUpdate}</p>
+      <p>{RUNTIME_CONNECTION_COPY.chatNeedsUpdate}</p>
+      <p className="font-medium">{copy.title}</p>
+      <p>{withCommandShell(copy.sentence)}</p>
       <CopyInstallCommand mode="update" />
       <details className="text-[11px] text-muted-foreground">
         <summary className="cursor-pointer">Details</summary>

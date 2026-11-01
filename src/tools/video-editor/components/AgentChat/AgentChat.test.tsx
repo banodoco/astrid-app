@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useSyncExternalStore, type ComponentProps } from 'react';
 import type { AgentTurn } from '@/tools/video-editor/types/agent-session';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
+import { CHAT_VOICE_ENABLED } from '@/tools/video-editor/hooks/chatVoice.ts';
 import type { LocalAgentChoice } from '@/integrations/astrid/localAgents.ts';
 import { AgentChatPanel as AgentChatPanelWithoutProvider } from './AgentChat';
 import { RuntimeConnectionProvider, useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
@@ -47,12 +48,13 @@ const mocks = vi.hoisted(() => ({
   useCurrentAttachmentSet: vi.fn(),
   composerRemoveAttachment: vi.fn(),
   composerClearAttachments: vi.fn(),
+  useAgentVoice: vi.fn(),
   loadGenerationForLightbox: vi.fn(),
+  agentSessionsAvailable: true,
   // Mutable so individual tests can flip isTasksPaneLocked to satisfy the
   // engagement gate that drives auto-create.
   panesState: { isTasksPaneLocked: false, setIsTasksPaneLocked: vi.fn() },
 }));
-
 
 vi.mock('@/shared/contexts/AgentChatContext', () => ({
   useAgentChatBridge: (...args: unknown[]) => mocks.useAgentChatBridge(...args),
@@ -64,6 +66,7 @@ vi.mock('@/tools/video-editor/contexts/VideoEditorRuntimeContext', () => ({
 }));
 
 vi.mock('@/tools/video-editor/hooks/useAgentSession', () => ({
+  isTimelineAgentSessionsAvailable: () => mocks.agentSessionsAvailable,
   useAgentSessions: (...args: unknown[]) => mocks.useAgentSessions(...args),
   useProjectChat: (...args: unknown[]) => mocks.useProjectChat(...args),
   useSaveProjectDraft: (...args: unknown[]) => mocks.useSaveProjectDraft(...args),
@@ -95,6 +98,9 @@ vi.mock('@/shared/state/panesStore', () => ({
   usePanesStore: (selector: (state: typeof mocks.panesState) => unknown) => selector(mocks.panesState),
 }));
 
+vi.mock('@/tools/video-editor/hooks/useAgentVoice', () => ({
+  useAgentVoice: (...args: unknown[]) => mocks.useAgentVoice(...args),
+}));
 
 vi.mock('@/tools/video-editor/lib/generation-utils', () => ({
   loadGenerationForLightbox: (...args: unknown[]) => mocks.loadGenerationForLightbox(...args),
@@ -177,6 +183,7 @@ function createState() {
       id: 'session-1',
       status: 'waiting_user',
       turns: [] as AgentTurn[],
+      assistantDraft: undefined as string | undefined,
       durableAcceptedRequestIds: undefined as string[] | undefined,
       control: undefined as { role: 'writer' | 'follower'; active: boolean; activeRequestId: string | null } | undefined,
     },
@@ -202,6 +209,14 @@ function createState() {
       mutate: vi.fn(),
       isPending: false,
       error: null as Error | null,
+    },
+    voice: {
+      startRecording: vi.fn(),
+      stopRecording: vi.fn(),
+      cancelRecording: vi.fn(),
+      isRecording: false,
+      isProcessing: false,
+      remainingSeconds: 30,
     },
   };
 }
@@ -254,6 +269,7 @@ function mockFromState(state: ReturnType<typeof createState>) {
     clips: state.timelineClips,
     summary: state.timelineClips.length > 0 ? `attaching ${state.timelineClips.length} image` : '',
   }));
+  mocks.useAgentVoice.mockImplementation(() => state.voice);
 }
 
 // The chat reads the runtime connection context, so every render mounts it (same component identity across rerenders).
@@ -292,15 +308,11 @@ function getQueuedTexts() {
   return Array.from(document.querySelectorAll('.line-clamp-2')).map((node) => node.textContent);
 }
 
-beforeEach(() => {
-  // The new-chat choice persists in localStorage; keep it from leaking between tests.
-  localStorage.removeItem('astrid.app.newChatChoice');
-});
-
 describe('AgentChat', () => {
   beforeEach(() => {
     mocks.useConfigureAgentSession.mockReturnValue({ mutateAsync: vi.fn().mockResolvedValue(undefined) });
     vi.clearAllMocks();
+    mocks.agentSessionsAvailable = true;
     // Default: pane is locked so the engagement gate is satisfied and the
     // existing auto-create assertions still hold. Tests that need the unengaged
     // baseline flip this back to false.
@@ -377,6 +389,50 @@ describe('AgentChat', () => {
     expect((screen.getByRole('textbox') as HTMLTextAreaElement).selectionStart).toBe(composer.value.length);
   });
 
+  it('shows the fixed agent and model with its thinking level in an info tooltip', async () => {
+    const state = createState();
+    const sessionId = 'codex:session-1';
+    const projectId = 'project-1';
+    state.projectChats[projectId].selected_session_id = sessionId;
+    state.projectChats[projectId].sessions = [{ id: sessionId }];
+    state.sessionsData = [{ id: sessionId, status: 'waiting_user' }];
+    state.activeSessionData.id = sessionId;
+    mockFromState(state);
+    mocks.useAgentModels.mockImplementation(() => ({
+      data: {
+        currentModel: 'openai/gpt-5',
+        providers: [{ id: 'openai', name: 'OpenAI', signedIn: true, models: [{ id: 'gpt-5', name: 'GPT 5' }] }],
+        localModels: {
+          currentModelId: 'vendor/codex-current',
+          thoughtLevel: { configId: 'reasoning_effort', name: 'Reasoning effort', currentValue: 'high', options: [{ value: 'high', name: 'High' }] },
+          availableModels: [
+            { modelId: 'vendor/codex-current', name: 'Codex Current' },
+            { modelId: 'vendor/codex-target', name: 'Codex Target', description: 'For focused coding' },
+          ],
+        },
+      },
+      isLoading: false,
+      error: null,
+      refetch: mocks.modelRefetch,
+    }));
+
+    renderAgentChat();
+    const identity = await screen.findByTestId('agent-chat-identity');
+    expect(identity).toHaveTextContent('Codex · Codex Current · High');
+    expect(screen.queryByText('Codex Current', { exact: true })).toBeNull();
+    const user = userEvent.setup();
+    await user.click(identity);
+    const panel = await screen.findByRole('dialog', { name: 'Model and thinking level' });
+    expect(within(panel).getByText('Codex · Codex Current')).toBeInTheDocument();
+    expect(within(panel).getByText('A chat keeps its model.')).toBeInTheDocument();
+    expect(within(panel).getByRole('option', { name: /High/ })).toHaveAttribute('aria-current', 'true');
+    expect(screen.queryByRole('combobox', { name: 'Agent model' })).toBeNull();
+
+    await waitFor(() => {
+      expect(mocks.useAgentModels).toHaveBeenCalledWith(true, sessionId, projectId);
+    });
+  });
+
   describe('setup recovery', () => {
     const agents = (): LocalAgentChoice[] => ['astrid', 'codex', 'hermes'].map(id => ({ id: id as LocalAgentChoice['id'], name: id, state: 'ready', signIn: 'signed-in', line: null, models: [], defaultModel: null }));
     function setupState() {
@@ -410,7 +466,7 @@ describe('AgentChat', () => {
       const view = renderSetupChat();
       await getInput();
 
-      fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Chat:/ }));
       fireEvent.click(screen.getByRole('option', { name: /Hermes/ }));
 
       const card = screen.getByRole('region', { name: 'How do you want Astrid to think?' });
@@ -570,7 +626,8 @@ describe('AgentChat', () => {
       state.createSession.mutateAsync.mockImplementation(() => new Promise((_resolve, fail) => { reject = fail; }));
       const view = renderSetupChat();
       await getInput();
-      fireEvent.click(screen.getByRole('button', { name: /^New chat · Codex/ }));
+      fireEvent.click(screen.getByRole('button', { name: /^Chat:/ }));
+      fireEvent.click(screen.getByRole('option', { name: /^Codex/ }));
       await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalledOnce());
       state.projectChats['project-1'].selected_session_id = 'hermes:session-2';
       state.projectChats['project-1'].sessions = [{ id: 'hermes:session-2' }];
@@ -652,12 +709,10 @@ describe('AgentChat', () => {
     const identity = await screen.findByTestId('agent-chat-identity');
     expect(identity).toHaveTextContent('Astrid · GPT 5');
     expect(screen.getByRole('button', { name: 'Astrid · GPT 5: model and thinking level' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
     fireEvent.click(await screen.findByRole('button', { name: `Choose a ${name} model` }));
     expect(state.createSession.mutateAsync).not.toHaveBeenCalled();
     fireEvent.click(await screen.findByRole('option', { name: /Exact model/ }));
-    expect(state.createSession.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat ·/ }));
     await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalledWith({ operationId: expect.any(String), agent, defaultModelId: 'vendor/exact' }));
   });
 
@@ -697,15 +752,13 @@ describe('AgentChat', () => {
     mocks.useLocalAgents.mockReturnValue({ data: { defaultAgent: 'codex', agents: [{ id: 'codex', name: 'Codex', state: 'ready', line: null, models: [{ modelId: 'sol', name: 'Sol', thoughtLevel: { configId: 'reasoning_effort', name: 'Effort', currentValue: 'low', recommendedValue: 'high', options: [{ value: 'low', name: 'Low' }, { value: 'high', name: 'High' }] } }], defaultModel: 'sol' }] }, refetch: vi.fn() });
     renderAgentChat();
     await screen.findByTestId('agent-chat-identity');
-    fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
     fireEvent.click(screen.getByRole('button', { name: 'Choose a Codex model' }));
     fireEvent.click(await screen.findByRole('button', { name: 'Choose a thinking level for Sol' }));
     fireEvent.click(screen.getByRole('option', { name: 'Low' }));
     expect(selection).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: 'Choose a thinking level for Sol' })).toHaveTextContent('Low');
     fireEvent.click(screen.getByRole('option', { name: /Sol/ }));
-    expect(state.createSession.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat ·/ }));
     await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalledOnce());
     expect(selection).not.toHaveBeenCalled();
     expect(screen.getByRole('textbox')).toBeDisabled();
@@ -734,11 +787,9 @@ describe('AgentChat', () => {
     const input = await getInput();
     fireEvent.change(input, { target: { value: 'Retain this draft' } });
     expect(screen.getByText('Previous chat transcript')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
     fireEvent.click(await screen.findByRole('button', { name: 'Choose a Codex model' }));
     fireEvent.click(await screen.findByRole('option', { name: /^Sol/ }));
-    expect(state.createSession.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat ·/ }));
     await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalled());
     vi.useFakeTimers();
     try {
@@ -749,9 +800,11 @@ describe('AgentChat', () => {
       expect(input).toHaveAttribute('placeholder', 'Starting Codex…');
       expect(input).toHaveValue('');
       expect(screen.getByRole('button', { name: 'Send' })).toBeDisabled();
+      expect(screen.queryByRole('button', { name: 'Voice input (Cmd+Shift+R)' })).toBeNull();
       fireEvent.keyDown(input, { key: 'Enter' });
       fireEvent.keyDown(window, { key: 'r', metaKey: true, shiftKey: true });
       expect(state.sendMessage.mutateAsync).not.toHaveBeenCalled();
+      expect(state.voice.startRecording).not.toHaveBeenCalled();
       await act(async () => {
         if (outcome === 'failure') reject(new Error('Slow adapter failed'));
         else {
@@ -777,21 +830,17 @@ describe('AgentChat', () => {
     }
   });
 
-  it('starts the default agent from + with no model, so the service repeats its remembered model', async () => {
+  it('starts the default agent from its row with no model, so the service repeats its remembered model', async () => {
     const state = createState();
     mockFromState(state);
-    // An agent with no model list: its row only opens the drill-in, which offers the agent default (no model sent). Only + starts the chat.
     mocks.useLocalAgents.mockReturnValue({
-      data: { defaultAgent: 'codex', agents: [{ id: 'codex', name: 'Codex', state: 'ready', line: null, models: [], defaultModel: null }] },
+      data: { defaultAgent: 'codex', agents: [{ id: 'codex', name: 'Codex', state: 'ready', line: null, models: [{ modelId: 'remembered', name: 'Remembered' }], defaultModel: 'remembered' }] },
       isLoading: false, error: null, refetch: vi.fn(),
     });
     renderAgentChat();
     expect(screen.getByTestId('agent-chat-identity')).toHaveTextContent('Astrid · GPT 5');
-    fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
     fireEvent.click(await screen.findByRole('option', { name: /^Codex/ }));
-    fireEvent.click(await screen.findByRole('option', { name: "Use the agent's default model" }));
-    expect(state.createSession.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat ·/ }));
     await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalledWith({ operationId: expect.any(String), agent: 'codex' }));
   });
 
@@ -805,11 +854,9 @@ describe('AgentChat', () => {
     }));
 
     renderAgentChat();
-    fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
     fireEvent.click(await screen.findByRole('button', { name: 'Choose a Codex model' }));
     fireEvent.click(await screen.findByRole('option', { name: /Exact model/ }));
-    expect(state.createSession.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat ·/ }));
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent("Codex didn't start.");
     expect(alert).toHaveTextContent('Details: adapter failed');
@@ -846,6 +893,23 @@ describe('AgentChat', () => {
     expect(screen.queryByRole('alert')).toBeNull();
   });
 
+  it('renders one Astrid-managed notice and never starts unavailable session work', async () => {
+    mocks.agentSessionsAvailable = false;
+    const state = createState();
+    state.sessionsData = [];
+    mockFromState(state);
+
+    const view = renderAgentChat();
+    expect(await screen.findByText('Timeline agent chat is managed in Astrid')).toBeInTheDocument();
+    expect(screen.getByText(/Run the agent workflow in Astrid/)).toBeInTheDocument();
+
+    view.rerender(<AgentChatPanel />);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(mocks.useAgentSessions).not.toHaveBeenCalled();
+    expect(mocks.useCreateSession).not.toHaveBeenCalled();
+    expect(state.createSession.mutate).not.toHaveBeenCalled();
+  });
+
   it('creates project chat without a timeline when engaged', async () => {
     const state = createState();
     state.timelineId = null;
@@ -862,7 +926,7 @@ describe('AgentChat', () => {
     const view = renderAgentChat();
 
     expect(screen.getByTestId('agent-chat-identity')).toHaveTextContent('Astrid');
-    expect(screen.getByTestId('agent-chat-header').querySelector('img')).toBeNull();
+    expect(view.container.querySelector('img[src="/astrid-avatar.png"]')).toBeNull();
 
     expect(screen.queryByText('Select a project to start chatting.')).not.toBeInTheDocument();
     await waitFor(() => expect(state.createSession.mutate).toHaveBeenCalledTimes(1));
@@ -1006,7 +1070,7 @@ describe('AgentChat', () => {
 
     const user = userEvent.setup();
     await user.click(selector);
-    expect(within(await screen.findByRole('option', { name: /^Chat 2/ })).getByRole('img', { name: 'Main chat' })).toBeInTheDocument();
+    expect(screen.getByText('Main', { exact: true })).toBeInTheDocument();
     await user.click(await screen.findByRole('option', { name: /Chat 1/ }));
     await waitFor(() => expect(selector).toHaveTextContent('Chat 1'));
 
@@ -1201,7 +1265,7 @@ describe('AgentChat', () => {
     await waitFor(() => expect(mocks.useAgentSession).toHaveBeenCalledWith('predispatch-cancel-session', 'project-1'));
   });
 
-  it('does not auto-create when unengaged (pane unlocked, no markEngaged)', async () => {
+  it('does not auto-create when unengaged (pane unlocked, no voice, no markEngaged)', async () => {
     mocks.panesState.isTasksPaneLocked = false;
     const state = createState();
     state.sessionsData = [];
@@ -1238,6 +1302,41 @@ describe('AgentChat', () => {
       shiftKey: true,
     });
     expect(notCancelled).toBe(true);
+  });
+
+  it('matches the configured voice gate for project chat without a timeline', async () => {
+    const state = createState();
+    state.timelineId = null;
+    state.sessionsData = [];
+    state.voice = {
+      startRecording: vi.fn(),
+      stopRecording: vi.fn(),
+      cancelRecording: vi.fn(),
+      isRecording: false,
+      isProcessing: false,
+      remainingSeconds: 30,
+    };
+    mockFromState(state);
+
+    renderAgentChat();
+
+    if (CHAT_VOICE_ENABLED) {
+      expect(screen.getByTitle('Voice input (Cmd+Shift+R)')).toBeInTheDocument();
+      fireEvent.keyDown(window, {
+        key: 'r',
+        metaKey: true,
+        shiftKey: true,
+      });
+      expect(state.voice.startRecording).toHaveBeenCalledTimes(1);
+    } else {
+      expect(screen.queryByTitle('Voice input (Cmd+Shift+R)')).toBeNull();
+      expect(fireEvent.keyDown(window, {
+        key: 'r',
+        metaKey: true,
+        shiftKey: true,
+      })).toBe(true);
+      expect(state.voice.startRecording).not.toHaveBeenCalled();
+    }
   });
 
   it('routes attachment removal through the composer intent', async () => {
@@ -1331,6 +1430,18 @@ describe('AgentChat', () => {
     expect(getQueuedTexts()).toEqual([]);
 
     await act(async () => { finishSend(); });
+  });
+
+  it('shows Adding while an element operation waits for durable acceptance', async () => {
+    const state = createState();
+    state.activeSessionData.status = 'processing';
+    state.activeSessionData.assistantDraft = '<astrid_element_operation>{"name":"timeline.apply_element"}</astrid_element_operation>';
+    mockFromState(state);
+
+    renderAgentChat();
+
+    expect(screen.getByText('Adding…')).toBeInTheDocument();
+    expect(screen.queryByText('Thinking...')).not.toBeInTheDocument();
   });
 
   it('auto-sends the queued head with attachments snapshotted at queue time', async () => {
@@ -1613,6 +1724,7 @@ describe('AgentChat', () => {
     expect(screen.queryByText(/Delivery not confirmed/)).toBeNull();
     expect(screen.queryByRole('button', { name: 'Send now' })).toBeNull();
     expect(screen.queryByTitle('Stop agent')).toBeNull();
+    expect(screen.queryByTitle('Voice input (Cmd+Shift+R)')).toBeNull();
     expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
     expect(screen.queryByRole('combobox', { name: 'Agent model' })).toBeNull();
     expect(getQueuedTexts()).toEqual(['Waiting behind it']);
@@ -1740,16 +1852,15 @@ describe('AgentChat', () => {
       expect(panel.getByRole('option', { name: /High/ })).toHaveAttribute('aria-disabled', 'true');
     });
 
-    it('opens the new-chat menu on the chat\'s agent models from "Change model for new chats"', async () => {
+    it('opens the chat menu on the chat\'s agent models from "New chat with another model"', async () => {
       mockFromState(createState());
       renderAgentChat();
       fireEvent.click(await screen.findByTestId('agent-chat-identity'));
-      fireEvent.click(within(await panelOf()).getByRole('option', { name: 'Change model for new chats' }));
+      fireEvent.click(within(await panelOf()).getByRole('option', { name: 'New chat with another model' }));
       expect(await screen.findByPlaceholderText('Search Astrid models…')).toBeInTheDocument();
-      expect(screen.getByRole('dialog', { name: 'New chat' })).toBeInTheDocument();
     });
 
-    it('reports the header overlay open while the chat menu, the model line or the new-chat picker is open', async () => {
+    it('reports the header overlay open while the chat menu or the model line is open', async () => {
       mockFromState(createState());
       const onSelectorOpenChange = vi.fn();
       render(<AgentChatPanel onSessionSelectorOpenChange={onSelectorOpenChange} />);
@@ -1762,18 +1873,6 @@ describe('AgentChat', () => {
       expect(onSelectorOpenChange).toHaveBeenLastCalledWith(true);
       await user.keyboard('{Escape}');
       await waitFor(() => expect(onSelectorOpenChange).toHaveBeenLastCalledWith(false));
-      fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
-      expect(onSelectorOpenChange).toHaveBeenLastCalledWith(true);
-      await user.keyboard('{Escape}');
-      await waitFor(() => expect(onSelectorOpenChange).toHaveBeenLastCalledWith(false));
-    });
-
-    it('starts a new chat with the open chat\'s agent from the + button', async () => {
-      const state = createState();
-      mockFromState(state);
-      renderAgentChat();
-      fireEvent.click(await screen.findByRole('button', { name: /^New chat · Astrid/ }));
-      await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalledWith(expect.objectContaining({ agent: 'astrid' })));
     });
 
     it('keeps no-key Astrid setup inside the open new-chat model panel', async () => {
@@ -1946,6 +2045,7 @@ describe('project draft consumer ownership', () => {
 
   it('hydrates each project draft/queue, flushes to its original owner on switch, and reopens retained local text', async () => {
     vi.clearAllMocks();
+    mocks.agentSessionsAvailable = true;
     mocks.panesState.isTasksPaneLocked = true;
     const state = createState();
     state.activeSessionData.status = 'processing';
@@ -2016,17 +2116,12 @@ describe('project draft consumer ownership', () => {
     const composer = screen.getByRole('textbox');
     fireEvent.change(composer, { target: { value: 'Keep my unsent draft' } });
     await waitFor(() => expect(mocks.useAgentSession).toHaveBeenLastCalledWith('session-1', 'project-1'));
-    fireEvent.click(screen.getByRole('button', { name: 'Choose the agent and model for new chats' }));
-    if (choice === 'plain') {
-      fireEvent.click(await screen.findByRole('option', { name: /^Codex/ }));
-      fireEvent.click(await screen.findByRole('option', { name: "Use the agent's default model" }));
-    }
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
+    if (choice === 'plain') fireEvent.click(await screen.findByRole('option', { name: /^Codex/ }));
     else {
       fireEvent.click(await screen.findByRole('button', { name: 'Choose a Codex model' }));
       fireEvent.click(await screen.findByRole('option', { name: /Codex Default/ }));
     }
-    expect(state.createSession.mutateAsync).not.toHaveBeenCalled();
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat ·/ }));
     await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalledOnce());
     // useCreateSession publishes its registry receipt before handleNewSession's
     // local selection applies. Commit that snapshot while the separate 5s
@@ -2045,7 +2140,7 @@ describe('project draft consumer ownership', () => {
     expect(selector).not.toBeDisabled();
     expect(composer).toHaveFocus();
     fireEvent.click(selector);
-    expect(within(await screen.findByRole('option', { name: /^Chat 2/ })).getByRole('img', { name: 'Main chat' })).toBeInTheDocument();
+    expect(await screen.findByRole('option', { name: /^Chat 2/ })).toHaveTextContent('Main');
     fireEvent.click(selector);
     await waitFor(() => expect(mocks.useAgentSession).toHaveBeenLastCalledWith(newId, 'project-1'));
     expect(selector).toHaveTextContent('Chat 2');
@@ -2071,7 +2166,8 @@ describe('project draft consumer ownership', () => {
     state.createSession.mutateAsync.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
     const view = renderAgentChat();
     await waitFor(() => expect(mocks.useAgentSession).toHaveBeenLastCalledWith('session-1', 'project-1'));
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat · Astrid/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
+    fireEvent.click(await screen.findByRole('option', { name: /^Astrid/ }));
     state.projectId = 'project-2';
     rerenderAgentChat(view.rerender);
     if (returnToOrigin) { state.projectId = 'project-1'; rerenderAgentChat(view.rerender); }
@@ -2092,7 +2188,8 @@ describe('project draft consumer ownership', () => {
     const composer = screen.getByRole('textbox');
     fireEvent.change(composer, { target: { value: 'Still my draft' } });
     await waitFor(() => expect(mocks.useAgentSession).toHaveBeenLastCalledWith('session-1', 'project-1'));
-    fireEvent.click(await screen.findByRole('button', { name: /^New chat · Astrid/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Chat: / }));
+    fireEvent.click(await screen.findByRole('option', { name: /^Astrid/ }));
     await waitFor(() => expect(state.createSession.mutateAsync).toHaveBeenCalledOnce());
     expect(mocks.useAgentSession).toHaveBeenLastCalledWith('session-1', 'project-1');
     expect(composer).toHaveValue('Still my draft');

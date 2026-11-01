@@ -8,6 +8,7 @@
 import { useCallback } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { getProjectSelectionFallbackId } from '@/shared/contexts/projectSelectionStore';
+import { getShotPlacementTarget } from '@/shared/state/selectionStore';
 import { GenerationRow } from '@/domains/generation/types';
 import { toast } from '@/shared/components/ui/runtime/sonner';
 import { enqueueGenerationsInvalidation } from '@/shared/hooks/invalidation';
@@ -16,6 +17,7 @@ import {
   batchUpdatePlacementFrames,
   placeGeneration,
   unplaceGeneration,
+  type PlaceGenerationRequest,
 } from '@/shared/lib/placement/placementService';
 import { placementEntryId } from '@/shared/lib/placement/documentPlacement';
 import {
@@ -41,6 +43,13 @@ type AddImageToShotWithoutPositionVariables = Omit<
   AddImageToShotVariables,
   'timelineFrame'
 >;
+
+function withPlacementTarget<T extends { project_id: string; shot_id: string; ownerRef?: PlaceGenerationRequest['ownerRef'] }>(variables: T): T {
+  return variables.ownerRef === undefined ? {
+    ...variables,
+    ...getShotPlacementTarget(variables.project_id || getProjectSelectionFallbackId() || '', variables.shot_id),
+  } : variables;
+}
 
 function withUnpositionedAddImageVariables(
   variables: AddImageToShotWithoutPositionVariables,
@@ -87,20 +96,29 @@ export const useAddImageToShot = () => {
     },
   });
 
+  // Capture selection and destination once per invocation, before React Query can retry it.
+  const { mutateAsync: submitAsync, mutate: submit } = mutation;
+  const mutateAsync = useCallback<typeof mutation.mutateAsync>(async (variables, options) =>
+    submitAsync(withPlacementTarget(variables), options), [submitAsync]);
+  const mutate = useCallback<typeof mutation.mutate>((variables, options) =>
+    submit(withPlacementTarget(variables), options), [submit]);
+
   const mutateAsyncWithoutPosition = useCallback(
-    (variables: AddImageToShotWithoutPositionVariables) =>
-      mutation.mutateAsync(withUnpositionedAddImageVariables(variables)),
+    async (variables: AddImageToShotWithoutPositionVariables) =>
+      mutation.mutateAsync(withPlacementTarget(withUnpositionedAddImageVariables(variables))),
     [mutation],
   );
 
   const mutateWithoutPosition = useCallback(
     (variables: AddImageToShotWithoutPositionVariables) =>
-      mutation.mutate(withUnpositionedAddImageVariables(variables)),
+      mutation.mutate(withPlacementTarget(withUnpositionedAddImageVariables(variables))),
     [mutation],
   );
 
   return {
     ...mutation,
+    mutateAsync,
+    mutate,
     mutateAsyncWithoutPosition,
     mutateWithoutPosition,
   };
@@ -340,15 +358,20 @@ export const useUpdateShotImageOrder = () => {
 export const usePositionExistingGenerationInShot = () => {
   const queryClient = useQueryClient();
 
-  return useMutation({
+  const mutation = useMutation({
     mutationFn: async ({
       shot_id,
       generation_id,
       project_id,
+      ownerRef,
+      timelineRef,
     }: {
       shot_id: string;
       generation_id: string;
       project_id: string;
+      /** Authenticated canonical occurrence owner; absent keeps parent-only callers unchanged. */
+      ownerRef?: PlaceGenerationRequest['ownerRef'];
+      timelineRef?: string;
     }) => {
       const projectSlug = project_id || getProjectSelectionFallbackId();
       if (!projectSlug) {
@@ -361,6 +384,8 @@ export const usePositionExistingGenerationInShot = () => {
         projectSlug,
         shotId: shot_id,
         generationId: generation_id,
+        ...(ownerRef === undefined ? {} : { ownerRef }),
+        ...(timelineRef === undefined ? {} : { timelineRef }),
       });
 
       return { shot_id, generation_id, project_id, placement };
@@ -380,4 +405,10 @@ export const usePositionExistingGenerationInShot = () => {
       toast.error(`Failed to position image: ${error.message}`);
     },
   });
+  const { mutateAsync: submitAsync, mutate: submit } = mutation;
+  const mutateAsync = useCallback<typeof mutation.mutateAsync>(async (variables, options) =>
+    submitAsync(withPlacementTarget(variables), options), [submitAsync]);
+  const mutate = useCallback<typeof mutation.mutate>((variables, options) =>
+    submit(withPlacementTarget(variables), options), [submit]);
+  return { ...mutation, mutateAsync, mutate };
 };

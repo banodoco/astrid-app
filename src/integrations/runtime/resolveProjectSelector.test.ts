@@ -24,6 +24,20 @@ function runtimeTransport() {
       }
       return ok({ project_id: CANONICAL, realm_id: 'r', slug: SLUG, name: 'Almost Ready', metadata: {}, version: 1, created_at: 'x', updated_at: 'x' });
     }
+    const timeline = new RegExp(`^/v1/projects/${CANONICAL}/timelines/${TIMELINE}$`).exec(path);
+    if (method === 'GET' && timeline) {
+      return ok({
+        project_id: CANONICAL,
+        timeline_id: TIMELINE,
+        version: 1,
+        name: 'Almost Ready timeline',
+        archived: false,
+        shots: [],
+        references: [],
+        head_revision_id: 'rev-1',
+        head_publication_id: 'publication-1',
+      });
+    }
     if (path.endsWith('/inspect')) {
       return ok({ representation: 'canonical_head', authority: 'runtime_parent_composition', project_id: CANONICAL, timeline_id: TIMELINE, revision_id: 'rev-1', head_revision_id: 'rev-1', is_current_head: true });
     }

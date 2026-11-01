@@ -1069,6 +1069,16 @@ describe('useRenderState render routing', () => {
     expect(diagnostic.length).toBeLessThanOrEqual(4_000);
   });
 
+  it('preserves labeled error lines, redacts credentials, and keeps explicit fix paths copyable', () => {
+    const diagnostic = formatAstridExecutorDiagnostic({
+      attempts: [],
+      result: { error: { message: 'Headline: Render failed\nDetail: token=secret-value at /Users/alice/log.txt\nFix: Run `cd /Users/alice/project && PATH=/opt/node-v20.19.4/bin:$PATH npm ci` with password=hidden' } },
+    });
+    expect(diagnostic).toContain('Headline: Render failed\nDetail: token=[REDACTED] at [REDACTED_PATH]\nFix: Run `cd /Users/alice/project && PATH=/opt/node-v20.19.4/bin:$PATH npm ci` with password=[REDACTED]');
+    expect(diagnostic).not.toContain('secret-value');
+    expect(diagnostic).not.toContain('password=hidden');
+  });
+
   it('does not let a late cancel completion erase a newer render intent', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(renderTaskDetail('queued')), { status: 200 })));
     let resolveCancel!: () => void;

@@ -268,3 +268,46 @@ describe('visual seam contract', () => {
     expect(report.blocked).toBe(true);
   });
 });
+
+describe('grouped source-track seam mapping', () => {
+  function grouped(source: ResolvedTimelineConfig, occurrence = 'occ~private') {
+    return {
+      ...source,
+      tracks: source.tracks.map((track) => ({ ...track, id: `${occurrence}~${track.id}`, app: { group: { id: occurrence, sourceTrack: track.id } } })),
+      clips: source.clips.map((clip) => ({ ...clip, track: `${occurrence}~${clip.track}` })),
+    };
+  }
+
+  it('maps authored continuity and picture policy through sourceTrack, without parsing ~ ids', () => {
+    const source = config([
+      { id: 'a', track: 'video', clipType: 'am-footage', at: 0, hold: 1 },
+      { id: 'b', track: 'video', clipType: 'am-footage', at: 2, hold: 1 },
+    ], { visualSeamContract: { continuityTracks: ['video'], pictureTracks: ['video'] } });
+    const report = analyzeVisualSeams(grouped(source));
+    expect(report.structuralIssues).toEqual(analyzeVisualSeams(source).structuralIssues);
+    expect(report.structuralIssues).toHaveLength(1);
+    expect(report.structuralIssues[0]).not.toContain('~');
+    expect(analyzeVisualSeams(grouped(source), { continuityTracks: ['video'] }).structuralIssues).toEqual(report.structuralIssues);
+  });
+
+  it('honours source-track pause declarations inside a group', () => {
+    const source = config([media('a', 0, 1, 'a'), media('b', 2, 1, 'b')], {
+      visualSeamContract: { continuityTracks: ['video'], gaps: [{ kind: 'pause', track: 'video', startFrame: 30, endFrame: 60 }] },
+    });
+    expect(analyzeVisualSeams(grouped(source)).structuralIssues).toEqual([]);
+  });
+
+  it('keeps different occurrence lanes independent even when their source tracks overlap', () => {
+    const first = grouped(config([media('a', 0, 2, 'a')]), 'one');
+    const second = grouped(config([media('b', 1, 2, 'b')]), 'two');
+    const combined = { ...first, tracks: [...first.tracks, ...second.tracks], clips: [...first.clips, ...second.clips] };
+    expect(analyzeVisualSeams(combined).structuralIssues).toEqual([]);
+  });
+
+  it('keeps portable intent contexts stable across internal track renaming', () => {
+    const source = config([media('a', 0, 1, 'a'), media('b', 1, 1, 'b')]);
+    const authored = withVisualSeamIntent(source, 30, 'hard-cut');
+    const projected = withVisualSeamIntent(grouped(source), 30, 'hard-cut');
+    expect(projected.app?.visualSeamContract).toEqual(authored.app?.visualSeamContract);
+  });
+});

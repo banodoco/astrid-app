@@ -1047,6 +1047,14 @@ if (typeof window !== 'undefined') {
   window.addEventListener('beforeunload', release);
 }
 
+/**
+ * ACP chat uses the authenticated local bridge, reached either through the dev proxy or the hosted
+ * page's loopback gateway. The shared transport resolves the configured origin for every request.
+ */
+export function isTimelineAgentSessionsAvailable(): boolean {
+  return true;
+}
+
 const agentModelsQueryKey = ['agent-models'] as const;
 export const localAgentsQueryKey = ['local-agents'] as const;
 export function useLocalAgents() {
@@ -1068,7 +1076,7 @@ export function useAgentModels(enabled = true, sessionId?: string | null, projec
   }, [projectId, queryClient, sessionId]);
   return useQuery({
     queryKey: [...agentModelsQueryKey, sessionId ?? null, projectId ?? null],
-    enabled,
+    enabled: enabled && isTimelineAgentSessionsAvailable(),
     queryFn: () => sessionId ? agentStore.models(sessionId, projectId) : agentStore.models(),
     refetchInterval: false,
     retry: false,
@@ -1121,7 +1129,7 @@ export function hasAnyActiveAgentTurn(queryClient: QueryClient): boolean {
 export function useAgentSessions(timelineId: string | null | undefined, projectId?: string | null) {
   return useQuery({
     queryKey: agentSessionsQueryKey(timelineId, projectId),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && isTimelineAgentSessionsAvailable(),
     queryFn: () => agentStore.list(projectId),
     refetchInterval: 5_000,
     retry: false,

@@ -461,6 +461,49 @@ describe('TimelineRenderer track lifetime', () => {
 });
 
 describe('TimelineRenderer registered sequences', () => {
+  it('prerolls an incoming text transition and stops at the authored end', async () => {
+    const { TextClipSequence } = await vi.importActual<typeof import('@/tools/video-editor/compositions/TextClip.tsx')>(
+      '@/tools/video-editor/compositions/TextClip.tsx',
+    );
+    sequenceProps.length = 0;
+    const clip = {
+      id: 'incoming-text', clipType: 'text' as const, track: 'V1', at: 10, hold: 2,
+      text: { content: 'Text' }, transition: { id: 'fade', durationFrames: 8 },
+      app: { canonicalTiming: { occurrenceStartMs: 10_000, occurrenceDurationMs: 2_000 } },
+    } as ResolvedTimelineConfig['clips'][number];
+    render(<TextClipSequence clip={clip} track={{ id: 'V1', kind: 'visual', label: 'V1' }} fps={30}
+      predecessor={{ id: 'previous', clipType: 'hold', track: 'V1', at: 8, hold: 2 } as never} />);
+    expect(sequenceProps.find((props) => props.from === 292)).toMatchObject({ from: 292, durationInFrames: 68 });
+  });
+
+  it.each([
+    { name: 'oversized clamped-start transition', start: 30, duration: 30, T: 60, endCap: undefined, drawStart: 0, drawDuration: 90 },
+    { name: 'canonical end cap', start: 60, duration: 30, T: 8, endCap: 90, drawStart: 52, drawDuration: 38 },
+  ])('draws $name on the installed package incoming plan', async ({ start, duration, T, endCap, drawStart, drawDuration }) => {
+    const { prepareTrack } = await import('@banodoco/timeline-composition/evaluation');
+    const { TextClipSequence } = await vi.importActual<typeof import('@/tools/video-editor/compositions/TextClip.tsx')>(
+      '@/tools/video-editor/compositions/TextClip.tsx',
+    );
+    const [, plan] = prepareTrack(
+      [{ start: 0, duration: start }, { start, duration, ...(endCap === undefined ? {} : { endCap }) }],
+      [null, null],
+      [null, { T }],
+    ).plans;
+    expect(plan).toMatchObject({ drawStart, drawDuration });
+    sequenceProps.length = 0;
+    const clip = {
+      id: 'incoming-text', clipType: 'text' as const, track: 'V1', at: start / 30, hold: duration / 30,
+      text: { content: 'Text' }, transition: { id: 'fade', durationFrames: T },
+      ...(endCap === undefined ? {} : { app: { canonicalTiming: { occurrenceStartMs: 2000, occurrenceDurationMs: 1000 } } }),
+    } as ResolvedTimelineConfig['clips'][number];
+    render(<TextClipSequence clip={clip} track={{ id: 'V1', kind: 'visual', label: 'V1' }} fps={30}
+      predecessor={{ id: 'previous', clipType: 'hold', track: 'V1', at: 0, hold: start / 30 } as never} />);
+    expect(sequenceProps.find((props) => props.from === plan.drawStart)).toMatchObject({
+      from: plan.drawStart,
+      durationInFrames: plan.drawDuration,
+    });
+  });
+
   it('keeps a canonical visual image absent at the half-open end after transition expansion', async () => {
     const { VisualClipSequence } = await vi.importActual<typeof import('@/tools/video-editor/compositions/VisualClip.tsx')>(
       '@/tools/video-editor/compositions/VisualClip.tsx',

@@ -36,6 +36,13 @@ export async function flushDraftsBeforeReload(): Promise<void> {
   throw new Error('Drafts kept changing while they were being saved.');
 }
 
+/** Bind an admission to the exact registered owners observed after flushing. */
+export function captureDraftReloadWitness(): () => boolean {
+  const version = guardsVersion;
+  const owners = [...guards.values()];
+  return () => version === guardsVersion && owners.every((owner) => typeof owner.isDirty === 'function' && !owner.isDirty());
+}
+
 /** Keep one mounted surface's latest flush implementation registered for update reloads. */
 export function useDraftSafeReload(label: string, flush: () => Promise<void>, enabled = true, isDirty: () => boolean = () => false): void {
   const latest = useRef({ flush, isDirty });

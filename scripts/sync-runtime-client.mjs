@@ -12,6 +12,16 @@ const commit = execFileSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], { stdi
 const lockPath = path.join(root, 'runtime.lock.json');
 const previous = readFileSync(lockPath, 'utf8');
 const lock = JSON.parse(previous);
+const responses = 'src/integrations/runtime/fixtures/responses/';
+const legacyConflict = `${responses}publish_conflict_409.json`;
+if (lock.files[legacyConflict]) {
+  // D39 records conflicts on /commit; retired publishers now return 410.
+  const entry = lock.files[legacyConflict];
+  delete lock.files[legacyConflict];
+  for (const name of ['commit_conflict_409', 'retired_route_410']) {
+    lock.files[`${responses}${name}.json`] = { ...entry, from: `conformance/responses/${name}.json` };
+  }
+}
 lock.source_commit = commit;
 writeFileSync(lockPath, `${JSON.stringify(lock, null, 2)}\n`);
 try {

@@ -1,5 +1,6 @@
+import { audioEnvelopeAt, compileAudioEnvelope } from '@banodoco/timeline-composition/evaluation';
 import { describe, expect, it } from 'vitest';
-import { audioFadeGain, getAudioFade, getAudioVolumeProp, type AudioFade } from '@/tools/video-editor/lib/audioFade';
+import { getAudioFade, getAudioVolumeProp } from '@/tools/video-editor/lib/audioFade';
 import type { TimelineClip } from '@/tools/video-editor/types';
 
 const FPS = 30;
@@ -9,17 +10,27 @@ const chip: TimelineClip = { id: 'music-chip', track: 'music', at: 0, from: 0, t
 const piano: TimelineClip = { id: 'music-piano', track: 'music', at: 28.5, from: 28.5, to: 88.4, volume: 0.7674, params: { fadeIn: 3, fadeOut: 4 } };
 const orch: TimelineClip = { id: 'music-orch', track: 'music', at: 84.4, from: 123.46, to: 199.393331, volume: 0.263, params: { fadeIn: 4, fadeOut: 3 } };
 
-function gainAt(clip: TimelineClip, compositionSecond: number): number {
-  const fade = getAudioFade(clip, FPS);
-  const frame = Math.round(compositionSecond * FPS) - Math.round(clip.at * FPS);
-  return fade ? audioFadeGain(fade, frame) : 1;
+function packageEnvelope(clip: TimelineClip) {
+  return compileAudioEnvelope(clip, FPS);
 }
 
-describe('audio fades (renderer semantics)', () => {
-  it('rounds fade lengths to whole frames and ends the fade-out at the clip end', () => {
-    expect(getAudioFade(chip, FPS)).toEqual({ fadeInFrames: 0, fadeOutFrames: 90, durationFrames: 945 });
-    expect(getAudioFade(piano, FPS)).toEqual({ fadeInFrames: 90, fadeOutFrames: 120, durationFrames: 1797 });
-    expect(getAudioFade(orch, FPS)).toEqual({ fadeInFrames: 120, fadeOutFrames: 90, durationFrames: 2278 });
+function gainAt(clip: TimelineClip, compositionSecond: number): number {
+  const envelope = getAudioFade(clip, FPS);
+  const frame = Math.round(compositionSecond * FPS) - Math.round(clip.at * FPS);
+  return envelope ? audioEnvelopeAt(envelope, frame / FPS) : 1;
+}
+
+describe('audio fades (Composition envelope semantics)', () => {
+  it('matches package fade envelopes for the timeline music examples', () => {
+    for (const clip of [chip, piano, orch]) {
+      const actual = getAudioFade(clip, FPS);
+      const expected = packageEnvelope(clip);
+      expect(actual).toEqual(expected);
+    }
+    expect(audioEnvelopeAt(getAudioFade(chip, FPS)!, 28.5)).toBe(1);
+    expect(audioEnvelopeAt(getAudioFade(chip, FPS)!, 30)).toBeCloseTo(0.5, 10);
+    expect(audioEnvelopeAt(getAudioFade(chip, FPS)!, 31.5)).toBe(0);
+    expect(audioEnvelopeAt(getAudioFade(piano, FPS)!, 1.5)).toBeCloseTo(0.5, 10);
   });
 
   it('crossfades the chiptune into the piano over 28.5–31.5 s instead of overlapping at full level', () => {
@@ -41,23 +52,27 @@ describe('audio fades (renderer semantics)', () => {
     expect(gainAt(orch, 158.8)).toBeCloseTo(0.5, 1);
   });
 
-  it('multiplies overlapping fade-in and fade-out ramps', () => {
-    const fade: AudioFade = { fadeInFrames: 20, fadeOutFrames: 20, durationFrames: 30 };
-    expect(audioFadeGain(fade, 15)).toBeCloseTo((15 / 20) * (15 / 20), 12);
-  });
-
-  it('keeps a plain gain without a valid fade, as the renderer does', () => {
+  it('keeps a plain gain when fade values are zero or invalid', () => {
     for (const params of [undefined, {}, { fadeIn: 0 }, { fadeIn: -1, fadeOut: Number.NaN }, { fadeIn: '2' }, { fadeOut: Infinity }]) {
       const clip: TimelineClip = { ...chip, params: params as TimelineClip['params'] };
       expect(getAudioFade(clip, FPS)).toBeNull();
-      expect(getAudioVolumeProp(0.4, getAudioFade(clip, FPS))).toBe(0.4);
+      expect(getAudioVolumeProp(0.4, getAudioFade(clip, FPS), FPS)).toBe(0.4);
     }
   });
 
+  it('does not opt raw package audio envelopes into the App timeline projection', () => {
+    const clipWithRawEnvelope = {
+      ...chip,
+      params: {},
+      audio: { envelope: { keyframes: [{ at: 0, value: 0 }, { at: 1, value: 1 }] } },
+    } as TimelineClip;
+    expect(getAudioFade(clipWithRawEnvelope, FPS)).toBeNull();
+  });
+
   it('anchors the ramp to the authored clip when playback starts later', () => {
-    const fade = getAudioFade(piano, FPS)!;
-    const volume = getAudioVolumeProp(1, fade, 30) as (frame: number) => number;
+    const envelope = getAudioFade(piano, FPS)!;
+    const volume = getAudioVolumeProp(1, envelope, FPS, 30) as (frame: number) => number;
     // One second into the played Sequence is two seconds into the clip.
-    expect(volume(30)).toBeCloseTo(audioFadeGain(fade, 60), 12);
+    expect(volume(30)).toBeCloseTo(audioEnvelopeAt(packageEnvelope(piano)!, 2), 12);
   });
 });

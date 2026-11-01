@@ -19,14 +19,12 @@ import {
 import {
   TimelineNotFoundError,
   TimelineSchemaIncompatibleError,
-  isTimelineVersionConflictError,
 } from '@/tools/video-editor/data/DataProvider.ts';
-import { uploadAssetWithResolver } from '@/tools/video-editor/data/AssetResolver.ts';
 import { InMemoryDataProvider } from '@/tools/video-editor/testing/InMemoryDataProvider.ts';
 import {
   expectUnsupportedExtensionPersistenceDiagnostics,
 } from '@/tools/video-editor/data/conformance/extensionPersistenceConformance.ts';
-import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/index.ts';
+import type { AssetRegistry } from '@/tools/video-editor/types/index.ts';
 import {
   MANAGED_OBJECT_DIGEST,
   MANAGED_OBJECT_ID,
@@ -43,8 +41,29 @@ const objectUrl = (objectId: string) => `${BASE_URL}/v1/objects/${encodeURICompo
 type Fixture = ReturnType<typeof runtimeFixture>;
 type FixtureTransport = Fixture['transport'];
 
+function publicTimelineTransport(fixture: Fixture, delegate: FixtureTransport = fixture.transport): FixtureTransport {
+  const path = `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`;
+  return async (method, requestPath, headers, body) => {
+    if (method === 'GET' && requestPath === path) {
+      try {
+        return await delegate(method, requestPath, headers, body);
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes('retired mutable timeline GET')) throw error;
+        const current = fixture.read();
+        return { status: 200, headers: {}, body: json({
+          project_id: PROJECT_ID,
+          timeline_id: TIMELINE_ID,
+          head_revision_id: current.headRevisionId,
+          head_publication_id: 'publication-current',
+        }) };
+      }
+    }
+    return delegate(method, requestPath, headers, body);
+  };
+}
+
 function providerFor(fixture: Fixture, transport: FixtureTransport = fixture.transport) {
-  return new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: BASE_URL, token: 'fixture-token', transport });
+  return new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: BASE_URL, token: 'fixture-token', transport: publicTimelineTransport(fixture, transport) });
 }
 
 const isPublication = (request: Fixture['requests'][number]) =>
@@ -120,7 +139,7 @@ describe('load and registry', () => {
     await expect(provider.loadAssetRegistry(TIMELINE_ID)).resolves.toEqual({ assets: {} });
   });
 
-  it('preserves unknown keys on clips, tracks and registry entries through load and save', async () => {
+  it('loads unknown keys on clips, tracks and registry entries from the canonical head', async () => {
     const clips = [{ id: 'c1', track: 'V1', at: 0, hold: 1, extensionAuthored: { keep: true } }];
     const fixture = runtimeFixture({ parentComposition: composition({
       config: { clips, tracks: [{ ...track, vendorField: 7 }] },
@@ -134,12 +153,7 @@ describe('load and registry', () => {
     expect(loaded.config.clips[0]).toMatchObject({ extensionAuthored: { keep: true } });
     expect(loaded.config.tracks?.[0]).toMatchObject({ vendorField: 7 });
     expect(registry.assets['asset-video']).toMatchObject({ vendorField: 'kept' });
-
-    await provider.saveTimelineAtHead(TIMELINE_ID, loaded.config, loaded.head!, registry);
-    const reloaded = await providerFor(fixture).loadTimeline(TIMELINE_ID);
-    expect(reloaded.config.clips[0]).toMatchObject({ extensionAuthored: { keep: true } });
-    expect(reloaded.config.tracks?.[0]).toMatchObject({ vendorField: 7 });
-    expect((await providerFor(fixture).loadAssetRegistry(TIMELINE_ID)).assets['asset-video']).toMatchObject({ vendorField: 'kept' });
+    expect(fixture.read().parentComposition.config.clips[0]).toMatchObject({ extensionAuthored: { keep: true } });
   });
 
   it('rejects a non-object config instead of coercing it', async () => {
@@ -250,7 +264,7 @@ describe('asset resolve', () => {
     await expect(provider.resolveAssetUrl('https://example.test/a.mp4')).resolves.toBe('https://example.test/a.mp4');
   });
 
-  it('persists registry metadata (integrity, provenance, enrichment, extensions) across a fresh provider read', async () => {
+  it('loads seeded registry metadata (integrity, provenance, enrichment, extensions) from a fresh provider', async () => {
     const metadata = {
       integrity: { algorithm: 'sha256', hash: 'parser-hash', size: 5 },
       provenance: { source: 'parser-test' },
@@ -261,170 +275,20 @@ describe('asset resolve', () => {
       },
       extensions: { 'com.example.parser': { parsed: true } },
     };
-    const fixture = runtimeFixture();
-    const provider = providerFor(fixture);
-
-    await provider.registerAsset(TIMELINE_ID, 'asset-enriched', {
-      file: objectUrl(MANAGED_OBJECT_ID),
-      type: 'video/mp4',
-      duration: 4,
-      media_id: MANAGED_OBJECT_ID,
-      content_sha256: MANAGED_OBJECT_DIGEST,
-      metadata,
-    } as AssetRegistry['assets'][string]);
-
+    const fixture = runtimeFixture({ parentComposition: composition({ registry: {
+      assets: { 'asset-enriched': {
+        file: `/v1/objects/${encodeURIComponent(MANAGED_OBJECT_ID)}`,
+        type: 'video/mp4', duration: 4, media_id: MANAGED_OBJECT_ID,
+        content_sha256: MANAGED_OBJECT_DIGEST, metadata,
+      } },
+    } as unknown as AssetRegistry }) });
     const fresh = await providerFor(fixture).loadAssetRegistry(TIMELINE_ID);
     expect(fresh.assets['asset-enriched'].metadata).toEqual(metadata);
   });
 });
 
-describe('save and CAS', () => {
-  it('publishes config, registry and the expected head in one request and resolves assets from the saved registry', async () => {
-    const fixture = runtimeFixture({ parentComposition: composition() });
-    const provider = providerFor(fixture);
-    const loaded = await provider.loadTimeline(TIMELINE_ID);
-    const savedRegistry = managedRegistry({ 'asset-save': { file: 'clips/saved.mp4', media_id: MANAGED_OBJECT_ID } });
-    const edited: TimelineConfig = {
-      ...loaded.config,
-      output: { resolution: '1280x720', fps: 30, file: 'output.mp4' },
-      tracks: [{ ...track, label: 'Saved V1' }],
-    };
-
-    const receipt = await provider.saveTimelineAtHead(TIMELINE_ID, edited, loaded.head!, savedRegistry);
-
-    const writes = fixture.requests.filter((request) => request.method !== 'GET' && !request.path.endsWith('/inspect')
-      && request.path !== '/v1/handshake');
-    expect(writes.map((request) => `${request.method} ${request.path}`)).toEqual([
-      `POST /v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}/composition-revisions`,
-    ]);
-    const body = publications(fixture)[0].body as {
-      expected_head: string;
-      parent_composition: { config: Record<string, unknown>; registry: AssetRegistry };
-    };
-    expect(body.expected_head).toBe('parent-r1');
-    expect(body.parent_composition.config.tracks).toEqual([{ ...track, label: 'Saved V1' }]);
-    expect(body.parent_composition.config).not.toHaveProperty('output');
-    expect(body.parent_composition.registry).toEqual(savedRegistry);
-    expect(receipt.configVersion).toBe(2);
-    await expect(provider.resolveAssetUrl('clips/saved.mp4')).resolves.toBe(objectUrl(MANAGED_OBJECT_ID));
-  });
-
-  it('keeps the loaded registry when a save passes none, from one cached base read', async () => {
-    const registry = managedRegistry({ 'asset-kept': { file: 'clips/kept.mp4', media_id: MANAGED_OBJECT_ID } });
-    const fixture = runtimeFixture({ parentComposition: composition({ registry }) });
-    const provider = providerFor(fixture);
-    const loaded = await provider.loadTimeline(TIMELINE_ID);
-
-    await provider.saveTimelineAtHead(TIMELINE_ID, { ...loaded.config, tracks: [{ ...track, label: 'Edited' }] }, loaded.head!);
-
-    expect(publications(fixture)).toHaveLength(1);
-    expect((publications(fixture)[0].body as { parent_composition: { registry: AssetRegistry } }).parent_composition.registry).toEqual(registry);
-    const revisionReads = fixture.requests.filter((request) => request.method === 'GET'
-      && request.path.endsWith('/composition-revisions/parent-r1'));
-    expect(revisionReads).toHaveLength(1);
-  });
-
-  it('registers assets by publishing the merged registry once per call and chains each publication on the advanced head', async () => {
-    const seeded = managedRegistry({
-      'asset-video': { file: 'clips/demo.mp4', media_id: MANAGED_OBJECT_ID },
-      'asset-image': { file: 'stills/cover.png', media_id: OTHER_OBJECT_ID },
-    });
-    const fixture = runtimeFixture({ parentComposition: composition({ registry: seeded }) });
-    const provider = providerFor(fixture);
-    const entry = { file: 'audio/voice.wav', type: 'audio/wav', duration: 2.5 } as AssetRegistry['assets'][string];
-
-    await provider.registerAsset(TIMELINE_ID, 'asset-audio', entry);
-    await provider.registerAsset(TIMELINE_ID, 'asset-audio', entry);
-
-    const posts = publications(fixture);
-    expect(posts).toHaveLength(2);
-    const registryOf = (index: number) => (posts[index].body as { parent_composition: { registry: AssetRegistry } }).parent_composition.registry;
-    expect(Object.keys(registryOf(0).assets)).toEqual(['asset-video', 'asset-image', 'asset-audio']);
-    expect(registryOf(1).assets['asset-audio']).toEqual(entry);
-    // The second publication must be based on the head the first one created,
-    // never on the stale loaded head, or Runtime would answer 409.
-    expect((posts[1].body as { expected_head: string }).expected_head)
-      .toBe((posts[0].body as { parent_revision_id: string }).parent_revision_id);
-    expect(fixture.read().documentVersion).toBe(3);
-    expect(fixture.requests.some((request) => request.path.includes('/registry'))).toBe(false);
-  });
-
-  it('rejects a save based on a stale head with the expected version, then accepts it once reloaded', async () => {
-    const fixture = runtimeFixture({ parentComposition: composition() });
-    const editor = providerFor(fixture);
-    const otherTab = providerFor(fixture);
-    const base = await editor.loadTimeline(TIMELINE_ID);
-    const otherBase = await otherTab.loadTimeline(TIMELINE_ID);
-    await otherTab.saveTimelineAtHead(TIMELINE_ID, { ...otherBase.config, tracks: [{ ...track, label: 'Other tab' }] }, otherBase.head!);
-    const mine = { ...base.config, tracks: [{ ...track, label: 'Mine' }] };
-    const registry = managedRegistry({ a: { file: 'f.mp4', media_id: MANAGED_OBJECT_ID } });
-
-    const conflict = await editor.saveTimelineAtHead(TIMELINE_ID, mine, base.head!, registry).catch((thrown: unknown) => thrown);
-
-    expect(isTimelineVersionConflictError(conflict)).toBe(true);
-    expect(conflict).toMatchObject({ code: 'timeline_version_conflict', expectedVersion: base.configVersion });
-    expect(fixture.read().documentVersion).toBe(2);
-    expect(fixture.read().config.tracks[0]?.label).toBe('Other tab');
-
-    const reloaded = await editor.loadTimeline(TIMELINE_ID);
-    expect(reloaded.config.tracks?.[0]?.label).toBe('Other tab');
-    const retried = await editor.saveTimelineAtHead(TIMELINE_ID, mine, reloaded.head!, registry);
-    expect(retried.configVersion).toBe(reloaded.configVersion + 1);
-    expect(fixture.read().config.tracks[0]?.label).toBe('Mine');
-  });
-
-  it('fails a rejected save terminally with the Runtime message and no retry', async () => {
-    const fixture = runtimeFixture();
-    let attempts = 0;
-    const provider = providerFor(fixture, async (method, path, headers, body) => {
-      if (method === 'POST' && path.endsWith('/composition-revisions')) {
-        attempts += 1;
-        return { status: 400, headers: {}, body: json({ code: 'invalid_registry', message: 'registry body must contain an assets object' }) };
-      }
-      return fixture.transport(method, path, headers, body);
-    });
-    const loaded = await provider.loadTimeline(TIMELINE_ID);
-
-    const error = await provider.saveTimelineAtHead(TIMELINE_ID, loaded.config, loaded.head!).catch((thrown: unknown) => thrown);
-
-    expect(error).toBeInstanceOf(TimelineSchemaIncompatibleError);
-    expect((error as Error).message).toContain('registry body must contain an assets object');
-    expect(attempts).toBe(1);
-  });
-
-  it('maps a missing timeline on publish to TimelineNotFoundError', async () => {
-    const fixture = runtimeFixture();
-    const provider = providerFor(fixture, async (method, path, headers, body) => (
-      method === 'POST' && path.endsWith('/composition-revisions')
-        ? { status: 404, headers: {}, body: json({ code: 'not_found', message: 'timeline missing' }) }
-        : fixture.transport(method, path, headers, body)
-    ));
-    const loaded = await provider.loadTimeline(TIMELINE_ID);
-
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, loaded.config, loaded.head!)).rejects.toBeInstanceOf(TimelineNotFoundError);
-  });
-});
-
 describe('uploads', () => {
   const file = () => new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' });
-
-  it('routes resolver uploads through media import and one registry publication', async () => {
-    const fixture = runtimeFixture();
-    const provider = providerFor(fixture);
-
-    const result = await uploadAssetWithResolver(provider, {
-      file: file(),
-      options: { timelineId: TIMELINE_ID, userId: 'user-1' },
-    });
-
-    expect(result.assetId).toBe(MANAGED_OBJECT_ID);
-    expect(fixture.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/media-imports'))).toHaveLength(1);
-    const posts = publications(fixture);
-    expect(posts).toHaveLength(1);
-    expect((posts[0].body as { parent_composition: { registry: AssetRegistry } }).parent_composition.registry.assets[result.assetId])
-      // The wire carries the object's route, never the absolute URL it was first seen at: the Runtime refuses any other locator when it freezes a render.
-      .toMatchObject({ media_id: MANAGED_OBJECT_ID, file: `/v1/objects/${encodeURIComponent(MANAGED_OBJECT_ID)}`, type: 'video/mp4' });
-  });
 
   it('leaves the registry and the timeline untouched when the media import is refused', async () => {
     const fixture = runtimeFixture();
@@ -458,21 +322,6 @@ describe('bundle passthrough', () => {
       }],
     },
   }) as TimelineBundleEnvelope;
-
-  it('reports no bundle key when the head carries none, and null only after an explicit clear', async () => {
-    const fixture = runtimeFixture({ parentComposition: composition() });
-    const provider = providerFor(fixture);
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    expect(initial).not.toHaveProperty('bundle');
-
-    const withBundle = await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!, undefined, bundle('hello'));
-    const cleared = await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, withBundle.head, undefined, null);
-
-    expect((publications(fixture)[1].body as { parent_composition: { config: Record<string, unknown> } }).parent_composition.config.bundle).toBeNull();
-    const reloaded = await providerFor(fixture).loadTimeline(TIMELINE_ID);
-    expect(reloaded.head).toEqual(cleared.head);
-    expect(reloaded.bundle).toBeNull();
-  });
 
   it('fails the whole load closed when the head declares an unparsable bundle', async () => {
     const invalid = { ...bundle('x'), schema_version: 99 };
@@ -528,6 +377,87 @@ describe('identity validation', () => {
 
     await expect(wrongProject.loadTimeline(TIMELINE_ID)).rejects.toThrow('belongs to project project-other, not project-r1');
     await expect(wrongRevision.loadTimeline(TIMELINE_ID)).rejects.toThrow('identity mismatch: requested parent-r1, got parent-other');
+  });
+
+  it('loads the matching revision/publication pair from the authenticated public timeline read', async () => {
+    const fixture = runtimeFixture({ parentComposition: composition() });
+    const provider = providerFor(fixture);
+
+    const loaded = await provider.loadTimeline(TIMELINE_ID);
+
+    expect(loaded.head).toMatchObject({
+      projectId: PROJECT_ID,
+      timelineId: TIMELINE_ID,
+      headRevisionId: 'parent-r1',
+      headPublicationId: 'publication-current',
+    });
+    expect(fixture.requests.filter((request) => request.method === 'GET'
+      && request.path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`)).toHaveLength(1);
+  });
+
+  it.each(['project_id', 'timeline_id'] as const)('refuses a public head from another %s', async (field) => {
+    const fixture = runtimeFixture({ parentComposition: composition() });
+    const transport: FixtureTransport = async (method, path, headers, body) => {
+      if (method === 'GET' && path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        return { status: 200, headers: {}, body: json({
+          project_id: field === 'project_id' ? 'project-other' : PROJECT_ID,
+          timeline_id: field === 'timeline_id' ? 'timeline-other' : TIMELINE_ID,
+          head_revision_id: 'parent-r1',
+          head_publication_id: 'publication-current',
+        }) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+
+    await expect(providerFor(fixture, transport).loadTimeline(TIMELINE_ID))
+      .rejects.toThrow(`belongs to ${field === 'project_id' ? 'project project-other, not project-r1' : 'timeline timeline-other, not timeline-r1'}`);
+  });
+
+  it('refuses a moving public head without reading an unmatched immutable basis', async () => {
+    const fixture = runtimeFixture({ parentComposition: composition() });
+    const transport: FixtureTransport = async (method, path, headers, body) => {
+      if (method === 'GET' && path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        return { status: 200, headers: {}, body: json({
+          project_id: PROJECT_ID,
+          timeline_id: TIMELINE_ID,
+          head_revision_id: 'parent-r2',
+          head_publication_id: 'publication-r2',
+        }) };
+      }
+      if (method === 'POST' && path.endsWith('/inspect')) {
+        const response = await fixture.transport(method, path, headers, body);
+        const inspection = JSON.parse(new TextDecoder().decode(response.body)) as Record<string, unknown>;
+        inspection.revision_id = 'parent-r1';
+        inspection.head_revision_id = 'parent-r1';
+        return { ...response, body: json(inspection) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+    const provider = providerFor(fixture, transport);
+
+    await expect(provider.loadTimeline(TIMELINE_ID)).rejects.toMatchObject({
+      code: 'timeline_version_conflict', message: expect.stringContaining('head moved while pairing'),
+    });
+    expect(fixture.requests.some((request) => request.method === 'GET'
+      && request.path.includes('/composition-revisions/'))).toBe(false);
+  });
+
+  it('preserves a true legacy null publication instead of inventing one', async () => {
+    const fixture = runtimeFixture({ parentComposition: composition() });
+    const transport: FixtureTransport = async (method, path, headers, body) => {
+      if (method === 'GET' && path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        return { status: 200, headers: {}, body: json({
+          project_id: PROJECT_ID,
+          timeline_id: TIMELINE_ID,
+          head_revision_id: 'parent-r1',
+          head_publication_id: null,
+        }) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+
+    await expect(providerFor(fixture, transport).loadTimeline(TIMELINE_ID))
+      .resolves.toMatchObject({ head: { headRevisionId: 'parent-r1', headPublicationId: null } });
   });
 });
 

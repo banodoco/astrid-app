@@ -15,6 +15,13 @@ import { VideoEditorAssetPanelSurface } from '@/tools/video-editor/components/Pr
 import type { DataLaneView, FrozenDataItem } from '@/tools/video-editor/data/typed/envelope';
 import type { DataItemInspectorProps } from '@astrid/editor-sdk';
 
+const inspectorElementBridge = vi.hoisted(() => ({ context: null as import('@/shared/contexts/AgentChatContext.tsx').AgentChatEditorContext | null }));
+let clipPanelChange: ((patch: { params: Record<string, unknown> }) => void) | undefined;
+vi.mock('@/shared/contexts/AgentChatContext.tsx', async importOriginal => ({
+  ...await importOriginal<typeof import('@/shared/contexts/AgentChatContext.tsx')>(),
+  useOptionalAgentChatBridge: () => ({ editorContext: inspectorElementBridge.context }),
+}));
+
 let realStoreSelectionTest = false;
 const useTimelineEditorDataMock = vi.fn();
 const useTimelineEditorOpsMock = vi.fn();
@@ -109,9 +116,10 @@ vi.mock('@/tools/video-editor/components/PropertiesPanel/AssetPanel', () => ({
 vi.mock('@/tools/video-editor/components/PropertiesPanel/ClipPanel', () => ({
   NO_EFFECT: 'no-effect',
   getVisibleClipTabs: () => ['effects', 'timing', 'position', 'audio', 'text'],
-  ClipPanel: ({ onDelete }: { onDelete?: () => void }) => (
-    <div data-testid="mock-clip-panel">Clip panel{onDelete && <button type="button" onClick={onDelete}>Delete clip</button>}</div>
-  ),
+  ClipPanel: ({ onDelete, onChange }: { onDelete?: () => void; onChange?: typeof clipPanelChange }) => {
+    clipPanelChange = onChange;
+    return <div data-testid="mock-clip-panel">Clip panel{onDelete && <button type="button" onClick={onDelete}>Delete clip</button>}</div>;
+  },
 }));
 
 vi.mock('@/tools/video-editor/components/PropertiesPanel/BulkClipPanel', () => ({
@@ -285,6 +293,19 @@ describe('PropertiesPanel registry surfaces', () => {
       (_registry: unknown, _context: unknown, _selection: unknown) => createInspectorContributions(),
     );
     useVideoEditorAssetPanelsMock.mockReturnValue([createAssetPanel('asset-panel-extra')]);
+  });
+
+  it('forwards the current element selection with the real property callback', () => {
+    const ops = createEditorOps();
+    useTimelineEditorOpsMock.mockReturnValue(ops);
+    const owner = { tool: 'video-editor' as const, projectId: 'project', projectSlug: 'project', timelineId: 'timeline', timelineName: null };
+    inspectorElementBridge.context = owner;
+    try {
+      render(<PropertiesPanel />);
+      const patch = { params: { bob: 12 } };
+      act(() => clipPanelChange!(patch));
+      expect(ops.handleSelectedClipChange).toHaveBeenCalledWith(patch, owner);
+    } finally { inspectorElementBridge.context = null; }
   });
 
   it.each([['media', 'timing'], ['text', 'text']] as const)('opens a retained touch Inspector on the %s clip’s own tab', (clipType, tab) => {

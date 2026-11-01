@@ -31,6 +31,7 @@ vi.mock('remotion', async () => ({
     <div data-testid="sequence" {...props}>{children}</div>
   ),
   interpolate: () => ({}),
+  spring: () => 1,
   useCurrentFrame: () => currentFrame,
   useRemotionEnvironment: () => ({ isRendering: false, isClientSideRendering: false }),
   useVideoConfig: () => ({ fps: 30, width: 1920, height: 1080 }),

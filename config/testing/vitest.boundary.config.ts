@@ -1,26 +1,8 @@
 import SkipGuardReporter from './skipGuardReporter';
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import fs from 'fs';
 
 const projectRoot = path.resolve(__dirname, '../..');
-const timelineCompositionRegistryPath = path.resolve(
-  projectRoot,
-  'node_modules/@banodoco/timeline-composition/typescript/src/registry.generated.ts',
-);
-const timelineCompositionThemeApiPath = path.resolve(
-  projectRoot,
-  'node_modules/@banodoco/timeline-composition/typescript/src/theme-api.ts',
-);
-
-const resolvedTimelineCompositionRegistryPath = fs.existsSync(timelineCompositionRegistryPath)
-  ? timelineCompositionRegistryPath
-  : path.resolve(projectRoot, 'examples/embed-demo/stubs/timeline-composition/registry.generated.ts');
-
-const resolvedTimelineCompositionThemeApiPath = fs.existsSync(timelineCompositionThemeApiPath)
-  ? timelineCompositionThemeApiPath
-  : path.resolve(projectRoot, 'examples/embed-demo/stubs/timeline-composition/theme-api.tsx');
-
 export default defineConfig({
   root: projectRoot,
   resolve: {
@@ -28,35 +10,26 @@ export default defineConfig({
       '@': path.resolve(projectRoot, 'src'),
       '@astrid/editor-sdk': path.resolve(projectRoot, 'src/sdk'),
       'fake-indexeddb': path.resolve(projectRoot, 'vendor/fake-indexeddb/index.js'),
-      // Sprint 5: deduplicate react / remotion / @banodoco/* across linked
-      // packages. The timeline-theme-2rp peer-dep package lives at a
-      // file: link outside this app's node_modules tree; Vite's nearest-
-      // node_modules resolution would otherwise pick up the package's
-      // own copies (or fail when none exists). Pinning these to the
-      // app's node_modules guarantees a single React/Remotion runtime.
+      // Share one React/Remotion runtime with Composition and linked host elements.
       'react': path.resolve(projectRoot, 'node_modules/react'),
       'react-dom': path.resolve(projectRoot, 'node_modules/react-dom'),
       'remotion': path.resolve(projectRoot, 'node_modules/remotion'),
       '@remotion/layout-utils': path.resolve(projectRoot, 'node_modules/@remotion/layout-utils'),
-      '@banodoco/timeline-composition/registry.generated': resolvedTimelineCompositionRegistryPath,
-      '@banodoco/timeline-composition/theme-api': resolvedTimelineCompositionThemeApiPath,
-      '@banodoco/timeline-composition': path.resolve(projectRoot, 'node_modules/@banodoco/timeline-composition'),
+      '@remotion/media': path.resolve(projectRoot, 'node_modules/@remotion/media'),
       '@banodoco/timeline-schema': path.resolve(projectRoot, 'vendor/timeline-schema/typescript/dist/src/index.js'),
-      // Sprint 5: workspace-primitive aliases for the linked packages.
-      // The composition package's animations.generated / transitions.generated
-      // / effects.generated import via these aliases. Astrid's bundler needs
-      // them to resolve; Banodoco's webpack already does the same.
+      // Resolve vendored Composition registry primitives used by generated modules.
       '@workspace-effects': path.resolve(projectRoot, 'vendor/banodoco-effects'),
       '@workspace-animations': path.resolve(projectRoot, 'vendor/banodoco-animations'),
       '@workspace-transitions': path.resolve(projectRoot, 'vendor/banodoco-transitions'),
     },
     dedupe: [
+      'three',
+      '@remotion/three',
       'react',
       'react-dom',
       'remotion',
       '@remotion/layout-utils',
       '@banodoco/timeline-composition',
-      '@banodoco/timeline-theme-2rp',
     ],
   },
   server: {

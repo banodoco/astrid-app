@@ -26,20 +26,12 @@ export function useEditorBrowserDefaults({ shellRoot, saveStatus, flushPendingSa
     // acquire another barrier until the current sequence is acknowledged.
     for (let attempt = 0; attempt < 5; attempt++) {
       if (currentSaveStatus() === 'saved') return;
-      try {
-        await latest.current.flushPendingSave();
-      } catch {
-        // A fenced Runtime cannot acknowledge the old workspace session. The
-        // timeline owner may still admit reload after it verifies its own
-        // latest recovery snapshot in IndexedDB. It never retries a write
-        // through the old client or changes the save badge to "saved".
-        await latest.current.preserveTimelineDraftForReload();
-      }
+      await latest.current.flushPendingSave();
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
-      if (currentSaveStatus() === 'saved' || latest.current.isTimelineDraftDurableForReload()) return;
+      if (currentSaveStatus() === 'saved') return;
     }
     throw new Error('the timeline kept changing while it was being saved');
-  }, shellRoot !== null, () => currentSaveStatus() !== 'saved' && !latest.current.isTimelineDraftDurableForReload());
+  }, shellRoot !== null, () => currentSaveStatus() !== 'saved');
 
   useEffect(() => {
     if (!shellRoot) return;

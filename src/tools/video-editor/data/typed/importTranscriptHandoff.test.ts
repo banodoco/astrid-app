@@ -59,6 +59,16 @@ describe('external transcript handoff admission', () => {
       'selected',
     );
   });
+  it('rejects a supplied source media pin that differs from the selected media', () => {
+    expect(() => parseTranscriptDocument({
+      mediaId: 'sha256:' + 'b'.repeat(64),
+      segments: [{ start: 0, end: 1, text: 'source' }],
+    })).not.toThrow();
+    expect(() => parseTranscriptDocument({
+      mediaId: 'not-a-runtime-media-pin',
+      segments: [{ start: 0, end: 1, text: 'source' }],
+    })).toThrow(/media_id/);
+  });
   it('rejects absent and non-media registry entries', async () => {
     const data = await buildTimelineData(
       {
@@ -100,5 +110,15 @@ describe('external transcript handoff admission', () => {
       }),
     ).rejects.toThrow('Runtime');
     expect(commits).toEqual([]);
+  });
+  it('rejects a malformed source pin without mutating the supplied document', () => {
+    const malformed = {
+      mediaId: 'not-a-runtime-media-pin',
+      segments: [{ start: 0, end: 1, text: 'source' }],
+    };
+    const before = structuredClone(malformed);
+
+    expect(() => parseTranscriptDocument(malformed)).toThrow(/media_id/);
+    expect(malformed).toEqual(before);
   });
 });

@@ -111,13 +111,22 @@ export class UpdateOperation {
       this.publish({ fresh: false, error: UPDATE_STATUS_UNAVAILABLE });
     }
   }
-  start = async (): Promise<void> => {
+  start = async (validateDrafts: () => boolean): Promise<void> => {
     if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !canStartInstallerUpdate(this.snapshot.status)) return;
     this.posting = true;
+    this.publish({ pending: true, error: null });
+    // Publishing can invoke subscribers synchronously. Recheck after it and
+    // directly before dispatch; a local refusal is not an uncertain POST.
+    let admitted = false;
+    try { admitted = validateDrafts(); } catch { /* Fail closed. */ }
+    if (!admitted) {
+      this.posting = false;
+      this.publish({ pending: false, error: 'Drafts changed before the update could start. Save them and try again.' });
+      return;
+    }
     this.refusal = null;
     this.operationId = null;
-    this.acknowledgementBaseline = this.snapshot.status.operation_id;
-    this.publish({ pending: true, error: null });
+    this.acknowledgementBaseline = this.snapshot.status?.operation_id;
     try {
       const accepted = await this.client.startInstallerUpdate();
       this.operationId = accepted.operation_id;

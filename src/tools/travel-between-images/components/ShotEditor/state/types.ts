@@ -32,6 +32,7 @@ interface ShotEditorNavigationProps {
   hasPrevious?: boolean;
   hasNext?: boolean;
   onUpdateShotName?: (newName: string) => void;
+  onBeforeNameEdit?: () => void;
 }
 
 interface ShotEditorCacheProps {

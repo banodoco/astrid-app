@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { repairConfig } from '@/tools/video-editor/lib/migrate';
-import { serializeClipForDisk, serializeForDisk, validateSerializedConfig } from '@/tools/video-editor/lib/serialize';
+import { serializeClipForDisk, serializeForDisk, validateSerializedConfig, withHeldClipSourceFields } from '@/tools/video-editor/lib/serialize';
+import { configToRows, rowsToConfig } from '@/tools/video-editor/lib/timeline-data';
+import { createDefaultTimelineConfig } from '@/tools/video-editor/lib/defaults';
 import {
   TIMELINE_POSTPROCESS_SHADER_APP_KEY,
   TimelineDomainError,
@@ -11,6 +13,45 @@ import {
 import type { AssetRegistryEntry, ResolvedTimelineConfig, TimelineConfig, TimelineClip } from '@/tools/video-editor/types';
 
 describe('video-editor serialization', () => {
+  it.each([
+    { clipType: 'media', from: 0, to: 8, speed: 1 },
+    { clipType: 'hold', from: 2 },
+    { clipType: 'media' },
+    { clipType: 'media', from: null, to: null, speed: null },
+  ])('keeps held source fields authored through row serialization: %j', (source) => {
+    const clip = { id: 'held', at: 0, track: 'V1', hold: 8, ...source,
+      app: { astrid: { until: 8, for: 8 }, opaque: { keep: null } } } as unknown as TimelineClip;
+    const config = { ...createDefaultTimelineConfig(), clips: [clip] };
+    const original = structuredClone(config);
+    const { rows, meta, clipOrder, tracks } = configToRows(config);
+    rows[0].actions[0].end = 6;
+    const serialized = withHeldClipSourceFields(rowsToConfig(rows, meta, config.output, clipOrder, tracks, undefined, config), meta);
+    expect(serialized.clips).toEqual([{ ...clip, hold: 6 }]);
+    expect(serialized.output).toEqual(config.output);
+    expect(serialized.clips[0]).not.toHaveProperty('label');
+    expect(config).toEqual(original);
+  });
+
+  it('serializes a held media Source In edit without changing its duration, Source Out, speed or app timing', () => {
+    const config = { ...createDefaultTimelineConfig(), clips: [{ id: 'right', at: 2, track: 'V1', clipType: 'media',
+      hold: 6, from: 0, to: 8, speed: 1, app: { astrid: { until: 8, for: 6 }, opaque: { keep: null } } }] };
+    const { rows, meta, clipOrder, tracks } = configToRows(config);
+    meta.right.from = 3;
+    const serialized = withHeldClipSourceFields(rowsToConfig(rows, meta, config.output, clipOrder, tracks, undefined, config), meta);
+    expect(serialized.clips).toEqual([{ ...config.clips[0], from: 3 }]);
+    expect(config.clips[0].from).toBe(0);
+  });
+
+  it('keeps source-window duration calculation for media without numeric hold', () => {
+    const config = { ...createDefaultTimelineConfig(), clips: [{ id: 'media', at: 2, track: 'V1', clipType: 'media',
+      from: 1, to: 9, speed: 2, app: { astrid: { until: 6, for: 4 }, opaque: null } }] };
+    const { rows, meta, clipOrder, tracks } = configToRows(config);
+    rows[0].actions[0].end = 5;
+    const serialized = withHeldClipSourceFields(rowsToConfig(rows, meta, config.output, clipOrder, tracks, undefined, config), meta);
+    expect(serialized.clips).toEqual([{ ...config.clips[0], to: 7 }]);
+    expect(serialized.clips[0]).not.toHaveProperty('hold');
+  });
+
   it('preserves exact source fields and strips resolved-only data', () => {
     const resolved = {
       output: {

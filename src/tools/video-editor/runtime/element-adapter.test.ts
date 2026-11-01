@@ -76,75 +76,49 @@ describe('Astrid element operation adapter', () => {
     expect(get).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
   });
 
-  it('uses the original immutable head and bundle, preserving concurrent CAS rejection', async () => {
+  it('uses the original head pair and bundle through the mounted save callback', async () => {
     const payload = documentPayload();
-    const originalHead = { projectId: 'astrid-intro', timelineId: 'main', headRevisionId: 'head-7' };
+    const originalHead = { projectId: 'astrid-intro', timelineId: 'main', headRevisionId: 'head-7', headPublicationId: 'pub-7' };
     let latestHead = originalHead;
-    const bundle: import('../data/typed/timelineBundle.ts').TimelineBundleEnvelope = { schema_version: 1, itemsBySchemaRef: {}, transcriptReferences: { schema: 'media.transcript.references/v1', associations: [] } };
-    const saveTimeline = vi.fn();
-    const saveTimelineAtHead = vi.fn(async (_id, _config, expectedHead, _registry, storedBundle) => {
-      expect(expectedHead).toEqual(originalHead); expect(storedBundle).toBe(bundle);
-      if (latestHead.headRevisionId !== expectedHead.headRevisionId) throw new Error('head CAS conflict');
-      return { configVersion: 8, head: { ...originalHead, headRevisionId: 'head-8' } };
+    const bundle = { schema_version: 1 as const, itemsBySchemaRef: {} };
+    const save = vi.fn(async (_id, input) => {
+      expect(input.expectedHead).toEqual(originalHead);
+      expect(input.bundle).toEqual(bundle);
+      if (JSON.stringify(latestHead) !== JSON.stringify(input.expectedHead)) throw new Error('head CAS conflict');
+      return { ...payload, config: input.config, config_version: 8, head: { ...originalHead, headRevisionId: 'head-8', headPublicationId: 'pub-8' } };
     });
-    const provider = { loadTimeline: vi.fn(async () => ({ config: payload.config as TimelineConfig, configVersion: 7, head: latestHead, bundle })), loadAssetRegistry: vi.fn(async () => ({})), saveTimeline, saveTimelineAtHead };
-    const routes = createElementTimelineRoutes(provider);
+    const routes = createElementTimelineRoutes({ get: async () => ({ ...payload, head: latestHead, bundle }), save });
     const owner = new AstridElementOperationAdapter(context(), routes, 'astrid-intro', { timelineId: 'main', assertAuthority: () => {}, getHead: () => latestHead });
     const captured = owner.captureForTurn();
     const operation = { name: 'timeline.set_clip_fade', project: 'astrid-intro', timeline: 'main', expected_version: 7, clip_id: 'a', fade_in: 0.2 };
     await expect(captured.execute(operation)).resolves.toMatchObject({ config_version: 8 });
-    expect(saveTimeline).not.toHaveBeenCalled();
     latestHead = { ...originalHead, headRevisionId: 'external-head' };
     await expect(captured.execute(operation)).rejects.toThrow('captured timeline head changed');
-    expect(saveTimelineAtHead).toHaveBeenCalledTimes(1);
+    expect(save).toHaveBeenCalledTimes(1);
     await expect(routes.save('main', { config: payload.config, registry: {}, expectedVersion: 7, expectedHead: originalHead, bundle })).rejects.toThrow('head CAS conflict');
+    const stale = owner.captureForTurn();
+    latestHead = { ...latestHead, headPublicationId: 'same-revision-other-publication' };
+    await expect(stale.execute(operation)).rejects.toThrow('captured timeline head changed');
   });
 
-  it('uses the active data provider CAS path to apply and reload an element', async () => {
+  it('applies and reloads an element through the active mounted save owner', async () => {
     const ownedContext = buildAstridAgentElementContext({ astridEffects: ASTRID_EFFECT_CATALOG });
-    const payload = documentPayload();
-    const registry = { assets: { source: { type: 'image/png', file: 'managed:source' } } };
-    let config = payload.config as TimelineConfig;
-    let configVersion = payload.config_version;
-    let storedRegistry = registry;
-    const provider = {
-      loadTimeline: vi.fn(async () => ({ config, configVersion })),
-      loadAssetRegistry: vi.fn(async () => storedRegistry),
-      saveTimeline: vi.fn(async (_timelineId, nextConfig, expectedVersion, nextRegistry) => {
-        if (expectedVersion !== configVersion) throw new Error('stale timeline version');
-        config = nextConfig;
-        storedRegistry = nextRegistry ?? storedRegistry;
-        configVersion += 1;
-        return configVersion;
-      }),
-    };
-    const adapter = new AstridElementOperationAdapter(
-      ownedContext,
-      createElementTimelineRoutes(provider),
-      'astrid-intro',
-    );
-    const entry = ownedContext.catalog.find((candidate) => candidate.id === 'text-card' && candidate.packId === 'rendering')!;
-    const element = { id: entry.id, kind: entry.kind, revision: entry.revision, packId: entry.packId };
-
-    const applied = await adapter.execute({
-      name: 'timeline.apply_element', project: 'astrid-intro', timeline: 'main', expected_version: 7,
-      clip_id: 'a', placement: 'overlay', element,
+    let payload = { ...documentPayload(), registry: { assets: { source: { type: 'image/png', file: 'managed:source' } } } };
+    const save = vi.fn(async (_id, input) => {
+      if (input.expectedVersion !== payload.config_version) throw new Error('stale timeline version');
+      payload = { ...payload, config: input.config, registry: input.registry, config_version: 8 };
+      return payload;
     });
-
-    expect(provider.loadTimeline).toHaveBeenCalledWith('main');
-    expect(provider.loadAssetRegistry).toHaveBeenCalledWith('main');
-    expect(provider.saveTimeline).toHaveBeenCalledWith('main', expect.objectContaining({
-      clips: expect.arrayContaining([expect.objectContaining({ elementRef: element })]),
-    }), 7, registry);
+    const routes = createElementTimelineRoutes({ get: async () => payload, save });
+    const adapter = new AstridElementOperationAdapter(ownedContext, routes, 'astrid-intro');
+    const entry = ownedContext.catalog.find(candidate => candidate.id === 'text-card' && candidate.packId === 'rendering')!;
+    const element = { id: entry.id, kind: entry.kind, revision: entry.revision, packId: entry.packId };
+    const operation = { name: 'timeline.apply_element', project: 'astrid-intro', timeline: 'main', expected_version: 7, clip_id: 'a', placement: 'overlay', element };
+    const applied = await adapter.execute(operation);
     expect(applied.config_version).toBe(8);
-
-    const reloaded = await createElementTimelineRoutes(provider).get('main');
-    expect((reloaded.config as TimelineConfig).clips.some((clip) => clip.elementRef?.revision === entry.revision)).toBe(true);
-    await expect(adapter.execute({
-      name: 'timeline.apply_element', project: 'astrid-intro', timeline: 'main', expected_version: 7,
-      clip_id: 'a', placement: 'overlay', element,
-    })).rejects.toThrow('Stale timeline version');
-    expect(provider.saveTimeline).toHaveBeenCalledTimes(1);
+    expect((await routes.get('main')).config).toEqual(expect.objectContaining({ clips: expect.arrayContaining([expect.objectContaining({ elementRef: element })]) }));
+    await expect(adapter.execute(operation)).rejects.toThrow('Stale timeline version');
+    expect(save).toHaveBeenCalledTimes(1);
   });
 
   it('preserves owner and revision through editor serialization and save/reload', async () => {
@@ -234,6 +208,68 @@ describe('Astrid element operation adapter', () => {
         revision: context().catalog.find((entry) => entry.id === 'cross-fade')?.revision,
       },
     })).resolves.toBeDefined();
+  });
+
+  it('preserves contributed effect arrays when setting legacy clip fades', async () => {
+    const payload = documentPayload();
+    const effects = [{ id: 'glow', params: { amount: 0.6 } }];
+    (payload.config.clips[0] as Record<string, unknown>).effects = effects;
+    const save = vi.fn(async (_ref, input) => ({
+      ...payload,
+      config: input.config,
+      registry: input.registry,
+      config_version: 8,
+    }));
+    const adapter = new AstridElementOperationAdapter(context(), {
+      get: vi.fn(async () => payload),
+      save,
+    }, 'astrid-intro');
+
+    await adapter.execute({
+      name: 'timeline.set_clip_fade',
+      project: 'astrid-intro',
+      timeline: 'main',
+      expected_version: 7,
+      clip_id: 'a',
+      fade_in: 0.5,
+      fade_out: 0.25,
+    });
+
+    const savedClip = save.mock.calls[0]?.[1].config.clips[0];
+    expect(savedClip.effects).toEqual(effects);
+    expect(savedClip.entrance).toEqual({ type: 'fade', duration: 0.5 });
+    expect(savedClip.exit).toEqual({ type: 'fade-out', duration: 0.25 });
+  });
+
+  it('preserves legacy drawable effects objects when setting clip fades', async () => {
+    const payload = documentPayload();
+    const effects = { fade_in: 0.1, blur: 0.25, vendorFlag: 3 };
+    (payload.config.clips[0] as Record<string, unknown>).effects = effects;
+    const save = vi.fn(async (_ref, input) => ({
+      ...payload,
+      config: input.config,
+      registry: input.registry,
+      config_version: 8,
+    }));
+    const adapter = new AstridElementOperationAdapter(context(), {
+      get: vi.fn(async () => payload),
+      save,
+    }, 'astrid-intro');
+
+    await adapter.execute({
+      name: 'timeline.set_clip_fade',
+      project: 'astrid-intro',
+      timeline: 'main',
+      expected_version: 7,
+      clip_id: 'a',
+      fade_in: 0.5,
+      fade_out: 0.25,
+    });
+
+    const savedClip = save.mock.calls[0]?.[1].config.clips[0];
+    expect(savedClip.effects).toEqual({ ...effects, fade_in: 0.5, fade_out: 0.25 });
+    expect(savedClip.entrance).toEqual({ type: 'fade', duration: 0.5 });
+    expect(savedClip.exit).toEqual({ type: 'fade-out', duration: 0.25 });
   });
 
   it('rejects an operation against a stale loaded document before writing', async () => {
@@ -355,18 +391,15 @@ describe('Astrid element operation adapter', () => {
 });
 
 
-it('refuses a retired editor authority across separate registry reads and before CAS save', async () => {
+it('refuses a retired editor authority after a mounted read and before save', async () => {
   let admitted = true;
-  const provider = {
-    loadTimeline: vi.fn(async () => ({configVersion: 3, config: {clips: []}})),
-    loadAssetRegistry: vi.fn(async () => { admitted = false; return {assets: {}}; }),
-    saveTimeline: vi.fn(async () => 4),
-  };
-  const routes = createElementTimelineRoutes(provider as never, () => {
+  const save = vi.fn();
+  const get = vi.fn(async () => { admitted = false; return documentPayload(); });
+  const routes = createElementTimelineRoutes({ get, save }, () => {
     if (!admitted) throw new Error('captured editor retired');
   });
   await expect(routes.get('owned-timeline')).rejects.toThrow('captured editor retired');
-  expect(provider.loadTimeline).toHaveBeenCalledTimes(1);
+  expect(get).toHaveBeenCalledTimes(1);
   await expect(routes.save('owned-timeline', {config: {clips: []}, registry: {}, expectedVersion: 3})).rejects.toThrow('captured editor retired');
-  expect(provider.saveTimeline).not.toHaveBeenCalled();
+  expect(save).not.toHaveBeenCalled();
 });

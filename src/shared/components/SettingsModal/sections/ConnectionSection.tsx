@@ -75,4 +75,3 @@ export function connectionStatus(connection: RuntimeConnectionValue, installType
       return { title: COPY.notRunning.title, detail: COPY.notRunning.sentence, checks: LOOKING };
   }
 }
-

@@ -46,13 +46,13 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
     && (recovery || snapshot.releaseStatus?.behind === true)
     && !snapshot.restartRequired
     && snapshot.fresh && canStartInstallerUpdate(snapshot.status);
-  return { ...snapshot, installType, available, updateReason: installerUpdateReasonOf(snapshot.status),
+  return { ...snapshot, installType, available, updateReason: installerUpdateReasonOf(snapshot.status) ?? undefined,
     refresh: async () => { if (enabled) await operation.refresh(true); },
-    start: async () => {
+    start: async (validateDrafts: () => boolean) => {
       if (!available || !latest.current.enabled) return;
       const current = latest.current.connection;
       if (current?.confirmPermission && !(await current.confirmPermission())) return;
-      if (latest.current.enabled) await operation.start();
+      if (latest.current.enabled) await operation.start(validateDrafts);
     },
   };
 }

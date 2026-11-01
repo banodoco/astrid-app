@@ -4,6 +4,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import React from 'react';
 import { enqueueGenerationsInvalidation } from '@/shared/hooks/invalidation';
 import { queryKeys } from '@/shared/lib/queryKeys';
+import { __resetSelectionStoreForTests, setTimelineClipData, userSelectTimelineClips } from '@/shared/state/selectionStore';
+import { createShotCompositionAdapter } from '@/tools/video-editor/data/shotCompositionAdapter';
+import compositionFixture from '@/tools/video-editor/data/shotComposition.fixture.json';
 
 const mockPlaceGeneration = vi.fn();
 const mockUnplaceGeneration = vi.fn();
@@ -40,6 +43,7 @@ import {
   useAddImageToShot,
   useRemoveImageFromShot,
   useUpdateShotImageOrder,
+  usePositionExistingGenerationInShot,
 } from '../useShotGenerationMutations';
 
 function createWrapper() {
@@ -53,6 +57,43 @@ function createWrapper() {
 
 // The deterministic entry id the document read model surfaces for a pair.
 const entryId = (shotId: string, generationId: string) => `sg-${shotId}-${generationId}`;
+
+describe('mounted selection fallback for existing shot callers', () => {
+  beforeEach(() => { vi.clearAllMocks(); __resetSelectionStoreForTests(); });
+
+  it.each(['add', 'position'] as const)('resolves %s from the active editor when the caller only has a shot id', async (operation) => {
+    const composition = createShotCompositionAdapter({ load: async () => compositionFixture }).prepare(compositionFixture);
+    const owner = Symbol('mounted-editor');
+    const release = setTimelineClipData([], owner, {
+      projectId: composition.projectId, timelineId: composition.parentDocumentId, composition,
+    });
+    userSelectTimelineClips(['occ-2:alpha-video'], {}, owner);
+    mockPlaceGeneration.mockImplementation(async (request) => ({
+      entryId: 'placed', shotId: request.shotId, generationId: 'gen-1', timelineFrame: 0,
+    }));
+    mockPlaceGeneration.mockRejectedValueOnce(new Error('temporary placement failure'));
+    const { wrapper, queryClient } = createWrapper();
+    queryClient.setDefaultOptions({ mutations: { retry: 1, retryDelay: 0 } });
+    const { result, unmount } = renderHook(() => {
+      const add = useAddImageToShot();
+      const position = usePositionExistingGenerationInShot();
+      return operation === 'add' ? add : position;
+    }, { wrapper });
+    await act(async () => {
+      await result.current.mutateAsync({ shot_id: 'shot-alpha', generation_id: 'gen-1', project_id: composition.projectId });
+    });
+    expect(mockPlaceGeneration).toHaveBeenCalledWith(expect.objectContaining({
+      projectSlug: composition.projectId, ownerRef: 'occurrence:occ-2', timelineRef: composition.parentDocumentId,
+    }));
+    expect(mockPlaceGeneration.mock.calls[0][0].shotId).not.toBe('shot-alpha');
+    expect(mockPlaceGeneration).toHaveBeenCalledTimes(2);
+    expect(mockPlaceGeneration.mock.calls[1][0]).toEqual(mockPlaceGeneration.mock.calls[0][0]);
+    unmount();
+    queryClient.clear();
+    release();
+    __resetSelectionStoreForTests();
+  });
+});
 
 describe('useAddImageToShot', () => {
   beforeEach(() => {
@@ -144,6 +185,37 @@ describe('useAddImageToShot', () => {
       expect.objectContaining({ timelineFrame: 100 }),
     );
     expect(data).toHaveProperty('timeline_frame', 100);
+  });
+
+  it('passes the authenticated canonical occurrence owner to placement', async () => {
+    mockPlaceGeneration.mockResolvedValue({
+      entryId: entryId('shot-1', 'gen-1'),
+      shotId: 'shot-1',
+      generationId: 'gen-1',
+      timelineFrame: 100,
+      assetKey: 'gen:gen-1',
+    });
+
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => useAddImageToShot(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        shot_id: 'shot-1',
+        generation_id: 'gen-1',
+        project_id: 'project-1',
+        ownerRef: 'occurrence:selected-occurrence',
+        timelineFrame: 100,
+      });
+    });
+
+    expect(mockPlaceGeneration).toHaveBeenCalledWith({
+      projectSlug: 'project-1',
+      shotId: 'shot-1',
+      generationId: 'gen-1',
+      ownerRef: 'occurrence:selected-occurrence',
+      timelineFrame: 100,
+    });
   });
 
   it('invalidates shot, segment, and unified data after a successful add', async () => {
@@ -313,5 +385,40 @@ describe('useUpdateShotImageOrder', () => {
       ],
     });
     expect(data).toHaveProperty('projectId', 'project-1');
+  });
+});
+
+describe('usePositionExistingGenerationInShot', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('passes the authenticated canonical occurrence owner to auto-positioning', async () => {
+    mockPlaceGeneration.mockResolvedValue({
+      entryId: entryId('shot-1', 'gen-1'),
+      shotId: 'shot-1',
+      generationId: 'gen-1',
+      timelineFrame: 150,
+      assetKey: 'gen:gen-1',
+    });
+
+    const { wrapper } = createWrapper();
+    const { result } = renderHook(() => usePositionExistingGenerationInShot(), { wrapper });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        shot_id: 'shot-1',
+        generation_id: 'gen-1',
+        project_id: 'project-1',
+        ownerRef: 'occurrence:selected-occurrence',
+      });
+    });
+
+    expect(mockPlaceGeneration).toHaveBeenCalledWith({
+      projectSlug: 'project-1',
+      shotId: 'shot-1',
+      generationId: 'gen-1',
+      ownerRef: 'occurrence:selected-occurrence',
+    });
   });
 });

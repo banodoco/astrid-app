@@ -34,6 +34,8 @@ import type {
 } from '@/tools/video-editor/types/index.ts';
 import {
   canonicalizeTimelinePair,
+  cloneTimelineExtras,
+  projectTimelineTracksForDisplay,
   serializeTimelineConfigSnapshot,
 } from '@/tools/video-editor/lib/timeline-domain.ts';
 import { buildAssetReferenceMap } from '@/tools/video-editor/lib/asset-registry.ts';
@@ -86,10 +88,16 @@ export interface TranscriptSegment {
 
 export type ClipOrderMap = Record<string, string[]>;
 
+export type TimelineEditProjection =
+  | { kind: 'accepted'; head: { revisionId: string; publicationId: string } }
+  | { kind: 'local'; base: { revisionId: string; publicationId: string }; generation: number };
+
 export interface TimelineData {
   config: TimelineConfig;
   configVersion: number;
   head?: import('../data/DataProvider.ts').TimelineHeadRevision;
+  /** Fact about this displayed snapshot; never part of authored config. */
+  editProjection?: TimelineEditProjection;
   registry: AssetRegistry;
   resolvedConfig: ResolvedTimelineConfig;
   rows: TimelineRow[];
@@ -272,10 +280,12 @@ export const rowsToConfig = (
   clipOrder: ClipOrderMap,
   tracks: TrackDefinition[],
   pinnedShotGroups?: TimelineConfig['pinnedShotGroups'],
-  extras?: Pick<TimelineConfig, 'theme' | 'theme_overrides' | 'generation_defaults' | 'app'>,
+  extras?: Pick<TimelineConfig, 'clips' | 'theme' | 'theme_overrides' | 'generation_defaults' | 'app'>,
 ): TimelineConfig => {
   const actionMap = new Map<string, TimelineAction>();
   const trackActionIds: Record<string, string[]> = Object.fromEntries(tracks.map((track) => [track.id, []]));
+  const authoredClips = new Map((extras?.clips ?? []).map((clip) => [clip.id, clip] as const));
+  const retainedClips = new Map<string, TimelineClip>();
 
   for (const row of rows) {
     for (const action of row.actions) {
@@ -312,12 +322,32 @@ export const rowsToConfig = (
       const roundedStart = roundTimelineTime(snapToFrameGrid(action.start, fps));
       const roundedEnd = roundTimelineTime(snapToFrameGrid(action.end, fps));
 
+      const authoredClip = authoredClips.get(clipId);
+      if (authoredClip) {
+        const originalMeta = getDefaultClipMeta(authoredClip);
+        const unchangedMeta = (Object.keys(originalMeta) as (keyof ClipMeta)[]).every((field) =>
+          field === 'label' || field === 'track'
+          || canonicalJsonStringify({ value: originalMeta[field] }) === canonicalJsonStringify({ value: clipMeta[field] }));
+        if (unchangedMeta && roundTimelineTime(action.end - action.start) === roundTimelineTime(getClipDurationSeconds(authoredClip))) {
+          // Rows are a display projection. A move must carry the raw clip,
+          // including opaque fields and absent/null source values, unchanged.
+          const retained = {
+            ...structuredClone(authoredClip),
+            at: action.start === authoredClip.at ? authoredClip.at : roundedStart,
+            track: track.id,
+          };
+          if (Object.prototype.hasOwnProperty.call(authoredClip, 'label')
+            && clipMeta.label === undefined && clipMeta.displayName === authoredClip.label) {
+            delete retained.label;
+          }
+          retainedClips.set(clipId, retained);
+        }
+      }
       const nextClip: Partial<TimelineClip> = {
         id: clipId,
         at: roundedStart,
         track: track.id,
         clipType: clipMeta.clipType,
-        label: clipMeta.label,
         asset: clipMeta.asset,
         from: clipMeta.from,
         to: clipMeta.to,
@@ -348,6 +378,18 @@ export const rowsToConfig = (
         app: clipMeta.app,
         keyframes: clipMeta.keyframes,
       };
+
+      // A raw label equal to the current display name is a legacy derived
+      // value; do not resurrect it after the assembly policy has healed it.
+      const legacyDerivedLabel = authoredClip
+        && Object.prototype.hasOwnProperty.call(authoredClip, 'label')
+        && clipMeta.label === undefined
+        && clipMeta.displayName === authoredClip.label;
+      if (authoredClip && Object.prototype.hasOwnProperty.call(authoredClip, 'label') && !legacyDerivedLabel) {
+        nextClip.label = authoredClip.label;
+      } else if (!authoredClip && clipMeta.label !== undefined) {
+        nextClip.label = clipMeta.label;
+      }
 
       if (typeof clipMeta.hold === 'number') {
         nextClip.hold = roundTimelineTime(roundedEnd - roundedStart);
@@ -390,25 +432,16 @@ export const rowsToConfig = (
     output: { ...output },
     tracks: tracks.map((track) => ({ ...track })),
     clips,
+    ...(extras ? cloneTimelineExtras(extras) : {}),
   };
   if (pinnedShotGroups && pinnedShotGroups.length > 0) {
     config.pinnedShotGroups = clonePinnedShotGroups(pinnedShotGroups);
   }
-  if (extras?.theme !== undefined) {
-    config.theme = extras.theme;
-  }
-  if (extras?.theme_overrides !== undefined) {
-    config.theme_overrides = extras.theme_overrides;
-  }
-  if (extras?.generation_defaults !== undefined) {
-    config.generation_defaults = extras.generation_defaults;
-  }
-  if (extras?.app !== undefined) {
-    // Extension project-data (project-data.write) must survive ordinary rows
-    // edits; it is not render state and must not be dropped on rebuild.
-    config.app = extras.app;
-  }
-  return serializeTimelineConfigSnapshot(config).config;
+  const serialized = serializeTimelineConfigSnapshot(config).config;
+  return {
+    ...serialized,
+    clips: serialized.clips.map((clip) => retainedClips.get(clip.id) ?? clip),
+  };
 };
 
 /**
@@ -470,8 +503,22 @@ export const assembleTimelineData = ({
   const displayNames = nameBasis.shown;
   const resolvedClips = canonicalResolvedConfig.clips.map((clip) => ({
     ...clip,
-    label: displayNames.get(clip.id),
-  }));
+  })).map((clip, index) => {
+    const label = displayNames.get(canonicalResolvedConfig.clips[index].id);
+    if (label === undefined || label === canonicalResolvedConfig.clips[index].label) {
+      return clip;
+    }
+    // Display labels are derived view data. Keep them available to consumers
+    // without making them part of the resolved JSON identity.
+    Object.defineProperty(clip, 'label', {
+      value: label,
+      enumerable: false,
+      configurable: true,
+      writable: true,
+    });
+    return clip;
+  });
+  canonicalResolvedConfig.clips = resolvedClips;
   const rowData = configToRows(canonicalConfig);
   // The derived name is a view, kept in `displayName` so that saving rows never writes it back as `label`
   // (a saved `label` reads as user-set and would stick after the asset changes). `meta.label` keeps only a
@@ -490,7 +537,7 @@ export const assembleTimelineData = ({
     configVersion,
     ...(head ? { head } : {}),
     registry,
-    resolvedConfig: { ...canonicalResolvedConfig, clips: resolvedClips },
+    resolvedConfig: canonicalResolvedConfig,
     rows: rowData.rows,
     meta: rowData.meta,
     effects: rowData.effects,
@@ -520,10 +567,11 @@ export const buildTimelineData = async (
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
   const canonical = canonicalizeTimelinePair(config, registry);
-  const resolvedConfig = await resolveTimelineConfig(canonical.config, canonical.registry, urlResolver);
+  const displayConfig = projectTimelineTracksForDisplay(canonical.config);
+  const resolvedConfig = await resolveTimelineConfig(displayConfig, canonical.registry, urlResolver);
 
   return assembleTimelineData({
-    config: canonical.config,
+    config: displayConfig,
     configVersion,
     head,
     registry: canonical.registry,
@@ -560,6 +608,7 @@ export const buildTimelineDataWithResolver = async (
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
   const canonical = canonicalizeTimelinePair(config, registry);
+  const displayConfig = projectTimelineTracksForDisplay(canonical.config);
 
   const urlResolver: UrlResolver = (file, entry, assetId) => {
     const resolutionToken = file || entry?.media_id || assetId || '';
@@ -569,7 +618,7 @@ export const buildTimelineDataWithResolver = async (
     return resolver.resolveAssetUrl(resolutionToken);
   };
 
-  const resolvedConfig = await resolveTimelineConfig(canonical.config, canonical.registry, urlResolver);
+  const resolvedConfig = await resolveTimelineConfig(displayConfig, canonical.registry, urlResolver);
 
   // Surface missing-asset references through the resolver lifecycle so
   // the host can render a tombstone / retry path.
@@ -595,7 +644,7 @@ export const buildTimelineDataWithResolver = async (
   }
 
   return assembleTimelineData({
-    config: canonical.config,
+    config: displayConfig,
     configVersion,
     head,
     registry: canonical.registry,

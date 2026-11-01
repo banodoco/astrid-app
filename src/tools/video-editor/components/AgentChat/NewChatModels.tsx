@@ -42,7 +42,7 @@ function SubagentHint({ agent }: { agent: LocalAgentId }) {
   </div>;
 }
 
-function ThinkingLevelSelector({ model, levels, value, open, onOpenChange, onSelect, returnFocus }: {
+function ThinkingLevelSelector({ model, levels, value, open, onOpenChange, onSelect, returnFocus, compact }: {
   model: string;
   levels: AgentThoughtLevel;
   value: string;
@@ -50,17 +50,18 @@ function ThinkingLevelSelector({ model, levels, value, open, onOpenChange, onSel
   onOpenChange: (open: boolean) => void;
   onSelect: (value: string) => void;
   returnFocus: RefObject<HTMLInputElement>;
+  compact: boolean;
 }) {
   const list = useRef<HTMLDivElement>(null);
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
       <PopoverTrigger asChild>
         <button type="button" aria-label={`Choose a thinking level for ${model}`} title="Choose a thinking level (→ or Space)"
-          className="inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded px-1 text-[11px] text-muted-foreground hover:bg-background/40 hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-[44px]"
+          className={cn(compact ? 'inline-flex h-6 shrink-0 items-center justify-center gap-1 rounded px-1' : 'ml-auto inline-flex h-6 shrink-0 self-start items-center justify-center gap-1 rounded px-1.5', 'text-[11px] text-muted-foreground hover:bg-background/40 hover:text-foreground aria-expanded:bg-accent aria-expanded:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-[44px]')}
           onPointerDown={event => event.stopPropagation()}
           onKeyDown={event => event.stopPropagation()}
           onClick={event => event.stopPropagation()}>
-          <span>· {levels.options.find(option => option.value === value)?.name}</span>
+          <span>{compact ? '· ' : ''}{levels.options.find(option => option.value === value)?.name}</span>
           <ChevronDown className="h-3 w-3" aria-hidden="true" />
         </button>
       </PopoverTrigger>
@@ -80,7 +81,7 @@ function ThinkingLevelSelector({ model, levels, value, open, onOpenChange, onSel
 }
 
 /** The model list a New chat drills into: each model with its thinking level, and the agent's default when there is no list. */
-export function NewChatModels({ agent, submenu, models, levelSelections, openLevelSelector, onLevelSelectorOpenChange, onRememberLevel, onBack, onPick, onStartNow, astridKeyConfigured, onAstridKeySaved, selectedModel, returnFocus, footer }: {
+export function NewChatModels({ agent, submenu, models, levelSelections, openLevelSelector, onLevelSelectorOpenChange, onRememberLevel, onBack, onPick, onStartNow, astridKeyConfigured, onAstridKeySaved, selectedModel, compactSelector = false, showStartButtons = false, returnFocus, footer }: {
   agent: LocalAgentId;
   submenu: NewChatAgentModels | null;
   /** The models matching the search. */
@@ -100,6 +101,10 @@ export function NewChatModels({ agent, submenu, models, levelSelections, openLev
   onAstridKeySaved?: () => Promise<unknown> | unknown;
   /** The model the next chat will use, ticked in the list; the agent's default when none. */
   selectedModel?: string;
+  /** NewChatMenu keeps the thinking control compact on the model name line. */
+  compactSelector?: boolean;
+  /** NewChatMenu exposes a per-model action; AgentChatMenu starts from row selection. */
+  showStartButtons?: boolean;
   returnFocus: RefObject<HTMLInputElement>;
   footer?: ReactNode;
 }) {
@@ -135,19 +140,20 @@ export function NewChatModels({ agent, submenu, models, levelSelections, openLev
                   <span className="min-w-0 truncate">{model.name}</span>
                   {levels && level !== undefined && (
                     <ThinkingLevelSelector model={model.name} levels={levels} value={level} open={openLevelSelector === model.id} returnFocus={returnFocus}
+                      compact={compactSelector}
                       onOpenChange={next => onLevelSelectorOpenChange(model.id, next)}
                       onSelect={value => onRememberLevel(model.id, value)} />
                   )}
                 </span>
                 {model.detail && <span className="text-[11px] text-muted-foreground">{model.detail}</span>}
               </span>
-              <button type="button" tabIndex={-1} aria-label={`New chat with ${model.name}${levelName ? ` · ${levelName}` : ''}`} title="Start a new chat with this model"
+              {showStartButtons && <button type="button" tabIndex={-1} aria-label={`New chat with ${model.name}${levelName ? ` · ${levelName}` : ''}`} title="Start a new chat with this model"
                 className="ml-auto inline-flex h-6 shrink-0 self-start items-center rounded px-1.5 text-[11px] text-muted-foreground hover:bg-background/40 hover:text-foreground [[data-selected=true]>&]:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring [@media(pointer:coarse)]:min-h-8 [@media(pointer:coarse)]:min-w-8 [@media(pointer:coarse)]:justify-center"
                 onPointerDown={event => { event.preventDefault(); event.stopPropagation(); }}
                 onKeyDown={event => event.stopPropagation()}
                 onClick={event => { event.preventDefault(); event.stopPropagation(); onStartNow(model.id, level, model.name); }}>
                 New chat
-              </button>
+              </button>}
             </CommandItem>
           );
         })}

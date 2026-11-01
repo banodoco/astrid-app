@@ -557,7 +557,11 @@ export function BulkClipPanelBody(props: BulkClipPanelProps & {effectResources: 
                     }));
                   }}
                 >
-                  <SelectTrigger><SelectValue placeholder="None" /></SelectTrigger>
+                  <SelectTrigger>
+                    <SelectValue placeholder="None">
+                      {sharedTransitionType === NO_TRANSITION ? 'None' : undefined}
+                    </SelectValue>
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={MIXED_SELECT_VALUE} disabled>Mixed</SelectItem>
                     <SelectItem value={NO_TRANSITION}>None</SelectItem>

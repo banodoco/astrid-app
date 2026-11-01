@@ -172,11 +172,11 @@ export function useExternalGenerations({
         setLightboxIndexRef.current(calculatedIndex);
       } else if (derivedNavContext !== null) {
         // CRITICAL: We're exiting derived mode and the target is IN tempDerived
-        
+
         const targetGeneration = tempDerivedGenerations[tempDerivedIndex];
         const newExternalIndex = externalGenerations.length;
         const newAbsoluteIndex = baseImages.length + newExternalIndex;
-        
+
         // Add to externalGenerations
         setExternalGenerations(prev => [...prev, targetGeneration]);
         
@@ -218,9 +218,9 @@ export function useExternalGenerations({
           if (existingIdx !== -1) {
             const newIndex = baseImages.length + externalGenerations.length + existingIdx;
             requestAnimationFrame(() => setLightboxIndexRef.current(newIndex));
-            return prev;
-          }
-          
+          return prev;
+        }
+
           const updated = [...prev, transformedData];
           const newIndex = baseImages.length + externalGenerations.length + updated.length - 1;
           requestAnimationFrame(() => setLightboxIndexRef.current(newIndex));
@@ -232,9 +232,9 @@ export function useExternalGenerations({
           if (existingIdx !== -1) {
             const newIndex = baseImages.length + existingIdx;
             requestAnimationFrame(() => setLightboxIndexRef.current(newIndex));
-            return prev;
-          }
-          
+          return prev;
+        }
+
           const updated = [...prev, transformedData];
           const newIndex = baseImages.length + updated.length - 1;
           requestAnimationFrame(() => setLightboxIndexRef.current(newIndex));

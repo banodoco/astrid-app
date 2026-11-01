@@ -8,9 +8,6 @@
       ],
       "@astrid/editor-sdk": [
         "./src/sdk/index.ts"
-      ],
-      "@workspace-animations/*": [
-        "./vendor/banodoco-animations/*"
       ]
     }
   },

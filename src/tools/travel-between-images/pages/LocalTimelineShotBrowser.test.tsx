@@ -24,7 +24,8 @@ vi.mock('../components/VideoGallery/ShotListDisplay.tsx', () => ({
 }));
 
 vi.mock('./ShotEditorView.tsx', () => ({
-  ShotEditorView: ({ shotToEdit, canonicalOccurrence, canonicalShotComposition, onClose }: { shotToEdit: { name: string; images?: Array<{ id: string }> }; canonicalOccurrence?: { occurrenceId: string; stableDeepLink: string }; canonicalShotComposition?: unknown; onClose?: () => void }) => {
+  ShotEditorView: ({ shotToEdit, canonicalOccurrence, canonicalShotComposition, onClose, ...props }: { shotToEdit: { name: string; images?: Array<{ id: string }> }; canonicalOccurrence?: { occurrenceId: string; stableDeepLink: string }; canonicalShotComposition?: unknown; onClose?: () => void }) => {
+    mocks.shotEditorProps({ canonicalShotComposition, ...props });
     const navigate = useNavigate();
     const location = useLocation();
     return (
@@ -44,6 +45,7 @@ vi.mock('./ShotEditorView.tsx', () => ({
 
 const mocks = vi.hoisted(() => ({
   providerOptions: vi.fn(),
+  shotEditorProps: vi.fn(),
   loadTimeline: vi.fn(),
   loadAssetRegistry: vi.fn(),
   onResolve: vi.fn(({ file }: { file: string }) => `https://runtime.test/${file}`),
@@ -85,6 +87,7 @@ describe('LocalTimelineShotBrowser', () => {
 
   beforeEach(() => {
     mocks.providerOptions.mockReset();
+    mocks.shotEditorProps.mockReset();
     mocks.loadTimeline.mockReset();
     mocks.loadAssetRegistry.mockReset();
     mocks.onResolve.mockClear();
@@ -194,6 +197,33 @@ describe('LocalTimelineShotBrowser', () => {
     fireEvent.click(screen.getByRole('button', { name: /Back to all shots/i }));
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId('location')).toHaveTextContent('/tools/video-editor?project=project-001&timeline=document-primary');
+  });
+
+  it('mounts the canonical occurrence owner and Runtime saver for the shot editor', async () => {
+    const shotCompositionAdapter = createShotCompositionAdapter({
+      load: async () => fixture,
+    });
+
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter initialEntries={['/tools/video-editor?project=project-001&timeline=document-primary']}>
+          <LocalTimelineShotBrowser
+            projectSlug="project-001"
+            projectId="project-001"
+            timelineRef="document-primary"
+            shotCompositionAdapter={shotCompositionAdapter}
+            shotRef="project/project-001/document/document-primary/shot/shot-alpha/revision/rev-a/occurrence/occ-1"
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(await screen.findByRole('heading', { name: 'shot-alpha' })).toBeInTheDocument();
+    expect(mocks.shotEditorProps).toHaveBeenCalledWith(expect.objectContaining({
+      canonicalShotComposition: shotCompositionAdapter,
+      timelineDataProvider: expect.anything(),
+      onCanonicalCompositionPublished: expect.any(Function),
+    }));
   });
 
   it('opens immediately from the parent composition while the document refresh is still pending', () => {

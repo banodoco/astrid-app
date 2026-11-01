@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { getGenerationAssetDisplayMetadata, planGenerationAssetRegistration } from './timeline-asset-plans.ts';
+import {
+  getGenerationAssetDisplayMetadata,
+  planAssetDropTarget,
+  planGenerationAssetRegistration,
+} from './timeline-asset-plans.ts';
+import type { TimelineData } from './timeline-data.ts';
+
+function plannerData(overrides: Partial<Pick<TimelineData, 'tracks' | 'rows'>> = {}): TimelineData {
+  return {
+    tracks: [
+      { id: 'V1', kind: 'visual', label: 'V1' },
+      { id: 'V2', kind: 'visual', label: 'V2' },
+      { id: 'V3', kind: 'visual', label: 'V3' },
+    ],
+    rows: [
+      { id: 'V1', actions: [] },
+      { id: 'V2', actions: [{ id: 'existing', start: 0, end: 20, effectId: 'effect-existing' }] },
+      { id: 'V3', actions: [] },
+    ],
+    ...overrides,
+  } as TimelineData;
+}
 
 describe('planGenerationAssetRegistration content type', () => {
   it('reads the MIME type from metadata so a Runtime video is not registered as a still image', () => {
@@ -54,5 +75,55 @@ describe('planGenerationAssetRegistration content type', () => {
       title: 'Opening shot',
       prompt: 'A slow pan across a valley',
     });
+  });
+});
+
+describe('planAssetDropTarget occurrence raw-track policy', () => {
+  it('keeps an occupied captured visual track instead of snapping or allocating V3', () => {
+    const result = planAssetDropTarget({
+      current: plannerData(),
+      assetKind: 'visual',
+      trackId: 'V2',
+      selectedTrackId: 'V2',
+      time: 0,
+      duration: 5,
+      placementPolicy: { kind: 'occurrence-raw-track', trackId: 'V2' },
+    });
+
+    expect(result).toEqual(expect.objectContaining({ ok: true, trackId: 'V2', preparedCurrent: expect.any(Object) }));
+    if (result.ok) expect(result.snappedTime).toBeUndefined();
+  });
+
+  it.each([
+    ['missing', 'missing', undefined],
+    ['wrong kind', 'A1', [{ id: 'A1', kind: 'audio', label: 'A1' }]],
+    ['inactive', 'V2', [{ id: 'V2', kind: 'visual', label: 'V2', active: false }]],
+    ['disabled', 'V2', [{ id: 'V2', kind: 'visual', label: 'V2', disabled: true }]],
+  ] as const)('refuses a %s captured track locally', (_name, trackId, tracks) => {
+    const result = planAssetDropTarget({
+      current: plannerData(tracks === undefined ? {} : { tracks: tracks as TimelineData['tracks'] }),
+      assetKind: 'visual',
+      trackId,
+      selectedTrackId: trackId,
+      time: 0,
+      duration: 5,
+      placementPolicy: { kind: 'occurrence-raw-track', trackId },
+    });
+
+    expect(result).toEqual({ ok: false, error: 'preserved_track_unavailable' });
+  });
+
+  it('refuses a stale placement when the captured track and explicit target disagree', () => {
+    const result = planAssetDropTarget({
+      current: plannerData(),
+      assetKind: 'visual',
+      trackId: 'V1',
+      selectedTrackId: 'V2',
+      time: 0,
+      duration: 5,
+      placementPolicy: { kind: 'occurrence-raw-track', trackId: 'V2' },
+    });
+
+    expect(result).toEqual({ ok: false, error: 'preserved_track_unavailable' });
   });
 });

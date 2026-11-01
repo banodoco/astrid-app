@@ -14,6 +14,9 @@ import type {
   TrackKind,
 } from '@/tools/video-editor/types';
 import { createTimelineEditability } from '@/tools/video-editor/lib/timeline-editability.ts';
+import type { CanonicalDocument } from '@/integrations/runtime/timeline-commit-types.ts';
+import { documentPatchIntent } from '@/tools/video-editor/commands/documentPatchIntent.ts';
+import fixture from '@/tools/video-editor/commands/fixtures/authoringBundle.json';
 
 const makePinnedGroup = (args: {
   shotId: string;
@@ -94,6 +97,22 @@ describe('reorderTracksByDirection', () => {
 });
 
 describe('runtime editability at commit', () => {
+  it.each(['V1', 'V2'])('captures original same-row move inputs without claiming a cross-track basis: %s', async (target) => {
+    const config = makeResolvedConfig([makeTrack('V1', 'visual'), makeTrack('V2', 'visual')]);
+    const data = await buildTimelineData(config, { assets: {} });
+    const applyEdit = vi.fn();
+    const { result } = renderHook(() => useTimelineTrackManagement({ dataRef: { current: data }, resolvedConfig: data.resolvedConfig,
+      selectedClipId: 'clip-V1', setSelectedTrackId: vi.fn(), applyEdit }));
+    act(() => result.current.moveClipToRow('clip-V1', target, 5, 'move-transaction'));
+    expect(applyEdit).toHaveBeenCalledTimes(1);
+    const [mutation, options] = applyEdit.mock.calls[0];
+    expect(mutation.rows.find((row: { id: string }) => row.id === target).actions).toContainEqual(expect.objectContaining({ id: 'clip-V1', start: 5 }));
+    if (target === 'V1') {
+      expect(options.gestureBasis).toEqual({ kind: 'move', clipId: 'clip-V1', trackId: 'V1', config: data.config, registry: data.registry });
+      expect(options.gestureBasis.config).not.toBe(data.config);
+    } else expect(options).not.toHaveProperty('gestureBasis');
+  });
+
   it('rechecks a lock after the drag plan was produced', () => {
     const tracks = [makeTrack('V1', 'visual'), makeTrack('V2', 'visual')];
     const dataRef = { current: {
@@ -590,4 +609,98 @@ it('does not add empty lane metadata to a legacy media-only row reorder', () => 
   act(() => result.current.handleMoveTrack('track-V1', 'track-A1', []));
   expect(applyEdit.mock.calls[0][0].resolvedConfig.app).toBeUndefined();
   expect(applyEdit.mock.calls[0][0].resolvedConfig.tracks.map((entry: TrackDefinition) => entry.id)).toEqual(['A1', 'V1']);
+});
+
+describe('mounted track reorder through the guarded document patch boundary', () => {
+  const canonicalDocument = () => structuredClone(
+    fixture.cases.find((entry) => entry.name === 'repeated-source')!.document,
+  ) as CanonicalDocument;
+
+  it('preserves raw rows and siblings, round-trips JSON, and emits the guarded A2 list move', async () => {
+    const tracks = [
+      { ...makeTrack('picture', 'visual'), extension: { clear: null }, opaque: { keep: [null, false, 0] } },
+      { ...makeTrack('audio', 'audio'), label: null, opaque: { zero: 0 } },
+      { ...makeTrack('overlay', 'visual'), opaque: { sibling: 'untouched' } },
+    ];
+    const config = {
+      ...makeResolvedConfig(tracks),
+      app: { timelineDataLanePlacement: { 'data-1': 'between' }, opaque: { keep: null } },
+    } as ResolvedTimelineConfig;
+    const applyEdit = vi.fn();
+    const { result } = renderHook(() => useTimelineTrackManagement({
+      dataRef: { current: null }, resolvedConfig: config, selectedClipId: null,
+      setSelectedTrackId: vi.fn(), applyEdit,
+    }));
+
+    act(() => result.current.handleMoveTrack('overlay', 'picture'));
+
+    expect(applyEdit).toHaveBeenCalledTimes(1);
+    const mutation = applyEdit.mock.calls[0][0];
+    expect(mutation).toMatchObject({ type: 'config', resolvedConfig: { app: config.app, clips: config.clips } });
+    expect(mutation.resolvedConfig.tracks.map((track: TrackDefinition) => track.id)).toEqual(['overlay', 'picture', 'audio']);
+    expect(mutation.resolvedConfig.tracks[0]).toEqual(tracks[2]);
+    expect(config.tracks.map((track) => track.id)).toEqual(['picture', 'audio', 'overlay']);
+    expect(mutation.resolvedConfig.tracks).not.toBe(config.tracks);
+
+    const rebuilt = await buildTimelineData(serializeForDisk(mutation.resolvedConfig), { assets: {} });
+    expect(rebuilt.tracks.map((track) => track.id)).toEqual(['overlay', 'picture', 'audio']);
+
+    const before = canonicalDocument();
+    const after = structuredClone(before);
+    const beforePayload = before.parent_revision.payload as Record<string, unknown>;
+    const afterPayload = after.parent_revision.payload as Record<string, unknown>;
+    beforePayload.config = { tracks: structuredClone(tracks) };
+    afterPayload.config = { tracks: structuredClone(mutation.resolvedConfig.tracks) };
+    const patch = documentPatchIntent({
+      before,
+      after,
+      roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
+      basis: { head: { revisionId: before.parent_revision.revision_id, publicationId: 'original-publication' } },
+      label: 'Reorder tracks',
+      step: { id: 'track-reorder', label: 'Reorder tracks', intent: 'Reorder tracks', tags: ['editor'] },
+    });
+    expect(patch).toMatchObject({ kind: 'document-patch-intent', created: [] });
+    expect(patch).toHaveProperty('changes', [{ op: 'list.move', ref: 'parent', path: ['config', 'tracks'], id: 'overlay',
+      before: { state: 'present', value: tracks[2] }, order_before: ['picture', 'audio', 'overlay'], after_id: null }]);
+    expect(patch).not.toHaveProperty('reads');
+    expect(patch).not.toHaveProperty('commands');
+  });
+
+  it.each(['missing', 'foreign/track:picture', 'track::malformed'])('does not write for an unavailable UI identity: %s', (identity) => {
+    const config = makeResolvedConfig([makeTrack('picture', 'visual'), makeTrack('overlay', 'visual')]);
+    const applyEdit = vi.fn();
+    const { result } = renderHook(() => useTimelineTrackManagement({ dataRef: { current: null }, resolvedConfig: config,
+      selectedClipId: null, setSelectedTrackId: vi.fn(), applyEdit }));
+
+    act(() => result.current.handleMoveTrack(identity, 'picture'));
+    act(() => result.current.handleMoveTrack('picture', identity));
+
+    expect(applyEdit).not.toHaveBeenCalled();
+    expect(config.tracks.map((track) => track.id)).toEqual(['picture', 'overlay']);
+  });
+
+  it('does not write an unchanged order, while the patch boundary refuses duplicate current track IDs atomically', () => {
+    const config = makeResolvedConfig([makeTrack('picture', 'visual'), makeTrack('overlay', 'visual')]);
+    const applyEdit = vi.fn();
+    const { result } = renderHook(() => useTimelineTrackManagement({ dataRef: { current: null }, resolvedConfig: config,
+      selectedClipId: null, setSelectedTrackId: vi.fn(), applyEdit }));
+
+    act(() => result.current.handleMoveTrack('picture', 'picture'));
+    expect(applyEdit).not.toHaveBeenCalled();
+
+    const before = canonicalDocument();
+    const after = structuredClone(before);
+    const beforePayload = before.parent_revision.payload as Record<string, unknown>;
+    const afterPayload = after.parent_revision.payload as Record<string, unknown>;
+    beforePayload.config = { tracks: [{ id: 'picture', kind: 'visual' }] };
+    afterPayload.config = { tracks: [{ id: 'picture', kind: 'visual' }, { id: 'picture', kind: 'audio' }] };
+    expect(() => documentPatchIntent({
+      before,
+      after,
+      roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
+      basis: { head: { revisionId: before.parent_revision.revision_id, publicationId: 'original-publication' } },
+      label: 'Invalid track reorder',
+      step: { id: 'invalid-track-reorder', label: 'Invalid track reorder', intent: 'Invalid track reorder', tags: ['editor'] },
+    })).toThrow('missing/duplicate id');
+  });
 });

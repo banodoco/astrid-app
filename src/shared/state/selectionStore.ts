@@ -12,6 +12,8 @@ import {
   buildSummary,
   type SelectedMediaClip,
 } from '@/tools/video-editor/hooks/useSelectedMediaClips';
+import type { PreparedShotComposition } from '@/tools/video-editor/data/shotCompositionAdapter';
+import { projectCanonicalComposition } from '@/tools/video-editor/data/shotCompositionProjection';
 
 type GallerySelectionMediaType = 'image' | 'video';
 
@@ -183,10 +185,17 @@ const initialClipDataById = (): ReadonlyMap<string, SelectedMediaClip> => new Ma
 export type TimelineClipDataOwner = string | symbol;
 const legacyTimelineClipDataOwner = Symbol('legacy-timeline-clip-data');
 const timelineClipDataRegistrations = new Map<TimelineClipDataOwner, ReadonlyMap<string, SelectedMediaClip>>();
+type PlacementSelectionContext = Readonly<{
+  projectId: string | null;
+  timelineId: string;
+  composition: PreparedShotComposition | null | undefined;
+}>;
+const placementSelectionContexts = new Map<TimelineClipDataOwner, PlacementSelectionContext>();
 let activeTimelineClipDataOwner: TimelineClipDataOwner | null = null;
 
 function resetTimelineClipDataRegistrations(): void {
   timelineClipDataRegistrations.clear();
+  placementSelectionContexts.clear();
   activeTimelineClipDataOwner = null;
 }
 
@@ -968,6 +977,39 @@ export function getSelectedTimelineDataItems(owner?: TimelineClipDataOwner): rea
   return timelineForOwner(selectionStore.getState(), owner).selectedDataItems;
 }
 
+/** Resolve the active editor's explicit selection before reserving a fork destination. */
+export function getShotPlacementTarget(projectId: string, shotId: string): {
+  shot_id: string;
+  ownerRef?: `occurrence:${string}`;
+  timelineRef?: string;
+} {
+  const owner = activeTimelineClipDataOwner;
+  if (owner === null) return { shot_id: shotId };
+  const context = placementSelectionContexts.get(owner);
+  if (!context) return { shot_id: shotId };
+  const composition = context.composition;
+  const selection = getTimelineItemSelection(owner);
+  if (!composition || context.projectId !== projectId || composition.projectId !== projectId
+    || composition.parentDocumentId !== context.timelineId
+    || selection.dataItems.length !== 0 || selection.clipIds.length === 0) {
+    throw new Error('Select one canonical shot occurrence before placing media.');
+  }
+  const projection = projectCanonicalComposition(composition);
+  const identities = selection.clipIds.map((id) => projection.clipIdentities.get(id));
+  const occurrenceIds = new Set(identities.map((identity) => identity?.occurrenceId));
+  if (selection.clipIds.some((id) => projection.config.clips.filter((clip) => clip.id === id).length !== 1)
+    || occurrenceIds.size !== 1 || identities.some((identity) => !identity?.clipRef
+    || identity.projectId !== projectId || identity.parentDocumentId !== context.timelineId
+    || identity.shotId !== shotId)) {
+    throw new Error('Placement selection must belong to one occurrence of the target shot.');
+  }
+  const occurrenceId = identities[0]!.occurrenceId;
+  if (composition.occurrences.filter((item) => item.occurrenceId === occurrenceId).length !== 1) {
+    throw new Error('Placement selection has an ambiguous canonical occurrence.');
+  }
+  return { shot_id: crypto.randomUUID(), ownerRef: `occurrence:${occurrenceId}`, timelineRef: context.timelineId };
+}
+
 export function userClearAllSelection(): void {
   selectionStore.setState((state) => ({
     gallery: state.gallery.gallerySelectionMap.size === 0 ? state.gallery : initialGalleryState(),
@@ -1189,9 +1231,12 @@ function publishTimelineClipData(next: ReadonlyMap<string, SelectedMediaClip>): 
 export function setTimelineClipData(
   entries: Iterable<SelectedMediaClip>,
   owner: TimelineClipDataOwner = legacyTimelineClipDataOwner,
+  placementContext?: PlacementSelectionContext,
 ): () => void {
   const registration = new Map(Array.from(entries, (clip) => [clip.clipId, clip]));
   timelineClipDataRegistrations.set(owner, registration);
+  if (placementContext) placementSelectionContexts.set(owner, placementContext);
+  else placementSelectionContexts.delete(owner);
   if (owner === legacyTimelineClipDataOwner || activeTimelineClipDataOwner === null) {
     activateTimelineClipData(owner);
   } else if (activeTimelineClipDataOwner === owner) {
@@ -1231,6 +1276,7 @@ export function activateTimelineClipData(owner: TimelineClipDataOwner): void {
 
 export function clearTimelineClipData(owner: TimelineClipDataOwner = legacyTimelineClipDataOwner): void {
   if (!timelineClipDataRegistrations.delete(owner)) return;
+  placementSelectionContexts.delete(owner);
   if (activeTimelineClipDataOwner === owner) {
     const remainingOwners = Array.from(timelineClipDataRegistrations.keys());
     const remainingOwner = remainingOwners[remainingOwners.length - 1];

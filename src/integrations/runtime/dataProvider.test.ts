@@ -1,33 +1,71 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AstridRuntimeClient, RuntimeAuthenticationError, RUNTIME_CLIENT_SCOPES } from './client.ts';
+import { acceptedCommit, fixtureDigest } from './__tests__/timelineCommitFixture.ts';
 import { RuntimeDataProvider, toRuntimePublication } from './dataProvider.ts';
-import { TimelineSchemaIncompatibleError, TimelineVersionConflictError, isOwnUnacknowledgedSaveError } from '@/tools/video-editor/data/DataProvider.ts';
+import { TimelineSaveError, TimelineSchemaIncompatibleError } from '@/tools/video-editor/data/DataProvider.ts';
 import { createTimelineReader } from '@/tools/video-editor/lib/timeline-reader.ts';
 import { buildTimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import {
   RUNTIME_SCHEMA_DIGEST,
   RUNTIME_TARGETED_EXECUTION_CAPABILITY,
 } from './contract-metadata.ts';
-import { sanitizeTimelineClipSnapshot } from '@/tools/video-editor/lib/timeline-domain.ts';
 import { createDefaultTimelineConfig } from '@/tools/video-editor/lib/defaults.ts';
 import type { ProjectObjectMetadata } from '@astrid/editor-sdk';
-import { MANAGED_OBJECT_DIGEST, MANAGED_OBJECT_ID, PROJECT_ID, TIMELINE_ID, json, runtimeFixture, sha256Digest } from '@/test/fakeWorkspaceRuntime.ts';
+import { MANAGED_OBJECT_DIGEST, MANAGED_OBJECT_ID, PROJECT_ID, TIMELINE_ID, json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
+import type { MediaSelection, MediaSelectionQuery, VerifiedMedia } from './generated.ts';
 
 const MANAGED_OBJECT_URL = `http://runtime.test/v1/objects/${encodeURIComponent(MANAGED_OBJECT_ID)}`;
-/** What a published registry entry's `file` is: the object's route, the only locator the Runtime accepts when it freezes a render. */
-const MANAGED_OBJECT_ROUTE = `/v1/objects/${encodeURIComponent(MANAGED_OBJECT_ID)}`;
 
-
-function packageBodyBytes(
-  manifest: Record<string, unknown>,
-  entry: unknown,
-  assets: readonly unknown[] = [],
-): Uint8Array {
-  return json({ manifest, entry, assets });
+function publicTimelineTransport(
+  fixture: ReturnType<typeof runtimeFixture>,
+  delegate: ReturnType<typeof runtimeFixture>['transport'] = fixture.transport,
+): ReturnType<typeof runtimeFixture>['transport'] {
+  const path = `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`;
+  return async (method, requestPath, headers, body) => {
+    if (method === 'GET' && requestPath === path) {
+      try {
+        return await delegate(method, requestPath, headers, body);
+      } catch (error) {
+        if (!(error instanceof Error) || !error.message.includes('retired mutable timeline GET')) throw error;
+        const current = fixture.read();
+        return { status: 200, headers: {}, body: json({
+          project_id: PROJECT_ID,
+          timeline_id: TIMELINE_ID,
+          head_revision_id: current.headRevisionId,
+          head_publication_id: 'publication-current',
+        }) };
+      }
+    }
+    return delegate(method, requestPath, headers, body);
+  };
 }
 
-// Saved compact composition: 320x180/30 fps, three ordinary parent clips,
-// no child occurrences.
+function restoreHeadResource(overrides: Record<string, unknown> = {}) {
+  return {
+    project_id: PROJECT_ID, timeline_id: TIMELINE_ID, version: 1, name: 'Main',
+    archived: false, shots: [], references: [],
+    head_revision_id: 'parent-r1', head_publication_id: 'publication-current',
+    ...overrides,
+  };
+}
+
+function preparedMediaSelection(overrides: Partial<MediaSelection> = {}): MediaSelection {
+  return {
+    asset: 'prepared-video',
+    generation_id: 'generation-prepared',
+    variant_id: 'variant-prepared',
+    object_id: MANAGED_OBJECT_DIGEST,
+    catalog_digest: `sha256:${'c'.repeat(64)}`,
+    ...overrides,
+  };
+}
+
+function verifiedMediaPath(projectId: string, selection: MediaSelection): string {
+  return `/v1/projects/${encodeURIComponent(projectId)}/media-selection/verified?asset=${encodeURIComponent(selection.asset)}&generation_id=${encodeURIComponent(selection.generation_id)}&variant_id=${encodeURIComponent(selection.variant_id)}&object_id=${encodeURIComponent(selection.object_id)}&catalog_digest=${encodeURIComponent(selection.catalog_digest)}`;
+}
+
+// Saved R5 compact composition: 320x180/30 fps, three ordinary parent clips,
+// no child occurrences (L3-managed-reconcile-normal-retry-result.md).
 function compactParentComposition() {
   const config = {
     ...createDefaultTimelineConfig(),
@@ -57,9 +95,160 @@ function compactParentComposition() {
   return { config, registry, clips, occurrences: [], tracks: config.tracks, provenance: { sentinel: 'keep-parent' } };
 }
 
-
-
 describe('RuntimeDataProvider', () => {
+  it('reads exact verified media through the project-scoped Runtime facade without writing canonical state', async () => {
+    const fixture = runtimeFixture();
+    const selection = preparedMediaSelection();
+    const verified: VerifiedMedia = {
+      selection: { ...selection },
+      media_type: 'video/mp4',
+      size: 123,
+      duration_seconds: 4,
+      width: 1920,
+      height: 1080,
+    };
+    const path = verifiedMediaPath(PROJECT_ID, selection);
+    const verifiedRequests: string[] = [];
+    const transport: typeof fixture.transport = async (method, requestPath, headers, body) => {
+      if (method === 'GET' && requestPath === path) {
+        verifiedRequests.push(requestPath);
+        return { status: 200, headers: {}, body: json(verified) };
+      }
+      return fixture.transport(method, requestPath, headers, body);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture, transport) });
+
+    await expect(provider.getProjectVerifiedMedia(PROJECT_ID, selection)).resolves.toEqual(verified);
+    expect(verifiedRequests).toEqual([path]);
+    expect(fixture.requests.filter(({ method, path: requestPath }) => method !== 'GET'
+      && requestPath !== '/v1/handshake')).toEqual([]);
+  });
+
+  it('reads the exact project media selection through the authenticated Runtime facade', async () => {
+    const fixture = runtimeFixture();
+    const query: MediaSelectionQuery = {
+      asset: 'asset-popup', generation_id: 'generation-popup', variant_id: 'variant-popup',
+    };
+    const selected: MediaSelection = {
+      ...query,
+      object_id: MANAGED_OBJECT_DIGEST,
+      catalog_digest: `sha256:${'d'.repeat(64)}`,
+    };
+    const path = `/v1/projects/${encodeURIComponent(PROJECT_ID)}/media-selection?asset=${encodeURIComponent(query.asset)}&generation_id=${encodeURIComponent(query.generation_id)}&variant_id=${encodeURIComponent(query.variant_id)}`;
+    const selectionRequests: string[] = [];
+    const transport: typeof fixture.transport = async (method, requestPath, headers, body) => {
+      if (method === 'GET' && requestPath === path) {
+        selectionRequests.push(requestPath);
+        return { status: 200, headers: {}, body: json(selected) };
+      }
+      return fixture.transport(method, requestPath, headers, body);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture, transport) });
+
+    await expect(provider.getProjectMediaSelection(PROJECT_ID, query)).resolves.toEqual(selected);
+    expect(selectionRequests).toEqual([path]);
+    expect(fixture.requests.filter(({ method, path: requestPath }) => method !== 'GET'
+      && requestPath !== '/v1/handshake')).toEqual([]);
+  });
+
+  it('refreshes the immutable basis when polling sees a new publication at the same revision', async () => {
+    const fixture = runtimeFixture();
+    let publicationId = 'publication-p1';
+    const publicPath = `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`;
+    const transport: typeof fixture.transport = async (method, path, headers, body) => {
+      if (method === 'GET' && path === publicPath) {
+        return { status: 200, headers: {}, body: json({
+          project_id: PROJECT_ID,
+          timeline_id: TIMELINE_ID,
+          head_revision_id: 'parent-r1',
+          head_publication_id: publicationId,
+        }) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
+
+    const initial = await provider.loadTimeline(TIMELINE_ID);
+    publicationId = 'publication-p2';
+    const polled = await provider.loadTimeline(TIMELINE_ID, { poll: true });
+
+    expect(initial.head).toEqual({ projectId: PROJECT_ID, timelineId: TIMELINE_ID, headRevisionId: 'parent-r1', headPublicationId: 'publication-p1' });
+    expect(polled.head).toEqual({ projectId: PROJECT_ID, timelineId: TIMELINE_ID, headRevisionId: 'parent-r1', headPublicationId: 'publication-p2' });
+    expect(polled.config).toEqual(initial.config);
+    expect(polled.configVersion).toBe(2);
+    expect(fixture.requests.filter((request) => request.path.endsWith('/composition-revisions/parent-r1'))).toHaveLength(2);
+  });
+
+  it('freezes the original five-field selection before an asynchronous read', async () => {
+    const fixture = runtimeFixture();
+    const selection = preparedMediaSelection();
+    const original = { ...selection };
+    const path = verifiedMediaPath(PROJECT_ID, selection);
+    let releaseRead!: () => void;
+    const readReleased = new Promise<void>((resolve) => { releaseRead = resolve; });
+    const transport: typeof fixture.transport = async (method, requestPath, headers, body) => {
+      if (method === 'GET' && requestPath === path) {
+        await readReleased;
+        return { status: 200, headers: {}, body: json({ selection: original, media_type: 'video/mp4', size: 123 }) };
+      }
+      return fixture.transport(method, requestPath, headers, body);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture, transport) });
+    const pending = provider.getProjectVerifiedMedia(PROJECT_ID, selection);
+    selection.asset = 'mutated-after-read-start';
+    releaseRead();
+
+    await expect(pending).resolves.toMatchObject({ selection: original });
+    expect(selection).toEqual({ ...original, asset: 'mutated-after-read-start' });
+  });
+
+  it('rejects a verified response with a different selection', async () => {
+    const fixture = runtimeFixture();
+    const selection = preparedMediaSelection();
+    const path = verifiedMediaPath(PROJECT_ID, selection);
+    const transport: typeof fixture.transport = async (method, requestPath, headers, body) => {
+      if (method === 'GET' && requestPath === path) {
+        return { status: 200, headers: {}, body: json({
+          selection: { ...selection, variant_id: 'variant-other' }, media_type: 'video/mp4', size: 123,
+        }) };
+      }
+      return fixture.transport(method, requestPath, headers, body);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture, transport) });
+
+    await expect(provider.getProjectVerifiedMedia(PROJECT_ID, selection)).rejects.toThrow(
+      'Workspace Runtime verified media read returned a mismatched selection',
+    );
+  });
+
+  it('propagates the existing Runtime read failure without a fallback', async () => {
+    const fixture = runtimeFixture();
+    const selection = preparedMediaSelection();
+    const path = verifiedMediaPath(PROJECT_ID, selection);
+    const transport: typeof fixture.transport = async (method, requestPath, headers, body) => {
+      if (method === 'GET' && requestPath === path) {
+        return { status: 409, headers: {}, body: json({ code: 'selection_mismatch', message: 'original selection is stale' }) };
+      }
+      return fixture.transport(method, requestPath, headers, body);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture, transport) });
+
+    await expect(provider.getProjectVerifiedMedia(PROJECT_ID, selection)).rejects.toThrow(
+      'selection_mismatch: original selection is stale',
+    );
+  });
+
+  it('rejects another project before using the verified read transport', async () => {
+    const fixture = runtimeFixture();
+    const selection = preparedMediaSelection();
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture) });
+
+    await expect(provider.getProjectVerifiedMedia('project-other', selection)).rejects.toThrow(
+      `Workspace Runtime verified media read requires project ${PROJECT_ID}, got project-other`,
+    );
+    expect(fixture.requests).toEqual([]);
+  });
+
   it('reads placements from the parent payload already used by timeline rows', async () => {
     const fixture = runtimeFixture({ parentComposition: {
       ...compactParentComposition(),
@@ -70,7 +259,7 @@ describe('RuntimeDataProvider', () => {
         duration_ms: 2_000, track: 'picture',
       }],
     } });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture) });
     await provider.loadTimeline(TIMELINE_ID);
     const placements = await provider.shotComposition.loadPlacements!({
       projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, poll: true,
@@ -86,7 +275,7 @@ describe('RuntimeDataProvider', () => {
 
   it('shares the in-flight parent revision between placements and the graph', async () => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture) });
     const request = { projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, poll: true };
 
     await Promise.all([
@@ -98,33 +287,9 @@ describe('RuntimeDataProvider', () => {
       && item.path.endsWith('/composition-revisions/parent-r1'))).toHaveLength(1);
   });
 
-
-  it('shares near-simultaneous idle head checks and checks immediately after a local save', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
-    let now = 0;
-    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
-    const inspections = () => fixture.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/inspect')).length;
-    try {
-      for (now = 0; now < 60_000; now += 2_000) {
-        await provider.loadTimeline(TIMELINE_ID, { poll: true });
-        await provider.loadAssetRegistry(TIMELINE_ID, { poll: true });
-        await provider.shotComposition.load({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, poll: true });
-      }
-      expect(inspections()).toBeLessThanOrEqual(30);
-      const loaded = await provider.loadTimeline(TIMELINE_ID);
-      const beforeSave = inspections();
-      await provider.saveTimelineAtHead(TIMELINE_ID, loaded.config, loaded.head!);
-      await provider.loadTimeline(TIMELINE_ID, { poll: true });
-      expect(inspections()).toBe(beforeSave + 1);
-    } finally {
-      clock.mockRestore();
-    }
-  });
-
   it('lets both polling readers observe an external head within one poll interval', async () => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture) });
     let now = 0;
     const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
     const inspections = () => fixture.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/inspect')).length;
@@ -169,7 +334,7 @@ describe('RuntimeDataProvider', () => {
       projectId: PROJECT_ID,
       baseUrl: 'http://runtime.test',
       token: 'fixture-token',
-      transport: async (method, path, headers, body) => {
+      transport: publicTimelineTransport(fixture, async (method, path, headers, body) => {
         if (method === 'GET' && path === `/v1/projects/${PROJECT_ID}/shots/${shotId}/revisions/${shotRevisionId}`) {
           revisionReads.push(path);
           return { status: 200, headers: {}, body: json({
@@ -193,7 +358,7 @@ describe('RuntimeDataProvider', () => {
           }) };
         }
         return fixture.transport(method, path, headers, body);
-      },
+      }),
     });
 
     await Promise.all(Array.from({ length: 3 }, () => provider.shotComposition.loadAtHead!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, headRevisionId: 'parent-r1' })));
@@ -207,7 +372,7 @@ describe('RuntimeDataProvider', () => {
 
   it('reuses an unchanged parent revision payload and fetches a changed head', async () => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
     const revisionPath = `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}/composition-revisions/`;
     const revisionReads = (revisionId: string) => fixture.requests.filter((request) => (
       request.method === 'GET' && request.path === `${revisionPath}${revisionId}`
@@ -269,7 +434,7 @@ describe('RuntimeDataProvider', () => {
     const parent = compactParentComposition();
     const { clips: _clips, ...withoutClips } = parent.config;
     const fixture = runtimeFixture({ parentComposition: { ...parent, config: shape === 'absent' ? withoutClips : parent.config } });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
 
     const loaded = await provider.loadTimeline(TIMELINE_ID);
     const referenced = await provider.loadReferencedTimeline(TIMELINE_ID);
@@ -292,14 +457,14 @@ describe('RuntimeDataProvider', () => {
       clips: shape === 'absent' ? undefined : shape === 'empty' ? [] : reversedKeys,
       config: { ...parent.config, clips: parent.clips },
     } });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
     expect((await provider.loadTimeline(TIMELINE_ID)).config.clips).toEqual(parent.clips);
     expect((await provider.loadReferencedTimeline(TIMELINE_ID)).timeline.config.clips).toEqual(parent.clips);
   });
 
   it('preserves empty legacy timelines', async () => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
     expect((await provider.loadTimeline(TIMELINE_ID)).config).toEqual(createDefaultTimelineConfig());
   });
 
@@ -309,7 +474,7 @@ describe('RuntimeDataProvider', () => {
       ? parent.clips.map((clip, index) => index === 0 ? { ...clip, at: 1 } : clip)
       : [...parent.clips].reverse();
     const fixture = runtimeFixture({ parentComposition: { ...parent, config: { ...parent.config, clips } } });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
     await expect(provider.loadTimeline(TIMELINE_ID)).rejects.toThrow('clips disagree');
     await expect(provider.loadReferencedTimeline(TIMELINE_ID)).rejects.toBeInstanceOf(TimelineSchemaIncompatibleError);
     await expect(provider.saveTimelineAtHead(TIMELINE_ID, createDefaultTimelineConfig(), { projectId: PROJECT_ID, timelineId: TIMELINE_ID, headRevisionId: 'parent-r1' })).rejects.toBeInstanceOf(TimelineSchemaIncompatibleError);
@@ -324,42 +489,12 @@ describe('RuntimeDataProvider', () => {
     const fixture = runtimeFixture({ parentComposition: location === 'parent'
       ? { ...parent, clips: value }
       : { ...parent, config: { ...parent.config, clips: value } } });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
     await expect(provider.loadTimeline(TIMELINE_ID)).rejects.toBeInstanceOf(TimelineSchemaIncompatibleError);
     await expect(provider.loadReferencedTimeline(TIMELINE_ID)).rejects.toThrow('clips are invalid');
   });
 
-  it.each(['canonical', 'legacy'] as const)('keeps %s parent clips coherent through edit, partial deletion, complete deletion, and reload', async (shape) => {
-    const parent = compactParentComposition();
-    const fixture = runtimeFixture({ parentComposition: shape === 'canonical'
-      ? parent
-      : { ...parent, clips: [], config: { ...parent.config, clips: parent.clips } } });
-    const options = { projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport };
-    let provider = new RuntimeDataProvider(options);
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const clips = initial.config.clips.map((clip) => clip.id === 'l3-scene' ? { ...clip, at: 0.1, from: 63.1 } : clip);
-    for (const nextClips of [clips, clips.filter((clip) => clip.id !== 'l3-label'), []]) {
-      const before = await provider.loadTimeline(TIMELINE_ID);
-      const savedVersion = await provider.saveTimelineAtHead(TIMELINE_ID, { ...before.config, clips: nextClips }, before.head!, await provider.loadAssetRegistry(TIMELINE_ID));
-      const persisted = fixture.read().parentComposition;
-      expect(persisted.clips).toEqual(nextClips);
-      expect(persisted.config.clips).toEqual(nextClips);
-      expect(persisted).toMatchObject({ tracks: parent.tracks, occurrences: [], provenance: parent.provenance, registry: parent.registry });
-      const { output: _output, clips: _storedClips, ...otherConfig } = parent.config;
-      expect(persisted.config).toMatchObject(otherConfig);
-      expect((await provider.loadTimeline(TIMELINE_ID)).configVersion).toBe(savedVersion.configVersion);
-      provider = new RuntimeDataProvider(options);
-      const reopened = await provider.loadTimeline(TIMELINE_ID);
-      expect(reopened.config.clips).toEqual(nextClips);
-      // saveTimeline deliberately excludes read-derived output from the wire.
-      expect(persisted.config).not.toHaveProperty('output');
-      expect((await provider.loadReferencedTimeline(TIMELINE_ID)).timeline.config.clips).toEqual(nextClips);
-      expect(await provider.loadAssetRegistry(TIMELINE_ID)).toEqual(parent.registry);
-    }
-    expect(fixture.read().parentComposition.clips).toEqual([]);
-    expect(fixture.read().config.clips).toEqual([]);
-    expect(fixture.requests.filter((request) => request.path.endsWith('/composition-revisions'))).toHaveLength(3);
-  });
+  ;
 
   it('preserves the local draft and performs no writes after a same-realm Runtime restart', async () => {
     vi.stubEnv('VITE_WORKSPACE_RUNTIME_EXPECTED_ACTOR_ID', 'astrid-product-connector');
@@ -368,7 +503,7 @@ describe('RuntimeDataProvider', () => {
     try {
       const options = { runtimeInstanceId: 'runtime-instance-r1' };
       const fixture = runtimeFixture(options);
-      const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+      const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture) });
       const initial = await provider.loadTimeline(TIMELINE_ID);
       const draft = { ...initial.config, clips: [{ id: 'unsaved-local', track: 'track-frame', clipType: 'hold', at: 0, hold: 2 }] };
       const preserved = structuredClone(draft);
@@ -387,100 +522,19 @@ describe('RuntimeDataProvider', () => {
     }
   });
 
-  it('saves the same immutable head after provider recreation with a different numeric counter', async () => {
+  it('refuses the retired head-save route without changing the canonical head', async () => {
     const fixture = runtimeFixture();
-    const original = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const first = await original.loadTimeline(TIMELINE_ID);
-    await original.saveTimelineAtHead(TIMELINE_ID, first.config, first.head!);
-    const base = await original.loadTimeline(TIMELINE_ID);
-    const restarted = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const fresh = await restarted.loadTimeline(TIMELINE_ID);
-    expect(base.configVersion).toBe(2);
-    expect(fresh.configVersion).toBe(1);
-    expect(fresh.head).toEqual(base.head);
-    const edited = { ...base.config, clips: [{ id: 'ordinary-drag', track: 'track-frame', clipType: 'hold', at: 0, hold: 2 }] };
-    await expect(restarted.saveTimelineAtHead(TIMELINE_ID, edited, base.head!)).resolves.toMatchObject({ configVersion: 2 });
-    expect(fixture.read().config.clips[0]?.track).toBe('track-frame');
-  });
-
-  it('atomically publishes edited transcript sources with the expected parent head and reloads them', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture) });
     const initial = await provider.loadTimeline(TIMELINE_ID);
-    const bundle = { schema_version: 1 as const, itemsBySchemaRef: {
-      'astrid.transcript_segment/v1': [{
-        id: 'source:segment', shape: 'interval' as const, domain: 'source_seconds' as const,
-        extent: { start: 1, end: 2 }, schemaRef: 'astrid.transcript_segment/v1',
-        sourceArtifactRef: { assetId: 'asset-1', artifactHash: 'content-v2' },
-        provenance: { adapterId: 'transcript', adapterVersion: '1' },
-        payload: { sourceId: 'source', segmentId: 'segment', text: 'Corrected', speaker: 'Alice', words: [{ id: 'word-1', start: 1, end: 2, text: 'Corrected' }] },
-      }],
-    } };
-    const receipt = await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!, undefined, bundle);
-    const publication = fixture.requests.find((request) => request.method === 'POST' && request.path.endsWith('/composition-revisions'));
-    expect(publication?.body).toMatchObject({ expected_head: initial.head!.headRevisionId, parent_composition: { config: { bundle } } });
-    const reopened = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const loaded = await reopened.loadTimeline(TIMELINE_ID);
-    expect(loaded.head).toEqual(receipt.head);
-    expect(loaded.bundle).toEqual(bundle);
-  });
+    const before = fixture.read();
 
-  it('preserves the stored bundle when an editor save omits bundle updates', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const bundle = { schema_version: 1 as const, itemsBySchemaRef: {} };
-    const first = await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!, undefined, bundle);
-    const next = { ...initial.config, tracks: initial.config.tracks.map((track, index) => index === 0 ? { ...track, label: 'Preserve bundle' } : track) };
-    await provider.saveTimelineAtHead(TIMELINE_ID, next, first.head);
-    const publications = fixture.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/composition-revisions'));
-    const lastPublication = publications[publications.length - 1]?.body as { parent_composition?: { config?: { bundle?: unknown } } } | undefined;
-    expect(lastPublication?.parent_composition?.config?.bundle).toEqual(bundle);
-  });
+    const error = await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!).catch((thrown: unknown) => thrown);
 
-  it('publishes one reconciled parent clip list while preserving authored edits and metadata', async () => {
-    const initialClips = [
-      {
-        id: 'frame',
-        at: 0,
-        track: 'frame',
-        clipType: 'media' as const,
-        app: { extensionOwned: { keep: true } },
-      },
-      {
-        id: 'fx',
-        at: 1,
-        track: 'fx',
-        clipType: 'effect' as const,
-        params: { amount: 0.5 },
-      },
-    ];
-    const fixture = runtimeFixture({ initialClips });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const edited = {
-      ...initial.config,
-      // This order/content is the editor-authored candidate. The canonical
-      // top-level list remains in its original order in the base revision.
-      clips: [
-        { ...initial.config.clips[1]!, label: 'Edited FX' },
-        { ...initial.config.clips[0]!, track: 'frame-top' },
-      ],
-    };
-
-    await provider.saveTimelineAtHead(TIMELINE_ID, edited, initial.head!);
-
-    const publication = fixture.requests.find((request) => (
-      request.method === 'POST' && request.path.endsWith('/composition-revisions')
-    ));
-    const parent = publication?.body as {
-      parent_composition?: { clips?: unknown; config?: { clips?: unknown } };
-    } | undefined;
-    expect(parent?.parent_composition?.clips).toEqual(parent?.parent_composition?.config?.clips);
-    expect(parent?.parent_composition?.clips).toEqual(edited.clips);
-    expect((parent?.parent_composition?.clips as Array<{ app?: unknown }>)[1]?.app).toEqual({
-      extensionOwned: { keep: true },
-    });
+    expect(error).toMatchObject({ code: 'schema_incompatible' });
+    expect((error as Error).message).toContain('retired_route');
+    expect(fixture.requests.filter((request) => request.method === 'POST'
+      && request.path.endsWith('/composition-revisions'))).toHaveLength(1);
+    expect(fixture.read()).toEqual(before);
   });
 
   it('fails closed when the canonical base has contradictory clip copies', async () => {
@@ -496,7 +550,7 @@ describe('RuntimeDataProvider', () => {
       }
       return response;
     };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture, transport) });
     // A corrupt immutable base is refused at read as well as at publication.
     // No successful load/head can be obtained from contradictory authorities.
     await expect(provider.loadTimeline(TIMELINE_ID)).rejects.toMatchObject({
@@ -512,137 +566,125 @@ describe('RuntimeDataProvider', () => {
     ))).toHaveLength(0);
   });
 
-  it('classifies the Runtime canonical payload conflict as terminal instead of retryable', async () => {
-    const fixture = runtimeFixture();
-    const transport: typeof fixture.transport = async (...args) => {
-      if (args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        return {
-          status: 409,
-          headers: {},
-          body: json({ code: 'conflict', message: 'canonical parent clips and config.clips disagree', request_id: 'req-canonical', details: { reason: 'canonical_payload_mismatch' } }),
-        };
-      }
-      return fixture.transport(...args);
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!)).rejects.toMatchObject({
-      code: 'schema_incompatible',
-      issues: [expect.objectContaining({ code: 'canonical_duplicate_mismatch' })],
-    });
-  });
-
-  it('classifies deterministic Runtime validation rejections as terminal instead of transport retries', async () => {
-    const fixture = runtimeFixture();
-    const transport: typeof fixture.transport = async (...args) => {
-      if (args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        return {
-          status: 422,
-          headers: {},
-          body: json({ code: 'validation_error', message: 'visual seam admission blocked' }),
-        };
-      }
-      return fixture.transport(...args);
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!)).rejects.toMatchObject({
-      code: 'schema_incompatible',
-      issues: [expect.objectContaining({ code: 'validation_error', message: expect.stringContaining('visual seam admission blocked') })],
-    });
-  });
-
-  it('rejects different heads with equal numeric counters even after polling a newer head', async () => {
-    const fixture = runtimeFixture();
-    const stale = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const base = await stale.loadTimeline(TIMELINE_ID);
-    await stale.saveTimelineAtHead(TIMELINE_ID, base.config, base.head!);
-    const restarted = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const fresh = await restarted.loadTimeline(TIMELINE_ID);
-    expect(fresh.configVersion).toBe(base.configVersion);
-    expect(fresh.head).not.toEqual(base.head);
-    const edited = { ...base.config, clips: [{ id: 'stale', track: 'V1', clipType: 'hold', at: 0, hold: 2 }] };
-    await expect(restarted.saveTimelineAtHead(TIMELINE_ID, edited, base.head!)).rejects.toMatchObject({ code: 'timeline_version_conflict' });
-    expect(fixture.read().config.clips).toEqual([]);
-    expect(fixture.read().documentVersion).toBe(2);
-  });
-
-  it('protects a concurrent publication between the editor read and Runtime CAS', async () => {
-    const fixture = runtimeFixture();
-    const remote = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    let intervene = true;
-    const transport: typeof fixture.transport = async (...args) => {
-      if (intervene && args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        intervene = false;
-        const base = await remote.loadTimeline(TIMELINE_ID);
-        await remote.saveTimelineAtHead(TIMELINE_ID, { ...base.config, clips: [{ id: 'remote', track: 'V1', clipType: 'hold', at: 0, hold: 1 }] }, base.head!);
-      }
-      return fixture.transport(...args);
-    };
-    const local = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const base = await local.loadTimeline(TIMELINE_ID);
-    await expect(local.saveTimelineAtHead(TIMELINE_ID, base.config, base.head!)).rejects.toMatchObject({ code: 'timeline_version_conflict' });
-    expect(fixture.read().config.clips[0]?.id).toBe('remote');
-    expect(fixture.read().documentVersion).toBe(2);
-  });
-
   it('fails closed for numeric-only saves and heads from another project or timeline', async () => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: publicTimelineTransport(fixture) });
     const base = await provider.loadTimeline(TIMELINE_ID);
-    await expect(provider.saveTimeline(TIMELINE_ID, base.config, base.configVersion)).rejects.toMatchObject({ code: 'timeline_version_conflict' });
+    await expect(provider.saveTimeline(TIMELINE_ID, base.config, base.configVersion)).rejects.toBeInstanceOf(TimelineSaveError);
     for (const head of [{ ...base.head!, projectId: 'another' }, { ...base.head!, timelineId: 'another' }]) {
-      await expect(provider.saveTimelineAtHead(TIMELINE_ID, base.config, head)).rejects.toMatchObject({ code: 'timeline_version_conflict' });
+      await expect(provider.saveTimelineAtHead(TIMELINE_ID, base.config, head)).rejects.toBeInstanceOf(TimelineSaveError);
     }
+    await expect(provider.saveTimelineAtHead(TIMELINE_ID, base.config, undefined as never)).rejects.toBeInstanceOf(TimelineSaveError);
+    await expect(provider.saveTimelineAtHead(TIMELINE_ID, base.config,
+      { ...base.head!, headRevisionId: '' })).rejects.toBeInstanceOf(TimelineSaveError);
     expect(fixture.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/composition-revisions'))).toHaveLength(0);
   });
 
-  it('replays a lost acknowledgement after provider restart with the original head, payload and key', async () => {
+  it.each([true, false])('restores with both current head guards and validates the accepted closure (complete: %s)', async (complete) => {
     const fixture = runtimeFixture();
-    let loseAck = true;
-    const transport: typeof fixture.transport = async (...args) => {
-      const response = await fixture.transport(...args);
-      if (loseAck && args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        loseAck = false;
-        throw new Error('lost acknowledgement');
+    const restoreRequests: Array<{ body: unknown; key?: string }> = [];
+    let headReads = 0;
+    const accepted = acceptedCommit(
+      { revision_id: 'restore-parent-old', publication_id: 'publication-restored' },
+      { revision_id: 'parent-r1', publication_id: 'publication-current' },
+      { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true },
+    );
+    if (!complete) {
+      accepted.data.canonical_document.internal_timeline_revisions = [];
+      accepted.data.canonical_document.dependency_manifest.internal_timelines = [];
+    }
+    accepted.data.commands = [{ schema_version: 1, op: 'timeline.restore', version: '1', select: null, args: {
+      revision_id: 'parent-old', content_digest: accepted.data.canonical_document.parent_revision.content_digest,
+    } }];
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      if (args[0] === 'GET' && args[1] === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        headReads += 1;
+        return { status: 200, headers: {}, body: json(restoreHeadResource()) };
       }
-      return response;
-    };
-    const original = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const base = await original.loadTimeline(TIMELINE_ID);
-    await expect(original.saveTimelineAtHead(TIMELINE_ID, base.config, base.head!)).rejects.toThrow('lost acknowledgement');
-    const restarted = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    await expect(restarted.saveTimelineAtHead(TIMELINE_ID, base.config, base.head!)).resolves.toHaveProperty('head');
-    const publications = fixture.requests.filter((r) => r.method === 'POST' && r.path.endsWith('/composition-revisions'));
-    expect(publications).toHaveLength(2);
-    expect(publications[1].body).toEqual(publications[0].body);
-    expect(publications[1].headers['Idempotency-Key']).toBe(publications[0].headers['Idempotency-Key']);
-    expect(fixture.read().documentVersion).toBe(2);
+      if (args[1].endsWith('/composition-revisions/parent-old/restore')) {
+        restoreRequests.push({ body: JSON.parse(new TextDecoder().decode(args[3] as Uint8Array)), key: args[2]['Idempotency-Key'] });
+        accepted.receipt.idempotency_key = args[2]['Idempotency-Key'];
+        accepted.receipt.request_hash = fixtureDigest({ operation: 'restoreProjectParentCompositionRevision', path: args[1], publisher: accepted.data.publisher, request: restoreRequests[0].body }).slice(7);
+        return { status: 200, headers: {}, body: json(accepted) };
+      }
+      return fixture.transport(...args);
+    } });
+
+    const history = await provider.shotComposition.listHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID });
+    expect(history.map((entry) => entry.revisionId)).toEqual(['parent-r1', 'parent-old']);
+    const restored = provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' });
+    if (complete) {
+      await expect(restored).resolves.toEqual({ newHead: 'restore-parent-old' });
+    } else {
+      await expect(restored).rejects.toThrow('missing internal revision');
+    }
+    expect(restoreRequests).toEqual([{
+      body: { expected_head: 'parent-r1', expected_publication_id: 'publication-current' },
+      key: expect.any(String),
+    }]);
+    expect(headReads).toBe(1);
+    expect(fixture.requests.some((request) => request.path.endsWith('/inspect'))).toBe(false);
+    expect(fixture.requests.some((request) => request.method === 'GET' && request.path.includes('/composition-revisions/'))).toBe(false);
   });
 
-  it('loads project-scoped canonical revisions and restores through a current-head CAS', async () => {
+  it.each([
+    ['missing publication', 'parent-r1', undefined],
+    ['unverified publication', 'parent-r1', null],
+    ['empty publication', 'parent-r1', ''],
+    ['missing revision', undefined, 'publication-current'],
+    ['unverified revision', null, 'publication-current'],
+    ['empty revision', '', 'publication-current'],
+  ])('refuses restore before send with %s', async (_label, head, publication) => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
+    let restoreSends = 0;
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      if (args[1].endsWith('/restore')) restoreSends += 1;
+      if (args[0] === 'GET' && args[1] === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        return { status: 200, headers: {}, body: json(restoreHeadResource({ head_revision_id: head, head_publication_id: publication })) };
+      }
+      return fixture.transport(...args);
+    } });
+    await expect(provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' }))
+      .rejects.toThrow(_label.startsWith('empty') ? 'is missing' : 'verified revision and publication');
+    expect(restoreSends).toBe(0);
+  });
 
-    const history = await provider.shotComposition.listHistory!({
-      projectId: PROJECT_ID,
-      parentDocumentId: TIMELINE_ID,
-    });
-    expect(history.map((entry) => entry.revisionId)).toEqual(['parent-r1', 'parent-old']);
+  it.each(['project_id', 'timeline_id'])('refuses restore before send with a head from another %s', async (field) => {
+    const fixture = runtimeFixture();
+    let restoreSends = 0;
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      if (args[1].endsWith('/restore')) restoreSends += 1;
+      if (args[0] === 'GET' && args[1] === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        return { status: 200, headers: {}, body: json(restoreHeadResource({ [field]: 'another' })) };
+      }
+      return fixture.transport(...args);
+    } });
+    await expect(provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' }))
+      .rejects.toThrow('belongs to');
+    expect(restoreSends).toBe(0);
+  });
 
-    const restored = await provider.shotComposition.restoreHistory!({
-      projectId: PROJECT_ID,
-      parentDocumentId: TIMELINE_ID,
-      revisionId: 'parent-old',
-    });
-    expect(restored.newHead).toBe('restore-parent-old');
-    expect(fixture.requests.some((request) => request.method === 'POST'
-      && request.path.endsWith('/composition-revisions/parent-old/restore')
-      && request.body?.expected_head === 'parent-r1')).toBe(true);
-    expect(fixture.requests.some((request) => request.method === 'GET'
-      && request.path.endsWith('/composition-revisions/restore-parent-old'))).toBe(true);
+  it('preserves Runtime 409 for a stale restore pair without refreshing or falling back', async () => {
+    const fixture = runtimeFixture();
+    const requests: Array<{ method: string; path: string; body?: unknown }> = [];
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      const [method, path, , body] = args;
+      requests.push({ method, path, ...(body ? { body: JSON.parse(new TextDecoder().decode(body as Uint8Array)) } : {}) });
+      if (method === 'GET' && path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}`) {
+        return { status: 200, headers: {}, body: json(restoreHeadResource()) };
+      }
+      if (path.endsWith('/restore')) {
+        return { status: 409, headers: {}, body: json({ code: 'conflict', message: 'stale restore head', request_id: 'restore-stale', details: { reason: 'stale_head' } }) };
+      }
+      return fixture.transport(...args);
+    } });
+    await expect(provider.shotComposition.restoreHistory!({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, revisionId: 'parent-old' }))
+      .rejects.toMatchObject({ status: 409, code: 'conflict', details: { reason: 'stale_head' } });
+    expect(requests.filter((request) => request.path.includes(`/timelines/${TIMELINE_ID}`))).toEqual([
+      { method: 'GET', path: `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}` },
+      { method: 'POST', path: `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}/composition-revisions/parent-old/restore`,
+        body: { expected_head: 'parent-r1', expected_publication_id: 'publication-current' } },
+    ]);
   });
 
   it('serializes canonical placement start after stale nested placement metadata', async () => {
@@ -761,591 +803,9 @@ describe('RuntimeDataProvider', () => {
     expect(requests).toContain('GET /v1/generations/generation-lightbox/variants?limit=200&cursor=variants-page-2');
   });
 
-  it('uses the authenticated generated client for canonical read/save/readback/reload', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
-
-    expect(provider.refreshIntervalMs).toBe(6_000);
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    expect(initial.configVersion).toBe(1);
-    const edited = { ...initial.config, tracks: initial.config.tracks.map((track, index) => index === 0 ? { ...track, label: 'Edited V1' } : track) };
-    const savedVersion = await provider.saveTimelineAtHead(TIMELINE_ID, edited, initial.head!, await provider.loadAssetRegistry(TIMELINE_ID));
-    const readback = await provider.loadTimeline(TIMELINE_ID);
-    const reloaded = await provider.loadTimeline(TIMELINE_ID);
-
-    expect(savedVersion.configVersion).toBe(2);
-    expect(readback.config.tracks[0]?.label).toBe('Edited V1');
-    expect(reloaded.config.tracks[0]?.label).toBe('Edited V1');
-    expect(reloaded.configVersion).toBe(2);
-    expect(fixture.read().documentVersion).toBe(2);
-    expect(fixture.read().config.tracks[0]?.label).toBe('Edited V1');
-    expect(fixture.requests.filter((request) => request.path !== '/v1/health').every((request) => request.headers.Authorization === 'Bearer fixture-token')).toBe(true);
-  });
-
-  it('does not let a delayed registry read overwrite a later save receipt', async () => {
-    const fixture = runtimeFixture();
-    let release!: () => void;
-    let entered!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const started = new Promise<void>((resolve) => { entered = resolve; });
-    let delayRead = false;
-    const transport: typeof fixture.transport = async (...args) => {
-      const response = await fixture.transport(...args);
-      if (delayRead && args[0] === 'GET' && args[1].includes('/composition-revisions/')) {
-        delayRead = false;
-        entered();
-        await held;
-      }
-      return response;
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    // Move the head so the registry load fetches a revision instead of reusing the cached one.
-    const movedHead = { ...initial.head!, headRevisionId: 'parent-r2' };
-    fixture.setHead(movedHead.headRevisionId, fixture.read().parentComposition);
-    delayRead = true;
-    const registryRead = provider.loadAssetRegistry(TIMELINE_ID);
-    await started;
-    const save = provider.saveTimelineAtHead(TIMELINE_ID, initial.config, movedHead);
-    // Give an unguarded save time to commit while the old read is suspended.
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    // The old immutable response must finish before publication can advance state.
-    release();
-    await registryRead;
-    const version = await save;
-    expect(version.configVersion).toBe(3);
-    expect((await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, version.head)).configVersion).toBe(4);
-    expect((await provider.loadTimeline(TIMELINE_ID)).configVersion).toBe(4);
-  });
-
-  it('keeps polling own publications behind their acknowledgement without inventing a version', async () => {
-    const fixture = runtimeFixture();
-    let release!: () => void;
-    let entered!: () => void;
-    const held = new Promise<void>((resolve) => { release = resolve; });
-    const started = new Promise<void>((resolve) => { entered = resolve; });
-    const transport: typeof fixture.transport = async (...args) => {
-      const response = await fixture.transport(...args);
-      if (args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        entered();
-        await held;
-      }
-      return response;
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const save = provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!);
-    await started;
-    const readsBefore = fixture.requests.filter((r) => r.path.endsWith('/inspect')).length;
-    const poll = provider.loadTimeline(TIMELINE_ID);
-    const registryPoll = provider.loadAssetRegistry(TIMELINE_ID);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(fixture.requests.filter((r) => r.path.endsWith('/inspect'))).toHaveLength(readsBefore);
-    release();
-    expect((await save).configVersion).toBe(2);
-    expect((await poll).configVersion).toBe(2);
-    await registryPoll;
-    expect((await provider.loadTimeline(TIMELINE_ID)).configVersion).toBe(2);
-  });
-
-  it('rejects overlapping stale saves and releases the queue after a rejection', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const first = provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!);
-    const second = provider.saveTimelineAtHead(TIMELINE_ID, { ...initial.config, clips: [{ id: 'stale', track: 'V1', clipType: 'hold', at: 0, hold: 1 }] }, initial.head!);
-    const rejected = expect(second).rejects.toMatchObject({ code: 'timeline_version_conflict' });
-    expect((await first).configVersion).toBe(2);
-    await rejected;
-    expect(fixture.requests.filter((r) => r.path.endsWith('/composition-revisions'))).toHaveLength(2);
-    const reloaded = await provider.loadTimeline(TIMELINE_ID);
-    expect(reloaded.configVersion).toBe(2);
-    expect((await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, reloaded.head!)).configVersion).toBe(3);
-  });
-
-  it('still rejects a genuine external publication without overwriting it', async () => {
-    const fixture = runtimeFixture();
-    const local = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const remote = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const initial = await local.loadTimeline(TIMELINE_ID);
-    const other = await remote.loadTimeline(TIMELINE_ID);
-    const remoteConfig = { ...other.config, tracks: other.config.tracks.map((t) => ({ ...t, label: 'Remote edit' })) };
-    await remote.saveTimelineAtHead(TIMELINE_ID, remoteConfig, other.head!);
-    await expect(local.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!))
-      .rejects.toMatchObject({ code: 'timeline_version_conflict' });
-    expect(fixture.read().config.tracks[0]?.label).toBe('Remote edit');
-    expect((await local.loadTimeline(TIMELINE_ID)).configVersion).toBe(2);
-  });
-
-  it('recovers a lost save acknowledgement after polling through the original idempotency receipt', async () => {
-    const fixture = runtimeFixture();
-    let loseAck = true;
-    const transport: typeof fixture.transport = async (...args) => {
-      const response = await fixture.transport(...args);
-      if (loseAck && args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        loseAck = false;
-        throw new Error('response lost after commit');
-      }
-      return response;
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!)).rejects.toThrow('response lost');
-    expect((await provider.loadTimeline(TIMELINE_ID)).configVersion).toBe(2);
-    const changed = { ...initial.config, tracks: initial.config.tracks.map((t) => ({ ...t, label: 'Unsent edit' })) };
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, changed, initial.head!)).rejects.toMatchObject({ code: 'timeline_version_conflict' });
-    const replay = await provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!);
-    expect(replay.configVersion).toBe(2);
-    const requests = fixture.requests.filter((r) => r.path.endsWith('/composition-revisions'));
-    expect(requests).toHaveLength(2);
-    expect(requests[1].body).toEqual(requests[0].body);
-    expect(requests[1].headers['Idempotency-Key']).toBe(requests[0].headers['Idempotency-Key']);
-    expect(fixture.read().documentVersion).toBe(2);
-    expect((await provider.saveTimelineAtHead(TIMELINE_ID, changed, replay.head)).configVersion).toBe(3);
-  });
-
-  it('allows a fresh edit based on an explicitly reloaded head after an ambiguous save', async () => {
-    const fixture = runtimeFixture();
-    let loseAck = true;
-    const transport: typeof fixture.transport = async (...args) => {
-      const response = await fixture.transport(...args);
-      if (loseAck && args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        loseAck = false;
-        throw new Error('response lost after commit');
-      }
-      return response;
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!)).rejects.toThrow('response lost');
-    const reloaded = await provider.loadTimeline(TIMELINE_ID);
-    const changed = { ...reloaded.config, tracks: reloaded.config.tracks.map((t) => ({ ...t, label: 'After reload' })) };
-    expect((await provider.saveTimelineAtHead(TIMELINE_ID, changed, reloaded.head!)).configVersion).toBe(3);
-    expect(fixture.read().config.tracks[0]?.label).toBe('After reload');
-  });
-
-  it('does not use an old receipt to overwrite a newer remote head', async () => {
-    const fixture = runtimeFixture();
-    let loseAck = true;
-    const transport: typeof fixture.transport = async (...args) => {
-      const response = await fixture.transport(...args);
-      if (loseAck && args[0] === 'POST' && args[1].endsWith('/composition-revisions')) {
-        loseAck = false;
-        throw new Error('response lost after commit');
-      }
-      return response;
-    };
-    const local = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await local.loadTimeline(TIMELINE_ID);
-    await expect(local.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!)).rejects.toThrow('response lost');
-    const remote = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const other = await remote.loadTimeline(TIMELINE_ID);
-    const config = { ...other.config, tracks: other.config.tracks.map((t) => ({ ...t, label: 'Remote after lost ack' })) };
-    await remote.saveTimelineAtHead(TIMELINE_ID, config, other.head!);
-    const latest = await local.loadTimeline(TIMELINE_ID);
-    await expect(local.saveTimelineAtHead(TIMELINE_ID, initial.config, initial.head!)).rejects.toMatchObject({ code: 'timeline_version_conflict' });
-    expect(fixture.read().documentVersion).toBe(3);
-    expect((await local.loadTimeline(TIMELINE_ID)).configVersion).toBe(latest.configVersion);
-    expect(fixture.read().config.tracks[0]?.label).toBe('Remote after lost ack');
-  });
-
-  it('registers simultaneous assets atomically without losing either registry entry', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    await Promise.all([
-      provider.registerAsset(TIMELINE_ID, 'one', { type: 'image', file: 'one.png' }),
-      provider.registerAsset(TIMELINE_ID, 'two', { type: 'image', file: 'two.png' }),
-    ]);
-    expect(Object.keys((await provider.loadAssetRegistry(TIMELINE_ID)).assets)).toEqual(['one', 'two']);
-    expect(fixture.read().documentVersion).toBe(3);
-  });
-
-  it('retains a managed object identity/provenance through upload and explicit timeline placement', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
-
-    const uploaded = await provider.uploadAsset(
-      new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }),
-      { timelineId: TIMELINE_ID, userId: 'owner-r3' },
-    );
-    expect(uploaded).toMatchObject({
-      assetId: MANAGED_OBJECT_ID,
-      entry: {
-        file: MANAGED_OBJECT_URL,
-        type: 'video/mp4',
-        media_id: MANAGED_OBJECT_ID,
-        content_sha256: MANAGED_OBJECT_DIGEST,
-        metadata: {
-          provenance: {
-            sourceProvider: 'workspace-runtime',
-            importedBy: 'owner-r3',
-            originalFilename: 'managed-creative.mp4',
-          },
-        },
-      },
-    });
-    expect(await provider.resolveAssetUrl(uploaded.assetId))
-      .toBe(MANAGED_OBJECT_URL);
-
-    const afterUpload = await provider.loadTimeline(TIMELINE_ID);
-    const registry = await provider.loadAssetRegistry(TIMELINE_ID);
-    const placedConfig = {
-      ...afterUpload.config,
-      clips: [{
-        id: 'clip-r3-managed',
-        at: 4,
-        track: 'V1',
-        asset: uploaded.assetId,
-        from: 0,
-        to: 2,
-      }],
-    };
-    const placedVersion = await provider.saveTimelineAtHead(
-      TIMELINE_ID,
-      placedConfig,
-      afterUpload.head!,
-      registry,
-    );
-    const persisted = await provider.loadTimeline(TIMELINE_ID);
-    const persistedRegistry = await provider.loadAssetRegistry(TIMELINE_ID);
-
-    expect(placedVersion.configVersion).toBe(3);
-    expect(persisted.config.clips[0]).toMatchObject({
-      id: 'clip-r3-managed',
-      asset: MANAGED_OBJECT_ID,
-      at: 4,
-    });
-    expect(persistedRegistry.assets[MANAGED_OBJECT_ID]).toMatchObject({
-      media_id: MANAGED_OBJECT_ID,
-      content_sha256: MANAGED_OBJECT_DIGEST,
-      file: MANAGED_OBJECT_ROUTE,
-      metadata: {
-        provenance: {
-          sourceProvider: 'workspace-runtime',
-          importedBy: 'owner-r3',
-          originalFilename: 'managed-creative.mp4',
-        },
-      },
-    });
-    expect(fixture.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/media-imports')))
-      .toHaveLength(1);
-    expect(fixture.requests.filter((request) => (
-      request.method === 'POST' && /^\/v1\/projects\/[^/]+\/objects$/.test(request.path)
-    ))).toHaveLength(0);
-  });
-
-  it('publishes an uploaded object by its route, not by the URL the editor first saw it at, and still plays it', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
-    const uploaded = await provider.uploadAsset(new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }), { timelineId: TIMELINE_ID, userId: 'owner-r3' });
-    // The editor holds the absolute URL (a playable locator before any readback); the Runtime refuses that as an unmanaged locator when it freezes a render.
-    expect(uploaded.entry.file).toBe(MANAGED_OBJECT_URL);
-    const loaded = await provider.loadTimeline(TIMELINE_ID);
-    const foreign = { type: 'image/png', file: 'https://cdn.example.test/elsewhere.png', media_id: 'sha256:' + 'b'.repeat(64) };
-    // Another origin's `/v1/objects/<media_id>` has the route's shape and names the entry's own media, and is still not this Runtime's object.
-    const foreignRoute = { type: 'image/png', file: `https://cdn.example.test/v1/objects/${'c'.repeat(64)}`, media_id: 'c'.repeat(64) };
-    const foreignLoopback = { type: 'image/png', file: `http://127.0.0.1:1234/v1/objects/${'d'.repeat(64)}`, media_id: 'd'.repeat(64) };
-    await provider.saveTimelineAtHead(TIMELINE_ID, loaded.config, loaded.head!, {
-      assets: { [uploaded.assetId]: uploaded.entry, foreign, foreignRoute, foreignLoopback },
-    });
-
-    const published = fixture.read().parentComposition.registry as { assets: Record<string, { file?: string }> };
-    expect(published.assets[uploaded.assetId].file).toBe(MANAGED_OBJECT_ROUTE);
-    // A locator that is not this entry's own object is left alone for the Runtime to refuse, never rewritten to look managed.
-    expect(published.assets.foreign.file).toBe('https://cdn.example.test/elsewhere.png');
-    expect(published.assets.foreignRoute.file).toBe(foreignRoute.file);
-    expect(published.assets.foreignLoopback.file).toBe(foreignLoopback.file);
-    // The route names its object by itself: it plays, with or without a registry readback.
-    expect(await provider.resolveAssetUrl(MANAGED_OBJECT_ROUTE)).toBe(MANAGED_OBJECT_URL);
-    expect(await new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport }).resolveAssetUrl(MANAGED_OBJECT_ROUTE)).toBe(MANAGED_OBJECT_URL);
-  });
-
-  it('round-trips package and entry identities through Runtime reload with stale-write rejection', async () => {
-    const objectReadOverrides = new Map<string, Uint8Array>();
-    const fixture = runtimeFixture({ objectReadOverrides });
-    const staleProvider = new RuntimeDataProvider({
-      projectId: PROJECT_ID,
-      baseUrl: 'http://runtime.test',
-      token: 'fixture-token',
-      transport: fixture.transport,
-    });
-    const staleInitial = await staleProvider.loadTimeline(TIMELINE_ID);
-    const staleRegistry = await staleProvider.loadAssetRegistry(TIMELINE_ID);
-
-    const provider = new RuntimeDataProvider({
-      projectId: PROJECT_ID,
-      baseUrl: 'http://runtime.test',
-      token: 'fixture-token',
-      transport: fixture.transport,
-    });
-    const initialSourceBytes = new TextEncoder().encode(
-      '<!doctype html><html><body><script>document.body.dataset.scene="initial";</script></body></html>',
-    );
-    const uploaded = await provider.projectObjects.ingest(initialSourceBytes, 'text/html', 'scene.html');
-    const initialReadback = await provider.projectObjects.read(uploaded.object_id);
-    expect(Array.from(initialReadback)).toEqual(Array.from(initialSourceBytes));
-    expect(await sha256Digest(initialReadback)).toBe(uploaded.digest);
-    const initialManifest = { formatVersion: 1, entry: 'scene.html', duration: 100, authoredFps: 30 };
-    const initialPackagePayload = { manifest: initialManifest, entry: uploaded, assets: [] };
-    const initialPackageBytes = packageBodyBytes(initialManifest, uploaded);
-    const initialPackageObject = await provider.projectObjects.ingest(
-      initialPackageBytes,
-      'application/json',
-      'scene.package.json',
-    );
-    const initialPackageReadback = await provider.projectObjects.read(initialPackageObject.object_id);
-    expect(Array.from(initialPackageReadback)).toEqual(Array.from(initialPackageBytes));
-    expect(await sha256Digest(initialPackageReadback)).toBe(initialPackageObject.digest);
-    expect(initialPackageObject.object_id).not.toBe(uploaded.object_id);
-    expect(initialPackageObject.digest).not.toBe(uploaded.digest);
-    const initialPackageBody = new TextDecoder().decode(initialPackageReadback);
-    expect(JSON.parse(initialPackageBody)).toEqual(initialPackagePayload);
-    expect(fixture.requests.filter((request) => request.path.includes('/objects')).map((request) => request.method))
-      .toEqual(['POST', 'GET', 'GET', 'POST', 'GET', 'GET']);
-
-    const initialLiveScene = {
-      revision: initialPackageObject.digest,
-      source: { objectId: initialPackageObject.object_id, revision: initialPackageObject.digest },
-      packageBody: initialPackageBody,
-      html: new TextDecoder().decode(initialReadback),
-    };
-    const afterInitialIngest = await provider.loadTimeline(TIMELINE_ID);
-    const initialRegistry = await provider.loadAssetRegistry(TIMELINE_ID);
-    const initialConfig = {
-      ...afterInitialIngest.config,
-      clips: [
-        {
-          id: 'scene-a',
-          at: 2,
-          track: 'V1',
-          clipType: 'haus.astrid.liveScene',
-          label: 'scene A sentinel',
-          from: 55,
-          to: 75,
-          speed: 1,
-          app: { liveScene: initialLiveScene, unrelated: { sentinel: 'keep-scene-a' } },
-        },
-        {
-          id: 'scene-b',
-          at: 22,
-          track: 'V1',
-          clipType: 'haus.astrid.liveScene',
-          label: 'scene B sentinel',
-          from: 20,
-          to: 30,
-          speed: 2,
-          app: { liveScene: initialLiveScene, unrelated: { sentinel: 'keep-scene-b' } },
-        },
-      ],
-    };
-    const initialSavedVersion = await provider.saveTimelineAtHead(
-      TIMELINE_ID,
-      initialConfig,
-      afterInitialIngest.head!,
-      initialRegistry,
-    );
-
-    const winningSourceBytes = new TextEncoder().encode(
-      '<!doctype html><html><body><script>document.body.dataset.scene="winning";</script></body></html>',
-    );
-    const winningObject = await provider.projectObjects.ingest(winningSourceBytes, 'text/html', 'scene.html');
-    const winningReadback = await provider.projectObjects.read(winningObject.object_id);
-    expect(Array.from(winningReadback)).toEqual(Array.from(winningSourceBytes));
-    expect(await sha256Digest(winningReadback)).toBe(winningObject.digest);
-    const winningManifest = { ...initialManifest, duration: 120, title: 'winning manifest' };
-    const winningPackagePayload = { manifest: winningManifest, entry: winningObject, assets: [] };
-    const winningPackageBytes = packageBodyBytes(winningManifest, winningObject);
-    const winningPackageObject = await provider.projectObjects.ingest(
-      winningPackageBytes,
-      'application/json',
-      'scene.package.json',
-    );
-    const winningPackageReadback = await provider.projectObjects.read(winningPackageObject.object_id);
-    expect(Array.from(winningPackageReadback)).toEqual(Array.from(winningPackageBytes));
-    expect(await sha256Digest(winningPackageReadback)).toBe(winningPackageObject.digest);
-    expect(winningPackageObject.object_id).not.toBe(winningObject.object_id);
-    expect(winningPackageObject.digest).not.toBe(winningObject.digest);
-    expect(winningPackageObject.digest).not.toBe(initialPackageObject.digest);
-    const winningPackageBody = new TextDecoder().decode(winningPackageReadback);
-    expect(JSON.parse(winningPackageBody)).toEqual(winningPackagePayload);
-
-    const manifestOnlyPackageBody = {
-      manifest: { ...winningManifest, title: 'manifest-only revision' },
-      entry: winningObject,
-      assets: [],
-    };
-    const manifestOnlyPackageBytes = packageBodyBytes(
-      manifestOnlyPackageBody.manifest,
-      manifestOnlyPackageBody.entry,
-      manifestOnlyPackageBody.assets,
-    );
-    const manifestOnlyPackageObject = await provider.projectObjects.ingest(
-      manifestOnlyPackageBytes,
-      'application/json',
-      'scene.package.json',
-    );
-    const manifestOnlyPackageReadback = await provider.projectObjects.read(manifestOnlyPackageObject.object_id);
-    expect(Array.from(manifestOnlyPackageReadback)).toEqual(Array.from(manifestOnlyPackageBytes));
-    expect(await sha256Digest(manifestOnlyPackageReadback)).toBe(manifestOnlyPackageObject.digest);
-    expect(manifestOnlyPackageObject.digest).not.toBe(winningPackageObject.digest);
-    expect(manifestOnlyPackageBody.entry).toEqual(winningPackagePayload.entry);
-    expect(manifestOnlyPackageBody.assets).toEqual(winningPackagePayload.assets);
-
-    const winningLiveScene = {
-      revision: winningPackageObject.digest,
-      source: { objectId: winningPackageObject.object_id, revision: winningPackageObject.digest },
-      packageBody: winningPackageBody,
-      html: new TextDecoder().decode(winningReadback),
-    };
-    expect(winningLiveScene.html).toBe(new TextDecoder().decode(winningSourceBytes));
-    const winningConfig = {
-      ...initialConfig,
-      clips: initialConfig.clips.map((clip) => ({
-        ...clip,
-        app: { ...clip.app, liveScene: winningLiveScene },
-      })),
-    };
-    const winningVersion = await provider.saveTimelineAtHead(
-      TIMELINE_ID,
-      winningConfig,
-      initialSavedVersion.head,
-      await provider.loadAssetRegistry(TIMELINE_ID),
-    );
-
-    await expect(staleProvider.saveTimelineAtHead(
-      TIMELINE_ID,
-      { ...staleInitial.config, clips: [] },
-      staleInitial.head!,
-      staleRegistry,
-    )).rejects.toBeInstanceOf(TimelineVersionConflictError);
-
-    const reloadedProvider = new RuntimeDataProvider({
-      projectId: PROJECT_ID,
-      baseUrl: 'http://runtime.test',
-      token: 'fixture-token',
-      transport: fixture.transport,
-    });
-    const reopened = await reloadedProvider.loadTimeline(TIMELINE_ID);
-    const reopenedRegistry = await reloadedProvider.loadAssetRegistry(TIMELINE_ID);
-    const reopenedData = await buildTimelineData(reopened.config, reopenedRegistry);
-    const clips = createTimelineReader({ data: reopenedData }).snapshot().clips;
-    expect(winningVersion.configVersion).toBe(3);
-    expect(reopened.config.clips[0]?.app?.liveScene).toEqual({
-      revision: winningPackageObject.digest,
-      html: new TextDecoder().decode(winningSourceBytes),
-      source: { objectId: winningPackageObject.object_id, revision: winningPackageObject.digest },
-      packageBody: winningPackageBody,
-    });
-    expect(reopened.config.clips.map((clip) => ({
-      id: clip.id,
-      at: clip.at,
-      from: clip.from,
-      to: clip.to,
-      speed: clip.speed,
-      label: clip.label,
-      unrelated: clip.app?.unrelated,
-    }))).toEqual([
-      {
-        id: 'scene-a',
-        at: 2,
-        from: 55,
-        to: 75,
-        speed: 1,
-        label: 'scene A sentinel',
-        unrelated: { sentinel: 'keep-scene-a' },
-      },
-      {
-        id: 'scene-b',
-        at: 22,
-        from: 20,
-        to: 30,
-        speed: 2,
-        label: 'scene B sentinel',
-        unrelated: { sentinel: 'keep-scene-b' },
-      },
-    ]);
-    expect(clips.map((clip) => ({
-      id: clip.id,
-      at: clip.at,
-      sourceOffset: clip.sourceOffset,
-      sourceEnd: clip.sourceEnd,
-      rate: clip.rate,
-      source: clip.sourceRefs?.find((ref) => ref.sourceObjectId),
-    }))).toEqual([
-      {
-        id: 'scene-a',
-        at: 2,
-        sourceOffset: 55,
-        sourceEnd: 75,
-        rate: 1,
-        source: expect.objectContaining({
-          sourceObjectId: winningPackageObject.object_id,
-          sourceRevision: winningPackageObject.digest,
-          packageRevision: winningPackageObject.digest,
-        }),
-      },
-      {
-        id: 'scene-b',
-        at: 22,
-        sourceOffset: 20,
-        sourceEnd: 30,
-        rate: 2,
-        source: expect.objectContaining({
-          sourceObjectId: winningPackageObject.object_id,
-          sourceRevision: winningPackageObject.digest,
-          packageRevision: winningPackageObject.digest,
-        }),
-      },
-    ]);
-    const reopenedPackageBytes = await reloadedProvider.projectObjects.read(winningPackageObject.object_id);
-    expect(Array.from(reopenedPackageBytes)).toEqual(Array.from(winningPackageBytes));
-    expect(await sha256Digest(reopenedPackageBytes)).toBe(winningPackageObject.digest);
-    const reopenedPackagePayload = JSON.parse(new TextDecoder().decode(reopenedPackageBytes)) as {
-      manifest: Record<string, unknown>;
-      entry: ProjectObjectMetadata;
-      assets: ProjectObjectMetadata[];
-    };
-    expect(reopenedPackagePayload).toEqual(winningPackagePayload);
-    const reopenedWinningBytes = await reloadedProvider.projectObjects.read(reopenedPackagePayload.entry.object_id);
-    expect(Array.from(reopenedWinningBytes)).toEqual(Array.from(winningSourceBytes));
-    expect(await sha256Digest(reopenedWinningBytes)).toBe(reopenedPackagePayload.entry.digest);
-    const originalBytes = await reloadedProvider.projectObjects.read(uploaded.object_id);
-    expect(Array.from(originalBytes)).toEqual(Array.from(initialSourceBytes));
-    expect(await sha256Digest(originalBytes)).toBe(uploaded.digest);
-
-    // The Runtime ETag/digest check must reject an equal-length wrong entry.
-    const wrongEntryBytes = new TextEncoder().encode(
-      '<!doctype html><html><body><script>document.body.dataset.scene="changed";</script></body></html>',
-    );
-    expect(wrongEntryBytes.byteLength).toBe(winningSourceBytes.byteLength);
-    objectReadOverrides.set(winningObject.object_id, wrongEntryBytes);
-    await expect(reloadedProvider.projectObjects.read(winningObject.object_id))
-      .rejects.toThrow(`Workspace Runtime object identity mismatch for ${winningObject.object_id}`);
-    objectReadOverrides.delete(winningObject.object_id);
-
-    await expect(reloadedProvider.projectObjects.read('unknown-project-object'))
-      .rejects.toMatchObject({ status: 404 });
-    const otherProjectProvider = new RuntimeDataProvider({
-      projectId: 'project-r2',
-      baseUrl: 'http://runtime.test',
-      token: 'fixture-token',
-      transport: fixture.transport,
-    });
-    const otherProjectObject = await otherProjectProvider.projectObjects.ingest(
-      new TextEncoder().encode('<html>other-project</html>'),
-      'text/html',
-      'other-scene.html',
-    );
-    await expect(reloadedProvider.projectObjects.read(otherProjectObject.object_id))
-      .rejects.toMatchObject({ status: 404 });
-    expect(fixture.read().config.clips).toHaveLength(2);
-    expect(fixture.read().config.clips[0]?.app?.liveScene.source)
-      .toEqual({ objectId: winningPackageObject.object_id, revision: winningPackageObject.digest });
-  });
-
   it('returns the stable catalog identity for freshly prepared media before registry readback', async () => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
 
     const prepared = await provider.prepareAsset(
       new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }),
@@ -1361,58 +821,6 @@ describe('RuntimeDataProvider', () => {
       .resolves.toBe(MANAGED_OBJECT_URL);
   });
 
-  it('reconnects and validates managed media Range/ETag against registry identity', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
-
-    await provider.uploadAsset(
-      new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }),
-      { timelineId: TIMELINE_ID, userId: 'owner-r4' },
-    );
-    const ranged = await provider.readAsset(MANAGED_OBJECT_ID, [0, 3]);
-    const metadata = await provider.headAsset(MANAGED_OBJECT_ID);
-    await provider.reconnect();
-
-    expect(ranged.status).toBe(206);
-    expect(ranged.etag).toBe(`"${MANAGED_OBJECT_DIGEST}"`);
-    expect(ranged.content_range).toBe('bytes 0-3/16');
-    expect(metadata.status).toBe(200);
-    expect(metadata.etag).toBe(`"${MANAGED_OBJECT_DIGEST}"`);
-    expect(fixture.requests.filter((request) => request.path === '/v1/handshake')).toHaveLength(2);
-    expect(fixture.requests.find((request) => request.method === 'GET' && request.path === `/v1/objects/${encodeURIComponent(MANAGED_OBJECT_ID)}`)?.headers.Range)
-      .toBe('bytes=0-3');
-  });
-
-  it('fails closed when managed media identity disagrees with the registry', async () => {
-    const fixture = runtimeFixture({ mediaEtag: `"sha256:${'b'.repeat(64)}"` });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
-
-    await provider.uploadAsset(
-      new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }),
-      { timelineId: TIMELINE_ID, userId: 'owner-r4' },
-    );
-
-    await expect(provider.headAsset(MANAGED_OBJECT_ID)).rejects.toThrow(
-      'Workspace Runtime object identity mismatch',
-    );
-  });
-
-  it('refuses a stale save without clobbering the canonical Runtime head', async () => {
-    const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const firstEdit = { ...initial.config, tracks: initial.config.tracks.map((track, index) => index === 0 ? { ...track, label: 'First V1' } : track) };
-    await provider.saveTimelineAtHead(TIMELINE_ID, firstEdit, initial.head!);
-    const staleEdit = { ...initial.config, tracks: initial.config.tracks.map((track, index) => index === 0 ? { ...track, label: 'Stale V1' } : track) };
-
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, staleEdit, initial.head!)).rejects.toMatchObject({
-      name: 'TimelineVersionConflictError',
-      code: 'timeline_version_conflict',
-    });
-    expect(fixture.read().documentVersion).toBe(2);
-    expect(fixture.read().config.tracks[0]?.label).toBe('First V1');
-  });
-
   it('returns an actionable error when the Runtime is down', async () => {
     const client = new AstridRuntimeClient({
       baseUrl: 'http://runtime.test',
@@ -1425,54 +833,6 @@ describe('RuntimeDataProvider', () => {
       code: 'runtime_unavailable',
       recoveryAction: 'Start the supported Runtime and configure its authenticated connector, then retry.',
     });
-  });
-
-  it('surfaces a storage admission failure instead of misclassifying it as a timeline conflict', async () => {
-    const fixture = runtimeFixture();
-    const onRuntimeError = vi.fn();
-    const publishPath = `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}/composition-revisions`;
-    const provider = new RuntimeDataProvider({
-      projectId: PROJECT_ID,
-      baseUrl: 'http://runtime.test',
-      token: 'fixture-token',
-      onRuntimeError,
-      transport: async (method, path, headers, body) => {
-        if (method === 'POST' && path === publishPath) {
-          return {
-            status: 409,
-            headers: {},
-            body: json({
-              code: 'realm_admission_failed',
-              message: 'Runtime realm admission failed',
-              details: {
-                checks: {
-                  sqlite: { result: 'error: [Errno 28] No space left on device' },
-                },
-              },
-            }),
-          };
-        }
-        return fixture.transport(method, path, headers, body);
-      },
-    });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const edited = {
-      ...initial.config,
-      tracks: initial.config.tracks?.map((track, index) => (
-        index === 0 ? { ...track, label: 'Storage failure' } : track
-      )),
-    };
-
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, edited, initial.head!)).rejects.toMatchObject({
-      code: 'runtime_unavailable',
-      causeCode: 'realm_admission_failed',
-      failureKind: 'storage',
-      status: 409,
-    });
-    expect(onRuntimeError).toHaveBeenCalledWith(expect.objectContaining({
-      code: 'runtime_unavailable',
-      recoveryAction: 'Check the Runtime data volume and restart it, then retry; your timeline draft is preserved.',
-    }));
   });
 
   it('reports rejected Runtime credentials to the page recovery seam', async () => {
@@ -1499,11 +859,10 @@ describe('RuntimeDataProvider', () => {
   });
 });
 
-
 // Accepted Pack media-locator regression retained with current provider tests.
 it('returns a playable locator for a freshly prepared object before registry readback', async () => {
     const fixture = runtimeFixture();
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: fixture.transport });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
 
     const prepared = await provider.prepareAsset(
       new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }),
@@ -1515,71 +874,209 @@ it('returns a playable locator for a freshly prepared object before registry rea
       .resolves.toBe(MANAGED_OBJECT_URL);
   });
 
+  it('reads and reconnects to managed media from the canonical seeded registry', async () => {
+    const fixture = runtimeFixture();
+    const setup = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
+    const prepared = await setup.prepareAsset(
+      new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }),
+      { timelineId: TIMELINE_ID, userId: 'owner-r4' },
+    );
+    fixture.setHead('parent-media', {
+      ...fixture.read().parentComposition,
+      registry: { assets: { [prepared.assetId]: prepared.entry } },
+    });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
 
-describe('current App preservation', () => {
-  it.each(['explicit-none', 'partial-missing'] as const)('publishes %s transition intent without losing canonical extensions', async (mode) => {
-    const initialClip = { id: 'clip-transition', at: 0, track: 'V1', hold: 2,
-      transition: { type: 'crossfade', duration: 0.5 }, app: { other: { keep: true } },
-      opaque_clip: { owner: 'another-client' } };
-    const fixture = runtimeFixture({ initialClips: [initialClip],
-      initialConfig: { app: { astrid: { intent: 'preserve' }, other: { keep: true } }, opaque_config: { keep: 3 } },
-      parentExtensions: { opaque_parent: { keep: 4 } } });
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixture.transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const authored = sanitizeTimelineClipSnapshot({ id: initialClip.id, at: 1, track: 'V1', hold: 2,
-      ...(mode === 'explicit-none' ? { transition: undefined } : {}) });
-    await provider.saveTimelineAtHead(TIMELINE_ID, { ...initial.config, clips: [authored] }, initial.head!);
-    const publication = fixture.requests.find((request) => request.method === 'POST' && request.path.endsWith('/composition-revisions'))!;
-    const parent = (publication.body as { parent_composition: Record<string, any> }).parent_composition;
-    const saved = parent.clips[0];
-    if (mode === 'explicit-none') expect(saved).not.toHaveProperty('transition');
-    else expect(saved.transition).toEqual(initialClip.transition);
-    expect(saved.opaque_clip).toEqual(initialClip.opaque_clip);
-    expect(saved.app).toEqual(initialClip.app);
-    expect(parent.opaque_parent).toEqual({ keep: 4 });
-    expect(parent.config.opaque_config).toEqual({ keep: 3 });
-    expect(parent.config.app).toEqual({ astrid: { intent: 'preserve' }, other: { keep: true } });
-    expect(parent.config.clips).toEqual(parent.clips);
+    const priorHandshakes = fixture.requests.filter((request) => request.path === '/v1/handshake').length;
+    await provider.loadAssetRegistry(TIMELINE_ID);
+    const ranged = await provider.readAsset(MANAGED_OBJECT_ID, [0, 3]);
+    const metadata = await provider.headAsset(MANAGED_OBJECT_ID);
+    await provider.reconnect();
+
+    expect(ranged.status).toBe(206);
+    expect(ranged.etag).toBe(`"${MANAGED_OBJECT_DIGEST}"`);
+    expect(ranged.content_range).toBe('bytes 0-3/16');
+    expect(metadata.status).toBe(200);
+    expect(metadata.etag).toBe(`"${MANAGED_OBJECT_DIGEST}"`);
+    expect(fixture.requests.filter((request) => request.path === '/v1/handshake')).toHaveLength(priorHandshakes + 2);
+    expect(fixture.requests.find((request) => request.method === 'GET' && request.path === `/v1/objects/${encodeURIComponent(MANAGED_OBJECT_ID)}`)?.headers.Range)
+      .toBe('bytes=0-3');
+    expect(fixture.requests.some((request) => request.method === 'POST' && request.path.endsWith('/composition-revisions'))).toBe(false);
   });
-});
 
+  it('fails closed when seeded managed media identity disagrees with the object response', async () => {
+    const fixture = runtimeFixture({ mediaEtag: `"sha256:${'b'.repeat(64)}"` });
+    const setup = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
+    const prepared = await setup.prepareAsset(
+      new File(['managed creative'], 'managed-creative.mp4', { type: 'video/mp4' }),
+      { timelineId: TIMELINE_ID, userId: 'owner-r4' },
+    );
+    fixture.setHead('parent-media', {
+      ...fixture.read().parentComposition,
+      registry: { assets: { [prepared.assetId]: prepared.entry } },
+    });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', token: 'fixture-token', transport: publicTimelineTransport(fixture) });
 
-describe('current App preservation pending acknowledgements', () => {
-  it('does not replay an accepted partial edit for a new explicit None action', async () => {
-    const fixture = runtimeFixture({ initialClips: [{ id: 'clip-transition', at: 0, track: 'V1', hold: 2, transition: { type: 'crossfade', duration: 0.5 } }] });
-    let loseAcknowledgement = true;
-    const transport: typeof fixture.transport = async (...args) => {
-      const response = await fixture.transport(...args);
-      if (args[0] === 'POST' && args[1].endsWith('/composition-revisions') && loseAcknowledgement) {
-        loseAcknowledgement = false;
-        throw new Error('fixture lost accepted publication acknowledgement');
+    await provider.loadAssetRegistry(TIMELINE_ID);
+    await expect(provider.headAsset(MANAGED_OBJECT_ID)).rejects.toThrow('Workspace Runtime object identity mismatch');
+    expect(fixture.requests.some((request) => request.method === 'POST' && request.path.endsWith('/composition-revisions'))).toBe(false);
+  });
+
+describe('verified basis loader diagnostics', () => {
+  it.each([
+    ['history-head', 'history', /malformed timeline history head/],
+    ['next-history-head', 'history', /malformed timeline history head/],
+    ['next-history-changed', 'history', /changed the captured timeline history head/],
+    ['parent-identity', 'parent', /belongs to project/],
+    ['parent-revision', 'parent', /identity mismatch/],
+    ['parent-manifest', 'parent', /verified parent dependency manifest/],
+    ['shot-identity', 'shot', /belongs to project/],
+    ['shot-revision', 'shot', /identity mismatch/],
+    ['shot-pin', 'shot', /Baseline shot pin mismatch/],
+    ['shot-payload', 'shot', /shot payload/],
+    ['internal-identity', 'internal', /belongs to project/],
+    ['internal-revision', 'internal', /identity mismatch/],
+    ['internal-pin', 'internal', /Baseline internal pin mismatch/],
+    ['internal-payload', 'internal', /internal payload/],
+    ['canonical-digest', 'parent', /parent content_digest/],
+    ['canonical-shot-pin', 'shot', /shot payload disagrees/],
+    ['canonical-occurrence', 'parent', /unresolved shot revision/],
+    ['graph-projection', 'parent', /shot closure is missing internal revision/],
+  ] as const)('does not complete unvalidated reads (%s)', async (fault, operation, message) => {
+    const { withTimelineBasisDiagnostics } = await import('@/tools/video-editor/lib/timeline-basis-diagnostics.ts');
+    const fixture = runtimeFixture();
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' },
+      { revision_id: 'r0', publication_id: 'p0' }, { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true }).data.canonical_document;
+    const observations: Array<{ operation: string; operationOrdinal: number; operationState: string }> = [];
+    const calls: string[] = [];
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      const [, path] = args;
+      const read = path.includes('/commits?') ? 'history' : path.includes('/composition-revisions/') ? 'parent'
+        : path.includes('/shots/') ? 'shot' : path.includes('/revisions/') ? 'internal' : undefined;
+      if (!read) return fixture.transport(...args);
+      calls.push(read);
+      const value: Record<string, unknown> = read === 'history'
+        ? { items: [], next_cursor: fault.startsWith('next-history') && calls.length === 1 ? 'next' : null,
+          head: { revision_id: 'r0', publication_id: 'p0' } }
+        : read === 'parent' ? { ...document.parent_revision, project_id: PROJECT_ID, timeline_id: TIMELINE_ID,
+          dependency_manifest: document.dependency_manifest }
+        : read === 'shot' ? { ...document.shot_revisions[0], project_id: PROJECT_ID, timeline_id: 'shot-1' }
+        : { ...document.internal_timeline_revisions[0], project_id: PROJECT_ID };
+      if (read === 'history') {
+        if (fault === 'history-head' || (fault === 'next-history-head' && calls.length === 2)) value.head = null;
+        if (fault === 'next-history-changed' && calls.length === 2) value.head = { revision_id: 'other', publication_id: 'other' };
       }
-      return response;
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const partial = { id: 'clip-transition', at: 1, track: 'V1', hold: 2 };
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, { ...initial.config, clips: [partial] }, initial.head!)).rejects.toThrow('fixture lost');
-    const none = sanitizeTimelineClipSnapshot({ ...partial, transition: undefined });
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, { ...initial.config, clips: [none] }, initial.head!)).rejects.toBeInstanceOf(TimelineVersionConflictError);
-    expect(fixture.requests.filter((request) => request.method === 'POST' && request.path.endsWith('/composition-revisions'))).toHaveLength(1);
+      if (fault === `${read}-identity`) value.project_id = 'other-project';
+      if (fault === `${read}-revision`) value.revision_id = 'other-revision';
+      if (fault === 'parent-manifest' && read === 'parent') value.dependency_manifest = null;
+      if (fault === `${read}-pin`) value.content_digest = `sha256:${'f'.repeat(64)}`;
+      if (fault === `${read}-payload`) value.payload = null;
+      if (read === 'parent' && fault === 'canonical-digest') value.content_digest = 'invalid';
+      if (read === 'shot' && fault === 'canonical-shot-pin') {
+        value.payload = { ...document.shot_revisions[0]!.payload, internal_timeline_revision_id: 'other' };
+      }
+      if (read === 'parent' && fault === 'canonical-occurrence') {
+        value.payload = { ...document.parent_revision.payload, occurrences: [{ occurrence_id: 'bad', shot_id: 'missing', shot_revision_id: 'missing' }] };
+      }
+      if (read === 'parent' && fault === 'graph-projection') {
+        value.dependency_manifest = { ...document.dependency_manifest, internal_timelines: [] };
+      }
+      return { status: 200, headers: {}, body: json(value) };
+    } });
+    await expect(withTimelineBasisDiagnostics(provider, observation => observations.push(observation),
+      () => provider.loadTimelineCommandBasis(TIMELINE_ID))).rejects.toThrow(message);
+    const failed = observations.filter(item => item.operation === operation).at(-1)!;
+    expect(failed.operationState).toBe('refused');
+    expect(observations.some(item => item.operationOrdinal === failed.operationOrdinal && item.operationState === 'end')).toBe(false);
+    expect(observations.filter(item => item.operationState === 'end' && item.operation !== 'history')).toEqual([]);
+    expect(observations.at(-1)).toMatchObject({ operation: 'loader', operationState: 'refused' });
+    for (const start of observations.filter(item => item.operationState === 'start')) {
+      expect(observations.filter(item => item.operationOrdinal === start.operationOrdinal)).toHaveLength(2);
+    }
+    const expectedCalls = operation === 'history' ? (fault.startsWith('next-') ? ['history', 'history'] : ['history'])
+      : fault === 'graph-projection' ? ['history', 'parent', 'shot']
+      : fault.startsWith('canonical-') ? ['history', 'parent', 'shot', 'internal']
+      : ['history', 'parent', 'shot', 'internal'].slice(0, ['history', 'parent', 'shot', 'internal'].indexOf(operation) + 1);
+    expect(calls).toEqual(expectedCalls);
   });
 
-  it('refuses a different edit beside an unanswered save as the editor\'s own save, never as another writer, and sends nothing', async () => {
-    const fixture = runtimeFixture({ initialClips: [{ id: 'clip-a', at: 0, track: 'V1', hold: 2 }] });
-    const transport: typeof fixture.transport = async (...args) => {
-      if (args[0] === 'POST' && args[1].endsWith('/composition-revisions')) throw new Error('fixture: Astrid went away mid-request');
-      return fixture.transport(...args);
-    };
-    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
-    const initial = await provider.loadTimeline(TIMELINE_ID);
-    const edit = (at: number) => ({ ...initial.config, clips: [{ id: 'clip-a', at, track: 'V1', hold: 2 }] });
-    await expect(provider.saveTimelineAtHead(TIMELINE_ID, edit(1), initial.head!)).rejects.toThrow('went away');
-
-    const refused = await provider.saveTimelineAtHead(TIMELINE_ID, edit(2), initial.head!).catch((error: unknown) => error);
-    expect(refused).toBeInstanceOf(TimelineVersionConflictError);
-    expect(isOwnUnacknowledgedSaveError(refused)).toBe(true);
-    // A genuine rejection by the Runtime is not "ours".
-    expect(isOwnUnacknowledgedSaveError(new TimelineVersionConflictError('Another editor changed the timeline'))).toBe(false);
+  it('defers immutable completion until the entire closure validates', async () => {
+    const { withTimelineBasisDiagnostics } = await import('@/tools/video-editor/lib/timeline-basis-diagnostics.ts');
+    const fixture = runtimeFixture();
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' },
+      { revision_id: 'r0', publication_id: 'p0' }, { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true }).data.canonical_document;
+    let release!: () => void;
+    let entered!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    const internalStarted = new Promise<void>(resolve => { entered = resolve; });
+    const observations: string[] = [];
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      const [, path] = args;
+      let value: unknown;
+      if (path.includes('/commits?')) value = { items: [], next_cursor: null, head: { revision_id: 'r0', publication_id: 'p0' } };
+      else if (path.includes('/composition-revisions/')) value = { ...document.parent_revision, project_id: PROJECT_ID,
+        timeline_id: TIMELINE_ID, dependency_manifest: document.dependency_manifest };
+      else if (path.includes('/shots/')) value = { ...document.shot_revisions[0], project_id: PROJECT_ID };
+      else if (path.includes('/revisions/')) {
+        entered();
+        await gate;
+        value = { ...document.internal_timeline_revisions[0], project_id: PROJECT_ID };
+      } else return fixture.transport(...args);
+      return { status: 200, headers: {}, body: json(value) };
+    } });
+    const read = withTimelineBasisDiagnostics(provider,
+      ({ operation, operationState }) => observations.push(`${operation}:${operationState}`),
+      () => provider.loadTimelineCommandBasis(TIMELINE_ID));
+    await internalStarted;
+    try {
+      expect(observations).toEqual(['loader:start', 'history:start', 'history:end', 'parent:start', 'shot:start', 'internal:start']);
+    } finally { release(); }
+    expect((await read).canonicalDocument).toEqual(document);
+    expect(observations.slice(-4)).toEqual(['parent:end', 'shot:end', 'internal:end', 'loader:end']);
   });
+
+  it.each(['complete', 'history', 'parent', 'shot', 'internal', 'listener'] as const)(
+    'observes exact immutable closure order without changing calls or faults (%s)', async boundary => {
+      const { withTimelineBasisDiagnostics } = await import('@/tools/video-editor/lib/timeline-basis-diagnostics.ts');
+      const fixture = runtimeFixture();
+      const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' },
+        { revision_id: 'r0', publication_id: 'p0' }, { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true }).data.canonical_document;
+      const fault = Object.freeze(new Error('private provider fault'));
+      const calls: string[] = [];
+      const observations: Array<{ operation: string; operationOrdinal: number; operationState: string }> = [];
+      const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+        const [, path] = args;
+        const operation = path.includes('/commits?') ? 'history' : path.includes('/composition-revisions/') ? 'parent'
+          : path.includes('/shots/') ? 'shot' : path.includes('/revisions/') ? 'internal' : undefined;
+        if (!operation) return fixture.transport(...args);
+        calls.push(operation);
+        if (operation === boundary) throw fault;
+        const value = operation === 'history' ? { items: [], next_cursor: null, head: { revision_id: 'r0', publication_id: 'p0' } }
+          : operation === 'parent' ? { ...document.parent_revision, project_id: PROJECT_ID, timeline_id: TIMELINE_ID, dependency_manifest: document.dependency_manifest }
+          : operation === 'shot' ? { ...document.shot_revisions[0], project_id: PROJECT_ID, timeline_id: 'shot-1' }
+          : { ...document.internal_timeline_revisions[0], project_id: PROJECT_ID };
+        return { status: 200, headers: {}, body: json(value) };
+      } });
+      const read = withTimelineBasisDiagnostics(provider, observation => {
+        observations.push(observation);
+        if (boundary === 'listener') throw new Error('listener failure');
+      }, () => provider.loadTimelineCommandBasis(TIMELINE_ID));
+      if (boundary === 'complete' || boundary === 'listener') {
+        expect((await read).canonicalDocument).toEqual(document);
+        expect(calls).toEqual(['history', 'parent', 'shot', 'internal']);
+        expect(observations.map(({ operation, operationState }) => `${operation}:${operationState}`)).toEqual([
+          'loader:start', 'history:start', 'history:end', 'parent:start', 'shot:start', 'internal:start',
+          'parent:end', 'shot:end', 'internal:end', 'loader:end',
+        ]);
+      } else {
+        await expect(read).rejects.toBe(fault);
+        expect(calls).toEqual(['history', 'parent', 'shot', 'internal'].slice(0, ['history', 'parent', 'shot', 'internal'].indexOf(boundary) + 1));
+        expect(observations.slice(-2).map(({ operation, operationState }) => `${operation}:${operationState}`))
+          .toEqual([`${boundary}:refused`, 'loader:refused']);
+      }
+      for (const start of observations.filter(item => item.operationState === 'start')) {
+        expect(observations.filter(item => item.operationOrdinal === start.operationOrdinal)).toHaveLength(2);
+      }
+      expect(JSON.stringify(observations)).not.toContain('private');
+    });
 });

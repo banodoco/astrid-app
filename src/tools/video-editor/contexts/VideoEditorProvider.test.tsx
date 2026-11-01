@@ -26,6 +26,7 @@ import {
   activateTimelineClipData,
   editorSelectTimelineClip,
   editorReplaceTimelineSelection,
+  getShotPlacementTarget,
   systemResetSelectionForProjectChange,
   userSelectGalleryItem,
 } from '@/shared/state/selectionStore';
@@ -33,6 +34,7 @@ import { useVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditor
 import { EditorRuntimeProvider } from '@/tools/video-editor/contexts/EditorRuntimeProvider';
 import type { VideoEditorScopedServices } from '@/tools/video-editor/browser/scopedServices';
 import { VideoEditorProvider } from '@/tools/video-editor/contexts/VideoEditorProvider';
+import shotCompositionFixture from '@/tools/video-editor/data/shotComposition.fixture.json';
 import { buildVideoEditorLightboxMedia } from '@/tools/video-editor/lib/video-editor-lightbox-media';
 import { ExtensionSettingsPanel } from '@/tools/video-editor/components/ExtensionSettings/ExtensionSettingsPanel';
 import type { EffectRegistryRecord } from '@/tools/video-editor/effects/registry/types';
@@ -101,6 +103,8 @@ vi.mock('react-router-dom', async () => {
     useNavigate: () => navigateMock,
   };
 });
+
+const mountedElementRoutes = { get: vi.fn(), save: vi.fn() };
 
 const mocks = {
   setInputModality: vi.fn(),
@@ -173,6 +177,7 @@ vi.mock('@/shared/hooks/settings/useToolSettings', () => ({
 vi.mock('@/tools/video-editor/hooks/useTimelineState', () => ({
   useTimelineState: () => {
     const editor = {
+      elementTimelineRoutes: mountedElementRoutes,
       data: operationalChromeState.editorData,
       resolvedConfig: { registry: {} },
       deviceClass: 'tablet',
@@ -292,8 +297,6 @@ vi.mock('@/tools/video-editor/hooks/useTimelineState', () => ({
       handleAddTrack: vi.fn(),
       handleClearUnusedTracks: vi.fn(),
       unusedTrackCount: 0,
-      handleAddText: vi.fn(),
-      handleAddTextAt: vi.fn(),
       reloadFromServer: vi.fn(),
       retrySaveAfterConflict: vi.fn(),
       startRender: vi.fn(),
@@ -792,6 +795,29 @@ describe('VideoEditorProvider', () => {
     operationalChromeState.store = null;
     operationalChromeState.isConflictExhausted = false;
     operationalChromeState.renderStatus = 'idle';
+  });
+
+  it('publishes the mounted canonical selection to app-level placement callers and releases it on close', async () => {
+    const provider: DataProvider = {
+      loadTimeline: vi.fn(), saveTimeline: vi.fn(), loadAssetRegistry: vi.fn(), resolveAssetUrl: vi.fn(),
+      shotComposition: { load: vi.fn(async () => shotCompositionFixture) },
+    };
+    let runtime!: ReturnType<typeof useVideoEditorRuntime>;
+    function Capture() { runtime = useVideoEditorRuntime(); return null; }
+    const view = render(<MemoryRouter><QueryClientProvider client={new QueryClient()}><AgentChatProvider>
+      <VideoEditorProvider dataProvider={provider} projectId="project-001" projectSlug="project-001"
+        timelineId="document-primary" userId={null}>
+        <Capture />
+      </VideoEditorProvider>
+    </AgentChatProvider></QueryClientProvider></MemoryRouter>);
+    await waitFor(() => expect(runtime.shots.canonicalComposition?.headRevisionId).toBeDefined());
+    act(() => editorSelectTimelineClip('occ-2:alpha-video', runtime.agentSelectionOwner));
+    expect(getShotPlacementTarget('project-001', 'shot-alpha')).toEqual({
+      shot_id: expect.any(String), ownerRef: 'occurrence:occ-2', timelineRef: 'document-primary',
+    });
+    expect(() => getShotPlacementTarget('foreign-project', 'shot-alpha')).toThrow();
+    view.unmount();
+    expect(getShotPlacementTarget('project-001', 'shot-alpha')).toEqual({ shot_id: 'shot-alpha' });
   });
 
 

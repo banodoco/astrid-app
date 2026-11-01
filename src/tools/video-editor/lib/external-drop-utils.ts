@@ -25,6 +25,7 @@ import {
 import { getAssetResolutionToken } from '@/tools/video-editor/lib/asset-registry.ts';
 import type { UseAssetManagementResult } from '@/tools/video-editor/hooks/useAssetManagement.ts';
 import type { TimelineProvisionedAsset } from '@/tools/video-editor/commands/provisioning.ts';
+import { canonicalJsonStringify } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { DragCoordinator } from '@/tools/video-editor/hooks/useDragCoordinator.ts';
 import type {
   TimelineApplyEdit,
@@ -300,6 +301,15 @@ export async function handleFileDrop({
       ? null
       : getCompatibleTrackId(dataRef.current.tracks, targetTrackId, kind, selectedTrackId);
     const isImageVideo = isImageFile(file) || isVideoFile(file);
+    const managedImageTrackId = directAssetUploadAllFiles && mediaImportForImageVideo
+      && files.length === 1 && isImageFile(file)
+      ? dropPosition.pointerTrackId
+      : undefined;
+    if (managedImageTrackId) {
+      targetTrackId = managedImageTrackId;
+      compatibleTrackId = managedImageTrackId;
+      forceNewTrack = false;
+    }
 
     // A direct host without Runtime media-import capability must not fall
     // through to browser storage, local materialization, or a legacy
@@ -393,6 +403,13 @@ export async function handleFileDrop({
 
     const clipTime = dropPosition.time + timeOffset;
     timeOffset += defaultClipDuration;
+    const dropScope = canonicalJsonStringify({ head: dataRef.current.head,
+      composition: dataRef.current.config.app?.canonicalComposition });
+    const currentDropData = () => {
+      const current = dataRef.current;
+      return current && canonicalJsonStringify({ head: current.head,
+        composition: current.config.app?.canonicalComposition }) === dropScope ? current : null;
+    };
 
     const skeletonId = `uploading-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
     const skeletonMeta: ClipMeta = {
@@ -422,7 +439,7 @@ export async function handleFileDrop({
     }, { save: false });
 
     const removeSkeleton = () => {
-      const current = dataRef.current;
+      const current = currentDropData();
       if (!current) {
         return;
       }
@@ -438,7 +455,7 @@ export async function handleFileDrop({
       try {
         if (isImageFile(file)) {
           const generationData = await uploadImageGeneration(file);
-          const current = dataRef.current;
+          const current = currentDropData();
           if (!current) {
             return;
           }
@@ -448,7 +465,11 @@ export async function handleFileDrop({
             removeSkeleton();
             return;
           }
-          if (!dropAsset(preparedAsset.assetKey, compatibleTrackId ?? undefined, clipTime, false, false, preparedAsset, skeletonId)) {
+          const preparedManagedImageTrackId = files.length === 1 && isImageFile(file) && preparedAsset.mediaSelection
+            ? dropPosition.pointerTrackId
+            : undefined;
+          if (!dropAsset(preparedAsset.assetKey, preparedManagedImageTrackId ?? compatibleTrackId ?? undefined, clipTime,
+            false, false, preparedAsset, skeletonId)) {
             removeSkeleton();
           }
           return;
@@ -456,7 +477,7 @@ export async function handleFileDrop({
 
         if (isVideoFile(file)) {
           const generationData = await uploadVideoGeneration(file);
-          const current = dataRef.current;
+          const current = currentDropData();
           if (!current) {
             return;
           }
@@ -761,6 +782,7 @@ export function finalizeExternalDrop({
   externalDragFrameRef,
   latestExternalDragRef,
   latestExternalPositionRef,
+  managedImage = false,
 }: {
   event: DragEvent<HTMLDivElement>;
   coordinator: DragCoordinator;
@@ -770,8 +792,10 @@ export function finalizeExternalDrop({
     clientX: number;
     clientY: number;
     sourceKind: TrackKind | null;
+    managedImage?: boolean;
   } | null>;
   latestExternalPositionRef: MutableRefObject<ReturnType<DragCoordinator['update']> | null>;
+  managedImage?: boolean;
 }): TimelineDropPosition {
   event.preventDefault();
   delete event.currentTarget.dataset.dragOver;
@@ -787,6 +811,7 @@ export function finalizeExternalDrop({
       clientX: latestExternalDragRef.current.clientX,
       clientY: latestExternalDragRef.current.clientY,
       sourceKind: latestExternalDragRef.current.sourceKind,
+      managedImage: latestExternalDragRef.current.managedImage,
     });
   }
 
@@ -796,6 +821,7 @@ export function finalizeExternalDrop({
       clientX: event.clientX,
       clientY: event.clientY,
       sourceKind: inferDragKind(event),
+      managedImage,
     });
 
   latestExternalDragRef.current = null;

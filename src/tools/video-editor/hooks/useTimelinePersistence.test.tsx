@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { act, render, renderHook } from '@testing-library/react';
+import { toast } from '@/shared/components/ui/runtime/sonner.tsx';
+vi.mock('@/shared/components/ui/runtime/sonner.tsx', () => ({ toast: { error: vi.fn() } }));
+import { act, fireEvent, render, renderHook } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeIndexedDB, resetFakeIndexedDB } from 'fake-indexeddb';
@@ -16,6 +18,8 @@ vi.mock('@/tools/video-editor/data/timelineDraftIndexedDb.ts', async (importOrig
   return { ...actual, saveTimelineDraft: vi.fn(actual.saveTimelineDraft) };
 });
 import { useTimelinePersistence, TimelineSaveBarrierError, type UseTimelinePersistenceResult } from './useTimelinePersistence';
+import { useClipEditing } from './useClipEditing';
+import { useTimelineCommit } from './useTimelineCommit';
 import { useTimelineOps } from './useTimelineOps';
 import { useEditorBrowserDefaults } from './useEditorBrowserDefaults';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
@@ -34,12 +38,37 @@ import { getConfigSignature, getStableConfigSignature } from '../lib/config-util
 import { buildDataFromCurrentRegistry } from '../lib/timeline-save-utils';
 import { createDefaultTimelineConfig } from '../lib/defaults';
 import type { AssetResolver } from '../data/AssetResolver';
-import { OwnUnacknowledgedSaveError, TimelineSchemaIncompatibleError, TimelineVersionConflictError, type DataProvider } from '../data/DataProvider';
+import { OwnUnacknowledgedSaveError, TimelineSaveError, TimelineSchemaIncompatibleError, TimelineVersionConflictError, type DataProvider } from '../data/DataProvider';
 import { StaleWriteError } from '../data/shotComposition';
 import { BRIDGE_REQUEST_TIMEOUT_MS } from '../data/bridgeContract';
 import { clearTimelineDraft, loadTimelineDraft, saveTimelineDraft, type TimelineDraftRecoveryMetadata } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import type { AssetRegistry } from '../types';
 import type { TimelineBundleEnvelope } from '../data/typed/timelineBundle';
+import { acceptedCommit, fixtureDigest } from '@/integrations/runtime/__tests__/timelineCommitFixture.ts';
+import { createCommitOutbox, toOutboxJson } from '../commands/commitOutbox.ts';
+import { createLocalSaveSession } from '../commands/localSaveSession.ts';
+import { createTimelineLocalSaveHandoff, type TimelineLocalSaveHandoff } from './timelineLocalSaveHandoff.ts';
+
+import { RuntimeDataProvider } from '@/integrations/runtime/dataProvider.ts';
+import { json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
+import { VideoEditorRuntimeProvider, type VideoEditorRuntimeContextValue } from '../contexts/VideoEditorRuntimeContext.tsx';
+import { useTimelineSave } from './useTimelineSave.ts';
+import { useTimelineTrackManagement } from './useTimelineTrackManagement.ts';
+import { useDragCoordinator } from './useDragCoordinator.ts';
+import { useClipDrag } from './useClipDrag.ts';
+import { buildTimelineRowLayout } from '../lib/timeline-row-layout.ts';
+import { publishTimelineRowLayout } from '../lib/drop-position.ts';
+import type { CommitRequest } from '@/integrations/runtime/timeline-commit-types.ts';
+
+const contractFixture = vi.hoisted(() => ({ digest: 'sha256:unsupported-test-fixture' }));
+
+// This case asserts the retained-draft path when the generated v2 contract is
+// unavailable. Keep that condition explicit instead of inheriting the current
+// full-v2 digest from the joined generated metadata.
+vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
+  get SCHEMA_DIGEST() { return contractFixture.digest; },
+}));
 
 // Keep these inputs aligned with useTimelinePersistence's private save timing
 // contract; the bridge request window itself comes from the shared contract.
@@ -129,6 +158,7 @@ interface TestHarness {
 interface SetupOptions {
   providerOverride?: DataProvider;
   timelineId?: string;
+  localDocumentSave?: TimelineLocalSaveHandoff;
   store?: TimelineStoreApi;
   initialData?: TimelineData;
   persistenceEnabled?: boolean;
@@ -194,6 +224,7 @@ function setup(options?: SetupOptions): TestHarness {
     (target: { provider: DataProvider; timelineId: string }) => useTimelinePersistence({
       store: options?.store,
       provider: target.provider,
+      localDocumentSave: options?.localDocumentSave,
       assetResolver,
       timelineId: target.timelineId,
       eventBus,
@@ -256,6 +287,214 @@ function makeBundle(text: string): TimelineBundleEnvelope {
 }
 
 describe('useTimelinePersistence — interaction gating', () => {
+  for (const { children, topLevel, gesture } of [
+    { children: false, topLevel: false },
+    { children: false, topLevel: true },
+    { children: true, topLevel: false },
+    { children: true, topLevel: true },
+  ].flatMap(basis => ['move', 'single', 'bulk'].map(gesture => ({ ...basis, gesture })))) {
+    // A2/P2 requires ordinary parent moves with retained child closures and
+    // top-level authored clips to reach the outbox. Keep the success contract.
+    it(`P2 parent ${gesture} reaches the durable outbox (children=${children}, topLevel=${topLevel})`, async () => {
+      contractFixture.digest = 'sha256:35c2d9c5e0b51ab8d8b7a4f4dbafbdfcb13d232d7bd22fff21cf73e250398d4c';
+      const config = createDefaultTimelineConfig();
+      config.clips = [{ id: 'clip-parent-move', at: 0, track: 'V1', clipType: 'media', asset: 'parent-image', from: 0, to: 3, speed: 1,
+        transition: { type: 'crossfade', duration: 0.5 } },
+        { id: 'reference', at: 20, track: 'V1', clipType: 'media', asset: 'parent-image', from: 0, to: 3, speed: 1,
+          transition: { type: 'crossfade', duration: 0.5 } }];
+      const original = await buildTimelineData(config, { assets: { 'parent-image': { file: 'parent.png', type: 'image/png' } } },
+        undefined, 1, undefined, { projectId: 'project-commit', timelineId: 'timeline-1', headRevisionId: 'r0', headPublicationId: 'p0' });
+      const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
+        { timelineId: 'timeline-1', children }).data.canonical_document;
+      document.parent_revision.payload = { ...document.parent_revision.payload,
+        config: JSON.parse(JSON.stringify(config)), clips: JSON.parse(JSON.stringify(config.clips)),
+        registry: structuredClone(original.registry), opaque: { keep: null } };
+      if (topLevel) delete document.parent_revision.payload.config.clips;
+      document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+      const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+      const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+      const outboxes = createCommitOutbox({ indexedDB: createFakeIndexedDB(), exclusiveLock: async (_key, work) => work() });
+      const selectedIds = gesture === 'bulk' ? ['clip-parent-move', 'reference'] : ['clip-parent-move'];
+      const edited = buildDataFromCurrentRegistry({ ...original.config,
+        clips: original.config.clips.map(clip => !selectedIds.includes(clip.id) ? clip
+          : gesture === 'move' ? { ...clip, at: 5 } : { ...clip, transition: undefined }) }, original);
+      const landed = structuredClone(document);
+      for (const list of [landed.parent_revision.payload.clips, landed.parent_revision.payload.config.clips]) {
+        if (!Array.isArray(list)) continue;
+        for (const clip of list as Array<Record<string, unknown>>) {
+          if (!selectedIds.includes(clip.id as string)) continue;
+          if (gesture === 'move') clip.at = 5;
+          else delete clip.transition;
+        }
+      }
+      landed.parent_revision.revision_id = 'r1';
+      landed.parent_revision.content_digest = fixtureDigest(landed.parent_revision.payload);
+      const response = acceptedCommit({ revision_id: 'r1', publication_id: 'p1' }, { revision_id: 'r0', publication_id: 'p0' },
+        { timelineId: 'timeline-1', children });
+      response.data.canonical_document = landed;
+      const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(async () => ({ response, accepted: { revisionId: 'r1', publicationId: 'p1' },
+        canonicalDocument: landed, graph: {}, receipt: response.receipt }));
+      const adopted = vi.fn();
+      const local = await createLocalSaveSession({ scope, initial, document: toOutboxJson(document), outboxes, send,
+        loadLatest: vi.fn(async () => initial), changed: vi.fn(), prepareDisplay: async (basis) => ({
+          document: toOutboxJson(basis.canonicalDocument), adopt: adopted,
+        }) });
+      const handoff = createTimelineLocalSaveHandoff({ initial,
+        source: { config: original.config, registry: original.registry, head: original.head }, session: local,
+        adopted: (basis) => ({ receipt: { configVersion: 2, head: { ...original.head!,
+          headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId } },
+        source: { config: edited.config, registry: edited.registry, head: { ...original.head!,
+          headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId } } }) });
+      const capture = vi.spyOn(handoff, 'capture');
+      const append = vi.spyOn(local, 'appendDocument');
+      const harness = setup({ initialData: original, localDocumentSave: handoff });
+      const oldHeadWriter = vi.fn();
+      harness.provider.saveTimelineAtHead = oldHeadWriter;
+      const eventBus = new TimelineEventBus();
+      const caller = renderHook(() => {
+        const commit = useTimelineCommit({ eventBus, initialData: original, lastSavedSignatureRef: { current: '' } });
+        return useClipEditing({ dataRef: commit.dataRef, resolvedConfig: commit.data?.resolvedConfig ?? null,
+          selectedClipId: 'clip-parent-move', selectedTrack: null, currentTime: 0,
+          selectClip: vi.fn(), setSelectedTrackId: vi.fn(), applyEdit: commit.applyEdit });
+      });
+      const unsubscribe = eventBus.on('scheduleSave', (data, options) => {
+        harness.dataRef.current = data;
+        harness.result.current.scheduleSave(data, options);
+      });
+      try {
+        act(() => {
+          if (gesture === 'single') caller.result.current.handleSelectedClipChange({ transition: undefined });
+          else if (gesture === 'bulk') caller.result.current.handleUpdateClipsDeep(selectedIds, () => ({ transition: undefined }));
+          else {
+            harness.dataRef.current = edited;
+            harness.result.current.scheduleSave(edited, { gestureBasis: {
+              kind: 'move', clipId: original.config.clips[0].id, trackId: 'V1',
+              config: original.config, registry: original.registry,
+            } });
+          }
+        });
+        expect(capture).toHaveBeenCalledTimes(1);
+        expect(capture.mock.calls[0][0].head).toEqual(original.head);
+        expect(harness.dataRef.current?.config.clips[0].at).toBe(gesture === 'move' ? 5 : 0);
+        await act(async () => { await harness.result.current.flushPendingSave(); });
+        expect(append).toHaveBeenCalledTimes(1);
+        expect(send).toHaveBeenCalledTimes(1);
+        const request = send.mock.calls[0][0];
+        expect(request).toMatchObject({ project_id: scope.projectId, timeline_id: scope.timelineId,
+          base_revision_id: 'r0', base_publication_id: 'p0', source: { via: 'app' }, dry_run: false,
+          commands: [{ op: 'doc.patch', created: [] }], merge: 'fields' });
+        const changes = gesture === 'move' ? [{
+          op: 'set', ref: 'parent', path: ['clips', 'id:clip-parent-move', 'at'],
+          before: { state: 'present', value: 0 }, value: 5,
+        }] : selectedIds.map(id => ({ op: 'remove', ref: 'parent', path: ['clips', `id:${id}`, 'transition'],
+          before: { state: 'present', value: { type: 'crossfade', duration: 0.5 } } }));
+        expect(request.commands[0].args.changes).toEqual(changes);
+        expect(request.steps).toMatchObject([{ command_ordinals: [0], patch: request.commands[0].args.changes }]);
+        expect(request.reads).toContainEqual({ kind: 'field', ref: 'parent',
+          path: [...(topLevel ? [] : ['config']), 'clips', 'id:clip-parent-move', gesture === 'move' ? 'at' : 'transition'],
+          state: { state: 'present', value: gesture === 'move' ? 0 : { type: 'crossfade', duration: 0.5 } } });
+        if (gesture !== 'move') expect(request.steps[0].reads).toEqual(request.reads);
+        expect((await outboxes.list(scope))[0].accepted).toBeTruthy();
+        expect(local.getDocument()).toEqual(landed);
+        expect(local.getDocument()).toMatchObject({ shot_revisions: document.shot_revisions,
+          internal_timeline_revisions: document.internal_timeline_revisions,
+          dependency_manifest: document.dependency_manifest });
+        expect(adopted).toHaveBeenCalledTimes(1);
+        expect(oldHeadWriter).not.toHaveBeenCalled();
+        expect(harness.saveTimeline).not.toHaveBeenCalled();
+        expect(harness.loadTimeline).not.toHaveBeenCalled();
+      } finally {
+        unsubscribe();
+        caller.unmount();
+        harness.unmount();
+        await local.dispose();
+        contractFixture.digest = 'sha256:unsupported-test-fixture';
+      }
+    });
+  }
+
+  it('keeps an unsupported child ownership edit visible and recoverable without entering either writer', async () => {
+    const original = makeTimelineData('flattened-child');
+    original.head = { projectId: 'project-commit', timelineId: 'timeline-1', headRevisionId: 'r0', headPublicationId: 'p0' };
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
+      { timelineId: 'timeline-1', children: true }).data.canonical_document;
+    const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const outboxes = createCommitOutbox({ indexedDB: createFakeIndexedDB(), exclusiveLock: async (_key, work) => work() });
+    const send = vi.fn();
+    const local = await createLocalSaveSession({ initial, document: toOutboxJson(document), outboxes, send,
+      scope: { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' },
+      loadLatest: vi.fn(async () => initial), changed: vi.fn(),
+      prepareDisplay: vi.fn(async () => { throw new Error('No canonical acceptance expected'); }) });
+    const handoff = createTimelineLocalSaveHandoff({ initial, source: { config: original.config, registry: original.registry, head: original.head },
+      session: local, adopted: vi.fn() });
+    const harness = setup({ initialData: original, localDocumentSave: handoff });
+    const oldHeadWriter = vi.fn();
+    harness.provider.saveTimelineAtHead = oldHeadWriter;
+    const edited = buildDataFromCurrentRegistry({ ...original.config,
+      clips: original.config.clips.map((clip) => ({ ...clip, hold: 2 })) }, original);
+    harness.scheduleSave(edited);
+    await act(async () => { await expect(harness.result.current.flushPendingSave()).rejects.toThrow('child ownership/fork mapping'); });
+    expect(harness.result.current.isConflictExhausted).toBe(false);
+    expect(harness.result.current.saveStatus).toBe('error');
+    expect(harness.dataRef.current?.config).toEqual(edited.config);
+    expect((await loadTimelineDraft('timeline-1'))?.draft.config).toEqual(edited.config);
+    expect(local.getDocument()).toEqual(document);
+    expect(oldHeadWriter).not.toHaveBeenCalled();
+    expect(harness.saveTimeline).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    harness.unmount();
+    await local.dispose();
+  });
+
+  it('captures dependent authored documents before debounce and retains them without using the old writer when v2 is unavailable', async () => {
+    const original = makeTimelineData('local-chain');
+    original.head = { projectId: 'project-commit', timelineId: 'timeline-1', headRevisionId: 'r0', headPublicationId: 'p0' };
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' }, { timelineId: 'timeline-1' }).data.canonical_document;
+    document.parent_revision.payload = { config: structuredClone(original.config), clips: structuredClone(original.config.clips),
+      registry: structuredClone(original.registry), occurrences: [], opaque: { keep: null } };
+    const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+    const outboxes = createCommitOutbox({ indexedDB: createFakeIndexedDB(), exclusiveLock: async (_key, work) => work() });
+    const send = vi.fn();
+    const local = await createLocalSaveSession({ scope, initial, document: toOutboxJson(document), outboxes, send,
+      loadLatest: vi.fn(async () => initial), changed: vi.fn(),
+      prepareDisplay: vi.fn(async () => { throw new Error('No canonical acceptance expected'); }) });
+    const receipt = vi.fn();
+    const handoff = createTimelineLocalSaveHandoff({ initial, source: { config: original.config, registry: original.registry, head: original.head }, session: local, adopted: receipt });
+    const harness = setup({ initialData: original, localDocumentSave: handoff });
+    const oldHeadWriter = vi.fn();
+    harness.provider.saveTimelineAtHead = oldHeadWriter;
+    const added = buildDataFromCurrentRegistry({ ...original.config, clips: [...original.config.clips,
+      { id: 'new-right', track: 'V1', clipType: 'hold', at: 1, hold: 2 }] }, original);
+    const trimmed = buildDataFromCurrentRegistry({ ...added.config,
+      clips: added.config.clips.map((clip) => clip.id === 'new-right' ? { ...clip, hold: 1 } : clip) }, added);
+    harness.scheduleSave(added);
+    harness.editSeqRef.current++;
+    harness.scheduleSave(trimmed);
+    await act(async () => { await expect(harness.result.current.flushPendingSave()).rejects.toThrow('generated v2 doc.patch contract'); });
+    const [stored] = await outboxes.list(scope);
+    expect(stored.intents).toHaveLength(2);
+    expect(stored.intents[1].basis).toEqual({ after: stored.intents[0].id });
+    expect(stored.intents[0].payload).toMatchObject({ documentIntent: {
+      basis: { head: initial.head }, created: ['parent/clip:new-right'], roots: [{ ref: 'parent', revisionId: 'r0' }],
+    } });
+    expect(stored.intents[1].payload).toMatchObject({ documentIntent: {
+      basis: { after: stored.intents[0].id }, changes: [{ op: 'set', ref: 'parent', path: ['clips', 'id:new-right', 'hold'], before: { state: 'present', value: 2 }, value: 1 }],
+    } });
+    expect(local.getState().status).toBe('blocked');
+    expect(harness.result.current.isConflictExhausted).toBe(false);
+    expect(harness.result.current.saveStatus).toBe('error');
+    expect(harness.dataRef.current?.config).toEqual(trimmed.config);
+    expect((await loadTimelineDraft('timeline-1'))?.draft.config).toEqual(trimmed.config);
+    expect(send).not.toHaveBeenCalled();
+    expect(receipt).not.toHaveBeenCalled();
+    expect(oldHeadWriter).not.toHaveBeenCalled();
+    expect(harness.saveTimeline).not.toHaveBeenCalled();
+    expect(harness.loadTimeline).not.toHaveBeenCalled();
+    harness.unmount();
+    await local.dispose();
+  });
+
   it('sends the edited source bundle at its captured Runtime head and keeps it recoverable on CAS conflict', async () => {
     const original = makeTimelineData('source-only');
     const head = { projectId: 'project-1', timelineId: 'timeline-1', headRevisionId: 'revision-1' };
@@ -283,6 +522,37 @@ describe('useTimelinePersistence — interaction gating', () => {
     expect(draft?.baseHeadRevisionId).toBe('revision-1');
     expect(harness.result.current.isConflictExhausted).toBe(true);
     expect(harness.commitData).not.toHaveBeenCalled();
+  });
+
+  it('keeps a local handoff refusal terminal without presenting it as a timeline conflict', async () => {
+    const original = makeTimelineData('handoff-refusal');
+    vi.mocked(toast.error).mockClear();
+    const refusal = new TimelineSaveError('The local save owner is unavailable; draft retained.');
+    const capture = vi.fn(async () => { throw refusal; });
+    const handoff = {
+      capture,
+      flush: vi.fn(),
+      remoteHistoryAvailable: () => false,
+      canUndo: () => false,
+      canRedo: () => false,
+      undo: vi.fn(),
+      redo: vi.fn(),
+    } satisfies TimelineLocalSaveHandoff;
+    const harness = setup({ initialData: original, localDocumentSave: handoff });
+    const edited = buildDataFromCurrentRegistry({ ...original.config,
+      clips: original.config.clips.map((clip) => ({ ...clip, hold: 2 })) }, original);
+
+    harness.scheduleSave(edited);
+    await act(async () => {
+      await expect(harness.result.current.flushPendingSave()).rejects.toBe(refusal);
+    });
+
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(toast.error).toHaveBeenCalledExactlyOnceWith(refusal.message);
+    expect(harness.result.current.saveStatus).toBe('error');
+    expect(harness.result.current.isConflictExhausted).toBe(false);
+    expect(harness.saveTimeline).not.toHaveBeenCalled();
+    harness.unmount();
   });
 
   it('publishes source-only edits and explicit source clearing without a server reload', async () => {
@@ -2548,4 +2818,212 @@ describe('useTimelinePersistence — recovery draft gated by persistence', () =>
     expect(harness.result.current.isTimelineDraftDurableForReload()).toBe(false);
     expect(await loadTimelineDraft('timeline-1')).toBeNull();
   });
+});
+
+describe('useTimelinePersistence — mounted pointer to outbox', () => {
+  const projectId = 'project-commit';
+  const timelineId = 'timeline-1';
+  const head = { projectId, timelineId, headRevisionId: 'r0', headPublicationId: 'publication-current' };
+  const queries = { timelineQuery: { data: undefined, isLoading: false }, assetRegistryQuery: { data: undefined } };
+  const config = createDefaultTimelineConfig();
+  config.clips = [
+    { id: 'f2-app-clip', at: 0, track: 'V1', clipType: 'media', hold: 3, from: 0, to: 8, speed: 1,
+      opaqueClip: { keep: null, ordered: [false, 0, ''] } },
+    { id: 'f2-transition-clip', at: 15, track: 'V1', hold: 3 },
+  ] as unknown as TimelineData['config']['clips'];
+  // This helper supplies only the initial read closure. No commit is acknowledged.
+  const originalDocument = acceptedCommit({ revision_id: 'r0', publication_id: head.headPublicationId },
+    { revision_id: 'r0', publication_id: head.headPublicationId }, { timelineId, children: true }).data.canonical_document;
+  originalDocument.parent_revision.payload = { ...originalDocument.parent_revision.payload,
+    config: JSON.parse(JSON.stringify(config)), clips: structuredClone(config.clips), registry: { assets: {} } };
+  originalDocument.parent_revision.content_digest = fixtureDigest(originalDocument.parent_revision.payload);
+  const fixture = {
+    parent: { ...originalDocument.parent_revision, project_id: projectId, timeline_id: timelineId,
+      dependency_manifest: originalDocument.dependency_manifest },
+    shot: { ...originalDocument.shot_revisions[0], project_id: projectId, timeline_id: 'child-timeline' },
+    internal: { ...originalDocument.internal_timeline_revisions[0], project_id: projectId },
+    history: { head: { revision_id: 'r0', publication_id: head.headPublicationId }, items: [], next_cursor: null },
+  };
+
+  const drain = async () => { await act(async () => { for (let i = 0; i < 50; i++) await Promise.resolve(); }); };
+  const advance = async (ms: number) => { await act(async () => { await vi.advanceTimersByTimeAsync(ms); }); await drain(); };
+  function changedPaths(before: unknown, after: unknown, path = ''): string[] {
+    if (JSON.stringify(before) === JSON.stringify(after)) return [];
+    if (before && after && typeof before === 'object' && typeof after === 'object') {
+      return [...new Set([...Object.keys(before), ...Object.keys(after)])].flatMap(key => changedPaths(before[key], after[key], `${path}/${key}`));
+    }
+    return [path];
+  }
+  function gate() {
+    let resolve!: () => void;
+    const promise = new Promise<void>(done => { resolve = done; });
+    return { promise, resolve };
+  }
+  function rect(left: number, top: number, width: number, height: number): DOMRect {
+    return { x: left, y: top, left, top, right: left + width, bottom: top + height, width, height, toJSON: () => ({}) };
+  }
+
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it.each(['ready', 'pending-original-read', 'pending-identity'] as const)(
+    'mounted 0→5 parent pointer/save boundary: %s', async mode => {
+      vi.useFakeTimers();
+      contractFixture.digest = 'sha256:35c2d9c5e0b51ab8d8b7a4f4dbafbdfcb13d232d7bd22fff21cf73e250398d4c';
+      resetFakeIndexedDB();
+      vi.stubGlobal('indexedDB', createFakeIndexedDB());
+      Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+        request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+      } });
+      const diagnostics: Array<Record<string, unknown>> = [];
+      const observe = (event: Event) => diagnostics.push((event as CustomEvent).detail);
+      Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+      window.addEventListener('timeline:save-diagnostic', observe);
+      const originalRead = gate();
+      const identity = gate();
+      const fixtureRuntime = runtimeFixture({ projectId, timelineId, headRevisionId: 'r0' });
+      const sends: Array<{ request: CommitRequest; key: string }> = [];
+      // Every transport call is in-memory. A dispatched mutation stays pending: no fake ACK.
+      const provider = new RuntimeDataProvider({ projectId, transport: async (method, path, headers, body) => {
+        if (method === 'POST' && path.endsWith('/commit')) {
+          sends.push({ request: JSON.parse(new TextDecoder().decode(body)), key: headers['Idempotency-Key'] });
+          return new Promise(() => {});
+        }
+        let value;
+        if (path.includes('/commits?')) { if (mode === 'pending-original-read') await originalRead.promise; value = fixture.history; }
+        else if (path.includes('/composition-revisions/')) value = fixture.parent;
+        else if (path.includes('/shots/') && path.includes('/revisions/')) value = fixture.shot;
+        else if (path.includes('/revisions/')) value = fixture.internal;
+        if (value) return { status: 200, headers: {}, body: json(value) };
+        return fixtureRuntime.transport(method, path, headers, body);
+      } });
+      // Explicit offline identity-read gate; the actual provider identity implementation still runs.
+      const readIdentity = provider.getRecoverableIdentity.bind(provider);
+      if (mode === 'pending-identity') provider.getRecoverableIdentity = async () => { await identity.promise; return readIdentity(); };
+      const legacySave = vi.spyOn(provider, 'saveTimeline');
+      const legacyHeadSave = vi.spyOn(provider, 'saveTimelineAtHead');
+      const loaded = await provider.loadTimeline(timelineId);
+      const registry = await provider.loadAssetRegistry(timelineId);
+      const data = await buildTimelineData(loaded.config, registry,
+        async file => file, loaded.configVersion, undefined, loaded.head);
+      expect(data.config.clips.find(clip => clip.id === 'f2-app-clip')?.at).toBe(0);
+      expect(data.config.clips.find(clip => clip.id === 'f2-transition-clip')?.at).toBe(15);
+      expect(fixture.parent.payload.occurrences).toHaveLength(2);
+      const store = createTimelineStore();
+      const interaction = { current: createInteractionState() };
+      const selected = { current: new Set(['f2-app-clip']) };
+      const wrapperNode = document.createElement('div');
+      wrapperNode.className = 'timeline-wrapper';
+      wrapperNode.getBoundingClientRect = () => rect(0, 0, 1000, 200);
+      const editArea = document.createElement('div');
+      editArea.className = 'timeline-canvas-edit-area';
+      editArea.dataset.timelineRowLayout = 'managed';
+      editArea.getBoundingClientRect = () => rect(0, 0, 1000, 200);
+      const clipNode = document.createElement('div');
+      clipNode.className = 'clip-action';
+      clipNode.dataset.clipId = 'f2-app-clip';
+      clipNode.dataset.rowId = 'V1';
+      clipNode.getBoundingClientRect = () => rect(144, 0, 96, 36);
+      editArea.appendChild(clipNode); wrapperNode.appendChild(editArea); document.body.appendChild(wrapperNode);
+      const wrapperRef = { current: wrapperNode };
+      const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+      const runtime = { provider, timelineId, project: { projectId }, assetResolver: null,
+        shots: { shots: undefined, isLoading: false, error: null, refetchShots: async () => {} },
+      } as unknown as VideoEditorRuntimeContextValue;
+      const wrapper = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={queryClient}><VideoEditorRuntimeProvider value={runtime}>
+          <TimelineStoreProvider store={store}>{children}</TimelineStoreProvider>
+        </VideoEditorRuntimeProvider></QueryClientProvider>
+      );
+      const hook = renderHook(() => {
+        const save = useTimelineSave(queries, provider, interaction, store, data);
+        const management = useTimelineTrackManagement({ dataRef: save.dataRef, resolvedConfig: save.data?.resolvedConfig ?? null,
+          selectedClipId: save.selectedClipId, setSelectedTrackId: save.setSelectedTrackId, applyEdit: save.applyEdit });
+        const drag = useDragCoordinator({ dataRef: save.dataRef, scale: 5, scaleWidth: 160, startLeft: 144, rowHeight: 36 });
+        React.useLayoutEffect(() => {
+          drag.editAreaRef.current = editArea;
+          const state = store.getState();
+          state.syncSlices({ data: { ...state.data, data: save.data, dataRef: save.dataRef, interactionStateRef: interaction,
+            selectedClipIdsRef: selected, additiveSelectionRef: { current: false }, timelineWrapperRef: wrapperRef,
+            deviceClass: 'desktop', interactionMode: 'select', gestureOwner: 'none', coordinator: drag.coordinator, scale: 5, scaleWidth: 160 },
+            ops: { ...state.ops, ...management, applyEdit: save.applyEdit,
+              setGestureOwner: () => {}, setInputModalityFromPointerType: () => 'mouse', selectClip: () => {}, selectClips: () => {} } });
+          return publishTimelineRowLayout(editArea, buildTimelineRowLayout({ tracks: save.data!.tracks, mediaRowHeight: 36 }), save.dataRef.current);
+        }, [save.data, management, drag.coordinator]);
+        return save;
+      }, { wrapper });
+      const pointer = renderHook(() => useClipDrag(), { wrapper });
+      // Default spy is call-through: observe authentic capture promises without replacing the seam.
+      const captures = vi.spyOn(hook.result.current.localDocumentSave!, 'capture');
+      const schedules: Array<{ gesture: string | undefined; changed: string[] }> = [];
+      const unsubscribe = hook.result.current.eventBus.on('scheduleSave', (next, options) => {
+        schedules.push({ gesture: options?.gestureBasis?.kind, changed: changedPaths(data.config, next.config) });
+      });
+      try {
+        // Settle the genuine initial draft read before selecting the owner/read timing.
+        await act(async () => { await loadTimelineDraft(timelineId); }); await drain();
+        if (mode === 'ready') {
+          await vi.waitFor(() => expect(diagnostics.some(row => row.phase === 'handoff-ready')).toBe(true));
+        } else if (mode === 'pending-identity') {
+          await vi.waitFor(() => expect(diagnostics.some(row => row.phase === 'basis-ready')).toBe(true));
+          expect(diagnostics.some(row => row.phase === 'session-created')).toBe(false);
+        }
+        fireEvent.pointerDown(clipNode, { button: 0, pointerId: 77, pointerType: 'mouse', clientX: 181, clientY: 18 });
+        fireEvent.pointerMove(window, { pointerId: 77, pointerType: 'mouse', clientX: 341, clientY: 18 });
+        expect(pointer.result.current.dragSessionRef.current?.moveReadBasis?.kind).toBe('move');
+        fireEvent.pointerUp(window, { pointerId: 77, pointerType: 'mouse', clientX: 341, clientY: 18 });
+        await drain();
+        expect(hook.result.current.dataRef.current?.config.clips.find(clip => clip.id === 'f2-app-clip')?.at).toBe(5);
+        expect(diagnostics.some(row => row.phase === 'schedule' && row.gestureKind === 'move')).toBe(true);
+        expect(diagnostics.some(row => row.phase === 'capture-called' && row.gestureKind === 'move')).toBe(true);
+        const scope = { ...await readIdentity(), projectId, timelineId };
+        if (mode !== 'ready') {
+          expect(sends).toHaveLength(0);
+          expect(await createCommitOutbox().list(scope)).toHaveLength(0);
+          await act(async () => { originalRead.resolve(); identity.resolve(); }); await drain(); await advance(100);
+        }
+        await act(async () => { await Promise.allSettled(captures.mock.results.map(result => result.value)); });
+        await advance(6000);
+        const records = await createCommitOutbox().list(scope);
+        expect(legacySave).not.toHaveBeenCalled();
+        expect(legacyHeadSave).not.toHaveBeenCalled();
+        if (mode === 'pending-original-read') {
+          expect(diagnostics.some(row => row.phase === 'owner-error' && row.errorCode === 'owner-original-read-invalidated')).toBe(true);
+          expect(diagnostics.some(row => row.phase === 'capture-rejected' && row.errorCode === 'owner-original-read-invalidated')).toBe(true);
+          expect(records).toHaveLength(0);
+          expect(sends).toHaveLength(0);
+        } else {
+          // The genuine causal move reaches the outbox once, including after owner initialization.
+          expect(diagnostics.some(row => row.phase === 'capture-resolved')).toBe(true);
+          expect(captures).toHaveBeenCalledTimes(1);
+          expect(captures.mock.calls[0][1]).toMatchObject({ kind: 'move', config: data.config, registry: data.registry });
+          expect(schedules).toEqual([{ gesture: 'move', changed: ['/clips/0/at'] }]);
+          expect(sends).toHaveLength(1);
+          expect(records).toHaveLength(1);
+          expect(records[0].intents).toHaveLength(1);
+          expect(records[0].intents[0].payload).toMatchObject({ after: {
+            shot_revisions: originalDocument.shot_revisions,
+            internal_timeline_revisions: originalDocument.internal_timeline_revisions,
+            dependency_manifest: originalDocument.dependency_manifest,
+          } });
+          expect(records[0].pending?.request.key).toBe(sends[0].key);
+          expect(JSON.parse(records[0].pending!.request.body)).toEqual(sends[0].request);
+          expect(sends[0].request).toMatchObject({ api_version: 1, project_id: projectId, timeline_id: timelineId,
+            base_revision_id: head.headRevisionId, base_publication_id: head.headPublicationId, dry_run: false,
+            merge: 'fields', source: { via: 'app' }, label: 'Edit timeline',
+            commands: [{ op: 'doc.patch', args: { changes: [expect.objectContaining({ op: 'set', ref: 'parent',
+              path: ['clips', 'id:f2-app-clip', 'at'], before: { state: 'present', value: 0 }, value: 5 })] } }] });
+          expect(sends[0].request.steps).toEqual([expect.objectContaining({ id: expect.any(String), label: 'Edit timeline',
+            intent: 'Move f2-app-clip on V1', tags: [], command_ordinals: [0], patch: expect.any(Array), reads: expect.any(Array) })]);
+          expect(sends[0].request.reads?.length).toBeGreaterThan(0);
+          expect(sends[0].request.steps[0].reads.length).toBeGreaterThan(0);
+        }
+      } finally {
+        pointer.unmount(); hook.unmount(); wrapperNode.remove(); queryClient.clear();
+        unsubscribe();
+        captures.mockRestore();
+        contractFixture.digest = 'sha256:unsupported-test-fixture';
+        window.removeEventListener('timeline:save-diagnostic', observe);
+        Object.assign(window, { __timelineSaveDiagnosticsEnabled: false });
+      }
+    });
 });

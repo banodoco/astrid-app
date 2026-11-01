@@ -65,11 +65,15 @@ DialogOverlay.displayName = 'DialogOverlay';
 interface DialogContentProps
   extends React.ComponentPropsWithoutRef<typeof DialogPrimitive.Popup> {
   container?: HTMLElement | null;
+  /** Non-modal dialogs leave the page interactive (for example, a docked gallery). */
+  modal?: boolean;
+  /** Modal dialogs render a backdrop by default; non-modal surfaces do not need one. */
+  showBackdrop?: boolean;
 }
 
 const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
-  ({ className, children, container, style, ...props }, ref) => {
-    const bridge = useOverlayBridge({ type: 'dialog', modal: true });
+  ({ className, children, container, style, modal = true, showBackdrop = modal, ...props }, ref) => {
+    const bridge = useOverlayBridge({ type: 'dialog', modal });
     const layer = useOverlayLayer(bridge.handle.id);
     const popupRef = React.useMemo(
       () => composeRefs(ref, (node: HTMLDivElement | null) => bridge.registerElement('popup', node)),
@@ -83,7 +87,7 @@ const DialogContent = React.forwardRef<HTMLDivElement, DialogContentProps>(
     return (
       <DialogPortal container={container ?? undefined}>
         <OverlayInstanceProvider value={bridge}>
-          <DialogOverlay ref={backdropRef} layer={layer} />
+          {showBackdrop ? <DialogOverlay ref={backdropRef} layer={layer} /> : null}
           <DialogPrimitive.Popup
             data-pane-control
             data-dialog-content

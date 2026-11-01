@@ -2,6 +2,8 @@ import type { CommitHistoryOptions, ScheduleSaveFn } from '@/tools/video-editor/
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 
 type TimelineEventMap = {
+  /** Exact upstream local basis and result, before save debounce/coalescing. */
+  localCommit: (before: TimelineData | null, after: TimelineData) => void;
   beforeCommit: (currentData: TimelineData, options: CommitHistoryOptions) => void;
   /**
    * Server-authoritative data is about to replace local state (accepted poll,

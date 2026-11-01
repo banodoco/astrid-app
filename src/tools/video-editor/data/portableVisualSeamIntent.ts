@@ -2,12 +2,12 @@ import type {ResolvedTimelineClip, ResolvedTimelineConfig} from '@/tools/video-e
 import {boundaryReport, type BoundaryDisclosure} from '../../../../vendor/astrid-browser/astrid/packs/local/rendering/elements/boundary';
 import {cueIdentity, intentContext, relevantIntentOwners, opaqueActivationCues, type IntentOwner, type SeamIntent} from '../../../../vendor/astrid-browser/astrid/packs/local/rendering/elements/seam-intent';
 import {timelineClipDurationMs} from './shotCompositionTiming.ts';
-import {coversFrame} from './visualSeamCoverage.ts';
+import {coversFrame, visualSeamSourceTrack} from './visualSeamCoverage.ts';
 
 type Json = Record<string, unknown>;
 const record = (v: unknown): Json => v && typeof v === 'object' && !Array.isArray(v) ? v as Json : {};
 const number = (v: unknown, fallback = 0): number => typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-export type DisclosedOwner = IntentOwner & {clipId: string; ownerId: string; primary: boolean; disclosure: BoundaryDisclosure};
+export type DisclosedOwner = IntentOwner & {lane?: string; clipId: string; ownerId: string; primary: boolean; disclosure: BoundaryDisclosure};
 const NON_PICTURE = new Set(['effect-layer', 'frame-overlay', 'end-spanning-layer', 'text', 'audio']);
 
 /** Closed metadata adapter shared by normal preflight and portable authoring.
@@ -42,20 +42,22 @@ export function visualSeamOwners(config: ResolvedTimelineConfig, metadataOnly = 
     const sourceType = String(entry.type ?? '');
     const scope = record(clip.app?.canonicalEffects);
     const local = Array.isArray(clip.effects) ? clip.effects.slice(0, number(scope.localCount, clip.effects.length)) : [];
-    const normalized = {...authored, clipType: clip.clipType ?? 'media', at, speed: number(clip.speed, 1),
-      ...(Array.isArray(scope.timeline) ? {effects: local} : {})};
     const track = tracks.get(clip.track);
+    const sourceTrack = visualSeamSourceTrack(track, clip.track);
+    const normalized = {...authored, track: sourceTrack, clipType: clip.clipType ?? 'media', at, speed: number(clip.speed, 1),
+      ...(Array.isArray(scope.timeline) ? {effects: local} : {})};
     const elementKind = record(clip.elementRef).kind;
     // Runtime picture_clip (240d5bb): on a visual, non-source track (checked below) any clip type is picture except the auxiliary ones.
     const isPicture = !NON_PICTURE.has(normalized.clipType);
     add(normalized, path, clip.id, occurrence ?? clip.id, start, end, start, binding, sourceType,
       track?.kind === 'visual' && track.role !== 'source' && isPicture
         && !['effect', 'animation', 'transition'].includes(String(elementKind)));
+    if (track?.app?.group) owners[owners.length - 1].lane = clip.track;
     local.forEach((raw, index) => {
       const effect = record(raw);
       const effectId = String(effect.id ?? index);
       add({...effect, id: effectId, clipType: effect.type ?? 'unknown', at, hold: (end - start) / fps,
-        track: clip.track, params: effect.params ?? effect}, [...path, 'effect', effectId], clip.id, occurrence ?? clip.id,
+        track: sourceTrack, params: effect.params ?? effect}, [...path, 'effect', effectId], clip.id, occurrence ?? clip.id,
       start, end, start, binding, sourceType);
     });
     if (Array.isArray(scope.timeline) && occurrence) {
@@ -120,7 +122,7 @@ export function visualSeamOwners(config: ResolvedTimelineConfig, metadataOnly = 
 function boundaryOwners(owners: readonly DisclosedOwner[], frame: number): DisclosedOwner[] {
   const groups = new Map<string, DisclosedOwner[]>();
   for (const o of owners.filter(o => o.primary)) {
-    const key = String(o.clip.track);
+    const key = o.lane ?? String(o.clip.track);
     const group = groups.get(key) ?? [];
     group.push(o); groups.set(key, group);
   }

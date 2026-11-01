@@ -11,10 +11,12 @@ const mocks = vi.hoisted(() => ({
   runtime: null as unknown,
   timeline: null as unknown,
   playback: null as unknown,
+  chrome: { saveStatus: 'saved' } as unknown,
 }));
 
 vi.mock('@/tools/video-editor/hooks/timelineStore.ts', () => ({
   useTimelineDataSelector: (selector: (timeline: unknown) => unknown) => selector(mocks.timeline),
+  useTimelineChromeSelector: (selector: (chrome: unknown) => unknown) => selector(mocks.chrome),
   useTimelinePlaybackSelector: (selector: (playback: unknown) => unknown) => selector(mocks.playback),
 }));
 
@@ -23,7 +25,7 @@ vi.mock('@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx', () => ({
 }));
 
 vi.mock('@/tools/video-editor/components/PreviewPanel/RemotionPreview.tsx', () => ({
-  RemotionPreview: () => React.createElement('div'),
+  RemotionPreview: (props: Record<string, unknown>) => React.createElement('div', props),
 }));
 
 function graphWithClipStart(atMs: number, head: string) {
@@ -35,6 +37,67 @@ function graphWithClipStart(atMs: number, head: string) {
 }
 
 describe('useVideoEditorPreviewSurface', () => {
+  it('passes the authoritative canonical head to the mounted preview after reload', () => {
+    const adapter = createShotCompositionAdapter({ load: vi.fn() });
+    const canonical = adapter.prepare(fixture);
+    mocks.timeline = { resolvedConfig: projectCanonicalComposition(canonical).config };
+    mocks.playback = {
+      currentTime: 0,
+      previewRef: { current: null },
+      playerContainerRef: { current: null },
+      onPreviewTimeUpdate: vi.fn(),
+    };
+    mocks.runtime = {
+      userId: null,
+      project: { projectId: canonical.projectId },
+      timelineId: canonical.parentDocumentId,
+      shots: {
+        shotComposition: adapter,
+        canonicalComposition: canonical,
+        canonicalDraft: null,
+        canonicalCompositionError: null,
+      },
+    };
+
+    const { result } = renderHook(() => useVideoEditorPreviewSurface());
+    act(() => result.current.slotRef(document.createElement('div')));
+    const previewElement = (result.current.portal as unknown as { children: React.ReactElement }).children;
+
+    expect(previewElement.props.previewRevision).toEqual({
+      kind: 'committed',
+      revisionId: canonical.headRevisionId,
+    });
+  });
+
+  it('marks a pending ordinary save local instead of claiming it is committed', () => {
+    mocks.timeline = {
+      data: { head: { headRevisionId: 'accepted-before', projectId: 'project', timelineId: 'timeline' } },
+      resolvedConfig: {
+        output: {resolution: '1280x720', fps: 30, file: 'preview.mp4'},
+        tracks: [],
+        clips: [],
+        registry: {},
+      },
+    };
+    mocks.chrome = { saveStatus: 'saving' };
+    mocks.playback = {
+      currentTime: 0,
+      previewRef: { current: null },
+      playerContainerRef: { current: null },
+      onPreviewTimeUpdate: vi.fn(),
+    };
+    mocks.runtime = null;
+
+    const { result } = renderHook(() => useVideoEditorPreviewSurface());
+    act(() => result.current.slotRef(document.createElement('div')));
+    const previewElement = (result.current.portal as unknown as { children: React.ReactElement }).children;
+
+    expect(previewElement.props.previewRevision).toEqual({
+      kind: 'local',
+      baseRevisionId: 'accepted-before',
+    });
+  });
+
   it('previews the active shot draft before canonical publication is acknowledged', () => {
     const adapter = createShotCompositionAdapter({ load: vi.fn(), publish: vi.fn() });
     const canonical = adapter.prepare(fixture);
@@ -42,6 +105,7 @@ describe('useVideoEditorPreviewSurface', () => {
     const parentConfig = projectCanonicalComposition(canonical).config!;
     const expectedDraftConfig = projectCanonicalComposition(draft, parentConfig).config!;
     mocks.timeline = { resolvedConfig: parentConfig };
+    mocks.chrome = { saveStatus: 'saved' };
     mocks.playback = {
       currentTime: 0,
       previewRef: { current: null },
@@ -68,6 +132,7 @@ describe('useVideoEditorPreviewSurface', () => {
   });
 
   it('retains the preview key across config updates and physical slot moves', () => {
+    mocks.chrome = { saveStatus: 'saved' };
     mocks.timeline = {
       resolvedConfig: {
         output: {resolution: '1280x720', fps: 30, file: 'preview.mp4'},
@@ -113,6 +178,7 @@ describe('useVideoEditorPreviewSurface', () => {
   });
 
   it('remounts the preview across project or timeline scopes so deferred footage cannot leak', () => {
+    mocks.chrome = { saveStatus: 'saved' };
     mocks.timeline={resolvedConfig:{output:{resolution:'1280x720',fps:30,file:'preview.mp4'},tracks:[],clips:[],registry:{}}};
     mocks.playback={currentTime:0,previewRef:{current:null},playerContainerRef:{current:null},onPreviewTimeUpdate:vi.fn()};
     mocks.runtime={project:{projectId:'one'},timelineId:'timeline-one'};

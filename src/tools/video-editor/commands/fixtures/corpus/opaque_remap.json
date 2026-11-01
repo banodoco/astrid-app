@@ -1,0 +1,168 @@
+{
+  "schema": "opaque-remap/v1",
+  "function": "astrid/core/timeline/authoring_bundle.py::_remap_known_item_references",
+  "contract": "design/opaque-remap-contract.md",
+  "opaque": {
+    "org.example.notes/v1": {
+      "item_id": "item-1",
+      "id": "item-1",
+      "source_item_id": "item-1",
+      "source_item": "item-audio",
+      "foreign_item_id": "item-audio",
+      "foreign_item_ids": ["item-audio", null, "item-1", "item-audio"],
+      "selected_item_id": "item-1",
+      "parent_item_id": "item-audio",
+      "item-1": null,
+      "literal": "item-1",
+      "nested": [{"item_id": "item-1"}]
+    }
+  },
+  "cases": [
+    {
+      "name": "item_id_codec_with_metadata_descriptor",
+      "item_ids": {"item-1": "remap-item-1", "item-audio": "remap-item-audio"},
+      "payload": {
+        "items": [
+          {
+            "item_id": "item-1",
+            "kind": "image",
+            "metadata": {
+              "source_item_id": "item-1",
+              "source_item": "item-audio",
+              "foreign_item_id": "item-audio"
+            }
+          }
+        ],
+        "data": {"org.example.notes/v1": {"item_id": "item-1", "source_item": "item-audio"}}
+      },
+      "expected": {
+        "items": [
+          {
+            "item_id": "remap-item-1",
+            "kind": "image",
+            "metadata": {
+              "source_item_id": "remap-item-1",
+              "source_item": "remap-item-audio",
+              "foreign_item_id": "item-audio"
+            }
+          }
+        ],
+        "data": {"org.example.notes/v1": {"item_id": "item-1", "source_item": "item-audio"}}
+      }
+    },
+    {
+      "name": "id_codec_with_root_descriptor",
+      "item_ids": {"item-1": "remap-item-1", "item-audio": "remap-item-audio"},
+      "payload": {
+        "items": [{"id": "item-1", "source_item_id": "item-1", "source_item": "item-audio"}]
+      },
+      "expected": {
+        "items": [{"id": "remap-item-1", "source_item_id": "remap-item-1", "source_item": "remap-item-audio"}]
+      }
+    },
+    {
+      "name": "equal_item_id_and_id_mirrors_both_remap",
+      "item_ids": {"item-1": "remap-item-1"},
+      "payload": {
+        "items": [{"item_id": "item-1", "id": "item-1", "metadata": {"source_item_id": "item-1"}}]
+      },
+      "expected": {
+        "items": [{"item_id": "remap-item-1", "id": "remap-item-1", "metadata": {"source_item_id": "remap-item-1"}}]
+      }
+    },
+    {
+      "name": "mismatched_id_mirror_is_not_identity",
+      "item_ids": {"item-1": "remap-item-1"},
+      "payload": {
+        "items": [{"item_id": "item-1", "id": "opaque-identity", "metadata": {"source_item_id": "item-1"}}]
+      },
+      "expected": {
+        "items": [{"item_id": "remap-item-1", "id": "opaque-identity", "metadata": {"source_item_id": "remap-item-1"}}]
+      }
+    },
+    {
+      "name": "non_mapping_metadata_falls_back_to_item_descriptor",
+      "item_ids": {"item-1": "remap-item-1"},
+      "payload": {
+        "items": [{"item_id": "item-1", "metadata": "item-1", "source_item_id": "item-1"}]
+      },
+      "expected": {
+        "items": [{"item_id": "remap-item-1", "metadata": "item-1", "source_item_id": "remap-item-1"}]
+      }
+    },
+    {
+      "name": "unknown_namespaces_and_selectors_are_byte_identical",
+      "item_ids": {"item-1": "remap-item-1", "item-audio": "remap-item-audio"},
+      "payload": {
+        "items": [
+          {
+            "item_id": "item-1",
+            "metadata": {"source_item_id": "item-1"},
+            "selected_item_id": "item-1",
+            "parent_item_id": "item-audio",
+            "foreign_item_ids": ["item-audio", null, "item-1"],
+            "item-1": null,
+            "literal": "item-1",
+            "nested": [{"item_id": "item-1"}],
+            "org.example.notes/v1": {"item_id": "item-1", "source_item_id": "item-1"}
+          }
+        ],
+        "pools": [{"item_id": "item-1"}],
+        "data": {"org.example.notes/v1": {"item_id": "item-1", "id": "item-1", "source_item": "item-audio", "foreign_item_id": "item-audio"}}
+      },
+      "expected": {
+        "items": [
+          {
+            "item_id": "remap-item-1",
+            "metadata": {"source_item_id": "remap-item-1"},
+            "selected_item_id": "item-1",
+            "parent_item_id": "item-audio",
+            "foreign_item_ids": ["item-audio", null, "item-1"],
+            "item-1": null,
+            "literal": "item-1",
+            "nested": [{"item_id": "item-1"}],
+            "org.example.notes/v1": {"item_id": "item-1", "source_item_id": "item-1"}
+          }
+        ],
+        "pools": [{"item_id": "item-1"}],
+        "data": {"org.example.notes/v1": {"item_id": "item-1", "id": "item-1", "source_item": "item-audio", "foreign_item_id": "item-audio"}}
+      }
+    },
+    {
+      "name": "numeric_zero_and_float_zero_stay_untouched",
+      "item_ids": {"item-1": "remap-item-1"},
+      "payload": {
+        "items": [
+          {
+            "item_id": "item-1",
+            "at": 0,
+            "speed": 0.0,
+            "metadata": {"source_item_id": "item-1", "offset": 0, "gain": 0.0},
+            "app": {"astrid": {"start": 0.0, "count": 0}}
+          }
+        ]
+      },
+      "expected": {
+        "items": [
+          {
+            "item_id": "remap-item-1",
+            "at": 0,
+            "speed": 0.0,
+            "metadata": {"source_item_id": "remap-item-1", "offset": 0, "gain": 0.0},
+            "app": {"astrid": {"start": 0.0, "count": 0}}
+          }
+        ]
+      }
+    },
+    {
+      "name": "unmapped_identities_are_left_alone",
+      "item_ids": {"item-1": "remap-item-1"},
+      "payload": {
+        "items": [{"item_id": "item-2", "metadata": {"source_item_id": "item-9", "source_item": "item-1"}}]
+      },
+      "expected": {
+        "items": [{"item_id": "item-2", "metadata": {"source_item_id": "item-9", "source_item": "remap-item-1"}}]
+      }
+    }
+  ]
+}

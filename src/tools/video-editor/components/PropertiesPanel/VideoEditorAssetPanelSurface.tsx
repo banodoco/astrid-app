@@ -51,9 +51,10 @@ function VideoEditorAssetPanelSurfaceComponent({
   const latestRuntime = useRef(runtime);
   latestRuntime.current = runtime;
   const { setAssetPanelState, uploadFiles, transcriptHost } = useTimelineEditorOps();
-  // The panel asks the project for transcripts once per adapter. A rebuilt host starts empty, so a
-  // new host gets a new adapter and the panel asks it again.
   const panelVideo = useMemo(() => {
+    // Rebuild the adapter when the host instance is replaced; TranscriptPanel
+    // reruns project-source lookups when its adapter identity changes.
+    void transcriptHost;
     const base = video ?? (store && view ? {
       view,
       seek: (seconds: number) => { store.getState().ops.onClickTimeArea(seconds); },

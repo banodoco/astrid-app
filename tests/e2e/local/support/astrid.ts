@@ -3,7 +3,7 @@
  * as subprocesses against the same Runtime the hosted page talks to.
  *
  * Every call gets an environment built from nothing (no ambient Astrid state, no ambient Runtime, no proxy), `PYTHONPATH`
- * set to the Astrid checkout, and the four `ASTRID_TIMELINE_EVAL_*` variables. Direct mode uses state inside the harness tmp;
+ * set to the Astrid and Runtime checkouts, and the four `ASTRID_TIMELINE_EVAL_*` variables. Direct mode uses state inside the harness tmp;
  * attachment mode reuses F1's data root and credential. The endpoint is read from discovery before each call. The explicit
  * context makes `astrid` skip the launcher and pack host (astrid/sdk/client.py `open_from_launcher`). The product token never enters it.
  */
@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { loadavg } from 'node:os';
 import path from 'node:path';
 import { ASTRID_ACTOR, REPO_ROOT, RUNTIME_CHECKOUT, spawnGroup, stopGroup, type DirectHarness } from './harness.ts';
+import type { CommitAcceptedMutation, HeadPin } from '../../../../src/integrations/runtime/timeline-commit-types.ts';
 
 /** The Astrid tree to test. The editable install in a venv may point elsewhere, so `PYTHONPATH` puts this one first and the identity probe asserts it. */
 export const ASTRID_CHECKOUT = path.resolve(process.env.ASTRID_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-agent'));
@@ -169,7 +170,7 @@ export class AstridCli {
       XDG_STATE_HOME: this.state,
       ASTRID_RUNTIME_DATA_ROOT: this.data,
       ...(this.harness.attachment ? { ASTRID_RUNTIME_SOURCE_MANIFEST: this.harness.attachment.sourceManifest } : {}),
-      PYTHONPATH: ASTRID_CHECKOUT,
+      PYTHONPATH: [ASTRID_CHECKOUT, RUNTIME_CHECKOUT].join(path.delimiter),
       PYTHONDONTWRITEBYTECODE: '1',
       PYTHONUNBUFFERED: '1',
       ASTRID_TIMELINE_EVAL_ENDPOINT: discovery.endpoint,
@@ -208,6 +209,46 @@ export class AstridCli {
   /** `python -m astrid <args>`. */
   astrid(args: string[], options?: { ok?: boolean; timeoutMs?: number }): Promise<AstridRun> {
     return this.python(['-m', 'astrid', ...args], options);
+  }
+
+  async commitCaptured(projectId: string, timelineId: string, base: HeadPin, operation:
+    { kind: 'track'; id: string } | { kind: 'move'; clipId: string; on: number }
+    | { kind: 'label'; trackId: string; label: string }
+    | { kind: 'clear-transition'; clipId: string }, key: string): Promise<CommitAcceptedMutation> {
+    const program = [
+      'import json, sys',
+      'from astrid.sdk.client import AstridClient',
+      'from astrid.sdk.timeline.capture import capture_move, capture_track_create',
+      'from astrid.sdk.timeline._track_commands import capture_track_set',
+      'from astrid.sdk.timeline._clip_scalar_commands import capture_clip_set',
+      'from astrid.sdk.timeline.commit import bundle_from_document',
+      'project, timeline, base, operation, key = json.loads(sys.argv[1])',
+      'with AstridClient.open_from_launcher(start_pack_host=False, client_name="three-products-command") as client:',
+      '    def read(name, *args, expected):',
+      '        result = client.timelines._typed(name, *args); assert result.ok, result.as_dict()',
+      '        row = result.data; assert all(row.get(field) == value for field, value in expected.items()), (name, expected); return row',
+      '    cursor = None',
+      '    while True:',
+      '        history = client.timelines._typed("list_timeline_commits", project, timeline, cursor=cursor, limit=50); assert history.ok, history.as_dict()',
+      '        if any(row["revision_id"] == base["revision_id"] and row["publication_id"] == base["publication_id"] for row in history.data["items"]): break',
+      '        cursor = history.data["next_cursor"]; assert cursor, ("original base pair is missing from scoped history", base)',
+      '    parent = read("get_project_parent_composition_revision", project, timeline, base["revision_id"], expected={"project_id": project, "timeline_id": timeline, "revision_id": base["revision_id"]})',
+      '    manifest = parent["dependency_manifest"]; shots = []; internals = []',
+      '    for pin in manifest["shots"]: shots.append({**pin, "payload": read("get_project_shot_revision", project, pin["shot_id"], pin["revision_id"], expected={"project_id": project, **pin})["payload"]})',
+      '    for pin in manifest["internal_timelines"]: internals.append({**pin, "payload": read("get_project_timeline_revision", project, pin["timeline_id"], pin["revision_id"], expected={"project_id": project, **pin})["payload"]})',
+      '    document = {"schema_version": 1, "project_id": project, "timeline_id": timeline, "parent_revision": {field: parent[field] for field in ("revision_id", "content_digest", "payload")}, "shot_revisions": shots, "internal_timeline_revisions": internals, "dependency_manifest": manifest}',
+      '    bundle = bundle_from_document(document)',
+      '    if operation["kind"] == "track": command = capture_track_create(bundle, "parent", {"id": operation["id"], "kind": "audio", "label": operation["id"]})',
+      '    elif operation["kind"] == "label": command = capture_track_set(bundle, "parent/track:" + operation["trackId"], values={"label": operation["label"]})',
+      '    elif operation["kind"] == "clear-transition": command = capture_clip_set(bundle, "parent/clip:" + operation["clipId"], clear=["transition"])',
+      '    else: command = capture_move(bundle, "parent/clip:" + operation["clipId"], operation["on"])',
+      '    body = {"api_version": 1, "project_id": project, "timeline_id": timeline, "base_revision_id": base["revision_id"], "base_publication_id": base["publication_id"], "commands": [command], "source": {"via": "python"}}',
+      '    result = client.timelines.commit(project, timeline, body, idempotency_key=key); assert result.ok, result.as_dict(); print(json.dumps(result.as_dict()))',
+    ].join('\n');
+    const run = await this.python(['-c', program, JSON.stringify([projectId, timelineId, base, operation, key])]);
+    const result = JSON.parse(run.stdout.trim().split('\n').pop()!);
+    if (!result.ok || !result.receipt) throw new Error(`Agent command was not accepted: ${JSON.stringify(result)}`);
+    return { data: result.data, receipt: result.receipt } as CommitAcceptedMutation;
   }
 
   /** `python -m astrid <args>` where the last stdout line is the `--json` envelope; the caller passes `--json`. */

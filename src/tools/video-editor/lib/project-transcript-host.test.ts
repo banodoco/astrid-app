@@ -12,6 +12,10 @@ import {
   normalizeTranscriptSource,
   TRANSCRIPT_SCHEMA_REF,
 } from "../data/typed/adaptTranscript.ts";
+import {
+  computeHostFingerprint,
+  HOST_GENERATION_PROVENANCE_VERSION,
+} from "@/sdk/video/timeline/sourceMap.ts";
 import { parseTimelineBundle } from "../data/typed/timelineBundle.ts";
 import {
   transcriptDocumentId,
@@ -139,6 +143,123 @@ const edit = (text: string) => ({
   wordId: "w-one",
   text,
 });
+const transcriptExtensionId = "haus.astrid.transcript-lane";
+const transcriptContributionId = "transcript-caption-foundry";
+const transcriptCaptionTrack = "transcript-caption-foundry-track";
+const legacyTranscriptId =
+  "transcript-source:reviewed:segment:segment-one";
+const canonicalTranscriptId =
+  "transcript-source:alias:source:reviewed:segment:segment-one";
+const transcriptWord = (id: string, text: string) => ({
+  id: `${id}:word:w-one`,
+  start: 1,
+  end: 2,
+  text,
+});
+const legacyTranscriptItem = () => {
+  const item = normalizeTranscriptSource({
+    assetId: "alias",
+    sourceId: "reviewed",
+    segments: [{
+      id: "segment-one",
+      start: 1,
+      end: 4,
+      text: "hello world",
+      speaker: null,
+      words: [{ id: "w-one", start: 1, end: 2, text: "hello" }],
+    }],
+  })[0];
+  return {
+    ...item,
+    id: legacyTranscriptId,
+    payload: {
+      ...item.payload,
+      segmentId: legacyTranscriptId,
+      words: [transcriptWord(legacyTranscriptId, "hello")],
+    },
+  };
+};
+const canonicalTranscript = {
+  sourceId: "reviewed",
+  segments: [
+    {
+      id: canonicalTranscriptId,
+      start: 1,
+      end: 4,
+      text: "hello world",
+      speaker: null,
+      words: [transcriptWord(canonicalTranscriptId, "hello")],
+    },
+    { id: "second-segment", start: 4, end: 5, text: "next" },
+  ],
+};
+function generatedTranscriptConfig(
+  data: Awaited<ReturnType<typeof editor>>["dataRef"]["current"],
+  options: { collision?: boolean } = {},
+) {
+  const oldCaptionId = `transcript-caption-${computeHostFingerprint(
+    `${legacyTranscriptId}@c`,
+  ).split(":")[1]}`;
+  const newCaptionId = `transcript-caption-${computeHostFingerprint(
+    `${canonicalTranscriptId}@c`,
+  ).split(":")[1]}`;
+  const caption = {
+    id: oldCaptionId,
+    track: transcriptCaptionTrack,
+    clipType: "text" as const,
+    at: 0,
+    hold: 2,
+    text: { content: "Human correction" },
+    app: {
+      __generated__: {
+        extensionId: transcriptExtensionId,
+        contributionId: transcriptContributionId,
+        provenance: {
+          contractVersion: HOST_GENERATION_PROVENANCE_VERSION,
+          sourceSchemaRef: TRANSCRIPT_SCHEMA_REF,
+          sourceItemId: legacyTranscriptId,
+          sourceFingerprint: "keep-source-fingerprint",
+          generatorVersion: "1.3.0",
+          outputFingerprint: "keep-output-fingerprint",
+          conflictPolicy: "preserve-output" as const,
+        },
+      },
+    },
+  };
+  const reviewKey = `transcript-source-review:${encodeURIComponent(
+    legacyTranscriptId,
+  )}`;
+  return {
+    oldCaptionId,
+    newCaptionId,
+    config: {
+      ...data.config,
+      clips: [
+        ...data.config.clips,
+        caption,
+        ...(options.collision
+          ? [{ id: newCaptionId, track: "other", clipType: "text" as const }]
+          : []),
+      ],
+      app: {
+        ...data.config.app,
+        [transcriptExtensionId]: {
+          ...(data.config.app?.[transcriptExtensionId] ?? {}),
+          [reviewKey]: {
+            schemaVersion: 1,
+            sourceSchemaRef: TRANSCRIPT_SCHEMA_REF,
+            sourceItemId: legacyTranscriptId,
+            status: "accepted-for-source-update",
+            proposedText: "Human correction",
+            opaque: { keep: [null, false] },
+          },
+          unrelated: { keep: true },
+        },
+      },
+    },
+    reviewKey,
+  };
+}
 beforeEach(() => localStorage.clear());
 afterEach(() => {
   hosts.splice(0).forEach((h) => h.dispose());
@@ -209,6 +330,309 @@ describe("canonical project transcript consistency", () => {
     expect(row.sourceArtifactRef.assetId).toBe("other-local-key");
     expect((row.payload as any).words[0].id).toBe("w-one");
     expect(r.create).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects an explicit source media pin mismatch before changing the project or timeline", async () => {
+    const { r, documents } = repository();
+    const a = await editor(r);
+    const before = structuredClone(a.dataRef.current);
+    const mismatched = {
+      ...handoff,
+      mediaId: "sha256:" + "b".repeat(64),
+    };
+
+    await expect(
+      a.host.importTranscript({
+        document: mismatched,
+        associationAssetId: "alias",
+      }),
+    ).rejects.toThrow("does not match");
+    expect(documents.size).toBe(0);
+    expect(a.dataRef.current).toEqual(before);
+    expect(JSON.parse(JSON.stringify(a.dataRef.current))).toEqual(
+      JSON.parse(JSON.stringify(before)),
+    );
+  });
+
+  it("reconciles canonical IDs through the host and refuses a caption collision without losing review data", async () => {
+    const { r, documents } = repository();
+    const a = await editor(r);
+    const fixture = generatedTranscriptConfig(a.dataRef.current, {
+      collision: true,
+    });
+    const legacy = legacyTranscriptItem();
+    const submitted = structuredClone(canonicalTranscript);
+    a.dataRef.current = {
+      ...a.dataRef.current,
+      config: fixture.config,
+      sourceItemsBySchemaRef: { [TRANSCRIPT_SCHEMA_REF]: [legacy] },
+    };
+    const before = structuredClone(a.dataRef.current);
+
+    const receipt = await a.host.importTranscript({
+      document: canonicalTranscript,
+      associationAssetId: "alias",
+    });
+    const next = a.dataRef.current;
+    const items = next.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF];
+    const extension = next.config.app![transcriptExtensionId] as Record<
+      string,
+      unknown
+    >;
+
+    expect(documents.get(docId(receipt))!.content.segments.map((s) => s.id)).toEqual([
+      canonicalTranscriptId,
+      "second-segment",
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      canonicalTranscriptId,
+      "second-segment",
+    ]);
+    expect(items[0].payload).toMatchObject({ speaker: null });
+    expect(items[1].payload).not.toHaveProperty("speaker");
+    expect(next.config.clips.map((clip) => clip.id)).toEqual(
+      before.config.clips.map((clip) => clip.id),
+    );
+    expect(next.config.app![transcriptExtensionId]).toMatchObject({
+      [`transcript-source-review:${encodeURIComponent(canonicalTranscriptId)}`]: {
+        sourceItemId: canonicalTranscriptId,
+        opaque: { keep: [null, false] },
+      },
+      unrelated: { keep: true },
+    });
+    expect(extension[fixture.reviewKey]).toBeUndefined();
+    expect(canonicalTranscript).toEqual(submitted);
+
+    const replay = parseTimelineBundle({
+      schema_version: 1,
+      itemsBySchemaRef: persistedTranscriptItems(next.sourceItemsBySchemaRef!),
+      transcriptReferences: next.transcriptReferences,
+    });
+    const reopened = await editor(r, "alias");
+    reopened.dataRef.current = await buildTimelineData(
+      next.config,
+      next.registry,
+      (f) => f,
+      next.configVersion,
+      replay.itemsBySchemaRef,
+      next.head,
+      replay.transcriptReferences,
+    );
+    await reopened.host.selectProjectSource({
+      assetId: "alias",
+      documentId: docId(receipt),
+    });
+    expect(
+      reopened.dataRef.current.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF].map(
+        (item) => item.id,
+      ),
+    ).toEqual([canonicalTranscriptId, "second-segment"]);
+    expect(reopened.dataRef.current.config.app![transcriptExtensionId]).toEqual(
+      next.config.app![transcriptExtensionId],
+    );
+  });
+
+  it("refuses to move a shared review owner while preserving source order and opaque fields", async () => {
+    const { r, documents } = repository();
+    const a = await editor(r);
+    const fixture = generatedTranscriptConfig(a.dataRef.current);
+    const legacy = legacyTranscriptItem();
+    const submitted = structuredClone(canonicalTranscript);
+    const shared = {
+      ...legacy,
+      sourceArtifactRef: { assetId: "other" },
+      payload: { ...legacy.payload, opaque: { keep: [null, false, 0] } },
+    };
+    a.dataRef.current = {
+      ...a.dataRef.current,
+      config: fixture.config,
+      sourceItemsBySchemaRef: {
+        [TRANSCRIPT_SCHEMA_REF]: [shared, legacy],
+      },
+    };
+
+    const receipt = await a.host.importTranscript({
+      document: canonicalTranscript,
+      associationAssetId: "alias",
+    });
+    const next = a.dataRef.current;
+    const items = next.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF];
+    const extension = next.config.app![transcriptExtensionId] as Record<
+      string,
+      unknown
+    >;
+
+    expect(documents.get(docId(receipt))!.content.segments.map((s) => s.id)).toEqual([
+      canonicalTranscriptId,
+      "second-segment",
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      legacyTranscriptId,
+      canonicalTranscriptId,
+      "second-segment",
+    ]);
+    expect(items[0]).toMatchObject({
+      sourceArtifactRef: { assetId: "other" },
+      payload: { opaque: { keep: [null, false, 0] } },
+    });
+    expect(next.config.clips.map((clip) => clip.id)).toContain(
+      fixture.newCaptionId,
+    );
+    expect(next.config.app![transcriptExtensionId]).toMatchObject({
+      [fixture.reviewKey]: { sourceItemId: legacyTranscriptId },
+    });
+    expect(extension[fixture.reviewKey]).toBeDefined();
+    expect(canonicalTranscript).toEqual(submitted);
+
+    const replay = parseTimelineBundle({
+      schema_version: 1,
+      itemsBySchemaRef: persistedTranscriptItems(next.sourceItemsBySchemaRef!),
+      transcriptReferences: next.transcriptReferences,
+    });
+    const reopened = await editor(r, "alias");
+    reopened.dataRef.current = await buildTimelineData(
+      next.config,
+      next.registry,
+      (f) => f,
+      next.configVersion,
+      replay.itemsBySchemaRef,
+      next.head,
+      replay.transcriptReferences,
+    );
+    await reopened.host.selectProjectSource({
+      assetId: "alias",
+      documentId: docId(receipt),
+    });
+    expect(
+      reopened.dataRef.current.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF].map(
+        (item) => item.id,
+      ),
+    ).toEqual([
+      legacyTranscriptId,
+      canonicalTranscriptId,
+      "second-segment",
+    ]);
+    expect(reopened.dataRef.current.config.app![transcriptExtensionId]).toEqual(
+      next.config.app![transcriptExtensionId],
+    );
+  });
+
+  it("keeps the production association planes replayable and distinguishes null from absent source fields", async () => {
+    const { r, documents } = repository();
+    const a = await editor(r);
+    const before = structuredClone(a.dataRef.current);
+    a.dataRef.current = {
+      ...a.dataRef.current,
+      config: {
+        ...a.dataRef.current.config,
+        clips: a.dataRef.current.config.clips.map((clip) => ({
+          ...clip,
+          app: { opaque: { keep: [null, false, 0] } },
+        })),
+      },
+    };
+    const imported = {
+      sourceId: "reviewed",
+      segments: [
+        {
+          id: "with-null-speaker",
+          start: 1,
+          end: 4,
+          text: "hello world",
+          speaker: null,
+          words: [{ id: "w-one", start: 1, end: 2, text: "hello" }],
+        },
+        { id: "without-speaker", start: 4, end: 5, text: "next" },
+      ],
+    };
+    const receipt = await a.host.importTranscript({
+      document: imported,
+      associationAssetId: "alias",
+    });
+    const document = documents.get(docId(receipt))!;
+    const next = a.dataRef.current;
+    const items = next.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF];
+
+    expect(document.content.segments).toEqual([
+      {
+        id: "with-null-speaker",
+        start: 1,
+        end: 4,
+        text: "hello world",
+        speaker: null,
+        words: [{ id: "w-one", start: 1, end: 2, text: "hello" }],
+      },
+      { id: "without-speaker", start: 4, end: 5, text: "next" },
+    ]);
+    expect(items.map((item) => item.id)).toEqual([
+      "with-null-speaker",
+      "without-speaker",
+    ]);
+    expect(items[0].payload).toMatchObject({ speaker: null });
+    expect(items[1].payload).not.toHaveProperty("speaker");
+    expect(next.config.clips[0]).toMatchObject({
+      app: { opaque: { keep: [null, false, 0] } },
+    });
+    expect(next.head).toEqual(before.head);
+    expect(next.registry).toEqual(before.registry);
+    expect(before.sourceItemsBySchemaRef).toBeUndefined();
+
+    const replay = parseTimelineBundle({
+      schema_version: 1,
+      itemsBySchemaRef: persistedTranscriptItems(next.sourceItemsBySchemaRef!),
+      transcriptReferences: next.transcriptReferences,
+    });
+    const reopened = await editor(r, "alias");
+    reopened.dataRef.current = await buildTimelineData(
+      reopened.dataRef.current.config,
+      reopened.dataRef.current.registry,
+      (f) => f,
+      reopened.dataRef.current.configVersion,
+      replay.itemsBySchemaRef,
+      next.head,
+      replay.transcriptReferences,
+    );
+    await reopened.host.selectProjectSource({
+      assetId: "alias",
+      documentId: document.document_id,
+    });
+    expect(
+      reopened.dataRef.current.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF].map(
+        (item) => item.id,
+      ),
+    ).toEqual(["with-null-speaker", "without-speaker"]);
+  });
+
+  it("uses the loaded document version as the production replacement guard", async () => {
+    const { r, documents } = repository();
+    const a = await editor(r);
+    const first = await a.host.importTranscript({
+      document: handoff,
+      associationAssetId: "alias",
+    });
+    const id = docId(first);
+    const replacement = {
+      ...handoff,
+      segments: [{ ...handoff.segments[0], text: "replacement" }],
+    };
+
+    await a.host.importTranscript({
+      document: replacement,
+      associationAssetId: "alias",
+    });
+
+    expect(r.update).toHaveBeenCalledWith(
+      id,
+      expect.objectContaining({
+        segments: [expect.objectContaining({ text: "replacement" })],
+      }),
+      1,
+      expect.any(String),
+    );
+    expect(documents.get(id)!.version).toBe(2);
+    expect(
+      a.dataRef.current.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF][0].payload,
+    ).toMatchObject({ text: "replacement" });
   });
   it('looks up media inside a played shot through the supplied registry', async () => {
     const { r } = repository();
@@ -476,6 +900,87 @@ describe("canonical project transcript consistency", () => {
       }),
     ).rejects.toThrow("Select it first");
     expect(documents.get(id)!.content.segments[0].text).toBe("newer");
+  });
+  it("submits replacement against the exact loaded prior version and keeps a stale refusal replayable", async () => {
+    const { r, documents } = repository();
+    const a = await editor(r);
+    const first = await a.host.importTranscript({
+      document: handoff,
+      associationAssetId: "alias",
+    });
+    const id = docId(first);
+    const current = documents.get(id)!;
+    await r.update(
+      id,
+      {
+        ...current.content,
+        segments: current.content.segments.map((segment) => ({
+          ...segment,
+          text: "remote winner",
+        })),
+      },
+      current.version,
+      "remote-edit",
+    );
+    const before = structuredClone(a.dataRef.current);
+    a.commitData.mockClear();
+    const updateCallsBeforeImport = r.update.mock.calls.length;
+
+    await expect(
+      a.host.importTranscript({
+        document: {
+          ...handoff,
+          segments: [
+            {
+              ...handoff.segments[0],
+              speaker: null,
+              text: "stale replacement",
+            },
+            { id: "second", start: 4, end: 5, text: "next" },
+          ],
+        },
+        associationAssetId: "alias",
+      }),
+    ).rejects.toThrow("Select it first");
+
+    expect(r.update.mock.calls.length).toBe(updateCallsBeforeImport);
+    expect(documents.get(id)!.version).toBe(2);
+    expect(documents.get(id)!.content.segments[0].text).toBe("remote winner");
+    expect(a.dataRef.current.transcriptReferences).toEqual(
+      before.transcriptReferences,
+    );
+    expect(
+      a.dataRef.current.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF][0].payload,
+    ).toMatchObject({ documentVersion: 1 });
+    expect(a.commitData.mock.calls.every(([, options]) => options?.save !== true)).toBe(
+      true,
+    );
+
+    const replay = parseTimelineBundle({
+      schema_version: 1,
+      itemsBySchemaRef: persistedTranscriptItems(
+        a.dataRef.current.sourceItemsBySchemaRef!,
+      ),
+      transcriptReferences: a.dataRef.current.transcriptReferences,
+    });
+    const reopened = await editor(r, "alias");
+    reopened.dataRef.current = await buildTimelineData(
+      reopened.dataRef.current.config,
+      reopened.dataRef.current.registry,
+      (f) => f,
+      reopened.dataRef.current.configVersion,
+      replay.itemsBySchemaRef,
+      a.dataRef.current.head,
+      replay.transcriptReferences,
+    );
+    await reopened.host.selectProjectSource({
+      assetId: "alias",
+      documentId: id,
+    });
+    expect(
+      reopened.dataRef.current.sourceItemsBySchemaRef![TRANSCRIPT_SCHEMA_REF][0]
+        .payload,
+    ).toMatchObject({ text: "remote winner" });
   });
   it("reports document success/timeline association failure and safely reuses the document when retrying", async () => {
     const { r, documents } = repository(),

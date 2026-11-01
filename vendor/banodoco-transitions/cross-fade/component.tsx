@@ -1,4 +1,4 @@
-import type {TransitionComponentResult, TransitionProps} from '../../tools/remotion/src/effects.types';
+import type {TransitionComponentResult, TransitionProps} from '@banodoco/timeline-composition/theme-api';
 
 type CrossFadeParams = {
   easing?: string;

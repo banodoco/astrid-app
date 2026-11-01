@@ -497,6 +497,8 @@ export type TimelineConfig = {
   output: TimelineOutput;
   clips: TimelineClip[];
   tracks?: TrackDefinition[];
+  /** Authored timeline effects, applied to child clips by the shot render projection. */
+  effects?: TimelineClip['effects'];
   pinnedShotGroups?: PinnedShotGroup[];
   // Schema-lift fields. All optional. `theme` is a slug that
   // resolves against the theme registry at render time; `theme_overrides`

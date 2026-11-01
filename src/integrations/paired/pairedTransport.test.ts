@@ -8,6 +8,17 @@ import { classifyPairedRoute, isSafeForwardPath } from '../../../config/vite/pai
 import { PairingError, PairingRegistry } from '../../../config/vite/pairedRegistry';
 import { PairedRelay } from '../../../config/vite/pairedRelay';
 
+async function listen(server: ReturnType<typeof createServer>): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => reject(error);
+    server.once('error', onError);
+    server.listen(0, '127.0.0.1', () => {
+      server.off('error', onError);
+      resolve();
+    });
+  });
+}
+
 function httpRequest(port: number, path: string, method: string, origin: string, headers: Record<string, string> = {}, body = ''): Promise<{ status: number; headers: Record<string, string | string[] | undefined>; body: string }> {
   return new Promise((resolve, reject) => {
     const req = httpRequestFn({ hostname: '127.0.0.1', port, path, method, headers: { Origin: origin, ...headers, ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}) } }, (response) => {
@@ -75,7 +86,7 @@ describe('paired transport boundary', () => {
     const relay = new PairedRelay(config, () => now);
     const server = createServer(relay.handler());
     relay.installUpgrade(server as never);
-    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    await listen(server);
     const address = server.address();
     if (!address || typeof address === 'string') throw new Error('live relay did not bind a TCP port');
     const port = address.port;
@@ -158,7 +169,7 @@ async function withBoundRelay(run: (venue: {
   const server = createServer(relay.handler());
   relay.installUpgrade(server as never);
   const sockets: WebSocket[] = [];
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await listen(server);
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('relay fixture did not bind');
   const port = address.port;

@@ -153,6 +153,35 @@ export function readTranscriptPanelExample(props: PanelRenderProps): TranscriptP
   return video?.transcript?.getSnapshot();
 }
 
+/** Start a word preview on hover; the caller invokes the returned cleanup on leave or teardown. */
+export function previewTranscriptWordOnHover(
+  props: PanelRenderProps,
+  word: TranscriptWordProjection,
+  target: Pick<HTMLElement, 'getBoundingClientRect'>,
+): (() => void) | undefined {
+  const preview: PanelPreviewService | undefined = props.video?.preview;
+  if (
+    !props.visible
+    || !preview
+    || word.timing !== 'word'
+    || word.timelineStart === null
+    || !Number.isFinite(word.timelineStart)
+    || word.timelineStart < 0
+  ) {
+    return undefined;
+  }
+
+  const rect = target.getBoundingClientRect();
+  const anchor: PanelFrameAnchor = {
+    left: rect.left,
+    top: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+  const handle = preview.showFrame({ seconds: word.timelineStart, anchor });
+  return () => { handle.dispose(); };
+}
+
 /** Show a host-rendered frame while visible; dispose the returned handle when the hover ends. */
 export function previewTranscriptFrame(props: PanelRenderProps, seconds: number, anchor: PanelFrameAnchor) {
   if (!props.visible) return undefined;

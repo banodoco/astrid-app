@@ -37,6 +37,7 @@ import type {
   PreparedShotComposition,
   ShotCompositionAdapter,
 } from '@/tools/video-editor/data/shotCompositionAdapter.ts';
+import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
 import type {
   CanonicalShotTimelineDraft,
   CanonicalShotTimelinePublication,
@@ -68,6 +69,8 @@ interface ShotEditorViewProps {
   canonicalOccurrence?: Pick<LocalTimelineShotModel, 'occurrenceId' | 'shotId' | 'revisionId' | 'parentDocumentId' | 'stableDeepLink' | 'outputIdentity'> & { projectId?: string | null };
   /** The same adapter used by the overview; embedded canonical mode can publish shot revisions. */
   canonicalShotComposition?: ShotCompositionAdapter;
+  /** Parent Runtime provider reused by the nested popup's A2 save funnel. */
+  timelineDataProvider?: DataProvider;
   /** Prepared canonical graph shared by the overview and the shot-local preview. */
   canonicalComposition?: PreparedShotComposition;
   /** Optional embedded-mode close action; avoids navigating the parent route. */
@@ -97,6 +100,7 @@ export function ShotEditorView({
   shotSortMode = 'ordered',
   canonicalOccurrence,
   canonicalShotComposition,
+  timelineDataProvider,
   canonicalComposition,
   onClose,
   onCanonicalCompositionPublished,
@@ -352,6 +356,7 @@ export function ShotEditorView({
             composition={canonicalComposition}
             occurrenceId={canonicalOccurrence.occurrenceId}
             shotCompositionAdapter={canonicalShotComposition}
+            timelineDataProvider={timelineDataProvider}
             onCanonicalCompositionPublished={onCanonicalCompositionPublished}
             onCanonicalDraftSessionChange={onCanonicalDraftSessionChange}
             onCanonicalDraftProjectionChange={onCanonicalDraftProjectionChange}

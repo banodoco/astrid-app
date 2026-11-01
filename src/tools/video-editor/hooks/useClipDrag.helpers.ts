@@ -1,5 +1,6 @@
 import { isInvalidTimelineRowTarget } from '@/tools/video-editor/lib/drop-position.ts';
 import type { TimelineApplyEdit } from '@/tools/video-editor/hooks/timeline-state-types.ts';
+import type { TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
 import { userSelectTimelineClip, userSelectTimelineClips } from '@/shared/state/selectionStore.ts';
 import type { DropPosition } from '@/tools/video-editor/lib/drop-position.ts';
 import type { ClipDragPlan } from '@/tools/video-editor/lib/clip-drag-planner.ts';
@@ -46,6 +47,10 @@ export interface DragSession {
 }
 
 export interface InternalDragSession extends DragSession {
+  /** Pointer-down timing and selection basis; only reused with the same live input. */
+  authoringData?: TimelineData;
+  plannedData?: TimelineData;
+  moveReadBasis?: TimelineGestureReadBasis;
   pointerId: number;
   sourceRowId: string;
   sourceKind: TrackKind;
@@ -124,7 +129,7 @@ interface DragCommitCallbacks {
   selectClip: (clipId: string) => void;
   selectClips: (clipIds: Iterable<string>) => void;
   applyEdit: TimelineApplyEdit;
-  applyResolvedClipMove?: (clipId: string, targetRowId: string, targetTrackId: string | null, start: number, needsNewTrack: boolean, transactionId?: string) => void;
+  applyResolvedClipMove?: (clipId: string, targetRowId: string, targetTrackId: string | null, start: number, needsNewTrack: boolean, transactionId?: string, gestureBasis?: TimelineGestureReadBasis) => void;
 }
 
 interface CommitDraggingSessionArgs {
@@ -335,6 +340,8 @@ export function buildPendingDragSession({
     },
     intent,
     session: {
+      authoringData: current,
+      moveReadBasis: structuredClone({ kind: 'move', clipId, trackId: rowId, config: current.config, registry: current.registry }),
       ...intent,
       draggedClipIds: [...intent.draggedClipIds],
       clipOffsets: [...clipOffsets],
@@ -359,6 +366,11 @@ export function commitDraggingSession({
   if (isInvalidTimelineRowTarget(dropPosition?.plan?.rejectReason)) return { deferDeactivate: false };
   const isGroupDrag = session.groupDragEntry !== null;
   const resolvedPlan = lastPlan?.valid && !lastPlan.rejectReason ? lastPlan : null;
+  const gestureBasis = !isGroupDrag && session.draggedClipIds.length === 1
+    && session.authoringData === liveData && session.plannedData === liveData
+    && resolvedPlan?.requestedTrackId === session.sourceRowId
+    && resolvedPlan.targetTrackId === session.sourceRowId && !resolvedPlan.needsNewTrack
+    ? session.moveReadBasis : undefined;
 
   if (!isGroupDrag && crossTrackActive && session.draggedClipIds.length === 1) {
     if (resolvedPlan && callbacks.applyResolvedClipMove) {
@@ -369,6 +381,7 @@ export function commitDraggingSession({
         resolvedPlan.resolvedStart,
         resolvedPlan.needsNewTrack,
         session.transactionId,
+        ...(gestureBasis ? [gestureBasis] : []),
       );
       userSelectTimelineClip(session.clipId, { additive: false });
       return { deferDeactivate: true };
@@ -493,6 +506,7 @@ export function commitDraggingSession({
       resolvedPlan.resolvedStart,
       resolvedPlan.needsNewTrack,
       session.transactionId,
+      ...(gestureBasis ? [gestureBasis] : []),
     );
   } else {
     callbacks.moveClipToRow(session.clipId, session.sourceRowId, nextStart, session.transactionId);

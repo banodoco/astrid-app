@@ -1,12 +1,12 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
-import fs from 'fs';
+import { fileURLToPath } from 'node:url';
 import { createElementAdmissionsPlugin } from '../vite/astridElementAdmissions';
 import { resolveAstridSource, validateAstridToolCatalog } from '../vite/astridSource';
 import { CHECKOUT_LANE, assertCheckoutLaneFilesExist } from './lanes';
 import SkipGuardReporter from './skipGuardReporter';
 
-const projectRoot = path.resolve(__dirname, '../..');
+const projectRoot = fileURLToPath(new URL('../..', import.meta.url));
 const checkoutLane = process.env.VITEST_LANE === 'checkout';
 assertCheckoutLaneFilesExist(projectRoot);
 const astridSource = resolveAstridSource();
@@ -15,23 +15,6 @@ const astridPublicSource = resolveAstridSource(
   process.env.ASTRID_PUBLIC_CHECKOUT ?? '',
   'ASTRID_PUBLIC_CHECKOUT',
 );
-const timelineCompositionRegistryPath = path.resolve(
-  projectRoot,
-  'node_modules/@banodoco/timeline-composition/typescript/src/registry.generated.ts',
-);
-const timelineCompositionThemeApiPath = path.resolve(
-  projectRoot,
-  'node_modules/@banodoco/timeline-composition/typescript/src/theme-api.ts',
-);
-
-const resolvedTimelineCompositionRegistryPath = fs.existsSync(timelineCompositionRegistryPath)
-  ? timelineCompositionRegistryPath
-  : path.resolve(projectRoot, 'examples/embed-demo/stubs/timeline-composition/registry.generated.ts');
-
-const resolvedTimelineCompositionThemeApiPath = fs.existsSync(timelineCompositionThemeApiPath)
-  ? timelineCompositionThemeApiPath
-  : path.resolve(projectRoot, 'examples/embed-demo/stubs/timeline-composition/theme-api.tsx');
-
 export default defineConfig({
   root: projectRoot,
   plugins: [createElementAdmissionsPlugin()],
@@ -43,12 +26,7 @@ export default defineConfig({
       ...(astridSource ? { '@astrid': astridSource.sourceRoot } : {}),
       ...(astridPublicSource ? { '@astrid-public': astridPublicSource.sourceRoot } : {}),
       'fake-indexeddb': path.resolve(projectRoot, 'vendor/fake-indexeddb/index.js'),
-      // Sprint 5: deduplicate react / remotion / @banodoco/* across linked
-      // packages. The timeline-theme-2rp peer-dep package lives at a
-      // file: link outside this app's node_modules tree; Vite's nearest-
-      // node_modules resolution would otherwise pick up the package's
-      // own copies (or fail when none exists). Pinning these to the
-      // app's node_modules guarantees a single React/Remotion runtime.
+      // Share one React/Remotion runtime with Composition and linked host elements.
       'react': path.resolve(projectRoot, 'node_modules/react'),
       'react-dom': path.resolve(projectRoot, 'node_modules/react-dom'),
       // Edge function tests run the function under Node: Deno's std `serve` becomes a recorder of the handler.
@@ -57,25 +35,20 @@ export default defineConfig({
       'remotion': path.resolve(projectRoot, 'node_modules/remotion'),
       '@remotion/layout-utils': path.resolve(projectRoot, 'node_modules/@remotion/layout-utils'),
       '@remotion/media': path.resolve(projectRoot, 'node_modules/@remotion/media'),
-      '@banodoco/timeline-composition/registry.generated': resolvedTimelineCompositionRegistryPath,
-      '@banodoco/timeline-composition/theme-api': resolvedTimelineCompositionThemeApiPath,
-      '@banodoco/timeline-composition': path.resolve(projectRoot, 'node_modules/@banodoco/timeline-composition'),
       '@banodoco/timeline-schema': path.resolve(projectRoot, 'src/test/shims/banodoco/timeline-schema.ts'),
-      // Sprint 5: workspace-primitive aliases for the linked packages.
-      // The composition package's animations.generated / transitions.generated
-      // / effects.generated import via these aliases. Astrid App's bundler needs
-      // them to resolve; Banodoco's webpack already does the same.
+      // Resolve vendored Composition registry primitives used by generated modules.
       '@workspace-effects': path.resolve(projectRoot, 'vendor/banodoco-effects'),
       '@workspace-animations': path.resolve(projectRoot, 'vendor/banodoco-animations'),
       '@workspace-transitions': path.resolve(projectRoot, 'vendor/banodoco-transitions'),
     },
     dedupe: [
+      'three',
+      '@remotion/three',
       'react',
       'react-dom',
       'remotion',
       '@remotion/layout-utils',
       '@banodoco/timeline-composition',
-      '@banodoco/timeline-theme-2rp',
     ],
   },
   server: {
@@ -121,6 +94,12 @@ export default defineConfig({
       // own config so its linked workspace aliases resolve to Astrid's pack.
       'src/tools/video-editor/runtime/astridSceneComposition.test.tsx',
     ],
+    // Keep Composition and the test providers on one Remotion context instance.
+    server: {
+      deps: {
+        inline: ['remotion', '@banodoco/timeline-composition'],
+      },
+    },
     setupFiles: [
       path.resolve(projectRoot, 'src/test/reactRefreshSetup.ts'),
       path.resolve(projectRoot, 'src/test/setup.ts'),

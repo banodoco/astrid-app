@@ -15,7 +15,7 @@ import type {
   BridgeTaskAdmissionResponse,
   BridgeTaskDetailPayload,
 } from '@/tools/video-editor/data/bridgeContract.ts';
-import { loadTimelineDocument, mutateTimelineDocument } from '@/shared/lib/placement/placementService.ts';
+import { loadTimelineDocument, mutateTimelineDocument, prepareTimelineDocumentMutation } from '@/shared/lib/placement/placementService.ts';
 import type { PlacementDocument } from '@/shared/lib/placement/documentPlacement.ts';
 import {
   deriveTimelineShotGroupViews,
@@ -385,7 +385,11 @@ export async function duplicateShotGroup(
   options: WaitForShotPackCommandOptions = {},
 ): Promise<DeepCopyShotGroupResult> {
   const client = new AstridLocalClient({ projectSlug: input.projectSlug });
-  const head = await loadTimelineDocument(input.projectSlug, input.timelineRef);
+  const head = await prepareTimelineDocumentMutation({
+    projectSlug: input.projectSlug,
+    timelineRef: input.timelineRef,
+    configVersion: input.configVersion,
+  });
   if (head.expectedVersion !== input.configVersion) {
     throw new Error(
       `Timeline ${input.timelineRef} is at version ${head.expectedVersion}; expected active editor version ${input.configVersion}`,
@@ -407,11 +411,7 @@ export async function duplicateShotGroup(
       throw new Error('Duplicate pack command succeeded without a copied final-video output');
     }
   }
-  return (await mutateTimelineDocument({
-    projectSlug: input.projectSlug,
-    timelineRef: input.timelineRef,
-    configVersion: input.configVersion,
-  }, (document) => deepCopyShotGroupInDocument(document, {
+  return (await head.mutate((document) => deepCopyShotGroupInDocument(document, {
     ...input,
     finalVideoReplacement: replacement,
     mediaContentUrl: (mediaId) => client.media.contentUrl(mediaId),

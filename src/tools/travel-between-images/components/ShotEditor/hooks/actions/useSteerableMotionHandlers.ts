@@ -31,6 +31,7 @@ interface UseSteerableMotionHandlersOptions {
   // Settings loading state
   isShotUISettingsLoading: boolean;
   settingsLoadingFromContext: boolean;
+  canonicalPersistence: boolean;
   // Setters
   updateShotUISettings: (scope: 'shot' | 'project', settings: Record<string, unknown>) => void;
   setSteerableMotionSettings: (settings: Partial<{ model_name: string; seed: number; negative_prompt: string; debug: boolean }>) => void;
@@ -53,6 +54,7 @@ export function useSteerableMotionHandlers({
   steerableMotionSettings,
   isShotUISettingsLoading,
   settingsLoadingFromContext,
+  canonicalPersistence,
   updateShotUISettings,
   setSteerableMotionSettings,
   setSteps,
@@ -85,6 +87,12 @@ export function useSteerableMotionHandlers({
 
   // Set model based on turbo mode
   useEffect(() => {
+    // Canonical popup settings are a projection; avoid turning a mount-time
+    // derived model name into an unrelated authored edit.
+    if (canonicalPersistence) {
+      return;
+    }
+
     if (!getModelSpec(selectedModel).ui.turboMode) {
       return;
     }
@@ -94,7 +102,7 @@ export function useSteerableMotionHandlers({
     if (currentModelName !== targetModel) {
       setSteerableMotionSettings({ model_name: targetModel });
     }
-  }, [selectedModel, turboMode, steerableMotionSettings?.model_name, setSteerableMotionSettings]);
+  }, [canonicalPersistence, selectedModel, turboMode, steerableMotionSettings?.model_name, setSteerableMotionSettings]);
 
   // Setters
   const setAccelerated = useCallback((value: boolean) => {

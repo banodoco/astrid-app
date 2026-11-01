@@ -45,12 +45,22 @@ function receipt(key: string) {
   };
 }
 
-function createTransport(options: { lostAck?: boolean } = {}) {
+function createTransport(options: {
+  lostAck?: boolean;
+  importedProject?: string;
+  selection?: Partial<{
+    asset: string;
+    generation_id: string;
+    variant_id: string;
+    object_id: string;
+    catalog_digest: string;
+  }>;
+} = {}) {
   const requests: Array<{ method: string; path: string; headers: Record<string, string>; body?: RequestBody }> = [];
   let importPostCount = 0;
   const completed = {
     provider: 'runtime' as const,
-    project: PROJECT_ID,
+    project: options.importedProject ?? PROJECT_ID,
     import_operation_id: 'operation-import',
     status: 'completed' as const,
     task_id: 'task-import',
@@ -80,6 +90,20 @@ function createTransport(options: { lostAck?: boolean } = {}) {
     }
     if (method === 'GET' && path.startsWith(`/v1/projects/${PROJECT_ID}/media-imports/`)) {
       return { status: 200, headers: {}, body: json({ ...completed, import_operation_id: path.split('/').at(-1) }) };
+    }
+    if (method === 'GET' && path.startsWith(`/v1/projects/${PROJECT_ID}/media-selection?`)) {
+      return {
+        status: 200,
+        headers: {},
+        body: json({
+          asset: ASSET_ID,
+          generation_id: 'generation-import',
+          variant_id: 'variant-import',
+          object_id: ASSET_ID,
+          catalog_digest: 'sha256:catalog-import',
+          ...options.selection,
+        }),
+      };
     }
     throw new Error(`unexpected ${method} ${path}`);
   };
@@ -114,8 +138,73 @@ describe('Runtime media import adapter', () => {
         variantId: 'variant-import',
       },
     });
+    // The import response carries object metadata; the immutable five-field
+    // selection is the authority used by verified media reads.
+    expect(prepared.mediaSelection).toEqual({
+      asset: ASSET_ID,
+      generation_id: 'generation-import',
+      variant_id: 'variant-import',
+      object_id: ASSET_ID,
+      catalog_digest: 'sha256:catalog-import',
+    });
+    expect(JSON.parse(JSON.stringify(prepared.entry))).toEqual({
+      file: `http://runtime.test/v1/objects/${encodeURIComponent(ASSET_ID)}`,
+      media_id: ASSET_ID,
+      content_sha256: ASSET_ID,
+      type: 'video/mp4',
+      duration: 2.5,
+      generationId: 'generation-import',
+      variantId: 'variant-import',
+      metadata: {
+        provenance: {
+          sourceProvider: 'workspace-runtime',
+          importOperationId: prepared.importOperationId,
+          source: 'external_upload',
+          origin: 'imported',
+        },
+        extensions: {
+          originalFilename: 'clip.mp4',
+          byteSize: 4,
+        },
+      },
+    });
+    expect(prepared.entry).not.toHaveProperty('catalog_digest');
+    expect(Object.isFrozen(prepared.mediaSelection)).toBe(true);
+    expect(fixture.requests.filter((request) => request.path.includes('/media-selection?'))).toHaveLength(1);
     expect(localStorage.getItem(`astrid.runtime.media-import.v1:${PROJECT_ID}:${prepared.importOperationId}`)).toContain(prepared.importOperationId);
     expect(fixture.requests.filter((request) => request.path.includes('/generations') || request.path.includes('/variants'))).toHaveLength(0);
+  });
+
+  it('leaves a legacy preparation unqualified without refreshing its selection', async () => {
+    const fixture = createTransport();
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', transport: fixture.transport });
+
+    const prepared = await provider.prepareAsset(
+      new File(['bytes'], 'clip.mp4', { type: 'video/mp4' }),
+      { timelineId: 'timeline-import', userId: 'actor' },
+    );
+
+    expect(prepared.entry).not.toHaveProperty('catalog_digest');
+    expect(fixture.requests.some((request) => request.path.includes('/media-selection?'))).toBe(false);
+  });
+
+  it('refuses a selection for the wrong imported object', async () => {
+    const fixture = createTransport({ selection: { object_id: 'sha256:wrong-object' } });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', transport: fixture.transport });
+
+    await expect(provider.prepareMediaImport(
+      new File(['bytes'], 'clip.mp4', { type: 'video/mp4' }),
+    )).rejects.toThrow('does not match the prepared import');
+  });
+
+  it('refuses a completed import returned for the wrong project', async () => {
+    const fixture = createTransport({ importedProject: 'other-project' });
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, baseUrl: 'http://runtime.test', transport: fixture.transport });
+
+    await expect(provider.prepareMediaImport(
+      new File(['bytes'], 'clip.mp4', { type: 'video/mp4' }),
+    )).rejects.toThrow('belongs to project other-project, not project-imports');
+    expect(fixture.requests.some((request) => request.path.includes('/media-selection?'))).toBe(false);
   });
 
   it('recovers a lost import acknowledgement by operation lookup without a new key', async () => {

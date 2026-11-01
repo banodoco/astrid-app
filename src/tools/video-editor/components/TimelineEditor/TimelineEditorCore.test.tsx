@@ -1,8 +1,16 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TimelineEditorCore } from '@/tools/video-editor/components/TimelineEditor/TimelineEditorCore';
+import { VideoEditorRuntimeContext } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext';
+import { useTimelineMultiSelect } from '@/shared/state/selectionStore';
+import {
+  __resetSelectionStoreForTests,
+  activateTimelineClipData,
+  setTimelineClipData,
+  type TimelineClipDataOwner,
+} from '@/shared/state/selectionStore';
 import {
   createTimelineStore,
   TimelineStoreProvider,
@@ -199,7 +207,6 @@ function createOverlayTestStore(options: {
     },
     chrome: {
       handleAddTrack: vi.fn(),
-      handleAddTextAt: vi.fn(),
       handleClearUnusedTracks: vi.fn(),
       unusedTrackCount: 0,
     },
@@ -229,8 +236,14 @@ function renderWithStore(ui: React.ReactElement, options: {
 
 describe('TimelineEditorCore', () => {
   afterEach(() => {
+    __resetSelectionStoreForTests();
     vi.clearAllMocks();
   });
+
+  function SharedPopupSelection({ owner, testId }: { owner: TimelineClipDataOwner; testId: string }) {
+    const { selectedClipIds } = useTimelineMultiSelect(owner);
+    return <output data-testid={testId}>{[...selectedClipIds].join('|') || 'none'}</output>;
+  }
 
   describe('selection and playhead tracking', () => {
     it('renders successfully with store data and tracks selectedClipIds', () => {
@@ -241,6 +254,80 @@ describe('TimelineEditorCore', () => {
     it('tracks selectedTrackId from the data store', () => {
       const { container } = renderWithStore(<TimelineEditorCore />);
       expect(container.querySelector('.timeline-wrapper')).toBeInTheDocument();
+    });
+
+    it('routes mounted occurrence clip selection to the owner-scoped popup', async () => {
+      const mountedOwner = Symbol('mounted-editor');
+      const wrongOwner = Symbol('wrong-editor');
+      const selectedClipId = 'f2-occurrence-copy:clip-0';
+      const siblingClipId = 'f2-occurrence-copy:clip-1';
+      setTimelineClipData([
+        {
+          clipId: selectedClipId,
+          assetKey: 'asset-selected',
+          url: 'https://example.test/selected.mp4',
+          mediaType: 'video',
+          isTimelineBacked: true,
+        },
+        {
+          clipId: siblingClipId,
+          assetKey: 'asset-sibling',
+          url: 'https://example.test/sibling.mp4',
+          mediaType: 'video',
+          isTimelineBacked: true,
+        },
+      ], mountedOwner);
+      setTimelineClipData([], wrongOwner);
+      activateTimelineClipData(wrongOwner);
+
+      const store = createOverlayTestStore();
+      const dataSlice = store.getState().data;
+      const data = {
+        ...dataSlice.data!,
+        rows: [{
+          id: 'V1',
+          actions: [
+            { id: selectedClipId, start: 0, end: 2, effectId: 'effect-selected' },
+            { id: siblingClipId, start: 2, end: 4, effectId: 'effect-sibling' },
+          ],
+        }],
+        meta: {
+          [selectedClipId]: { asset: 'asset-1', track: 'V1' },
+          [siblingClipId]: { asset: 'asset-1', track: 'V1' },
+        },
+      };
+      const resolvedConfig = {
+        ...dataSlice.resolvedConfig!,
+        clips: [
+          { ...dataSlice.resolvedConfig!.clips[0], id: selectedClipId },
+          { ...dataSlice.resolvedConfig!.clips[0], id: siblingClipId },
+        ],
+      };
+      dataSlice.dataRef.current = data;
+      store.getState().syncDataSlice({ ...dataSlice, data, resolvedConfig });
+
+      const runtimeValue = {
+        agentSelectionOwner: mountedOwner,
+      } as unknown as React.ContextType<typeof VideoEditorRuntimeContext>;
+      render(
+        <VideoEditorRuntimeContext.Provider value={runtimeValue}>
+          <TimelineStoreProvider store={store}>
+            <TimelineEditorCore />
+            <SharedPopupSelection owner={mountedOwner} testId="mounted-popup-selection" />
+            <SharedPopupSelection owner={wrongOwner} testId="wrong-popup-selection" />
+          </TimelineStoreProvider>
+        </VideoEditorRuntimeContext.Provider>,
+      );
+
+      const clip = document.querySelector(`[data-clip-id="${selectedClipId}"]`);
+      expect(clip).toBeInTheDocument();
+      // The mounted ClipAction delegates this direct selection to Core before
+      // opening its popup; no selection action is called directly by the test.
+      act(() => fireEvent.contextMenu(clip!));
+
+      await waitFor(() => expect(screen.getByTestId('mounted-popup-selection')).toHaveTextContent(selectedClipId));
+      expect(screen.getByTestId('mounted-popup-selection')).not.toHaveTextContent(siblingClipId);
+      expect(screen.getByTestId('wrong-popup-selection')).toHaveTextContent('none');
     });
 
     it('propagates the selected occurrence identity to its canonical overlay label', () => {

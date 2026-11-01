@@ -1,6 +1,7 @@
 import { getEffectiveClipVolume } from '@/tools/video-editor/lib/clip-volume.ts';
 import { TimelineItemSelectionSummary } from './TimelineItemSelectionSummary.tsx';
 import { EMPTY_TIMELINE_DATA_ITEMS } from '@/shared/state/selectionStore.ts';
+import { useOptionalAgentChatBridge } from '@/shared/contexts/AgentChatContext.tsx';
 import { memo, useEffect, useMemo, useRef, type ComponentType, type ReactNode } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { BulkClipPanel } from '@/tools/video-editor/components/PropertiesPanel/BulkClipPanel.tsx';
@@ -41,7 +42,7 @@ import {
 } from '@/tools/video-editor/runtime/ContributionErrorBoundary.tsx';
 import type { TimelineInspectorTarget } from '@/tools/video-editor/lib/mobile-interaction-model.ts';
 
-function InspectorRegistrySections({
+export function InspectorRegistrySections({
   placement,
   selection,
 }: {
@@ -101,7 +102,7 @@ type DataKindInspectorComponent = ComponentType<DataItemInspectorProps>;
  * one is registered (contained by the host boundary), otherwise the opaque
  * fallback that renders only frozen envelope facts.
  */
-function DataItemInspectorSection({ lane, view }: { lane: DataLaneView; view: DataLaneItemView }) {
+export function DataItemInspectorSection({ lane, view }: { lane: DataLaneView; view: DataLaneItemView }) {
   const { item } = view;
 
   if (!lane.inspector) {
@@ -141,7 +142,7 @@ function DataItemInspectorSection({ lane, view }: { lane: DataLaneView; view: Da
  * envelope facts the host owns — label, schemaRef, shape, item count.
  * Styling mirrors OpaqueDataItemInspector; payloads are never interpreted.
  */
-function DataLaneSummarySection({ lane }: { lane: DataLaneView }) {
+export function DataLaneSummarySection({ lane }: { lane: DataLaneView }) {
   return (
     <div
       data-testid="data-lane-summary"
@@ -193,6 +194,7 @@ export interface PropertiesPanelProps {
 
 function PropertiesPanelComponent({ visible = true }: PropertiesPanelProps) {
   useRenderDiagnostic('PropertiesPanel');
+  const elementOwner = useOptionalAgentChatBridge()?.editorContext;
   const {
     data,
     resolvedConfig,
@@ -557,7 +559,7 @@ function PropertiesPanelComponent({ visible = true }: PropertiesPanelProps) {
             track={selectedTrack}
             deviceClass={deviceClass}
             hasPredecessor={selectedClipHasPredecessor}
-            onChange={handleSelectedClipChange}
+            onChange={patch => handleSelectedClipChange(patch, elementOwner)}
             onResetPosition={handleResetClipPosition}
             onClose={clearSelection}
             onDelete={selectedClip ? () => {

@@ -7,9 +7,6 @@ import { BulkClipPanelBody, type BulkClipPanelProps } from '@/tools/video-editor
 import { ClipPanelBody, type ClipPanelBodyProps } from '@/tools/video-editor/components/PropertiesPanel/ClipPanelBody.tsx';
 import { getVisibleClipTabs } from '@/tools/video-editor/lib/clip-inspector.ts';
 import { NO_EFFECT } from '@/tools/video-editor/components/PropertiesPanel/clip-panel-primitives.tsx';
-import { OpaqueDataItemInspector } from '@/tools/video-editor/components/PropertiesPanel/OpaqueDataItemInspector';
-import type { DataItemInspectorProps } from '@/sdk/video/families/dataKind';
-import type { DataLaneItemView, DataLaneView } from '@/tools/video-editor/data/typed/envelope';
 import { useDataLanes } from '@/tools/video-editor/data-kinds/useDataLanes';
 import { ShaderInspector } from '@/tools/video-editor/components/ShaderInspector/ShaderInspector.tsx';
 import {
@@ -26,144 +23,13 @@ import { getFallbackClipTab, getSelectionDefaultClipTab, getTrackMoveTargets } f
 import { getBulkVisibleTabs, getSharedNestedValue, getSharedValue } from '@/tools/video-editor/lib/bulk-utils.ts';
 import { getTimelinePostprocessShader } from '@/tools/video-editor/lib/timeline-domain.ts';
 import { VIDEO_EDITOR_THEME_VARS } from '@/tools/video-editor/lib/themeTokens.ts';
-import {
-  useVideoEditorPanelRegistry,
-  useVideoEditorRenderContext,
-} from '@/tools/video-editor/runtime/useVideoEditorRenderContext.ts';
 import { useOptionalVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
-import {
-  getInspectorContributions,
-  findContributionOwnerId,
-  type InspectorSelectionSnapshot,
-} from '@/tools/video-editor/runtime/extensionSurface.ts';
-import {
-  HostContributionErrorBoundary,
-  type ContributionErrorInfo,
-} from '@/tools/video-editor/runtime/ContributionErrorBoundary.tsx';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/components/ui/tabs.tsx';
-
-function InspectorRegistrySections({
-  placement,
-  selection,
-}: {
-  placement: 'before-default' | 'after-default';
-  selection: InspectorSelectionSnapshot | null;
-}) {
-  const renderContext = useVideoEditorRenderContext();
-  const registry = useVideoEditorPanelRegistry();
-  const runtime = useOptionalVideoEditorRuntime();
-  const contributionIndex = runtime?.extensionRuntime?.contributionIndex;
-  const contributions = useMemo(
-    () => getInspectorContributions(registry, renderContext, selection),
-    [registry, renderContext, selection],
-  );
-
-  const sections =
-    placement === 'before-default'
-      ? contributions.beforeDefault
-      : contributions.afterDefault;
-
-  if (sections.length === 0) {
-    return null;
-  }
-
-  const handleContributionError = (info: ContributionErrorInfo) => {
-    if (typeof console !== 'undefined') {
-      console.warn(
-        '[PropertiesPanel] Inspector section error captured by boundary:',
-        info,
-      );
-    }
-  };
-
-  return (
-    <div className="flex flex-col gap-3">
-      {sections.map((section) => (
-        <HostContributionErrorBoundary
-          key={section.id}
-          contributionId={section.id}
-          extensionId={findContributionOwnerId(contributionIndex, 'inspectorSection', section.id)}
-          kind="inspectorSection"
-          onError={handleContributionError}
-        >
-          <div data-video-editor-inspector-section-id={section.id}>
-            {section.render(renderContext, selection)}
-          </div>
-        </HostContributionErrorBoundary>
-      ))}
-    </div>
-  );
-}
-
-type DataKindInspectorComponent = ComponentType<DataItemInspectorProps>;
-
-/**
- * Inspector body for a selected lane item: the kind's bound inspector when
- * one is registered (contained by the host boundary), otherwise the opaque
- * fallback that renders only frozen envelope facts.
- */
-function DataItemInspectorSection({ lane, view }: { lane: DataLaneView; view: DataLaneItemView }) {
-  const { item } = view;
-
-  if (!lane.inspector) {
-    return <OpaqueDataItemInspector item={item} />;
-  }
-
-  const KindInspector = lane.inspector as unknown as DataKindInspectorComponent;
-
-  return (
-    <HostContributionErrorBoundary
-      contributionId={`dataItem:${item.id}`}
-      kind="inspectorSection"
-      label={`Data item (${lane.kindId}): ${item.id}`}
-    >
-      <KindInspector
-        kindId={lane.kindId}
-        schemaRef={item.schemaRef}
-        shape={item.shape}
-        domain={item.domain}
-        item={{
-          id: item.id,
-          ...(item.sourceItemId ? { sourceItemId: item.sourceItemId } : {}),
-          timelineStart: view.timelineStart,
-          timelineEnd: view.timelineEnd,
-          clipId: view.clipId,
-          ...(item.sourceArtifactRef ? { sourceArtifactRef: item.sourceArtifactRef } : {}),
-          provenance: item.provenance,
-          payload: item.payload,
-        }}
-      />
-    </HostContributionErrorBoundary>
-  );
-}
-
-/**
- * Host summary for a selected lane (dataKind V1 rework R3d): the frozen
- * envelope facts the host owns — label, schemaRef, shape, item count.
- * Styling mirrors OpaqueDataItemInspector; payloads are never interpreted.
- */
-function DataLaneSummarySection({ lane }: { lane: DataLaneView }) {
-  return (
-    <div
-      data-testid="data-lane-summary"
-      className="rounded-xl border bg-card/80 p-3 text-xs"
-    >
-      <div className="mb-2 text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">
-        Data lane
-      </div>
-      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-        <dt className="text-muted-foreground">label</dt>
-        <dd data-testid="data-lane-summary-label">{lane.label}</dd>
-        <dt className="text-muted-foreground">schemaRef</dt>
-        <dd className="break-all font-mono" data-testid="data-lane-summary-schema-ref">{lane.schemaRef}</dd>
-        <dt className="text-muted-foreground">shape</dt>
-        <dd data-testid="data-lane-summary-shape">{lane.shape}</dd>
-        <dt className="text-muted-foreground">items</dt>
-        <dd className="font-mono" data-testid="data-lane-summary-item-count">{lane.items.length}</dd>
-      </dl>
-    </div>
-  );
-}
+import {
+  DataItemInspectorSection,
+  DataLaneSummarySection,
+  InspectorRegistrySections,
+} from './PropertiesPanel.tsx';
 
 export interface PropertiesPanelProps {
   /** Timeline-scoped assets live behind this tab so they do not hide the editor tabs. */

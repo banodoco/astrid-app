@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import fixture from './shotComposition.fixture.json';
 import orderFixture from './shotTrackOrder.fixture.json';
+import { collectBuiltInKnownIds, collectExtensionDeclaredIds, scanExportConfig } from '@/tools/video-editor/runtime/exportGuard.ts';
+import mediaProjectionFixture from './occurrenceMediaProjection.fixture.json';
 import { createShotCompositionAdapter, type PreparedShotComposition } from './shotCompositionAdapter.ts';
 import { createAudioReactiveColourFixtures } from '@/test/fakeRuntimeSeed.mjs';
 import {
@@ -13,7 +15,6 @@ import { timelineContentExtentMs } from './shotCompositionTiming.ts';
 import { boundCanonicalClipToOccurrence } from '@/tools/video-editor/lib/canonicalRenderBounds.ts';
 import { getClipTimelineDuration } from '@/tools/video-editor/lib/config-utils.ts';
 import type { ResolvedTimelineConfig } from '@/tools/video-editor/types/index.ts';
-import { collectBuiltInKnownIds, collectExtensionDeclaredIds, scanExportConfig } from '@/tools/video-editor/runtime/exportGuard.ts';
 
 const prepared = createShotCompositionAdapter({ load: async () => fixture }).prepare(fixture);
 
@@ -92,6 +93,251 @@ describe('canonical shot-composition downstream projection', () => {
     expect(projection.config.tracks.find((track) => track.id === 'fx')).toMatchObject(
       orderFixture.shot_tracks.find((track) => track.id === 'fx')!,
     );
+  });
+
+  it('keeps overlapping missing-row occurrences in occurrence order within one fallback block', () => {
+    const composition = {
+      ...prepared,
+      occurrences: prepared.occurrences.slice(0, 2).map((occurrence, index) => ({
+        ...occurrence, atMs: 0, durationMs: 2000, trackId: `missing-row-${index}`,
+      })),
+    };
+    const projection = projectCanonicalComposition(composition, {
+      output: { resolution: '1920x1080', fps: 30, file: 'fallback.mp4' },
+      tracks: [{ id: 'parent', kind: 'visual', label: 'Parent' }],
+      clips: [], registry: {},
+    });
+    expect(projection.config.tracks.filter((track) => track.kind === 'visual').map((track) => track.id))
+      .toEqual(['occ-1~video', 'occ-2~video', 'parent']);
+    expect(projection.warnings).toEqual(composition.occurrences.map((occurrence) => ({
+      severity: 'warning', code: 'timeline-patch/target-not-found',
+      message: `shot-layering: track "${occurrence.trackId}" not found — placing occurrence "${occurrence.occurrenceId}" at top of stack`,
+    })));
+    expect(projection.config.clips.filter((clip) => clip.track.endsWith('~video')).map((clip) => clip.at))
+      .toEqual([0, 0]);
+  });
+
+  const collisionTimingCases = [
+    {
+      name: 'inherited trim', raw: { from: 0.125, to: 2.125 }, durationMs: 2000, extentMs: 2000,
+      visual: { from: 0.475, to: 2.475, hold: undefined, speed: 1.5 },
+      audio: { from: 0.125, to: 2.125, hold: undefined, speed: undefined },
+    },
+    {
+      name: 'inherited hold', raw: { from: 0.125, hold: 4 }, durationMs: 4000, extentMs: 4000,
+      visual: { from: 0.475, to: undefined, hold: 4, speed: 1.5 },
+      audio: { from: 0.125, to: undefined, hold: 4, speed: undefined },
+    },
+    {
+      name: 'explicit trim speed', raw: { from: 0.125, to: 4.125, speed: 2 }, durationMs: 4000, extentMs: 2000,
+      visual: { from: 0.475, to: 4.475, hold: undefined, speed: 2 },
+      audio: { from: 0.125, to: 4.125, hold: undefined, speed: 2 },
+    },
+    {
+      name: 'explicit hold speed', raw: { from: 0.125, hold: 4, speed: 2 }, durationMs: 4000, extentMs: 2000,
+      visual: { from: 0.475, to: undefined, hold: 4, speed: 2 },
+      audio: { from: 0.125, to: undefined, hold: 4, speed: 2 },
+    },
+  ];
+
+  it.each(collisionTimingCases)('uses a child visual declaration over parent audio for $name', ({ raw, visual, durationMs, extentMs }) => {
+    const child = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline,
+      tracks: [{ id: 'video', kind: 'visual', label: 'Child' }],
+      clips: [{ id: 'collision', asset: 'alpha-image', clipType: 'media', track: 'video', at: 0, ...raw }],
+    }));
+    const composition = { ...child, occurrences: [{
+      ...child.occurrences[0], sourceOffsetMs: 350, speed: 1.5,
+    }] };
+    const projection = projectCanonicalComposition(composition, {
+      output: { resolution: '1920x1080', fps: 30, file: 'collision.mp4' },
+      tracks: [{ id: 'video', kind: 'audio', label: 'Parent' }], clips: [], registry: {},
+    });
+    const clip = projection.config.clips[0];
+    expect(clip).toMatchObject({
+      id: 'occ-1:collision', track: 'occ-1~video', at: 0,
+      app: { canonicalTiming: {
+        sourceOffsetMs: 350, occurrenceSpeed: 1.5, speed: visual.speed, durationMs,
+        occurrenceStartMs: 0, occurrenceDurationMs: extentMs, storedOccurrenceDurationMs: 2000,
+      } },
+    });
+    expect({ from: clip.from, to: clip.to, hold: clip.hold, speed: clip.speed }).toStrictEqual(visual);
+    expect(getClipTimelineDuration(clip)).toBeCloseTo(durationMs / 1000 / visual.speed, 6);
+  });
+
+  it.each(collisionTimingCases)('uses a child audio declaration over parent visual for $name', ({ raw, audio, durationMs, extentMs }) => {
+    const child = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline,
+      tracks: [{ id: 'video', kind: 'audio', label: 'Child audio' }],
+      clips: [{ id: 'collision', asset: 'alpha-image', clipType: 'media', track: 'video', at: 0, ...raw }],
+    }));
+    const composition = { ...child, occurrences: [{
+      ...child.occurrences[0], sourceOffsetMs: 350, speed: 1.5,
+    }] };
+    const projection = projectCanonicalComposition(composition, {
+      output: { resolution: '1920x1080', fps: 30, file: 'collision.mp4' },
+      tracks: [{ id: 'video', kind: 'visual', label: 'Parent' }], clips: [], registry: {},
+    });
+    expect(projection.config.tracks).toEqual([
+      { id: 'video', kind: 'visual', label: 'Parent' },
+      { id: 'occ-1~video', kind: 'audio', label: 'Child audio' },
+    ]);
+    const clip = projection.config.clips[0];
+    expect(clip).toMatchObject({
+      id: 'occ-1:collision', track: 'occ-1~video', at: 0,
+      app: { canonicalTiming: {
+        sourceOffsetMs: 350, occurrenceSpeed: 1.5, speed: audio.speed ?? 1, durationMs,
+        occurrenceStartMs: 0, occurrenceDurationMs: extentMs, storedOccurrenceDurationMs: 2000,
+      } },
+    });
+    expect({ from: clip.from, to: clip.to, hold: clip.hold, speed: clip.speed }).toStrictEqual(audio);
+    expect(getClipTimelineDuration(clip)).toBeCloseTo(durationMs / 1000 / (audio.speed ?? 1), 6);
+  });
+
+  it.each([false, true])('keeps undeclared visual tracks local when another occurrence declares audio (reverse %s)', (reverse) => {
+    let source = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline, tracks: [],
+      clips: [{ id: 'visual', asset: 'alpha-image', clipType: 'media', track: 'shared', at: 0, from: 0, to: 2 }],
+    }));
+    source = withOccurrenceRevision(source, 1, (timeline) => ({
+      ...timeline, tracks: [{ id: 'shared', kind: 'audio' }],
+      clips: [{ id: 'audio', asset: 'alpha-image', clipType: 'media', track: 'shared', at: 0, from: 0, to: 2 }],
+    }));
+    const occurrences = source.occurrences.slice(0, 2).map((occurrence, index) => ({
+      ...occurrence, atMs: index * 10000, trackId: 'picture', sourceOffsetMs: 350, speed: 1.5,
+    }));
+    const projection = projectCanonicalComposition({ ...source, occurrences: reverse ? occurrences.reverse() : occurrences }, {
+      output: { resolution: '1920x1080', fps: 30, file: 'independent.mp4' },
+      tracks: [{ id: 'picture', kind: 'visual', label: 'Picture' }], clips: [], registry: {},
+    });
+    expect(projection.config.tracks.map(({ id, kind }) => ({ id, kind }))).toEqual([
+      { id: 'occ-1~shared', kind: 'visual' }, { id: 'picture', kind: 'visual' }, { id: 'shared', kind: 'audio' },
+    ]);
+    expect(projection.config.clips.find((clip) => clip.id === 'occ-1:visual')).toMatchObject({
+      track: 'occ-1~shared', from: 0.35, to: 2.35, speed: 1.5,
+    });
+    const audio = projection.config.clips.find((clip) => clip.id === 'occ-2:audio');
+    expect(audio).toMatchObject({ track: 'shared', from: 0, to: 2 });
+    expect(audio?.speed).toBeUndefined();
+  });
+
+  it.each([
+    { transform: { opacity: 0.5 } },
+    { transform: { x: 0 } },
+    { transform: { cropAnything: 0 } },
+    { transform: { scale: 1.2 } },
+    { opacity: 0.5 },
+  ])('refuses picture-changing shot placement %j', (placement) => {
+    const graph = structuredClone(fixture);
+    Object.assign(graph.occurrences[0], placement);
+    const composition = createShotCompositionAdapter({ load: async () => graph }).prepare(graph);
+
+    expect(() => projectCanonicalComposition(composition)).toThrow(CanonicalCompositionProjectionError);
+    try {
+      projectCanonicalComposition(composition);
+    } catch (error) {
+      expect(error).toMatchObject({ code: 'unsupported_placement', occurrenceId: 'occ-1' });
+    }
+  });
+
+  it.each([
+    { transform: {} },
+    { transform: { futureHint: 'preserve' } },
+    { transform: { opacity: 1 } },
+    { transform: { scale: 1 } },
+    { opacity: 1 },
+  ])('accepts no-op or opaque shot placement %j', (placement) => {
+    const graph = structuredClone(fixture);
+    Object.assign(graph.occurrences[0], placement);
+    const composition = createShotCompositionAdapter({ load: async () => graph }).prepare(graph);
+
+    expect(() => projectCanonicalComposition(composition)).not.toThrow();
+  });
+
+  it('applies placement timing to visual media and keeps occurrence timing metadata-only for audio', () => {
+    const graph = JSON.parse(JSON.stringify(fixture)) as typeof fixture;
+    const vector = mediaProjectionFixture;
+    const occurrences = graph.occurrences as Array<Record<string, unknown>>;
+    Object.assign(occurrences[0]!, vector.occurrence);
+    Object.assign(occurrences[1]!, vector.next_occurrence);
+    const revision = graph.shot_revisions.find((item) => item.shot_id === 'shot-alpha' && item.revision_id === 'rev-a')!;
+    const timeline = revision.internal_timeline_revision.timeline as Record<string, unknown>;
+    timeline.tracks = vector.tracks;
+    timeline.clips = vector.clips;
+    revision.assets = vector.assets as typeof revision.assets;
+
+    const parentClip = vector.parent_clip;
+    const parentConfig = {
+      output: { resolution: '1280x720', fps: 30, file: 'canonical.mp4' },
+      tracks: [{ id: 'parent-visual-lane', kind: 'visual' as const, label: 'Shots' }],
+      clips: [parentClip] as ResolvedTimelineConfig['clips'],
+      registry: { 'standalone-source': { file: 'standalone.png', type: 'image/png' } },
+    } as ResolvedTimelineConfig;
+    const composition = createShotCompositionAdapter({ load: async () => graph }).prepare(graph);
+    const projection = projectCanonicalComposition(composition, parentConfig);
+    const projected = new Map(
+      projection.config.clips
+        .filter((clip) => clip.id.startsWith('occ-1:'))
+        .map((clip) => [clip.id.slice('occ-1:'.length), clip]),
+    );
+
+    for (const [id, expected] of Object.entries(vector.expected)) {
+      const clip = projected.get(id)!;
+      expect(clip).toBeDefined();
+      expect(clip).toMatchObject({
+        at: expected.at,
+        from: expected.from,
+        ...(expected.to === undefined ? {} : { to: expected.to }),
+        ...(expected.hold === undefined ? {} : { hold: expected.hold }),
+        ...(expected.speed === undefined ? {} : { speed: expected.speed }),
+      });
+      expect(getClipTimelineDuration(clip)).toBeCloseTo(expected.timeline_duration, 6);
+    }
+    expect(projected.get('audio-track-inherited')?.speed).toBeUndefined();
+    expect(projected.get('audio-asset-inferred')?.speed).toBeUndefined();
+    expect(projected.get('audio-clip-type-inferred')?.speed).toBeUndefined();
+    expect(projected.get('audio-track-inherited')?.app?.canonicalTiming)
+      .toMatchObject({ sourceOffsetMs: 350, occurrenceSpeed: 1.5, speed: 1 });
+    expect(projected.get('visual-trim-inherited')?.app?.canonicalTiming).toMatchObject({ sourceOffsetMs: 350, speed: 1.5 });
+    expect(projection.config.registry['occ-1:lane-audio-source'] ?? projection.config.registry['lane-audio-source'])
+      .toMatchObject({ media_id: 'object-lane-audio-source', type: 'audio/wav' });
+    expect(projection.config.clips.find((clip) => clip.id === 'parent-standalone')).toMatchObject(parentClip);
+    expect(timeline.clips).toEqual(vector.clips);
+  });
+
+  it('keeps authored visual properties in the occurrence block and audio on merged lanes', () => {
+    const shotTracks = [
+      { id: 'chrome', kind: 'visual', label: 'Chrome', opacity: 0.8 },
+      { id: 'type', kind: 'visual', label: 'Type', scale: 1.2 },
+      { id: 'fx', kind: 'visual', label: 'Fx', blend: 'screen', opacity: 0.7 },
+      { id: 'sprite', kind: 'visual', label: 'Sprite' },
+      { id: 'plate', kind: 'visual', label: 'Plate' },
+      { id: 'vo', kind: 'audio', label: 'VO' },
+      { id: 'sfx', kind: 'audio', label: 'Sfx', volume: 0.6 },
+      { id: 'audio', kind: 'audio', label: 'Audio' },
+    ];
+    const composition = withOccurrenceRevision(prepared, 0, (timeline) => ({ ...timeline, tracks: shotTracks }));
+    const projection = projectCanonicalComposition(composition, {
+      output: { resolution: '1280x720', fps: 30, file: 'canonical.mp4' },
+      tracks: [
+        { id: 'picture', kind: 'visual', label: 'Picture' },
+        { id: 'sprite', kind: 'visual', label: 'Sprite' },
+        { id: 'plate', kind: 'visual', label: 'Plate' },
+        { id: 'vo', kind: 'audio', label: 'VO' },
+        { id: 'music', kind: 'audio', label: 'Music' },
+      ],
+      clips: [], registry: {},
+    });
+    expect(projection.config.tracks.map((track) => track.id)).toEqual([
+      'occ-1~chrome', 'occ-1~type', 'occ-1~fx', 'occ-1~sprite', 'occ-1~plate',
+      'occ-1~video', 'occ-2~video', 'occ-3~video', 'occ-4~video', 'occ-5~video',
+      'picture', 'sprite', 'plate', 'vo', 'music', 'sfx', 'audio',
+    ]);
+    expect(projection.config.tracks.find((track) => track.id === 'occ-1~fx')).toMatchObject({
+      ...shotTracks.find((track) => track.id === 'fx'),
+      id: 'occ-1~fx', app: { group: { id: 'occ-1', sourceTrack: 'fx' } },
+    });
+    expect(projection.config.tracks.find((track) => track.id === 'sfx')).toMatchObject(shotTracks[6]);
   });
 
   it('attaches one frame-domain seam report to the canonical config shared by preview and export', () => {
@@ -264,12 +510,12 @@ describe('canonical shot-composition downstream projection', () => {
     });
   });
 
-  it('filters child Source lanes before extent, asset selection and track merging', () => {
+  it.each([undefined, 'output'] as const)('keeps child Source visuals in their occurrence with sibling role %s', (role) => {
     const normalized = withOccurrenceRevision(prepared, 0, (timeline) => ({
       ...timeline,
       tracks: [
         { id: 'source-video', kind: 'visual', label: 'Interview', role: 'source' },
-        { id: 'video', kind: 'visual', label: 'Output cut' },
+        { id: 'video', kind: 'visual', label: 'Output cut', ...(role ? { role } : {}) },
       ],
       clips: [
         { id: 'long-source', asset: 'missing-source', clipType: 'media', track: 'source-video', at_ms: 0, duration_ms: 90000 },
@@ -293,16 +539,28 @@ describe('canonical shot-composition downstream projection', () => {
       'occ-4:beta-video',
       'occ-5:alpha-copy-video',
       'occ-1:short-output',
+      'occ-1:long-source',
     ]));
-    expect(projection.config.clips).toHaveLength(6);
-    expect(projection.config.clips.some((clip) => clip.id === 'occ-1:long-source')).toBe(false);
+    expect(projection.config.clips).toHaveLength(7);
+    expect(projection.config.clips.find((clip) => clip.id === 'occ-1:long-source'))
+      .toMatchObject({ track: 'occ-1~source-video', hold: 4 });
     expect(projection.config.clips.some((clip) => clip.id === 'parent-source')).toBe(false);
-    expect(projection.config.tracks.find((track) => track.id === 'video')?.role).toBeUndefined();
+    expect(projection.config.tracks.find((track) => track.id === 'occ-1~source-video')).toMatchObject({
+      kind: 'visual', role: 'output', app: { group: { id: 'occ-1', sourceTrack: 'source-video' } },
+    });
+    expect(projection.config.tracks.find((track) => track.id === 'occ-1~video')).toMatchObject({ kind: 'visual' });
+    expect(projection.config.tracks.find((track) => track.id === 'occ-1~video')?.role).toBe(role);
     expect(projection.config.clips.find((clip) => clip.id === 'occ-1:short-output')?.hold).toBe(4);
     expect(projection.config.clips.find((clip) => clip.id === 'occ-1:short-output')?.app?.canonicalTiming)
       .toMatchObject({ occurrenceDurationMs: 4000 });
     expect(projection.config.registry).not.toHaveProperty('missing-source');
     expect(projection.config.registry).not.toHaveProperty('missing-parent');
+    expect((normalized.occurrences[0].revision.internal_timeline_revision as {
+      timeline: { tracks: unknown[] };
+    }).timeline.tracks).toEqual([
+      { id: 'source-video', kind: 'visual', label: 'Interview', role: 'source' },
+      { id: 'video', kind: 'visual', label: 'Output cut', ...(role ? { role } : {}) },
+    ]);
   });
 
   it('classifies parent Source ownership before filtering tracks, even when a child reuses the ID', () => {
@@ -325,7 +583,8 @@ describe('canonical shot-composition downstream projection', () => {
     expect(projection.config.clips.some((clip) => clip.id.startsWith('occ-1:'))).toBe(false);
     expect(projection.config.clips.some((clip) => clip.id === 'occ-2:alpha-video')).toBe(true);
     expect(projection.config.clips.some((clip) => clip.id === 'parent-source')).toBe(false);
-    expect(projection.config.tracks.find((track) => track.id === 'video')?.role).not.toBe('source');
+    expect(projection.config.tracks.find((track) => track.id === 'occ-2~video')).toMatchObject({ kind: 'visual' });
+    expect(projection.config.tracks.find((track) => track.id === 'occ-2~video')?.role).not.toBe('source');
     expect(projection.config.registry).not.toHaveProperty('parent-source-asset');
     expect(projection.config.app?.canonicalComposition).toMatchObject({ occurrenceIds: ['occ-2', 'occ-3', 'occ-4', 'occ-5'] });
   });

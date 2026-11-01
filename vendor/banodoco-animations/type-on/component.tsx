@@ -1,5 +1,5 @@
 import {interpolate} from 'remotion';
-import type {HookAnimationProps, HookAnimationResult} from '../../tools/remotion/src/effects.types';
+import type {HookAnimationProps, HookAnimationResult} from '@banodoco/timeline-composition/theme-api';
 
 type TypeOnParams = {
   startFrame?: number;

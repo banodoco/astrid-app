@@ -4,7 +4,7 @@ import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-up
 import { CopyInstallCommand } from './CopyInstallCommand.tsx';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
+import { captureDraftReloadWitness, useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 
 /** Opens Settings on its Updates tab; the header and the update cards share this route. */
@@ -28,7 +28,7 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
   const execute = actions.find((action) => action.execute === 'installer-update');
   const localCommand = actions.find((action) => action.label === RUN_IT_YOURSELF_ACTION)?.command;
   const startUpdate = async () => {
-    if (await guarded.flush()) await operation?.start();
+    if (await guarded.flush()) await operation?.start(captureDraftReloadWitness());
   };
 
   return <div className="space-y-2">
@@ -39,7 +39,7 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
-    {operation?.error && <p role="alert">Could not confirm the update status. Download diagnostics before trying again.</p>}
+    {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
     {operation?.fresh && !operation.error && installerUpdateStatusMessage(operation.status) && !operation.pending && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
     {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}

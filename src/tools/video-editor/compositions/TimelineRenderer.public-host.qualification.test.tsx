@@ -26,6 +26,7 @@ import canonicalCard2 from '@astrid/packs/local/rendering/elements/effects/end-s
 import canonicalCard3 from '@astrid/packs/local/rendering/elements/effects/end-spanning-layer/assets/card-3.png?url';
 import canonicalCard4 from '@astrid/packs/local/rendering/elements/effects/end-spanning-layer/assets/card-4-canonical-mink.png?url';
 import canonicalCard5 from '@astrid/packs/local/rendering/elements/effects/end-spanning-layer/assets/card-5-canonical-mink.png?url';
+import { clipOpacity } from '@banodoco/timeline-composition/evaluation';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
@@ -117,6 +118,75 @@ const makeProbeHost = () => {
 };
 
 describe('V009 public host behavior qualification', () => {
+  it('applies a top-level fade to a registered effect and prerolls its incoming transition', () => {
+    const { host } = makeProbeHost();
+    const config = baseConfig({
+      id: 'effect', clipType: 'probe', track: 'V1', at: 1, hold: 1, params: {},
+      elementRef: { id: 'probe', kind: 'effect', revision: 'r1' },
+      entrance: { id: 'fade', durationFrames: 12, easing: 'linear' },
+      transition: { id: 'fade', durationFrames: 8 },
+    });
+    config.clips.unshift({ id: 'previous', clipType: 'media', track: 'V1', at: 0, hold: 1 });
+    currentFrame = 0;
+    const view = render(<TimelineRenderer astridElementHost={host} config={config} />);
+    const effect = screen.getByTestId('probe-effect');
+    expect(effect.closest('[data-testid="sequence"]')).toHaveAttribute('from', '22');
+    let parent: HTMLElement | null = effect.parentElement;
+    let faded = false;
+    while (parent && parent !== view.container) {
+      faded ||= parent.style.opacity === '0';
+      parent = parent.parentElement;
+    }
+    expect(faded).toBe(true);
+    view.unmount();
+  });
+
+  it.each([
+    { shape: 'object', effects: { fade_in: 1 } },
+    { shape: 'array', effects: [{ fade_in: 1 }] },
+  ])('applies the package clipOpacity for $shape effects fade_in on a registered effect', ({ effects }) => {
+    const { host } = makeProbeHost();
+    const clip = {
+      id: 'effect', clipType: 'probe', track: 'V1', at: 0, hold: 2, params: {},
+      elementRef: { id: 'probe', kind: 'effect', revision: 'r1' },
+      effects,
+    } as ResolvedTimelineConfig['clips'][number];
+    currentFrame = 15;
+    const expected = clipOpacity(clip as never, 15, 30);
+    expect(expected).toBeGreaterThan(0);
+    expect(expected).toBeLessThan(1);
+    const view = render(<TimelineRenderer astridElementHost={host} config={baseConfig(clip)} />);
+    const opacities: number[] = [];
+    for (let node: HTMLElement | null = screen.getByTestId('probe-effect').parentElement; node && node !== view.container; node = node.parentElement) {
+      if (node.style.opacity && node.style.opacity !== '1') opacities.push(Number(node.style.opacity));
+    }
+    expect(opacities).toEqual([expected]);
+    view.unmount();
+  });
+
+  it('applies effects fade_out once on text content that already carries clip.opacity', async () => {
+    const { TextClip } = await vi.importActual<typeof import('@/tools/video-editor/compositions/TextClip.tsx')>(
+      '@/tools/video-editor/compositions/TextClip.tsx',
+    );
+    const clip = {
+      id: 'text', clipType: 'text', track: 'V1', at: 0, hold: 2, opacity: 0.8,
+      text: { content: 'Faded' }, effects: { fade_out: 1 },
+    } as ResolvedTimelineConfig['clips'][number];
+    currentFrame = 45;
+    const fadeOnly = clipOpacity({ ...clip, opacity: undefined } as never, 45, 30);
+    expect(fadeOnly).toBeGreaterThan(0);
+    expect(fadeOnly).toBeLessThan(1);
+    const view = render(<TextClip clip={clip} track={{ id: 'V1', kind: 'visual', label: 'V1' }} fps={30} />);
+    const content = screen.getByText('Faded');
+    expect(content.style.opacity).toBe('0.8');
+    const faded: number[] = [];
+    for (let node: HTMLElement | null = content.parentElement; node && node !== view.container; node = node.parentElement) {
+      if (node.style.opacity && node.style.opacity !== '1') faded.push(Number(node.style.opacity));
+    }
+    expect(faded).toEqual([fadeOnly]);
+    view.unmount();
+  });
+
   it('uses injected host values at typed effect, typed animation, legacy, and sequence helper callsites', () => {
     const typedEffect = makeProbeHost();
     const typedEffectView = render(<TimelineRenderer

@@ -60,7 +60,7 @@ describe('UpdateOperation', () => {
     const { operation, client } = makeOperation({ statuses: [new ApiError(404, 'not_found', 'No update route.', 'req-old')] });
 
     await operation.refresh();
-    await operation.start();
+    await operation.start(() => true);
 
     expect(operation.getSnapshot()).toMatchObject({ health: HEALTH, releaseStatus, fresh: false });
     expect(operation.getSnapshot().error).toBe('Could not check Astrid update status. Check your connection and try again.');
@@ -81,7 +81,7 @@ describe('UpdateOperation', () => {
     });
 
     await operation.refresh();
-    await operation.start();
+    await operation.start(() => true);
 
     expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
     expect(operation.getSnapshot()).toMatchObject({ status: acceptedJob, pending: state === 'active', fresh: true });
@@ -107,7 +107,7 @@ describe('UpdateOperation', () => {
     const { operation, client } = makeOperation({ statuses: [NONE, NONE], start: async () => { throw refusal; } });
     await operation.refresh();
 
-    await operation.start();
+    await operation.start(() => true);
 
     expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
     expect(operation.getSnapshot().pending).toBe(false);
@@ -122,11 +122,24 @@ describe('UpdateOperation', () => {
     });
     await operation.refresh();
 
-    await operation.start();
+    await operation.start(() => true);
 
     expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
     expect(operation.getSnapshot()).toMatchObject({ fresh: false, pending: false });
     expect(operation.getSnapshot().error).toBe('Could not check Astrid update status. Check your connection and try again.');
+  });
+
+  it('rechecks draft admission after publishing pending and refuses locally without POST', async () => {
+    const { operation, client } = makeOperation({ statuses: [NONE] });
+    await operation.refresh();
+    let clean = true;
+    operation.subscribe(() => { if (operation.getSnapshot().pending) clean = false; });
+
+    await operation.start(() => clean);
+
+    expect(client.startInstallerUpdate).not.toHaveBeenCalled();
+    expect(operation.getSnapshot()).toMatchObject({ pending: false, fresh: true });
+    expect(operation.getSnapshot().error).toMatch(/drafts changed/i);
   });
 
   it('reuses a page-owned operation across component remounts', () => {

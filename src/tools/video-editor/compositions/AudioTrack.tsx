@@ -297,20 +297,34 @@ const ClipAudio: FC<{
   trimAfter?: number;
   playbackRate: number;
 }> = ({ clip, renderClip, fps, baseVolume, isRendering, src, trimBefore, trimAfter, playbackRate }) => {
-  const fade = getAudioFade(clip, fps);
-  const fadeInFrames = fade?.fadeInFrames ?? 0;
-  const fadeOutFrames = fade?.fadeOutFrames ?? 0;
-  const durationFrames = fade?.durationFrames ?? 0;
+  const fadeIn = clip.params?.fadeIn;
+  const fadeOut = clip.params?.fadeOut;
+  const fadeInCurve = clip.params?.fadeInCurve;
+  const fadeOutCurve = clip.params?.fadeOutCurve;
+  const durationFrames = getClipDurationInFrames(clip, fps);
+  const fadeClip = useMemo(() => ({
+    id: clip.id,
+    track: clip.track,
+    at: 0,
+    hold: durationFrames / fps,
+    speed: 1,
+    params: { fadeIn, fadeOut, fadeInCurve, fadeOutCurve },
+  }), [clip.id, clip.track, durationFrames, fadeIn, fadeOut, fadeInCurve, fadeOutCurve, fps]);
+  const envelope = useMemo(
+    () => getAudioFade(fadeClip, fps),
+    [fadeClip, fps],
+  );
   const frameOffset = secondsToFrames(renderClip.at, fps) - secondsToFrames(clip.at, fps);
   // A stable function identity matters: Remotion re-derives a per-frame
   // volume table whenever the `volume` prop changes.
   const volume = useMemo(
     () => getAudioVolumeProp(
       baseVolume,
-      fadeInFrames > 0 || fadeOutFrames > 0 ? { fadeInFrames, fadeOutFrames, durationFrames } : null,
+      envelope,
+      fps,
       frameOffset,
     ),
-    [baseVolume, durationFrames, fadeInFrames, fadeOutFrames, frameOffset],
+    [baseVolume, envelope, fps, frameOffset],
   );
 
   if (isRendering) {

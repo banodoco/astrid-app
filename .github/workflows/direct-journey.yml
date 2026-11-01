@@ -182,6 +182,13 @@ jobs:
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 
+      - name: Record checkout identities
+        id: checkout-identities
+        shell: bash
+        run: |
+          printf 'agent_head=%s\n' "$(git -C astrid-agent rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          printf 'runtime_head=%s\n' "$(git -C astrid-runtime rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
       - name: Restore npm cache (C-08)
         id: c08-app-direct-journey-1
         uses: actions/cache/restore@v4
@@ -227,6 +234,8 @@ jobs:
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
           ASTRID_REQUIRE_LANES: direct-journey
           ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
+          TIMELINE_BUNDLE_AGENT_HEAD: ${{ steps.checkout-identities.outputs.agent_head }}
+          TIMELINE_BUNDLE_RUNTIME_HEAD: ${{ steps.checkout-identities.outputs.runtime_head }}
           # Written by the JSON reporter itself (the globalSetup prints to stdout, so a shell redirect would corrupt the file).
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results

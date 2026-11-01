@@ -11,7 +11,7 @@
  */
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, randomUUID, X509Certificate } from 'node:crypto';
-import { accessSync, chmodSync, constants as fsConstants, createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { accessSync, chmodSync, constants as fsConstants, createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer as createHttpsServer, type Server as HttpsServer } from 'node:https';
 import { request as httpRequest, type IncomingHttpHeaders } from 'node:http';
 import { createServer as createNetServer } from 'node:net';
@@ -686,7 +686,11 @@ export class DirectHarness {
       this.phaseCaptureLaunchOrdinal = this.runtimeLogLaunchOrdinal - 1;
       const descriptorText = process.env.ASTRID_QUICK_DESCRIPTOR;
       if (descriptorText !== undefined) this.attachment = loadQuickDescriptor(descriptorText);
-      this.tmp = mkdtempSync(path.join(tmpdir(), 'astrid-direct-'));
+      // Chromium needs TMPDIR to retain a /tmp lexical prefix in this sandbox,
+      // but Runtime correctly rejects a realm root that traverses that helper
+      // symlink.  Store the canonical task-local directory for all Runtime
+      // roots while the browser can keep using the compatibility alias.
+      this.tmp = realpathSync(mkdtempSync(path.join(tmpdir(), 'astrid-direct-')));
       if (!this.attachment) await assertPortFree(this.doorPort, 'door');
       const tls = makeCertificate(this.tmp);
       this.spki = tls.spki;
@@ -743,7 +747,7 @@ export class DirectHarness {
 
   private runtimeEnv(captureSink?: string): NodeJS.ProcessEnv {
     const agent = path.resolve(process.env.ASTRID_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-agent'));
-    const env: NodeJS.ProcessEnv = { PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', PYTHONPATH: [RUNTIME_CHECKOUT, agent].join(path.delimiter) };
+    const env: NodeJS.ProcessEnv = { PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', TMPDIR: this.tmp, PYTHONPATH: [RUNTIME_CHECKOUT, agent].join(path.delimiter) };
     if (this.verificationOnly) {
       for (const key of runtimeMeasurementEnvKeys) env[key] = undefined;
     }
@@ -826,8 +830,10 @@ export class DirectHarness {
       if (managed.child.exitCode !== null) {
         return managed.closed.then(() => {
           const stderr = managed.stderr.trim();
+          const stdout = managed.stdout.trim();
           const detail = stderr ? stderr.slice(-4000) : '<empty>';
-          throw new Error(`${error instanceof Error ? error.message : String(error)}\nRuntime stderr:\n${detail}`);
+          const output = stdout ? stdout.slice(-4000) : '<empty>';
+          throw new Error(`${error instanceof Error ? error.message : String(error)}\nRuntime exit: ${managed.child.exitCode}\nRuntime stdout:\n${output}\nRuntime stderr:\n${detail}`);
         });
       }
       throw error;

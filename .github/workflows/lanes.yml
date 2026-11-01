@@ -4,14 +4,15 @@ name: Lanes
 
 on:
   push:
-    branches: [main, release-1, "int/**"]
+    branches: [main, int/r1]
+  pull_request:
   # Nightly, like direct-journey.yml: the siblings' main moves without an App push, and these lanes catch that drift.
   schedule:
     - cron: "43 3 * * *"
   workflow_dispatch:
 
 concurrency:
-  group: lanes-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:

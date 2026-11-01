@@ -1,0 +1,22 @@
+{
+  "repos": {
+    "astrid-app": "d8b6985d664cb92a92d9001e1952c88e370aca2b"
+  },
+  "gpu": false,
+  "cpu": {
+    "vcpu": 8
+  },
+  "max_minutes": 25,
+  "setup": [
+    "mkdir -p /workspace/out/I-AP-04-R1-R2-baseline /tmp/i-ap-04-r1-r2 && printf %s IyEvdXNyL2Jpbi9lbnYgYmFzaAojIFJ1biBhIGNvbW1hbmQgd2l0aCBjcmVkZW50aWFscyByZW1vdmVkIGZyb20gdGhlIGVudmlyb25tZW50LCBzbyBDb2RleCBtYW5hZ2VycyBhbmQgd29ya2VycyBuZXZlciBzZWUgdGhlbS4KIyBQcm94eSBhbmQgQ0EgdmFyaWFibGVzIGFyZSBrZXB0ICh0aGUgbmV0d29yayBuZWVkcyB0aGVtKS4gVXNhZ2U6IGNvZGV4L2Vudi1zYWZlLnNoIDxjb21tYW5kLi4uPgpleGVjIGVudiAtdSBSVU5QT0RfQVBJX0tFWSAtdSBBV1NfQUNDRVNTX0tFWV9JRCAtdSBBV1NfU0VDUkVUX0FDQ0VTU19LRVkgLXUgQVdTX1NFU1NJT05fVE9LRU4gXAogIC11IEdIX1RPS0VOIC11IEdJVEhVQl9UT0tFTiAtdSBDTE9VRFNES19BVVRIX0FDQ0VTU19UT0tFTiAtdSBDTEFVREVfQ09ERV9NRVNTQUdJTkdfVE9LRU4gXAogIC11IENMQVVERV9TRVNTSU9OX0lOR1JFU1NfVE9LRU5fRklMRSAtdSBPUEVOQUlfQVBJX0tFWSAtdSBBTlRIUk9QSUNfQVBJX0tFWSAtdSBGQUxfS0VZIC11IEhGX1RPS0VOIFwKICAtdSBSQUlMV0FZX1RPS0VOIC11IFJBSUxXQVlfQVBJX1RPS0VOICIkQCIK | base64 -d > /tmp/i-ap-04-r1-r2/env-safe.sh && chmod +x /tmp/i-ap-04-r1-r2/env-safe.sh && cd /workspace/astrid-app && /tmp/i-ap-04-r1-r2/env-safe.sh git rev-parse HEAD | tee /workspace/out/I-AP-04-R1-R2-baseline/head.txt && test \"$(/tmp/i-ap-04-r1-r2/env-safe.sh git rev-parse HEAD)\" = d8b6985d664cb92a92d9001e1952c88e370aca2b",
+    "cd /workspace/astrid-app && /tmp/i-ap-04-r1-r2/env-safe.sh npm ci --cache /tmp/i-ap-04-r1-r2/npm-cache"
+  ],
+  "run": [
+    "cd /workspace/astrid-app || exit $?\nset -o pipefail\ntest \"$(/tmp/i-ap-04-r1-r2/env-safe.sh git rev-parse HEAD)\" = d8b6985d664cb92a92d9001e1952c88e370aca2b || exit 1\n./node_modules/.bin/vitest run --config config/testing/vitest.config.ts --maxWorkers=1 src/tools/video-editor/components/AgentChat/AgentChatMenu.test.tsx --reporter=verbose --reporter=json --outputFile.json=/workspace/out/I-AP-04-R1-R2-baseline/vitest.json 2>&1 | tee /workspace/out/I-AP-04-R1-R2-baseline/vitest.log\ncode=${PIPESTATUS[0]}\nprintf \"%s\\n\" \"$code\" > /workspace/out/I-AP-04-R1-R2-baseline/test-exit-code.txt\nexit \"$code\""
+  ],
+  "artifacts": [
+    "/workspace/out/I-AP-04-R1-R2-baseline"
+  ],
+  "task_id": "I-AP-04-R1-R2",
+  "notes": "Baseline only; preserve actual results even on failure. Pod checkout is pinned independently of request branch."
+}

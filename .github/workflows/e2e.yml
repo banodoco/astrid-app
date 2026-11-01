@@ -10,7 +10,7 @@ on:
 
 concurrency:
   group: e2e-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   CI: "true"

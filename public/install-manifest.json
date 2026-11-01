@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "release": 1,
   "agent": {
     "sha": "020877f12ea490308a9e5f9564c8f4a4bf77ede1"
   },

@@ -11,8 +11,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: lanes-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: lanes-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   # `npm run test:checkout` (portableVisualSeamIntent, astridSceneAuthoring, localExtensions.catalog) and

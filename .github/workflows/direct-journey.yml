@@ -29,8 +29,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: direct-journey-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: direct-journey-${{ github.event.pull_request.number || github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   direct-journey:
@@ -145,8 +145,8 @@ jobs:
   three-products:
     runs-on: ubuntu-24.04
     concurrency:
-      group: three-products-${{ github.ref }}
-      cancel-in-progress: true
+      group: three-products-${{ github.ref }}-${{ github.event_name == 'pull_request' && 'pr' || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       # The harness finds Astrid at ../astrid-agent (ASTRID_CHECKOUT overrides) and the Runtime at ../astrid-runtime,
       # so all three checkouts are siblings under $GITHUB_WORKSPACE.

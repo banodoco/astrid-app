@@ -1,0 +1,82 @@
+name: PR fast lane
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docs: ${{ steps.paths.outputs.docs }}
+    steps:
+      - id: paths
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            // Missing output selects all jobs, including API and pagination failures.
+            const {owner, repo} = context.repo;
+            const pull_number = context.payload.pull_request.number;
+            const pr = (await github.rest.pulls.get({owner, repo, pull_number})).data;
+            if (pr.head.sha !== context.payload.pull_request.head.sha ||
+                pr.base.sha !== context.payload.pull_request.base.sha ||
+                !Number.isInteger(pr.changed_files) || pr.changed_files < 1 || pr.changed_files >= 3000) return;
+            const files = await github.paginate(github.rest.pulls.listFiles,
+              {owner, repo, pull_number, per_page: 100});
+            if (files.length !== pr.changed_files || files.some(f =>
+              !['added', 'modified'].includes(f.status) || typeof f.filename !== 'string')) return;
+            const latest = (await github.rest.pulls.get({owner, repo, pull_number})).data;
+            if (latest.head.sha !== pr.head.sha || latest.base.sha !== pr.base.sha ||
+                latest.changed_files !== pr.changed_files) return;
+            // Only this audited, existing document is exempt. Unknown paths run all jobs.
+            core.setOutput('docs', String(files.every(f =>
+              f.status === 'modified' && f.filename === 'docs/blog/ios-safari-fixed-overlays.md')));
+  tests:
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs != 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+      - run: npm ci --legacy-peer-deps
+      - run: npm test
+      - run: npm run test:sdk-boundary
+  release:
+    needs: changes
+    if: ${{ always() && (needs.changes.result != 'success' || needs.changes.outputs.docs != 'true') }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+      - run: node --test scripts/installer/release.test.mjs scripts/qualification/check-public-updater-candidate.test.mjs
+  aggregate:
+    name: PR fast lane aggregate
+    if: ${{ always() }}
+    needs: [changes, tests, release]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify selected jobs
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYCODE'
+          import json, os
+          needs = json.loads(os.environ['RESULTS'])
+          docs = needs['changes']['result'] == 'success' and needs['changes'].get('outputs', {}).get('docs') == 'true'
+          for name in ['tests', 'release']:
+              expected = 'skipped' if docs else 'success'
+              if needs[name]['result'] != expected:
+                  raise SystemExit(f"{name}: expected {expected}, got {needs[name]['result']}")
+          PYCODE

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AstridRuntimeClient, type InstallerUpdateHealth, type InstallerUpdateStatus } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import { installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
+import { canStartInstallerUpdate, installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
 
 vi.mock('./updateStatus.ts', () => ({ checkHostedUpdate: vi.fn(async () => null) }));
@@ -51,6 +51,69 @@ function makeOperation(options: {
 }
 
 describe('UpdateOperation', () => {
+  it('does not continue a recovery status without a valid operation identity', async () => {
+    const { operation, client } = makeOperation({ statuses: [{ available: true, state: 'recovery-needed' }] });
+    await operation.refresh();
+    expect(canStartInstallerUpdate(operation.getSnapshot().status)).toBe(false);
+    await operation.start();
+    expect(client.startInstallerUpdate).not.toHaveBeenCalled();
+  });
+
+  it('only exposes recovery for a valid identity and never exposes an active job as actionable', () => {
+    expect(canStartInstallerUpdate({ available: true, state: 'recovery-needed', operation_id: 'A'.repeat(32) })).toBe(false);
+    expect(canStartInstallerUpdate({ available: false, state: 'recovery-needed', operation_id: 'a'.repeat(32) })).toBe(true);
+    expect(canStartInstallerUpdate({ available: true, state: 'active', operation_id: 'a'.repeat(32) })).toBe(false);
+  });
+
+  it('does not settle a continuation from an unrelated acknowledgement or status', async () => {
+    const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: 'a'.repeat(32) };
+    const unrelated: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: 'b'.repeat(32) };
+    const { operation, client } = makeOperation({
+      statuses: [recovery, unrelated, unrelated],
+      start: async () => ({ accepted: true, state: 'accepted', operation_id: 'b'.repeat(32), message: 'Update accepted.' }),
+    });
+    await operation.refresh();
+    await operation.start();
+    await operation.refresh();
+    expect(operation.getSnapshot()).toMatchObject({ status: null, pending: true, fresh: false });
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+  });
+
+  it('retains the unresolved operation through two lost continuation acknowledgements', async () => {
+    const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: 'a'.repeat(32) };
+    const { operation, client } = makeOperation({
+      statuses: [recovery, recovery, recovery],
+      start: async () => { throw new TypeError('connection reset after continuation'); },
+    });
+    await operation.refresh();
+    await operation.start();
+    expect(operation.getSnapshot()).toMatchObject({ status: recovery, pending: false, fresh: true });
+    await operation.start();
+    expect(operation.getSnapshot()).toMatchObject({ status: recovery, pending: false, fresh: true });
+    expect(client.startInstallerUpdate).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not settle a lost acknowledgement with a read started before the click', async () => {
+    const recovery: InstallerUpdateStatus = { available: true, state: 'recovery-needed', operation_id: 'a'.repeat(32) };
+    let resolveOld!: (status: InstallerUpdateStatus) => void;
+    const oldRead = new Promise<InstallerUpdateStatus>((resolve) => { resolveOld = resolve; });
+    const status = vi.fn().mockResolvedValueOnce(recovery).mockReturnValueOnce(oldRead).mockResolvedValueOnce(recovery);
+    const client: ClientMethods = {
+      readInstallerUpdateHealth: vi.fn(async () => HEALTH),
+      readInstallerUpdateStatus: status,
+      startInstallerUpdate: vi.fn(async () => { throw new TypeError('lost acknowledgement'); }),
+    };
+    const operation = new UpdateOperation(client as AstridRuntimeClient);
+    await operation.refresh();
+    const before = operation.refresh();
+    const action = operation.start();
+    resolveOld({ available: true, state: 'terminal', operation_id: 'a'.repeat(32), outcome: 'updated' });
+    await Promise.all([before, action]);
+    expect(status).toHaveBeenCalledTimes(3);
+    expect(operation.getSnapshot()).toMatchObject({ status: recovery, pending: false, fresh: true });
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+  });
+
   it('keeps authenticated release ordering when an older Runtime has no F1 status route', async () => {
     const releaseStatus = {
       release: 12, app: 'page', servedRelease: 4, servedApp: 'served', behind: false,

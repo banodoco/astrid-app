@@ -46,7 +46,7 @@ export function localUpdateBehind(servedRelease: number, checkoutRelease: number
   return servedRelease > checkoutRelease || !servedAppIsAncestor;
 }
 
-async function boundedJsonBody(url: string): Promise<unknown> {
+async function boundedBody(url: string): Promise<string> {
   const response = await fetch(url, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(5000), headers: { Accept: 'application/json' } });
   if (!response.ok) throw new Error(`Astrid update check returned HTTP ${response.status}`);
   const declaredLength = Number(response.headers.get('content-length'));
@@ -72,14 +72,36 @@ async function boundedJsonBody(url: string): Promise<unknown> {
     text = await response.text();
     if (Buffer.byteLength(text) > 16_384) throw new Error('Astrid update status response was too large');
   }
-  return JSON.parse(text) as unknown;
+  return text;
 }
 
-async function boundedJson(url: string): Promise<{ app: string; release: number }> {
-  const body = await boundedJsonBody(url) as { app?: unknown; release?: unknown };
+function servedBuild(raw: unknown): { app: string; release: number } {
+  const body = raw as { app?: unknown; release?: unknown };
   if (typeof body.app !== 'string' || !/^[0-9a-f]{40}$/i.test(body.app) || !Number.isSafeInteger(body.release) || (body.release as number) < 0) throw new Error('Astrid update status response was invalid');
   return { app: body.app, release: body.release as number };
 }
+
+async function isServedAppAncestor(root: string, app: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--verify', '--quiet', `${app}^{commit}`], { cwd: root, timeout: 2000, maxBuffer: 1024 });
+  } catch (error) {
+    // A served revision may not be in a shallow or older checkout. That is the
+    // expected "behind" outcome, not an unavailable local Git diagnostic.
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 1) return false;
+    throw error;
+  }
+  try {
+    await execFileAsync('git', ['merge-base', '--is-ancestor', app, 'HEAD'], { cwd: root, timeout: 2000, maxBuffer: 1024 });
+    return true;
+  } catch (error) {
+    // git merge-base returns 1 for the expected "not an ancestor" result. Other
+    // failures (including an unavailable or broken local checkout) are diagnostic.
+    if (typeof error === 'object' && error !== null && 'code' in error && (error as { code?: unknown }).code === 1) return false;
+    throw error;
+  }
+}
+
+type LocalUpdateStatusFailureStage = 'upstream_fetch' | 'served_manifest_validation' | 'local_git_ancestry_lookup';
 
 export function createLocalUpdateStatusPlugin({ manifestPath }: { manifestPath: string }): Plugin {
   const enabled = process.env.ASTRID_LOCAL_UPDATE_STATUS === '1';
@@ -105,23 +127,58 @@ export function createLocalUpdateStatusPlugin({ manifestPath }: { manifestPath: 
           response.end(JSON.stringify({ error: 'request_refused' }));
           return;
         }
+
+        const unavailable = (stage: LocalUpdateStatusFailureStage) => {
+          response.statusCode = 503;
+          response.setHeader('Content-Type', 'application/json; charset=utf-8');
+          response.setHeader('Cache-Control', 'no-store');
+          response.end(JSON.stringify({ error: 'local_update_status_unavailable', stage }));
+        };
+
+        let servedBody: string;
         try {
-          const served = await boundedJson('https://astrid.haus/build.json');
-          const requirement = servedRequirement(await boundedJsonBody('https://astrid.haus/install-manifest.json'), served.release);
+          servedBody = await boundedBody('https://astrid.haus/build.json');
+        } catch {
+          unavailable('upstream_fetch');
+          return;
+        }
+
+        let served: { app: string; release: number };
+        try {
+          served = servedBuild(JSON.parse(servedBody) as unknown);
+        } catch {
+          unavailable('served_manifest_validation');
+          return;
+        }
+
+        let installManifestBody: string;
+        try {
+          installManifestBody = await boundedBody('https://astrid.haus/install-manifest.json');
+        } catch {
+          unavailable('upstream_fetch');
+          return;
+        }
+
+        let requirement: { requiredRelease?: number; requiredReason?: string };
+        try {
+          requirement = servedRequirement(JSON.parse(installManifestBody) as unknown, served.release);
+        } catch {
+          unavailable('served_manifest_validation');
+          return;
+        }
+
+        try {
           const release = readLocalRelease(await readFile(manifestPath, 'utf8'));
           const { stdout: localHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: server.config.root, timeout: 2000, maxBuffer: 1024 });
-          const ancestry = await execFileAsync('git', ['merge-base', '--is-ancestor', served.app, 'HEAD'], { cwd: server.config.root, timeout: 2000, maxBuffer: 1024 }).then(() => true, () => false);
+          const ancestry = await isServedAppAncestor(server.config.root, served.app);
           const body = JSON.stringify({ app: localHead.trim(), release, ...requirement, servedApp: served.app, servedRelease: served.release, behind: localUpdateBehind(served.release, release, ancestry) });
           response.statusCode = 200;
           response.setHeader('Content-Type', 'application/json; charset=utf-8');
           response.setHeader('Cache-Control', 'no-store');
           response.setHeader('Content-Length', Buffer.byteLength(body));
           response.end(body);
-        } catch (error) {
-          response.statusCode = 503;
-          response.setHeader('Content-Type', 'application/json; charset=utf-8');
-          response.setHeader('Cache-Control', 'no-store');
-          response.end(JSON.stringify({ error: error instanceof Error ? error.message : 'update_status_unavailable' }));
+        } catch {
+          unavailable('local_git_ancestry_lookup');
         }
       });
     },

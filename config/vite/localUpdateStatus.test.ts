@@ -84,4 +84,60 @@ describe('local update status endpoint boundary', () => {
     }
   });
 
+  it('degrades safely with a stable diagnostic stage for each status lookup failure', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'astrid-local-update-failure-'));
+    tempDirs.push(dir);
+    const checkout = path.join(dir, 'not-a-git-checkout');
+    await mkdir(checkout);
+    const manifestPath = path.join(dir, 'install-manifest.json');
+    await writeFile(manifestPath, JSON.stringify({ release: 3 }));
+    const originalFlag = process.env.ASTRID_LOCAL_UPDATE_STATUS;
+    process.env.ASTRID_LOCAL_UPDATE_STATUS = '1';
+    const plugin = createLocalUpdateStatusPlugin({ manifestPath });
+    let middleware!: (request: unknown, response: unknown, next: () => void) => Promise<void>;
+    const server = { config: { root: checkout, server: { port: 4317 } }, middlewares: { use: (handler: typeof middleware) => { middleware = handler; } } };
+    plugin.configureServer?.(server as never);
+    const request = { method: 'POST', url: '/__astrid/local-update-status', headers: {
+      host: '127.0.0.1:4317', origin: 'http://127.0.0.1:4317', 'sec-fetch-site': 'same-origin', 'content-length': '0', 'content-type': 'application/json', accept: 'application/json',
+    } };
+    const run = async () => {
+      const headers: Record<string, string | number> = {};
+      const response = { statusCode: 0, setHeader: (name: string, value: string | number) => { headers[name.toLowerCase()] = value; }, end: (body: string) => { (response as { body?: string }).body = body; }, body: '' };
+      await middleware(request, response, () => { throw new Error('Unexpected middleware pass-through'); });
+      return { response, headers, rawBody: response.body, body: JSON.parse(response.body) as Record<string, unknown> };
+    };
+    const unavailable = (stage: string) => expect.objectContaining({
+      response: expect.objectContaining({ statusCode: 503 }),
+      headers: expect.objectContaining({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' }),
+      body: { error: 'local_update_status_unavailable', stage },
+    });
+    try {
+      vi.stubGlobal('fetch', vi.fn(async () => { throw new Error('offline token=very-secret-token'); }));
+      const offline = await run();
+      expect(offline).toEqual(unavailable('upstream_fetch'));
+      expect(offline.rawBody).not.toContain('very-secret-token');
+
+      vi.stubGlobal('fetch', vi.fn(async (input: unknown) => new Response(JSON.stringify(
+        String(input) === 'https://astrid.haus/build.json'
+          ? { app: '0000000000000000000000000000000000000000', release: 3 }
+          : { release: 2, required: { release: 'credential-path-token', reason: 'invalid' } },
+      ), { status: 200 })));
+      const invalidServedManifest = await run();
+      expect(invalidServedManifest).toEqual(unavailable('served_manifest_validation'));
+      expect(invalidServedManifest.rawBody).not.toContain('credential-path-token');
+
+      vi.stubGlobal('fetch', vi.fn(async (input: unknown) => new Response(JSON.stringify(
+        String(input) === 'https://astrid.haus/build.json'
+          ? { app: '0000000000000000000000000000000000000000', release: 3 }
+          : { release: 3 },
+      ), { status: 200 })));
+      const localGit = await run();
+      expect(localGit).toEqual(unavailable('local_git_ancestry_lookup'));
+      expect(localGit.rawBody).not.toContain(checkout);
+    } finally {
+      if (originalFlag === undefined) delete process.env.ASTRID_LOCAL_UPDATE_STATUS;
+      else process.env.ASTRID_LOCAL_UPDATE_STATUS = originalFlag;
+    }
+  });
+
 });

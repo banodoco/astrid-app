@@ -505,7 +505,7 @@ export function useTimelineSave(
   guardOwner.durable = () => !isTimelineSavePending() || (!localOwner.operations
     && !localOwner.operationError && persistence.isTimelineDraftDurableForReload());
   useLayoutEffect(() => isDataProviderPersistenceEnabled(provider) ? registerDraftSafeReloadGuard({
-    label: 'Timeline owner', retainUnresolved: true,
+    label: 'Timeline', retainUnresolved: true,
     flush: () => guardOwner.flush(), isDirty: () => guardOwner.read(),
     flushForReload: () => guardOwner.reload(), isDirtyForReload: () => !guardOwner.durable(),
   }) : undefined, [guardOwner, provider]);

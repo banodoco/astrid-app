@@ -99,7 +99,7 @@ export function useDraftSafeReload(label: string, flush: () => Promise<void>, en
 }
 
 /** Run a caller's reload only after every registered draft has reached durable storage. */
-export function useGuardedReload(reloadImpl: () => void = () => window.location.reload()): {
+export function useGuardedReload(reloadImpl: () => void = () => window.location.reload(), intent: 'update' | 'reload' = 'reload'): {
   flush: () => Promise<false | (() => boolean)>;
   reload: () => Promise<void>;
   error: string | null;
@@ -129,7 +129,7 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
     setPending(true);
     setError(null);
     try {
-      const validate = await flushDraftsBeforeReload('reload');
+      const validate = await flushDraftsBeforeReload(intent);
       if (!validate()) throw new Error('Drafts changed before reload. Try again.');
       reloadImpl();
     } catch (cause) {
@@ -138,6 +138,6 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
       pendingRef.current = false;
       setPending(false);
     }
-  }, [reloadImpl]);
+  }, [reloadImpl, intent]);
   return { flush, reload, error, pending };
 }

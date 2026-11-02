@@ -347,23 +347,29 @@ export function useTimelineSave(
             if (isCurrent()) setLocalSaveState(state);
           },
           prepareDisplay: async (basis, draft, adoption) => {
-            const document = (draft ?? basis.canonicalDocument) as unknown as typeof basis.canonicalDocument;
+            const retained = adoption?.retainedDraft;
+            const displayBasis = retained?.basis ?? basis;
+            const document = (draft ?? retained?.document ?? basis.canonicalDocument) as unknown as typeof basis.canonicalDocument;
             const parent = document.parent_revision.payload;
             const { bundle, ...config } = parent.config as unknown as TimelineConfig & { bundle?: TimelineBundleEnvelope };
             const registry = parent.registry as unknown as AssetRegistry;
             if (bundle) parseTimelineBundle(bundle);
             const head: TimelineHeadRevision = { projectId: document.project_id, timelineId: document.timeline_id,
-              headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId };
+              headRevisionId: displayBasis.head.revisionId, headPublicationId: displayBasis.head.publicationId };
             // The numeric UI counter is local; it is never used as a physical pin.
             const next = await buildTimelineData({ ...config, ...withDefaultTimelineOutput(config) }, registry, resolveAssetUrl,
               configVersionRef.current, bundle?.itemsBySchemaRef, head, bundle?.transcriptReferences);
             const source: TimelineSaveSource = { config: next.config, registry: next.registry, head,
               ...(bundle === undefined ? {} : { bundle }) };
-            return { document: toOutboxJson(document), adopt() {
-              // Keep a queued suffix visible while its accepted prefix is
-              // adopted and revalidated. On conflict the recovery action must
-              // still be able to preserve that user's complete draft.
-              if (!isCurrent() || adoption === 'pending' || adoption === 'conflict-draft') return;
+            return { document: toOutboxJson(retained ? basis.canonicalDocument : document), adopt() {
+              if (!isCurrent()) return;
+              // The session adopts the canonical conflict basis. Its retained
+              // suffix supplies the user's visible recovery draft, without
+              // relabelling that draft as authored on the new remote head.
+              if (retained) {
+                adoptCanonicalData(next, { save: false, skipHistory: true });
+                return;
+              }
               emitTimelineSaveDiagnostic('adoption-start', () => ({ owner: localOwner, timelineId,
                 mounted: localDataRef.current, source, current: isCurrent(), generation,
                 scopeMatched: head.timelineId === timelineId && head.projectId === verified.initial.canonicalDocument.project_id }));

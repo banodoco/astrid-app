@@ -196,7 +196,7 @@ describe('local editor saves through the durable outbox', () => {
     const mergedTrim = { ...trimmed, meta: mergedSplit.meta };
     env.send.mockResolvedValueOnce(result(mergedSplit, h1, h0, true)).mockImplementationOnce(async (request) => {
       expect(env.visible()).toEqual(mergedSplit);
-      expect(env.prepareDisplay.mock.lastCall?.[2]).toBe('pending');
+      expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: 'pending' });
       expect(session.getDocument()).toEqual(mergedSplit);
       expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1', commands: trimCommands });
       return result(mergedTrim, h2, h1);
@@ -318,7 +318,7 @@ describe('local editor saves through the durable outbox', () => {
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(env.send).toHaveBeenCalledTimes(1);
     expect(session.getState()).toMatchObject({ status: 'conflict', error: { code: 'dependency_changed', details } });
-    expect(env.prepareDisplay.mock.lastCall?.[2]).toBe('conflict');
+    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: 'conflict' });
     expect(env.visible()).toEqual({ ...original, agent: true });
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents.map((intent) => intent.payload)).toEqual([
@@ -424,7 +424,9 @@ describe('local editor saves through the durable outbox', () => {
     });
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(session.getState()).toMatchObject({ status: status === 409 ? 'conflict' : 'error', error: { code: 'binding_changed', details } });
-    expect(env.prepareDisplay.mock.lastCall?.[2]).toBe(status === 409 ? 'conflict-draft' : 'settled');
+    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual(status === 409
+      ? { kind: 'conflict', retainedDraft: { basis: originalRecord.intents[1].payload.displayBasis,
+        document: trimmed } } : { kind: 'settled' });
     expect(env.visible()).toEqual(canonical.canonicalDocument.parent_revision.payload);
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents).toHaveLength(1);

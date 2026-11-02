@@ -549,11 +549,12 @@ async function runHostedLoopbackLeaseJourney(
       expect(outcome.kind, JSON.stringify(outcome)).toBe('conflict');
       expect(outcome.failure.details).toMatchObject({ status: 'conflict', reason: 'value_conflict' });
       expect(outcome.recovery.status).toBe('re_derive');
-      expect(outcome.recovery.summary).toContain(`The user value is '${scenario.appLabel}'`);
-      expect(outcome.recovery.summary).toMatch(/preserve it and re-derive only compatible work/i);
       expect((await history(harness, seed3)).head).toEqual(appHead);
       const state = await revisionState(harness, seed3, appHead.revision_id);
       expect(state.trackLabel).toBe(scenario.appLabel);
+      journey.facts.preservedUserLabel = state.trackLabel;
+      expect(outcome.recovery.summary).toContain(`The user value is '${scenario.appLabel}'`);
+      expect(outcome.recovery.summary).toMatch(/preserve it and re-derive only compatible work/i);
     } else {
       expect(outcome.kind, JSON.stringify(outcome)).toBe('accepted');
       expect(outcome.result.data.status).toBe('merged');
@@ -843,6 +844,9 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   await expect(transitionSelect(page)).toContainText('crossfade');
   expect((await agent.status()).current_head).toBe(headB);
   const shown = await agent.show();
+  journey.facts.recoveryDraft = { survivedReload: true, baseRevisionId: kept?.baseHeadRevisionId,
+    basePublicationId: kept?.baseHeadPublicationId, label: 'F2 App A', transitionCleared: true };
+  journey.facts.agentPublishedReadback = shown;
   expect(shown.head_revision_id).toBe(headB);
   const layers = shown.rows.flatMap((row) => row.layers);
   expect(layers.find((layer) => layer.clip_id === seed3.agentClearClipId)?.asset, 'the agent sees the clear').toBeNull();

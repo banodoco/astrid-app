@@ -536,6 +536,7 @@ export function createExtensionLifecycleHost(
   liveDataRegistry?: LiveDataRegistry,
 ): ExtensionLifecycleHost {
   const lifecycles = new Map<string, ExtensionLifecycle>();
+  const registrationStages = new WeakMap<ExtensionLifecycle, ReturnType<typeof stageExtensionContext>>();
   const hostDiagnostics: ExtensionDiagnostic[] = [];
   const disposedCallbacks = new Set<(extensionId: string) => void>();
   let disposed = false;
@@ -590,6 +591,8 @@ export function createExtensionLifecycleHost(
           // still serving the editor. Failed activation disposes only the stage.
           const replacement = createExtensionLifecycle(ext);
           let stage: ReturnType<typeof stageExtensionContext> | undefined;
+          const previousStage = registrationStages.get(existing);
+          let suspended = false;
           try {
             stage = stageExtensionContext(contextFactory(ext));
             replacement.activate(stage.context);
@@ -599,17 +602,24 @@ export function createExtensionLifecycleHost(
               stage.dispose();
               continue;
             }
+            suspended = true;
+            previousStage?.suspend();
+            notifyLifecycleDisposed(id);
+            stage.commit();
             existing.dispose();
             if (liveDataRegistry && !liveDataRegistry.isDisposed) {
               try { liveDataRegistry.disposeExtensionSources(id); } catch { /* Keep disposing. */ }
             }
-            notifyLifecycleDisposed(id);
-            stage.commit();
             lifecycles.set(id, replacement);
+            registrationStages.set(replacement, stage);
             recoveryKeys.set(id, (recoveryKeys.get(id) ?? 0) + 1);
           } catch (error) {
             replacement.dispose();
             stage?.dispose();
+            if (suspended) {
+              notifyLifecycleDisposed(id);
+              previousStage?.restore();
+            }
             hostDiagnostics.push(Object.freeze({ severity: 'error',
               code: 'lifecycle/replacement-failed', extensionId: id,
               message: `Replacement activation failed: ${String(error)}` }));
@@ -647,12 +657,17 @@ export function createExtensionLifecycleHost(
 
     // Activate new/changed extensions
     for (const lc of toActivate) {
+      let stage: ReturnType<typeof stageExtensionContext> | undefined;
       try {
-        const stage = stageExtensionContext(contextFactory(lc.extension));
+        stage = stageExtensionContext(contextFactory(lc.extension));
+        registrationStages.set(lc, stage);
+        // Initial activation has no prior revision to protect. Preserve service
+        // validation/diagnostics while still owning every registration handle.
+        stage.commit();
         lc.activate(stage.context);
-        if (lc.state === 'active') stage.commit();
-        else { stage.dispose(); }
+        if (lc.state !== 'active') stage.dispose();
       } catch (err) {
+        stage?.dispose();
         // Context factory threw — capture in both the lifecycle's diagnostics
         // and the persistent host diagnostics so they survive lifecycle removal.
         const diag: ExtensionDiagnostic = Object.freeze({

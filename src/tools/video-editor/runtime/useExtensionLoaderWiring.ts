@@ -764,7 +764,7 @@ export function useExtensionLoaderWiring(
               const id = extension.manifest.id as string;
               return !loadResult.loadedExtensions.some((next) => next.manifest.id === id)
                 && packageStateEntries.some((entry) => entry.extensionId === id
-                  && ['invalid', 'incompatible', 'runtime-error', 'settings-error'].includes(entry.packageState));
+                  && ['invalid', 'incompatible', 'runtime-error'].includes(entry.packageState));
             }),
           ],
           diagnostics: [

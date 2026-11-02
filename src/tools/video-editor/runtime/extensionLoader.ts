@@ -12,6 +12,7 @@
 
 import type {
   AstridExtension,
+  ExtensionContext,
   ExtensionManifest,
   ExtensionDiagnostic,
   InstalledExtensionPackage,
@@ -180,7 +181,7 @@ async function importAdmittedExtension(
     releaseLease();
     throw moduleError('loader/module-identity', 'Default export must be an activatable AstridExtension with the exact admitted manifest and API.');
   }
-  const retained = { ...extension, activate(context: Parameters<AstridExtension['activate']>[0]) {
+  const retained = { ...extension, activate(context: ExtensionContext) {
     try {
       const handle = extension.activate(context);
       return { dispose() { try { handle?.dispose(); } finally { releaseLease(); } } };

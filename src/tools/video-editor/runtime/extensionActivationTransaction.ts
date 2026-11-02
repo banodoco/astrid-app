@@ -12,7 +12,7 @@ export function stageExtensionContext(context: ExtensionContext) {
   let committed = false;
   let disposed = false;
   const pending: Array<() => void> = [];
-  const handles = new Set<DisposeHandle>();
+  const registrations = new Set<{ apply(): void; suspend(): void; dispose(): void }>();
   const staged = { ...context } as any;
   // Registration services all return scoped disposal handles. Other operations
   // retain the host context's semantics; arbitrary extension side effects cannot
@@ -26,18 +26,24 @@ export function stageExtensionContext(context: ExtensionContext) {
         if (disposed) throw new Error('Extension registration context is disposed');
         let cancelled = false;
         let handle: DisposeHandle | undefined;
-        const owned = { dispose() {
-          if (cancelled) return;
-          cancelled = true;
-          handles.delete(owned);
-          handle?.dispose();
-        } };
-        const apply = () => {
-          if (cancelled) return;
-          handle = value.apply(service, args);
-          if (handle) handles.add(owned);
+        const owned = {
+          apply() {
+            if (!cancelled) handle = value.apply(service, args);
+          },
+          suspend() {
+            const previous = handle;
+            handle = undefined;
+            previous?.dispose();
+          },
+          dispose() {
+            if (cancelled) return;
+            cancelled = true;
+            registrations.delete(owned);
+            owned.suspend();
+          },
         };
-        if (committed) apply(); else pending.push(apply);
+        registrations.add(owned);
+        if (committed) owned.apply(); else pending.push(owned.apply);
         return owned;
       }];
     }));
@@ -46,7 +52,7 @@ export function stageExtensionContext(context: ExtensionContext) {
     if (disposed) return;
     disposed = true;
     pending.length = 0;
-    for (const handle of [...handles].reverse()) {
+    for (const handle of [...registrations].reverse()) {
       try { handle.dispose(); } catch { /* Keep draining owned handles. */ }
     }
     (context as any)[CONTEXT_DISPOSE_SYMBOL]?.();
@@ -66,6 +72,14 @@ export function stageExtensionContext(context: ExtensionContext) {
       committed = true;
       commitCallbacks.get(context)?.();
       for (const apply of pending.splice(0)) apply();
+    },
+    suspend() {
+      for (const registration of [...registrations].reverse()) registration.suspend();
+    },
+    restore() {
+      if (disposed) return;
+      commitCallbacks.get(context)?.();
+      for (const registration of registrations) registration.apply();
     },
     dispose,
   };

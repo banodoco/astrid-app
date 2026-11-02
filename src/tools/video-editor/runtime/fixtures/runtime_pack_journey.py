@@ -92,6 +92,8 @@ try:
             if command == 'uninstall':
                 install_group(source=source, packs={}, remove=('native_effect',), packs_root=installed, python_packages={})
                 result = {'uninstalled': True}
+            elif command == 'leases':
+                result = len(daemon.service._pack_leases)
             elif command == 'hash':
                 snapshot = read_group(installed)
                 record = snapshot.admissions['native_effect']

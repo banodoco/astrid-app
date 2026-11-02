@@ -3809,16 +3809,21 @@ describe('live effect replacement transaction', () => {
     const id = 'com.test.transaction';
     const firstComponent = () => null;
     const secondComponent = () => null;
-    const make = (component: typeof firstComponent, fail = false) => defineExtension({
+    const make = (component: typeof firstComponent, fail: boolean | 'commit' = false) => defineExtension({
       manifest: { id: id as never, version: '1.0.0', label: 'Transaction', apiVersion: 1,
         contributions: [{ id: 'effect' as never, kind: 'effect', effectId: 'live-transaction' },
           { id: 'command' as never, kind: 'command', command: 'com.test.transaction.ping', label: 'Ping' }] },
       activate(ctx) {
         ctx.effects.registerComponent('live-transaction', component);
         ctx.commands.registerCommand('com.test.transaction.ping', () => {});
-        if (fail) {
+        if (fail === true) {
           expect(effects.resolve('live-transaction')?.component).toBe(firstComponent);
           throw new Error('replacement refused after registration');
+        }
+        if (fail === 'commit') {
+          ctx.effects.registerComponent('live-transaction', component, {
+            get label(): string { throw new Error('extension registration options failed'); },
+          });
         }
         // Host tracks these handles even if the extension fails to return one.
       },
@@ -3843,6 +3848,11 @@ describe('live effect replacement transaction', () => {
     expect(old?.state).toBe('active');
     expect(effects.resolve('live-transaction')?.component).toBe(firstComponent);
     expect(commands.getSnapshot().getCommand('com.test.transaction.ping')).toBeDefined();
+    host.synchronize([make(secondComponent, 'commit')], context);
+    expect(host.lifecycles.get(id)).toBe(old);
+    expect(old?.state).toBe('active');
+    expect(effects.resolve('live-transaction')?.component).toBe(firstComponent);
+    expect(await commands.executeCommand('com.test.transaction.ping')).toBe(true);
     host.synchronize([make(secondComponent)], context);
     expect(old?.state).toBe('disposed');
     expect(effects.resolve('live-transaction')?.component).toBe(secondComponent);

@@ -78,9 +78,17 @@ it('renders a real M1-installed effect in the open editor and retains the workin
       await build({configFile:false,root:${JSON.stringify(root)},publicDir:false,logLevel:'error',
         plugins:[createExtensionImportMapPlugin()],resolve:{alias:${JSON.stringify({
           '@': path.join(app, 'src'), '@astrid/editor-sdk': path.join(app, 'src/sdk/index.ts'),
+          '@astrid': path.join(process.env.M4_TEST_AGENT_ROOT!, 'astrid'),
           react: path.join(app, 'node_modules/react'), 'react-dom': path.join(app, 'node_modules/react-dom'),
           remotion: path.join(app, 'node_modules/remotion'), '@remotion/player': path.join(app, 'node_modules/@remotion/player'),
+          '@remotion/layout-utils': path.join(app, 'node_modules/@remotion/layout-utils'),
+          '@remotion/media': path.join(app, 'node_modules/@remotion/media'),
+          '@banodoco/timeline-composition/registry.generated': path.join(app, 'node_modules/@banodoco/timeline-composition/typescript/src/registry.generated.ts'),
+          '@banodoco/timeline-composition/theme-api': path.join(app, 'node_modules/@banodoco/timeline-composition/typescript/src/theme-api.ts'),
           '@banodoco/timeline-composition': path.join(app, 'node_modules/@banodoco/timeline-composition'),
+          '@workspace-effects': path.join(app, 'vendor/banodoco-effects'),
+          '@workspace-animations': path.join(app, 'vendor/banodoco-animations'),
+          '@workspace-transitions': path.join(app, 'vendor/banodoco-transitions'),
         })},dedupe:['react','react-dom','remotion']},build:{outDir:${JSON.stringify(dist)},target:'esnext',minify:false}});
     `);
     const env = Object.fromEntries(['PATH', 'TMPDIR', 'LANG', 'PLAYWRIGHT_BROWSERS_PATH']
@@ -174,6 +182,7 @@ it('renders a real M1-installed effect in the open editor and retains the workin
     await page.waitForFunction(() => !(window as any).proof.effects.resolve('installed-effect'));
     expect(await page.getByTestId('installed-effect').count()).toBe(0);
     expect(await page.evaluate(() => (window as any).proof.commands.executeCommand('com.test.installed-effect.ping'))).toBe(false);
+    await expect.poll(() => command('leases')).toBe(0);
     await page.getByRole('button', { name: 'Enable com.test.installed-effect', exact: true }).click();
     await page.getByTestId('installed-effect').waitFor();
     await command('uninstall');

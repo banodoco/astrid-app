@@ -838,66 +838,11 @@ describe('explicit resolution in the same command session', () => {
     const original = structuredClone((await env.outboxes.list(scope))[0]);
     expect(session.getState()).toMatchObject({ canDiscardRejected: false, canReapplyLabel: false });
     await expect(session.useLatest()).rejects.toThrow('definitively rejected');
-    await expect(session.keepLabelChanges()).rejects.toThrow('definitively rejected');
     expect((await env.outboxes.list(scope))[0]).toEqual(original);
     expect(env.commits()).toHaveLength(1);
     await session.retry();
     expect(env.commits()[1]).toEqual(env.commits()[0]);
     await session.dispose();
-  });
-
-  it.each<TrackLabelArgs>([
-    { values: { label: 'Mine' }, clear: [] },
-    { values: { label: '' }, clear: [] },
-    { values: {}, clear: ['label'] },
-  ])('authors a new explicit label intent %j, then reloads and retries it exactly', async (args) => {
-    const env = await environment();
-    const session = await env.mount();
-    const captured = captureTrackLabelEdit(session.trackLabelPort, env.current(), 'V1');
-    const remote = await env.external((raw) => { rawTrack(raw).label = 'Someone else'; });
-    submitTrackLabelEdit(captured, args);
-    await expect(session.flush()).rejects.toThrow('original capture');
-    const [rejected] = await env.outboxes.list(scope);
-    const original = structuredClone(env.commits()[0]);
-    expect(session.getState()).toMatchObject({ canDiscardRejected: true, canReapplyLabel: true });
-    session.observe(remote);
-    await session.retry();
-    expect(env.commits()).toEqual([original]);
-    expect((await env.outboxes.list(scope))[0]).toEqual(rejected);
-    expect(env.projected).toHaveLength(0);
-
-    // A further external write must be guarded only by the explicit NEW intent.
-    const fresh = await env.external((raw) => { rawTrack(raw).label = 'Latest label'; });
-    env.setFault('lost');
-    await session.keepLabelChanges();
-    expect(session.getState().status).toBe('retry');
-    const [kept] = await env.outboxes.list(scope);
-    expect(kept.ownerId).toBe(rejected.ownerId);
-    expect(kept.intents).toHaveLength(1);
-    expect(kept.intents[0].id).not.toBe(rejected.intents[0].id);
-    const replacement = structuredClone(env.commits()[1]);
-    expect(replacement.key).not.toBe(original.key);
-    expect(replacement.body).toMatchObject({ base_revision_id: fresh.head.revisionId,
-      base_publication_id: fresh.head.publicationId, commands: [{ op: 'track.set', select: 'parent/track:V1', args,
-        expect: { 'parent/track:V1::label': { state: 'present', value: 'Latest label' } } }] });
-    expect(replacement.body!.commands[0].bindings).toEqual(original.body!.commands[0].bindings);
-    expect(kept.intents[0].payload).toMatchObject({ before: { base_parent: { revision_id: fresh.head.revisionId } } });
-    expect(env.commits()[0]).toEqual(original);
-    expect(JSON.parse(rejected.pending!.request.body)).toEqual(original.body);
-    expect(rejected.intents[0].payload).toMatchObject({ commands: [original.body!.commands[0]] });
-    await session.dispose();
-
-    const reopened = await env.mount(await env.provider.loadTimelineCommandBasis(scope.timelineId));
-    await reopened.recover(kept.ownerId);
-    expect(env.commits()[2]).toEqual(replacement);
-    expect(reopened.getState().status).toBe('saved');
-    const accepted = env.projected.at(-1)!.canonicalDocument;
-    if ('label' in args.values) expect(rawTrack(accepted).label).toBe(args.values.label);
-    else expect(rawTrack(accepted)).not.toHaveProperty('label');
-    await reopened.undo();
-    await reopened.flush();
-    expect(rawTrack(env.projected.at(-1)!.canonicalDocument).label).toBe('Latest label');
-    await reopened.dispose();
   });
 
   it('retains dependent B and unsupported operations until Use latest explicitly discards all displayed work', async () => {
@@ -910,7 +855,6 @@ describe('explicit resolution in the same command session', () => {
     const [original] = await env.outboxes.list(scope);
     expect(original.intents).toHaveLength(2);
     expect(session.getState()).toMatchObject({ canDiscardRejected: true, canReapplyLabel: false });
-    await expect(session.keepLabelChanges()).rejects.toThrow('no retained suffix');
     await session.retry();
     expect((await env.outboxes.list(scope))[0]).toEqual(original);
     expect(env.commits()).toHaveLength(1);
@@ -938,65 +882,7 @@ describe('explicit resolution in the same command session', () => {
     await reopened.dispose();
   });
 
-  it('disables Keep for a rejected parent-label prefix with an original dependent suffix', async () => {
-    const env = await environment();
-    const session = await env.mount();
-    env.setFault('conflict');
-    rename(session, env.current(), 'A');
-    env.move(session, 7);
-    await expect(session.flush()).rejects.toThrow('conflict');
-    const [original] = await env.outboxes.list(scope);
-    expect(original.intents[1]).toMatchObject({ basis: { after: original.intents[0].id },
-      payload: { commands: [{ op: 'clip.move', expect: { 'parent/clip:x::at': { state: 'present', value: 1 } } }] } });
-    expect(session.getState()).toMatchObject({ canDiscardRejected: true, canReapplyLabel: false });
-    await expect(session.keepLabelChanges()).rejects.toThrow('no retained suffix');
-    expect((await env.outboxes.list(scope))[0]).toEqual(original);
-    expect(env.commits()).toHaveLength(1);
-    await session.dispose();
-  });
-
-  it.each(['deleted target', 'ambiguous owner', 'wrong scope', 'wrong revision', 'read failure', 'storage failure'] as const)(
-    'preserves the original rejected request on %s', async (failure) => {
-      const env = await environment();
-      const session = await env.mount();
-      env.setFault('conflict');
-      rename(session, env.current(), 'Retain me');
-      await expect(session.flush()).rejects.toThrow('conflict');
-      const [original] = await env.outboxes.list(scope);
-      const fresh = await env.external((raw) => {
-        if (failure === 'deleted target') (raw.parent_revision.payload.config as { tracks: unknown[] }).tracks = [];
-        if (failure === 'ambiguous owner') {
-          const children = acceptedCommit({ revision_id: 'child-parent', publication_id: 'child-p' },
-            { revision_id: 'old', publication_id: 'old' }, { children: true }).data.canonical_document;
-          raw.parent_revision.payload.occurrences = children.parent_revision.payload.occurrences;
-          raw.shot_revisions = children.shot_revisions;
-          raw.internal_timeline_revisions = children.internal_timeline_revisions;
-          raw.dependency_manifest = children.dependency_manifest;
-        }
-      });
-      const load = vi.spyOn(env.provider, 'loadTimelineCommandBasis');
-      if (failure === 'wrong scope') load.mockResolvedValueOnce({ ...fresh,
-        canonicalDocument: { ...fresh.canonicalDocument, project_id: 'other-project' } });
-      if (failure === 'wrong revision') load.mockResolvedValueOnce({ ...fresh, head: { ...fresh.head, revisionId: 'other' } });
-      if (failure === 'read failure') load.mockRejectedValueOnce(new Error('cannot fetch closure'));
-      const open = env.factory.open;
-      if (failure === 'storage failure') env.factory.open = () => { throw new Error('disk full'); };
-      await expect(session.keepLabelChanges()).rejects.toThrow();
-      env.factory.open = open;
-      load.mockRestore();
-      expect((await env.outboxes.list(scope))[0]).toEqual(original);
-      expect(env.commits()).toHaveLength(1);
-      expect(env.projected).toHaveLength(0);
-      expect(session.getState().canDiscardRejected).toBe(true);
-      await session.dispose();
-      const reopened = await env.mount();
-      await reopened.recover(original.ownerId);
-      expect((await env.outboxes.list(scope))[0].pending).toEqual(original.pending);
-      await reopened.dispose();
-    },
-  );
-
-  it.each(['keep', 'latest'] as const)('fences %s when dispose races the fresh read', async (action) => {
+  it('fences Use latest when dispose races the fresh read', async () => {
     const env = await environment();
     const session = await env.mount();
     env.setFault('conflict');
@@ -1006,7 +892,7 @@ describe('explicit resolution in the same command session', () => {
     let finish!: (basis: typeof env.initial) => void;
     const load = vi.spyOn(env.provider, 'loadTimelineCommandBasis').mockImplementationOnce(() =>
       new Promise((resolve) => { finish = resolve; }));
-    const resolving = action === 'keep' ? session.keepLabelChanges() : session.useLatest();
+    const resolving = session.useLatest();
     const refused = expect(resolving).rejects.toThrow(/closed|Stale/);
     await vi.waitFor(() => expect(load).toHaveBeenCalledOnce());
     await session.dispose();

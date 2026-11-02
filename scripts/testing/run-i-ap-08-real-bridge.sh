@@ -2,11 +2,11 @@
 # I-AP-08: exact published-base browser bridge/outbox proof.
 set -euo pipefail
 
-readonly APP_SHA='5c95abb00525e1a77d00c32042b6453d9f14f4e7'
+readonly APP_SHA='2699f2f7deaa1a9975e43ed76bd00ed008f14095'
 readonly RUNTIME_SOURCE_SHA='8d3e3af4ede6e3579ac673ae77794464f693bf1b'
 readonly RUNTIME_PRODUCT_SHA='5453366458f7b4ee874c94d15ae7952e3e82d3c3'
-readonly AGENT_CANDIDATE_SHA='e425903f7a9fa5b82973281d15054c0716b46e2d'
-readonly AGENT_HARNESS_SHA='6e46e3bb45ec3feddbd0b0617a50a157e3a4df67'
+readonly AGENT_CANDIDATE_SHA='2de0726d1eaea7f7bd141251e088aa9fdf224525'
+readonly AGENT_HARNESS_SHA='2de0726d1eaea7f7bd141251e088aa9fdf224525'
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app_root="$(cd -- "$script_dir/../.." && pwd)"

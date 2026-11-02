@@ -245,7 +245,7 @@ test.describe('first time and returning panels (App)', () => {
 // Fresh profiles see the permission explanation before any door request. The installer handoff starts the same prompt automatically.
 test.describe('permission gate and readiness (App)', () => {
   test('a fresh profile sees the permission explanation before Connect asks Chrome, and the installer handoff still starts it', async ({ browser, harness }) => {
-    const context = await browser.newContext(); // no grant: the permission reads `prompt`
+    const context = await browser.newContext({ storageState: harness.contextOptions.storageState }); // no grant: the permission reads `prompt`
     try {
       const page = await context.newPage();
       const doorRequests = await openApp(page, harness);

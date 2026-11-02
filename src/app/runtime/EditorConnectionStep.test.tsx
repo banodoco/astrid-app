@@ -85,34 +85,15 @@ describe('editor gate: the step is drawn in place', () => {
     expectNoNavigation();
   });
 
-  it('asks Chrome once on entering the permission step, and does not ask again while it stays', () => {
+  it('renders the permission explanation without probing, then Connect starts the request', () => {
     stubLocation(EDITOR_URL);
     const connect = vi.fn();
-    const view = render(<EditorConnectionPanel connection={connectionFor({ status: 'needs_permission' }, { connect })} exit={null} />);
-    expect(connect).toHaveBeenCalledOnce();
-    // Chrome's prompt is up, then dismissed (Connect stays): no loop.
-    view.rerender(<EditorConnectionPanel connection={connectionFor({ status: 'needs_permission' }, { connect, isChecking: true })} exit={null} />);
-    view.rerender(<EditorConnectionPanel connection={connectionFor({ status: 'needs_permission' }, { connect, askUnanswered: true })} exit={null} />);
-    expect(connect).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole('button', { name: /connect/i }));
-    expect(connect).toHaveBeenCalledTimes(2);
-  });
-
-  it('asks again only on a new entry into the permission step', () => {
-    stubLocation(EDITOR_URL);
-    const connect = vi.fn();
-    const view = render(<EditorConnectionPanel connection={connectionFor({ status: 'needs_permission' }, { connect })} exit={null} />);
-    view.rerender(<EditorConnectionPanel connection={connectionFor({ status: 'blocked' }, { connect })} exit={null} />);
-    expect(connect).toHaveBeenCalledOnce();
-    view.rerender(<EditorConnectionPanel connection={connectionFor({ status: 'needs_permission' }, { connect })} exit={null} />);
-    expect(connect).toHaveBeenCalledTimes(2);
-  });
-
-  it('does not ask when the gate already did (the prompt is open on entry)', () => {
-    stubLocation(EDITOR_URL);
-    const connect = vi.fn();
-    render(<EditorConnectionPanel connection={connectionFor({ status: 'needs_permission' }, { connect, isChecking: true })} exit={null} />);
+    render(<EditorConnectionPanel connection={connectionFor({ status: 'needs_permission' }, { connect })} exit={null} />);
+    expect(screen.getByTestId('runtime-not-connected')).toHaveAttribute('data-state', 'permission');
+    expect(screen.getByRole('heading', { name: 'Connect to Astrid on this computer' })).toBeVisible();
     expect(connect).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /connect/i }));
+    expect(connect).toHaveBeenCalledOnce();
   });
 
   it.each(['not_running', 'refused', 'blocked'] as const)('%s drawn on the way out does not ask or navigate', (status) => {

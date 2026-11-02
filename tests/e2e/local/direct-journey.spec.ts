@@ -295,7 +295,7 @@ test.describe('permission gate and readiness (App)', () => {
   });
 
   test('a denied local-network permission shows how to allow Astrid in Chrome', async ({ browser, harness }, testInfo) => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ storageState: harness.contextOptions.storageState });
     let override: Awaited<ReturnType<typeof setLocalNetworkPermission>> | undefined;
     try {
       const page = await context.newPage();

@@ -13,9 +13,11 @@ import path from 'node:path';
 import { commandOutboxes, dragTimelineClip, expectConnected, holdCommandRequests, openApp, openSeededTimeline, test as appTest } from './support/app.ts';
 import { harnessUnavailableReason, RUNTIME_CHECKOUT, type DirectHarness } from './support/harness.ts';
 
-const RUNTIME_SHA = '1a275bb339ae897e52a5be5e1da99e846e402037';
-const AGENT_SHA = 'ddd5d278796641901bd11508863a8ea21e6c9697';
-const APP_SHA = '0c36714a267b1d65b2e10adda1c7ff22c4500a66';
+const RUNTIME_SOURCE_SHA = '8d3e3af4ede6e3579ac673ae77794464f693bf1b';
+const RUNTIME_PRODUCT_SHA = '5453366458f7b4ee874c94d15ae7952e3e82d3c3';
+const AGENT_CANDIDATE_SHA = '5b5fea985d8b45fdd9bf8ea54884f1950502e167';
+const AGENT_HARNESS_SHA = '6e46e3bb45ec3feddbd0b0617a50a157e3a4df67';
+const APP_SHA = 'd7ed57c58f6bf54ba1ec91374176978701e4758d';
 const INSTALL_OWNER = 'haus.astrid.runtime';
 const RECOVERY_OPERATION = 'a'.repeat(32);
 const CEILING = { timeout: 60_000 };
@@ -234,7 +236,11 @@ appTest('I-AP-08 real browser bridge: guarded Update and one durable Timeline re
   expect(installerHealth.status).toBe(200);
   expect(installerHealth.json()).toMatchObject({ identity: { release: 3, managed_by: null } });
   evidence(testInfo, 'tuple.json', {
-    app: APP_SHA, runtime: RUNTIME_SHA, agent: AGENT_SHA,
+    app: APP_SHA,
+    runtimeSource: RUNTIME_SOURCE_SHA,
+    runtimeProduct: RUNTIME_PRODUCT_SHA,
+    agentCandidate: AGENT_CANDIDATE_SHA,
+    agentHarness: AGENT_HARNESS_SHA,
     runtimeCheckout: RUNTIME_CHECKOUT, agentCheckout: process.env.ASTRID_CHECKOUT,
     installerIdentityStart, installerHealth: installerHealth.json(),
   });

@@ -17,7 +17,7 @@ const RUNTIME_SOURCE_SHA = '8d3e3af4ede6e3579ac673ae77794464f693bf1b';
 const RUNTIME_PRODUCT_SHA = '5453366458f7b4ee874c94d15ae7952e3e82d3c3';
 const AGENT_CANDIDATE_SHA = '2de0726d1eaea7f7bd141251e088aa9fdf224525';
 const AGENT_HARNESS_SHA = '2de0726d1eaea7f7bd141251e088aa9fdf224525';
-const APP_SHA = '2699f2f7deaa1a9975e43ed76bd00ed008f14095';
+const APP_SHA = process.env.I_AP_08_APP_SHA ?? '';
 const INSTALL_OWNER = 'haus.astrid.runtime';
 const RECOVERY_OPERATION = 'a'.repeat(32);
 const CEILING = { timeout: 60_000 };
@@ -213,6 +213,7 @@ async function closeSettings(page: Page): Promise<void> {
 }
 
 appTest.beforeAll(() => {
+  if (!/^[0-9a-f]{40}$/.test(APP_SHA)) throw new Error('I_AP_08_APP_SHA must name the exact App commit');
   const unavailable = harnessUnavailableReason();
   if (unavailable) throw new Error(`I-AP-08 real bridge harness unavailable: ${unavailable}`);
 });

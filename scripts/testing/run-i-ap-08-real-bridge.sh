@@ -2,7 +2,6 @@
 # I-AP-08: exact published-base browser bridge/outbox proof.
 set -euo pipefail
 
-readonly APP_SHA='2699f2f7deaa1a9975e43ed76bd00ed008f14095'
 readonly RUNTIME_SOURCE_SHA='8d3e3af4ede6e3579ac673ae77794464f693bf1b'
 readonly RUNTIME_PRODUCT_SHA='5453366458f7b4ee874c94d15ae7952e3e82d3c3'
 readonly AGENT_CANDIDATE_SHA='2de0726d1eaea7f7bd141251e088aa9fdf224525'
@@ -13,7 +12,17 @@ app_root="$(cd -- "$script_dir/../.." && pwd)"
 task_dir="${I_AP_08_TASK_DIR:-/home/user/merge/ws/M-APP/queue/running/I-AP-08}"
 runtime_source="${I_AP_08_RUNTIME_SOURCE:-/home/user/merge/ws/M-APP/repos/astrid-runtime}"
 agent_source="${I_AP_08_AGENT_SOURCE:-/home/user/merge/ws/M-APP/repos/astrid-agent}"
-app_dist="${I_AP_08_APP_DIST:-$task_dir/sub/2/dist}"
+# A proof must name the exact commit it intends to exercise. Never accept a
+# caller-provided build: build from a git archive of that commit below.
+APP_SHA="${I_AP_08_APP_SHA:-}"
+if [[ ! "$APP_SHA" =~ ^[0-9a-f]{40}$ ]]; then
+  printf 'I_AP_08_APP_SHA must be the full expected App commit SHA\n' >&2
+  exit 64
+fi
+if [[ -n "${I_AP_08_APP_DIST+x}" || -n "${ASTRID_APP_DIRECT_DIST+x}" ]]; then
+  printf 'Caller-supplied App dist is not accepted; the runner builds the exact App commit\n' >&2
+  exit 65
+fi
 
 for required in "$task_dir" "$runtime_source" "$agent_source"; do
   if [[ "$required" != /* || ! -d "$required" ]]; then
@@ -23,7 +32,11 @@ for required in "$task_dir" "$runtime_source" "$agent_source"; do
 done
 
 if [[ "$(git -C "$app_root" rev-parse HEAD)" != "$APP_SHA" ]]; then
-  printf 'App HEAD is not the published base %s\n' "$APP_SHA" >&2
+  printf 'App HEAD does not match expected commit %s\n' "$APP_SHA" >&2
+  exit 65
+fi
+if [[ -n "$(git -C "$app_root" status --porcelain --untracked-files=all)" ]]; then
+  printf 'App checkout must be clean for exact-head proof\n' >&2
   exit 65
 fi
 if [[ "$(git -C "$runtime_source" rev-parse HEAD)" != "$RUNTIME_SOURCE_SHA" ]]; then
@@ -50,18 +63,38 @@ if [[ ! -x "$runtime_python" ]]; then
   printf 'Task-local Runtime Python is missing: %s\n' "$runtime_python" >&2
   exit 66
 fi
-if [[ "$app_dist" != /* || ! -f "$app_dist/index.html" ]]; then
-  printf 'Task-local hosted App build is missing: %s\n' "$app_dist" >&2
-  exit 66
-fi
 
 umask 077
-mkdir -p "$task_dir/artifacts/bridge-runs" "$task_dir/pip-cache"
+mkdir -p "$task_dir/artifacts/bridge-runs"
 run_dir="$(mktemp -d "$task_dir/artifacts/bridge-runs/run.XXXXXX")"
 version_root="$run_dir/installer-root/versions/old"
 runtime_fixture="$version_root/runtime"
 agent_fixture="$version_root/agent"
-mkdir -p "$runtime_fixture" "$agent_fixture" "$run_dir/xdg" "$run_dir/home" "$run_dir/tmp"
+mkdir -p "$runtime_fixture" "$agent_fixture" "$run_dir/xdg" "$run_dir/home" "$run_dir/tmp" "$run_dir/app-source"
+# Both build and test code come from the named commit, not from an arbitrary
+# dist, installed modules, or ignored files in the checkout.
+git -C "$app_root" archive --format=tar "$APP_SHA" | tar -xf - -C "$run_dir/app-source"
+app_dist="$run_dir/app-source/dist"
+app_tree="$(git -C "$app_root" rev-parse "$APP_SHA^{tree}")"
+# Keep the build environment narrow so caller VITE_/ASTRID_ overrides cannot
+# silently select a different source. The chosen door port is recorded below.
+build_env=(env -i PATH="$PATH" HOME="$run_dir/home" TMPDIR="$run_dir/tmp"
+  NPM_CONFIG_USERCONFIG=/dev/null npm_config_cache="${npm_config_cache:-${MERGE_CACHE:-/home/user/merge/cache}/npm}"
+  HTTPS_PROXY="${HTTPS_PROXY:-}" HTTP_PROXY="${HTTP_PROXY:-}" NO_PROXY="${NO_PROXY:-}"
+  NODE_EXTRA_CA_CERTS="${NODE_EXTRA_CA_CERTS:-}"
+  NODE_OPTIONS=--max-old-space-size=8192
+  VITE_APP_BUILD="$APP_SHA" RAILWAY_GIT_COMMIT_SHA="$APP_SHA"
+  ASTRID_APP_DIRECT_DOOR_PORT="${ASTRID_APP_DIRECT_DOOR_PORT:-17340}")
+(cd "$run_dir/app-source" && "${build_env[@]}" npm ci) >"$run_dir/npm-ci.log" 2>&1
+(cd "$run_dir/app-source" && "${build_env[@]}" npm run build:hosted) >"$run_dir/build.log" 2>&1
+[[ -f "$app_dist/index.html" ]] || { printf 'Hosted build missing index.html\n' >&2; exit 66; }
+node "$run_dir/app-source/scripts/testing/i-ap-08-build-identity.mjs" "$APP_SHA" "$app_dist/build.json"
+cmp "$run_dir/app-source/public/install-manifest.json" "$app_dist/install-manifest.json"
+if [[ -n "$(find "$app_dist" ! -type d ! -type f -print -quit)" ]]; then
+  printf 'Hosted build contains a non-regular entry\n' >&2
+  exit 65
+fi
+(cd "$app_dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) >"$run_dir/dist.sha256"
 # Chromium in this sandbox traps when TMPDIR's lexical path is outside /tmp.
 # The link contains no data: it points to the task-local directory above, so
 # all resulting files still live under the task root.
@@ -86,10 +119,16 @@ ln -s "$task_dir/runtime-venv" "$runtime_fixture/.venv"
 # The Runtime venv is task-local.  Install the published Agent wheel from the
 # disposable archive so its authoring profile has its normal dependencies; the
 # import path below still selects the archived exact source tree first.
-"$runtime_python" -m pip install --cache-dir "$task_dir/pip-cache" "$agent_fixture" >"$run_dir/agent-wheel-install.log" 2>&1
+"$runtime_python" -m pip install "$agent_fixture" >"$run_dir/agent-wheel-install.log" 2>&1
 
 {
-  printf 'app_head=%s\n' "$(git -C "$app_root" rev-parse HEAD)"
+  printf 'app_head=%s\n' "$APP_SHA"
+  printf 'app_tree=%s\n' "$app_tree"
+  printf 'app_build=git-archive,npm-run-build:hosted\n'
+  printf 'app_build_node=%s\n' "$(node --version)"
+  printf 'app_build_npm=%s\n' "$(npm --version)"
+  printf 'app_build_door_port=%s\n' "${ASTRID_APP_DIRECT_DOOR_PORT:-17340}"
+  sha256sum "$run_dir/app-source/package-lock.json" "$run_dir/dist.sha256"
   printf 'runtime_source_head=%s\n' "$(git -C "$runtime_source" rev-parse HEAD)"
   printf 'runtime_product_sha=%s\n' "$RUNTIME_PRODUCT_SHA"
   printf 'agent_candidate_sha=%s\n' "$AGENT_CANDIDATE_SHA"
@@ -107,15 +146,23 @@ export ASTRID_RUNTIME_CHECKOUT="$runtime_fixture"
 export ASTRID_CHECKOUT="$agent_fixture"
 export ASTRID_RUNTIME_PYTHON="$runtime_python"
 export ASTRID_PYTHON="$runtime_python"
+export I_AP_08_APP_SHA="$APP_SHA"
 export I_AP_08_INSTALL_ROOT="$run_dir/installer-root"
 export ASTRID_APP_DIRECT_DIST="$app_dist"
 export PLAYWRIGHT_OUTPUT_DIR="$run_dir/playwright-output"
 export IAP08_PLAYWRIGHT_JSON="$run_dir/playwright-results.json"
 
 set +e
-(cd "$app_root" && ./node_modules/.bin/playwright test --config config/testing/i-ap-08.playwright.config.ts --workers=1) 2>&1 | tee "$run_dir/playwright.verbose.log"
+(cd "$run_dir/app-source" && ./node_modules/.bin/playwright test --config config/testing/i-ap-08.playwright.config.ts --workers=1) 2>&1 | tee "$run_dir/playwright.verbose.log"
 status="${PIPESTATUS[0]}"
 set -e
 printf '%s\n' "$status" >"$run_dir/playwright.exit"
+if [[ -n "$(find "$app_dist" ! -type d ! -type f -print -quit)" ]]; then
+  printf 'Hosted build contains a non-regular entry after the journey\n' >"$run_dir/dist-verify.log"
+  status=1
+else
+  (cd "$app_dist" && find . -type f -print0 | LC_ALL=C sort -z | xargs -0 sha256sum) >"$run_dir/dist-after.sha256"
+  cmp "$run_dir/dist.sha256" "$run_dir/dist-after.sha256" >"$run_dir/dist-verify.log" 2>&1 || status=1
+fi
 printf 'I-AP-08 run directory: %s\n' "$run_dir"
 exit "$status"

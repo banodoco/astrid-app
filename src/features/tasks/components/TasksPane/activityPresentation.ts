@@ -28,6 +28,7 @@ const TASK_LABELS: Record<string, string> = {
   'pixel.strip': 'Animation strip',
   'capture.web_page': 'Web capture',
   'media.clip_extract': 'Clip extraction',
+  'f2.marker': 'F2 Marker',
 };
 
 const LEADING_VERBS = new Set(['generate', 'make', 'create', 'run', 'build']);

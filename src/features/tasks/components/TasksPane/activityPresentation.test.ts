@@ -63,6 +63,7 @@ describe('activityPresentation', () => {
     expect(labelFor('music.beats')).toBe('Beat detection');
     expect(labelFor('generation.generate_speech')).toBe('Voice');
     expect(labelFor('rendering.render')).toBe('Render');
+    expect(labelFor('f2.marker')).toBe('F2 Marker');
     expect(labelFor('generation.generate_foo')).toBe('Foo');
     expect(labelFor('vendor.make_thing_thing')).toBe('Thing');
     expect(labelFor('vendor.do_stuff')).toBe('Do stuff');

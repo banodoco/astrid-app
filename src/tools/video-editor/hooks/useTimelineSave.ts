@@ -496,11 +496,14 @@ export function useTimelineSave(
     if (isTimelineSavePending()) throw new Error('Timeline owner has unresolved work.');
   };
   guardOwner.reload = async () => {
-    try { await guardOwner.flush(); }
-    catch {
-      if (localOwner.closed || localOwner.operations || localOwner.operationError) throw new Error('Timeline owner has unresolved work.');
-      await persistence.preserveTimelineDraftForReload();
+    // A restart-card reload is recovery navigation, not an update. A Runtime
+    // commit can remain pending forever after its instance has restarted, so
+    // first persist and verify the current local snapshot instead of waiting
+    // for that server acknowledgement. Update reloads still use guardOwner.flush.
+    if (localOwner.closed || localOwner.operations || localOwner.operationError) {
+      throw new Error('Timeline owner has unresolved work.');
     }
+    await persistence.preserveTimelineDraftForReload();
   };
   guardOwner.durable = () => !isTimelineSavePending() || (!localOwner.operations
     && !localOwner.operationError && persistence.isTimelineDraftDurableForReload());

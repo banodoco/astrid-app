@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeIndexedDB, resetFakeIndexedDB } from 'fake-indexeddb';
 import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { flushDraftsBeforeReload, resetDraftReloadGuardsForTest } from '@/shared/lib/updates/draftSafeReload.ts';
+import { flushDraftsBeforeReload, resetDraftReloadGuardsForTest, useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 import { AppBuildProvider } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
@@ -82,7 +82,7 @@ afterEach(() => {
 });
 
 async function mountEditor(options: { handoff?: TimelinePersistenceHandoff; local?: boolean; identity?: () => Promise<{ realmId: string; actorId: string }>;
-  save?: DataProvider['saveTimeline']; wait?: boolean; recovery?: boolean } = {}) {
+  save?: DataProvider['saveTimeline']; commit?: DataProvider['commitTimeline']; wait?: boolean; recovery?: boolean } = {}) {
   const config = createDefaultTimelineConfig();
   config.clips = [{ id: 'source', at: 0, track: 'V1', clipType: 'hold', hold: 2 }];
   const registry = { assets: {} };
@@ -97,7 +97,7 @@ async function mountEditor(options: { handoff?: TimelinePersistenceHandoff; loca
     ...(options.local ? {
       getRecoverableIdentity: options.identity ?? (async () => ({ realmId: 'realm', actorId: 'actor' })),
       loadTimelineCommandBasis: async () => ({ head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: original.data.canonical_document }),
-      commitTimeline: vi.fn(async () => { throw new Error('Held local commit'); }),
+      commitTimeline: vi.fn(options.commit ?? (async () => { throw new Error('Held local commit'); })),
     } : {}),
   };
   if (options.recovery) await saveTimelineDraft(timelineId, { config: { ...config, output: { ...config.output, file: 'recover-me.mp4' } }, registry }, 1);
@@ -142,6 +142,29 @@ async function mountUpdate(recovery = false) {
 function expectNoUpdate() { expect(updatePosts).toHaveLength(0); }
 
 describe('strict D5 mounted editor Update', () => {
+  it('reloads after local recovery while a Runtime timeline commit is still held', async () => {
+    const held = deferred<never>();
+    const commit = vi.fn(() => held.promise);
+    const editor = await mountEditor({ local: true, commit });
+    await editor.edit('held-post-recovery.mp4');
+    await waitFor(() => expect(commit).toHaveBeenCalled());
+
+    const reload = vi.fn();
+    function RestartReloadButton() {
+      const guarded = useGuardedReload(reload);
+      return <button type="button" onClick={() => void guarded.reload()}>Restart reload</button>;
+    }
+    render(<RestartReloadButton />);
+    fireEvent.click(screen.getByRole('button', { name: 'Restart reload' }));
+
+    await waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    expect(editor.hook.result.current.isTimelineDraftDurableForReload()).toBe(true);
+    expect((await loadTimelineDraft(timelineId))?.draft.config).toMatchObject({ output: { file: 'held-post-recovery.mp4' } });
+
+    held.reject(new Error('Runtime restarted'));
+    await drain();
+  });
+
   it('keeps the mounted draft open and reports a failed save on stale-build reload', async () => {
     const handoff = { capture: vi.fn(async () => {}), flush: vi.fn(async () => { throw new TimelineSaveError('offline'); }) };
     const editor = await mountEditor({ handoff });

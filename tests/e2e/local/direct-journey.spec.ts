@@ -245,7 +245,8 @@ test.describe('first time and returning panels (App)', () => {
 // Fresh profiles see the permission explanation before any door request. The installer handoff starts the same prompt automatically.
 test.describe('permission gate and readiness (App)', () => {
   test('a fresh profile sees the permission explanation before Connect asks Chrome, and the installer handoff still starts it', async ({ browser, harness }) => {
-    const context = await browser.newContext(); // no grant: the permission reads `prompt`
+    const context = await browser.newContext({ storageState: harness.contextOptions.storageState }); // no grant: the permission reads `prompt`
+    let promptOverride: Awaited<ReturnType<typeof setLocalNetworkPermission>> | undefined;
     try {
       const page = await context.newPage();
       const doorRequests = await openApp(page, harness);
@@ -276,6 +277,9 @@ test.describe('permission gate and readiness (App)', () => {
 
       // Clearing the grant simulates a fresh permission prompt for the installer handoff. Its URL flag starts Connect itself.
       await context.clearPermissions();
+      await page.goto(`${harness.origin}/__blank.html?permission=prompt`);
+      promptOverride = await setLocalNetworkPermission(browser, page, harness.origin, 'prompt');
+      expect(await readLocalNetworkState(page)).toBe('prompt');
       const installerRequests: Route[] = [];
       let installerPromptOpen = true;
       await page.unroute(`http://127.0.0.1:${DOOR_PORT}/**`);
@@ -290,12 +294,13 @@ test.describe('permission gate and readiness (App)', () => {
       await expectConnected(page);
       expect(installerRequests.length).toBe(0);
     } finally {
+      await promptOverride?.detach().catch(() => {});
       await context.close();
     }
   });
 
   test('a denied local-network permission shows how to allow Astrid in Chrome', async ({ browser, harness }, testInfo) => {
-    const context = await browser.newContext();
+    const context = await browser.newContext({ storageState: harness.contextOptions.storageState });
     let override: Awaited<ReturnType<typeof setLocalNetworkPermission>> | undefined;
     try {
       const page = await context.newPage();

@@ -365,32 +365,36 @@ it('mounts the retained native-none two-clip transition clear through selection,
     const [request, idempotencyKey] = send.mock.calls[0];
     const selectedIds = ['f2-app-clip', 'f2-transition-clip'];
     const sourceClip = (id: string) => sourceClips.find(clip => clip.id === id)!;
-    const changes = selectedIds.map(id => ({
-      op: 'remove' as const, ref: 'parent' as const, path: ['clips', `id:${id}`, 'transition'],
-      before: { state: 'present' as const, value: structuredClone(sourceClip(id).transition) },
-    }));
-    const reads = selectedIds.flatMap(id => [
-      { kind: 'field' as const, ref: 'parent' as const, path: ['config', 'clips', `id:${id}`, 'id'], state: { state: 'present' as const, value: sourceClip(id).id } },
-      { kind: 'field' as const, ref: 'parent' as const, path: ['config', 'clips', `id:${id}`, 'transition'], state: { state: 'present' as const, value: structuredClone(sourceClip(id).transition) } },
-    ]);
-    reads.push({ kind: 'field', ref: 'parent', path: ['config', 'pinnedShotGroups'], state: { state: 'absent' } });
     const step = request.steps?.[0];
     expect(step?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(idempotencyKey).toEqual(expect.any(String));
-    expect(request).toEqual({
+    expect(request).toMatchObject({
       api_version: 1,
       project_id: nativeScope.projectId,
       timeline_id: nativeScope.timelineId,
       base_revision_id: 'r0',
       base_publication_id: 'p0',
-      commands: [{ schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [], args: { changes } }],
       label: 'Edit timeline',
-      steps: [{ id: step?.id, label: 'Edit timeline', intent: 'Clear transitions: f2-app-clip, f2-transition-clip', tags: [], command_ordinals: [0], patch: changes, reads }],
+      steps: [{ id: step?.id, label: 'Edit timeline', intent: 'Edit timeline', tags: [], command_ordinals: [0, 1], patch: [] }],
       merge: 'fields',
-      reads,
       dry_run: false,
       source: { via: 'app' },
     });
+    expect(request.commands).toHaveLength(2);
+    expect(request.commands).toEqual(expect.arrayContaining(selectedIds.map(id => expect.objectContaining({
+      schema_version: 1,
+      op: 'clip.set',
+      version: '1',
+      select: `parent/clip:${id}`,
+      args: { values: {}, clear: ['transition'] },
+      bindings: { 'scalar.target': `parent/clip:${id}` },
+    }))));
+    for (const command of request.commands) {
+      const id = command.select!.slice('parent/clip:'.length);
+      expect(command.expect?.[`${command.select}::transition`]).toEqual({ state: 'present', value: sourceClip(id).transition });
+      expect(command.reads!.length).toBeGreaterThan(0);
+    }
+    expect(request.commands.some(command => command.op === 'doc.patch' || command.select === null)).toBe(false);
     const [stored] = await createCommitOutbox().list(nativeScope);
     expect(stored.pending?.request.key).toBe(idempotencyKey);
     expect(JSON.parse(stored.pending!.request.body)).toEqual(request);

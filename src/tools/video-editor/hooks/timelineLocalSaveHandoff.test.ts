@@ -292,8 +292,19 @@ describe('upstream local document handoff', () => {
       config: env.source.config, registry: env.source.registry });
     const [stored] = await env.outboxes.list(env.scope);
     expect(stored.intents).toHaveLength(1);
-    const intent = stored.intents[0].payload.documentIntent as { reads: unknown[]; step: { reads: unknown[] } };
-    expect(intent).toMatchObject({ merge: 'fields', roots: [{ ref: 'parent' }] });
+    const payload = stored.intents[0].payload as { commands: Array<Record<string, unknown>>; documentIntent?: unknown };
+    expect(payload.documentIntent).toBeUndefined();
+    expect(payload.commands).toHaveLength(2);
+    for (const id of ['authored', 'sibling']) {
+      const command = payload.commands.find(item => item.select === `parent/clip:${id}`)!;
+      expect(command).toMatchObject({ schema_version: 1, op: 'clip.set', version: '1',
+        select: `parent/clip:${id}`, args: { values: {}, clear: ['transition'] },
+        bindings: { 'scalar.target': `parent/clip:${id}` } });
+      expect((command.expect as Record<string, unknown>)[`parent/clip:${id}::transition`]).toEqual({ state: 'present',
+        value: { type: 'crossfade', duration: 0.5, opaque: null } });
+      expect((command.reads as unknown[]).length).toBeGreaterThan(0);
+    }
+    expect(payload.commands.some(command => command.op === 'doc.patch' || command.select === null)).toBe(false);
     const after = structuredClone(before);
     for (const key of ['authored', 'sibling']) {
       for (const list of [after.parent_revision.payload.clips, after.parent_revision.payload.config.clips]) {
@@ -301,10 +312,6 @@ describe('upstream local document handoff', () => {
       }
     }
     expect(env.session.getDocument()).toEqual(after);
-    expect(intent.reads).toContainEqual({ kind: 'field', ref: 'parent',
-      path: [...(topLevel ? [] : ['config']), 'clips', 'id:authored', 'transition'],
-      state: { state: 'present', value: { type: 'crossfade', duration: 0.5, opaque: null } } });
-    expect(intent.step.reads).toEqual(intent.reads);
     await env.session.dispose();
   });
 
@@ -314,6 +321,12 @@ describe('upstream local document handoff', () => {
     delete next.config.clips[0].transition;
     await env.handoff.capture(next, { kind: 'transition-clear', clipId: 'authored', clipIds: ['authored'],
       config: env.source.config, registry: env.source.registry });
+    const [stored] = await env.outboxes.list(env.scope);
+    const command = (stored.intents[0].payload as { commands: Array<Record<string, unknown>> }).commands[0];
+    expect(command).toMatchObject({ op: 'clip.set', select: 'parent/clip:authored', args: { values: {}, clear: ['transition'] },
+      bindings: { 'scalar.target': 'parent/clip:authored' } });
+    expect((command.expect as Record<string, unknown>)['parent/clip:authored::transition']).toEqual({ state: 'present', value: null });
+    expect((command.reads as unknown[]).length).toBeGreaterThan(0);
     const expected = structuredClone(env.initial.canonicalDocument);
     delete (expected.parent_revision.payload.clips as Array<Record<string, unknown>>)[0].transition;
     expect(env.session.getDocument()).toEqual(expected);

@@ -4,6 +4,7 @@ import type { LocalSaveSession } from '../commands/localSaveSession.ts';
 import { toOutboxJson, type OutboxJson } from '../commands/commitOutbox.ts';
 import { canonicalJsonStringify, type TimelineBundleEnvelope } from '../data/typed/timelineBundle.ts';
 import { authoringBundleFromDocument, type AuthoringBundle } from '../commands/authoringBundle.ts';
+import { captureClipSet, executeClipSet } from '../commands/clipScalarCapture.ts';
 import { TimelineSaveError, TimelineVersionConflictError, type DataProvider, type TimelineCommandBasis, type TimelineHeadRevision, type TimelineSaveReceipt } from '../data/DataProvider.ts';
 import type { AssetRegistry, TimelineConfig } from '../types/index.ts';
 import { canonicalizeTimelinePair, projectTimelineTracksForDisplay } from '../lib/timeline-domain.ts';
@@ -566,6 +567,16 @@ export function createTimelineLocalSaveHandoff(options: {
           reads.push({ kind: 'field', ref: 'parent', path: ['config', 'pinnedShotGroups'],
             state: Object.prototype.hasOwnProperty.call(configBefore, 'pinnedShotGroups')
               ? { state: 'present', value: (configBefore as Record<string, OutboxJson>).pinnedShotGroups } : { state: 'absent' } });
+          // A causal parent clear has an executable scalar representation. Keep
+          // the native capture boundary so the exact selected parent entity,
+          // original transition guard, and read claims reach Runtime instead
+          // of flattening this into a null-selected document patch.
+          let scalarBundle = await authoringBundleFromDocument(before) as AuthoringBundle;
+          commands = gestureBasis.clipIds.map((id) => {
+            const command = captureClipSet(scalarBundle, `parent/clip:${id}`, { values: {}, clear: ['transition'] });
+            scalarBundle = executeClipSet(scalarBundle, command).bundle;
+            return command;
+          });
         }
         if (gestureBasis && gestureBasis.kind !== 'prepared-media' && gestureBasis.kind !== 'element' && gestureBasis.kind !== 'transition-clear') {
           const config = parent.config as Record<string, unknown>;
@@ -640,7 +651,7 @@ export function createTimelineLocalSaveHandoff(options: {
         const firstCommand = commands?.[0];
         if (commands && !firstCommand) refuse('prepared media command is empty');
         const pending = commands && firstCommand ? options.session.append({ before: toOutboxJson(before), after: toOutboxJson(after),
-          label: mediaLabel, commands: [firstCommand, ...commands.slice(1)],
+          label: gestureBasis?.kind === 'transition-clear' ? 'Edit timeline' : mediaLabel, commands: [firstCommand, ...commands.slice(1)],
           ...(mediaReads && mediaSteps ? { reads: mediaReads, steps: mediaSteps,
             rationale: mediaSteps[0].intent, group_id: mediaSteps[0].id } : {}) }) : options.session.appendDocument({ before, after,
           roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],

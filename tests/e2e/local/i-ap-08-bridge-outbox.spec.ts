@@ -14,9 +14,9 @@ import { commandOutboxes, dragTimelineClip, expectConnected, holdCommandRequests
 import { harnessUnavailableReason, RUNTIME_CHECKOUT, type DirectHarness } from './support/harness.ts';
 
 const RUNTIME_SOURCE_SHA = '8d3e3af4ede6e3579ac673ae77794464f693bf1b';
-const RUNTIME_PRODUCT_SHA = '5453366458f7b4ee874c94d15ae7952e3e82d3c3';
-const AGENT_CANDIDATE_SHA = '2de0726d1eaea7f7bd141251e088aa9fdf224525';
-const AGENT_HARNESS_SHA = '2de0726d1eaea7f7bd141251e088aa9fdf224525';
+const RUNTIME_PRODUCT_SHA = '2776ba973b6c8f3555b5629b0840d9691a98d3c2';
+const AGENT_CANDIDATE_SHA = 'ab43bad818ef65ca1e929b973a2f61cd9fc4bf61';
+const AGENT_HARNESS_SHA = 'ab43bad818ef65ca1e929b973a2f61cd9fc4bf61';
 const APP_SHA = process.env.I_AP_08_APP_SHA ?? '';
 const INSTALL_OWNER = 'haus.astrid.runtime';
 const RECOVERY_OPERATION = 'a'.repeat(32);

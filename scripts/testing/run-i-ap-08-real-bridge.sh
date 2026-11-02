@@ -3,9 +3,9 @@
 set -euo pipefail
 
 readonly RUNTIME_SOURCE_SHA='8d3e3af4ede6e3579ac673ae77794464f693bf1b'
-readonly RUNTIME_PRODUCT_SHA='5453366458f7b4ee874c94d15ae7952e3e82d3c3'
-readonly AGENT_CANDIDATE_SHA='2de0726d1eaea7f7bd141251e088aa9fdf224525'
-readonly AGENT_HARNESS_SHA='2de0726d1eaea7f7bd141251e088aa9fdf224525'
+readonly RUNTIME_PRODUCT_SHA='2776ba973b6c8f3555b5629b0840d9691a98d3c2'
+readonly AGENT_CANDIDATE_SHA='ab43bad818ef65ca1e929b973a2f61cd9fc4bf61'
+readonly AGENT_HARNESS_SHA='ab43bad818ef65ca1e929b973a2f61cd9fc4bf61'
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app_root="$(cd -- "$script_dir/../.." && pwd)"

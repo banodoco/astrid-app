@@ -129,7 +129,8 @@
     "quality:schema-drift": "node scripts/quality/check-schema-drift.mjs",
     "quality:test-fixture-legacy": "node scripts/quality/check-test-fixture-legacy.mjs",
     "quality:slot-first:audit": "npm run test:slot:unit && npm run test:slot:edge && npm run test:slot:db -- --audit && npm run quality:schema-drift -- --audit && npm run quality:test-fixture-legacy -- --audit && npm run slot:first:health -- --audit && npm run test:slot:e2e",
-    "typecheck:strict-probe": "npm run typecheck:strict-islands"
+    "typecheck:strict-probe": "npm run typecheck:strict-islands",
+    "test:i-ap-08-provenance": "node --test scripts/testing/i-ap-08-provenance.test.mjs"
   },
   "dependencies": {
     "@banodoco/timeline-composition": "file:vendor/artifacts/banodoco-timeline-composition-0.0.17.tgz",

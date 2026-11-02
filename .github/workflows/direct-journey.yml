@@ -29,8 +29,8 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: direct-journey-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/int/r1' }}
 
 jobs:
   direct-journey:

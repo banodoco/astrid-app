@@ -2,11 +2,10 @@
 # a real Runtime daemon on throwaway SQLite serving it through its own browser door, and Chromium.
 # Local equivalent: npm run test:e2e:direct (tests/e2e/local/support/harness.ts).
 #
-# Runtime checkout: the Runtime repo is private, so actions/checkout needs a token that can read it. Add a
-# repository secret RUNTIME_READ_TOKEN (a fine-grained PAT, or a deploy-key-backed token, with read access
-# to banodoco/astrid-runtime). When the secret is not set, the job falls back to github.token,
-# which only works if the Runtime repo is readable by this repository. Pull requests from forks get no
-# secrets, so this lane cannot run for them.
+# Runtime and Agent checkouts are private, so actions/checkout needs tokens that can read them. Add repository
+# secrets RUNTIME_READ_TOKEN and ASTRID_READ_TOKEN with read access to banodoco/astrid-runtime and
+# banodoco/astrid-agent. When either secret is not set, that checkout falls back to github.token, which only
+# works if its repo is readable by this repository. Pull requests from forks get no secrets.
 #
 # Pass rule (a skip means a missing harness, R-9): exactly M tests expected to fail (M is the journey
 # file's budget in scripts/quality/check-known-failures.mjs), none unexpected, none flaky, none skipped.
@@ -27,6 +26,17 @@ on:
   schedule:
     - cron: "17 3 * * *"
   workflow_dispatch:
+    inputs:
+      runtime_ref:
+        description: Full Runtime commit SHA or ref for both journey jobs
+        required: true
+        default: "1e6d899efa77a2d6ec247c38250f9748330bb587"
+        type: string
+      agent_ref:
+        description: Full Agent commit SHA or ref for both journey jobs
+        required: true
+        default: "14ea1103f3105fca71317427c882572333bdb1e6"
+        type: string
 
 concurrency:
   group: direct-journey-${{ github.event.pull_request.number || github.ref }}
@@ -36,17 +46,42 @@ jobs:
   direct-journey:
     runs-on: ubuntu-24.04
     steps:
-      # The harness finds the Runtime at ../astrid-runtime (ASTRID_RUNTIME_CHECKOUT overrides),
-      # so both repos are checked out as siblings under $GITHUB_WORKSPACE/..: App in astrid-app, Runtime beside it.
+      # The harness finds the Runtime at ../astrid-runtime and Agent at ../astrid-agent,
+      # so all three repos are checked out as siblings under $GITHUB_WORKSPACE: App in astrid-app.
       - uses: actions/checkout@v4
+        id: app-checkout
         with:
           path: astrid-app
       - uses: actions/checkout@v4
+        id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: main
+          ref: ${{ inputs.runtime_ref || '1e6d899efa77a2d6ec247c38250f9748330bb587' }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
+      - uses: actions/checkout@v4
+        id: agent-checkout
+        with:
+          repository: banodoco/astrid-agent
+          ref: ${{ inputs.agent_ref || '14ea1103f3105fca71317427c882572333bdb1e6' }}
+          path: astrid-agent
+          token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+
+      - name: Resolve effective checkout SHAs
+        id: checkout-shas
+        run: |
+          app_head="$(git -C astrid-app rev-parse --verify HEAD)"
+          runtime_head="$(git -C astrid-runtime rev-parse --verify HEAD)"
+          agent_head="$(git -C astrid-agent rev-parse --verify HEAD)"
+          for head in "$app_head" "$runtime_head" "$agent_head"; do
+            [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          done
+          printf 'app_head=%s\n' "$app_head" >> "$GITHUB_OUTPUT"
+          printf 'runtime_head=%s\n' "$runtime_head" >> "$GITHUB_OUTPUT"
+          printf 'agent_head=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
+          printf 'APP_CHECKOUT_SHA=%s\n' "$app_head" >> "$GITHUB_ENV"
+          printf 'RUNTIME_CHECKOUT_SHA=%s\n' "$runtime_head" >> "$GITHUB_ENV"
+          printf 'AGENT_CHECKOUT_SHA=%s\n' "$agent_head" >> "$GITHUB_ENV"
 
       - name: Restore npm cache (C-08)
         id: c08-app-direct-journey-2
@@ -68,6 +103,15 @@ jobs:
           .venv/bin/python -m pip install -e .
           .venv/bin/python -m runtime_protocol.cli --help > /dev/null
 
+      - name: Build the Astrid venv
+        working-directory: astrid-agent
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e .
+          # Astrid imports runtime_protocol but does not declare it: use the pinned sibling Runtime under test.
+          .venv/bin/python -m pip install --no-deps -e ../astrid-runtime
+          .venv/bin/python -m astrid.core.dev.cross_client --help > /dev/null
+
       - name: Install App dependencies, Chromium and ffmpeg
         working-directory: astrid-app
         run: |
@@ -83,6 +127,12 @@ jobs:
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/direct-results
           NODE_OPTIONS: --max-old-space-size=4096
           ASTRID_APP_DIRECT_DOOR_PORT: "17341"
+          ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
+          ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
+          ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
+          APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
+          RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}
+          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_head }}
           # A missing dependency in this job is a failure, never a skip (config/testing/skipRegistry.mjs).
           ASTRID_REQUIRE_LANES: direct-journey
         run: npx playwright test -c playwright.direct.config.ts --reporter=json,list,./config/testing/playwrightSkipGuard.ts
@@ -151,20 +201,39 @@ jobs:
       # The harness finds Astrid at ../astrid-agent (ASTRID_CHECKOUT overrides) and the Runtime at ../astrid-runtime,
       # so all three checkouts are siblings under $GITHUB_WORKSPACE.
       - uses: actions/checkout@v4
+        id: app-checkout
         with:
           path: astrid-app
       - uses: actions/checkout@v4
+        id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: main
+          ref: ${{ inputs.runtime_ref || '1e6d899efa77a2d6ec247c38250f9748330bb587' }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
+        id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: main
+          ref: ${{ inputs.agent_ref || '14ea1103f3105fca71317427c882572333bdb1e6' }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+
+      - name: Resolve effective checkout SHAs
+        id: checkout-shas
+        run: |
+          app_head="$(git -C astrid-app rev-parse --verify HEAD)"
+          runtime_head="$(git -C astrid-runtime rev-parse --verify HEAD)"
+          agent_head="$(git -C astrid-agent rev-parse --verify HEAD)"
+          for head in "$app_head" "$runtime_head" "$agent_head"; do
+            [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          done
+          printf 'app_head=%s\n' "$app_head" >> "$GITHUB_OUTPUT"
+          printf 'runtime_head=%s\n' "$runtime_head" >> "$GITHUB_OUTPUT"
+          printf 'agent_head=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
+          printf 'APP_CHECKOUT_SHA=%s\n' "$app_head" >> "$GITHUB_ENV"
+          printf 'RUNTIME_CHECKOUT_SHA=%s\n' "$runtime_head" >> "$GITHUB_ENV"
+          printf 'AGENT_CHECKOUT_SHA=%s\n' "$agent_head" >> "$GITHUB_ENV"
 
       - name: Restore npm cache (C-08)
         id: c08-app-direct-journey-1
@@ -211,6 +280,12 @@ jobs:
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
           ASTRID_REQUIRE_LANES: direct-journey
           ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
+          ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
+          APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
+          RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}
+          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_head }}
+          TIMELINE_BUNDLE_AGENT_HEAD: ${{ steps.checkout-shas.outputs.agent_head }}
+          TIMELINE_BUNDLE_RUNTIME_HEAD: ${{ steps.checkout-shas.outputs.runtime_head }}
           # Written by the JSON reporter itself (the globalSetup prints to stdout, so a shell redirect would corrupt the file).
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results

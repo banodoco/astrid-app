@@ -420,6 +420,122 @@ async function plantNoReloadFlag(page: Page) {
   await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
 }
 
+async function runHostedLoopbackLeaseJourney(
+  page: Page, harness: DirectHarness, astrid: AstridCli, seed3: ThreeProductsSeed,
+  scenario: { journey: 'J1' | 'J2'; appLabel: string; agentLabel: string; agentTrack: 'V1' | 'S1' },
+) {
+  await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+  const trace: Array<{ kind: string; method?: string; path?: string; status?: number; body?: any }> = [];
+  const pendingLeaseRoutes = new Set<Promise<void>>();
+  let releaseDelete!: () => void;
+  const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+  const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+  const holdLeaseRelease = (route: Route) => {
+    const operation = (async () => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      trace.push({ kind: 'request', method: request.method(), path });
+      if (request.method() === 'DELETE') {
+        trace.push({ kind: 'lease-release-held', method: request.method(), path });
+        await deleteGate;
+        await route.continue();
+      } else {
+        await route.fallback();
+      }
+    })();
+    pendingLeaseRoutes.add(operation);
+    void operation.finally(() => pendingLeaseRoutes.delete(operation));
+    return operation;
+  };
+  page.on('response', async (response) => {
+    const path = new URL(response.url()).pathname;
+    if (!editingPath.test(path) && !COMMITS.test(path)) return;
+    const body = await response.json().catch(() => null);
+    trace.push({ kind: path.endsWith('/editing') ? 'lease-ack' : 'app-save-ack',
+      method: response.request().method(), path, status: response.status(), body });
+  });
+  await page.route(editingPath, holdLeaseRelease);
+  try {
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    const base = (await history(harness, seed3)).head;
+    const leaseAckPromise = page.waitForResponse((response) => response.request().method() === 'PUT'
+      && editingPath.test(new URL(response.url()).pathname), CEILING);
+    const saveAckPromise = page.waitForResponse((response) => response.request().method() === 'POST'
+      && COMMITS.test(new URL(response.url()).pathname), { timeout: 15_000 });
+
+    await editFirstTrackName(page, scenario.appLabel);
+    await expect(firstTrackName(page), 'the browser retains the user value while waiting for App save acknowledgement')
+      .toHaveValue(scenario.appLabel);
+    const leaseAck = await leaseAckPromise;
+    expect(leaseAck.status(), 'the App received an acknowledged active lease').toBe(200);
+    const leaseReceipt = await leaseAck.json();
+    expect(leaseReceipt.data).toMatchObject({ active: true, sequence: expect.any(Number), tab_session_id: expect.any(String) });
+    const saveAck = await saveAckPromise;
+    expect(saveAck.status(), 'the actual App command save was acknowledged').toBe(200);
+    const saved = await saveAck.json() as CommitAcceptedMutation;
+    expect(saved.data.status).toMatch(/^(accepted|merged|rebased)$/);
+    expect(saveAck.request().postDataJSON()).toMatchObject({
+      base_revision_id: base.revision_id,
+      commands: [{ op: 'track.set', select: 'parent/track:V1', args: { values: { label: scenario.appLabel }, clear: [] } }],
+    });
+    const appHead = pinOf(saved);
+    expect((await history(harness, seed3)).head).toEqual(appHead);
+    await expect.poll(() => trace.some((event) => event.kind === 'lease-release-held'), CEILING)
+      .toBe(true);
+
+    // The actual SDK session posts the original field command from the pinned pre-save head.
+    // Its first user_editing response is visible in the Runtime door audit while the App's DELETE is held at the network edge.
+    const agentFlight = astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+      scenario.agentTrack, scenario.agentLabel, `hosted-loopback-${scenario.journey.toLowerCase()}-${seed3.timelineId}`);
+    const refusedWhileLive = await waitForAudit(harness, (entry) => entry.method === 'POST'
+      && entry.path === `/v1/projects/${harness.seed.projectId}/timelines/${seed3.timelineId}/commit`
+      && entry.status === 409, 10_000);
+    expect(refusedWhileLive.length, 'the original Agent POST was refused while the acknowledged App lease remained active').toBeGreaterThan(0);
+    expect((await history(harness, seed3)).head).toEqual(appHead);
+
+    releaseDelete();
+    const outcome = await agentFlight;
+    expect(outcome.kind, JSON.stringify(outcome)).not.toBe('error');
+    if (scenario.journey === 'J1') {
+      expect(outcome.kind, JSON.stringify(outcome)).toBe('conflict');
+      expect(outcome.failure.details).toMatchObject({ status: 'conflict', reason: 'value_conflict' });
+      expect(outcome.recovery.status).toBe('re_derive');
+      expect(outcome.recovery.summary).toContain(`The user value is '${scenario.appLabel}'`);
+      expect(outcome.recovery.summary).toMatch(/preserve it and re-derive only compatible work/i);
+      expect((await history(harness, seed3)).head).toEqual(appHead);
+      const state = await revisionState(harness, seed3, appHead.revision_id);
+      expect(state.trackLabel).toBe(scenario.appLabel);
+    } else {
+      expect(outcome.kind, JSON.stringify(outcome)).toBe('accepted');
+      expect(outcome.result.data.status).toBe('merged');
+      const state = await revisionState(harness, seed3, outcome.result.data.accepted_revision_id);
+      expect(state.trackLabel).toBe(scenario.appLabel);
+      expect(state.parent.config.tracks.find((track: any) => track.id === scenario.agentTrack)?.label)
+        .toBe(scenario.agentLabel);
+    }
+    journey.facts = { ...journey.facts, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+      journey: scenario.journey, base, appHead, leaseReceipt,
+      eventTrace: trace.map(({ body, ...event }) => event), refusedAgentPostCountWhileLeaseLive: refusedWhileLive.length,
+      agentOutcome: outcome };
+  } finally {
+    releaseDelete();
+    await Promise.allSettled([...pendingLeaseRoutes]);
+    await page.unroute(editingPath, holdLeaseRelease).catch(() => {});
+  }
+}
+
+test('hosted-loopback J1: acknowledged App save holds the original Agent POST; a field conflict preserves the user value and re-derive guidance', async ({ page, harness, astrid, seed3 }) => {
+  await runHostedLoopbackLeaseJourney(page, harness, astrid, seed3,
+    { journey: 'J1', appLabel: 'Hosted user wins J1', agentLabel: 'Agent wanted J1', agentTrack: 'V1' });
+});
+
+test('hosted-loopback J2: acknowledged App save holds the original Agent POST; a disjoint field merges after lease release', async ({ page, harness, astrid, seed3 }) => {
+  await runHostedLoopbackLeaseJourney(page, harness, astrid, seed3,
+    { journey: 'J2', appLabel: 'Hosted user wins J2', agentLabel: 'Agent disjoint J2', agentTrack: 'S1' });
+});
+
 // ---------------------------------------------------------------------------------------------
 // 1. agent -> open App
 
@@ -512,7 +628,7 @@ test('agent -> open App: an Astrid task and its publication appear in the open A
  * pins, extension and explicit clear. Either the provider notices B before accepting A's receipt or C receives stale_head;
  * both must retain A+C and offer an explicit resolution. Command rebase is exercised separately by the M1 move cases.
  */
-test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, the App edits again; the App names the conflict and keeps its draft', async ({ page, harness, astrid, seed3 }) => {
+test('hosted-loopback recovery: the App names the conflict, keeps the user draft, and restores it after reload', async ({ page, harness, astrid, seed3 }) => {
   const agent = agentOf(astrid, seed3);
   const sniff = new TokenSniff(secretsOf(harness, astrid));
   sniff.attach(page);

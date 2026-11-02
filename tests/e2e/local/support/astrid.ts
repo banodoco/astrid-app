@@ -251,6 +251,42 @@ export class AstridCli {
     return { data: result.data, receipt: result.receipt } as CommitAcceptedMutation;
   }
 
+  /** Submit one original SDK command from a pinned base and expose the shipped pending re-derive result. */
+  async commitTrackLabelFromBase(projectSlug: string, timelineId: string, base: HeadPin, trackId: string, label: string, key: string) {
+    const program = [
+      'import json, sys',
+      'from pathlib import Path',
+      'from astrid.sdk.client import AstridClient',
+      'from astrid.sdk.timeline.commit_session import Timeline',
+      'from astrid.sdk.timeline.sync import TimelineSession, CommitConflict',
+      'from astrid.sdk.timeline.store import fetch_bundle',
+      'from astrid.sdk.timeline._track_commands import capture_track_set',
+      'project, timeline_id, base, track_id, label, key, outbox_path = json.loads(sys.argv[1])',
+      'with AstridClient.open_from_launcher(start_pack_host=False, client_name="three-products-timeline-edit") as client:',
+      '    session = TimelineSession.open(project, timeline_id, client=client, outbox_path=outbox_path,',
+      '        base_revision_id=base["revision_id"], base_publication_id=base["publication_id"],',
+      '        user_editing_timeout=8, user_editing_interval=0.05)',
+      '    bundle = fetch_bundle(session.project_id, session.timeline_id, revision_id=base["revision_id"],',
+      '                          publication_id=base["publication_id"], client=client)',
+      '    command = capture_track_set(bundle, "parent/track:" + track_id, values={"label": label})',
+      '    try:',
+      '        result = session.commit(command, idempotency_key=key, label="Agent track label")',
+      '        print(json.dumps({"kind": "accepted", "result": result}))',
+      '    except CommitConflict as exc:',
+      '        current = Timeline.open(project, timeline_id, client=client, outbox_path=outbox_path,',
+      '                               user_editing_timeout=8, user_editing_interval=0.05)',
+      '        recovery = current.retry(exc)',
+      '        print(json.dumps({"kind": "conflict", "pending_id": exc.pending_id,',
+      '                          "detail": exc.detail, "fix": exc.fix, "failure": exc.failure,',
+      '                          "pending": current.pending_show(exc.pending_id), "recovery": recovery}))',
+      '    except Exception as exc:',
+      '        print(json.dumps({"kind": "error", "type": type(exc).__name__, "message": str(exc)}))',
+    ].join('\n');
+    const outboxPath = path.join(this.data, 't4-r2-outboxes', `${key}.json`);
+    const run = await this.python(['-c', program, JSON.stringify([projectSlug, timelineId, base, trackId, label, key, outboxPath])]);
+    return JSON.parse(run.stdout.trim().split('\n').at(-1)!);
+  }
+
   /** `python -m astrid <args>` where the last stdout line is the `--json` envelope; the caller passes `--json`. */
   async json<T = any>(args: string[], options?: { timeoutMs?: number }): Promise<AstridEnvelope<T>> {
     const run = await this.astrid(args, options);

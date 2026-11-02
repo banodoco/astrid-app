@@ -35,7 +35,7 @@ on:
       agent_ref:
         description: Full Agent commit SHA or ref for both journey jobs
         required: true
-        default: "e425903f7a9fa5b82973281d15054c0716b46e2d"
+        default: "999d3046321456d0ede1ceb86d564bf549ccfdda"
         type: string
 
 concurrency:
@@ -63,7 +63,7 @@ jobs:
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_ref || '999d3046321456d0ede1ceb86d564bf549ccfdda' }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 
@@ -78,7 +78,7 @@ jobs:
           done
           printf 'app_head=%s\n' "$app_head" >> "$GITHUB_OUTPUT"
           printf 'runtime_head=%s\n' "$runtime_head" >> "$GITHUB_OUTPUT"
-          printf 'agent_head=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
+          printf 'agent_checkout_sha=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
           printf 'APP_CHECKOUT_SHA=%s\n' "$app_head" >> "$GITHUB_ENV"
           printf 'RUNTIME_CHECKOUT_SHA=%s\n' "$runtime_head" >> "$GITHUB_ENV"
           printf 'AGENT_CHECKOUT_SHA=%s\n' "$agent_head" >> "$GITHUB_ENV"
@@ -132,7 +132,7 @@ jobs:
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
           APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
           RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}
-          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_head }}
+          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_checkout_sha }}
           # A missing dependency in this job is a failure, never a skip (config/testing/skipRegistry.mjs).
           ASTRID_REQUIRE_LANES: direct-journey
         run: npx playwright test -c playwright.direct.config.ts --reporter=json,list,./config/testing/playwrightSkipGuard.ts
@@ -215,7 +215,7 @@ jobs:
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_ref || '999d3046321456d0ede1ceb86d564bf549ccfdda' }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 
@@ -230,7 +230,7 @@ jobs:
           done
           printf 'app_head=%s\n' "$app_head" >> "$GITHUB_OUTPUT"
           printf 'runtime_head=%s\n' "$runtime_head" >> "$GITHUB_OUTPUT"
-          printf 'agent_head=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
+          printf 'agent_checkout_sha=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
           printf 'APP_CHECKOUT_SHA=%s\n' "$app_head" >> "$GITHUB_ENV"
           printf 'RUNTIME_CHECKOUT_SHA=%s\n' "$runtime_head" >> "$GITHUB_ENV"
           printf 'AGENT_CHECKOUT_SHA=%s\n' "$agent_head" >> "$GITHUB_ENV"
@@ -283,8 +283,8 @@ jobs:
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
           APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
           RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}
-          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_head }}
-          TIMELINE_BUNDLE_AGENT_HEAD: ${{ steps.checkout-shas.outputs.agent_head }}
+          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_checkout_sha }}
+          TIMELINE_BUNDLE_AGENT_HEAD: ${{ steps.checkout-shas.outputs.agent_checkout_sha }}
           TIMELINE_BUNDLE_RUNTIME_HEAD: ${{ steps.checkout-shas.outputs.runtime_head }}
           # Written by the JSON reporter itself (the globalSetup prints to stdout, so a shell redirect would corrupt the file).
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json

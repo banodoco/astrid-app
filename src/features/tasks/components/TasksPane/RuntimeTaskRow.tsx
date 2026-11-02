@@ -43,7 +43,7 @@ interface RuntimeTaskRowProps {
 function StatusText({ task }: { task: RuntimeTask }) {
   if (task.state === 'succeeded') {
     const time = runtimeTaskRelativeTime(task.updated_at);
-    return time ? <span className="whitespace-nowrap text-muted-foreground">{time}</span> : null;
+    return <span className="whitespace-nowrap text-muted-foreground"><span>Complete</span>{time && <> · <span>{time}</span></>}</span>;
   }
   const progress = runtimeTaskProgress(task);
   const state = runtimeTaskStateLabel(task.state);

@@ -80,10 +80,10 @@ describe('RuntimeTaskList', () => {
     expect(onInspectTask).toHaveBeenCalledTimes(2);
   });
 
-  it('shows no state for complete rows, a relative time, and a human detail line', () => {
+  it('shows the complete state, a relative time, and a human detail line', () => {
     const recent = new Date(Date.now() - 5 * 60_000).toISOString();
     renderList([task('v', 'generation.generate_speech', { updated_at: recent }, { text: 'Well, it was cool.', voice: 'en-US-Andrew' })]);
-    expect(screen.queryByText('Complete')).not.toBeInTheDocument();
+    expect(screen.getByText('Complete')).toBeVisible();
     expect(screen.getByText('Voice')).toBeInTheDocument();
     expect(screen.getByText('Well, it was cool.')).toBeInTheDocument();
     expect(screen.getByText('5 min ago')).toBeInTheDocument();

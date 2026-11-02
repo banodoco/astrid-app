@@ -13,6 +13,7 @@ import { markTimelineSaveRejection, type TimelineSaveRejectionCode } from '../li
 import { applyTimelineOperation, type TimelineElementOperation } from '../runtime/element-adapter.ts';
 import type { AstridAgentElementContext } from '../runtime/element-contract.ts';
 import { documentPatchIntent } from '../commands/documentPatchIntent.ts';
+import { captureClipSet, executeClipSet } from '../commands/clipScalarCapture.ts';
 import type { PlacePreparedMediaCommand } from '../commands/media.ts';
 
 export interface TimelineSaveSource {
@@ -171,6 +172,7 @@ export function createTimelineLocalSaveHandoff(options: {
   initial: TimelineCommandBasis;
   source: TimelineSaveSource;
   session: LocalSaveSession;
+  authoringBundle?: AuthoringBundle;
   /** Read the upstream assembly after the session has adopted the complete canonical result. */
   loadHistory?(): Promise<TimelineCommandBasis>;
   adopted(basis: TimelineCommandBasis): { receipt: TimelineSaveReceipt; source: TimelineSaveSource };
@@ -181,6 +183,8 @@ export function createTimelineLocalSaveHandoff(options: {
   let authoringSource = structuredClone(options.source);
   let document = structuredClone(options.initial.canonicalDocument);
   let sourceChecked = false;
+  const nativeTransitionCapture = Boolean(options.authoringBundle);
+  let authoringBundle = options.authoringBundle && structuredClone(options.authoringBundle);
   let targets = historyTargets(options.initial.history, options.initial.head);
   let inversePending = false;
 
@@ -637,6 +641,23 @@ export function createTimelineLocalSaveHandoff(options: {
           }
         }
         // The encoder supplies guards and created IDs; these bytes are never a wire DTO.
+        if (gestureBasis?.kind === 'transition-clear' && nativeTransitionCapture && !same(before, after)) {
+          if (!authoringBundle) refuse('native transition authoring basis is refreshing');
+          // Keep the verified child closure, but capture against the current local
+          // parent so a preceding unacknowledged edit remains the causal basis.
+          let bundle = structuredClone(authoringBundle);
+          bundle.parent = structuredClone(parent);
+          delete bundle.parent.occurrences;
+          commands = gestureBasis.clipIds.map((id) => {
+            const command = captureClipSet(bundle, `parent/clip:${id}`, { clear: ['transition'] });
+            bundle = executeClipSet(bundle, command).bundle as AuthoringBundle;
+            return command;
+          });
+          const expectedParent = structuredClone(payload);
+          delete expectedParent.occurrences;
+          if (!same(bundle.parent, expectedParent)) refuse('native transition clear differs from the selected parent edit');
+          mediaLabel = 'Clear transitions';
+        }
         const firstCommand = commands?.[0];
         if (commands && !firstCommand) refuse('prepared media command is empty');
         const pending = commands && firstCommand ? options.session.append({ before: toOutboxJson(before), after: toOutboxJson(after),
@@ -678,12 +699,14 @@ export function createTimelineLocalSaveHandoff(options: {
         if (head.projectId !== initial.canonicalDocument.project_id || head.timelineId !== initial.canonicalDocument.timeline_id
           || head.headRevisionId !== basis.head.revisionId || head.headPublicationId !== basis.head.publicationId
           || !same(adopted.source.head, head)) refuse('canonical assembly did not adopt the accepted head');
+        if (nativeTransitionCapture) authoringBundle = undefined;
         initial = structuredClone(basis);
         source = structuredClone(adopted.source);
         authoringSource = structuredClone(adopted.source);
         document = structuredClone(basis.canonicalDocument);
         sourceChecked = false;
         targets = historyTargets(basis.history, basis.head);
+        if (nativeTransitionCapture) authoringBundle = await authoringBundleFromDocument(basis.canonicalDocument);
         if (options.loadHistory) {
           const latest = await options.loadHistory();
           targets = historyTargets(same(latest.head, basis.head) ? latest.history : undefined, basis.head);

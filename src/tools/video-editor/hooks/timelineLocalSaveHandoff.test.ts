@@ -17,6 +17,7 @@ import { acceptedCommit, fixtureDigest } from '@/integrations/runtime/__tests__/
 import { WorkspaceClient, type Transport } from '@/integrations/runtime/generated.ts';
 import { createCommitOutbox, toOutboxJson } from '../commands/commitOutbox.ts';
 import { createLocalSaveSession } from '../commands/localSaveSession.ts';
+import { authoringBundleFromDocument } from '../commands/authoringBundle.ts';
 import { applyPreparedMediaCommand } from '../commands/media.ts';
 import { createDefaultTimelineConfig, withDefaultTimelineOutput } from '../lib/defaults.ts';
 import { buildTimelineData } from '../lib/timeline-data.ts';
@@ -305,6 +306,36 @@ describe('upstream local document handoff', () => {
       path: [...(topLevel ? [] : ['config']), 'clips', 'id:authored', 'transition'],
       state: { state: 'present', value: { type: 'crossfade', duration: 0.5, opaque: null } } });
     expect(intent.step.reads).toEqual(intent.reads);
+    await env.session.dispose();
+  });
+
+  it.each([false, true])('captures an atomic native transition clear on the original parent basis (topLevel=%s)', async (topLevel) => {
+    contractFixture.digest = CURRENT_V2_DIGEST;
+    const env = await environment(true, true, ['authored', 'sibling', 'untouched'], undefined, undefined, topLevel, true);
+    const handoff = createTimelineLocalSaveHandoff({ initial: env.initial, source: env.source, session: env.session,
+      authoringBundle: await authoringBundleFromDocument(env.initial.canonicalDocument), adopted: env.receipt });
+    const next = structuredClone(env.source);
+    next.config.clips = next.config.clips.map(clip => clip.id === 'untouched' ? clip : { ...clip, transition: undefined });
+    await handoff.capture(next, { kind: 'transition-clear', clipId: 'authored', clipIds: ['authored', 'sibling'],
+      config: env.source.config, registry: env.source.registry });
+    const [stored] = await env.outboxes.list(env.scope);
+    expect(stored.intents).toHaveLength(1);
+    const payload = stored.intents[0].payload as { commands: Array<Record<string, any>> };
+    expect(payload.commands.map(command => command.select)).toEqual(['parent/clip:authored', 'parent/clip:sibling']);
+    for (const command of payload.commands) {
+      expect(command).toMatchObject({ op: 'clip.set', args: { values: {}, clear: ['transition'] },
+        bindings: { 'scalar.target': command.select } });
+      expect(command.expect[`${command.select}::transition`]).toEqual({ state: 'present',
+        value: { type: 'crossfade', duration: 0.5, opaque: null } });
+    }
+    env.send.mockRejectedValue(new Error('connection lost'));
+    await expect(env.session.flush()).rejects.toThrow('unacknowledged');
+    await expect(env.session.flush()).rejects.toThrow('unacknowledged');
+    expect(env.send).toHaveBeenCalledTimes(2);
+    const [request, key] = env.send.mock.calls[0];
+    expect(request.commands).toEqual(payload.commands);
+    expect(request).toMatchObject({ base_revision_id: 'r0', base_publication_id: 'p0' });
+    expect(env.send.mock.calls[1]).toEqual([request, key]);
     await env.session.dispose();
   });
 

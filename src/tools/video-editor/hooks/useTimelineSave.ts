@@ -31,6 +31,7 @@ import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { createTimelineLocalSaveHandoff, readTimelineOriginalSaveBasis, type TimelineLocalSaveHandoff, type TimelineOriginalSaveBasis, type TimelineSaveSource, type TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
 import { createLocalSaveSession, type LocalSaveSession, type LocalSaveState } from '../commands/localSaveSession.ts';
 import { toOutboxJson } from '../commands/commitOutbox.ts';
+import { authoringBundleFromDocument } from '../commands/authoringBundle.ts';
 import { emitTimelineSaveDiagnostic, markTimelineSaveRejection } from '../lib/timeline-diagnostics.ts';
 export { shouldAcceptPolledData } from '@/tools/video-editor/lib/timeline-save-utils.ts';
 export type { SaveStatus } from '@/tools/video-editor/hooks/useTimelinePersistence.ts';
@@ -392,7 +393,9 @@ export function useTimelineSave(
           }
         }
         if (!isCurrent()) throw markTimelineSaveRejection(new Error('Local save session replaced during history read'), 'owner-history-invalidated', 'Error');
-        const handoff = createTimelineLocalSaveHandoff({ initial, source: adoptedSource, session,
+        const authoringBundle = initial === verified.initial ? verified.authoringBundle : await authoringBundleFromDocument(initial.canonicalDocument);
+        if (!isCurrent()) throw new Error('Local save session replaced during authoring read');
+        const handoff = createTimelineLocalSaveHandoff({ initial, source: adoptedSource, session, authoringBundle,
           loadHistory: () => provider.loadTimelineCommandBasis!(timelineId),
           adopted: () => {
             emitTimelineSaveDiagnostic('adopted-read', () => ({ owner: localOwner, timelineId,

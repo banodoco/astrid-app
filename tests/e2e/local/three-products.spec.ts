@@ -540,6 +540,10 @@ async function runHostedLoopbackLeaseJourney(
     const saveBeforeRelease = trace.findIndex(event => event.kind === 'app-save-ack' && event.status === 200);
     expect(saveBeforeRelease).toBeGreaterThan(appPost);
     expect(trace.findIndex(event => event.kind === 'lease-release-held')).toBeGreaterThan(saveBeforeRelease);
+    journey.facts = { ...journey.facts, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+      journey: scenario.journey, base, appHead, leaseReceipt, releaseReceipt,
+      eventTrace: trace.map(({ body, ...event }) => event), refusedAgentPostCountWhileLeaseLive: refusedWhileLive.length,
+      agentPosts: posts, agentOutcome: outcome };
     expect(outcome.kind, JSON.stringify(outcome)).not.toBe('error');
     if (scenario.journey === 'J1') {
       expect(outcome.kind, JSON.stringify(outcome)).toBe('conflict');
@@ -558,10 +562,6 @@ async function runHostedLoopbackLeaseJourney(
       expect(state.parent.config.tracks.find((track: any) => track.id === scenario.agentTrack)?.label)
         .toBe(scenario.agentLabel);
     }
-    journey.facts = { ...journey.facts, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
-      journey: scenario.journey, base, appHead, leaseReceipt, releaseReceipt,
-      eventTrace: trace.map(({ body, ...event }) => event), refusedAgentPostCountWhileLeaseLive: refusedWhileLive.length,
-      agentPosts: posts, agentOutcome: outcome };
   } finally {
     journey.facts = { ...journey.facts, pageErrors, eventTrace: trace,
       saveDiagnostics: await page.evaluate(() => (window as unknown as { __saveEvents?: unknown[] }).__saveEvents).catch(() => []) };

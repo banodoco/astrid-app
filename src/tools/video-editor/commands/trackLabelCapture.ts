@@ -72,3 +72,21 @@ export function finishTrackLabel(basis: unknown, args: TrackLabelArgs) {
   }
   return apply(basis.bundle as AuthoredBundle, { ...copy(basis.command as EditCommand), args: copy(args) });
 }
+
+/** Shared eligibility and fresh-head capture for explicit single-label resolution. */
+export function reapplicableTrackLabel(command: EditCommand): { select: string; args: TrackLabelArgs } | undefined {
+  if (command.schema_version !== 1 || command.op !== 'track.set' || command.version !== '1'
+    || typeof command.select !== 'string' || !/^parent\/track:[^/]+$/.test(command.select) || command.select.includes('::')
+    || (command.intent !== undefined && !equal(command.intent, {}))) return;
+  try { assertArgs(command.args); } catch { return; }
+  return { select: command.select, args: copy(command.args) };
+}
+
+export function rebaseTrackLabel(bundle: AuthoredBundle, label: { select: string; args: TrackLabelArgs }) {
+  const trackId = label.select.slice('parent/track:'.length);
+  if (Object.values(bundle.shots).some((shot) => Array.isArray(shot.internal_timeline.tracks)
+    && shot.internal_timeline.tracks.some((track) => object(track) && track.id === trackId))) {
+    throw new ClipMoveError('Track label requires one unambiguous parent track identity');
+  }
+  return finishTrackLabel(captureTrackLabel(bundle, label.select), label.args);
+}

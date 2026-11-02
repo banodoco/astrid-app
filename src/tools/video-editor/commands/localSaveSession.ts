@@ -4,6 +4,8 @@ import { classifyRuntimeCommitFailure } from '@/integrations/runtime/client.ts';
 import { supportsFullV2Commit } from '@/integrations/runtime/contract-metadata.ts';
 import type { TimelineCommandBasis, TimelineCommitResult } from '../data/DataProvider.ts';
 import { documentPatchIntent } from './documentPatchIntent.ts';
+import { authoringBundleFromDocument } from './authoringBundle.ts';
+import { reapplicableTrackLabel, rebaseTrackLabel } from './trackLabelCapture.ts';
 import {
   createCommitOutbox,
   toOutboxJson,
@@ -78,6 +80,7 @@ export async function createLocalSaveSession(options: Options) {
   let lifetime: Promise<unknown> | undefined;
   let writes: Promise<unknown> = Promise.resolve();
   let sending: Promise<void> | undefined;
+  let resolving = false;
   let generation = 0;
   let adoptedAcceptance: string | undefined;
   let replaying = false;
@@ -91,6 +94,7 @@ export async function createLocalSaveSession(options: Options) {
     if (error === undefined) delete state.error;
     options.changed(clone(state));
   }
+  const getStatus = () => state.status;
   function assertOpen() {
     if (!closed && recoveryError) throw recoveryError;
     if (closed || !box) throw new Error('Local save session is closed or awaiting recovery');
@@ -120,6 +124,12 @@ export async function createLocalSaveSession(options: Options) {
     const conflict = inverse || (failure.error && typeof failure.error === 'object' && !Array.isArray(failure.error)
       && failure.error.kind === 'conflict');
     publish(conflict ? 'conflict' : 'error', failure.error);
+    // A concurrent writer rejected this exact local chain.  Do not replace the
+    // mounted draft with its head before the person chooses one of the conflict
+    // actions: that turns a correctly surfaced 409 into visible data loss.
+    // `discardRejected` is the explicit "Use latest version" path; the
+    // retained chain remains available to the "Keep my changes" recovery flow.
+    if (conflict) return true;
     try {
       const latest = await options.loadLatest();
       checkBasis(latest);
@@ -277,7 +287,7 @@ export async function createLocalSaveSession(options: Options) {
 
   function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
     assertOpen();
-    if (writeError || ['conflict', 'error'].includes(state.status)) throw new Error('Resolve retained local saves before editing again');
+    if (resolving || writeError || ['conflict', 'error'].includes(state.status)) throw new Error('Resolve retained local saves before editing again');
     // The visible closure is now canonical, while the retained suffix still
     // describes its original local chain. Do not author a new edit between them.
     if (replaying) throw new Error('Wait for retained dependent saves to finish revalidation before editing again');
@@ -327,6 +337,82 @@ export async function createLocalSaveSession(options: Options) {
       if (writeError) throw writeError;
       if (state.status !== 'saved') throw new Error('Local saves remain unacknowledged; draft retained');
       return clone(basis);
+    },
+    /** Rebuild a single document-patch label on a fresh head in this same owner. */
+    async keepLabelChanges(): Promise<boolean> {
+      assertOpen();
+      if (resolving) throw new Error('Conflict resolution is already in progress');
+      if (state.status !== 'conflict') return false;
+      resolving = true;
+      try {
+        await writes;
+        await sending;
+        const current = await box!.read();
+        if (current.pending?.outcome?.kind !== 'rejected' || current.pending.intentId !== current.intents[0]?.id
+          || current.intents.length !== 1) return false;
+        const save = saveOf(current.intents[0].payload);
+        const patch = save.documentIntent as Record<string, OutboxJson> | undefined;
+        if (save.commands || !patch || !Array.isArray(patch.changes) || patch.changes.length !== 1
+          || !Array.isArray(patch.created) || patch.created.length) return false;
+        const change = patch.changes[0] as Record<string, OutboxJson>;
+        const path = change?.path;
+        const target = Array.isArray(path) ? path[path.length - 2] : undefined;
+        if (change?.ref !== 'parent' || !Array.isArray(path)
+          || !((path.length === 3 && path[0] === 'tracks') || (path.length === 4 && path[0] === 'config' && path[1] === 'tracks'))
+          || typeof target !== 'string' || !target.startsWith('id:')
+          || path[path.length - 1] !== 'label') return false;
+        const id = target.slice(3);
+        const args = change.op === 'set' && typeof change.value === 'string'
+          ? { values: { label: change.value }, clear: [] }
+          : change.op === 'remove' ? { values: {}, clear: ['label'] } : undefined;
+        if (!args) return false;
+        const label = reapplicableTrackLabel({ schema_version: 1, op: 'track.set', version: '1',
+          select: `parent/track:${id}`, args } as CommitRequest['commands'][number]);
+        if (!label) return false;
+        const fresh = await options.loadLatest();
+        checkBasis(fresh);
+        const before = await authoringBundleFromDocument(fresh.canonicalDocument);
+        let command: CommitRequest['commands'][number];
+        try { command = rebaseTrackLabel(before, label).command; } catch { return false; }
+        if (closed) throw new Error('Local save session is closed');
+        // Preserve a recoverable display image until the fresh command is acknowledged.
+        const after = clone(fresh.canonicalDocument);
+        const parent = after.parent_revision.payload as Record<string, unknown>;
+        for (const container of [parent, parent.config]) {
+          if (!container || typeof container !== 'object' || Array.isArray(container)) continue;
+          const tracks = (container as Record<string, unknown>).tracks;
+          if (!Array.isArray(tracks)) continue;
+          const track = tracks.find((item) => item && typeof item === 'object' && item.id === id);
+          if (!track) continue;
+          if ('label' in label.args.values) track.label = label.args.values.label;
+          else delete track.label;
+        }
+        const replacement: StoredSave = { kind: 'local-save', label: save.label, displayBasis: fresh,
+          before: toOutboxJson(fresh.canonicalDocument), after: toOutboxJson(after), commands: [command] };
+        record = await box!.resolveRejected([current.intents[0].id], { payload: toOutboxJson(replacement), head: fresh.head }, () => !closed);
+        basis = clone(fresh);
+        displayBasis = clone(fresh);
+        document = toOutboxJson(after);
+        generation++;
+        publish('dirty');
+        await pump();
+        if (getStatus() !== 'saved') throw new Error('Reapplied label remains unacknowledged; draft retained');
+        return true;
+      } finally { resolving = false; }
+    },
+    /** Resolve an explicitly discarded conflict; never call this implicitly. */
+    async discardRejected() {
+      assertOpen();
+      if (resolving || state.status !== 'conflict') throw new Error('No rejected local save is awaiting an explicit discard');
+      const current = await box!.read();
+      const rejected = current.pending?.outcome?.kind === 'rejected';
+      if (!rejected || current.intents.length === 0) {
+        throw new Error('Rejected local save changed before explicit discard');
+      }
+      record = await box!.resolveRejected(current.intents.map((intent) => intent.id));
+      document = toOutboxJson(basis.canonicalDocument);
+      replaying = false;
+      publish('saved');
     },
     async recover(ownerId: string) {
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');

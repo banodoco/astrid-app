@@ -1498,6 +1498,11 @@ export function useTimelinePersistence({
     onCanonicalReloadStart?.();
     if (reloadPromiseRef.current) return reloadPromiseRef.current;
 
+    // This is the explicit "Use latest version" branch. The local outbox
+    // stays intact for Save-as-copy (`preserveDraft`), but a person who chose
+    // the remote version must not have the rejected local chain revived later.
+    const discardRejectedConflict = isConflictExhaustedRef.current && !options?.preserveDraft;
+
     reloadInProgressRef.current = true;
     saveQueueGenerationRef.current += 1;
     rejectFlushWaiters(new Error('Timeline reloaded before durable acknowledgement.'));
@@ -1556,6 +1561,9 @@ export function useTimelinePersistence({
         if (reloadCancelledRef.current) {
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
+
+        // Keep the rejected chain if reading or building the latest version fails.
+        if (discardRejectedConflict) await localDocumentSave?.discardConflictDraft?.();
 
         // Clear only the exact durable draft snapshot the user chose to
         // discard. IndexedDB compares and deletes in one transaction, so a
@@ -1652,6 +1660,7 @@ export function useTimelinePersistence({
     selectedClipIdRef,
     selectedTrackIdRef,
     onCanonicalReloadStart,
+    localDocumentSave,
     rejectFlushWaiters,
     store,
     timelineId,
@@ -1673,6 +1682,21 @@ export function useTimelinePersistence({
     }
 
     try {
+      if (await localDocumentSave?.keepLabelChanges?.()) {
+        // The same owner has acknowledged the rebased edit. Reload its accepted
+        // closure without discarding a now-settled rejected chain.
+        isConflictExhaustedRef.current = false;
+        setIsConflictExhausted(false);
+        await reloadFromServer();
+        return;
+      }
+    } catch {
+      // Failed fresh reads or saves retain the owner and the visible draft.
+      setSaveStatus('error');
+      return;
+    }
+
+    try {
       await createRecoverySave(latest, editSeqRef.current).draftWrite;
     } catch {
       // IndexedDB unavailable (private mode etc.) — the copy can't persist.
@@ -1681,7 +1705,7 @@ export function useTimelinePersistence({
     }
     setIsConflictExhausted(false);
     await reloadFromServer({ preserveDraft: true });
-  }, [createRecoverySave, dataRef, editSeqRef, getDataRef, reloadFromServer]);
+  }, [createRecoverySave, dataRef, editSeqRef, getDataRef, localDocumentSave, reloadFromServer]);
 
   useEffect(() => {
     // A durable save receipt acknowledges the edit: clear the watchdog.

@@ -17,7 +17,7 @@ import { authoringBundleFromDocument, type AuthoringBundle } from './authoringBu
 import { captureClipMove, finishClipMove, type AuthoredBundle } from './clipMoveCapture.ts';
 import type { ClipMoveCapturePort, ClipMoveProposal } from './semanticGestures.ts';
 import { AuthoredState, assertFiniteJson, copy, equal, freezeJson } from './clipMovePrimitives.ts';
-import { captureTrackLabel, finishTrackLabel, type TrackLabelArgs } from './trackLabelCapture.ts';
+import { captureTrackLabel, finishTrackLabel, reapplicableTrackLabel, rebaseTrackLabel, type TrackLabelArgs } from './trackLabelCapture.ts';
 import type { TrackLabelCapturePort } from './trackLabelGesture.ts';
 import type { ClipParamsArgs } from './clipParamsCapture.ts';
 import type { JsonObject } from './types.ts';
@@ -283,16 +283,7 @@ export async function createTimelineCommandSession(options: Options) {
     if (record?.intents.length !== 1) return;
     const commands = (record.intents[0].payload as unknown as Payload).commands;
     if (commands?.length !== 1) return;
-    const command = commands[0];
-    if (command.schema_version !== 1 || command.op !== 'track.set' || command.version !== '1'
-      || typeof command.select !== 'string' || !/^parent\/track:[^/]+$/.test(command.select) || command.select.includes('::')
-      || (command.intent !== undefined && !equal(command.intent, {}))) return;
-    const args = command.args;
-    if (!args || !equal(Object.keys(args).sort(), ['clear', 'values'])
-      || !args.values || typeof args.values !== 'object' || Array.isArray(args.values)) return;
-    if (!(equal(Object.keys(args.values), ['label']) && typeof args.values.label === 'string' && equal(args.clear, []))
-      && !(equal(args.values, {}) && equal(args.clear, ['label']))) return;
-    return { select: command.select, args: copy(args) as TrackLabelArgs };
+    return reapplicableTrackLabel(commands[0]);
   }
   function publish(status: CommandSessionState['status'], error: string | null = null) {
     if (stopped) return;
@@ -1203,8 +1194,7 @@ export async function createTimelineCommandSession(options: Options) {
       let payload: Payload | undefined;
       if (label) {
         const trackId = label.select.slice('parent/track:'.length);
-        if (hasChildTrack(before, trackId)) throw new Error('Track label requires one unambiguous parent track identity');
-        const result = finishTrackLabel(captureTrackLabel(before, label.select), label.args);
+        const result = rebaseTrackLabel(before, label);
         payload = { commands: [result.command], before, after: result.bundle, displayBasis: fresh,
           preview: { version: 1, operations: [{ op: 'track.update', target: trackId,
             payload: { label: 'label' in label.args.values ? label.args.values.label : trackId } }] } };

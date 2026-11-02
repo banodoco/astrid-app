@@ -332,12 +332,12 @@ export async function holdTimelineCreation(page: Page) {
 }
 
 /**
- * Holds every save of a composition revision in flight, so the Runtime never receives it and an edit stays an unsaved
+ * Holds every timeline commit in flight, so the Runtime never receives it and an edit stays an unsaved
  * draft by construction. The editor autosaves 500 ms after an edit, so without this a restart that follows the edit
  * only keeps the draft when it happens to win that race. Returns the release (later saves go through).
  */
 export async function holdTimelineSaves(page: Page) {
-  const saves = /\/timelines\/[^/]+\/composition-revisions$/;
+  const saves = /\/timelines\/[^/]+\/commit$/;
   await page.route(saves, (route) => (route.request().method() === 'POST' ? new Promise<void>(() => {}) : route.fallback()));
   return () => page.unroute(saves);
 }

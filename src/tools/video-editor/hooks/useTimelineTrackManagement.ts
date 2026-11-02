@@ -903,6 +903,7 @@ export function useTimelineTrackManagement({
   }, [applyEdit, resolvedConfig]);
 
   const handleTrackPopoverChange = useCallback((trackId: string, patch: Partial<TrackDefinition>) => {
+    const current = dataRef.current;
     if (!resolvedConfig) {
       return;
     }
@@ -911,8 +912,13 @@ export function useTimelineTrackManagement({
       ...resolvedConfig,
       tracks: resolvedConfig.tracks.map((track) => (track.id === trackId ? { ...track, ...patch } : track)),
     };
-    applyEdit({ type: 'config', resolvedConfig: nextConfig }, { selectedTrackId: trackId });
-  }, [applyEdit, resolvedConfig]);
+    applyEdit({ type: 'config', resolvedConfig: nextConfig }, { selectedTrackId: trackId,
+      ...(current && Object.keys(patch).length === 1 && typeof patch.label === 'string' ? {
+        gestureBasis: { kind: 'track-label' as const, trackId,
+          config: structuredClone(current.config), registry: structuredClone(current.registry) },
+      } : {}),
+    });
+  }, [applyEdit, dataRef, resolvedConfig]);
 
   const handleMoveTrack = useCallback((activeId: string, overId: string, lanes?: readonly DataLaneView[]) => {
     if (editability?.checkTimeline?.().allowed === false || editability?.check({ clipId: '__row-reorder__', sourceTrackId: null, targetTrackId: null }).allowed === false) return;

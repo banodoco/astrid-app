@@ -426,6 +426,16 @@ async function runHostedLoopbackLeaseJourney(
 ) {
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const trace: Array<{ kind: string; method?: string; path?: string; status?: number; body?: any }> = [];
+  const pageErrors: string[] = [];
+  page.on('pageerror', error => pageErrors.push(error.message));
+  await page.addInitScript(() => {
+    const target = window as unknown as { __timelineSaveDiagnosticsEnabled: boolean; __saveEvents: unknown[] };
+    target.__timelineSaveDiagnosticsEnabled = true;
+    target.__saveEvents = [];
+    window.addEventListener('timeline:save-diagnostic', event => {
+      if (target.__saveEvents.length < 300) target.__saveEvents.push((event as CustomEvent).detail);
+    });
+  });
   const pendingLeaseRoutes = new Set<Promise<void>>();
   let releaseDelete!: () => void;
   const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
@@ -454,11 +464,16 @@ async function runHostedLoopbackLeaseJourney(
     trace.push({ kind: path.endsWith('/editing') ? 'lease-ack' : 'app-save-ack',
       method: response.request().method(), path, status: response.status(), body });
   });
+  page.on('request', request => {
+    const path = new URL(request.url()).pathname;
+    if (request.method() === 'POST' && COMMITS.test(path)) trace.push({ kind: 'app-save-post', method: 'POST', path });
+  });
   await page.route(editingPath, holdLeaseRelease);
   try {
     await openApp(page, harness);
     await expectConnected(page);
     await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
     const base = (await history(harness, seed3)).head;
     const leaseAckPromise = page.waitForResponse((response) => response.request().method() === 'PUT'
       && editingPath.test(new URL(response.url()).pathname), CEILING);
@@ -477,26 +492,54 @@ async function runHostedLoopbackLeaseJourney(
     const saved = await saveAck.json() as CommitAcceptedMutation;
     expect(saved.data.status).toMatch(/^(accepted|merged|rebased)$/);
     expect(saveAck.request().postDataJSON()).toMatchObject({
-      base_revision_id: base.revision_id,
-      commands: [{ op: 'track.set', select: 'parent/track:V1', args: { values: { label: scenario.appLabel }, clear: [] } }],
+      base_revision_id: base.revision_id, base_publication_id: base.publication_id,
+      source: { via: 'app' },
+      commands: [{ op: 'doc.patch', args: { changes: [{ op: 'set', ref: 'parent',
+        path: ['config', 'tracks', 'id:V1', 'label'], value: scenario.appLabel }] } }],
     });
+    const leaseBeforePost = trace.findIndex(event => event.kind === 'lease-ack' && event.method === 'PUT' && event.status === 200);
+    const appPost = trace.findIndex(event => event.kind === 'app-save-post');
+    expect(leaseBeforePost).toBeGreaterThanOrEqual(0);
+    expect(appPost).toBeGreaterThan(leaseBeforePost);
     const appHead = pinOf(saved);
     expect((await history(harness, seed3)).head).toEqual(appHead);
     await expect.poll(() => trace.some((event) => event.kind === 'lease-release-held'), CEILING)
       .toBe(true);
 
     // The actual SDK session posts the original field command from the pinned pre-save head.
-    // Its first user_editing response is visible in the Runtime door audit while the App's DELETE is held at the network edge.
+    // Observe its real HTTP result while the App's DELETE is held at the network edge.
+    const agentKey = `hosted-loopback-${scenario.journey.toLowerCase()}-${seed3.timelineId}`;
     const agentFlight = astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
-      scenario.agentTrack, scenario.agentLabel, `hosted-loopback-${scenario.journey.toLowerCase()}-${seed3.timelineId}`);
-    const refusedWhileLive = await waitForAudit(harness, (entry) => entry.method === 'POST'
-      && entry.path === `/v1/projects/${harness.seed.projectId}/timelines/${seed3.timelineId}/commit`
-      && entry.status === 409, 10_000);
+      scenario.agentTrack, scenario.agentLabel, agentKey);
+    await expect.poll(() => astrid.trackLabelPosts(agentKey).some(entry => entry.status === 409
+      && entry.details?.status === 'refused' && entry.details?.reason === 'user_editing'), { timeout: 10_000 }).toBe(true);
+    const refusedWhileLive = astrid.trackLabelPosts(agentKey);
+    expect(refusedWhileLive[0]).toMatchObject({ method: 'POST',
+      path: `/v1/projects/${harness.seed.projectId}/timelines/${seed3.timelineId}/commit`,
+      status: 409, details: { status: 'refused', reason: 'user_editing' } });
+    expect(JSON.parse(refusedWhileLive[0].body)).toMatchObject({ base_revision_id: base.revision_id,
+      base_publication_id: base.publication_id, commands: [{ op: 'track.set',
+        select: `parent/track:${scenario.agentTrack}`, args: { values: { label: scenario.agentLabel } } }] });
     expect(refusedWhileLive.length, 'the original Agent POST was refused while the acknowledged App lease remained active').toBeGreaterThan(0);
     expect((await history(harness, seed3)).head).toEqual(appHead);
 
+    const releaseAckPromise = page.waitForResponse(response => response.request().method() === 'DELETE'
+      && editingPath.test(new URL(response.url()).pathname), CEILING);
     releaseDelete();
-    const outcome = await agentFlight;
+    const [releaseAck, outcome] = await Promise.all([releaseAckPromise, agentFlight]);
+    expect(releaseAck.status(), 'the Runtime acknowledged releasing the App lease').toBe(200);
+    const releaseReceipt = await releaseAck.json();
+    expect(releaseReceipt.data).toMatchObject({ active: false, tab_session_id: leaseReceipt.data.tab_session_id });
+    expect(releaseReceipt.data.sequence).toBeGreaterThan(leaseReceipt.data.sequence);
+    const posts = astrid.trackLabelPosts(agentKey);
+    expect(posts.length).toBeGreaterThan(1);
+    const originalFlight = posts.filter(post => post.key === posts[0].key);
+    expect(originalFlight.length).toBeGreaterThan(1);
+    expect(originalFlight.every(post => post.body === posts[0].body),
+      'the SDK retries the original request bytes and key after user_editing').toBe(true);
+    const saveBeforeRelease = trace.findIndex(event => event.kind === 'app-save-ack' && event.status === 200);
+    expect(saveBeforeRelease).toBeGreaterThan(appPost);
+    expect(trace.findIndex(event => event.kind === 'lease-release-held')).toBeGreaterThan(saveBeforeRelease);
     expect(outcome.kind, JSON.stringify(outcome)).not.toBe('error');
     if (scenario.journey === 'J1') {
       expect(outcome.kind, JSON.stringify(outcome)).toBe('conflict');
@@ -516,10 +559,12 @@ async function runHostedLoopbackLeaseJourney(
         .toBe(scenario.agentLabel);
     }
     journey.facts = { ...journey.facts, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
-      journey: scenario.journey, base, appHead, leaseReceipt,
+      journey: scenario.journey, base, appHead, leaseReceipt, releaseReceipt,
       eventTrace: trace.map(({ body, ...event }) => event), refusedAgentPostCountWhileLeaseLive: refusedWhileLive.length,
-      agentOutcome: outcome };
+      agentPosts: posts, agentOutcome: outcome };
   } finally {
+    journey.facts = { ...journey.facts, pageErrors, eventTrace: trace,
+      saveDiagnostics: await page.evaluate(() => (window as unknown as { __saveEvents?: unknown[] }).__saveEvents).catch(() => []) };
     releaseDelete();
     await Promise.allSettled([...pendingLeaseRoutes]);
     await page.unroute(editingPath, holdLeaseRelease).catch(() => {});
@@ -635,12 +680,12 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   const watched = watchPageReads(page, harness);
 
   // Every save the page sends, with the key and head it names and what became of it.
-  interface Post { key: string; body: string; expectedHead: string | null; status: number | null; outcome: 'held' | 'sent' | 'lost' }
+  interface Post { key: string; body: string; expectedHead: string | null; status: number | null; outcome: 'held' | 'sent' | 'lost'; receipt?: CommitAcceptedMutation }
   const posts: Post[] = [];
   const postOf = new Map<Request, Post>();
   page.on('request', (request) => {
-    if (request.method() !== 'POST' || !SAVES.test(new URL(request.url()).pathname)) return;
-    const post: Post = { key: request.headers()['idempotency-key'], body: request.postData()!, expectedHead: JSON.parse(request.postData() ?? '{}').expected_head ?? null, status: null, outcome: 'sent' };
+    if (request.method() !== 'POST' || !COMMITS.test(new URL(request.url()).pathname)) return;
+    const post: Post = { key: request.headers()['idempotency-key'], body: request.postData()!, expectedHead: JSON.parse(request.postData() ?? '{}').base_revision_id ?? null, status: null, outcome: 'sent' };
     postOf.set(request, post);
     posts.push(post);
   });
@@ -650,16 +695,21 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   // Hold the acknowledgement, not the request: the Runtime commits the save, the page never hears back.
   let holding = true;
   const held: Array<{ route: Parameters<Parameters<Page['route']>[1]>[0]; post: Post }> = [];
-  await page.route(SAVES, async (route) => {
+  await page.route(COMMITS, async (route) => {
     const request = route.request();
     if (!holding || request.method() !== 'POST') return route.fallback();
     const post = postOf.get(request)!;
     const response = await route.fetch({ maxRetries: 0 });
     post.status = response.status();
+    post.receipt = await response.json();
     post.outcome = 'held';
     held.push({ route, post });
   });
 
+  // Simulate an unavailable presence channel for this lost-ACK recovery case.
+  // J1/J2 independently cover active acknowledged leases; a disconnected App
+  // cannot renew one while another writer advances the timeline.
+  await page.route(/\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/, route => route.abort('connectionreset'));
   await openApp(page, harness);
   await expectConnected(page);
   await openSeededTimeline(page, harness);
@@ -675,16 +725,17 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   const keyA = held[0].post.key;
   await expect.poll(() => currentHead(harness), CEILING).not.toBe(baseHead);
   const headA = await currentHead(harness);
-  expect(headA, 'the App\'s save is stored under its idempotency key').toBe(keyA);
+  expect(held[0].post.receipt?.receipt.idempotency_key, 'the App save has its original idempotency key').toBe(keyA);
+  expect(held[0].post.receipt?.data.accepted_revision_id).toBe(headA);
 
-  // B: the agent builds on A and publishes (it extends one clip and clears another one's asset).
-  await agent.checkout();
+  // B: the shipped SDK builds on A. Its one atomic publication extends and
+  // clears the child clips and changes the transition C will clear. That
+  // competing field makes recovery a real conflict under field-aware merging.
   const stateA = await revisionState(harness, seed3, headA);
-  await agent.edit('--clip', seed3.agentClipId, '--extend', '1');
-  await agent.edit('--clip', seed3.agentClearClipId, '--clear-asset');
-  const published = await agent.publish('agent: extend and clear', 'f2-case2');
-  expect(published.old_head, 'the agent built on the App\'s save').toBe(headA);
-  const headB = published.new_head;
+  const published = await astrid.commitRecoveryChanges(seed3.projectSlug, seed3.timelineId,
+    (await history(harness, seed3)).head, seed3);
+  expect(published.result.data.base_revision_id, 'the agent built on the App save').toBe(headA);
+  const headB = published.result.data.accepted_revision_id;
   expect(await currentHead(harness)).toBe(headB);
 
   // C: the App edits again while A is unacknowledged (it clears a transition).
@@ -704,7 +755,7 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   await expect(conflict.getByText('Keep your changes, or switch to the latest version.')).toBeVisible();
   await expect(conflict.getByRole('button', { name: 'Keep my changes' })).toBeVisible();
   await expect(conflict.getByRole('button', { name: 'Use latest version' })).toBeVisible();
-  await page.unroute(SAVES);
+  await page.unroute(COMMITS);
 
   // Which of the two ways to the conflict ran (recorded, not asserted).
   const afterRelease = posts.slice(1);
@@ -724,14 +775,16 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   expect(stateB.shotClips[seed3.agentClipId].hold, 'B holds the agent\'s extension').toBe(stateA.shotClips[seed3.agentClipId].hold + 1);
   expect(stateB.shotClips[seed3.agentClearClipId].asset, 'B holds the agent\'s clear').toBeUndefined();
   expect(stateA.shotClips[seed3.agentClearClipId].asset, 'A still had that asset').toBeTruthy();
-  expect(stateB.parentClips[seed3.transitionClipId].transition, 'C was never published').toEqual(stateA.parentClips[seed3.transitionClipId].transition);
+  expect(stateB.parentClips[seed3.transitionClipId].transition, 'B retains its competing transition; C was never published').toEqual(published.transition);
+  expect(published.transition).toEqual({ ...stateA.parentClips[seed3.transitionClipId].transition,
+    duration: stateA.parentClips[seed3.transitionClipId].transition.duration + 0.125 });
   expect(stateB.parentClips[seed3.transitionClipId].transition).toBeTruthy();
 
   // One publication per retried save: A was replayed under its own key and made exactly one revision; the agent's publication made one.
   const revisions = (await allRevisions(harness, seed3)).map((revision) => revision.revision_id);
   expect(revisions.length, 'two new revisions: A and B').toBe(revisionsBefore + 2);
   expect(new Set(revisions).size, 'no revision is stored twice').toBe(revisions.length);
-  expect(revisions.filter((id) => id === keyA), 'A\'s key names exactly one revision').toHaveLength(1);
+  expect(revisions.filter((id) => id === headA), 'A\'s receipt names exactly one revision').toHaveLength(1);
   const retriesA = posts.filter((post) => post.key === keyA);
   expect(retriesA.length, 'A was replayed with the same key').toBeGreaterThanOrEqual(2);
   expect(retriesA.every((post) => post.body === posts[0].body), 'every replay of A keeps the exact request bytes').toBe(true);

@@ -41,7 +41,8 @@ interface Options {
   send(request: CommitRequest, key: string): Promise<TimelineCommitResult>;
   loadLatest(): Promise<TimelineCommandBasis>;
   /** Build with the upstream editor, then return a synchronous adoption callback. */
-  prepareDisplay(basis: TimelineCommandBasis, draft?: OutboxJson): Promise<{ document: OutboxJson; adopt(): void }>;
+  prepareDisplay(basis: TimelineCommandBasis, draft?: OutboxJson,
+    adoption?: 'pending' | 'settled' | 'conflict' | 'conflict-draft' | 'recovery'): Promise<{ document: OutboxJson; adopt(): void }>;
   changed(state: LocalSaveState): void;
 }
 
@@ -124,7 +125,8 @@ export async function createLocalSaveSession(options: Options) {
       const latest = await options.loadLatest();
       checkBasis(latest);
       if (closed || at !== generation) return true;
-      const prepared = await options.prepareDisplay(clone(latest));
+      const prepared = await options.prepareDisplay(clone(latest), undefined,
+        conflict ? replaying ? 'conflict-draft' : 'conflict' : 'settled');
       if (closed || at !== generation) return true;
       basis = clone(latest);
       displayBasis = clone(latest);
@@ -150,7 +152,7 @@ export async function createLocalSaveSession(options: Options) {
         if ((record.accepted && record.accepted.intentId !== adoptedAcceptance) || (!record.intents.length && !record.accepted)) {
           // Runtime owns suffix revalidation. Install its complete landed closure
           // before sending the next ORIGINAL intent, never execute/recapture it here.
-          const prepared = await options.prepareDisplay(clone(basis));
+          const prepared = await options.prepareDisplay(clone(basis), undefined, record.intents.length ? 'pending' : 'settled');
           if (closed || writeError || at !== generation) return;
           displayBasis = clone(basis);
           document = toOutboxJson(prepared.document);
@@ -249,7 +251,7 @@ export async function createLocalSaveSession(options: Options) {
         displayBasis = clone(saveOf(record.intents[0].payload).displayBasis);
         checkBasis(displayBasis);
         document = clone(saveOf(record.intents[record.intents.length - 1].payload).after);
-        const prepared = await options.prepareDisplay(clone(displayBasis), clone(document));
+        const prepared = await options.prepareDisplay(clone(displayBasis), clone(document), 'recovery');
         if (!closed) prepared.adopt();
       }
       recoveryError = undefined;

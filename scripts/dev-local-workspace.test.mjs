@@ -564,7 +564,7 @@ const fs = require('node:fs');
 const kind = args.includes('dev:astrid-acp') ? 'acp' : (args.includes('dev') || args.includes('preview') ? 'vite' : 'other');
 fs.appendFileSync(${JSON.stringify(spawnLog)}, args.join(' ') + '\\n');
 fs.appendFileSync(process.env.FAKE_RUNTIME_LIFECYCLE_LOG, kind + ':start\\n');
-if (kind === 'vite') fs.writeFileSync(process.env.FAKE_RUNTIME_APP_ENV, JSON.stringify({ args, astridCheckout: process.env.ASTRID_CHECKOUT, dataRoot: process.env.ASTRID_RUNTIME_DATA_ROOT, supportRoot: process.env.ASTRID_SUPPORT_ROOT, discovery: process.env.ASTRID_WORKSPACE_DISCOVERY, localUpdateStatus: process.env.ASTRID_LOCAL_UPDATE_STATUS, viteLocalUpdateStatus: process.env.VITE_ASTRID_LOCAL_UPDATE_STATUS }));
+if (kind === 'vite') fs.writeFileSync(process.env.FAKE_RUNTIME_APP_ENV, JSON.stringify({ args, astridCheckout: process.env.ASTRID_CHECKOUT, dataRoot: process.env.ASTRID_RUNTIME_DATA_ROOT, supportRoot: process.env.ASTRID_SUPPORT_ROOT, discovery: process.env.ASTRID_WORKSPACE_DISCOVERY, localUpdateStatus: process.env.ASTRID_LOCAL_UPDATE_STATUS, viteLocalUpdateStatus: process.env.VITE_ASTRID_LOCAL_UPDATE_STATUS, dynamicProxyPort: process.env.VITE_ASTRID_DYNAMIC_PROXY_PORT, bridgePort: process.env.VITE_ASTRID_BRIDGE_PORT, acpBridgePort: process.env.VITE_ASTRID_ACP_BRIDGE_PORT, workspaceRuntimeUrl: process.env.VITE_WORKSPACE_RUNTIME_URL }));
 console.log(['fake-npm', ...args].join(' '));
 if (kind === 'vite' && process.env.FAKE_NPM_VITE_EXIT) process.exit(Number(process.env.FAKE_NPM_VITE_EXIT));
 if (process.env.FAKE_NPM_TREE_PIDS) {
@@ -770,6 +770,42 @@ test('the app port taken by another program: one friendly line, the details, no 
     assert(!result.stdout.includes('Starting Astrid'), result.stdout);
     assert.equal(result.spawned, '', 'no proxy, ACP bridge or Vite was started');
   } finally { await new Promise(r => holder.close(r)); }
+});
+
+test('an unconfigured runtime proxy chooses a free loopback port and passes it through to Vite', async () => {
+  const started = await startLauncher({ configuredOrigin: 'https://hosted.test', env: { VITE_ASTRID_DYNAMIC_PROXY_PORT: '' } });
+  try {
+    const childEnvironment = JSON.parse(readFileSync(started.fixture.env.FAKE_RUNTIME_APP_ENV, 'utf8'));
+    const selectedPort = childEnvironment.dynamicProxyPort;
+    assert.match(selectedPort, /^\d+$/);
+    assert(Number(selectedPort) > 0 && Number(selectedPort) <= 65535);
+    assert.equal(childEnvironment.bridgePort, selectedPort);
+    assert.equal(childEnvironment.acpBridgePort, selectedPort);
+    assert.equal(childEnvironment.workspaceRuntimeUrl, `http://127.0.0.1:${selectedPort}`);
+    const response = await fetch(`${childEnvironment.workspaceRuntimeUrl}/v1/realm`);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).realm_id, started.fixture.realmId);
+  } finally { await started.stop(); }
+});
+
+test('an occupied runtime proxy override fails before App services launch', async () => {
+  const holder = createServer();
+  await listenOnTestPort(holder);
+  const proxyPort = String(holder.address().port);
+  const fixture = await launchFixture({ configuredOrigin: 'https://hosted.test' });
+  try {
+    const result = await launcherEnds({ fixture, env: { VITE_ASTRID_DYNAMIC_PROXY_PORT: proxyPort } });
+    assert.equal(result.code, 1, result.stdout + result.stderr);
+    assert.deepEqual(result.stderr.split('\n').slice(0, 2), [
+      "Astrid: Another program is in the way, so Astrid can't start. Close it and try again.",
+      `Details: VITE_ASTRID_DYNAMIC_PROXY_PORT ${proxyPort} is already in use on 127.0.0.1. Close the program using it, or unset VITE_ASTRID_DYNAMIC_PROXY_PORT to let Astrid choose a free loopback port.`,
+    ]);
+    assert.equal(result.stdout, '');
+    assert.equal(result.spawned, '', 'the proxy collision must stop Vite and ACP before they launch');
+  } finally {
+    await new Promise(resolve => holder.close(resolve));
+    await fixture.close();
+  }
 });
 
 test('a second launcher for the same Astrid says so, prints the same Open block, starts nothing and exits 0', async () => {

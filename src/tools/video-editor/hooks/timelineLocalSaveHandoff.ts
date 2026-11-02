@@ -37,6 +37,7 @@ export interface TimelineLocalSaveHandoff {
   flush(): Promise<TimelineSaveReceipt>;
   /** Explicitly discard a rejected local chain before adopting the remote head. */
   discardConflictDraft?(): Promise<void>;
+  keepLabelChanges?(): Promise<boolean>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
   canUndo(): boolean;
@@ -46,7 +47,7 @@ export interface TimelineLocalSaveHandoff {
 }
 
 /** Scoped editors supply their own verified physical-image join and durable owner. */
-export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'discardConflictDraft'>;
+export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'discardConflictDraft' | 'keepLabelChanges'>;
 export interface TimelinePersistenceBinding {
   readonly provider: DataProvider;
   readonly timelineId: string;
@@ -703,6 +704,11 @@ export function createTimelineLocalSaveHandoff(options: {
     },
     async discardConflictDraft() {
       await options.session.discardRejected();
+    },
+    async keepLabelChanges() {
+      if (!await options.session.keepLabelChanges()) return false;
+      await handoff.flush();
+      return true;
     },
     remoteHistoryAvailable,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,

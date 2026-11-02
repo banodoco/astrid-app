@@ -1682,6 +1682,21 @@ export function useTimelinePersistence({
     }
 
     try {
+      if (await localDocumentSave?.keepLabelChanges?.()) {
+        // The same owner has acknowledged the rebased edit. Reload its accepted
+        // closure without discarding a now-settled rejected chain.
+        isConflictExhaustedRef.current = false;
+        setIsConflictExhausted(false);
+        await reloadFromServer();
+        return;
+      }
+    } catch {
+      // Failed fresh reads or saves retain the owner and the visible draft.
+      setSaveStatus('error');
+      return;
+    }
+
+    try {
       await createRecoverySave(latest, editSeqRef.current).draftWrite;
     } catch {
       // IndexedDB unavailable (private mode etc.) — the copy can't persist.
@@ -1690,7 +1705,7 @@ export function useTimelinePersistence({
     }
     setIsConflictExhausted(false);
     await reloadFromServer({ preserveDraft: true });
-  }, [createRecoverySave, dataRef, editSeqRef, getDataRef, reloadFromServer]);
+  }, [createRecoverySave, dataRef, editSeqRef, getDataRef, localDocumentSave, reloadFromServer]);
 
   useEffect(() => {
     // A durable save receipt acknowledges the edit: clear the watchdog.

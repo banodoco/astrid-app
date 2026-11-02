@@ -329,6 +329,9 @@ describe('local editor saves through the durable outbox', () => {
     ]);
     expect(stored.intents[1].conflict).toEqual(stored.intents[0].conflict);
     expect(() => session.append(trimSave())).toThrow('retained local saves');
+    expect(await session.keepLabelChanges()).toBe(false);
+    expect(env.send).toHaveBeenCalledTimes(1);
+    expect((await env.outboxes.list(scope))[0].intents).toEqual(stored.intents);
     await session.dispose();
     const recovered = await env.mount();
     await recovered.recover(stored.ownerId);

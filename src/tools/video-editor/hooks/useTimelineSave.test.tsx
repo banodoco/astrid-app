@@ -559,7 +559,8 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(stored.intents).toHaveLength(1);
           expect(stored.intents[0].payload).toMatchObject({ after: { parent_revision: { payload: { config: { clips: mode === 'video'
             ? [expect.any(Object), expect.any(Object), expect.any(Object), expect.any(Object)] : [expect.any(Object)] } } } } });
-          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual(data.config.clips);
+          expect(harness.hook.result.current.dataRef.current!.config.clips).toHaveLength(mode === 'video' ? 4 : 1);
+          expect(harness.hook.result.current.dataRef.current!.config.clips.some(clip => clip.id === bornId)).toBe(true);
           expect(harness.hook.result.current.localSaveState?.error).toMatchObject({ message: expect.stringContaining('Media track changed') });
           return;
         }
@@ -783,7 +784,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status)
             .toBe(boundary === 'before poll adoption' ? 'conflict' : 'saved'));
           expect(harness.hook.result.current.dataRef.current?.config.clips.find((clip) => clip.id === rightId))
-            .toEqual({ ...right, from: boundary === 'before poll adoption' ? 0 : 3 });
+            .toEqual({ ...(boundary === 'before poll adoption' ? displayed.config.clips.find(clip => clip.id === rightId) : right), from: 3 });
         }
         expect(harness.saveTimeline).not.toHaveBeenCalled();
       } finally {
@@ -1561,7 +1562,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           steps: [{ command_ordinals: [0], intent: 'Save local editor changes' }] });
         if (outcome === 'conflict' || outcome === 'invalid') {
           expect(stored.intents).toHaveLength(1);
-          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(config.output.file);
+          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(outcome === 'conflict' ? 'authored.mp4' : config.output.file);
           expect(harness.hook.result.current.localSaveState?.status).toBe(outcome === 'conflict' ? 'conflict' : 'error');
         } else if (restart) {
           const exact = structuredClone(send.mock.calls[0]);

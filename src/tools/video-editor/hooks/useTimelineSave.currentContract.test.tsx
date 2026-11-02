@@ -121,7 +121,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-it.each(['latest', 'keep'] as const)(
+it.each(['latest', 'keep', 'mixed', 'fresh-fail'] as const)(
   'retains the mounted draft on a competing commit until the person chooses %s', async choice => {
     vi.stubGlobal('indexedDB', createFakeIndexedDB());
     const locks = Object.getOwnPropertyDescriptor(navigator, 'locks');
@@ -145,19 +145,38 @@ it.each(['latest', 'keep'] as const)(
     remoteCanonical.parent_revision.payload.config = remoteConfig;
     remoteCanonical.parent_revision.content_digest = fixtureDigest(remoteCanonical.parent_revision.payload);
     let remote = false;
+    let landed = false;
     const fixture = runtimeFixture();
     const transmit = vi.fn<Transport>(async (method, path, headers, body) => {
       if (method !== 'POST' || !path.endsWith('/commit')) return fixture.transport(method, path, headers, body);
-      return { status: 409, headers: {}, body: json({ code: 'conflict', message: 'Another writer committed', details: { status: 'conflict', reason: 'stale_head' } }) };
+      if (!transmit.mock.calls.filter(([verb, url]) => verb === 'POST' && url.endsWith('/commit')).slice(0, -1).length) {
+        return { status: 409, headers: {}, body: json({ code: 'conflict', message: 'Another writer committed', details: { status: 'conflict', reason: 'stale_head' } }) };
+      }
+      const raw = new TextDecoder().decode(body instanceof Blob ? await body.arrayBuffer() : body);
+      const request = JSON.parse(raw);
+      expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1',
+        commands: [{ op: 'track.set', select: 'parent/track:V1', args: { values: { label: 'Draft from the first writer' }, clear: [] } }] });
+      const reply = acceptedCommit({ revision_id: 'r2', publication_id: 'p2' }, { revision_id: 'r1', publication_id: 'p1' },
+        { ...scope, commands: request.commands });
+      remoteConfig.tracks![0].label = 'Draft from the first writer';
+      remoteCanonical.parent_revision.revision_id = 'r2';
+      remoteCanonical.parent_revision.content_digest = fixtureDigest(remoteCanonical.parent_revision.payload);
+      reply.data.canonical_document = structuredClone(remoteCanonical);
+      reply.data.document_digest = fixtureDigest(reply.data.canonical_document);
+      Object.assign(reply.data, { label: request.label, steps: request.steps, merge_mode: request.merge });
+      reply.receipt.idempotency_key = headers['Idempotency-Key'];
+      landed = true;
+      return { status: 200, headers: {}, body: json(reply) };
     });
     const runtime = new RuntimeDataProvider({ projectId: scope.projectId, transport: transmit });
     const provider: DataProvider = {
       persistenceEnabled: true,
-      loadTimeline: async () => ({ config: remote ? remoteConfig : config, configVersion: remote ? 2 : 1, head: remote ? remoteHead : initialHead }),
+      loadTimeline: async () => ({ config: remote ? remoteConfig : config, configVersion: remote ? 2 : 1, head: landed ? { ...remoteHead, headRevisionId: 'r2', headPublicationId: 'p2' } : remote ? remoteHead : initialHead }),
       loadAssetRegistry: async () => registry, resolveAssetUrl: async file => file,
       saveTimeline: vi.fn(async () => { throw new Error('Legacy save route used'); }),
-      loadTimelineCommandBasis: async () => remote
-        ? { head: { revisionId: 'r1', publicationId: 'p1' }, canonicalDocument: remoteCanonical }
+      loadTimelineCommandBasis: async () => remote && choice === 'fresh-fail'
+        ? Promise.reject(new Error('Fresh head unavailable')) : remote
+        ? { head: landed ? { revisionId: 'r2', publicationId: 'p2' } : { revisionId: 'r1', publicationId: 'p1' }, canonicalDocument: remoteCanonical }
         : { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: canonical },
       getRecoverableIdentity: async () => ({ realmId: scope.realmId, actorId: scope.actorId }),
       commitTimeline: (request, key) => runtime.commitTimeline(request, key),
@@ -180,7 +199,8 @@ it.each(['latest', 'keep'] as const)(
       await act(async () => {
         const current = save.result.current.dataRef.current!;
         save.result.current.applyEdit({ type: 'config', resolvedConfig: { ...current.resolvedConfig,
-          tracks: current.resolvedConfig.tracks.map(track => ({ ...track, label: 'Draft from the first writer' })) } });
+          tracks: current.resolvedConfig.tracks.map(track => ({ ...track, label: 'Draft from the first writer' })),
+          ...(choice === 'mixed' ? { fps: 25 } : {}) } });
       });
       remote = true;
       await act(async () => { await expect(save.result.current.flushPendingSave()).rejects.toThrow(); });
@@ -195,13 +215,24 @@ it.each(['latest', 'keep'] as const)(
         await act(async () => { await save.result.current.reloadFromServer(); });
         expect(save.result.current.dataRef.current?.config.tracks?.[0].label).toBe('Second writer');
         expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(0);
-      } else {
+      } else if (choice === 'fresh-fail') {
+        await act(async () => { await save.result.current.retrySaveAfterConflict(); });
+        expect(save.result.current.dataRef.current?.config.tracks?.[0].label).toBe('Draft from the first writer');
+        expect(save.result.current.isConflictExhausted).toBe(true);
+        expect((await createCommitOutbox().list(scope))[0].intents).toEqual(outbox.intents);
+      } else if (choice === 'mixed') {
         await act(async () => { await save.result.current.retrySaveAfterConflict(); });
         expect(JSON.stringify(await loadTimelineDraft(scope.timelineId))).toContain('Draft from the first writer');
         expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(1);
+      } else {
+        await act(async () => { await save.result.current.retrySaveAfterConflict(); });
+        expect(save.result.current.dataRef.current?.config.tracks?.[0].label).toBe('Draft from the first writer');
+        expect((await createCommitOutbox().list(scope))).toHaveLength(1);
+        expect((await createCommitOutbox().list(scope))[0].ownerId).toBe(outbox.ownerId);
+        expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(0);
       }
-      expect(posts()).toHaveLength(1);
-      expect(remoteConfig.tracks?.[0].label).toBe('Second writer');
+      expect(posts()).toHaveLength(choice === 'keep' ? 2 : 1);
+      expect(remoteConfig.tracks?.[0].label).toBe(choice === 'keep' ? 'Draft from the first writer' : 'Second writer');
     } finally {
       save.unmount();
       queryClient.clear();

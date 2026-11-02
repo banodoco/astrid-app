@@ -266,7 +266,7 @@ export function createTimelineLocalSaveHandoff(options: {
     return authoredJson(next);
   }
   const handoff: TimelineLocalSaveHandoff = {
-    capture(input, gestureBasis) {
+    async capture(input, gestureBasis) {
       try {
         const next = structuredClone(input);
         checkHead(initial, source, 'capture-source-head-unavailable');
@@ -571,12 +571,15 @@ export function createTimelineLocalSaveHandoff(options: {
           // the native capture boundary so the exact selected parent entity,
           // original transition guard, and read claims reach Runtime instead
           // of flattening this into a null-selected document patch.
-          let scalarBundle = await authoringBundleFromDocument(before) as AuthoringBundle;
-          commands = gestureBasis.clipIds.map((id) => {
-            const command = captureClipSet(scalarBundle, `parent/clip:${id}`, { values: {}, clear: ['transition'] });
-            scalarBundle = executeClipSet(scalarBundle, command).bundle;
-            return command;
-          });
+          if (gestureBasis.clipIds.some((id) => clips.some((clip) => object(clip) && clip.id === id
+            && Object.prototype.hasOwnProperty.call(clip, 'transition')))) {
+            let scalarBundle = await authoringBundleFromDocument(before) as AuthoringBundle;
+            commands = gestureBasis.clipIds.map((id) => {
+              const command = captureClipSet(scalarBundle, `parent/clip:${id}`, { values: {}, clear: ['transition'] });
+              scalarBundle = executeClipSet(scalarBundle, command).bundle;
+              return command;
+            });
+          }
         }
         if (gestureBasis && gestureBasis.kind !== 'prepared-media' && gestureBasis.kind !== 'element' && gestureBasis.kind !== 'transition-clear') {
           const config = parent.config as Record<string, unknown>;

@@ -21,7 +21,9 @@ export function createWorkspaceRuntimeProxyOptions(
         if (cacheControl) proxyRes.headers['cache-control'] = cacheControl;
       });
     },
-    rewrite: (incomingPath) => incomingPath.replace(/^\/api\/runtime/, ''),
+    rewrite: (incomingPath) => incomingPath.startsWith('/api/runtime/packs/')
+      ? incomingPath
+      : incomingPath.replace(/^\/api\/runtime/, ''),
     ...(token ? { headers: { Authorization: `Bearer ${token}` } } : {}),
   };
 }

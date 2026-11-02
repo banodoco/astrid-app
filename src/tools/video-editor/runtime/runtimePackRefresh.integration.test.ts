@@ -8,8 +8,12 @@ import { execFile, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createInterface } from 'node:readline';
 import { chromium } from '@playwright/test';
+import { createWorkspaceRuntimeProxyOptions } from '../../../../config/vite/runtimeProxy';
 
 it('renders a real M1-installed effect in the open editor and retains the working revision through refused updates', async () => {
+  const rewrite = createWorkspaceRuntimeProxyOptions('http://127.0.0.1:1', null).rewrite!;
+  expect(rewrite('/api/runtime/packs/inventory')).toBe('/api/runtime/packs/inventory');
+  expect(rewrite('/api/runtime/v1/projects')).toBe('/v1/projects');
   const app = process.cwd();
   const root = await realpath(await mkdtemp(path.join(tmpdir(), 'installed-pack-journey-')));
   const dist = path.join(root, 'dist');
@@ -107,6 +111,7 @@ it('renders a real M1-installed effect in the open editor and retains the workin
       return JSON.parse(line.value);
     }
     const runtime = await next();
+    const runtimeProxy = createWorkspaceRuntimeProxyOptions(runtime.endpoint, runtime.token);
     async function command(command: string) {
       child!.stdin!.write(JSON.stringify({ command }) + '\n');
       const result = await next();
@@ -119,8 +124,8 @@ it('renders a real M1-installed effect in the open editor and retains the workin
       requests.push(url);
       if (url.startsWith('/api/runtime/')) {
         try {
-          const upstream = await fetch(runtime.endpoint + url, { method: request.method,
-            headers: { Authorization: `Bearer ${runtime.token}` }, redirect: 'manual' });
+          const upstream = await fetch(runtime.endpoint + runtimeProxy.rewrite!(url), { method: request.method,
+            headers: runtimeProxy.headers as Record<string, string>, redirect: 'manual' });
           response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json', 'Cache-Control': 'no-store' });
           response.end(Buffer.from(await upstream.arrayBuffer()));
         } catch (error) { response.writeHead(502).end(String(error)); }

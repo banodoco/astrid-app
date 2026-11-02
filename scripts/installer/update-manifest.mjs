@@ -3,6 +3,7 @@ import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { agentVibecomfyPin } from './vibecomfy-pin.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const SHA = /^[0-9a-f]{40}$/;
@@ -89,7 +90,7 @@ function checkoutHead(checkout, label) {
   return head;
 }
 
-function makePlan(options) {
+async function makePlan(options) {
   const manifestPath = absolute(options.manifest);
   const runtimeLockPath = absolute(options.runtimeLock);
   const appMetadataPath = absolute(options.appMetadata);
@@ -107,6 +108,10 @@ function makePlan(options) {
 
   const runtimeSha = checkoutHead(runtimeCheckout, 'Runtime checkout');
   const agentSha = checkoutHead(agentCheckout, 'Agent checkout');
+  const readAgent = (file) => execFileSync('git', ['-C', agentCheckout, 'show', `${agentSha}:${file}`], { stdio: ['ignore', 'pipe', 'pipe'] });
+  const agentLock = JSON.parse(readAgent('runtime.lock.json').toString('utf8'));
+  if (agentLock.source_commit !== runtimeSha) throw new Error(`Agent runtime.lock.json source_commit ${agentLock.source_commit ?? '(missing)'} does not match Runtime checkout HEAD ${runtimeSha}`);
+  const vibecomfy = await agentVibecomfyPin(readAgent);
   if (runtimeSha !== runtimeLock.source_commit) {
     throw new Error(`Runtime checkout HEAD ${runtimeSha} does not match App runtime.lock.json source_commit ${runtimeLock.source_commit}`);
   }
@@ -117,6 +122,7 @@ function makePlan(options) {
   }
 
   const next = structuredClone(manifest);
+  next.vibecomfy = vibecomfy;
   next.agent.sha = agentSha;
   next.runtime.sha = runtimeSha;
   next.runtime.schema_digest = appSchemaDigest;
@@ -126,7 +132,9 @@ function makePlan(options) {
     runtimeSha,
     agentSha,
     schemaDigest: appSchemaDigest,
+    vibecomfy,
     changes: [
+      { path: 'vibecomfy', from: manifest.vibecomfy ?? null, to: vibecomfy },
       { path: 'agent.sha', from: manifest.agent.sha ?? null, to: agentSha },
       { path: 'runtime.sha', from: manifest.runtime.sha ?? null, to: runtimeSha },
       { path: 'runtime.schema_digest', from: manifest.runtime.schema_digest ?? null, to: appSchemaDigest },
@@ -134,24 +142,22 @@ function makePlan(options) {
   };
 }
 
-function main(argv) {
+async function main(argv) {
   if (argv.includes('--help')) {
     console.log(usage);
     return;
   }
   const options = parseArgs(argv);
-  const plan = makePlan(options);
+  const plan = await makePlan(options);
   console.log(JSON.stringify({
     mode: options.mode,
     manifest: path.relative(ROOT, plan.manifestPath),
-    pins: { runtime_sha: plan.runtimeSha, agent_sha: plan.agentSha, schema_digest: plan.schemaDigest },
+    pins: { runtime_sha: plan.runtimeSha, agent_sha: plan.agentSha, schema_digest: plan.schemaDigest, vibecomfy: plan.vibecomfy },
     changes: plan.changes,
   }, null, 2));
   if (options.mode === 'write') writeFileSync(plan.manifestPath, `${JSON.stringify(plan.next, null, 2)}\n`);
 }
 
-try {
-  main(process.argv.slice(2));
-} catch (error) {
+main(process.argv.slice(2)).catch((error) => {
   fail(error instanceof Error ? error.message : String(error));
-}
+});

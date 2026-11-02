@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { agentVibecomfyPin, checkVibecomfyPin } from './vibecomfy-pin.mjs';
 
 const agentRepo = 'banodoco/astrid-agent';
 const runtimeRepo = 'banodoco/astrid-runtime';
@@ -83,6 +84,8 @@ async function pin(agentSha, reason) {
   if (!manifest.agent || !manifest.runtime) throw new Error('install-manifest.json needs agent and runtime records');
   const runtimeSha = await readAgentRuntime(agentSha);
   const schemaDigest = await runtimeSchemaDigest(runtimeSha);
+  const vibecomfy = await agentVibecomfyPin((file) => readRaw(agentRepo, agentSha, file));
+  manifest.vibecomfy = vibecomfy;
   manifest.agent.sha = agentSha;
   manifest.runtime.sha = runtimeSha;
   manifest.runtime.schema_digest = schemaDigest;
@@ -94,6 +97,8 @@ export async function checkManifest(manifest) {
   const agentSha = manifest?.agent?.sha;
   if (!/^[0-9a-f]{40}$/.test(agentSha ?? '')) throw new Error('install-manifest.json agent.sha must be a full commit SHA');
   const runtimeSha = await readAgentRuntime(agentSha);
+  const vibecomfy = await agentVibecomfyPin((file) => readRaw(agentRepo, agentSha, file));
+  checkVibecomfyPin(manifest.vibecomfy, vibecomfy);
   if (manifest.runtime?.sha !== runtimeSha) {
     throw new Error(`install-manifest.json runtime.sha ${manifest.runtime?.sha ?? '(missing)'} does not match agent ${agentSha} runtime.lock.json source_commit ${runtimeSha}`);
   }

@@ -242,6 +242,9 @@ export default function VideoEditorPage() {
   const {
     resolvedExtensions,
     diagnostics: loaderDiagnostics,
+    packageStateEntries,
+    repository: extensionStateRepository,
+    triggerExtensionRefresh,
   } = useRuntimePackExtensions(smokeDirectExtensions, 2000);
   useEffect(() => {
     publishLocalTestExtensionDiagnostics("loader", loaderDiagnostics);
@@ -910,6 +913,9 @@ export default function VideoEditorPage() {
             onSaveStatusChange={setMountedSaveStatus}
             onPendingWorkChange={onPendingWorkChange}
             extensions={resolvedExtensions}
+            packageStateEntries={packageStateEntries}
+            extensionStateRepository={extensionStateRepository}
+            triggerExtensionRefresh={triggerExtensionRefresh}
             timelineOverlaysEnabled={timelineOverlaysEnabled}
             extensionHostEnabled
             extensionReleaseRevision="shipped"

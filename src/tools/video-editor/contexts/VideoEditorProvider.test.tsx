@@ -33,6 +33,8 @@ import { useVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditor
 import { EditorRuntimeProvider } from '@/tools/video-editor/contexts/EditorRuntimeProvider';
 import type { VideoEditorScopedServices } from '@/tools/video-editor/browser/scopedServices';
 import { VideoEditorProvider } from '@/tools/video-editor/contexts/VideoEditorProvider';
+import { ExtensionManager } from '@/tools/video-editor/components/ExtensionManager/ExtensionManager';
+import { createProviderBackedExtensionStateRepository } from '@/tools/video-editor/runtime/extensionStateRepositoryProvider';
 import { buildVideoEditorLightboxMedia } from '@/tools/video-editor/lib/video-editor-lightbox-media';
 import { ExtensionSettingsPanel } from '@/tools/video-editor/components/ExtensionSettings/ExtensionSettingsPanel';
 import type { EffectRegistryRecord } from '@/tools/video-editor/effects/registry/types';
@@ -792,6 +794,30 @@ describe('VideoEditorProvider', () => {
     operationalChromeState.store = null;
     operationalChromeState.isConflictExhausted = false;
     operationalChromeState.renderStatus = 'idle';
+  });
+
+  it('routes the installed package manager toggle to the loader repository and refresh callback', async () => {
+    const repository = createProviderBackedExtensionStateRepository({
+      get: async key => localStorage.getItem(key),
+      set: async (key, value) => { localStorage.setItem(key, value); },
+      delete: async key => { localStorage.removeItem(key); },
+    });
+    await repository.initialize();
+    const refresh = vi.fn();
+    const provider: DataProvider = { loadTimeline: vi.fn(), saveTimeline: vi.fn(), loadAssetRegistry: vi.fn(), resolveAssetUrl: vi.fn() };
+    const view = render(<MemoryRouter><QueryClientProvider client={new QueryClient()}><AgentChatProvider>
+      <VideoEditorProvider dataProvider={provider} projectId="live-pack-project" timelineId="live-pack-timeline" userId={null}
+        extensionStateRepository={repository} triggerExtensionRefresh={refresh}
+        packageStateEntries={[{ extensionId: 'com.test.native', packageState: 'loaded', packageSource: 'installed',
+          stateReason: 'Runtime installed effect', packageMetadata: { label: 'Native effect', version: '1.0.0' } }]}>
+        <ExtensionManager />
+      </VideoEditorProvider>
+    </AgentChatProvider></QueryClientProvider></MemoryRouter>);
+    fireEvent.click(await screen.findByRole('button', { name: 'Disable com.test.native' }));
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
+    expect((await repository.getEnablementState('com.test.native'))?.enabled).toBe(false);
+    view.unmount();
+    await repository.dispose();
   });
 
 

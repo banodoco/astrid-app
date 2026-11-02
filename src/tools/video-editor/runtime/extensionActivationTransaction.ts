@@ -49,6 +49,7 @@ export function stageExtensionContext(context: ExtensionContext) {
     for (const handle of [...handles].reverse()) {
       try { handle.dispose(); } catch { /* Keep draining owned handles. */ }
     }
+    (context as any)[CONTEXT_DISPOSE_SYMBOL]?.();
   }
   // Preserve the context's internal disposal/render-surface symbols.
   for (const symbol of Object.getOwnPropertySymbols(context)) {
@@ -57,10 +58,7 @@ export function stageExtensionContext(context: ExtensionContext) {
     }
   }
   if (staged.ui) attachInternalExtensionRenderSurface(staged, staged.ui);
-  Object.defineProperty(staged, CONTEXT_DISPOSE_SYMBOL, { value() {
-    dispose();
-    (context as any)[CONTEXT_DISPOSE_SYMBOL]?.();
-  } });
+  Object.defineProperty(staged, CONTEXT_DISPOSE_SYMBOL, { value: dispose });
   return {
     context: Object.freeze(staged) as ExtensionContext,
     commit() {

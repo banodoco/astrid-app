@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { AstridExtension } from '@astrid/editor-sdk';
 import { createIndexedDBExtensionStateRepository } from './extensionStateRepositoryIndexedDB';
 import { generateIntegrityHash } from './extensionIntegrity';
@@ -56,11 +56,14 @@ export function useRuntimePackExtensions(directExtensions: readonly AstridExtens
     }
     void refresh();
     const timer = window.setInterval(() => void refresh(), refreshIntervalMs);
-    const onRefresh = () => { last = ''; void refresh(); };
+    const onRefresh = () => { last = ''; setRefreshKey((key) => key + 1); void refresh(); };
     window.addEventListener('focus', onRefresh);
     window.addEventListener('astrid:pack-inventory-changed', onRefresh);
     return () => { stopped = true; window.clearInterval(timer); window.removeEventListener('focus', onRefresh); window.removeEventListener('astrid:pack-inventory-changed', onRefresh); };
   }, [refreshIntervalMs]);
+  const triggerExtensionRefresh = useCallback(() => {
+    window.dispatchEvent(new Event('astrid:pack-inventory-changed'));
+  }, []);
   const wiring = useExtensionLoaderWiring({ directExtensions, repository, bundleStore: repository, refreshKey });
-  return { ...wiring, error: transportError ?? wiring.error };
+  return { ...wiring, repository, triggerExtensionRefresh, error: transportError ?? wiring.error };
 }

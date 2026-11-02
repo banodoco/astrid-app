@@ -26,13 +26,13 @@ it('renders a real M1-installed effect in the open editor and retains the workin
       import {Player} from '@remotion/player';
       import {defineExtension} from '@astrid/editor-sdk';
       import {useRuntimePackExtensions} from '@/tools/video-editor/runtime/useRuntimePackExtensions';
+      import {PackageCard} from '@/tools/video-editor/components/ExtensionManager/PackageCard';
       import {createExtensionLifecycleHost,createExtensionDiagnosticsService} from '@/tools/video-editor/runtime/extensionLifecycle';
       import {createExtensionContext} from '@/tools/video-editor/runtime/extensionContextFactory';
       import {createEffectRegistrationService} from '@/tools/video-editor/runtime/effectRegistrationService';
       import {createEffectRegistry} from '@/tools/video-editor/effects/registry/EffectRegistry';
       import {createCommandRegistry} from '@/tools/video-editor/runtime/commandRegistry';
       import {onExtensionContextCommit} from '@/tools/video-editor/runtime/extensionActivationTransaction';
-      import {createIndexedDBExtensionStateRepository} from '@/tools/video-editor/runtime/extensionStateRepositoryIndexedDB';
       import {EffectLayerSequence} from '@/tools/video-editor/compositions/EffectLayerSequence';
       const effects=createEffectRegistry(), commands=createCommandRegistry(), host=createExtensionLifecycleHost();
       window.proof={effects,commands,host,mounts:0};
@@ -60,16 +60,15 @@ it('renders a real M1-installed effect in the open editor and retains the workin
           if(wiring.isResolving)return;
           host.synchronize(wiring.resolvedExtensions,context);
           window.proof.diagnostics=wiring.diagnostics;
+          window.proof.packageStates=wiring.packageStateEntries;
           window.proof.error=wiring.error?.message;
         },[wiring.resolvedExtensions,wiring.isResolving,wiring.error]);
-        return React.createElement(Player,{component:Composition,durationInFrames:60,fps:30,compositionWidth:320,
-          compositionHeight:180,style:{width:320,height:180},controls:false});
+        return React.createElement(React.Fragment,null,
+          React.createElement(Player,{component:Composition,durationInFrames:60,fps:30,compositionWidth:320,
+            compositionHeight:180,style:{width:320,height:180},controls:false}),
+          wiring.packageStateEntries.map(entry=>React.createElement(PackageCard,{key:entry.extensionId,entry,
+            repository:wiring.repository,onToggleRequest:wiring.triggerExtensionRefresh,contributionSummary:null})));
       }
-      window.setEnabled=async enabled=>{
-        const repo=createIndexedDBExtensionStateRepository();await repo.initialize();
-        await repo.putEnablementState({extensionId:'com.test.installed-effect',enabled,lastToggledAt:new Date().toISOString()});
-        window.dispatchEvent(new Event('astrid:pack-inventory-changed'));
-      };
       createRoot(document.getElementById('root')).render(React.createElement(App));
     `);
     const buildScript = path.join(root, 'build.mts');
@@ -140,6 +139,10 @@ it('renders a real M1-installed effect in the open editor and retains the workin
     await page.getByTestId('installed-effect').waitFor();
     expect(await page.getByTestId('installed-effect').getAttribute('data-revision')).toBe('v1');
     expect(await page.getByTestId('installed-effect').evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgb(25, 95, 175)');
+    if (process.env.M4_PROOF_DIR) {
+      await mkdir(process.env.M4_PROOF_DIR, { recursive: true });
+      await page.screenshot({ path: path.join(process.env.M4_PROOF_DIR, 'installed-effect-v1.png') });
+    }
     expect(await page.evaluate(() => (window as any).proof.commands.executeCommand('com.test.installed-effect.ping'))).toBe(true);
     expect(await page.evaluate(() => (window as any).pings)).toBe(1);
     const oldPrefix = `/api/runtime/packs/assets/native_effect/${first.admission.digest}/`;
@@ -147,10 +150,13 @@ it('renders a real M1-installed effect in the open editor and retains the workin
     expect((await command('compileFail')).failedBuild).toBe(true);
     for (const mode of ['activateFail', 'badIdentity', 'badApi']) {
       await command(mode);
-      await page.waitForFunction(() => {
+      await page.waitForFunction(mode => {
         const proof = (window as any).proof;
-        return proof.host.diagnostics.some((d: any) => d.code === 'lifecycle/activation-failed') || proof.diagnostics?.some((d: any) => d.severity === 'error');
-      });
+        if (mode === 'activateFail') return proof.host.diagnostics.some((d: any) => d.code === 'lifecycle/activation-failed');
+        if (mode === 'badIdentity') return proof.diagnostics?.some((d: any) => d.code === 'loader/module-identity');
+        return proof.packageStates?.some((state: any) => state.packageState === 'incompatible')
+          || proof.diagnostics?.some((d: any) => d.code === 'loader/module-identity' && d.detail?.revision === null);
+      }, mode);
       expect(await page.getByTestId('installed-effect').getAttribute('data-revision')).toBe('v1');
     }
     await command('hash');
@@ -163,11 +169,12 @@ it('renders a real M1-installed effect in the open editor and retains the workin
     // Restore a valid install, then prove a successful same-version replacement.
     await command('v2');
     await page.waitForFunction(() => document.querySelector('[data-revision="v2"]') !== null);
-    await page.evaluate(() => (window as any).setEnabled(false));
+    if (process.env.M4_PROOF_DIR) await page.screenshot({ path: path.join(process.env.M4_PROOF_DIR, 'installed-effect-v2.png') });
+    await page.getByRole('button', { name: 'Disable com.test.installed-effect', exact: true }).click();
     await page.waitForFunction(() => !(window as any).proof.effects.resolve('installed-effect'));
     expect(await page.getByTestId('installed-effect').count()).toBe(0);
     expect(await page.evaluate(() => (window as any).proof.commands.executeCommand('com.test.installed-effect.ping'))).toBe(false);
-    await page.evaluate(() => (window as any).setEnabled(true));
+    await page.getByRole('button', { name: 'Enable com.test.installed-effect', exact: true }).click();
     await page.getByTestId('installed-effect').waitFor();
     await command('uninstall');
     await page.waitForFunction(() => !(window as any).proof.effects.resolve('installed-effect'));

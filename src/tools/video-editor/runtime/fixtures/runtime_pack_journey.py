@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import urllib.request
 
 root, agent, runtime, site, node, esbuild, lock_file = map(Path, sys.argv[1:])
 sys.path[:0] = [str(runtime), str(runtime / 'packages/python'), str(agent), str(site)]
@@ -37,6 +38,15 @@ RealmStore.initialize(realm).close()
 daemon = RuntimeDaemon(realm, support_root=root / 'support', installed_pack_root=installed).start()
 
 
+def refresh(**notification):
+    request = urllib.request.Request(daemon.endpoint + '/api/runtime/packs/inventory',
+        headers={'Authorization': 'Bearer ' + daemon.token})
+    with urllib.request.urlopen(request, timeout=10) as response:
+        inventory = json.load(response)
+    return {'version': 1, 'accepted': inventory['revision'] == notification['committed_revision'],
+            'revision': inventory['revision'], 'reason': ''}
+
+
 def install(mode):
     version = 'v1' if mode == 'install' else mode
     manifest = {'id': 'com.test.installed-effect', 'version': '1.0.0', 'apiVersion': 2 if mode == 'badApi' else 1,
@@ -63,8 +73,7 @@ export default defineExtension({manifest:MANIFEST,activate(ctx){
     try:
         result = install_group(source=source, packs={'native_effect': 'native_effect'}, packs_root=installed,
             python_packages={}, builds={'native_effect': {'entry': 'entry.tsx', 'extension_manifest': manifest}},
-            toolchain=toolchain, refresh=lambda **kw: {'version': 1, 'accepted': True,
-                'revision': kw['committed_revision'], 'reason': ''})
+            toolchain=toolchain, refresh=refresh)
     except PackInstallError as exc:
         assert mode == 'compileFail', str(exc)
         after = read_group(installed)

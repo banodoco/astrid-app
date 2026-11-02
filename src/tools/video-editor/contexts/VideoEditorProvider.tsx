@@ -856,6 +856,9 @@ export interface VideoEditorProviderProps {
   extensions?: readonly AstridExtension[];
   /** Package-state inventory entries propagated from the loader. */
   packageStateEntries?: readonly import('@/tools/video-editor/runtime/extensionSurface').PackageStateInventoryEntry[];
+  /** The loader's carrier also owns the manager's local enablement state. */
+  extensionStateRepository?: import('@/tools/video-editor/runtime/extensionStateRepository').ExtensionStateRepository | null;
+  triggerExtensionRefresh?: () => void;
   /** Host-provided process manager override. When absent, a default
    *  ProcessManager is created from the extension runtime's declared process
    *  specs. */
@@ -898,6 +901,8 @@ function VideoEditorProviderInstance({
   onPendingWorkChange,
   extensions,
   packageStateEntries,
+  extensionStateRepository,
+  triggerExtensionRefresh,
   processManager: hostProcessManager,
   timelineOverlaysEnabled = false,
   timelineEditability,
@@ -1122,6 +1127,8 @@ function VideoEditorProviderInstance({
     userId,
     extensions: assembly.resolvedExtensionsConfig,
     extensionRuntime: assembly.extensionRuntime,
+    extensionStateRepository: extensionStateRepository ?? null,
+    triggerExtensionRefresh,
     commandRegistry: assembly.commandRegistryRef.current ?? undefined,
     agentToolRegistry: assembly.agentToolRegistryRef.current ?? undefined,
     liveSceneOperationPort: assembly.liveSceneOperationPort,
@@ -1137,7 +1144,7 @@ function VideoEditorProviderInstance({
     timelineOverlaysEnabled,
     timelineViewStore: assembly.timelineViewStoreRef.current ?? undefined,
     timelineEditability: effectiveTimelineEditability,
-  }), [agentChatHost, assembly.agentSelectionOwner, assembly.shellRootRef, dataProvider, effectiveTimelineEditability, extensionHostEnabled, operationalEmitter, projectId, projectSlug, registerAgentChatTimeline, shotsHost, telemetryHost, timelineId, timelineName, userId, assembly.resolvedExtensionsConfig, assembly.extensionRuntime, assembly.processResultAttachRecords, assembly.processStatuses, assembly.recordProcessResultAttach, assembly.getRecoveryKey, assembly.incrementRecoveryKey, timelineOverlaysEnabled]);
+  }), [agentChatHost, assembly.agentSelectionOwner, assembly.shellRootRef, dataProvider, effectiveTimelineEditability, extensionHostEnabled, extensionStateRepository, triggerExtensionRefresh, operationalEmitter, projectId, projectSlug, registerAgentChatTimeline, shotsHost, telemetryHost, timelineId, timelineName, userId, assembly.resolvedExtensionsConfig, assembly.extensionRuntime, assembly.processResultAttachRecords, assembly.processStatuses, assembly.recordProcessResultAttach, assembly.getRecoveryKey, assembly.incrementRecoveryKey, timelineOverlaysEnabled]);
 
   return (
     <VideoEditorRuntimeProvider value={runtimeValue}>

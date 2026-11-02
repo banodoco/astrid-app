@@ -179,8 +179,11 @@ export const test = base.extend<object, { harness: DirectHarness; browser: Brows
 });
 
 export async function currentHead(harness: DirectHarness): Promise<string> {
-  const timelines = await harness.runtimeJson('GET', `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}/composition-revisions?limit=1`);
-  return timelines.body.items.find((item: any) => item.is_current_head).revision_id;
+  const timeline = await harness.runtimeJson('GET', `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}`);
+  expect(timeline.status).toBe(200);
+  expect(typeof timeline.body?.head_revision_id).toBe('string');
+  expect(timeline.body.head_revision_id).not.toBe('');
+  return timeline.body.head_revision_id;
 }
 
 export async function waitForAudit(harness: DirectHarness, predicate: (entry: ReturnType<DirectHarness['audit']>[number]) => boolean, timeoutMs = 3000) {

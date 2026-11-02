@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# I-AP-08: exact-published-tuple browser bridge/outbox proof.
+# I-AP-08: exact published-base browser bridge/outbox proof.
 set -euo pipefail
 
-readonly APP_SHA='0c36714a267b1d65b2e10adda1c7ff22c4500a66'
-readonly RUNTIME_SHA='1a275bb339ae897e52a5be5e1da99e846e402037'
-readonly AGENT_SHA='ddd5d278796641901bd11508863a8ea21e6c9697'
+readonly APP_SHA='5c95abb00525e1a77d00c32042b6453d9f14f4e7'
+readonly RUNTIME_SOURCE_SHA='8d3e3af4ede6e3579ac673ae77794464f693bf1b'
+readonly RUNTIME_PRODUCT_SHA='5453366458f7b4ee874c94d15ae7952e3e82d3c3'
+readonly AGENT_CANDIDATE_SHA='e425903f7a9fa5b82973281d15054c0716b46e2d'
+readonly AGENT_HARNESS_SHA='6e46e3bb45ec3feddbd0b0617a50a157e3a4df67'
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app_root="$(cd -- "$script_dir/../.." && pwd)"
@@ -24,12 +26,22 @@ if [[ "$(git -C "$app_root" rev-parse HEAD)" != "$APP_SHA" ]]; then
   printf 'App HEAD is not the published base %s\n' "$APP_SHA" >&2
   exit 65
 fi
-if [[ "$(git -C "$runtime_source" rev-parse HEAD)" != "$RUNTIME_SHA" ]]; then
-  printf 'Runtime HEAD is not the published tuple %s\n' "$RUNTIME_SHA" >&2
+if [[ "$(git -C "$runtime_source" rev-parse HEAD)" != "$RUNTIME_SOURCE_SHA" ]]; then
+  printf 'Runtime source HEAD is not the published source %s\n' "$RUNTIME_SOURCE_SHA" >&2
   exit 65
 fi
-if [[ "$(git -C "$agent_source" rev-parse HEAD)" != "$AGENT_SHA" ]]; then
-  printf 'Agent HEAD is not the published tuple %s\n' "$AGENT_SHA" >&2
+if ! git -C "$runtime_source" cat-file -e "$RUNTIME_PRODUCT_SHA^{commit}"; then
+  printf 'Runtime product is unavailable from the published source: %s\n' "$RUNTIME_PRODUCT_SHA" >&2
+  exit 65
+fi
+if [[ "$(git -C "$agent_source" rev-parse HEAD)" != "$AGENT_HARNESS_SHA" ]]; then
+  printf 'Agent harness HEAD is not the published harness %s\n' "$AGENT_HARNESS_SHA" >&2
+  exit 65
+fi
+
+manifest_tuple="$(node -e 'const manifest = require(process.argv[1]); process.stdout.write(`${manifest.runtime?.sha ?? ""} ${manifest.agent?.sha ?? ""}`)' "$app_root/public/install-manifest.json")"
+if [[ "$manifest_tuple" != "$RUNTIME_PRODUCT_SHA $AGENT_CANDIDATE_SHA" ]]; then
+  printf 'App manifest does not pin the exact Runtime product and Agent candidate\n' >&2
   exit 65
 fi
 
@@ -67,8 +79,8 @@ export ASTRID_INSTALL_MANAGED_BY=
 
 # Archives preserve the exact commits in physical version children, while all
 # generated state, venv links, and installer records stay under the task root.
-git -C "$runtime_source" archive --format=tar "$RUNTIME_SHA" | tar -xf - -C "$runtime_fixture"
-git -C "$agent_source" archive --format=tar "$AGENT_SHA" | tar -xf - -C "$agent_fixture"
+git -C "$runtime_source" archive --format=tar "$RUNTIME_PRODUCT_SHA" | tar -xf - -C "$runtime_fixture"
+git -C "$agent_source" archive --format=tar "$AGENT_HARNESS_SHA" | tar -xf - -C "$agent_fixture"
 ln -s "$task_dir/runtime-venv" "$runtime_fixture/.venv"
 
 # The Runtime venv is task-local.  Install the published Agent wheel from the
@@ -79,6 +91,9 @@ ln -s "$task_dir/runtime-venv" "$runtime_fixture/.venv"
 {
   printf 'app_head=%s\n' "$(git -C "$app_root" rev-parse HEAD)"
   printf 'runtime_source_head=%s\n' "$(git -C "$runtime_source" rev-parse HEAD)"
+  printf 'runtime_product_sha=%s\n' "$RUNTIME_PRODUCT_SHA"
+  printf 'agent_candidate_sha=%s\n' "$AGENT_CANDIDATE_SHA"
+  printf 'agent_harness_sha=%s\n' "$AGENT_HARNESS_SHA"
   printf 'agent_source_head=%s\n' "$(git -C "$agent_source" rev-parse HEAD)"
   printf 'runtime_fixture=%s\n' "$runtime_fixture"
   printf 'agent_fixture=%s\n' "$agent_fixture"

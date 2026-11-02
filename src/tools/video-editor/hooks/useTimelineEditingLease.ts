@@ -26,15 +26,6 @@ function getTabOwner(): TabOwner {
       const existing = ownersByStorage.get(storage);
       if (existing) return existing;
     } else if (fallbackOwner) return fallbackOwner;
-    const stored = storage?.getItem(TAB_SESSION_STORAGE_KEY);
-    if (stored) {
-      const value = JSON.parse(stored) as Partial<TabOwner>;
-      if (typeof value.id === 'string' && value.id && Number.isSafeInteger(value.sequence) && (value.sequence ?? 0) >= 0) {
-        const owner = { id: value.id, sequence: value.sequence!, storage };
-        if (storage) ownersByStorage.set(storage, owner); else fallbackOwner = owner;
-        return owner;
-      }
-    }
   } catch { /* storage can be unavailable in private or embedded contexts */ }
   const owner = { id: newTabSessionId(), sequence: 0, storage };
   if (storage) ownersByStorage.set(storage, owner); else fallbackOwner = owner;

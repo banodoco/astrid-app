@@ -24,8 +24,8 @@ function makeProvider() {
   return provider;
 }
 
-function fakeStorage() {
-  const values = new Map<string, string>();
+function fakeStorage(initial: Record<string, string> = {}) {
+  const values = new Map<string, string>(Object.entries(initial));
   return {
     getItem: (key: string) => values.get(key) ?? null,
     setItem: (key: string, value: string) => { values.set(key, value); },
@@ -162,6 +162,45 @@ describe('useTimelineEditingLease', () => {
     expect(release[1]).toBe(tabAId);
     expect(release[2]).toBeGreaterThan(firstSequence as number);
     expect(providerB.timelineEditingLease!.release).not.toHaveBeenCalled();
+    tabB.unmount();
+  });
+
+  it('gives cloned sessionStorage contexts separate lease owners and releases only its own lease', () => {
+    const serializedOwner = JSON.stringify({ id: 'cloned-tab-owner', sequence: 41 });
+    const storageA = fakeStorage({ 'astrid.timeline-editing.tab.v1': serializedOwner });
+    const storageB = fakeStorage({ 'astrid.timeline-editing.tab.v1': serializedOwner });
+    const activeLeases = new Map<string, number>();
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn(async (_timelineId, tab, sequence) => {
+      activeLeases.set(tab, sequence);
+      return response(tab, sequence);
+    });
+    provider.timelineEditingLease!.release = vi.fn(async (_timelineId, tab, sequence) => {
+      if (sequence > (activeLeases.get(tab) ?? -1)) activeLeases.delete(tab);
+      return response(tab, sequence, false);
+    });
+
+    Object.defineProperty(window, 'sessionStorage', { configurable: true, value: storageA });
+    const tabA = renderHook(() => useTimelineEditingLease(options(provider, { dirty: true, editSeq: 1 })));
+    const [tabAId, firstSequenceA] = provider.timelineEditingLease!.renew.mock.calls[0].slice(1);
+
+    Object.defineProperty(window, 'sessionStorage', { configurable: true, value: storageB });
+    const tabB = renderHook(() => useTimelineEditingLease(options(provider, { dirty: true, editSeq: 1 })));
+    const [tabBId, firstSequenceB] = provider.timelineEditingLease!.renew.mock.calls[1].slice(1);
+
+    expect(JSON.parse(storageA.getItem('astrid.timeline-editing.tab.v1')!).id).toBe(tabAId);
+    expect(JSON.parse(storageB.getItem('astrid.timeline-editing.tab.v1')!).id).toBe(tabBId);
+    expect(tabBId).not.toBe(tabAId);
+    expect(firstSequenceA).toBe(1);
+    expect(firstSequenceB).toBe(1);
+    expect(activeLeases.size).toBe(2);
+
+    tabA.unmount();
+
+    expect(provider.timelineEditingLease!.release).toHaveBeenCalledTimes(1);
+    expect(provider.timelineEditingLease!.release.mock.calls[0][2]).toBeGreaterThan(firstSequenceA as number);
+    expect(activeLeases.has(tabAId as string)).toBe(false);
+    expect(activeLeases.has(tabBId as string)).toBe(true);
     tabB.unmount();
   });
 

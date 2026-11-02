@@ -473,6 +473,8 @@ test.describe('core journey', () => {
     expect(retired.body).toMatchObject({ code: 'retired_route' });
     const second = await harness.runtimeJson('POST', `${timelinePath(harness)}/commit`, timelineCommit(harness, head, 'Second writer'));
     expect(second.status).toBe(200);
+    const secondHead = acceptedHead(second.body);
+    expect(secondHead.revisionId).not.toBe(head.revisionId);
     await editFirstTrackName(page, 'Draft from the first writer');
     const conflict = page.getByRole('alertdialog', { name: 'This timeline changed somewhere else' });
     await expect(conflict).toBeVisible({ timeout: 20_000 });
@@ -483,7 +485,7 @@ test.describe('core journey', () => {
     const draftField = page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first();
     await expect(draftField).toHaveValue('Draft from the first writer');
     // The stale save was refused, not applied: the second writer's revision is still the head.
-    expect(await currentHead(harness)).toBe(acceptedHead(second.body).revisionId);
+    expect(await currentHead(harness)).toBe(secondHead.revisionId);
   });
 
   test('through the hosted origin: open, read the timeline, save with the expected head, reload byte-identical', async ({ page, harness }) => {

@@ -45,6 +45,11 @@ import {
   syncEnabledPackLockEntries,
 } from '@/tools/video-editor/runtime/extensionLockMetadata';
 
+const moduleLeases = new WeakMap<AstridExtension, () => void>();
+export function releaseAdmittedExtensionAssets(extension: AstridExtension): void {
+  moduleLeases.get(extension)?.();
+}
+
 /** Build-time singleton bindings; the browser never constructs an import map. */
 const SHARED_SPECIFIERS = [
   'react', 'react/jsx-runtime', 'react/jsx-dev-runtime',
@@ -142,18 +147,47 @@ async function importAdmittedExtension(
       throw moduleError('loader/shared-modules', `Singleton binding mismatch for ${specifier}. Rebuild against this host release.`);
     }
   }
+  let releaseLease = () => {};
+  {
+    const leased = await fetch(`/api/runtime/packs/leases/${artifact.packId}/${artifact.digest}`, {
+      method: 'POST', credentials: 'same-origin',
+    });
+    if (!leased.ok || leased.redirected) throw moduleError('loader/not-admitted', 'Runtime could not retain the admitted revision.');
+    const lease = await leased.json();
+    if (lease.version !== 1 || typeof lease.lease !== 'string' || !SHA256.test(lease.lease)) {
+      throw moduleError('loader/not-admitted', 'Runtime returned an invalid artifact lease.');
+    }
+    let released = false;
+    releaseLease = () => {
+      if (released) return;
+      released = true;
+      window.removeEventListener('pagehide', releaseLease);
+      void fetch(`/api/runtime/packs/leases/${lease.lease}`, { method: 'DELETE',
+        credentials: 'same-origin', keepalive: true }).catch(() => {});
+    };
+    window.addEventListener('pagehide', releaseLease, { once: true });
+  }
   let namespace: any;
   try {
     namespace = await import(/* @vite-ignore */ new URL(url, location.origin).href);
   } catch (error) {
+    releaseLease();
     throw moduleError('loader/module-import-failed', `Entry or chunk import failed: ${String(error)}`);
   }
   const extension = namespace.default;
   if (!record(extension) || !record(extension.manifest) || typeof extension.activate !== 'function'
     || canonical(extension.manifest) !== canonical(admittedManifest)) {
+    releaseLease();
     throw moduleError('loader/module-identity', 'Default export must be an activatable AstridExtension with the exact admitted manifest and API.');
   }
-  return extension as AstridExtension;
+  const retained = { ...extension, activate(context: Parameters<AstridExtension['activate']>[0]) {
+    try {
+      const handle = extension.activate(context);
+      return { dispose() { try { handle?.dispose(); } finally { releaseLease(); } } };
+    } catch (error) { releaseLease(); throw error; }
+  } } as AstridExtension;
+  moduleLeases.set(retained, releaseLease);
+  return retained;
 }
 
 // ---------------------------------------------------------------------------

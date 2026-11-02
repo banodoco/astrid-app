@@ -1,3 +1,4 @@
+import { stageExtensionContext } from './extensionActivationTransaction';
 /**
  * Extension lifecycle state machine and diagnostics service.
  *
@@ -585,25 +586,34 @@ export function createExtensionLifecycleHost(
       if (existing) {
         // Check if manifest changed (by reference comparison, since manifests are frozen)
         if (existing.extension.manifest !== ext.manifest) {
-          // Manifest changed — dispose old and create new
-          const oldId = existing.extensionId;
-          existing.dispose();
-          lifecycles.delete(id);
-          // Orphan-dispose live sources owned by the old lifecycle
-          if (liveDataRegistry && !liveDataRegistry.isDisposed) {
-            try {
-              liveDataRegistry.disposeExtensionSources(oldId);
-            } catch {
-              // Swallow registry errors during lifecycle cleanup
+          // Activate against deferred registrations while the old revision is
+          // still serving the editor. Failed activation disposes only the stage.
+          const replacement = createExtensionLifecycle(ext);
+          let stage: ReturnType<typeof stageExtensionContext> | undefined;
+          try {
+            stage = stageExtensionContext(contextFactory(ext));
+            replacement.activate(stage.context);
+            if (replacement.state !== 'active') {
+              hostDiagnostics.push(...replacement.diagnostics);
+              replacement.dispose();
+              stage.dispose();
+              continue;
             }
+            existing.dispose();
+            if (liveDataRegistry && !liveDataRegistry.isDisposed) {
+              try { liveDataRegistry.disposeExtensionSources(id); } catch { /* Keep disposing. */ }
+            }
+            notifyLifecycleDisposed(id);
+            stage.commit();
+            lifecycles.set(id, replacement);
+            recoveryKeys.set(id, (recoveryKeys.get(id) ?? 0) + 1);
+          } catch (error) {
+            replacement.dispose();
+            stage?.dispose();
+            hostDiagnostics.push(Object.freeze({ severity: 'error',
+              code: 'lifecycle/replacement-failed', extensionId: id,
+              message: `Replacement activation failed: ${String(error)}` }));
           }
-          notifyLifecycleDisposed(oldId);
-          const newLc = createExtensionLifecycle(ext);
-          lifecycles.set(id, newLc);
-          // Manifest change → increment recovery key (re-activation)
-          const prevRk = recoveryKeys.get(id) ?? 0;
-          recoveryKeys.set(id, prevRk + 1);
-          toActivate.push(newLc);
         }
         // else: same extension, nothing to do (recovery key stable)
       } else {
@@ -638,8 +648,10 @@ export function createExtensionLifecycleHost(
     // Activate new/changed extensions
     for (const lc of toActivate) {
       try {
-        const ctx = contextFactory(lc.extension);
-        lc.activate(ctx);
+        const stage = stageExtensionContext(contextFactory(lc.extension));
+        lc.activate(stage.context);
+        if (lc.state === 'active') stage.commit();
+        else { stage.dispose(); }
       } catch (err) {
         // Context factory threw — capture in both the lifecycle's diagnostics
         // and the persistent host diagnostics so they survive lifecycle removal.

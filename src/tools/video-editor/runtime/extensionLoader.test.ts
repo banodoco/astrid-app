@@ -206,6 +206,9 @@ beforeAll(async () => {
   });
   const originalFetch = globalThis.fetch;
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).startsWith('/api/runtime/packs/leases/')) {
+      return { ok: true, redirected: false, json: async () => ({ version: 1, lease: 'e'.repeat(64), released: true }) } as Response;
+    }
     if (String(input) === '/api/runtime/packs/inventory') {
       return {
         ok: true,

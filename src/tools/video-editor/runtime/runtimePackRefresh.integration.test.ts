@@ -1,0 +1,187 @@
+// @vitest-environment node
+import { expect, it } from 'vitest';
+import { createServer } from 'node:http';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createInterface } from 'node:readline';
+import { chromium } from '@playwright/test';
+
+it('renders a real M1-installed effect in the open editor and retains the working revision through refused updates', async () => {
+  const app = process.cwd();
+  const root = await realpath(await mkdtemp(path.join(tmpdir(), 'installed-pack-journey-')));
+  const dist = path.join(root, 'dist');
+  let child: ReturnType<typeof spawn> | undefined;
+  let browser: Awaited<ReturnType<typeof chromium.launch>> | undefined;
+  let server: ReturnType<typeof createServer> | undefined;
+  try {
+    await mkdir(path.join(root, 'src'));
+    await writeFile(path.join(root, 'package-lock.json'), await readFile(path.join(app, 'package-lock.json')));
+    await writeFile(path.join(root, 'index.html'), '<html><head></head><body><div id="root"></div><script type="module" src="/src/main.tsx"></script></body></html>');
+    await writeFile(path.join(root, 'src/main.tsx'), `
+      import React,{useEffect,useSyncExternalStore} from 'react';
+      import {createRoot} from 'react-dom/client';
+      import {Player} from '@remotion/player';
+      import {defineExtension} from '@astrid/editor-sdk';
+      import {useRuntimePackExtensions} from '@/tools/video-editor/runtime/useRuntimePackExtensions';
+      import {createExtensionLifecycleHost,createExtensionDiagnosticsService} from '@/tools/video-editor/runtime/extensionLifecycle';
+      import {createExtensionContext} from '@/tools/video-editor/runtime/extensionContextFactory';
+      import {createEffectRegistrationService} from '@/tools/video-editor/runtime/effectRegistrationService';
+      import {createEffectRegistry} from '@/tools/video-editor/effects/registry/EffectRegistry';
+      import {createCommandRegistry} from '@/tools/video-editor/runtime/commandRegistry';
+      import {onExtensionContextCommit} from '@/tools/video-editor/runtime/extensionActivationTransaction';
+      import {createIndexedDBExtensionStateRepository} from '@/tools/video-editor/runtime/extensionStateRepositoryIndexedDB';
+      import {EffectLayerSequence} from '@/tools/video-editor/compositions/EffectLayerSequence';
+      const effects=createEffectRegistry(), commands=createCommandRegistry(), host=createExtensionLifecycleHost();
+      window.proof={effects,commands,host,mounts:0};
+      window.hostSingletons={React,defineExtension};
+      host.onLifecycleDisposed(id=>{commands.unregisterAll(id);effects.unregisterOwner(id)});
+      function context(extension){
+        const id=extension.manifest.id;
+        const ctx=createExtensionContext(extension,undefined,
+          {registerCommand:(...args)=>commands.registerCommand(id,...args)},
+          createEffectRegistrationService({extension,effectRegistry:effects,diagnosticsService:createExtensionDiagnosticsService(id)}));
+        onExtensionContextCommit(ctx,()=>{for(const c of extension.manifest.contributions)if(c.kind==='command')commands.ingestCommandContribution(id,c)});
+        return ctx;
+      }
+      const subscribe=cb=>{const h=effects.subscribe(cb);return ()=>h.dispose()};
+      function Composition(){
+        const snapshot=useSyncExternalStore(subscribe,()=>effects.getSnapshot());
+        return React.createElement(EffectLayerSequence,{clip:{id:'live',clipType:'effect-layer',track:'V1',at:0,hold:2,
+          continuous:{type:'installed-effect',intensity:1,params:{}}},fps:30,effectRegistrySnapshot:snapshot},
+          React.createElement('span',{'data-testid':'editor-content'},'Editor already open'));
+      }
+      function App(){
+        const wiring=useRuntimePackExtensions(undefined,100);
+        useEffect(()=>{window.proof.mounts++;return ()=>host.disposeAll()},[]);
+        useEffect(()=>{
+          if(wiring.isResolving)return;
+          host.synchronize(wiring.resolvedExtensions,context);
+          window.proof.diagnostics=wiring.diagnostics;
+          window.proof.error=wiring.error?.message;
+        },[wiring.resolvedExtensions,wiring.isResolving,wiring.error]);
+        return React.createElement(Player,{component:Composition,durationInFrames:60,fps:30,compositionWidth:320,
+          compositionHeight:180,style:{width:320,height:180},controls:false});
+      }
+      window.setEnabled=async enabled=>{
+        const repo=createIndexedDBExtensionStateRepository();await repo.initialize();
+        await repo.putEnablementState({extensionId:'com.test.installed-effect',enabled,lastToggledAt:new Date().toISOString()});
+        window.dispatchEvent(new Event('astrid:pack-inventory-changed'));
+      };
+      createRoot(document.getElementById('root')).render(React.createElement(App));
+    `);
+    const buildScript = path.join(root, 'build.mts');
+    await writeFile(buildScript, `
+      import {build} from ${JSON.stringify(path.join(app, 'node_modules/vite/dist/node/index.js'))};
+      import {createExtensionImportMapPlugin} from ${JSON.stringify(path.join(app, 'config/vite/extensionImportMap.ts'))};
+      await build({configFile:false,root:${JSON.stringify(root)},publicDir:false,logLevel:'error',
+        plugins:[createExtensionImportMapPlugin()],resolve:{alias:${JSON.stringify({
+          '@': path.join(app, 'src'), '@astrid/editor-sdk': path.join(app, 'src/sdk/index.ts'),
+          react: path.join(app, 'node_modules/react'), 'react-dom': path.join(app, 'node_modules/react-dom'),
+          remotion: path.join(app, 'node_modules/remotion'), '@remotion/player': path.join(app, 'node_modules/@remotion/player'),
+          '@banodoco/timeline-composition': path.join(app, 'node_modules/@banodoco/timeline-composition'),
+        })},dedupe:['react','react-dom','remotion']},build:{outDir:${JSON.stringify(dist)},target:'esnext',minify:false}});
+    `);
+    const env = Object.fromEntries(['PATH', 'TMPDIR', 'LANG', 'PLAYWRIGHT_BROWSERS_PATH']
+      .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]!]));
+    await promisify(execFile)(process.execPath, ['--import', path.join(app, 'node_modules/tsx/dist/loader.mjs'), buildScript], { env, maxBuffer: 2_000_000 });
+    const required = (key: string) => { const value = process.env[key]; if (!value) throw new Error(`Set explicit ${key} for the frozen integration tuple`); return value; };
+    child = spawn(required('M4_TEST_PYTHON'), ['-S', path.join(app, 'src/tools/video-editor/runtime/fixtures/runtime_pack_journey.py'), root,
+      required('M4_TEST_AGENT_ROOT'), required('M4_TEST_RUNTIME_ROOT'), required('M4_TEST_PYTHON_SITE'),
+      process.execPath, required('M4_TEST_ESBUILD'), path.join(dist, 'extension-shared-modules.json')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
+    let stderr = '';
+    child.stderr!.on('data', data => { stderr += data.toString(); });
+    async function next() {
+      const line = await lines.next();
+      if (line.done) throw new Error(`Runtime fixture exited: ${stderr}`);
+      return JSON.parse(line.value);
+    }
+    const runtime = await next();
+    async function command(command: string) {
+      child!.stdin!.write(JSON.stringify({ command }) + '\n');
+      const result = await next();
+      if (!result.ok) throw new Error(result.error);
+      return result.result;
+    }
+    const requests: string[] = [];
+    server = createServer(async (request, response) => {
+      const url = request.url ?? '/';
+      requests.push(url);
+      if (url.startsWith('/api/runtime/')) {
+        try {
+          const upstream = await fetch(runtime.endpoint + url, { method: request.method,
+            headers: { Authorization: `Bearer ${runtime.token}` }, redirect: 'manual' });
+          response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') ?? 'application/json', 'Cache-Control': 'no-store' });
+          response.end(Buffer.from(await upstream.arrayBuffer()));
+        } catch (error) { response.writeHead(502).end(String(error)); }
+        return;
+      }
+      try {
+        const filename = path.resolve(dist, url === '/' ? 'index.html' : url.slice(1));
+        if (!filename.startsWith(dist + path.sep)) { response.writeHead(403).end(); return; }
+        response.writeHead(200, { 'Content-Type': filename.endsWith('.html') ? 'text/html' : 'text/javascript' });
+        response.end(await readFile(filename));
+      } catch { response.writeHead(404).end(); }
+    });
+    await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('Missing App listener');
+    browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH, headless: true, args: ['--no-sandbox'] });
+    const page = await browser.newPage();
+    const errors: string[] = [];
+    page.on('pageerror', error => errors.push(error.message));
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    await page.getByTestId('editor-content').waitFor();
+    expect(await page.getByTestId('installed-effect').count()).toBe(0);
+    const first = await command('install');
+    await page.getByTestId('installed-effect').waitFor();
+    expect(await page.getByTestId('installed-effect').getAttribute('data-revision')).toBe('v1');
+    expect(await page.getByTestId('installed-effect').evaluate(node => getComputedStyle(node).backgroundColor)).toBe('rgb(25, 95, 175)');
+    expect(await page.evaluate(() => (window as any).proof.commands.executeCommand('com.test.installed-effect.ping'))).toBe(true);
+    expect(await page.evaluate(() => (window as any).pings)).toBe(1);
+    const oldPrefix = `/api/runtime/packs/assets/native_effect/${first.admission.digest}/`;
+    expect(requests.filter(url => url.startsWith(oldPrefix)).every(url => url.endsWith('/index.js'))).toBe(true);
+    expect((await command('compileFail')).failedBuild).toBe(true);
+    for (const mode of ['activateFail', 'badIdentity', 'badApi']) {
+      await command(mode);
+      await page.waitForFunction(() => {
+        const proof = (window as any).proof;
+        return proof.host.diagnostics.some((d: any) => d.code === 'lifecycle/activation-failed') || proof.diagnostics?.some((d: any) => d.severity === 'error');
+      });
+      expect(await page.getByTestId('installed-effect').getAttribute('data-revision')).toBe('v1');
+    }
+    await command('hash');
+    await page.waitForFunction(() => !!(window as any).proof.error);
+    expect(await page.getByTestId('installed-effect').getAttribute('data-revision')).toBe('v1');
+    expect(await page.evaluate(() => (window as any).loadInstalledLazy())).toBe('late-v1');
+    expect(requests.some(url => url.startsWith(oldPrefix) && !url.endsWith('/index.js'))).toBe(true);
+    const traversal = await page.request.get(`http://127.0.0.1:${address.port}${oldPrefix}%2e%2e/secret.js`);
+    expect([400, 404]).toContain(traversal.status());
+    // Restore a valid install, then prove a successful same-version replacement.
+    await command('v2');
+    await page.waitForFunction(() => document.querySelector('[data-revision="v2"]') !== null);
+    await page.evaluate(() => (window as any).setEnabled(false));
+    await page.waitForFunction(() => !(window as any).proof.effects.resolve('installed-effect'));
+    expect(await page.getByTestId('installed-effect').count()).toBe(0);
+    expect(await page.evaluate(() => (window as any).proof.commands.executeCommand('com.test.installed-effect.ping'))).toBe(false);
+    await page.evaluate(() => (window as any).setEnabled(true));
+    await page.getByTestId('installed-effect').waitFor();
+    await command('uninstall');
+    await page.waitForFunction(() => !(window as any).proof.effects.resolve('installed-effect'));
+    expect(await page.evaluate(() => (window as any).proof.mounts)).toBe(1);
+    expect(errors).toEqual([]);
+    const old = await page.request.get(`http://127.0.0.1:${address.port}${oldPrefix}index.js`);
+    expect(old.status()).toBe(404);
+  } finally {
+    await browser?.close();
+    await new Promise<void>(resolve => server ? server.close(() => resolve()) : resolve());
+    if (child) {
+      child.stdin?.end();
+      if (child.exitCode === null) await new Promise<void>(resolve => child!.once('exit', () => resolve()));
+    }
+    await rm(root, { recursive: true, force: true });
+  }
+}, 120_000);

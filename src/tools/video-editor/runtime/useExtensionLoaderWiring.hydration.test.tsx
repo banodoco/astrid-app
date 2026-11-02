@@ -184,6 +184,9 @@ describe('useExtensionLoaderWiring native module composition', () => {
       server = createServer(async (request, response) => {
         const url = request.url ?? '/'; requested.push(url);
         const json = (body: unknown) => response.writeHead(200, { 'Content-Type': 'application/json' }).end(JSON.stringify(body));
+        if (url.startsWith('/api/runtime/packs/leases/')) {
+          json({ version: 1, lease: 'e'.repeat(64), released: true }); return;
+        }
         if (url === '/fixture.json') { json(artifact); return; }
         if (url === '/api/runtime/packs/inventory') {
           json({ version: 1, revision: 7, packs: [{ packId: artifact.packId, sourceDigest: source,

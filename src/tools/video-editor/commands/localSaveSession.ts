@@ -120,6 +120,12 @@ export async function createLocalSaveSession(options: Options) {
     const conflict = inverse || (failure.error && typeof failure.error === 'object' && !Array.isArray(failure.error)
       && failure.error.kind === 'conflict');
     publish(conflict ? 'conflict' : 'error', failure.error);
+    // A concurrent writer rejected this exact local chain.  Do not replace the
+    // mounted draft with its head before the person chooses one of the conflict
+    // actions: that turns a correctly surfaced 409 into visible data loss.
+    // `discardRejected` is the explicit "Use latest version" path; the
+    // retained chain remains available to the "Keep my changes" recovery flow.
+    if (conflict) return true;
     try {
       const latest = await options.loadLatest();
       checkBasis(latest);
@@ -327,6 +333,20 @@ export async function createLocalSaveSession(options: Options) {
       if (writeError) throw writeError;
       if (state.status !== 'saved') throw new Error('Local saves remain unacknowledged; draft retained');
       return clone(basis);
+    },
+    /** Resolve an explicitly discarded conflict; never call this implicitly. */
+    async discardRejected() {
+      assertOpen();
+      if (state.status !== 'conflict') throw new Error('No rejected local save is awaiting an explicit discard');
+      const current = await box!.read();
+      const rejected = current.pending?.outcome?.kind === 'rejected';
+      if (!rejected || current.intents.length === 0) {
+        throw new Error('Rejected local save changed before explicit discard');
+      }
+      record = await box!.resolveRejected(current.intents.map((intent) => intent.id));
+      document = toOutboxJson(basis.canonicalDocument);
+      replaying = false;
+      publish('saved');
     },
     async recover(ownerId: string) {
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');

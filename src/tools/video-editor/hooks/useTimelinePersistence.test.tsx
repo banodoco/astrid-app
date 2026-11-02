@@ -2185,6 +2185,59 @@ describe('useTimelinePersistence — interaction gating', () => {
     });
   });
 
+  it('keeps a mounted rejected chain for save-as-copy, but discards it before Use latest reloads canonical', async () => {
+    const localData = makeTimelineData('mounted-local-draft');
+    const remoteData = makeTimelineData('remote-authoritative-head');
+    const conflict = new TimelineVersionConflictError('remote writer committed first');
+    const makeMountedHandoff = () => ({
+      capture: vi.fn(async () => {}),
+      flush: vi.fn(async () => { throw conflict; }),
+      discardConflictDraft: vi.fn(async () => {}),
+    });
+
+    const retained = makeMountedHandoff();
+    const keepHarness = setup({
+      initialData: localData,
+      persistenceEnabled: true,
+      localDocumentSave: retained,
+      loadTimelineImpl: async () => ({ config: remoteData.config, configVersion: 2 }),
+    });
+    keepHarness.scheduleSave(localData);
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(keepHarness.result.current.isConflictExhausted).toBe(true);
+    await act(async () => { await keepHarness.result.current.retrySaveAfterConflict(); });
+    expect(retained.discardConflictDraft).not.toHaveBeenCalled();
+    expect(await loadTimelineDraft('timeline-1')).toMatchObject({ draft: { config: localData.config } });
+    keepHarness.unmount();
+
+    resetFakeIndexedDB();
+    const discarded = makeMountedHandoff();
+    const latestHarness = setup({
+      initialData: localData,
+      persistenceEnabled: true,
+      localDocumentSave: discarded,
+      loadTimelineImpl: async () => ({ config: remoteData.config, configVersion: 2 }),
+    });
+    latestHarness.scheduleSave(localData);
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(latestHarness.result.current.isConflictExhausted).toBe(true);
+    await act(async () => { await latestHarness.reloadFromServer(); });
+    expect(discarded.discardConflictDraft).toHaveBeenCalledOnce();
+    expect(latestHarness.loadTimeline).toHaveBeenCalledOnce();
+    expect(latestHarness.commitData).toHaveBeenCalledWith(expect.objectContaining({
+      config: expect.objectContaining({ output: expect.objectContaining({ file: 'output-remote-authoritative-head.mp4' }) }),
+    }), expect.objectContaining({ save: false, skipHistory: true }));
+    latestHarness.unmount();
+  });
+
   it('direct reload adopts server state and clears a diverged recovery draft', async () => {
     const harness = setup({ persistenceEnabled: true });
     harness.scheduleSave(makeTimelineData('local-before-reload'));

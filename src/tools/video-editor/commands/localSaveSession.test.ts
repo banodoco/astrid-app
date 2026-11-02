@@ -305,7 +305,7 @@ describe('local editor saves through the durable outbox', () => {
     await session.dispose();
   });
 
-  it('rolls back a failed predecessor visibly, retaining the complete split → trim chain and error details across restart', async () => {
+  it('keeps a conflicted mounted draft visible until an explicit discard, while retaining the complete split → trim chain across restart', async () => {
     const env = environment();
     const session = await env.mount();
     await env.append(session, splitSave());
@@ -317,7 +317,11 @@ describe('local editor saves through the durable outbox', () => {
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(env.send).toHaveBeenCalledTimes(1);
     expect(session.getState()).toMatchObject({ status: 'conflict', error: { code: 'dependency_changed', details } });
-    expect(env.visible()).toEqual({ ...original, agent: true });
+    // The other writer's remote result is authoritative, but it must not
+    // replace the mounted local document before the conflict choice.
+    expect(remote.accepted).toEqual({ revisionId: 'agent-r', publicationId: 'agent-p' });
+    expect(env.visible()).toEqual(trimmed);
+    expect(env.loadLatest).not.toHaveBeenCalled();
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents.map((intent) => intent.payload)).toEqual([
       expect.objectContaining({ before: original, after: split, commands: splitCommands }),
@@ -332,6 +336,27 @@ describe('local editor saves through the durable outbox', () => {
     expect(env.send).toHaveBeenCalledTimes(1);
     expect((await env.outboxes.list(scope))[0].intents).toEqual(stored.intents);
     await recovered.dispose();
+  });
+
+  it('discards a rejected chain only after the explicit use-latest action', async () => {
+    const env = environment();
+    const session = await env.mount();
+    await env.append(session, splitSave());
+    env.send.mockRejectedValueOnce(new ApiError(409, 'dependency_changed', 'Split conflicts with another edit', '', {
+      status: 'conflict', reason: 'dependency_changed',
+    }));
+
+    await expect(session.flush()).rejects.toThrow('unacknowledged');
+    expect(session.getState().status).toBe('conflict');
+    expect((await env.outboxes.list(scope))[0].intents).toHaveLength(1);
+
+    await session.discardRejected();
+
+    expect(session.getState().status).toBe('saved');
+    const [outbox] = await env.outboxes.list(scope);
+    expect(outbox.intents).toEqual([]);
+    expect(outbox.pending).toBeUndefined();
+    await session.dispose();
   });
 
   it('does not let an asynchronous canonical build overwrite a later local edit', async () => {

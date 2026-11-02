@@ -1498,6 +1498,13 @@ export function useTimelinePersistence({
     onCanonicalReloadStart?.();
     if (reloadPromiseRef.current) return reloadPromiseRef.current;
 
+    // This is the explicit "Use latest version" branch. The local outbox
+    // stays intact for Save-as-copy (`preserveDraft`), but a person who chose
+    // the remote version must not have the rejected local chain revived later.
+    const discardRejectedConflict = isConflictExhaustedRef.current && !options?.preserveDraft
+      ? localDocumentSave?.discardConflictDraft?.()
+      : undefined;
+
     reloadInProgressRef.current = true;
     saveQueueGenerationRef.current += 1;
     rejectFlushWaiters(new Error('Timeline reloaded before durable acknowledgement.'));
@@ -1514,6 +1521,7 @@ export function useTimelinePersistence({
 
     const reloadTask = (async () => {
       try {
+        await discardRejectedConflict;
         // Cancel not-yet-started work above, then wait for any transport that
         // already crossed the write boundary. Its acknowledgement (including
         // an ambiguous/lost-ack retry) must settle before canonical is read.
@@ -1652,6 +1660,7 @@ export function useTimelinePersistence({
     selectedClipIdRef,
     selectedTrackIdRef,
     onCanonicalReloadStart,
+    localDocumentSave,
     rejectFlushWaiters,
     store,
     timelineId,

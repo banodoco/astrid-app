@@ -8,6 +8,7 @@ import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { flushDraftsBeforeReload, resetDraftReloadGuardsForTest } from '@/shared/lib/updates/draftSafeReload.ts';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
+import { AppBuildProvider } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { VideoEditorRuntimeProvider, type VideoEditorRuntimeContextValue } from '../contexts/VideoEditorRuntimeContext.tsx';
@@ -29,6 +30,10 @@ import { ProjectChatDraftPersistence } from '../components/AgentChat/projectChat
 vi.mock('@/shared/contexts/AuthContext.tsx', () => ({ useAuthSafe: () => ({ isAuthenticated: true }) }));
 vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => 'https://astrid.test', runtimeApiBase: () => 'https://astrid.test/api/runtime' }));
 vi.mock('../compositions/TimelineRenderer.tsx', () => ({ invalidateReferencedTimelineCache: vi.fn() }));
+vi.mock('@/shared/lib/updates/appBuildWatch.ts', async (importOriginal) => ({
+  ...await importOriginal<typeof import('@/shared/lib/updates/appBuildWatch.ts')>(),
+  useAppBuildWatch: () => true,
+}));
 
 function deferred<T = void>() {
   let resolve!: (value: T) => void;
@@ -137,6 +142,22 @@ async function mountUpdate(recovery = false) {
 function expectNoUpdate() { expect(updatePosts).toHaveLength(0); }
 
 describe('strict D5 mounted editor Update', () => {
+  it('keeps the mounted draft open and reports a failed save on stale-build reload', async () => {
+    const handoff = { capture: vi.fn(async () => {}), flush: vi.fn(async () => { throw new TimelineSaveError('offline'); }) };
+    const editor = await mountEditor({ handoff });
+    await editor.edit('unsaved-on-reload.mp4');
+    const reload = vi.fn();
+    render(<AppBuildProvider reload={reload}><div>Editor still open</div></AppBuildProvider>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not safely reload: Timeline:');
+    expect(screen.getByText('Editor still open')).toBeInTheDocument();
+    expect(editor.hook.result.current.dataRef.current?.config.output.file).toBe('unsaved-on-reload.mp4');
+    expect((await loadTimelineDraft(timelineId))?.draft.config).toMatchObject({ output: { file: 'unsaved-on-reload.mp4' } });
+    expect(reload).not.toHaveBeenCalled();
+    expectNoUpdate();
+  });
+
   it.each([false, true])('saves before exactly one explicit POST, recovery-needed=%s', async recovery => {
     const editor = await mountEditor();
     await editor.edit('saved.mp4');

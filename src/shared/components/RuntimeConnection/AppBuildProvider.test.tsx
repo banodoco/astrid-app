@@ -11,7 +11,7 @@ describe('AppBuildProvider stale-build notice', () => {
   it('stays above an interactive editor surface and reloads after mounted drafts flush', async () => {
     const reload = vi.fn();
     const flush = vi.fn(async () => undefined);
-    const unregister = registerDraftSafeReloadGuard({ label: 'Timeline', flush });
+    const unregister = registerDraftSafeReloadGuard({ label: 'Timeline', flush, isDirty: () => false });
     render(
       <AppBuildProvider reload={reload}>
         <div data-testid="editor-surface" className="fixed inset-0 z-[100100]">Editor</div>

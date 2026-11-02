@@ -12,7 +12,7 @@ import {
 import { computeSecondaryGhosts } from '@/tools/video-editor/lib/multi-drag-utils.ts';
 import { createAutoScroller } from '@/tools/video-editor/lib/auto-scroll.ts';
 import { getTimelineLabelWidth } from '@/tools/video-editor/lib/coordinate-utils.ts';
-import { notifyInteractionEndIfIdle } from '@/tools/video-editor/lib/interaction-state.ts';
+import { notifyInteractionEndIfIdle, notifyInteractionStart } from '@/tools/video-editor/lib/interaction-state.ts';
 import {
   shouldPreserveTouchSelectionForMove,
   shouldAllowTouchClipDrag,
@@ -277,6 +277,7 @@ export const useClipDrag = (): UseClipDragResult => {
       session.hasMoved = true;
       session.claimedGestureOwner = true;
       latestRef.current.interactionStateRef.current.drag = true;
+      notifyInteractionStart(latestRef.current.interactionStateRef);
       latestRef.current.setGestureOwner('clip');
       ensureCountBadge(session);
       setState({

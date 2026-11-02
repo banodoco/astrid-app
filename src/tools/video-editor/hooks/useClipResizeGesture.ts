@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { MutableRefObject, RefObject } from 'react';
 import type { ShotGroup } from '@/tools/video-editor/hooks/useShotGroups.ts';
-import { notifyInteractionEndIfIdle } from '@/tools/video-editor/lib/interaction-state.ts';
+import { notifyInteractionEndIfIdle, notifyInteractionStart } from '@/tools/video-editor/lib/interaction-state.ts';
 import type { TimelineGestureOwner, TimelineInputModality } from '@/tools/video-editor/lib/mobile-interaction-model.ts';
 import type { ResizeDir } from '@/tools/video-editor/lib/resize-math.ts';
 import {
@@ -306,6 +306,7 @@ export const useClipResizeGesture = ({
           }
           if (latestRef.current.interactionStateRef) {
             latestRef.current.interactionStateRef.current.resize = true;
+            notifyInteractionStart(latestRef.current.interactionStateRef);
           }
           setState({
             ...currentState,

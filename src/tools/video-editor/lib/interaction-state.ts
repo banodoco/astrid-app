@@ -12,12 +12,13 @@ export interface InteractionState {
   drag: boolean;
   resize: boolean;
   listeners: Set<() => void>;
+  startListeners: Set<() => void>;
 }
 
 export type InteractionStateRef = MutableRefObject<InteractionState>;
 
 export function createInteractionState(): InteractionState {
-  return { drag: false, resize: false, listeners: new Set() };
+  return { drag: false, resize: false, listeners: new Set(), startListeners: new Set() };
 }
 
 export function isInteractionActive(ref: InteractionStateRef): boolean {
@@ -36,6 +37,17 @@ export function onInteractionEnd(
   return () => {
     ref.current.listeners.delete(cb);
   };
+}
+
+export function onInteractionStart(ref: InteractionStateRef, cb: () => void): () => void {
+  ref.current.startListeners.add(cb);
+  return () => { ref.current.startListeners.delete(cb); };
+}
+
+export function notifyInteractionStart(ref: InteractionStateRef): void {
+  for (const listener of [...ref.current.startListeners]) {
+    try { listener(); } catch (error) { console.error('[interactionState] start listener threw', error); }
+  }
 }
 
 /**

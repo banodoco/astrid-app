@@ -16,6 +16,7 @@ import type { InteractionStateRef } from '@/tools/video-editor/lib/interaction-s
 import { useTimelineCommit, type OwnedRegistryMutation, type TimelineEditMutation } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
 import { TimelineEventBus } from '@/tools/video-editor/hooks/useTimelineEventBus.ts';
 import { useTimelinePersistence } from '@/tools/video-editor/hooks/useTimelinePersistence.ts';
+import { useTimelineEditingLease } from '@/tools/video-editor/hooks/useTimelineEditingLease.ts';
 import { clearTimelineDraft, loadTimelineDraft } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { buildTimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { getStableConfigSignature } from '@/tools/video-editor/lib/config-utils.ts';
@@ -91,7 +92,7 @@ export function useTimelineSave(
   store: TimelineStoreApi,
   initialData?: TimelineData,
 ) {
-  const { timelineId, assetResolver, timelineEditability, shots, toast } = useVideoEditorRuntime();
+  const { timelineId, assetResolver, timelineEditability, shots, toast, shellRootRef } = useVideoEditorRuntime();
   const resolveAssetUrl = useCallback(async (file: string) => {
     if (assetResolver) {
       return await assetResolver.resolveAssetUrl(file);
@@ -452,6 +453,16 @@ export function useTimelineSave(
     onCanonicalReloadStart: invalidateRecoveryAction,
     localDocumentSave,
     diagnosticOwner: localOwner,
+  });
+  useTimelineEditingLease({
+    provider,
+    timelineId,
+    editSeq: commit.editSeqRef.current,
+    dirty: commit.editSeqRef.current > savedSeqRef.current,
+    saving: persistence.saveStatus === 'saving',
+    nestedDraftActive: Boolean(shots.canonicalDraft),
+    interactionStateRef,
+    shellRootRef,
   });
   const { clearDeferredRecoverySave, resumeDeferredRecoverySave } = persistence;
   localOperationBoundaryRef.current = persistence.invalidateTimelineRecovery;

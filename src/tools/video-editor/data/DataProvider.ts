@@ -454,6 +454,11 @@ export interface ExtensionPersistenceService {
 // ---------------------------------------------------------------------------
 
 export interface DataProvider extends AssetResolver {
+  /** Optional owner/tab-scoped Runtime lease used while the local editor is active. */
+  timelineEditingLease?: {
+    renew(timelineId: string, tabSessionId: string, sequence: number, ttlSeconds: number): Promise<unknown>;
+    release(timelineId: string, tabSessionId: string, sequence: number): Promise<unknown>;
+  };
   /** Command commits are supplied whole by gesture/command producers. */
   timelineCommands?: TimelineCommitCapability;
   loadTimelineCommandBasis?(timelineId: string): Promise<TimelineCommandBasis>;

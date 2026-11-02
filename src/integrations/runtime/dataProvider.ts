@@ -347,6 +347,18 @@ export class RuntimeDataProvider implements DataProvider {
 
   private readonly projectId: string;
   private readonly client: AstridRuntimeClient;
+  readonly timelineEditingLease: NonNullable<DataProvider['timelineEditingLease']> = {
+    renew: (timelineId, tabSessionId, sequence, ttlSeconds) => this.client.updateTimelineEditing(
+      this.projectId,
+      timelineId,
+      { tab_session_id: tabSessionId, sequence, ttl_seconds: ttlSeconds },
+    ),
+    release: (timelineId, tabSessionId, sequence) => this.client.releaseTimelineEditing(
+      this.projectId,
+      timelineId,
+      { tab_session_id: tabSessionId, sequence },
+    ),
+  };
   readonly paramReadClient: NonNullable<DataProvider['paramReadClient']> = {
     getProjectVerifiedDocument: (projectId, pin) => {
       if (projectId !== this.projectId) throw new Error('Retained document read belongs to another project');

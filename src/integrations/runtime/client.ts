@@ -29,6 +29,9 @@ import {
   type Transport,
   type RequestBody,
   type DocumentPin,
+  type TimelineEditingRequest,
+  type TimelineEditingRelease,
+  type TimelineEditingResponse,
 } from './generated.ts';
 import {
   RUNTIME_ACCEPTED_SCHEMA_DIGESTS,
@@ -911,6 +914,14 @@ export class AstridRuntimeClient {
 
   async getProjectTimeline(projectId: string, timelineId: string): Promise<Record<string, unknown>> {
     return this.coalescedRead(JSON.stringify(['timeline', projectId, timelineId]), () => this.client.getProjectTimeline(projectId, timelineId));
+  }
+
+  async updateTimelineEditing(projectId: string, timelineId: string, body: TimelineEditingRequest): Promise<TimelineEditingResponse> {
+    return this.withMutation(() => this.client.updateTimelineEditing(projectId, timelineId, body));
+  }
+
+  async releaseTimelineEditing(projectId: string, timelineId: string, body: TimelineEditingRelease): Promise<TimelineEditingResponse> {
+    return this.withMutation(() => this.client.releaseTimelineEditing(projectId, timelineId, body));
   }
 
   /**

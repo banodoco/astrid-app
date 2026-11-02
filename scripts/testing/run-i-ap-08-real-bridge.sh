@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
-# I-AP-08: exact-published-tuple browser bridge/outbox proof.
+# I-AP-08: exact-candidate-bound browser bridge/outbox proof.
 set -euo pipefail
 
-readonly APP_SHA='0c36714a267b1d65b2e10adda1c7ff22c4500a66'
-readonly RUNTIME_SHA='1a275bb339ae897e52a5be5e1da99e846e402037'
-readonly AGENT_SHA='ddd5d278796641901bd11508863a8ea21e6c9697'
+readonly APP_SHA='13e3ae6522074898f47daadf29f24ec1cbe92d0e'
+readonly RUNTIME_SHA='8d3e3af4ede6e3579ac673ae77794464f693bf1b'
+readonly AGENT_SHA='a09579d8c87e2b3b7b617b65d49b0551ddd6b9cc'
+readonly MANIFEST_SHA256='1a1493587859f13f231df325dc15114c1302288873e1e28ff703d49115bdb973'
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 app_root="$(cd -- "$script_dir/../.." && pwd)"
@@ -12,6 +13,7 @@ task_dir="${I_AP_08_TASK_DIR:-/home/user/merge/ws/M-APP/queue/running/I-AP-08}"
 runtime_source="${I_AP_08_RUNTIME_SOURCE:-/home/user/merge/ws/M-APP/repos/astrid-runtime}"
 agent_source="${I_AP_08_AGENT_SOURCE:-/home/user/merge/ws/M-APP/repos/astrid-agent}"
 app_dist="${I_AP_08_APP_DIST:-$task_dir/sub/2/dist}"
+pip_cache="${I_AP_08_PIP_CACHE:-$task_dir/pip-cache}"
 
 for required in "$task_dir" "$runtime_source" "$agent_source"; do
   if [[ "$required" != /* || ! -d "$required" ]]; then
@@ -32,6 +34,10 @@ if [[ "$(git -C "$agent_source" rev-parse HEAD)" != "$AGENT_SHA" ]]; then
   printf 'Agent HEAD is not the published tuple %s\n' "$AGENT_SHA" >&2
   exit 65
 fi
+if [[ "$(sha256sum "$app_root/public/install-manifest.json" | awk '{print $1}')" != "$MANIFEST_SHA256" ]]; then
+  printf 'App install manifest is not the candidate manifest %s\n' "$MANIFEST_SHA256" >&2
+  exit 65
+fi
 
 runtime_python="$task_dir/runtime-venv/bin/python"
 if [[ ! -x "$runtime_python" ]]; then
@@ -44,7 +50,7 @@ if [[ "$app_dist" != /* || ! -f "$app_dist/index.html" ]]; then
 fi
 
 umask 077
-mkdir -p "$task_dir/artifacts/bridge-runs" "$task_dir/pip-cache"
+mkdir -p "$task_dir/artifacts/bridge-runs" "$pip_cache"
 run_dir="$(mktemp -d "$task_dir/artifacts/bridge-runs/run.XXXXXX")"
 version_root="$run_dir/installer-root/versions/old"
 runtime_fixture="$version_root/runtime"
@@ -71,15 +77,16 @@ git -C "$runtime_source" archive --format=tar "$RUNTIME_SHA" | tar -xf - -C "$ru
 git -C "$agent_source" archive --format=tar "$AGENT_SHA" | tar -xf - -C "$agent_fixture"
 ln -s "$task_dir/runtime-venv" "$runtime_fixture/.venv"
 
-# The Runtime venv is task-local.  Install the published Agent wheel from the
+# The Runtime venv is task-local. Install the selected Agent wheel from the
 # disposable archive so its authoring profile has its normal dependencies; the
 # import path below still selects the archived exact source tree first.
-"$runtime_python" -m pip install --cache-dir "$task_dir/pip-cache" "$agent_fixture" >"$run_dir/agent-wheel-install.log" 2>&1
+"$runtime_python" -m pip install --cache-dir "$pip_cache" "$agent_fixture" >"$run_dir/agent-wheel-install.log" 2>&1
 
 {
   printf 'app_head=%s\n' "$(git -C "$app_root" rev-parse HEAD)"
   printf 'runtime_source_head=%s\n' "$(git -C "$runtime_source" rev-parse HEAD)"
   printf 'agent_source_head=%s\n' "$(git -C "$agent_source" rev-parse HEAD)"
+  printf 'manifest_sha256=%s\n' "$MANIFEST_SHA256"
   printf 'runtime_fixture=%s\n' "$runtime_fixture"
   printf 'agent_fixture=%s\n' "$agent_fixture"
   printf 'installer_identity=release:%s,managed_by:%s\n' "$ASTRID_INSTALL_RELEASE" "${ASTRID_INSTALL_MANAGED_BY:-<none>}"

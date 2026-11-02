@@ -1201,7 +1201,7 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
   /**
    * A second timeline in the seeded project for the pack extensions, made on first use (after the cases that open the
    * seeded timeline, so none of them sees a second timeline): one media clip with a transcript lane over it, and one
-   * live-scene clip whose package is a Runtime project object, published as one composition revision.
+   * live-scene clip whose package is a Runtime project object, published as one timeline commit.
    */
   async seedExtensions(): Promise<ExtensionsSeed> {
     if (this.extensionsSeed) return this.extensionsSeed;
@@ -1251,11 +1251,34 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     ];
     const registry = { assets: { [assetKey]: { file: 'journey-speech.webm', type: 'video', duration: 12, media_id: video.objectId, content_sha256: video.digest } } };
     const timelineId = randomUUID();
+    const timelinePath = `/v1/projects/${projectId}/timelines/${timelineId}`;
+    const created = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines`, { timeline_id: timelineId, name: 'Extensions' });
+    if (created.status !== 201) throw new Error(`create extensions timeline: ${created.status} ${JSON.stringify(created.body)}`);
+    const timeline = await this.runtimeJson('GET', timelinePath);
+    if (timeline.status !== 200) throw new Error(`read extensions head: ${timeline.status} ${JSON.stringify(timeline.body)}`);
+    const { head_revision_id: revisionId, head_publication_id: publicationId } = timeline.body;
+    if (typeof revisionId !== 'string' || !revisionId || typeof publicationId !== 'string' || !publicationId) throw new Error('extensions timeline has no Runtime head pair');
+    const base = await this.runtimeJson('GET', `${timelinePath}/composition-revisions/${revisionId}`);
+    if (base.status !== 200 || !base.body?.payload) throw new Error(`read extensions revision: ${base.status} ${JSON.stringify(base.body)}`);
     const publication = compositionPublication({ projectId, timelineId }, null, 'Extensions', 30);
     publication.parent_composition.config = { ...publication.parent_composition.config, clips, bundle } as typeof publication.parent_composition.config;
     publication.parent_composition.clips = clips as unknown as typeof publication.parent_composition.clips;
     publication.parent_composition.registry = registry as unknown as typeof publication.parent_composition.registry;
-    const published = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, publication);
+    const change = { op: 'set', ref: 'parent', path: [], before: { state: 'present', value: base.body.payload }, value: publication.parent_composition };
+    const commands = [
+      { schema_version: 1, op: 'doc.patch', version: '1', select: null, created: ['parent/track:V1', `parent/clip:${sceneClipId}`, `parent/clip:${speechClipId}`, `parent/asset:${assetKey}`], args: { changes: [change] } },
+      { schema_version: 1, op: 'media.admit', version: '1', select: null, args: { inputs: [{ pin: { media_id: video.objectId, content_digest: video.digest } }] } },
+    ];
+    const published = await this.runtimeJson('POST', `${timelinePath}/commit`, {
+      api_version: 1, project_id: projectId, timeline_id: timelineId,
+      base_revision_id: revisionId, base_publication_id: publicationId, commands,
+      label: 'Seed extensions', merge: 'atomic', reads: [{ kind: 'scope', ref: 'timeline', path: [] }],
+      steps: [
+        { id: 'extensions', label: 'Seed extensions', intent: 'Initialize extensions timeline', tags: [], command_ordinals: [0], patch: [change] },
+        { id: 'media', label: 'Capture extensions media', intent: 'Verify media through Runtime', tags: [], command_ordinals: [1], patch: [] },
+      ],
+      source: { via: 'app' },
+    });
     if (published.status !== 200) throw new Error(`seed extensions timeline: ${published.status} ${JSON.stringify(published.body)}`);
     this.extensionsSeed = { projectSlug: (project.body.data ?? project.body).slug, timelineId, transcriptTexts, sceneClipId, speechClipId, sceneMarker: SCENE_MARKER, scenePackage, sceneEntry: entry };
     return this.extensionsSeed;

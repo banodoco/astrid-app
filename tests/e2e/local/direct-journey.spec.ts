@@ -425,6 +425,10 @@ test.describe('core journey', () => {
     await expectConnected(page);
     await openSeededTimeline(page, harness);
     const head = await currentHead(harness);
+    // Keep the retired writer's negative assertion from the accepted route migration.
+    const retired = await harness.runtimeJson('POST', `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}/composition-revisions`, {});
+    expect(retired.status).toBe(410);
+    expect(retired.body).toMatchObject({ code: 'retired_route' });
     const second = await harness.runtimeJson('POST', `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
     expect(second.status).toBe(200);
     await editFirstTrackName(page, 'Draft from the first writer');

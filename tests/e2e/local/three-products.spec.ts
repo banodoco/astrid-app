@@ -27,8 +27,8 @@
  * route holds, never by sleeping.
  */
 import { expect, type Locator, type Page, type Request, type Route } from '@playwright/test';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { cpus, loadavg } from 'node:os';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpus, loadavg, tmpdir } from 'node:os';
 import path from 'node:path';
 import { getTimelineLabelWidth } from '../../../src/tools/video-editor/lib/coordinate-utils.ts';
 import { PREVIEW_SURFACE, calibrateRuler, seekRulerToFrame, type RulerSeek } from '../support/previewRuler.ts';
@@ -291,9 +291,17 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
     checkout: () => astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']),
     edit: (...flags: string[]) => astrid.astrid(['timelines', 'edit', ...common, ...flags]),
     publish: async (message: string, idempotencyKey: string) => {
-      const envelope = await astrid.json<{ new_head: string; old_head: string; idempotency_key: string; published?: boolean }>(['timelines', 'publish', ...common, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
-      expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
-      return envelope.data!;
+      const directory = mkdtempSync(path.join(tmpdir(), 'astrid-candidate-'));
+      const candidate = path.join(directory, 'candidate.json');
+      try {
+        await astrid.python(['-c', 'import sys; from astrid.sdk.timeline_checkout import Checkout; Checkout.draft(sys.argv[1], sys.argv[2]).save(sys.argv[3], quiet=True)', seed.projectSlug, seed.timelineId, candidate]);
+        const envelope = await astrid.json<{ status: string; previous_revision_id: string; accepted_revision_id: string }>(['timelines', 'commit', ...common, '--file', candidate, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
+        expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
+        expect(envelope.data?.status, JSON.stringify(envelope)).toBe('accepted');
+        return { old_head: envelope.data!.previous_revision_id, new_head: envelope.data!.accepted_revision_id };
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
     },
     status: async () => (await astrid.json<{ current_head: string }>(['timelines', 'status', ...common, '--json'])).data!,
     show: async () => (await astrid.json<{ head_revision_id: string; rows: Array<{ layers: Array<{ clip_id: string; asset: string | null }> }> }>(['timelines', 'show', ...common, '--published', '--json'])).data!,

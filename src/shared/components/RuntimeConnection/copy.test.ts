@@ -1,18 +1,18 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, INSTALL_LINE_LABEL, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, withOrigin } from './copy.ts';
+import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
 
 afterEach(() => vi.restoreAllMocks());
 
 describe('install commands', () => {
-  it('uses the shared K8 label next to the install line', () => {
-    expect(INSTALL_LINE_LABEL).toBe('Install or update Astrid');
-    expect(localSetupSteps()[0].line).toContain(INSTALL_LINE_LABEL);
+  it('uses the shared install command in the setup block and not a second local setup line', () => {
+    expect(installCommand('install')).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
+    expect(localSetupSteps().some(step => step.command === ASTRID_COMMANDS.macLinux)).toBe(false);
   });
 
   it.each([
-    ['MacIntel', 'Macintosh', 'install', 'curl -fsSL https://astrid.haus/install | sh'],
-    ['Linux x86_64', 'Linux', 'install', 'curl -fsSL https://astrid.haus/install | sh'],
-    ['Win32', 'Windows', 'install', 'irm https://astrid.haus/install.ps1 | iex'],
+    ['MacIntel', 'Macintosh', 'install', 'curl -fsSL https://astrid.haus/install | sh -s -- --yes'],
+    ['Linux x86_64', 'Linux', 'install', 'curl -fsSL https://astrid.haus/install | sh -s -- --yes'],
+    ['Win32', 'Windows', 'install', '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --yes'],
     ['MacIntel', 'Macintosh', 'update', 'curl -fsSL https://astrid.haus/install | sh -s -- --update'],
     ['Linux x86_64', 'Linux', 'update', 'curl -fsSL https://astrid.haus/install | sh -s -- --update'],
     ['Win32', 'Windows', 'update', '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update'],
@@ -20,6 +20,29 @@ describe('install commands', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(os);
     expect(installCommand(mode)).toBe(expected);
+  });
+
+  it('puts only changed choices after --yes and can explicitly apply Settings choices', () => {
+    const choices = { ...RECOMMENDED_SETUP_CHOICES, autostart: false, skills: false, skillCopies: true };
+    expect(installCommand('install', choices)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes --autostart off --skills off --skill-copies on');
+    expect(installCommand('install', choices, true)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes --autostart off --command on --skills off --skill-copies on');
+  });
+});
+
+describe('setup consent wording', () => {
+  it('asks once for setup with the selected choices and the same runnable command', () => {
+    const choices = { ...RECOMMENDED_SETUP_CHOICES, autostart: false, skills: false };
+    const text = agentInstructions('install', 'https://astrid.haus', false, undefined, { choices });
+    expect(text).toContain('May I install Astrid with these setup choices?');
+    expect(text).toContain('Setup choices: start at sign-in off · `astrid` terminal command on · coding-agent skills off · skill copies off.');
+    expect(text).toContain('curl -fsSL https://astrid.haus/install | sh -s -- --yes --autostart off --skills off');
+  });
+
+  it('uses restart wording without a consent question for an already set up Runtime', () => {
+    const text = agentInstructions('install', 'https://astrid.haus', false, undefined, { alreadySetup: true });
+    expect(text).toContain('Please restart Astrid on this computer');
+    expect(text).not.toContain('May I install');
+    expect(text).not.toContain('Setup choices:');
   });
 });
 
@@ -63,7 +86,7 @@ describe('onboarding instructions', () => {
 
   it('returns the fully local instructions', () => {
     const text = localSetupInstructions();
-    expect(text).toContain('Please set up Astrid to run fully on this computer, including the editor, so I can change Astrid itself.');
+    expect(text).toContain('Please set up Astrid to run fully on this computer, including the editor so I can change Astrid itself.');
     expect(text).toContain('https://github.com/banodoco/astrid-app');
     expect(text).toContain('npm run dev:local');
     expect(text.match(/npx -y npm@11 ci/g)).toHaveLength(2);
@@ -73,7 +96,7 @@ describe('onboarding instructions', () => {
   });
 
   it('local setup step five gives one browser address to open', () => {
-    const step = localSetupSteps()[4];
+    const step = localSetupSteps()[3];
     expect(step.line).toBe('Open this address in your browser. The editor opens with your project.');
     expect(step.command).toBe(LOCAL_SETUP.openUrl);
     expect(step.commandLabel).toBe('Copy the address');

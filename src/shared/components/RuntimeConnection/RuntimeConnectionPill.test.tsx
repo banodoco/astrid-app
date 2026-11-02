@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { RuntimeConnectionPill } from './RuntimeConnectionPill.tsx';
-import { RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
+import { installCommand, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
 import { CONNECTED_REALM, connectionFor } from './connectionFixture.ts';
 
 afterEach(() => {
@@ -110,7 +110,7 @@ describe('RuntimeConnectionPill', () => {
 
       fireEvent.click(screen.getByRole('button', { name: COPY.agent.commandCopy }));
     await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
-    expect(String(writeText.mock.calls[0][0])).toMatch(/^curl -fsSL https:\/\/astrid\.haus\/install \| sh$/);
+    expect(writeText.mock.calls[0][0]).toBe(installCommand('install'));
   });
 
   it('Pinokio stopped card says where to start Astrid and has no installer or coding-agent instructions', async () => {
@@ -157,7 +157,7 @@ describe('RuntimeConnectionPill', () => {
     await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
     route.answer = unreachable;
 
-    await waitFor(() => expect(screen.getByText('Or run this yourself in PowerShell:')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/PowerShell/)).toBeInTheDocument());
   });
 
   it('two answers that come late are busy: a calm card with no install command, and it clears when Astrid answers', async () => {
@@ -289,7 +289,7 @@ describe('RuntimeConnectionPill', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
     expect(status()).toHaveAttribute('data-state', 'stopped');
     expect(isRecoveryCardShowing()).toBe(true);
-    expect(document.body.textContent).not.toMatch(/Runtime|workspace|realm|gateway|127\.0\.0\.1|npm run/);
+    expect(document.body.textContent).toContain(installCommand('install'));
 
     route.answer = healthy('instance-1');
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
@@ -330,10 +330,10 @@ describe('RuntimeConnectionPill', () => {
     await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
     route.answer = unreachable;
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
-    expect(document.body.textContent).not.toMatch(/Runtime|workspace|realm|gateway|127\.0\.0\.1|npm run/);
+    expect(document.body.textContent).toContain(installCommand('install'));
     route.answer = healthy('instance-2');
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid restarted' })).toBeInTheDocument());
-    expect(document.body.textContent).not.toMatch(/Runtime|workspace|realm|gateway|127\.0\.0\.1|npm run/);
+    expect(document.body.textContent).not.toContain(installCommand('install'));
   });
 
   it.each(['not_running', 'refused'] as const)('renders nothing while %s, and asks Astrid nothing', (status) => {

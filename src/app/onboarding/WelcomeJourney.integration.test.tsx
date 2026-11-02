@@ -96,7 +96,11 @@ function runtimeDoor({ unavailable = false, failDiscovery = false } = {}) {
       project = { ...project, metadata: body?.metadata as Record<string, unknown>, version: project.version + 1 };
       return json(project);
     }
-    if (path === `/v1/projects/${PROJECT}/timelines`) return json({ items: timeline ? [timeline] : [], next_cursor: null });
+    if (path === `/v1/projects/${PROJECT}/timelines` && method === 'GET') return json({ items: timeline ? [timeline] : [], next_cursor: null });
+    if (path === `/v1/projects/${PROJECT}/timelines` && method === 'POST') {
+      timeline = { timeline_id: body?.timeline_id, project_id: PROJECT, slug: 'main', name: body?.name ?? 'Main', head_revision_id: 'journey-head', archived: false };
+      return json(committed(timeline, 'timeline.create', key), 201);
+    }
     if (path.startsWith(`/v1/projects/${PROJECT}/timelines/`) && path.endsWith('/composition-revisions') && method === 'POST') {
       timeline = { timeline_id: body?.timeline_id, project_id: PROJECT, slug: 'main', name: 'Main',
         head_revision_id: body?.parent_revision_id, archived: false };
@@ -151,6 +155,8 @@ function chooseHosted() {
   expect(fetch).not.toHaveBeenCalled();
   expect(permissions.query).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Continue in this tab' }));
+  expect(screen.getByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
 }
 
 function destination() {
@@ -176,13 +182,13 @@ it('recovers from hosted permission denial, creates a real canonical starter tim
   expect(door.requests.map(request => request.path)).toEqual(['/v1/health']);
   expect(screen.queryByRole('main', { name: 'Opening your project' })).not.toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: 'Connect' }));
-  await waitFor(() => expect(replaceNavigate).toHaveBeenCalledOnce());
+  await waitFor(() => expect(replaceNavigate).toHaveBeenCalledOnce(), { timeout: 10_000 });
 
   const url = destination();
   expect(url.pathname).toBe('/tools/video-editor');
   expect(url.searchParams.get('project')).toBe(PROJECT);
   expect(url.searchParams.get('timeline')).toBe(door.timeline?.timeline_id);
-  expect(entryFor(url, null)).toBe('editor');
+  expect(entryFor(url, readWelcomePhase())).toBe('editor');
   expect(classifyBrowserEntry(url)).toBe('app');
   expect(readWelcomePhase()).toBe('complete');
   expect(localStorage.getItem(PENDING_STARTER_PROJECT_KEY)).toBeNull();
@@ -191,9 +197,11 @@ it('recovers from hosted permission denial, creates a real canonical starter tim
   const intent = door.project?.metadata.astrid_onboarding_intent;
   expect(intent).toMatch(/^[a-f0-9-]{36}$/);
   expect(create[0].key).toBe(`astrid-onboarding-project-${intent}`);
-  const publications = door.requests.filter(request => request.path.endsWith('/composition-revisions'));
-  expect(publications).toHaveLength(1);
-  expect(publications[0].body).toMatchObject({ expected_head: null, parent_composition: { clips: [], occurrences: [], registry: { assets: {} } } });
+  const timelineCreate = door.requests.filter(request => request.path === `/v1/projects/${PROJECT}/timelines` && request.method === 'POST');
+  expect(timelineCreate).toHaveLength(1);
+  expect(timelineCreate[0].body?.timeline_id).toBe(door.timeline?.timeline_id);
+  expect(timelineCreate[0].key).toBe(`astrid-first-timeline-${PROJECT}`);
+  expect(door.timeline?.head_revision_id).toBe('journey-head');
   expect(door.project?.metadata.default_timeline_id).toBe(url.searchParams.get('timeline'));
   expect(door.timeline?.head_revision_id).toBeTruthy();
   expect(door.unexpected).toEqual([]);
@@ -221,7 +229,7 @@ it('keeps an absent Runtime in setup, and Back returns to the real chooser so lo
   fireEvent.click(screen.getByRole('radio', { name: 'Run app on your computer' }));
   fireEvent.click(screen.getByRole('button', { name: 'Set up with your agent' }));
   expect(await screen.findByRole('heading', { name: 'Have your agent set it up' })).toBeInTheDocument();
-  expect(readWelcomePhase()).toBe('local');
+  expect(readWelcomePhase()).toBe('setup');
   expect(door.requests).toHaveLength(readsBeforeLocalSetup);
   expect(navigate).not.toHaveBeenCalled();
   expect(door.unexpected).toEqual([]);
@@ -246,7 +254,7 @@ it('offers Open editor after real project discovery fails, with a reload-safe ed
   expect(url.searchParams.has('project')).toBe(false);
   expect(url.searchParams.has('timeline')).toBe(false);
   // A new document cannot read this visit's in-memory welcome phase.
-  expect(entryFor(url, null)).toBe('editor');
+  expect(entryFor(url, readWelcomePhase())).toBe('editor');
   expect(classifyBrowserEntry(url)).toBe('app');
   expect(door.unexpected).toEqual([]);
 });

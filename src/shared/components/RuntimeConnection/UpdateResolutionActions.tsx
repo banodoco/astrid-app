@@ -2,6 +2,7 @@ import { Button } from '@/shared/components/ui/button.tsx';
 import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN_PINOKIO_ACTION, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
 import { CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { SetupBlock } from './SetupBlock.tsx';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
@@ -19,7 +20,7 @@ export function openUpdatesSettings() {
 export function UpdateResolutionActions({ resolution, operation }: { readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView }) {
   const guarded = useGuardedReload();
   const actions = [resolution.primary, resolution.secondary].filter((action) => action !== null);
-  if (actions.length === 0 && !operation?.pending && !operation?.status?.result && !operation?.error) return null;
+  if (actions.length === 0 && resolution.updateReason !== 'autostart-off' && !operation?.pending && !operation?.status?.result && !operation?.error) return null;
 
   const commandOptions = actions.some((action) => action.label === COPY_FOR_AGENT_ACTION || action.label === RUN_IT_YOURSELF_ACTION);
   const route = actions.find((action) => action.destination === 'settings-updates');
@@ -39,6 +40,10 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
     {(resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} />}
+    {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
+      <p className="text-sm">Run this command to start Astrid and apply the update:</p>
+      <SetupBlock initiallySetUp showCheckbox={false} forceCustomize />
+    </div>}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}

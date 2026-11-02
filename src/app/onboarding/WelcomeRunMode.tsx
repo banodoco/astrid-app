@@ -9,7 +9,6 @@ import { LOCAL_SETUP, type WindowMode } from '@/shared/components/RuntimeConnect
 import { EditorCard } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
 import { EditorCardLayer } from '@/shared/components/RuntimeConnection/EditorCardLayer.tsx';
 import { CopyFallback, useCopyAction } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
-import { RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { readWelcomePhase, writeWelcomePhase } from './welcomeProgress.ts';
 import { RunModeMink } from './RunModeMink/RunModeMink.tsx';
 
@@ -17,7 +16,7 @@ export type { WindowMode };
 export type RunMode = 'hosted' | 'local';
 
 interface Props {
-  readonly onContinue: (phase: 'connection' | 'local') => void;
+  readonly onContinue: (phase: 'setup') => void;
   readonly windowMode: WindowMode;
   readonly setWindowMode: (mode: WindowMode) => void;
   readonly runMode: RunMode;
@@ -44,13 +43,11 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
   const [opened, setOpened] = useState(false);
   const linkCopy = useCopyAction(window.location.href);
 
-  const continueHere = () => {
-    onContinue('connection');
-  };
+  const continueHere = () => onContinue('setup');
   const installApp = async () => {
     if (!deferredPrompt) return continueHere();
     const previousPhase = readWelcomePhase();
-    writeWelcomePhase('connection');
+    writeWelcomePhase('setup');
     try {
       const { outcome } = await runInstallPrompt(deferredPrompt);
       consumeDeferredPrompt(deferredPrompt);
@@ -67,7 +64,7 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
   };
 
   useEffect(() => {
-    if (opened && standalone) onContinue('connection');
+    if (opened && standalone) onContinue('setup');
   }, [opened, standalone, onContinue]);
 
   if (opened && !standalone) return <main aria-label="Astrid opened in its own window">
@@ -121,8 +118,7 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
             </div>
           </RadioGroup>
           <Button type="button" className="h-11 w-full rounded-xl" onClick={() => {
-            if (runMode === 'local') onContinue('local');
-            else if (scenario === 'unsupported') void linkCopy.copy();
+            if (scenario === 'unsupported' && runMode === 'hosted') void linkCopy.copy();
             else if (canInstall && windowMode === 'app-window') void installApp();
             else continueHere();
           }}>{runMode === 'hosted' && scenario === 'unsupported' ? linkCopy.status === 'copied' ? 'Copied. Open it in Chrome or Edge.' : 'Copy link for Chrome or Edge' : buttonLabel}</Button>

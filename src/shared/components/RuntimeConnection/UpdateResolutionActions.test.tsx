@@ -28,6 +28,15 @@ function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>) {
 }
 
 describe('update resolution Settings actions', () => {
+  it('shows a runnable setup command with Customize when Update Now is refused for autostart off', () => {
+    const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
+    render(<UpdateResolutionActions resolution={resolution} />);
+    expect(screen.getByText('Run this command to start Astrid and apply the update:')).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+  });
+
   it('routes a soft update nudge to the expanded Updates destination and preserves the URL hash', () => {
     window.history.replaceState({}, '', '/tools/video-editor?project=film#edit');
     const onOpen = mountWithEventCapture(resolveUpdate({ installedRelease: 1, servedRelease: 2, releaseBehind: true }));

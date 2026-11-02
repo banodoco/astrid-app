@@ -1,7 +1,8 @@
 import { APP_ENTRY_PATH } from '@/app/entryClassification.ts';
 
 export const WELCOME_PROGRESS_KEY = 'astrid:welcome-v1';
-export type WelcomePhase = 'tour' | 'choose' | 'connection' | 'local' | 'complete';
+const SETUP_DESTINATION_KEY = 'astrid:welcome-setup-destination';
+export type WelcomePhase = 'tour' | 'choose' | 'setup' | 'connection' | 'local' | 'complete';
 export type WelcomeEntry = WelcomePhase | 'editor';
 const LEGACY_KEYS = [
   'astrid.runtime.connectedBefore',
@@ -15,7 +16,7 @@ let memoryPhase: WelcomePhase | null = null;
 export function readWelcomePhase(): WelcomePhase | null {
   try {
     const value = localStorage.getItem(WELCOME_PROGRESS_KEY);
-    if (value === 'tour' || value === 'choose' || value === 'connection' || value === 'local' || value === 'complete') return value;
+    if (value === 'tour' || value === 'choose' || value === 'setup' || value === 'connection' || value === 'local' || value === 'complete') return value;
     if (value !== null) return null;
     const returning = LEGACY_KEYS.some(key => localStorage.getItem(key) !== null);
     if (returning) {
@@ -35,16 +36,39 @@ export function writeWelcomePhase(phase: WelcomePhase | null): void {
   } catch { /* This visit still progresses. */ }
 }
 
+export function hasRememberedConnection(): boolean {
+  try { return localStorage.getItem('astrid.runtime.connectedBefore') !== null; }
+  catch { return false; }
+}
+
+/** Preserve the one-time setup completion across the destination reload when localStorage is unavailable. */
+export function rememberSetupDestination(url: URL): void {
+  try {
+    const current = window.history.state;
+    const state = current && typeof current === 'object' ? current as Record<string, unknown> : {};
+    window.history.replaceState({ ...state, [SETUP_DESTINATION_KEY]: `${url.pathname}${url.search}${url.hash}` }, '');
+  } catch { /* Session progress remains the fallback. */ }
+}
+
 /** Pick the only owner for this URL and phase. Work links take precedence over onboarding. */
 export function entryFor(url: URL, phase: WelcomePhase | null, localBuild = false): WelcomeEntry {
   if (url.pathname !== APP_ENTRY_PATH) return 'editor';
-  if (['project', 'timeline', 'localProject', 'localTimeline'].some(key => url.searchParams.has(key))) return 'editor';
+  try {
+    const current = window.history.state;
+    if (current && typeof current === 'object' && (current as Record<string, unknown>)[SETUP_DESTINATION_KEY] === `${url.pathname}${url.search}${url.hash}`) {
+      const state = { ...(current as Record<string, unknown>) };
+      delete state[SETUP_DESTINATION_KEY];
+      window.history.replaceState(state, '');
+      return url.searchParams.get('connect') === '1' ? 'connection' : 'editor';
+    }
+  } catch { /* Storage may be blocked. */ }
+  if (['project', 'timeline', 'localProject', 'localTimeline'].some(key => url.searchParams.has(key))) return phase === 'complete' ? 'editor' : 'setup';
   // The tour's explicit Open editor link can still work when browser storage is blocked.
   // The editor's normal Runtime gate remains responsible for connecting before workspace data loads.
-  if (url.searchParams.get('entry') === 'editor') return 'editor';
+  if (url.searchParams.get('entry') === 'editor') return phase === 'complete' ? 'editor' : 'setup';
   if (phase === 'local') return 'local';
-  if (url.searchParams.get('connect') === '1') return 'connection';
-  if (localBuild && phase === 'choose') return 'connection';
+  if (url.searchParams.get('connect') === '1') return phase === 'complete' || phase === 'connection' ? 'connection' : 'setup';
+  if (localBuild && phase === 'choose') return 'setup';
   return phase === 'complete' ? 'editor' : phase ?? 'tour';
 }
 
@@ -55,5 +79,7 @@ export function completeWelcome(selection?: {projectId: string; timelineId: stri
     params.set('project', selection.projectId);
     if (selection.timelineId) params.set('timeline', selection.timelineId);
   } else params.set('entry', 'editor');
-  return `${APP_ENTRY_PATH}${params.size ? `?${params}` : ''}`;
+  const target = `${APP_ENTRY_PATH}${params.size ? `?${params}` : ''}`;
+  rememberSetupDestination(new URL(target, window.location.origin));
+  return target;
 }

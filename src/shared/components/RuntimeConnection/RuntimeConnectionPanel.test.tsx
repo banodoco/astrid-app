@@ -56,7 +56,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     fireEvent.click(installDisclosure);
     expect(installDisclosure).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     expect(connect).toHaveBeenCalledOnce();
@@ -76,7 +76,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(pinokioLink).toHaveAttribute('href', PINOKIO_INSTALL_COPY.installUrl);
     expect(pinokioLink).toHaveClass('underline', 'underline-offset-4', 'hover:text-foreground');
     expect(pinokioLink.parentElement).toHaveClass('text-sm', 'text-muted-foreground');
-    expect(pinokioLink.compareDocumentPosition(screen.getByRole('code')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(pinokioLink.compareDocumentPosition(screen.getByText(installCommand('install'), { exact: true })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Get Pinokio' })).not.toBeInTheDocument();
   });
 
@@ -103,7 +103,10 @@ describe('RuntimeConnectionPanel', () => {
   it.each(ALL_SCREENS)('%s: speaks of Astrid and never names a Runtime, workspace, port or command', (_name, connection) => {
     panel(connection());
     expect(shownText()).toContain('Astrid');
-    expect(shownText()).not.toMatch(ENGINEER_WORDS);
+    if (_name === 'not running') {
+      expect(shownText()).toContain('npm run dev:local');
+      expect(shownText()).toContain(installCommand('install'));
+    } else expect(shownText()).not.toMatch(ENGINEER_WORDS);
     expect(shownText()).not.toMatch(/\bport\b|\borigin\b/i);
   });
 
@@ -137,7 +140,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(card).toHaveClass('border-border', 'bg-card', 'text-center');
     expect(card.parentElement).toHaveClass('max-w-[576px]');
     expect(screen.getByRole('heading', { level: 1 })).toHaveClass('font-theme-heading', 'text-[25px]', 'text-foreground');
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.getAllByRole('button')).toHaveLength(4);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.agent.copy })).toHaveClass('w-full');
     // The waiting line is the card's last line, not a banner above it.
@@ -293,10 +296,10 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
     const sentence = screen.getByText("Your coding agent can start it, or install it if it isn't there yet.");
     expect(sentence).toHaveClass('text-sm', 'text-muted-foreground');
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.getAllByRole('button')).toHaveLength(4);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
     expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
     // The card says what the instructions are for; no line repeats it, and none explains how to open a terminal.
     expect(shownText()).not.toContain('Paste these instructions');
@@ -316,9 +319,9 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
     expect(screen.getByText("Your coding agent can start it, or install it if it isn't there yet.")).toBeInTheDocument();
     expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.getAllByRole('button')).toHaveLength(4);
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
     expect(shownText()).not.toMatch(/reload/i);
     expect(screen.queryByText('Set up Astrid on this computer')).not.toBeInTheDocument();
   });
@@ -336,7 +339,7 @@ describe('RuntimeConnectionPanel', () => {
     const retry = screen.getByRole('button', { name: COPY.notRunning.retry });
     expect(retry).toBeInTheDocument();
     if (showsInstaller) {
-      expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+      expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
     } else {
       expect(screen.queryByRole('code')).not.toBeInTheDocument();
@@ -480,7 +483,7 @@ describe('RuntimeConnectionPanel', () => {
       stubClipboard(writeText);
       panel(connection());
       const command = mode === 'update' ? installCommand('update') : installCommand('install');
-      expect(screen.getByRole('code')).toHaveTextContent(command);
+      expect(screen.getByText(command, { exact: true })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: COPY.agent.commandCopy }));
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(command));
     });
@@ -497,8 +500,8 @@ describe('RuntimeConnectionPanel', () => {
       panel(connectionFor({ status }));
       const primary = screen.getByRole('button', { name: 'Copy for your agent' });
       const commandCopy = screen.getByRole('button', { name: 'Copy command' });
-      expect(screen.getAllByRole('button')[0]).toBe(primary);
-      expect(commandCopy.parentElement).toContainElement(screen.getByRole('code'));
+      expect(screen.getByRole('button', { name: 'Customize' }).compareDocumentPosition(primary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(commandCopy.parentElement).toContainElement(screen.getByText(installCommand('install'), { exact: true }));
       fireEvent.click(primary);
       await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
       const brief = writeText.mock.calls[0][0];

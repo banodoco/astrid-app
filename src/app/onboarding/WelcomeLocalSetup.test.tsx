@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ASTRID_COMMANDS, localSetupInstructions, localSetupSteps, LOCAL_SETUP, PINOKIO_INSTALL_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, PINOKIO_INSTALL_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { WelcomeLocalSetup } from './WelcomeLocalSetup.tsx';
 
 beforeEach(() => {
@@ -22,28 +22,27 @@ describe('local setup card', () => {
     expect(Array.from(document.querySelectorAll('pre')).some(pre => pre.textContent === localSetupInstructions())).toBe(false);
     expect(screen.queryByRole('button', { name: 'Show the instructions' })).toBeNull();
     expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
-    expect(screen.getByText('Run it yourself')).toBeInTheDocument();
+    expect(screen.getAllByText('Run it yourself')).toHaveLength(2);
   });
 
-  it('shows five ordered macOS/Linux steps using commands from the shared setup source', () => {
+  it('shows four ordered macOS/Linux local-editor steps; the installer command stays in the shared setup block', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
 
     const list = screen.getByRole('list');
     expect(list.tagName).toBe('OL');
-    expect(within(list).getAllByRole('listitem')).toHaveLength(5);
-    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Install or update Astrid: in Terminal run');
+    expect(within(list).getAllByRole('listitem')).toHaveLength(4);
+    expect(within(list).getAllByRole('listitem')[0]).toHaveTextContent('Install Git and Node.js 20');
     expect(localSetupSteps().map(step => step.command).filter(Boolean)).toEqual([
-      ASTRID_COMMANDS.macLinux,
       [LOCAL_SETUP.cloneCommand, LOCAL_SETUP.changeDirectoryCommand, LOCAL_SETUP.installDependenciesCommand].join('\n'),
       LOCAL_SETUP.startCommand,
       LOCAL_SETUP.openUrl,
     ]);
-    expect(list.querySelectorAll('pre code')).toHaveLength(4);
-    expect(within(list).getAllByRole('listitem')[4]).toHaveTextContent('Open this address in your browser. The editor opens with your project.');
-    expect(within(list).getAllByRole('listitem')[4].querySelectorAll('pre code')).toHaveLength(1);
-    expect(within(list).getAllByRole('listitem')[4].querySelector('pre code')?.textContent).toBe(LOCAL_SETUP.openUrl);
+    expect(list.querySelectorAll('pre code')).toHaveLength(3);
+    expect(within(list).getAllByRole('listitem')[3]).toHaveTextContent('Open this address in your browser. The editor opens with your project.');
+    expect(within(list).getAllByRole('listitem')[3].querySelectorAll('pre code')).toHaveLength(1);
+    expect(within(list).getAllByRole('listitem')[3].querySelector('pre code')?.textContent).toBe(LOCAL_SETUP.openUrl);
     expect(screen.queryByRole('link', { name: LOCAL_SETUP.openUrl })).not.toBeInTheDocument();
     expect(screen.queryByText(/step 4 command/i)).not.toBeInTheDocument();
     expect(localSetupInstructions()).not.toMatch(/confirm it shows Connected|says Connected/i);
@@ -82,13 +81,13 @@ describe('local setup card', () => {
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
 
     const labels = [
-      'Copy the install command',
+      'Copy command',
       'Copy the editor setup commands',
       'Copy the start command',
       'Copy the address',
     ];
     const commands = [
-      ASTRID_COMMANDS.macLinux,
+      installCommand('install'),
       [LOCAL_SETUP.cloneCommand, LOCAL_SETUP.changeDirectoryCommand, LOCAL_SETUP.installDependenciesCommand].join('\n'),
       LOCAL_SETUP.startCommand,
       LOCAL_SETUP.openUrl,
@@ -108,10 +107,9 @@ describe('local setup card', () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
 
-    const firstStep = within(screen.getByRole('list')).getAllByRole('listitem')[0];
-    expect(firstStep).toHaveTextContent('Install or update Astrid: in PowerShell run');
-    expect(firstStep.querySelector('pre code')?.textContent).toBe(ASTRID_COMMANDS.windows);
-    expect(within(firstStep).getByText('If pasting gives nothing, select the command and press Ctrl+C.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('install'))).toBeInTheDocument();
+    expect(screen.getByText('If pasting gives nothing, select the command and press Ctrl+C.')).toBeInTheDocument();
   });
 
   it('calls onBack', () => {

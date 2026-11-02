@@ -17,8 +17,8 @@ vi.mock('./BrowserTourEditor', () => ({ BrowserTourEditor: ({onFinish, atEnd = f
   return <><h1>{atEnd ? 'Last card' : 'Welcome to Astrid'}</h1><button onClick={finishEditorTour}>Skip</button><button onClick={() => { setEditorTourBeat(3, 'feedback'); finishEditorTour(); }}>Done</button></>;
 } }));
 vi.mock('./WelcomeConnection', () => ({ default: ({ onBack }: { onBack: () => void }) => { spies.connected(); return <><h1>Connect your machine</h1><button onClick={onBack}>Back</button></>; } }));
-vi.mock('./WelcomeRunMode', () => ({ WelcomeRunMode: ({ onContinue, runMode, setRunMode }: { onContinue: (phase: 'local' | 'connection') => void; runMode: 'hosted' | 'local'; setRunMode: (mode: 'hosted' | 'local') => void }) => <><h1>How do you want to run the app?</h1><button onClick={() => onContinue('connection')}>Connect</button><button onClick={() => { setRunMode('local'); onContinue('local'); }}>Local</button><span>{runMode}</span></> }));
-vi.mock('./WelcomeLocalSetup', () => ({ WelcomeLocalSetup: ({ onBack }: { onBack: () => void }) => <><h1>Have your agent set it up</h1><button onClick={onBack}>Back</button></> }));
+vi.mock('./WelcomeRunMode', () => ({ WelcomeRunMode: ({ onContinue, runMode, setRunMode }: { onContinue: (phase: 'setup') => void; runMode: 'hosted' | 'local'; setRunMode: (mode: 'hosted' | 'local') => void }) => <><h1>How do you want to run the app?</h1><button onClick={() => { setRunMode('hosted'); onContinue('setup'); }}>Connect</button><button onClick={() => { setRunMode('local'); onContinue('setup'); }}>Local</button><span>{runMode}</span></> }));
+vi.mock('./WelcomeLocalSetup', () => ({ WelcomeLocalSetup: ({ onBack, onContinue }: { onBack: () => void; onContinue?: () => void }) => <><h1>Have your agent set it up</h1><span>npm run dev:local</span><button onClick={onContinue}>Continue to Astrid</button><button onClick={onBack}>Back</button></> }));
 import { WelcomeFlow } from './WelcomeFlow';
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); spies.record.mockClear(); spies.connected.mockClear();
@@ -49,11 +49,13 @@ it('moves from the choice to local setup or connection and back', async () => {
   render(<WelcomeFlow entry="choose" />);
   fireEvent.click(screen.getByText('Local'));
   expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
-  expect(localStorage.getItem('astrid:welcome-v1')).toBe('local');
+  expect(localStorage.getItem('astrid:welcome-v1')).toBe('setup');
   fireEvent.click(screen.getByText('Back'));
   expect(await screen.findByText('How do you want to run the app?')).toBeInTheDocument();
   expect(screen.getByText('local')).toBeInTheDocument();
   fireEvent.click(screen.getByText('Connect'));
+  expect(await screen.findByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
   expect(await screen.findByText('Connect your machine')).toBeInTheDocument();
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('connection');
 });
@@ -61,6 +63,8 @@ it('moves from the choice to local setup or connection and back', async () => {
 it('returns from connection to the saved hosting choice', async () => {
   render(<WelcomeFlow entry="choose" />);
   fireEvent.click(screen.getByText('Connect'));
+  expect(await screen.findByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
   expect(await screen.findByText('Connect your machine')).toBeInTheDocument();
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('connection');
 
@@ -92,13 +96,20 @@ it('does not let a stale onboarding tab overwrite completed setup', () => {
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('complete');
 });
 
-it.each([['local editor', { localBuild: true }], ['phone', { localBuild: false }]])('%s goes from the tour straight to connection', async (_name, props) => {
+it.each([['local editor', { localBuild: true }], ['phone', { localBuild: false }]])('%s goes from the tour to setup before connection', async (_name, props) => {
   if (_name === 'phone') {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('iPhone');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)');
   }
   render(<WelcomeFlow entry="tour" {...props} />);
   fireEvent.click(screen.getByText('Done'));
+  if (_name === 'local editor') {
+    expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
+    expect(screen.getByText('npm run dev:local')).toBeInTheDocument();
+  } else {
+    expect(await screen.findByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
+  }
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
   expect(await screen.findByText('Connect your machine')).toBeInTheDocument();
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('connection');
   expect(screen.queryByText('How do you want to run the app?')).not.toBeInTheDocument();

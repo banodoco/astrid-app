@@ -8,17 +8,21 @@ Use this route to change the editor itself. The editor runs from source, with li
 
 First install or repair Astrid with the official installer. Read the script before running it. It keeps existing projects, media, credentials and agent instructions.
 
+Recommended setup starts Astrid at sign-in, adds the `astrid` terminal command and installs skills for coding agents. Skill copies are off. In the App's setup block, use Customize to change these choices. When sharing setup with an agent, ask once, “May I install Astrid with these setup choices?” and wait for consent. If Astrid is already set up, say “restart Astrid” and do not ask that question again.
+
 macOS or Linux, in Terminal:
 
 ```sh
-curl -fsSL https://astrid.haus/install | sh
+curl -fsSL https://astrid.haus/install | sh -s -- --yes
 ```
 
 Windows (beta), in PowerShell:
 
 ```powershell
-irm https://astrid.haus/install.ps1 | iex
+& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --yes
 ```
+
+Append changed choices after `--yes`, for example `--autostart off --skills off`. Supported choices are `--autostart on|off`, `--command on|off`, `--skills on|off`, and `--skill-copies on|off`.
 
 Pin `public/install-manifest.json` with `node scripts/installer/pin.mjs <agent-sha>`; CI checks the agent Runtime and schema digest.
 

@@ -79,8 +79,9 @@ it('renders a real M1-installed effect in the open editor and retains the workin
     await writeFile(buildScript, `
       import {build} from ${JSON.stringify(path.join(app, 'node_modules/vite/dist/node/index.js'))};
       import {createExtensionImportMapPlugin} from ${JSON.stringify(path.join(app, 'config/vite/extensionImportMap.ts'))};
+      import {createElementAdmissionsPlugin} from ${JSON.stringify(path.join(app, 'config/vite/astridElementAdmissions.ts'))};
       await build({configFile:false,root:${JSON.stringify(root)},publicDir:false,logLevel:'error',
-        plugins:[createExtensionImportMapPlugin()],resolve:{alias:${JSON.stringify({
+        plugins:[createElementAdmissionsPlugin(),createExtensionImportMapPlugin()],esbuild:{jsx:'automatic'},resolve:{alias:${JSON.stringify({
           '@': path.join(app, 'src'), '@astrid/editor-sdk': path.join(app, 'src/sdk/index.ts'),
           '@astrid': path.join(process.env.M4_TEST_AGENT_ROOT!, 'astrid'),
           react: path.join(app, 'node_modules/react'), 'react-dom': path.join(app, 'node_modules/react-dom'),
@@ -99,7 +100,7 @@ it('renders a real M1-installed effect in the open editor and retains the workin
       .filter(key => process.env[key] !== undefined).map(key => [key, process.env[key]!]));
     await promisify(execFile)(process.execPath, ['--import', path.join(app, 'node_modules/tsx/dist/loader.mjs'), buildScript], { env, maxBuffer: 2_000_000 });
     const required = (key: string) => { const value = process.env[key]; if (!value) throw new Error(`Set explicit ${key} for the frozen integration tuple`); return value; };
-    child = spawn(required('M4_TEST_PYTHON'), ['-S', path.join(app, 'src/tools/video-editor/runtime/fixtures/runtime_pack_journey.py'), root,
+    child = spawn(required('M4_TEST_PYTHON'), ['-B', '-S', path.join(app, 'src/tools/video-editor/runtime/fixtures/runtime_pack_journey.py'), root,
       required('M4_TEST_AGENT_ROOT'), required('M4_TEST_RUNTIME_ROOT'), required('M4_TEST_PYTHON_SITE'),
       process.execPath, required('M4_TEST_ESBUILD'), path.join(dist, 'extension-shared-modules.json')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();

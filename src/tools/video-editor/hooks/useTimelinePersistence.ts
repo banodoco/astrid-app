@@ -1501,9 +1501,7 @@ export function useTimelinePersistence({
     // This is the explicit "Use latest version" branch. The local outbox
     // stays intact for Save-as-copy (`preserveDraft`), but a person who chose
     // the remote version must not have the rejected local chain revived later.
-    const discardRejectedConflict = isConflictExhaustedRef.current && !options?.preserveDraft
-      ? localDocumentSave?.discardConflictDraft?.()
-      : undefined;
+    const discardRejectedConflict = isConflictExhaustedRef.current && !options?.preserveDraft;
 
     reloadInProgressRef.current = true;
     saveQueueGenerationRef.current += 1;
@@ -1521,7 +1519,6 @@ export function useTimelinePersistence({
 
     const reloadTask = (async () => {
       try {
-        await discardRejectedConflict;
         // Cancel not-yet-started work above, then wait for any transport that
         // already crossed the write boundary. Its acknowledgement (including
         // an ambiguous/lost-ack retry) must settle before canonical is read.
@@ -1564,6 +1561,9 @@ export function useTimelinePersistence({
         if (reloadCancelledRef.current) {
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
+
+        // Keep the rejected chain if reading or building the latest version fails.
+        if (discardRejectedConflict) await localDocumentSave?.discardConflictDraft?.();
 
         // Clear only the exact durable draft snapshot the user chose to
         // discard. IndexedDB compares and deletes in one transaction, so a

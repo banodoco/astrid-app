@@ -121,6 +121,97 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+it.each(['latest', 'keep'] as const)(
+  'retains the mounted draft on a competing commit until the person chooses %s', async choice => {
+    vi.stubGlobal('indexedDB', createFakeIndexedDB());
+    const locks = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const scope = { projectId: 'project-commit', timelineId: `timeline-conflict-${choice}`, realmId: 'realm', actorId: 'actor' };
+    const initialHead = { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'r0', headPublicationId: 'p0' };
+    const remoteHead = { ...initialHead, headRevisionId: 'r1', headPublicationId: 'p1' };
+    const config = createDefaultTimelineConfig();
+    config.tracks = [{ id: 'V1', kind: 'visual', label: 'Original' }];
+    const remoteConfig = structuredClone(config);
+    remoteConfig.tracks![0].label = 'Second writer';
+    const registry = { assets: {} };
+    const seed = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' }, scope);
+    const canonical = seed.data.canonical_document;
+    canonical.parent_revision.payload = { config, registry, clips: config.clips, occurrences: [] };
+    canonical.parent_revision.content_digest = fixtureDigest(canonical.parent_revision.payload);
+    const remoteCanonical = structuredClone(canonical);
+    remoteCanonical.parent_revision.revision_id = 'r1';
+    remoteCanonical.parent_revision.payload.config = remoteConfig;
+    remoteCanonical.parent_revision.content_digest = fixtureDigest(remoteCanonical.parent_revision.payload);
+    let remote = false;
+    const fixture = runtimeFixture();
+    const transmit = vi.fn<Transport>(async (method, path, headers, body) => {
+      if (method !== 'POST' || !path.endsWith('/commit')) return fixture.transport(method, path, headers, body);
+      return { status: 409, headers: {}, body: json({ code: 'conflict', message: 'Another writer committed', details: { status: 'conflict', reason: 'stale_head' } }) };
+    });
+    const runtime = new RuntimeDataProvider({ projectId: scope.projectId, transport: transmit });
+    const provider: DataProvider = {
+      persistenceEnabled: true,
+      loadTimeline: async () => ({ config: remote ? remoteConfig : config, configVersion: remote ? 2 : 1, head: remote ? remoteHead : initialHead }),
+      loadAssetRegistry: async () => registry, resolveAssetUrl: async file => file,
+      saveTimeline: vi.fn(async () => { throw new Error('Legacy save route used'); }),
+      loadTimelineCommandBasis: async () => remote
+        ? { head: { revisionId: 'r1', publicationId: 'p1' }, canonicalDocument: remoteCanonical }
+        : { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: canonical },
+      getRecoverableIdentity: async () => ({ realmId: scope.realmId, actorId: scope.actorId }),
+      commitTimeline: (request, key) => runtime.commitTimeline(request, key),
+    };
+    const data = await buildTimelineData(config, registry, undefined, 1, undefined, initialHead);
+    const store = createTimelineStore();
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const context = { provider, timelineId: scope.timelineId, project: { projectId: scope.projectId },
+      shots: {}, toast: { error: vi.fn() } } as unknown as VideoEditorRuntimeContextValue;
+    const wrapper = ({ children }: { children: React.ReactNode }) => (
+      <QueryClientProvider client={queryClient}><VideoEditorRuntimeProvider value={context}>
+        <TimelineStoreProvider store={store}>{children}</TimelineStoreProvider>
+      </VideoEditorRuntimeProvider></QueryClientProvider>
+    );
+    const interaction = { current: createInteractionState() };
+    const save = renderHook(() => useTimelineSave({ timelineQuery: { data: undefined, isLoading: false },
+      assetRegistryQuery: { data: undefined } }, provider, interaction, store, data), { wrapper });
+    try {
+      await vi.waitFor(() => expect(save.result.current.localSaveState?.ownerId).toBeTruthy());
+      await act(async () => {
+        const current = save.result.current.dataRef.current!;
+        save.result.current.applyEdit({ type: 'config', resolvedConfig: { ...current.resolvedConfig,
+          tracks: current.resolvedConfig.tracks.map(track => ({ ...track, label: 'Draft from the first writer' })) } });
+      });
+      remote = true;
+      await act(async () => { await expect(save.result.current.flushPendingSave()).rejects.toThrow(); });
+      expect(save.result.current.isConflictExhausted).toBe(true);
+      expect(save.result.current.dataRef.current?.config.tracks?.[0].label).toBe('Draft from the first writer');
+      const [outbox] = await createCommitOutbox().list(scope);
+      expect(JSON.stringify(outbox.intents)).toContain('Draft from the first writer');
+      expect(remoteConfig.tracks?.[0].label).toBe('Second writer');
+      const posts = () => transmit.mock.calls.filter(([method, path]) => method === 'POST' && path.endsWith('/commit'));
+      expect(posts()).toHaveLength(1);
+      if (choice === 'latest') {
+        await act(async () => { await save.result.current.reloadFromServer(); });
+        expect(save.result.current.dataRef.current?.config.tracks?.[0].label).toBe('Second writer');
+        expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(0);
+      } else {
+        await act(async () => { await save.result.current.retrySaveAfterConflict(); });
+        expect(JSON.stringify(await loadTimelineDraft(scope.timelineId))).toContain('Draft from the first writer');
+        expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(1);
+      }
+      expect(posts()).toHaveLength(1);
+      expect(remoteConfig.tracks?.[0].label).toBe('Second writer');
+    } finally {
+      save.unmount();
+      queryClient.clear();
+      if (locks) Object.defineProperty(navigator, 'locks', locks);
+      else Reflect.deleteProperty(navigator, 'locks');
+      vi.unstubAllGlobals();
+    }
+  },
+);
+
 it.each(['late acceptance', 'exact replay'] as const)(
   'keeps an element pending until durable Runtime acceptance: %s', async outcome => {
     vi.stubGlobal('indexedDB', createFakeIndexedDB());

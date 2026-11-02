@@ -2238,6 +2238,32 @@ describe('useTimelinePersistence — interaction gating', () => {
     latestHarness.unmount();
   });
 
+  it('retains the rejected chain if Use latest cannot load the canonical timeline', async () => {
+    const localData = makeTimelineData('mounted-local-draft');
+    const handoff = {
+      capture: vi.fn(async () => {}),
+      flush: vi.fn(async () => { throw new TimelineVersionConflictError('remote writer committed first'); }),
+      discardConflictDraft: vi.fn(async () => {}),
+    };
+    const harness = setup({
+      initialData: localData,
+      persistenceEnabled: true,
+      localDocumentSave: handoff,
+      loadTimelineImpl: async () => { throw new Error('offline'); },
+    });
+    harness.scheduleSave(localData);
+    await act(async () => {
+      vi.advanceTimersByTime(600);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(harness.result.current.isConflictExhausted).toBe(true);
+    await act(async () => { await expect(harness.reloadFromServer()).rejects.toThrow('offline'); });
+    expect(handoff.discardConflictDraft).not.toHaveBeenCalled();
+    expect(harness.result.current.isConflictExhausted).toBe(true);
+    harness.unmount();
+  });
+
   it('direct reload adopts server state and clears a diverged recovery draft', async () => {
     const harness = setup({ persistenceEnabled: true });
     harness.scheduleSave(makeTimelineData('local-before-reload'));

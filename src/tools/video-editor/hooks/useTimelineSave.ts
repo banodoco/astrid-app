@@ -168,6 +168,12 @@ export function useTimelineSave(
       try { return await handoff.flush(); }
       catch (error) { recordDraftReloadFailure(); throw error; }
     },
+    async discardConflictDraft() {
+      if (localOwner.closed || !localOwner.ready) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
+      const handoff = await localOwner.ready;
+      if (localOwner.closed || !handoff.discardConflictDraft) throw new TimelineSaveError('Local save session was replaced; draft retained');
+      await handoff.discardConflictDraft();
+    },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
     canUndo: () => localOwner.handoff?.canUndo() ?? false,
     canRedo: () => localOwner.handoff?.canRedo() ?? false,

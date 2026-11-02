@@ -230,6 +230,8 @@ function contributionsFromInput(input: ExtensionLoaderInput): readonly Extension
  */
 export interface BundleContentStore {
   getBundleContent(ref: string): Promise<string | null>;
+  /** Optional untrusted builder manifest carrier, bound to Runtime M at load. */
+  getArtifactManifest?(ref: string): Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +258,11 @@ export interface UseExtensionLoaderWiringOptions {
 
   /**
    * Store for retrieving installed bundle content bytes.
+   *
+   * Runtime pack inputs can carry the builder artifact manifest JSON in the existing
+   * content slot, with the record's integrity hash covering that carrier. The
+   * loader binds it to live Runtime M before importing. Existing byte stores
+   * can instead provide getArtifactManifest; JS text alone grants no admission.
    *
    * Required when `repository` is provided AND installed packs exist.
    * This is typically the IndexedDB-backed repository.
@@ -528,6 +535,7 @@ export function useExtensionLoaderWiring(
             kind: 'installed',
             packRecord: record,
             bundleContent: content,
+            artifactManifest: await bundleStore.getArtifactManifest?.(record.bundleContentRef),
           });
         }
 

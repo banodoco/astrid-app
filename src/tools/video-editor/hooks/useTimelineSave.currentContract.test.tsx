@@ -121,7 +121,7 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
-it.each(['latest', 'keep', 'mixed', 'fresh-fail'] as const)(
+it.each(['latest', 'keep', 'mixed', 'fresh-fail', 'draft-first'] as const)(
   'retains the mounted draft on a competing commit until the person chooses %s', async choice => {
     vi.stubGlobal('indexedDB', createFakeIndexedDB());
     const locks = Object.getOwnPropertyDescriptor(navigator, 'locks');
@@ -202,6 +202,11 @@ it.each(['latest', 'keep', 'mixed', 'fresh-fail'] as const)(
           tracks: current.resolvedConfig.tracks.map(track => ({ ...track, label: 'Draft from the first writer' })),
           ...(choice === 'mixed' ? { fps: 25 } : {}) } });
       });
+      if (choice === 'draft-first') {
+        await vi.waitFor(async () => expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(1));
+        expect(transmit.mock.calls.filter(([method, path]) => method === 'POST' && path.endsWith('/commit'))).toHaveLength(0);
+      }
+      // The competing writer lands only after the durable capture in draft-first.
       remote = true;
       await act(async () => { await expect(save.result.current.flushPendingSave()).rejects.toThrow(); });
       expect(save.result.current.isConflictExhausted).toBe(true);
@@ -231,8 +236,8 @@ it.each(['latest', 'keep', 'mixed', 'fresh-fail'] as const)(
         expect((await createCommitOutbox().list(scope))[0].ownerId).toBe(outbox.ownerId);
         expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(0);
       }
-      expect(posts()).toHaveLength(choice === 'keep' ? 2 : 1);
-      expect(remoteConfig.tracks?.[0].label).toBe(choice === 'keep' ? 'Draft from the first writer' : 'Second writer');
+      expect(posts()).toHaveLength(choice === 'keep' || choice === 'draft-first' ? 2 : 1);
+      expect(remoteConfig.tracks?.[0].label).toBe(choice === 'keep' || choice === 'draft-first' ? 'Draft from the first writer' : 'Second writer');
     } finally {
       save.unmount();
       queryClient.clear();

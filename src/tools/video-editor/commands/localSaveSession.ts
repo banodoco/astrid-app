@@ -88,6 +88,7 @@ export async function createLocalSaveSession(options: Options) {
   let generation = 0;
   let adoptedAcceptance: string | undefined;
   let replaying = false;
+  let recovering = false;
   let recoveryError: unknown;
   let writeError: unknown;
   let state: LocalSaveState = { status: 'saved', recoverableOwners: [] };
@@ -131,7 +132,7 @@ export async function createLocalSaveSession(options: Options) {
       const latest = await options.loadLatest();
       checkBasis(latest);
       if (closed || at !== generation) return true;
-      const retained = conflict && replaying && record?.intents.length
+      const retained = conflict && recovering && replaying && record?.intents.length
         ? { basis: clone(saveOf(record.intents[0].payload).displayBasis),
           document: clone(saveOf(record.intents[record.intents.length - 1].payload).after) } : undefined;
       const prepared = await options.prepareDisplay(clone(latest), undefined,
@@ -172,6 +173,7 @@ export async function createLocalSaveSession(options: Options) {
         if (closed || writeError || at !== generation) return;
         if (!record.intents.length) {
           replaying = false;
+          recovering = false;
           publish('saved');
           return;
         }
@@ -182,6 +184,7 @@ export async function createLocalSaveSession(options: Options) {
           || (!fullV2 && save.commands?.some((command) => command.op === 'doc.patch'))) { publish('blocked', dtoGap); return; }
         publish('saving');
         const acceptedId = record.accepted?.intentId;
+        if (record.pending?.outcome?.kind === 'retry') recovering = true;
         record = await box.dispatch((intent, head) => {
           const original = saveOf(intent.payload);
           const patch = original.documentIntent as Record<string, OutboxJson> | undefined;
@@ -236,6 +239,7 @@ export async function createLocalSaveSession(options: Options) {
 
   async function claim(ownerId?: string) {
     if (closed || lifetime) throw new Error('Local save owner is closed or already claimed');
+    recovering = ownerId !== undefined;
     let ready!: () => void;
     let fail!: (error: unknown) => void;
     const mounted = new Promise<void>((resolve, reject) => { ready = resolve; fail = reject; });

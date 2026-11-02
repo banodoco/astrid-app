@@ -192,7 +192,8 @@ function cloneAttemptValue<T>(value: T): T {
 function sameHead(a: TimelineHeadRevision | undefined, b: TimelineHeadRevision | undefined): boolean {
   return a?.projectId === b?.projectId
     && a?.timelineId === b?.timelineId
-    && a?.headRevisionId === b?.headRevisionId;
+    && a?.headRevisionId === b?.headRevisionId
+    && a?.headPublicationId === b?.headPublicationId;
 }
 
 export interface UseTimelinePersistenceResult {
@@ -1050,6 +1051,7 @@ export function useTimelinePersistence({
             ...recoveryMetadata,
             ...(provider.saveTimelineAtHead ? {
               baseHeadRevisionId: head?.headRevisionId,
+              baseHeadPublicationId: head?.headPublicationId,
               baseHeadProjectId: head?.projectId,
               baseHeadTimelineId: head?.timelineId,
             } : {}),

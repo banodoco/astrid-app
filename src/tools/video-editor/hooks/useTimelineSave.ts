@@ -581,7 +581,8 @@ export function useTimelineSave(
       || record.baseHeadProjectId !== scope.projectId
       || record.baseHeadTimelineId !== scope.timelineId
       || !(record.baseHeadRevisionId === null || (typeof record.baseHeadRevisionId === 'string' && record.baseHeadRevisionId.length > 0))) return undefined;
-    return { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: record.baseHeadRevisionId };
+    return { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: record.baseHeadRevisionId,
+      ...(record.baseHeadPublicationId === undefined ? {} : { headPublicationId: record.baseHeadPublicationId }) };
   }, [commit.dataRef, timelineId]);
   const offerRecovery = useCallback((record: TimelineDraftRecord) => {
     recoveryPendingRef.current = true;

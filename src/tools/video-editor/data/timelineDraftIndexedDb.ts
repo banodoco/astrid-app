@@ -28,6 +28,7 @@ export interface TimelineDraftRecord {
   ownerId?: string;
   updatedAt: string;
   baseHeadRevisionId?: string | null;
+  baseHeadPublicationId?: string | null;
   /** Scope evidence for immutable-head recovery; legacy unscoped heads are untrusted. */
   baseHeadProjectId?: string;
   baseHeadTimelineId?: string;
@@ -41,6 +42,7 @@ export interface TimelineDraftRecoveryMetadata {
   /** Compare-and-delete owner for editor save acknowledgements. */
   ownerId?: string;
   baseHeadRevisionId?: string | null;
+  baseHeadPublicationId?: string | null;
   baseHeadProjectId?: string;
   baseHeadTimelineId?: string;
   baseCanonicalGraph?: Record<string, unknown>;
@@ -73,13 +75,15 @@ export async function advanceTimelineDraftBaseAfterHeadAcknowledgement(
         || current.ownerId !== ownerId
         || current.baseHeadProjectId !== expectedHead.projectId
         || current.baseHeadTimelineId !== expectedHead.timelineId
-        || current.baseHeadRevisionId !== expectedHead.headRevisionId) return;
+        || current.baseHeadRevisionId !== expectedHead.headRevisionId
+        || current.baseHeadPublicationId !== expectedHead.headPublicationId) return;
 
       store.put({
         ...current,
         baseHeadProjectId: acknowledgedHead.projectId,
         baseHeadTimelineId: acknowledgedHead.timelineId,
         baseHeadRevisionId: acknowledgedHead.headRevisionId,
+        ...(acknowledgedHead.headPublicationId === undefined ? {} : { baseHeadPublicationId: acknowledgedHead.headPublicationId }),
       });
       updated = true;
     });
@@ -134,6 +138,9 @@ function createDraftRecord(
     ...(recoveryMetadata.ownerId === undefined ? {} : { ownerId: recoveryMetadata.ownerId }),
     ...(recoveryMetadata.baseHeadRevisionId !== undefined
       ? { baseHeadRevisionId: recoveryMetadata.baseHeadRevisionId }
+      : {}),
+    ...(recoveryMetadata.baseHeadPublicationId !== undefined
+      ? { baseHeadPublicationId: recoveryMetadata.baseHeadPublicationId }
       : {}),
     ...(recoveryMetadata.baseHeadProjectId !== undefined ? { baseHeadProjectId: recoveryMetadata.baseHeadProjectId } : {}),
     ...(recoveryMetadata.baseHeadTimelineId !== undefined ? { baseHeadTimelineId: recoveryMetadata.baseHeadTimelineId } : {}),

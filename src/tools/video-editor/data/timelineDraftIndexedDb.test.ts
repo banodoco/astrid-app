@@ -213,6 +213,20 @@ describe('timelineDraftIndexedDb — one-slot recovery draft (plan-v5 B9)', () =
     });
   });
 
+  it('retains the publication pin and advances only the exact acknowledged head pair', async () => {
+    const head = { projectId: 'project', timelineId: 'timeline', headRevisionId: 'revision', headPublicationId: 'publication-0' };
+    const next = { ...head, headRevisionId: 'revision-1', headPublicationId: 'publication-1' };
+    const draft = { config: { title: 'Unsaved user work' } };
+    await saveTimelineDraft('timeline', draft, 1, { ownerId: 'user', baseHeadProjectId: head.projectId,
+      baseHeadTimelineId: head.timelineId, baseHeadRevisionId: head.headRevisionId, baseHeadPublicationId: head.headPublicationId });
+    expect((await loadTimelineDraft('timeline'))?.baseHeadPublicationId).toBe('publication-0');
+    expect(await advanceTimelineDraftBaseAfterHeadAcknowledgement('timeline', 'user',
+      { ...head, headPublicationId: 'another-publication' }, next)).toBe(false);
+    expect(await advanceTimelineDraftBaseAfterHeadAcknowledgement('timeline', 'user', head, next)).toBe(true);
+    expect(await loadTimelineDraft('timeline')).toMatchObject({ draft, baseHeadRevisionId: next.headRevisionId,
+      baseHeadPublicationId: next.headPublicationId });
+  });
+
   it('drafts for different timelines do not collide', async () => {
     await saveTimelineDraft('tl-a', { config: { name: 'a' } }, 1);
     await saveTimelineDraft('tl-b', { config: { name: 'b' } }, 2);

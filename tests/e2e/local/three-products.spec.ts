@@ -805,6 +805,7 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   expect(kept?.baseHeadProjectId).toBe(harness.seed.projectId);
   expect(kept?.baseHeadTimelineId).toBe(seed3.timelineId);
   expect([baseHead, headA]).toContain(kept?.baseHeadRevisionId);
+  expect(kept?.baseHeadPublicationId).toEqual(expect.any(String));
   expect(await currentHead(harness)).toBe(headB);
 
   // A reload offers that same draft. Retrying its original CAS cannot erase B; Use latest resolves it explicitly.
@@ -815,6 +816,7 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   await expect(recovered).toBeVisible(CEILING);
   await expect(recovered.getByRole('button', { name: 'Save them' })).toBeEnabled();
   expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
+  expect((await timelineDraft(page, seed3.timelineId))?.baseHeadPublicationId).toBe(kept?.baseHeadPublicationId);
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText('crossfade');

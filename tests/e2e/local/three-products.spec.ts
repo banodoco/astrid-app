@@ -284,53 +284,63 @@ async function expectOpaqueDataKept(harness: DirectHarness, seed: ThreeProductsS
   return revisions.length;
 }
 
-/** The agent's verbs, as the CLI ships them. */
+/** The agent's CLI draft verbs and Runtime-backed authoring session. */
 function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' | 'projectSlug'>) {
   const common = [seed.timelineId, '--project', seed.projectSlug];
+  let edits: string[][] = [];
   return {
-    checkout: () => astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']),
-    edit: (...flags: string[]) => astrid.astrid(['timelines', 'edit', ...common, ...flags]),
+    checkout: async () => { edits = []; return astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']); },
+    edit: async (...flags: string[]) => { const result = await astrid.astrid(['timelines', 'edit', ...common, ...flags]); edits.push(flags); return result; },
     publish: async (message: string, idempotencyKey: string) => {
       const directory = mkdtempSync(path.join(tmpdir(), 'astrid-candidate-'));
-      const candidate = path.join(directory, 'candidate.json');
       try {
-        // Resolve task output bytes, then admit the exact raw object through the media CLI.
-        const prepare = [
-          'import json, subprocess, sys',
+        // Resolve the authored handles to bytes and let the Runtime-backed session admit them.
+        const program = [
+          'import hashlib, json, sys',
           'from pathlib import Path',
           'from astrid.sdk import AstridClient',
-          'from astrid.sdk.authoring_bundle import plan_authoring_media, import_authoring_media',
+          'from astrid.sdk import timeline as timeline_sdk',
           'from astrid.sdk.media_handles import resolve_media_handle',
-          'from astrid.sdk.timeline_checkout import Checkout',
-          'project, timeline, target, key = sys.argv[1:]',
-          'checkout = Checkout.draft(project, timeline)',
-          'candidate = checkout.document()',
+          'project, timeline, directory, message, key, edits_json = sys.argv[1:]',
+          'edits = json.loads(edits_json)',
           'with AstridClient.open_from_launcher(start_pack_host=False) as client:',
-          '    count = 0',
-          '    for shot in candidate.get("shots", {}).values():',
-          '        for entry in shot.get("internal_timeline", {}).get("registry", {}).get("assets", {}).values():',
-          '            source = entry.get("source", "")',
-          '            if not isinstance(source, str) or not source.startswith("task:"): continue',
-          '            descriptor, _ = resolve_media_handle(client, project, source)',
-          '            assert descriptor["digest"] == entry["media_id"], "task output differs from draft"',
-          '            local = Path(target).parent / (str(count) + "-" + Path(descriptor["filename"]).name)',
+          '    prepared = []',
+          '    for flags in edits:',
+          '        clip_id, operation = flags[1], flags[2]',
+          '        value = flags[3] if len(flags) > 3 else None',
+          '        if operation == "--swap-asset":',
+          '            alias, handle = value.split("=", 1)',
+          '            descriptor, _ = resolve_media_handle(client, project, handle)',
+          '            local = Path(directory) / (alias + Path(descriptor["filename"]).suffix)',
           '            local.write_bytes(client.media.read_bytes(descriptor["digest"]))',
-          '            result = subprocess.run([sys.executable, "-m", "astrid", "media", "import", str(local), "--project", project, "--realm", "managed_local", "--idempotency-key", f"{key}-media-{count}", "--json"], check=True, capture_output=True, text=True)',
-          '            imported = json.loads(result.stdout)',
-          '            if not imported.get("ok"): raise RuntimeError(str(imported.get("error")))',
-          '            object_id = imported["data"]["object_id"]',
-          '            assert object_id == descriptor["digest"], "import changed task output"',
-          '            entry["media_id"] = object_id',
-          '            entry["local_path"] = str(local)',
-          '            count += 1',
-          '    if count:',
-          '        plan = plan_authoring_media(candidate, base_directory=Path(target).parent)',
-          '        candidate = import_authoring_media(plan, client._remote._transport)["candidate"]',
-          'checkout.bundle = candidate',
-          'checkout.save(target, quiet=True)',
+          '            assert "sha256:" + hashlib.sha256(local.read_bytes()).hexdigest() == descriptor["digest"], "output bytes differ from descriptor"',
+          '            value = (alias, str(local))',
+          '        prepared.append((clip_id, operation, value))',
+          '    session = timeline_sdk.open(project=project, timeline=timeline, client=client)',
+          '    def apply(draft):',
+          '        for clip_id, operation, value in prepared:',
+          '            clip = draft.clip(clip_id)',
+          '            if operation == "--swap-asset":',
+          '                alias, local = value',
+          '                clip.swap_asset(local)',
+          // The CLI edit named the asset explicitly; retain that identity in the authored document.
+          '                registry = draft._registry(clip.shot_id)',
+          '                generated = clip.data["asset"]',
+          '                if alias != generated:',
+          '                    assert alias not in registry, "asset alias already exists"',
+          '                    registry[alias] = registry.pop(generated)',
+          '                    clip.data["asset"] = alias',
+          '            elif operation == "--extend": clip.extend(float(value))',
+          '            elif operation == "--clear-asset": clip.clear_asset()',
+          '            elif operation == "--set":',
+          '                name, raw = value.split("=", 1)',
+          '                clip.set(**{name: json.loads(raw)})',
+          '            else: raise ValueError(f"unsupported edit: {operation}")',
+          '    result = session.commit(apply, label=message, idempotency_key=key)',
+          '    print(json.dumps(result))',
         ].join('\n');
-        await astrid.python(['-c', prepare, seed.projectSlug, seed.timelineId, candidate, idempotencyKey]);
-        const envelope = await astrid.json<{ status: string; previous_revision_id: string; accepted_revision_id: string }>(['timelines', 'commit', ...common, '--file', candidate, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
+        const run = await astrid.python(['-c', program, seed.projectSlug, seed.timelineId, directory, message, idempotencyKey, JSON.stringify(edits)]);
+        const envelope = JSON.parse(run.stdout) as { ok: boolean; data?: { status: string; previous_revision_id: string; accepted_revision_id: string } };
         expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
         expect(envelope.data?.status, JSON.stringify(envelope)).toBe('accepted');
         return { old_head: envelope.data!.previous_revision_id, new_head: envelope.data!.accepted_revision_id };

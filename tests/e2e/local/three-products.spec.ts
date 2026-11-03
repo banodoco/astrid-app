@@ -728,13 +728,14 @@ async function runHostedLoopbackJ3(page: Page, harness: DirectHarness, astrid: A
     'V1', agentLabel, key, mode);
   expect(outcome.kind, JSON.stringify(outcome)).toBe('conflict');
   expect(outcome.recovery.status).toBe('re_derive');
-  if (mode === 'command-list') {
-    expect(outcome.recovery.summary).toContain(`The user value is '${userLabel}'`);
-    expect(outcome.recovery.summary).toMatch(/preserve it and re-derive only compatible work/i);
-  } else {
-    expect(outcome.fix).toMatch(/was not committed.*nothing is lost.*tl\.retry\(".+", your_function\)/i);
-    expect(outcome.pending.clash?.origin).toBe('function');
-  }
+  expect(outcome.presentation.fix).toContain(`user's current value for track V1.label is '${userLabel}'`);
+  expect(outcome.presentation.fix).toMatch(/preserve it\. re-derive only compatible work/i);
+  expect(outcome.recovery.summary).toContain(`user's current value for track V1.label is '${userLabel}'`);
+  expect(outcome.recovery.summary).toMatch(/preserve it\. re-derive only compatible work/i);
+  expect(outcome.recovery.data.conflicts.length).toBeGreaterThan(0);
+  expect(outcome.recovery.next).toContain('dry_run=True');
+  expect(outcome.recovery.next).toContain(`pending='${outcome.pending_id}'`);
+  if (mode === 'commit-fn') expect(outcome.pending.clash?.origin).toBe('function');
   expect(outcome.pending).toMatchObject({ state: 'pending', key,
     flight: expect.objectContaining({ key, body: expect.any(String) }) });
   const originalPosts = astrid.trackLabelPosts(key);
@@ -763,7 +764,8 @@ async function runHostedLoopbackJ3(page: Page, harness: DirectHarness, astrid: A
   expect(state.trackLabel, 'the saved user field remains canonical').toBe(userLabel);
   journey.facts = { ...journey.facts, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
     journey: `J3 ${mode}`, base, appHead, agentKey: key, agentPosts: originalPosts,
-    pending: outcome.pending, recovery: outcome.recovery, preservedUserLabel: state.trackLabel };
+    pending: outcome.pending, initialRefusal: outcome.presentation, recovery: outcome.recovery,
+    preservedUserLabel: state.trackLabel };
 }
 
 test('hosted-loopback J3 command-list: saved-user stale base preserves the field as pending with re-derive guidance',

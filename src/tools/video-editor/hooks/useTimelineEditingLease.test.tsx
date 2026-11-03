@@ -160,6 +160,43 @@ describe('useTimelineEditingLease', () => {
     root.remove();
   });
 
+  it('replays the captured full field value over a refreshed canonical value', async () => {
+    const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn((_timelineId, tab, sequence) => new Promise((resolve) => {
+      pending.set(sequence, value => resolve(value));
+    }));
+    const root = document.createElement('div');
+    const input = document.createElement('input');
+    input.value = 'User baseline';
+    input.setSelectionRange(input.value.length, input.value.length);
+    root.append(input);
+    document.body.append(root);
+    const shellRootRef = { current: root };
+    const reconcileCanonical = vi.fn(async () => {
+      input.value = 'Agent before admission';
+    });
+    const hook = renderHook(() => useTimelineEditingLease(options(provider, { reconcileCanonical, shellRootRef })));
+
+    act(() => input.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true, cancelable: true, data: '!', inputType: 'insertText',
+    })));
+    expect(input.value).toBe('User baseline');
+    const [tab, sequence] = provider.timelineEditingLease!.renew.mock.calls[0].slice(1) as [string, number];
+    await act(async () => {
+      pending.get(sequence)!(response(tab, sequence));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(reconcileCanonical).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('User baseline!');
+    expect(hook.result.current).toBe(true);
+    hook.unmount();
+    root.remove();
+  });
+
   it('replaces cumulative cancelable IME composition text while admission is pending', async () => {
     const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
     const provider = makeProvider();

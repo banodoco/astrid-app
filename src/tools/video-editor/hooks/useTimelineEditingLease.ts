@@ -339,9 +339,12 @@ export function useTimelineEditingLease({
         state.value = state.value.slice(0, from) + insert + state.value.slice(to);
         state.start = state.end = state.anchor = state.focus = from + insert.length;
         state.composition = input.inputType === 'insertCompositionText' ? { start: from, end: from + insert.length } : undefined;
+        // Preserve the literal field value the person authored while waiting.
+        // Canonical reconciliation refreshes the command basis and other fields;
+        // it must not splice this input into an intervening writer's text.
+        const intendedValue = state.value;
         void admitTimelineEdit(root, () => {
-          const current = target.value;
-          setText(target, current.slice(0, from) + insert + current.slice(to), from + insert.length);
+          setText(target, intendedValue, from + insert.length);
           pendingText.delete(target);
         }).catch(() => {});
         return;

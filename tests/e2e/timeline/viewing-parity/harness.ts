@@ -15,14 +15,14 @@ import { browserExecutableHash, playerBrowserProfile, verifyPlayerBrowser } from
 export const INSTALLED_BROWSER = '/opt/pw-browsers/chromium_headless_shell-1194/chrome-linux/headless_shell';
 export const PLAYER_BROWSER = playerBrowserProfile().executablePath;
 const EXPORT_BROWSER_HASH = '63eca986a3fe7f523d2d6e79d9f13daf4f1c73c1d9013c2c4a05b123510145b4';
-const COMPOSITION_HASH = 'sha256:9412ae25c306d5118241f4d631e8eecc6eef9b2fb5a98302d40938e9f6d54738';
-const COMPOSITION_FILE_COUNT = 77;
+const COMPOSITION_HASH = 'sha256:cdd89c78d18b4b437a03efd1fff081f1ce00ee448d644ef8360fc1937df60f0f';
+const COMPOSITION_FILE_COUNT = 80;
 const EXPECTED_PACKAGE_VERSIONS = {
   react: '18.3.1',
   'react-dom': '18.3.1',
   remotion: '4.0.509',
   '@remotion/player': '4.0.509',
-  '@banodoco/timeline-composition': '0.0.13',
+  '@banodoco/timeline-composition': '0.0.17',
 } as const;
 
 type FileManifest = Readonly<Record<string, string>>;
@@ -84,7 +84,7 @@ function archiveMembers(archive: string): string[] {
 async function compositionManifest(archive: string): Promise<FileManifest> {
   const archiveBytes = await readFile(archive);
   if (mediaHash(archiveBytes) !== COMPOSITION_HASH) {
-    throw new Error(`Composition artifact is not the approved 0.0.13 source: ${archive}`);
+    throw new Error(`Composition artifact is not the approved 0.0.17 source: ${archive}`);
   }
   const members = archiveMembers(archive);
   if (members.length !== COMPOSITION_FILE_COUNT || new Set(members).size !== members.length) {
@@ -172,10 +172,10 @@ export async function sourceVersions(profile?: unknown) {
       gitFile: gitInfo.isFile() ? mediaHash(await readFile(gitPath)) : null };
   }
   await verifyFileGraph(roots.app, tuple.client.files, 'official Runtime client');
-  const artifacts = [resolve(roots.app, 'vendor/artifacts/banodoco-timeline-composition-0.0.13.tgz'),
-    resolve(roots.agent, 'remotion/artifacts/banodoco-timeline-composition-0.0.13.tgz')];
+  const artifacts = [resolve(roots.app, 'vendor/artifacts/banodoco-timeline-composition-0.0.17.tgz'),
+    resolve(roots.agent, 'remotion/artifacts/banodoco-timeline-composition-0.0.17.tgz')];
   const hashes = await Promise.all(artifacts.map(async path => mediaHash(await readFile(path))));
-  if (hashes.some(hash => hash !== COMPOSITION_HASH)) throw new Error(`both consumers require exact public 0.0.13 artifact ${COMPOSITION_HASH}: ${hashes}`);
+  if (hashes.some(hash => hash !== COMPOSITION_HASH)) throw new Error(`both consumers require exact public 0.0.17 artifact ${COMPOSITION_HASH}: ${hashes}`);
   const remotionProject = await realpath(requiredEnv('ASTRID_REMOTION_PROJECT_DIR'));
   deepStrictEqual(remotionProject, await realpath(tuple.remotionProject), 'selected Agent Remotion project changed');
   const packages: Record<string, string> = {};

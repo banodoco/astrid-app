@@ -8,12 +8,31 @@ import json
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 if len(sys.argv) >= 2 and sys.argv[:2] == ["-m", "start"]:
     directory_name = os.environ.pop("ASTRID_T4_ACCEPTANCE_BARRIER", None)
     if directory_name:
         from runtime_protocol.timeline_commit_port import RequestCommitPort
+        from runtime_protocol.timeline_commit_execution import CommitExecutionCoordinator
+        from runtime_protocol.timeline_commit import CommitRejected
+        from runtime_protocol.errors import RuntimeErrorBase
+
+        execute = CommitExecutionCoordinator.execute
+
+        def observed_execute(coordinator, *args, **kwargs):
+            try:
+                return execute(coordinator, *args, **kwargs)
+            except (CommitRejected, RuntimeErrorBase):
+                raise
+            except Exception:
+                # Private test-process streams retain unexpected composition
+                # failures; the real exception and outcome remain unchanged.
+                traceback.print_exc()
+                raise
+
+        CommitExecutionCoordinator.execute = observed_execute
 
         directory = Path(directory_name)
         original = RequestCommitPort.accept

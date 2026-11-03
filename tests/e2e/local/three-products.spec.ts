@@ -654,9 +654,11 @@ test('hosted-loopback interleaving-1: admission racing serialized acceptance kee
       expect((await save).status()).toBe(200);
       expect((await release).status()).toBe(200);
       const retry = await astrid.retryTrackLabelPending(seed3.projectSlug, seed3.timelineId, key, refused.pending_id);
-      expect(retry.kind, JSON.stringify(retry)).toBe('accepted');
       const posts = astrid.trackLabelPosts(key);
+      journey.facts.serializedAcceptanceRace = { barrier: barrier.ready(), refused, retry, posts };
+      expect(retry.kind, JSON.stringify(retry)).toBe('accepted');
       expect(posts.every(post => post.body === posts[0].body && post.key === key)).toBe(true);
+      expect(posts.some(post => post.status === 200), 'the observed original flight actually receives an accepted response').toBe(true);
       const state = await revisionState(harness, seed3, retry.result.data.accepted_revision_id);
       expect(state.trackLabel).toBe('User draft during prepared Agent acceptance');
       expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe('Agent after serialized gate');
@@ -980,7 +982,8 @@ test('hosted-loopback J4: 15-second deadline persists the exact Agent flight, th
       keepLease = false;
       await keeper;
     }
-    expect(Date.now() - agentStarted, 'the SDK waited to its monotonic 15-second deadline').toBeGreaterThanOrEqual(14_000);
+    const waitedMs = Date.now() - agentStarted;
+    expect(waitedMs, 'the SDK waited to its monotonic 15-second deadline').toBeGreaterThanOrEqual(14_000);
     expect(agentOutcome.kind, JSON.stringify(agentOutcome)).toBe('refused');
     expect(agentOutcome.pending).toMatchObject({ state: 'pending', key,
       failure: { details: { status: 'refused', reason: 'user_editing' } },
@@ -1020,8 +1023,17 @@ test('hosted-loopback J4: 15-second deadline persists the exact Agent flight, th
       });
       expect(explicitRelease.body.data).toMatchObject({ active: false, sequence: sequence + 1 });
       const retried = await astrid.retryTrackLabelPending(seed3.projectSlug, seed3.timelineId, key, agentOutcome.pending_id);
+      const retryPosts = astrid.trackLabelPosts(key);
+      journey.facts.j4DeadlineAndRetry = { configuredTimeoutSeconds: 15, waitedMs, base, appHead, key,
+        leaseTrace, posts, retryPosts, renewals, pending: agentOutcome.pending,
+        pendingId: agentOutcome.pending_id, userLabel, retryResult: retried,
+        appRelease: appRelease.data, explicitRelease: explicitRelease.body.data };
       expect(retried.kind, JSON.stringify(retried)).toBe('accepted');
+      expect(retryPosts.length, 'the retry sent a real commit POST').toBeGreaterThan(posts.length);
+      expect(retryPosts.every(post => post.key === key && post.body === posts[0].body)).toBe(true);
+      expect(retryPosts.at(-1)).toMatchObject({ status: 200 });
       const accepted = retried.result.data.accepted_revision_id;
+      expect(retryPosts.at(-1)?.response?.data?.accepted_revision_id).toBe(accepted);
       const state = await revisionState(harness, seed3, accepted);
       expect(state.trackLabel, 'the latest user save remains intact').toBe(userLabel);
       expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe(agentLabel);

@@ -26,7 +26,7 @@
  * output) and never judged (R-10). Waits are hang ceilings, not budgets. The ordering of events is made by awaited CLI calls and
  * route holds, never by sleeping.
  */
-import { expect, type Locator, type Page, type Request, type Route } from '@playwright/test';
+import { expect, type Browser, type Locator, type Page, type Request, type Route } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
 import path from 'node:path';
@@ -49,11 +49,32 @@ const CONFLICT_TITLE = 'This timeline changed somewhere else';
 const COMMITS = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/commit$/;
 const FULL_SHA = /^[0-9a-f]{40}$/;
 
+function trackRoute(handler: (route: Route) => Promise<void>) {
+  const operations: Promise<void>[] = [];
+  return Object.assign((route: Route) => {
+    const operation = handler(route);
+    operations.push(operation);
+    // Observe immediately, while preserving the original failure for both
+    // Playwright and the explicit drain below.
+    void operation.catch(() => {});
+    return operation;
+  }, { async drain() {
+    let consumed = 0;
+    while (consumed < operations.length) {
+      const batch = operations.slice(consumed);
+      consumed = operations.length;
+      const results = await Promise.allSettled(batch);
+      for (const result of results) if (result.status === 'rejected') throw result.reason;
+    }
+  } });
+}
+
+
 const test = appTest.extend<object, { seed3: ThreeProductsSeed; astrid: AstridCli; quickAstrid: AstridCli }>({
   // P3 owns initialization of the common bootstrap's single pristine Runtime shell.
   // eslint-disable-next-line no-empty-pattern
   harness: [async ({}, use) => {
-    const harness = await startDirectHarness({ deferTimelineInitialization: true });
+    const harness = await startDirectHarness({ deferTimelineInitialization: true, timelineAcceptanceBarrier: true });
     try { await use(harness); } finally { await harness.stop(); }
   }, { scope: 'worker', timeout: process.env.ASTRID_QUICK_DESCRIPTOR ? 0 : 240_000 }],
   seed3: [async ({ harness }, use) => {
@@ -422,7 +443,7 @@ async function plantNoReloadFlag(page: Page) {
 
 async function runHostedLoopbackLeaseJourney(
   page: Page, harness: DirectHarness, astrid: AstridCli, seed3: ThreeProductsSeed,
-  scenario: { journey: 'J1' | 'J2'; appLabel: string; agentLabel: string; agentTrack: 'V1' | 'S1' },
+  scenario: { journey: 'J1' | 'J2' | 'interleaving-1'; appLabel: string; agentLabel: string; agentTrack: 'V1' | 'S1' },
 ) {
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const trace: Array<{ kind: string; method?: string; path?: string; status?: number; body?: any }> = [];
@@ -490,6 +511,8 @@ async function runHostedLoopbackLeaseJourney(
     const saveAck = await saveAckPromise;
     expect(saveAck.status(), 'the actual App command save was acknowledged').toBe(200);
     const saved = await saveAck.json() as CommitAcceptedMutation;
+    expect(saveAck.request().headers()['x-timeline-editing-session'],
+      'the App save carries its own acknowledged lease credential').toBe(leaseReceipt.data.tab_session_id);
     expect(saved.data.status).toMatch(/^(accepted|merged|rebased)$/);
     expect(saveAck.request().postDataJSON()).toMatchObject({
       base_revision_id: base.revision_id, base_publication_id: base.publication_id,
@@ -553,8 +576,8 @@ async function runHostedLoopbackLeaseJourney(
       const state = await revisionState(harness, seed3, appHead.revision_id);
       expect(state.trackLabel).toBe(scenario.appLabel);
       journey.facts.preservedUserLabel = state.trackLabel;
-      expect(outcome.recovery.summary).toContain(`The user value is '${scenario.appLabel}'`);
-      expect(outcome.recovery.summary).toMatch(/preserve it and re-derive only compatible work/i);
+      expect(outcome.recovery.summary).toContain(`user's current value for track V1.label is '${scenario.appLabel}'`);
+      expect(outcome.recovery.summary).toMatch(/preserve it\. re-derive only compatible work/i);
     } else {
       expect(outcome.kind, JSON.stringify(outcome)).toBe('accepted');
       expect(outcome.result.data.status).toBe('merged');
@@ -581,6 +604,682 @@ test('hosted-loopback J2: acknowledged App save holds the original Agent POST; a
   await runHostedLoopbackLeaseJourney(page, harness, astrid, seed3,
     { journey: 'J2', appLabel: 'Hosted user wins J2', agentLabel: 'Agent disjoint J2', agentTrack: 'S1' });
 });
+
+test('hosted-loopback interleaving-1: admission racing serialized acceptance keeps the original flight fenced',
+  async ({ page, harness, astrid, seed3 }) => {
+    await runHostedLoopbackLeaseJourney(page, harness, astrid, seed3,
+    { journey: 'interleaving-1', appLabel: 'Hosted user wins interleaving-1',
+      agentLabel: 'Agent disjoint interleaving-1', agentTrack: 'S1' });
+    const base = (await history(harness, seed3)).head;
+    const key = `hosted-loopback-serialized-race-${seed3.timelineId}`;
+    const barrier = harness.armTimelineAcceptanceBarrier(key);
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>(resolve => { releaseSave = resolve; });
+    let saveHeld = false;
+    const holdSave = async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      saveHeld = true;
+      await saveGate;
+      await route.continue();
+    };
+    await page.route(COMMITS, holdSave);
+    const flight = astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+      'S1', 'Agent after serialized gate', key, 'command-list', 15).then(
+      value => ({ value }), error => ({ error }));
+    try {
+      await expect.poll(barrier.ready, CEILING).toMatchObject({ key,
+        base_revision_id: base.revision_id, base_publication_id: base.publication_id });
+      const field = firstTrackName(page);
+      const lease = page.waitForResponse(response => response.request().method() === 'PUT'
+        && /\/editing$/.test(new URL(response.url()).pathname), CEILING);
+      await field.fill('User draft during prepared Agent acceptance');
+      expect((await lease).status()).toBe(200);
+      await expect.poll(() => saveHeld, CEILING).toBe(true);
+      expect((await history(harness, seed3)).head).toEqual(base);
+      barrier.release();
+      const observed = await flight;
+      if ('error' in observed) throw observed.error;
+      const refused = observed.value;
+      expect(refused.kind, JSON.stringify(refused)).toBe('refused');
+      expect(refused.pending.failure.details.reason).toBe('user_editing');
+      expect((await history(harness, seed3)).head).toEqual(base);
+      await expect(field).toHaveValue('User draft during prepared Agent acceptance');
+      const save = page.waitForResponse(response => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      const release = page.waitForResponse(response => response.request().method() === 'DELETE'
+        && /\/editing$/.test(new URL(response.url()).pathname), CEILING);
+      await field.press('Enter');
+      await field.blur();
+      releaseSave();
+      expect((await save).status()).toBe(200);
+      expect((await release).status()).toBe(200);
+      const retry = await astrid.retryTrackLabelPending(seed3.projectSlug, seed3.timelineId, key, refused.pending_id);
+      const posts = astrid.trackLabelPosts(key);
+      journey.facts.serializedAcceptanceRace = { barrier: barrier.ready(), refused, retry, posts };
+      expect(retry.kind, JSON.stringify(retry)).toBe('accepted');
+      expect(posts.every(post => post.body === posts[0].body && post.key === key)).toBe(true);
+      expect(posts.some(post => post.status === 200), 'the observed original flight actually receives an accepted response').toBe(true);
+      const state = await revisionState(harness, seed3, retry.result.data.accepted_revision_id);
+      expect(state.trackLabel).toBe('User draft during prepared Agent acceptance');
+      expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe('Agent after serialized gate');
+      journey.facts.serializedAcceptanceRace = { barrier: barrier.ready(), refused, retry, posts };
+    } finally {
+      barrier.release();
+      releaseSave();
+      await flight;
+      await page.unroute(COMMITS, holdSave).catch(() => {});
+    }
+  });
+
+test('hosted-loopback interleaving-2: Agent SDK replays the exact request after the hosted response is lost',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+    const base = (await history(harness, seed3)).head;
+    const before = (await allRevisions(harness, seed3)).length;
+    const key = `hosted-loopback-interleaving-2-${seed3.timelineId}`;
+    const label = 'Agent exact replay interleaving-2';
+    const outcome = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+      'S1', label, key, 'command-list', 15, false, 'python', true);
+    expect(outcome.kind, JSON.stringify(outcome)).toBe('replayed');
+    const posts = astrid.trackLabelPosts(key);
+    expect(posts).toHaveLength(2);
+    expect(posts[0]).toMatchObject({ key, status: 200 });
+    expect(posts[1]).toMatchObject({ key, status: 200 });
+    expect(posts[1].body, 'the retry preserves the exact request bytes after a lost response').toBe(posts[0].body);
+    expect(posts[1].response?.receipt).toMatchObject({ idempotency_key: key });
+    const accepted = outcome.result.data.accepted_revision_id;
+    expect((await allRevisions(harness, seed3)).length).toBe(before + 1);
+    const state = await revisionState(harness, seed3, accepted);
+    expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe(label);
+    journey.facts = { ...journey.facts,
+      transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+      interleaving: 'Agent SDK replay after lost response', base, key, posts,
+      acceptedRevision: accepted, finalRevisionCount: (await allRevisions(harness, seed3)).length };
+  });
+
+async function runHostedLoopbackJ3(page: Page, harness: DirectHarness, astrid: AstridCli, seed3: ThreeProductsSeed,
+  mode: 'command-list' | 'commit-fn') {
+  await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+  await openApp(page, harness);
+  await expectConnected(page);
+  await openSeededTimeline(page, harness);
+  journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+  const base = (await history(harness, seed3)).head;
+  const userLabel = `Hosted user wins J3 ${mode}`;
+  const savePromise = page.waitForResponse((response) => response.request().method() === 'POST'
+    && COMMITS.test(new URL(response.url()).pathname), CEILING);
+  await editFirstTrackName(page, userLabel);
+  const save = await savePromise;
+  expect(save.status(), 'the App saves before the Agent submits its stale base').toBe(200);
+  const saved = await save.json() as CommitAcceptedMutation;
+  const savedHead = pinOf(saved);
+  expect(savedHead.revision_id).not.toBe(base.revision_id);
+  const appHead = (await history(harness, seed3)).head;
+  expect(appHead.revision_id).not.toBe(base.revision_id);
+  expect((await revisionState(harness, seed3, appHead.revision_id)).trackLabel).toBe(userLabel);
+
+  const key = `hosted-loopback-j3-${mode}-${seed3.timelineId}`;
+  const agentLabel = `Agent stale J3 ${mode}`;
+  const outcome = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+    'V1', agentLabel, key, mode);
+  expect(outcome.kind, JSON.stringify(outcome)).toBe('conflict');
+  expect(outcome.recovery.status).toBe('re_derive');
+  expect(outcome.presentation.fix).toContain(`user's current value for track V1.label is '${userLabel}'`);
+  expect(outcome.presentation.fix).toMatch(/preserve it\. re-derive only compatible work/i);
+  expect(outcome.recovery.summary).toContain(`user's current value for track V1.label is '${userLabel}'`);
+  expect(outcome.recovery.summary).toMatch(/preserve it\. re-derive only compatible work/i);
+  expect(outcome.recovery.data.conflicts.length).toBeGreaterThan(0);
+  expect(outcome.recovery.next).toContain('dry_run=True');
+  expect(outcome.recovery.next).toContain(`pending='${outcome.pending_id}'`);
+  if (mode === 'commit-fn') expect(outcome.pending.clash?.origin).toBe('function');
+  expect(outcome.pending).toMatchObject({ state: 'pending', key,
+    flight: expect.objectContaining({ key, body: expect.any(String) }) });
+  const originalPosts = astrid.trackLabelPosts(key);
+  expect(originalPosts.length).toBeGreaterThan(0);
+  expect(originalPosts[0].key).toBe(key);
+  const submittedPosts = originalPosts.filter(post => JSON.parse(post.body).dry_run !== true);
+  expect(submittedPosts.length).toBeGreaterThan(0);
+  if (mode === 'command-list') {
+    expect(outcome.pending.flight.body, 'command-list pending keeps the exact submitted flight')
+      .toBe(submittedPosts[0].body);
+  }
+  const posted = JSON.parse(originalPosts[0].body);
+  expect(posted).toMatchObject({ base_revision_id: base.revision_id,
+    base_publication_id: base.publication_id, commands: [{ op: 'track.set',
+      select: 'parent/track:V1', args: { values: { label: agentLabel } } }] });
+  if (mode === 'commit-fn') {
+    expect(originalPosts[0].status).toBe(409);
+    expect(JSON.parse(outcome.pending.flight.body)).toMatchObject({
+      base_revision_id: base.revision_id,
+      base_publication_id: base.publication_id,
+      commands: [{ expect: { 'parent/track:V1::label': { state: 'present', value: userLabel } } }],
+    });
+  }
+  expect((await history(harness, seed3)).head).toEqual(appHead);
+  const state = await revisionState(harness, seed3, appHead.revision_id);
+  expect(state.trackLabel, 'the saved user field remains canonical').toBe(userLabel);
+  journey.facts = { ...journey.facts, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+    journey: `J3 ${mode}`, base, appHead, agentKey: key, agentPosts: originalPosts,
+    pending: outcome.pending, initialRefusal: outcome.presentation, recovery: outcome.recovery,
+    preservedUserLabel: state.trackLabel };
+}
+
+test('hosted-loopback J3 command-list: saved-user stale base preserves the field as pending with re-derive guidance',
+  async ({ page, harness, astrid, seed3 }) => runHostedLoopbackJ3(page, harness, astrid, seed3, 'command-list'));
+
+test('hosted-loopback J3 commit-fn: saved-user stale base preserves the field as pending with re-derive guidance',
+  async ({ page, harness, astrid, seed3 }) => runHostedLoopbackJ3(page, harness, astrid, seed3, 'commit-fn'));
+
+test('hosted-loopback J5 interleaving-3: App/App same-field recovery keeps the second draft across independent tabs',
+  async ({ page, browser, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+    const secondContext = await browser.newContext(harness.contextOptions as Parameters<Browser['newContext']>[0]);
+    const second = await secondContext.newPage();
+    await second.addInitScript(() => {
+      const target = window as unknown as { __timelineSaveDiagnosticsEnabled: boolean; __saveEvents: unknown[] };
+      target.__timelineSaveDiagnosticsEnabled = true;
+      target.__saveEvents = [];
+      window.addEventListener('timeline:save-diagnostic', event => {
+        if (target.__saveEvents.length < 300) target.__saveEvents.push((event as CustomEvent).detail);
+      });
+    });
+    const leaseReceipts: Array<{ tab: string; active: boolean; sequence: number; tabSessionId?: string }> = [];
+    const recordLease = (tab: string) => (response: import('@playwright/test').Response) => {
+      if (response.request().method() !== 'PUT' || !/\/editing$/.test(new URL(response.url()).pathname)) return;
+      void response.json().then(body => leaseReceipts.push({ tab, active: body.data?.active,
+        sequence: body.data?.sequence, tabSessionId: body.data?.tab_session_id })).catch(() => {});
+    };
+    page.on('response', recordLease('first'));
+    second.on('response', recordLease('second'));
+    let releaseSecond!: () => void;
+    const secondGate = new Promise<void>((resolve) => { releaseSecond = resolve; });
+    let releaseFirstLease!: () => void;
+    const firstLeaseGate = new Promise<void>((resolve) => { releaseFirstLease = resolve; });
+    let firstLeaseReleaseHeld = false;
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    let heldSecond: { route: Route; body: any; key: string } | undefined;
+    const secondLabel = 'Hosted second App draft J5';
+    const firstLabel = 'Hosted first App save J5';
+    const base = (await history(harness, seed3)).head;
+    try {
+      await page.route(editingPath, async route => {
+        if (route.request().method() !== 'DELETE') return route.fallback();
+        firstLeaseReleaseHeld = true;
+        await firstLeaseGate;
+        await route.continue();
+      });
+      await openApp(second, harness);
+      await expectConnected(second);
+      await openSeededTimeline(second, harness);
+      // Field visibility precedes the verified basis/identity read and durable
+      // owner claim. Reuse the canonical mounted-bootstrap readiness boundary;
+      // an early edit is intentionally retained without authoring a POST.
+      await expect.poll(async () => (await commandOutboxes(second, seed3.timelineId)).some(owner =>
+        owner.scope.projectId === harness.seed.projectId && !owner.pending && owner.intents.length === 0),
+      { ...CEILING, message: 'the independent App owns a verified save session before editing' }).toBe(true);
+      await expect.poll(() => second.evaluate(() => (window as any).__saveEvents.some((event: any) =>
+        event.phase === 'handoff-ready' && event.current === true)),
+      { ...CEILING, message: 'the independent App completed its original save handoff' }).toBe(true);
+      await second.route(COMMITS, async (route) => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        heldSecond = { route, body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'] };
+        await secondGate;
+        await route.continue();
+      });
+      await editFirstTrackName(second, secondLabel);
+      await expect(firstTrackName(second)).toHaveValue(secondLabel);
+      await expect.poll(() => heldSecond, { timeout: 15_000 }).toBeTruthy();
+      expect(heldSecond!.body).toMatchObject({ base_revision_id: base.revision_id,
+        base_publication_id: base.publication_id, source: { via: 'app' } });
+
+      const firstSavePromise = page.waitForResponse((response) => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      await editFirstTrackName(page, firstLabel);
+      const firstSave = await firstSavePromise;
+      expect(firstSave.status(), 'the first authenticated App connector write is exempt while its lease is active').toBe(200);
+      const firstReceipt = await firstSave.json() as CommitAcceptedMutation;
+      const firstHead = pinOf(firstReceipt);
+      expect((await history(harness, seed3)).head).toEqual(firstHead);
+      await expect.poll(() => firstLeaseReleaseHeld, CEILING).toBe(true);
+      await expect.poll(() => leaseReceipts.filter(receipt => receipt.active).length, CEILING).toBeGreaterThanOrEqual(2);
+      const secondLease = leaseReceipts.find(receipt => receipt.tab === 'second' && receipt.active)!;
+
+      const agentKey = `hosted-loopback-j5-independent-tabs-${seed3.timelineId}`;
+      const stillHeld = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', 'Agent waits for second App tab', agentKey, 'command-list', 0.2);
+      expect(stillHeld.kind, JSON.stringify(stillHeld)).toBe('refused');
+      expect(stillHeld.pending.failure.details).toMatchObject({ status: 'refused', reason: 'user_editing' });
+      const editingUrl = `/v1/projects/${harness.seed.projectId}/timelines/${seed3.timelineId}/editing`;
+      const forcedRenewalSequence = secondLease.sequence + 100;
+      const renewal = await harness.runtimeJson('PUT', editingUrl, {
+        tab_session_id: secondLease.tabSessionId, sequence: forcedRenewalSequence, ttl_seconds: 10,
+      });
+      expect(renewal.status).toBe(200);
+      expect(renewal.body.data).toMatchObject({ active: true, tab_session_id: secondLease.tabSessionId,
+        sequence: forcedRenewalSequence });
+      const staleRelease = await harness.runtimeJson('DELETE', editingUrl, {
+        tab_session_id: secondLease.tabSessionId, sequence: secondLease.sequence + 1,
+      });
+      expect(staleRelease.status).toBe(200);
+      expect(staleRelease.body.data).toMatchObject({ active: true, sequence: forcedRenewalSequence });
+      const currentRelease = await harness.runtimeJson('DELETE', editingUrl, {
+        tab_session_id: secondLease.tabSessionId, sequence: forcedRenewalSequence + 1,
+      });
+      expect(currentRelease.body.data).toMatchObject({ active: false, sequence: forcedRenewalSequence + 1 });
+      const firstStillActive = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', 'Agent waits for first App tab', `${agentKey}-first-tab`, 'command-list', 0.2);
+      expect(firstStillActive.kind, JSON.stringify(firstStillActive)).toBe('refused');
+      expect(firstStillActive.pending.failure.details).toMatchObject({ status: 'refused', reason: 'user_editing' });
+      const firstLeaseReleaseAck = page.waitForResponse(response => response.request().method() === 'DELETE'
+        && editingPath.test(new URL(response.url()).pathname), CEILING);
+      releaseFirstLease();
+      expect((await firstLeaseReleaseAck).status()).toBe(200);
+
+      const secondConflictPromise = second.waitForResponse((response) => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      releaseSecond();
+      const secondConflict = await secondConflictPromise;
+      expect(secondConflict.status(), 'the stale same-field App save returns a recoverable conflict').toBe(409);
+      const conflict = second.getByRole('alertdialog', { name: CONFLICT_TITLE });
+      await expect(conflict).toBeVisible(CEILING);
+      await expect(second.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue(secondLabel);
+      const draft = await timelineDraft(second, seed3.timelineId);
+      expect(draft?.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label).toBe(secondLabel);
+      const firstLease = leaseReceipts.find(receipt => receipt.tab === 'first' && receipt.active)!;
+      expect(firstLease.tabSessionId).not.toBe(secondLease.tabSessionId);
+      expect((await history(harness, seed3)).head).toEqual(firstHead);
+      expect((await revisionState(harness, seed3, firstHead.revision_id)).trackLabel).toBe(firstLabel);
+      journey.facts = { ...journey.facts, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+        journey: 'J5 App connector exemption and App/App same-field recovery', base, firstHead,
+        firstSaveStatus: firstSave.status(), secondKey: heldSecond!.key, secondBody: heldSecond!.body,
+        secondConflictStatus: secondConflict.status(), retainedSecondDraft: draft?.draft, leaseReceipts,
+        independentTabAgentRefusal: stillHeld, forcedRenewalSequence, staleRelease: staleRelease.body.data,
+        currentRelease: currentRelease.body.data, independentFirstTabRefusal: firstStillActive,
+        firstLeaseReleaseHeld: firstLeaseReleaseHeld };
+    } finally {
+      journey.facts.j5SaveDiagnostics = await second.evaluate(() => (window as any).__saveEvents).catch(() => []);
+      releaseFirstLease();
+      releaseSecond();
+      await second.unroute(COMMITS).catch(() => {});
+      await page.unroute(editingPath).catch(() => {});
+      await secondContext.close();
+    }
+  });
+
+test('hosted-loopback J4: 15-second deadline persists the exact Agent flight, then retry lands after release',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+    const base = (await history(harness, seed3)).head;
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>(resolve => { releaseSave = resolve; });
+    let saveHeld = false;
+    const holdSave = async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      saveHeld = true;
+      await saveGate;
+      await route.continue();
+    };
+    await page.route(COMMITS, holdSave);
+    try {
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    const leaseTrace: Array<{ method: string; status: number }> = [];
+    let activeLease: { tab_session_id: string; sequence: number } | undefined;
+    page.on('response', response => {
+      if (editingPath.test(new URL(response.url()).pathname)) {
+        const method = response.request().method();
+        void response.json().then(body => {
+          leaseTrace.push({ method, status: response.status() });
+          if (method === 'PUT' && body.data?.active) {
+            activeLease = { tab_session_id: body.data.tab_session_id, sequence: body.data.sequence };
+          }
+        }).catch(() => {});
+      }
+    });
+    const userLabel = 'Hosted user wins J4';
+    const field = firstTrackName(page);
+    await field.hover();
+    await field.fill(userLabel);
+    await expect(field).toHaveValue(userLabel);
+    await expect.poll(() => activeLease, CEILING).toBeTruthy();
+    await expect.poll(() => saveHeld, CEILING).toBe(true);
+
+    const key = `hosted-loopback-j4-${seed3.timelineId}`;
+    const agentLabel = 'Agent compatible J4';
+    let sequence = activeLease!.sequence;
+    let keepLease = true;
+    let renewals = 0;
+    const editingUrl = `/v1/projects/${harness.seed.projectId}/timelines/${seed3.timelineId}/editing`;
+    const keeper = (async () => {
+      while (keepLease) {
+        await new Promise(resolve => setTimeout(resolve, 1_000));
+        if (!keepLease) break;
+        sequence += 1;
+        const renewal = await harness.runtimeJson('PUT', editingUrl, {
+          tab_session_id: activeLease!.tab_session_id, sequence, ttl_seconds: 10,
+        });
+        expect(renewal.status).toBe(200);
+        expect(renewal.body.data.active).toBe(true);
+        sequence = Math.max(sequence, renewal.body.data.sequence);
+        renewals += 1;
+      }
+    })();
+    const agentStarted = Date.now();
+    let agentOutcome: Awaited<ReturnType<AstridCli['commitTrackLabelFromBase']>>;
+    try {
+      agentOutcome = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', agentLabel, key, 'command-list', 15);
+    } finally {
+      keepLease = false;
+      await keeper;
+    }
+    const waitedMs = Date.now() - agentStarted;
+    expect(waitedMs, 'the SDK waited to its monotonic 15-second deadline').toBeGreaterThanOrEqual(14_000);
+    expect(agentOutcome.kind, JSON.stringify(agentOutcome)).toBe('refused');
+    expect(agentOutcome.pending).toMatchObject({ state: 'pending', key,
+      failure: { details: { status: 'refused', reason: 'user_editing' } },
+      flight: { key, body: expect.any(String) } });
+    expect(agentOutcome.fix).toContain('tl.retry(');
+    const posts = astrid.trackLabelPosts(key);
+    expect(posts.length, 'the monotonic 15-second wait made repeated hosted SDK attempts').toBeGreaterThan(1);
+    expect(posts.every(post => post.key === key && post.body === posts[0].body),
+      'the flight identity and body stay fixed for every refusal').toBe(true);
+    expect(JSON.parse(posts[0].body)).toMatchObject({ base_revision_id: base.revision_id,
+      base_publication_id: base.publication_id, commands: [{ op: 'track.set',
+        select: 'parent/track:S1', args: { values: { label: agentLabel } } }] });
+    expect(JSON.parse(agentOutcome.pending.flight.body)).toMatchObject({
+      base_revision_id: base.revision_id, base_publication_id: base.publication_id,
+      commands: [{ op: 'track.set', select: 'parent/track:S1', args: { values: { label: agentLabel } } }],
+    });
+
+      expect(renewals, 'Runtime received real renewal writes during the 15-second SDK wait').toBeGreaterThan(1);
+      const savePromise = page.waitForResponse(response => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      const releaseAckPromise = page.waitForResponse(response => response.request().method() === 'DELETE'
+        && editingPath.test(new URL(response.url()).pathname), CEILING);
+      await field.press('Enter');
+      await field.blur();
+      releaseSave();
+      const save = await savePromise;
+      expect(save.status()).toBe(200);
+      const appHead = pinOf(await save.json() as CommitAcceptedMutation);
+      const releaseAck = await releaseAckPromise;
+      expect(releaseAck.status()).toBe(200);
+      const appRelease = await releaseAck.json();
+      expect(appRelease.data.active,
+        'the old App sequence is stale after the bounded-wait renewal fence').toBe(true);
+      sequence = Math.max(sequence, appRelease.data.sequence);
+      const explicitRelease = await harness.runtimeJson('DELETE', editingUrl, {
+        tab_session_id: activeLease!.tab_session_id, sequence: sequence + 1,
+      });
+      expect(explicitRelease.body.data).toMatchObject({ active: false, sequence: sequence + 1 });
+      const retried = await astrid.retryTrackLabelPending(seed3.projectSlug, seed3.timelineId, key, agentOutcome.pending_id);
+      const retryPosts = astrid.trackLabelPosts(key);
+      journey.facts.j4DeadlineAndRetry = { configuredTimeoutSeconds: 15, waitedMs, base, appHead, key,
+        leaseTrace, posts, retryPosts, renewals, pending: agentOutcome.pending,
+        pendingId: agentOutcome.pending_id, userLabel, retryResult: retried,
+        appRelease: appRelease.data, explicitRelease: explicitRelease.body.data };
+      expect(retried.kind, JSON.stringify(retried)).toBe('accepted');
+      expect(retryPosts.length, 'the retry sent a real commit POST').toBeGreaterThan(posts.length);
+      expect(retryPosts.every(post => post.key === key && post.body === posts[0].body)).toBe(true);
+      expect(retryPosts.at(-1)).toMatchObject({ status: 200 });
+      const accepted = retried.result.data.accepted_revision_id;
+      expect(retryPosts.at(-1)?.response?.data?.accepted_revision_id).toBe(accepted);
+      const state = await revisionState(harness, seed3, accepted);
+      expect(state.trackLabel, 'the latest user save remains intact').toBe(userLabel);
+      expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe(agentLabel);
+      journey.facts = { ...journey.facts,
+        transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+        journey: 'J4 bounded 15-second wait and compatible retry', base, appHead, key, leaseTrace,
+        posts, renewals, pending: agentOutcome.pending, pendingId: agentOutcome.pending_id,
+        userLabel, elapsedMs: Date.now() - agentStarted,
+        releaseStatus: releaseAck.status(), retryResult: retried, finalRevision: accepted };
+    } finally {
+      releaseSave();
+      await page.unroute(COMMITS, holdSave).catch(() => {});
+    }
+  });
+
+test('hosted-loopback interleaving-7: retry cancellation stops resend and preserves the exact fenced flight',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+    const base = (await history(harness, seed3)).head;
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    let releaseDelete!: () => void;
+    const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    let releaseHeld = false;
+    const holdRelease = trackRoute(async (route: Route) => {
+      if (route.request().method() !== 'DELETE') return route.fallback();
+      releaseHeld = true;
+      await releaseGate;
+      await route.continue();
+    });
+    await page.route(editingPath, holdRelease);
+    try {
+      const savePromise = page.waitForResponse((response) => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      await editFirstTrackName(page, 'Hosted user holds lease for cancellation');
+      expect((await savePromise).status()).toBe(200);
+      await expect.poll(() => releaseHeld, CEILING).toBe(true);
+      const key = `hosted-loopback-interleaving-7-${seed3.timelineId}`;
+      const cancelled = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', 'Agent cancelled interleaving-7', key, 'command-list', 15, true);
+      expect(cancelled.kind, JSON.stringify(cancelled)).toBe('cancelled');
+      const posts = astrid.trackLabelPosts(key);
+      expect(posts, 'cancellation occurs on the first actual hosted refusal and stops the resend').toHaveLength(1);
+      expect(posts[0]).toMatchObject({ key, status: 409, details: { status: 'refused', reason: 'user_editing' } });
+      expect(cancelled.flight).toMatchObject({ key, fence: expect.any(String), body: posts[0].body });
+      expect(JSON.parse(cancelled.flight.body)).toMatchObject({ base_revision_id: base.revision_id,
+        base_publication_id: base.publication_id, commands: [{ op: 'track.set',
+          select: 'parent/track:S1', args: { values: { label: 'Agent cancelled interleaving-7' } } }] });
+      expect(cancelled.pending_changes).toEqual({});
+      journey.facts = { ...journey.facts,
+        transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+        interleaving: 'retry cancellation', base, key, flight: cancelled.flight, posts,
+        pendingChanges: cancelled.pending_changes };
+    } finally {
+      releaseDelete();
+      await holdRelease.drain();
+      await page.unroute(editingPath, holdRelease).catch(() => {});
+    }
+  });
+
+test('hosted-loopback interleaving-6: Agent SDK source.via app spoof remains behind the active App lease',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+    const base = (await history(harness, seed3)).head;
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    let releaseDelete!: () => void;
+    const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    let releaseHeld = false;
+    const holdRelease = trackRoute(async (route: Route) => {
+      if (route.request().method() !== 'DELETE') return route.fallback();
+      releaseHeld = true;
+      await releaseGate;
+      await route.continue();
+    });
+    await page.route(editingPath, holdRelease);
+    try {
+      const userLabel = 'Hosted user keeps editing during spoof probe';
+      const savePromise = page.waitForResponse((response) => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      await editFirstTrackName(page, userLabel);
+      const save = await savePromise;
+      expect(save.status()).toBe(200);
+      const saved = await save.json() as CommitAcceptedMutation;
+      const appHead = pinOf(saved);
+      await expect.poll(() => releaseHeld, CEILING).toBe(true);
+
+      const key = `hosted-loopback-interleaving-6-${seed3.timelineId}`;
+      const agentLabel = 'Agent SDK spoofed app source';
+      const outcome = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', agentLabel, key, 'command-list', 0.2, false, 'app');
+      expect(outcome.kind, JSON.stringify(outcome)).toBe('refused');
+      const posts = astrid.trackLabelPosts(key);
+      expect(posts.length).toBeGreaterThan(0);
+      expect(JSON.parse(posts[0].body)).toMatchObject({ source: { via: 'app' },
+        base_revision_id: base.revision_id, base_publication_id: base.publication_id });
+      expect(posts[0]).toMatchObject({ status: 409, details: { status: 'refused', reason: 'user_editing' } });
+      const appLeaseCredential = save.request().headers()['x-timeline-editing-session'];
+      expect(appLeaseCredential, 'the actual App save supplied its acknowledged lease authority').toBeTruthy();
+      const copiedCredentialProbe = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', agentLabel, `${key}-copied-credential`, 'command-list', 0.2, false, 'app', false, appLeaseCredential);
+      expect(copiedCredentialProbe.kind, JSON.stringify(copiedCredentialProbe)).toBe('refused');
+      expect(copiedCredentialProbe.pending.failure.details.reason).toBe('user_editing');
+      expect((await history(harness, seed3)).head).toEqual(appHead);
+      const state = await revisionState(harness, seed3, appHead.revision_id);
+      expect(state.trackLabel).toBe(userLabel);
+      expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).not.toBe(agentLabel);
+      journey.facts = { ...journey.facts,
+        transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+        interleaving: 'caller-supplied source.via app spoof', base, appHead, key, posts, copiedCredentialProbe,
+        userLabelPreserved: state.trackLabel };
+    } finally {
+      releaseDelete();
+      await holdRelease.drain();
+      await page.unroute(editingPath, holdRelease).catch(() => {});
+    }
+  });
+
+test('hosted-loopback interleaving-5: Runtime restart drops the process-local lease and preserves the documented best-effort boundary',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+    const base = (await history(harness, seed3)).head;
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    let releaseDelete!: () => void;
+    const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    let releaseHeld = false;
+    const holdRelease = trackRoute(async (route: Route) => {
+      if (route.request().method() !== 'DELETE') return route.fallback();
+      releaseHeld = true;
+      await releaseGate;
+      await route.continue();
+    });
+    await page.route(editingPath, holdRelease);
+    try {
+      const userLabel = 'Hosted saved value before Runtime restart';
+      const savePromise = page.waitForResponse((response) => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      await editFirstTrackName(page, userLabel);
+      const save = await savePromise;
+      expect(save.status()).toBe(200);
+      const saved = await save.json() as CommitAcceptedMutation;
+      const appHead = pinOf(saved);
+      await expect.poll(() => releaseHeld, CEILING).toBe(true);
+
+      const beforeRestart = await harness.runtimeFetch('/v1/health').then(response => response.json()) as { runtime_instance_id: string };
+      const restart = await harness.restartRuntime();
+      const afterRestart = await harness.runtimeFetch('/v1/health').then(response => response.json()) as { runtime_instance_id: string };
+      expect(restart.oldInstanceId).toBe(beforeRestart.runtime_instance_id);
+      expect(afterRestart.runtime_instance_id).not.toBe(beforeRestart.runtime_instance_id);
+      expect((await history(harness, seed3)).head).toEqual(appHead);
+
+      const key = `hosted-loopback-interleaving-5-${seed3.timelineId}`;
+      const outcome = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'V1', 'Agent stale after restart', key, 'command-list');
+      expect(outcome.kind, JSON.stringify(outcome)).toBe('conflict');
+      expect(outcome.recovery.status).toBe('re_derive');
+      expect(outcome.recovery.summary).toContain(`user's current value for track V1.label is '${userLabel}'`);
+      expect(outcome.recovery.summary).toMatch(/preserve it\. re-derive only compatible work/i);
+      const posts = astrid.trackLabelPosts(key);
+      expect(posts.length).toBeGreaterThan(0);
+      expect(posts.every(post => post.details?.reason !== 'user_editing'),
+        'the restarted Runtime no longer has the process-local lease; acceptance relies on stale-base field conflict').toBe(true);
+      const state = await revisionState(harness, seed3, appHead.revision_id);
+      expect(state.trackLabel).toBe(userLabel);
+      journey.facts = { ...journey.facts,
+        transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+        interleaving: 'Runtime restart; best-effort boundary only, no strict priority across restart',
+        base, appHead, oldRuntimeInstanceId: beforeRestart.runtime_instance_id,
+        newRuntimeInstanceId: afterRestart.runtime_instance_id, posts,
+        preservedUserLabel: state.trackLabel, leasePersistence: 'process-local; restart clears lease' };
+    } finally {
+      releaseDelete();
+      await holdRelease.drain();
+      await page.unroute(editingPath, holdRelease).catch(() => {});
+    }
+  });
+
+test('hosted-loopback interleaving-4: stopped lease renewal reaches TTL expiry and the SDK flight proceeds',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
+    const base = (await history(harness, seed3)).head;
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    let putCount = 0;
+    let releaseDelete!: () => void;
+    const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+    let releaseHeld = false;
+    const controlLease = trackRoute(async (route: Route) => {
+      if (route.request().method() === 'PUT') {
+        putCount += 1;
+        if (putCount > 1) return route.abort('connectionreset');
+        return route.fallback();
+      }
+      releaseHeld = true;
+      await releaseGate;
+      await route.continue();
+    });
+    await page.route(editingPath, controlLease);
+    try {
+      const userLabel = 'Hosted user saved before TTL expiry';
+      const savePromise = page.waitForResponse((response) => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      await editFirstTrackName(page, userLabel);
+      const save = await savePromise;
+      expect(save.status()).toBe(200);
+      const saved = await save.json() as CommitAcceptedMutation;
+      const appHead = pinOf(saved);
+      await expect.poll(() => releaseHeld, CEILING).toBe(true);
+
+      const key = `hosted-loopback-interleaving-4-${seed3.timelineId}`;
+      const agentLabel = 'Agent after lease TTL expiry';
+      const outcome = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', agentLabel, key, 'command-list', 15);
+      expect(outcome.kind, JSON.stringify(outcome)).toBe('accepted');
+      const posts = astrid.trackLabelPosts(key);
+      expect(posts.some(post => post.status === 409 && post.details?.reason === 'user_editing')).toBe(true);
+      expect(posts.every(post => post.key === key && post.body === posts[0].body)).toBe(true);
+      const accepted = outcome.result.data.accepted_revision_id;
+      const state = await revisionState(harness, seed3, accepted);
+      expect(state.trackLabel).toBe(userLabel);
+      expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe(agentLabel);
+      journey.facts = { ...journey.facts,
+        transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+        interleaving: 'lease TTL expiry after heartbeat renewal is blocked', base, appHead, putCount,
+        key, posts, acceptedRevision: accepted, userLabelPreserved: state.trackLabel };
+    } finally {
+      releaseDelete();
+      await controlLease.drain();
+      await page.unroute(editingPath, controlLease).catch(() => {});
+    }
+  });
 
 // ---------------------------------------------------------------------------------------------
 // 1. agent -> open App

@@ -57,9 +57,11 @@ export async function flushDraftsBeforeReload(intent: 'update' | 'reload' = 'upd
     const pending = [...guards.values()];
     const outcomes = await Promise.allSettled(pending.map((guard) => Promise.resolve().then(() =>
       intent === 'reload' && guard.flushForReload ? guard.flushForReload() : guard.flush())));
-    const failures = outcomes.flatMap((outcome, index) => outcome.status === 'rejected'
-      ? [`${pending[index]!.label}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`]
-      : []);
+    const failures = outcomes.flatMap((outcome, index) => {
+      if (outcome.status !== 'rejected') return [];
+      const label = pending[index]!.label === 'Timeline owner' ? 'Timeline' : pending[index]!.label;
+      return [`${label}: ${outcome.reason instanceof Error ? outcome.reason.message : String(outcome.reason)}`];
+    });
     if (failures.length) throw new Error(failures.join('; '));
     if (intent === 'update' && (mutation !== mutationVersion || failure !== failureVersion)) {
       throw new Error('Drafts changed or failed while saving. Save them and try again.');
@@ -98,8 +100,8 @@ export function useDraftSafeReload(label: string, flush: () => Promise<void>, en
   }, [enabled, label]);
 }
 
-/** Run a caller's reload only after every registered draft has reached durable storage. */
-export function useGuardedReload(reloadImpl: () => void = () => window.location.reload()): {
+/** Use update intent for committed drafts; reload intent permits a guard's recovery-only fallback. */
+export function useGuardedReload(reloadImpl: () => void = () => window.location.reload(), intent: 'update' | 'reload' = 'reload'): {
   flush: () => Promise<false | (() => boolean)>;
   reload: () => Promise<void>;
   error: string | null;
@@ -129,7 +131,7 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
     setPending(true);
     setError(null);
     try {
-      const validate = await flushDraftsBeforeReload('reload');
+      const validate = await flushDraftsBeforeReload(intent);
       if (!validate()) throw new Error('Drafts changed before reload. Try again.');
       reloadImpl();
     } catch (cause) {
@@ -138,6 +140,6 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
       pendingRef.current = false;
       setPending(false);
     }
-  }, [reloadImpl]);
+  }, [reloadImpl, intent]);
   return { flush, reload, error, pending };
 }

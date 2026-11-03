@@ -1,17 +1,17 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AppBuildProvider } from './AppBuildProvider.tsx';
-import { flushDraftsBeforeReload, registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
+import { flushDraftsBeforeReload, registerDraftSafeReloadGuard, resetDraftReloadGuardsForTest } from '@/shared/lib/updates/draftSafeReload.ts';
 
 vi.mock('@/shared/lib/updates/appBuildWatch.ts', () => ({ useAppBuildWatch: () => true }));
 
-afterEach(cleanup);
+afterEach(() => { cleanup(); resetDraftReloadGuardsForTest(); });
 
 describe('AppBuildProvider stale-build notice', () => {
   it('stays above an interactive editor surface and reloads after mounted drafts flush', async () => {
     const reload = vi.fn();
     const flush = vi.fn(async () => undefined);
-    const unregister = registerDraftSafeReloadGuard({ label: 'Timeline', flush });
+    const unregister = registerDraftSafeReloadGuard({ label: 'Timeline', flush, isDirty: () => false });
     render(
       <AppBuildProvider reload={reload}>
         <div data-testid="editor-surface" className="fixed inset-0 z-[100100]">Editor</div>
@@ -37,6 +37,26 @@ describe('AppBuildProvider stale-build notice', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent chat: bridge unavailable');
+    expect(reload).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it('does not fall back to recovery reload when Timeline persistence fails', async () => {
+    const reload = vi.fn();
+    const preserveForRecovery = vi.fn(async () => undefined);
+    const unregister = registerDraftSafeReloadGuard({
+      label: 'Timeline owner',
+      flush: async () => { throw new Error('commit rejected'); },
+      isDirty: () => true,
+      flushForReload: preserveForRecovery,
+      isDirtyForReload: () => false,
+    });
+    render(<AppBuildProvider reload={reload}><input aria-label="Track name" defaultValue="Keep this unsaved draft" /></AppBuildProvider>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not safely reload: Timeline: commit rejected');
+    expect(screen.getByRole('textbox', { name: 'Track name' })).toHaveValue('Keep this unsaved draft');
+    expect(preserveForRecovery).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
     unregister();
   });

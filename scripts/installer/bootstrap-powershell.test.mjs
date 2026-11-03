@@ -246,6 +246,15 @@ async function scenario(fn) {
       ...env,
       MOCK_INSTALLER_ARGS: args.map((argument) => `x${Buffer.from(argument, 'utf8').toString('base64')}`).join(','),
     }));
+  } catch (error) {
+    // Diagnostic lane: retain the bootstrap's original error before fixture cleanup.
+    try {
+      const log = await readFile(context.env.MOCK_LOG, 'utf8');
+      process.stderr.write(`\n--- BEGIN INSTALL LOG (${context.env.MOCK_LOG}) ---\n${log}\n--- END INSTALL LOG ---\n`);
+    } catch (captureError) {
+      process.stderr.write(`\nINSTALL LOG CAPTURE FAILED: ${captureError}\n`);
+    }
+    throw error;
   } finally { await context.cleanup(); }
 }
 function alive(result) {

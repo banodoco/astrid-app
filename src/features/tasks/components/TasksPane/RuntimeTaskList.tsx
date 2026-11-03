@@ -20,9 +20,10 @@ interface RuntimeTaskListProps {
   onExportManagedOutput: (taskId: string, timelineId: string) => void;
   isExportTaskPending: (taskId: string) => boolean;
   onInspectTask: (taskId: string, anchor: { top: number; right: number }) => void;
+  showComplete?: boolean;
 }
 
-export function RuntimeTaskList({ tasks, isLoading, error, ...actions }: RuntimeTaskListProps) {
+export function RuntimeTaskList({ tasks, isLoading, error, showComplete = false, ...actions }: RuntimeTaskListProps) {
   const [showOlder, setShowOlder] = useState(false);
   const sections = useMemo(() => sectionRuntimeTasks(tasks, actions.timelineId), [tasks, actions.timelineId]);
 
@@ -48,10 +49,10 @@ export function RuntimeTaskList({ tasks, isLoading, error, ...actions }: Runtime
     <div className="space-y-1 p-4 text-sidebar-foreground" data-runtime-task-list="true">
       {active.map((task) => <RuntimeTaskRow key={task.task_id} task={task} actions={rowActions} />)}
       {failed.map((group) => <RuntimeTaskGroup key={group.key} group={group} actions={rowActions} />)}
-      {recent.map((group) => <RuntimeTaskGroup key={group.key} group={group} actions={rowActions} />)}
+      {recent.map((group) => <RuntimeTaskGroup key={group.key} group={group} actions={rowActions} showComplete={showComplete} />)}
       {older.length > 0 && (
         <>
-          {showOlder && older.map((group) => <RuntimeTaskGroup key={group.key} group={group} actions={rowActions} />)}
+          {showOlder && older.map((group) => <RuntimeTaskGroup key={group.key} group={group} actions={rowActions} showComplete={showComplete} />)}
           <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => setShowOlder((open) => !open)}>
             {showOlder ? 'Hide older' : `Show ${older.length} older`}
           </Button>

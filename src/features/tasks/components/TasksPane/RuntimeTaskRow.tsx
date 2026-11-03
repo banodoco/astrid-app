@@ -38,12 +38,14 @@ interface RuntimeTaskRowProps {
   /** A collapsed group: the row names the group and toggles its members instead of inspecting. */
   group?: { count: number; expanded: boolean; onToggle: () => void };
   nested?: boolean;
+  showComplete?: boolean;
 }
 
-function StatusText({ task }: { task: RuntimeTask }) {
+function StatusText({ task, showComplete }: { task: RuntimeTask; showComplete?: boolean }) {
   if (task.state === 'succeeded') {
     const time = runtimeTaskRelativeTime(task.updated_at);
-    return time ? <span className="whitespace-nowrap text-muted-foreground">{time}</span> : null;
+    if (!showComplete && !time) return null;
+    return <span className="whitespace-nowrap text-muted-foreground">{showComplete && <span>Complete</span>}{showComplete && time && ' · '}{time}</span>;
   }
   const progress = runtimeTaskProgress(task);
   const state = runtimeTaskStateLabel(task.state);
@@ -55,7 +57,7 @@ function StatusText({ task }: { task: RuntimeTask }) {
   );
 }
 
-export function RuntimeTaskRow({ task, actions, group, nested = false }: RuntimeTaskRowProps) {
+export function RuntimeTaskRow({ task, actions, group, nested = false, showComplete = false }: RuntimeTaskRowProps) {
   const { timelineId, actionFailures, exportedTo } = actions;
   const label = runtimeTaskLabel(task);
   const detail = runtimeTaskDetail(task);
@@ -106,7 +108,7 @@ export function RuntimeTaskRow({ task, actions, group, nested = false }: Runtime
           {detail && !group && <div className="truncate text-muted-foreground">{detail}</div>}
         </div>
         <div className="flex shrink-0 items-center gap-1">
-          <StatusText task={task} />
+          <StatusText task={task} showComplete={showComplete} />
           {canExport && timelineId && (
             <Button
               variant="ghost"

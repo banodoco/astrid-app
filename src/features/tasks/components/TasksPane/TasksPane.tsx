@@ -601,6 +601,7 @@ const TasksPaneComponent: React.FC = () => {
               >
                 {isRuntimeMode ? (
                   <RuntimeTaskList
+                    showComplete={isRuntimeActivityDock}
                     tasks={runtimeTaskData?.tasks ?? []}
                     isLoading={isPaginatedLoading}
                     error={runtimeTaskError}

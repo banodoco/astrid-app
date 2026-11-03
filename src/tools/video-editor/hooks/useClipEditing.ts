@@ -42,10 +42,10 @@ export interface UseClipEditingArgs {
 export interface UseClipEditingResult {
   onOverlayChange: (actionId: string, patch: Partial<ClipMeta>) => void;
   handleUpdateClips: (clipIds: string[], patch: Partial<ClipMeta>) => void;
-  handleUpdateClipsDeep: (clipIds: string[], patchFn: (existing: ClipMeta) => Partial<ClipMeta>) => void;
+  handleUpdateClipsDeep: (clipIds: string[], patchFn: (existing: ClipMeta) => Partial<ClipMeta>, nativeClear?: boolean) => void;
   handleDeleteClips: (clipIds: string[], options?: DeleteClipOptions) => void;
   handleDeleteClip: (clipId: string, options?: DeleteClipOptions) => void;
-  handleSelectedClipChange: (patch: Partial<ClipMeta> & { at?: number }, elementOwner?: AgentChatEditorContext | null) => void;
+  handleSelectedClipChange: (patch: Partial<ClipMeta> & { at?: number }, elementOwner?: AgentChatEditorContext | null, nativeClear?: boolean) => void;
   handleResetClipPosition: () => void;
   handleResetClipsPosition: (clipIds: string[]) => void;
   handleSplitSelectedClip: () => void;
@@ -213,6 +213,7 @@ export function useClipEditing({
   const handleUpdateClipsDeep = useCallback((
     clipIds: string[],
     patchFn: (existing: ClipMeta) => Partial<ClipMeta>,
+    nativeClear = false,
   ) => {
     const current = dataRef.current;
     if (!current) {
@@ -239,11 +240,12 @@ export function useClipEditing({
       return;
     }
 
-    const gestureBasis = transitionClearBasis(metaUpdates);
+    const basis = transitionClearBasis(metaUpdates);
+    const gestureBasis = basis && nativeClear ? { ...basis, native: true } : basis;
     applyRowsEdit(current.rows, metaUpdates, undefined, undefined, gestureBasis ? { gestureBasis } : undefined);
   }, [applyRowsEdit, dataRef, getValidClipIds, transitionClearBasis]);
 
-  const handleSelectedClipChange = useCallback((patch: Partial<ClipMeta> & { at?: number }, elementOwner?: AgentChatEditorContext | null) => {
+  const handleSelectedClipChange = useCallback((patch: Partial<ClipMeta> & { at?: number }, elementOwner?: AgentChatEditorContext | null, nativeClear = false) => {
     const current = dataRef.current;
     if (!current || !selectedClipId) {
       return;
@@ -283,7 +285,8 @@ export function useClipEditing({
       return;
     }
 
-    const gestureBasis = transitionClearBasis({ [selectedClipId]: patch }) ?? (resolvedConfig && current.resolvedConfig === resolvedConfig
+    const clearBasis = transitionClearBasis({ [selectedClipId]: patch });
+    const gestureBasis = (clearBasis && nativeClear ? { ...clearBasis, native: true } : clearBasis) ?? (resolvedConfig && current.resolvedConfig === resolvedConfig
       && Object.keys(patch).length > 0 && Object.keys(patch).every((key) => ['from', 'to', 'hold', 'speed'].includes(key))
       ? structuredClone({ kind: 'trim' as const, clipId: selectedClipId, patch, config: current.config, registry: current.registry }) : undefined);
     const { at: _at, ...metaPatch } = patch;

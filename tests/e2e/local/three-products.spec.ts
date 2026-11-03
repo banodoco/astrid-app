@@ -291,9 +291,19 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
     checkout: () => astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']),
     edit: (...flags: string[]) => astrid.astrid(['timelines', 'edit', ...common, ...flags]),
     publish: async (message: string, idempotencyKey: string) => {
-      const envelope = await astrid.json<{ new_head: string; old_head: string; idempotency_key: string; published?: boolean }>(['timelines', 'publish', ...common, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
+      const candidate = test.info().outputPath(`candidate-${sha256Hex(Buffer.from(idempotencyKey))}.json`);
+      await astrid.python(['-c', 'import sys; from astrid.sdk.timeline_checkout import Checkout; Checkout.draft(sys.argv[1], sys.argv[2]).save(sys.argv[3], quiet=True)', seed.projectSlug, seed.timelineId, candidate]);
+      const document = JSON.parse(readFileSync(candidate, 'utf8'));
+      const base = document.base_parent as HeadPin;
+      expect(base.revision_id).toBeTruthy();
+      expect(base.publication_id).toBeTruthy();
+      const envelope = await astrid.json<{ accepted_revision_id: string; accepted_publication_id: string }>(['timelines', 'commit', ...common, '--file', candidate, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
       expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
-      return envelope.data!;
+      expect(envelope.receipt, JSON.stringify(envelope)).toBeTruthy();
+      expect(envelope.data!.accepted_revision_id).toBeTruthy();
+      expect(envelope.data!.accepted_publication_id).toBeTruthy();
+      return { old_head: base.revision_id, old_publication: base.publication_id, new_head: envelope.data!.accepted_revision_id,
+        new_publication: envelope.data!.accepted_publication_id, receipt: envelope.receipt };
     },
     status: async () => (await astrid.json<{ current_head: string }>(['timelines', 'status', ...common, '--json'])).data!,
     show: async () => (await astrid.json<{ head_revision_id: string; rows: Array<{ layers: Array<{ clip_id: string; asset: string | null }> }> }>(['timelines', 'show', ...common, '--published', '--json'])).data!,
@@ -460,11 +470,18 @@ test('agent -> open App: an Astrid task and its publication appear in the open A
   expect(settled.data!.state, 'the Runtime agrees the task succeeded').toBe('succeeded');
 
   // The agent publishes the timeline with the task's output; the open page adopts that revision by itself.
-  const before = await currentHead(harness);
+  const beforePin = (await history(harness, seed3)).head;
+  const before = beforePin.revision_id;
   await agent.checkout();
-  await agent.edit('--clip', seed3.agentClipId, '--swap-asset', `${seed3.markerAssetKey}=task:${taskId}/marker#0`);
+  const imported = await astrid.python([path.join(process.cwd(), 'tests/e2e/local/support/import-task-marker.py'),
+    seed3.projectSlug, seed3.timelineId, seed3.agentClipId, seed3.markerAssetKey, output!.object_id, test.info().outputDir]);
+  const selection = JSON.parse(imported.stdout.trim().split('\n').pop()!);
+  expect(selection).toEqual({ asset: seed3.markerAssetKey, generation_id: expect.any(String), variant_id: expect.any(String),
+    object_id: output!.object_id, catalog_digest: expect.any(String) });
+  journey.facts.taskMediaSelection = selection;
   const published = await agent.publish('agent: marker', 'f2-case1');
   expect(published.old_head, 'the agent built on the head the App has').toBe(before);
+  expect(published.old_publication).toBe(beforePin.publication_id);
   expect(published.new_head).not.toBe(before);
   expect(await currentHead(harness), 'the Runtime head is the agent\'s revision').toBe(published.new_head);
 
@@ -481,6 +498,7 @@ test('agent -> open App: an Astrid task and its publication appear in the open A
   expect((await agent.show()).head_revision_id, 'the agent reads the head it published').toBe(published.new_head);
   const agentHead = (await history(harness, seed3)).head;
   expect(agentHead.revision_id).toBe(published.new_head);
+  expect(agentHead.publication_id).toBe(published.new_publication);
   // The App's next save is built on the agent's head, and the Runtime accepts it (the parent-head check of the retired handoff case).
   const appSaved = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
   await editFirstTrackName(page, 'F2 App after agent');

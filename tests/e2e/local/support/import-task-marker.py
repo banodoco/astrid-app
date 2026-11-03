@@ -16,6 +16,7 @@ assert object_id == expected, (object_id, expected)
 with AstridClient.open_from_launcher(start_pack_host=False, client_name='three-products-marker') as client:
     raw = client.media.read_bytes(object_id)
     assert len(raw) == 158 and 'sha256:' + hashlib.sha256(raw).hexdigest() == object_id
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
     marker = Path(output_dir) / 'task-marker.png'
     marker.write_bytes(raw)
     checkout = Checkout.draft(project, timeline, client=client)

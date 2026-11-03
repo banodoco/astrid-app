@@ -130,6 +130,7 @@ export function useTimelineSave(
   const localOwner = useMemo(() => ({ provider, timelineId, closed: false, started: false, generation: 0,
     initialization: 'pending' as 'pending' | 'ready' | 'error', operations: 0, operationError: false, failedOutbox: false,
     headKey: '', recovered: false,
+    chooseRecovery: undefined as ((ownerId: string | null) => void) | undefined,
     retirement: undefined as Promise<void> | undefined,
     ready: undefined as Promise<TimelineLocalSaveHandoff> | undefined,
     handoff: undefined as TimelineLocalSaveHandoff | undefined,
@@ -201,6 +202,8 @@ export function useTimelineSave(
     setLocalSaveState(null);
     return () => {
       localOwner.closed = true;
+      localOwner.chooseRecovery?.(null);
+      localOwner.chooseRecovery = undefined;
       localOwner.generation++;
       localOwner.started = false;
       localOwner.ready = undefined;
@@ -378,11 +381,15 @@ export function useTimelineSave(
         emitTimelineSaveDiagnostic('session-created', () => ({ owner: localOwner, timelineId,
           sessionPresent: true, current: isCurrent(), generation, basis: verified, mounted: localDataRef.current }));
         const owners = session.getState().recoverableOwners;
-        if (owners.length === 1) { localOwner.recovered = true; await session.recover(owners[0]);
+        if (owners.length) {
+          const selected = await new Promise<string | null>((resolve) => { localOwner.chooseRecovery = resolve; });
+          localOwner.chooseRecovery = undefined;
+          if (!selected || !isCurrent()) throw new TimelineSaveError('Local save session replaced before recovery');
+          localOwner.recovered = true;
+          await session.recover(selected);
           emitTimelineSaveDiagnostic('session-recovered', () => ({ owner: localOwner, timelineId,
             current: isCurrent(), generation, sessionPresent: true }));
         }
-        else if (owners.length) throw markTimelineSaveRejection(new TimelineSaveError('Multiple local save owners require recovery; drafts retained'), 'owner-recovery-ambiguous', 'TimelineSaveError');
         let initial = verified.initial;
         if (owners.length && session.getState().status === 'saved') {
           initial = await session.flush();
@@ -899,6 +906,9 @@ export function useTimelineSave(
     elementTimelineRoutes,
     localDocumentSave,
     localSaveState,
+    recoverLocalOwner: (ownerId: string) => {
+      if (localOwner.session?.getState().recoverableOwners.includes(ownerId)) localOwner.chooseRecovery?.(ownerId);
+    },
     originalLocalSaveBasis,
     data: commit.data,
     dataRef: commit.dataRef,

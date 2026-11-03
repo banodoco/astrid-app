@@ -899,6 +899,24 @@ function TimelineEditorShellCoreComponent({
       {conflictBanner}
       {incompatibleBanner}
       {watchdogBanner}
+      {chrome.localSaveState?.status === 'recovery' && (
+        <div role="alert" data-testid="timeline-command-recovery">
+          <span>Saved edits need recovery.</span>
+          {chrome.localSaveState.recoverableOwners.map(ownerId => (
+            <Button key={ownerId} type="button" data-owner-id={ownerId} onClick={() => chrome.recoverLocalOwner(ownerId)}>
+              Recover saved edits
+            </Button>
+          ))}
+        </div>
+      )}
+      {chrome.localSaveState?.status === 'retry' && (
+        <div role="alert"><span>Your changes have not been confirmed.</span>
+          <Button type="button" data-testid="timeline-command-retry" onClick={chrome.retryPendingSave}>Retry save</Button>
+        </div>
+      )}
+      {chrome.localSaveState?.status === 'conflict' && (
+        <div role="alert" data-testid="timeline-command-recovery">Your changes are retained and need resolution before they can be saved.</div>
+      )}
       {recoveryBanner}
       {chrome.loadError && !(recoveryCardShowing && hasLoadedTimeline) ? (
         // The hosted build's "Astrid stopped" / "restarted" card already says what to do about the same failure.

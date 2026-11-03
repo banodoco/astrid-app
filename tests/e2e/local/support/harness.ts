@@ -1160,7 +1160,7 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
   }
 
   private async seedRuntime(deferTimelineInitialization = false): Promise<Seed> {
-    const projectName = `Direct Journey ${randomBytes(3).toString('hex')}`;
+    const projectName = process.env.ASTRID_DIRECT_PROJECT_NAME ?? `Direct Journey ${randomBytes(3).toString('hex')}`;
     const project = await this.runtimeJson('POST', '/v1/projects', { name: projectName });
     if (project.status !== 201) throw new Error(`seed project: ${project.status} ${JSON.stringify(project.body)}`);
     const projectId: string = project.body.data.project_id;

@@ -246,6 +246,8 @@ export interface TimelineChromeContextValue {
    * when a conflict, reload or recovery choice owns the timeline).
    */
   retryPendingSave: () => void;
+  localSaveState: import('../commands/localSaveSession.ts').LocalSaveState | null;
+  recoverLocalOwner: (ownerId: string) => void;
   /** Sends the latest unsaved edit now and resolves once it is acknowledged (immediately when nothing is pending). */
   flushPendingSave: () => Promise<number>;
   preserveTimelineDraftForReload: () => Promise<void>;

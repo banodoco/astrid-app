@@ -403,6 +403,8 @@ function createInitialChromeSlice(): TimelineChromeContextValue {
     watchdogReason: null,
     retryWatchdog: noop,
     retryPendingSave: noop,
+    localSaveState: null,
+    recoverLocalOwner: noop,
     flushPendingSave: () => Promise.resolve(0),
     preserveTimelineDraftForReload: noopAsync,
     isTimelineDraftDurableForReload: () => false,

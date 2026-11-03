@@ -164,6 +164,9 @@ async function mountedLifecycle(delay: number) {
     first.queryClient.clear();
 
     const intermediate = mount();
+    await vi.waitFor(() => expect(intermediate.hook.result.current.localSaveState?.status).toBe('recovery'));
+    expect(boundary.attempts).toHaveLength(2);
+    act(() => intermediate.hook.result.current.recoverLocalOwner(intermediate.hook.result.current.localSaveState!.recoverableOwners[0]));
     await vi.waitFor(() => expect(boundary.attempts).toHaveLength(3));
     await new Promise((resolve) => setTimeout(resolve, delay));
     boundary.rejectHeld();
@@ -172,6 +175,9 @@ async function mountedLifecycle(delay: number) {
     intermediate.queryClient.clear();
 
     const restarted = mount();
+    await vi.waitFor(() => expect(restarted.hook.result.current.localSaveState?.status).toBe('recovery'));
+    expect(boundary.attempts).toHaveLength(3);
+    act(() => restarted.hook.result.current.recoverLocalOwner(restarted.hook.result.current.localSaveState!.recoverableOwners[0]));
     await vi.waitFor(() => expect(boundary.attempts).toHaveLength(4));
     await new Promise((resolve) => setTimeout(resolve, delay));
     boundary.releaseHeld();

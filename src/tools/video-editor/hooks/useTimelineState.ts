@@ -393,6 +393,8 @@ function useTimelineChromeContextValue({
   watchdogReason,
   retryWatchdog,
   retryPendingSave,
+  localSaveState,
+  recoverLocalOwner,
   flushPendingSave,
   preserveTimelineDraftForReload,
   isTimelineDraftDurableForReload,
@@ -420,6 +422,8 @@ function useTimelineChromeContextValue({
   watchdogReason: 'timeout' | 'lost-edit' | null;
   retryWatchdog: () => void;
   retryPendingSave: () => void;
+  localSaveState: ReturnType<typeof useTimelineSave>['localSaveState'];
+  recoverLocalOwner: ReturnType<typeof useTimelineSave>['recoverLocalOwner'];
   flushPendingSave: () => Promise<number>;
   preserveTimelineDraftForReload: () => Promise<void>;
   isTimelineDraftDurableForReload: () => boolean;
@@ -475,6 +479,8 @@ function useTimelineChromeContextValue({
     watchdogReason,
     retryWatchdog,
     retryPendingSave,
+    localSaveState,
+    recoverLocalOwner,
     flushPendingSave,
     preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload,
@@ -526,6 +532,8 @@ function useTimelineChromeContextValue({
     retrySaveAfterConflict,
     retryWatchdog,
     retryPendingSave,
+    localSaveState,
+    recoverLocalOwner,
     flushPendingSave,
     preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload,
@@ -1232,6 +1240,8 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     watchdogReason: save.watchdogReason,
     retryWatchdog: save.retryWatchdog,
     retryPendingSave: save.retryPendingSave,
+    localSaveState: save.localSaveState,
+    recoverLocalOwner: save.recoverLocalOwner,
     flushPendingSave: save.flushPendingSave,
     preserveTimelineDraftForReload: save.preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload: save.isTimelineDraftDurableForReload,

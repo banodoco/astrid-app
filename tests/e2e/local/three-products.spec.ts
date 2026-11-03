@@ -592,8 +592,19 @@ test('hosted-loopback interleaving-1: admission racing serialized acceptance kee
     const base = (await history(harness, seed3)).head;
     const key = `hosted-loopback-serialized-race-${seed3.timelineId}`;
     const barrier = harness.armTimelineAcceptanceBarrier(key);
+    let releaseSave!: () => void;
+    const saveGate = new Promise<void>(resolve => { releaseSave = resolve; });
+    let saveHeld = false;
+    const holdSave = async (route: Route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      saveHeld = true;
+      await saveGate;
+      await route.continue();
+    };
+    await page.route(COMMITS, holdSave);
     const flight = astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
-      'S1', 'Agent after serialized gate', key, 'command-list', 0.2);
+      'S1', 'Agent after serialized gate', key, 'command-list', 15).then(
+      value => ({ value }), error => ({ error }));
     try {
       await expect.poll(barrier.ready, CEILING).toMatchObject({ key,
         base_revision_id: base.revision_id, base_publication_id: base.publication_id });
@@ -602,9 +613,12 @@ test('hosted-loopback interleaving-1: admission racing serialized acceptance kee
         && /\/editing$/.test(new URL(response.url()).pathname), CEILING);
       await field.fill('User draft during prepared Agent acceptance');
       expect((await lease).status()).toBe(200);
+      await expect.poll(() => saveHeld, CEILING).toBe(true);
       expect((await history(harness, seed3)).head).toEqual(base);
       barrier.release();
-      const refused = await flight;
+      const observed = await flight;
+      if ('error' in observed) throw observed.error;
+      const refused = observed.value;
       expect(refused.kind, JSON.stringify(refused)).toBe('refused');
       expect(refused.pending.failure.details.reason).toBe('user_editing');
       expect((await history(harness, seed3)).head).toEqual(base);
@@ -615,6 +629,7 @@ test('hosted-loopback interleaving-1: admission racing serialized acceptance kee
         && /\/editing$/.test(new URL(response.url()).pathname), CEILING);
       await field.press('Enter');
       await field.blur();
+      releaseSave();
       expect((await save).status()).toBe(200);
       expect((await release).status()).toBe(200);
       const retry = await astrid.retryTrackLabelPending(seed3.projectSlug, seed3.timelineId, key, refused.pending_id);
@@ -627,7 +642,9 @@ test('hosted-loopback interleaving-1: admission racing serialized acceptance kee
       journey.facts.serializedAcceptanceRace = { barrier: barrier.ready(), refused, retry, posts };
     } finally {
       barrier.release();
-      await flight.catch(() => {});
+      releaseSave();
+      await flight;
+      await page.unroute(COMMITS, holdSave).catch(() => {});
     }
   });
 

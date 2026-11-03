@@ -319,7 +319,13 @@ describe('local editor saves through the durable outbox', () => {
     const reopened = await separate.mount();
     expect(reopened.getState().status).toBe('saved');
     expect(reopened.getState().recoverableOwners).toEqual([]);
+    expect(reopened.getState().keptOwners).toEqual([parked.ownerId]);
     expect(separate.send).toHaveBeenCalledTimes(2);
+    await reopened.recoverKept(parked.ownerId);
+    expect(reopened.getState().status).toBe('conflict');
+    expect(separate.visible()).toEqual(trimmed);
+    expect(separate.send).toHaveBeenCalledTimes(2);
+    expect((await separate.outboxes.list(scope)).find((row) => row.ownerId === parked.ownerId)?.pending).toEqual(before.pending);
     await reopened.dispose();
   });
 

@@ -30,6 +30,7 @@ export interface LocalSaveState {
   status: 'saved' | 'dirty' | 'saving' | 'retry' | 'conflict' | 'blocked' | 'recovery' | 'error';
   ownerId?: string;
   recoverableOwners: string[];
+  keptOwners?: string[];
   error?: OutboxJson;
 }
 
@@ -94,7 +95,8 @@ export async function createLocalSaveSession(options: Options) {
   }
   function assertOpen() {
     if (!closed && recoveryError) throw recoveryError;
-    if (closed || !box || resolving) throw new Error('Local save session is closed, resolving or awaiting recovery');
+    if (closed || !box) throw new Error('Local save session is closed or awaiting recovery');
+    if (resolving) throw new Error('Local save session is resolving');
   }
   function checkBasis(value: TimelineCommandBasis) {
     if (!value.head.revisionId || !value.head.publicationId
@@ -263,7 +265,7 @@ export async function createLocalSaveSession(options: Options) {
         checkBasis(basis);
       }
       box = claimed;
-      state = { status: 'saved', recoverableOwners: [], ownerId: id };
+      state = { status: 'saved', recoverableOwners: [], keptOwners: state.keptOwners ?? [], ownerId: id };
       // A recovered accepted prefix must win over its old optimistic suffix,
       // including when the next request already has uncertain durable bytes.
       replaying = !!record.accepted && record.intents.length > 0;
@@ -292,7 +294,9 @@ export async function createLocalSaveSession(options: Options) {
     }
   }
 
-  const owners = (await storage.list(options.scope)).filter((owner) => owner.disposition !== 'kept-copy' && (owner.intents.length || owner.pending));
+  const allOwners = await storage.list(options.scope);
+  state.keptOwners = allOwners.filter((owner) => owner.disposition === 'kept-copy').map((owner) => owner.ownerId);
+  const owners = allOwners.filter((owner) => owner.disposition !== 'kept-copy' && (owner.intents.length || owner.pending));
   state.recoverableOwners = owners.map((owner) => owner.ownerId);
   if (owners.length) publish('recovery');
   else await claim();
@@ -384,6 +388,24 @@ export async function createLocalSaveSession(options: Options) {
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');
       await claim(ownerId);
       await pump();
+    },
+    /** Explicitly reopen one parked owner; never retry it automatically. */
+    async recoverKept(ownerId: string) {
+      assertOpen();
+      if (state.status !== 'saved' || !state.keptOwners?.includes(ownerId) || sending) throw new Error('Kept copy cannot be opened while edits are pending');
+      resolving = true;
+      try {
+        await writes;
+        await storage.recover(options.scope, ownerId, (claimed) => claimed.restoreParked());
+        release?.();
+        await lifetime;
+        lifetime = undefined;
+        release = undefined;
+        box = undefined;
+        state.keptOwners = state.keptOwners.filter((id) => id !== ownerId);
+        await claim(ownerId);
+        await pump();
+      } finally { resolving = false; }
     },
     async dispose() {
       closed = true;

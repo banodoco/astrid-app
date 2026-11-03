@@ -1,12 +1,132 @@
 import { describe, expect, it } from 'vitest';
 import { AstridRuntimeClient, RUNTIME_CLIENT_SCOPES } from './client.ts';
 import { RuntimeDataProvider } from './dataProvider.ts';
-import type { Transport } from './generated.ts';
+import type { CommitRequest, Transport } from './generated.ts';
 import { RUNTIME_SCHEMA_DIGEST, RUNTIME_TARGETED_EXECUTION_CAPABILITY } from './contract-metadata.ts';
 import { PROJECT_ID, TIMELINE_ID, json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
 import { acceptedCommit } from './__tests__/timelineCommitFixture.ts';
 
+async function waitForRenewalReplies(
+  replies: Map<number, (value: Awaited<ReturnType<Transport>>) => void>,
+  sequences: number[],
+) {
+  for (let attempt = 0; attempt < 100 && sequences.some(sequence => !replies.has(sequence)); attempt++) {
+    await new Promise(resolve => setTimeout(resolve, 1));
+  }
+  expect(sequences.every(sequence => replies.has(sequence))).toBe(true);
+}
+
 describe('Runtime timeline editing lease client', () => {
+  it('accepts a same-sequence retry after a lost initial PUT acknowledgement', async () => {
+    const fixture = runtimeFixture();
+    const requests: Array<{ method: string; path: string; headers: Record<string, string>; body: string }> = [];
+    let firstPut = true;
+    const wireBody: CommitRequest = {
+      api_version: 1, project_id: PROJECT_ID, timeline_id: TIMELINE_ID,
+      base_revision_id: 'r0', base_publication_id: 'p0', source: { via: 'app' },
+      commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: 'App' } } }],
+    };
+    const transport: Transport = async (method, path, headers, body) => {
+      const request = { method, path, headers, body: body ? new TextDecoder().decode(body) : '' };
+      requests.push(request);
+      if (path.endsWith('/editing')) {
+        if (method === 'PUT' && firstPut) {
+          firstPut = false;
+          throw new TypeError('connection lost after Runtime accepted request');
+        }
+        const payload = JSON.parse(request.body);
+        return { status: 200, headers: {}, body: json({ data: { ...payload,
+          active: method === 'PUT', expires_in_seconds: method === 'PUT' ? 10 : 0 } }) };
+      }
+      if (path.endsWith('/commit')) {
+        return { status: 200, headers: {}, body: json(acceptedCommit(
+          { revision_id: 'r1', publication_id: 'p1' }, { revision_id: 'r0', publication_id: 'p0' })) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+    const client = new AstridRuntimeClient({ baseUrl: 'http://runtime.test', transport });
+    const leaseBody = { tab_session_id: 'retry-owner', sequence: 1 };
+
+    await expect(client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, leaseBody)).rejects.toThrow(TypeError);
+    await client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, leaseBody);
+    await client.commitTimeline(PROJECT_ID, TIMELINE_ID, wireBody, 'retry-body-key');
+
+    const puts = requests.filter(request => request.method === 'PUT' && request.path.endsWith('/editing'));
+    const commit = requests.find(request => request.method === 'POST' && request.path.endsWith('/commit'))!;
+    expect(puts).toHaveLength(2);
+    expect(puts.map(request => JSON.parse(request.body))).toEqual([leaseBody, leaseBody]);
+    expect(commit.headers['X-Timeline-Editing-Session']).toBe('retry-owner');
+    expect(commit.headers['Idempotency-Key']).toBe('retry-body-key');
+    expect(JSON.parse(commit.body)).toEqual(wireBody);
+  });
+
+  it('keeps same-generation renewals usable when acknowledgements arrive out of order', async () => {
+    const fixture = runtimeFixture();
+    const renewalReplies = new Map<number, (value: Awaited<ReturnType<Transport>>) => void>();
+    const commits: Array<{ key?: string; headers: Record<string, string>; body: string }> = [];
+    const transport: Transport = async (method, path, headers, body) => {
+      if (path.endsWith('/editing')) {
+        const request = JSON.parse(new TextDecoder().decode(body));
+        if (method === 'PUT') {
+          return await new Promise(resolve => renewalReplies.set(request.sequence, resolve));
+        }
+        return { status: 200, headers: {}, body: json({ data: { ...request,
+          active: method === 'PUT', expires_in_seconds: method === 'PUT' ? 10 : 0 } }) };
+      }
+      if (path.endsWith('/commit')) {
+        commits.push({ key: headers['Idempotency-Key'] ?? headers['idempotency-key'], headers, body: new TextDecoder().decode(body) });
+        return { status: 200, headers: {}, body: json(acceptedCommit(
+          { revision_id: 'r1', publication_id: 'p1' }, { revision_id: 'r0', publication_id: 'p0' })) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+    const client = new AstridRuntimeClient({ baseUrl: 'http://runtime.test', transport });
+    const wireBody: CommitRequest = {
+      api_version: 1, project_id: PROJECT_ID, timeline_id: TIMELINE_ID,
+      base_revision_id: 'r0', base_publication_id: 'p0', source: { via: 'app' },
+      commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: 'App' } } }],
+    };
+    const sendCommit = () => client.commitTimeline(PROJECT_ID, TIMELINE_ID, wireBody, 'same-body-key');
+
+    const initial = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 1 });
+    const earlier = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 2 });
+    const later = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 3 });
+    await waitForRenewalReplies(renewalReplies, [1, 2, 3]);
+
+    // The initial successful acknowledgment arrives while renewals 2 and 3 are pending.
+    // It must make the cold-start owner usable even though newer requests were already sent.
+    renewalReplies.get(1)!({ status: 200, headers: {}, body: json({ data: {
+      tab_session_id: 'stable-owner', sequence: 1, active: true, expires_in_seconds: 10,
+    } }) });
+    await initial;
+    await sendCommit();
+
+    // A later successful renewal remains usable while the newest request is still in flight.
+    renewalReplies.get(2)!({ status: 200, headers: {}, body: json({ data: {
+      tab_session_id: 'stable-owner', sequence: 2, active: true, expires_in_seconds: 10,
+    } }) });
+    await earlier;
+    await sendCommit();
+
+    // A later request is acknowledged first; the delayed lower sequence must not fence it.
+    const newest = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 4 });
+    await waitForRenewalReplies(renewalReplies, [4]);
+    renewalReplies.get(4)!({ status: 200, headers: {}, body: json({ data: {
+      tab_session_id: 'stable-owner', sequence: 4, active: true, expires_in_seconds: 10,
+    } }) });
+    await newest;
+    renewalReplies.get(3)!({ status: 200, headers: {}, body: json({ data: {
+      tab_session_id: 'stable-owner', sequence: 3, active: true, expires_in_seconds: 10,
+    } }) });
+    await later;
+    await sendCommit();
+
+    expect(commits).toHaveLength(3);
+    expect(commits.map(commit => commit.key)).toEqual(['same-body-key', 'same-body-key', 'same-body-key']);
+    expect(commits.map(commit => commit.headers['X-Timeline-Editing-Session'])).toEqual(['stable-owner', 'stable-owner', 'stable-owner']);
+    expect(commits.map(commit => commit.body)).toEqual([JSON.stringify(wireBody), JSON.stringify(wireBody), JSON.stringify(wireBody)]);
+  });
+
   it('sends only its acknowledged timeline lease credential and fences late renewal acknowledgements after release', async () => {
     const fixture = runtimeFixture();
     const sent: Array<{ path: string; credential?: string }> = [];

@@ -35,7 +35,9 @@ function fakeStorage(initial: Record<string, string> = {}) {
 }
 
 const interactionStates = new WeakMap<object, { current: ReturnType<typeof createInteractionState> }>();
-function options(provider: DataProvider, overrides: Partial<Parameters<typeof useTimelineEditingLease>[0]> = {}) {
+type LeaseOptions = Parameters<typeof useTimelineEditingLease>[0];
+type LeaseOverrides = Partial<LeaseOptions> & { reconcileCanonical?: () => Promise<void> };
+function options(provider: DataProvider, overrides: LeaseOverrides = {}) {
   let interactionState = interactionStates.get(provider);
   if (!interactionState) {
     interactionState = { current: createInteractionState() };
@@ -72,6 +74,246 @@ describe('useTimelineEditingLease', () => {
     await act(async () => { finish(); await Promise.resolve(); });
     expect(hook.result.current).toBe(true);
     hook.unmount();
+  });
+
+  it('keeps admission pending through a slow renewal and reconciles canonical state before acknowledging admission', async () => {
+    const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
+    const events: string[] = [];
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn((_timelineId, tab, sequence) => new Promise((resolve) => {
+      pending.set(sequence, (value) => resolve(value));
+    }));
+    let finishReconcile!: () => void;
+    const root = document.createElement('div');
+    const input = document.createElement('input');
+    root.append(input);
+    document.body.append(root);
+    const shellRootRef = { current: root };
+    const reconcileCanonical = vi.fn(() => {
+      events.push('canonical-reconcile-start');
+      return new Promise<void>(resolve => { finishReconcile = () => { events.push('canonical-reconcile-finish'); resolve(); }; });
+    });
+    const hook = renderHook(() => useTimelineEditingLease(options(provider, {
+      editSeq: 1, dirty: true, reconcileCanonical, shellRootRef,
+    })));
+    act(() => input.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true, cancelable: true, data: 'A', inputType: 'insertText',
+    })));
+    expect(input.value).toBe('');
+    expect(hook.result.current).toBe(false);
+    await act(async () => {
+      vi.advanceTimersByTime(TIMELINE_EDITING_LEASE_RENEW_MS + 500);
+      const tab = provider.timelineEditingLease!.renew.mock.calls[0][1] as string;
+      pending.get(1)!(response(tab, 1));
+      await Promise.resolve();
+    });
+    expect(provider.timelineEditingLease!.renew).toHaveBeenCalledTimes(2);
+    expect(reconcileCanonical).toHaveBeenCalledTimes(1);
+    expect(hook.result.current).toBe(false);
+    expect(input.value).toBe('');
+    expect(events).toEqual(['canonical-reconcile-start']);
+    await act(async () => {
+      finishReconcile();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+    });
+    expect(events).toEqual(['canonical-reconcile-start', 'canonical-reconcile-finish']);
+    expect(input.value).toBe('A');
+    expect(hook.result.current).toBe(true);
+    hook.unmount();
+    root.remove();
+  });
+
+  it('replays cumulative native beforeinput insertions in order after admission', async () => {
+    const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn((_timelineId, tab, sequence) => new Promise((resolve) => {
+      pending.set(sequence, value => resolve(value));
+    }));
+    const root = document.createElement('div');
+    const input = document.createElement('input');
+    root.append(input);
+    document.body.append(root);
+    const shellRootRef = { current: root };
+    const reconcileCanonical = vi.fn(async () => {});
+    const hook = renderHook(() => useTimelineEditingLease(options(provider, { reconcileCanonical, shellRootRef })));
+
+    act(() => {
+      for (const data of ['A', 'B', 'C']) input.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true, cancelable: true, data, inputType: 'insertText',
+      }));
+    });
+    expect(input.value).toBe('');
+    const [tab, sequence] = provider.timelineEditingLease!.renew.mock.calls[0].slice(1) as [string, number];
+    await act(async () => {
+      pending.get(sequence)!(response(tab, sequence));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(reconcileCanonical).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('ABC');
+    expect(hook.result.current).toBe(true);
+    hook.unmount();
+    root.remove();
+  });
+
+  it('replays the captured full field value over a refreshed canonical value', async () => {
+    const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn((_timelineId, tab, sequence) => new Promise((resolve) => {
+      pending.set(sequence, value => resolve(value));
+    }));
+    const root = document.createElement('div');
+    const input = document.createElement('input');
+    input.value = 'User baseline';
+    input.setSelectionRange(input.value.length, input.value.length);
+    root.append(input);
+    document.body.append(root);
+    const shellRootRef = { current: root };
+    const reconcileCanonical = vi.fn(async () => {
+      input.value = 'Agent before admission';
+    });
+    const hook = renderHook(() => useTimelineEditingLease(options(provider, { reconcileCanonical, shellRootRef })));
+
+    act(() => input.dispatchEvent(new InputEvent('beforeinput', {
+      bubbles: true, cancelable: true, data: '!', inputType: 'insertText',
+    })));
+    expect(input.value).toBe('User baseline');
+    const [tab, sequence] = provider.timelineEditingLease!.renew.mock.calls[0].slice(1) as [string, number];
+    await act(async () => {
+      pending.get(sequence)!(response(tab, sequence));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(reconcileCanonical).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('User baseline!');
+    expect(hook.result.current).toBe(true);
+    hook.unmount();
+    root.remove();
+  });
+
+  it('replaces cumulative cancelable IME composition text while admission is pending', async () => {
+    const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn((_timelineId, tab, sequence) => new Promise((resolve) => {
+      pending.set(sequence, value => resolve(value));
+    }));
+    const root = document.createElement('div');
+    const input = document.createElement('input');
+    root.append(input);
+    document.body.append(root);
+    const shellRootRef = { current: root };
+    const reconcileCanonical = vi.fn(async () => {});
+    const hook = renderHook(() => useTimelineEditingLease(options(provider, { reconcileCanonical, shellRootRef })));
+
+    act(() => {
+      input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+      input.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true, cancelable: true, data: 'n', inputType: 'insertCompositionText', isComposing: true,
+      }));
+      input.dispatchEvent(new CompositionEvent('compositionupdate', { bubbles: true, data: 'ni' }));
+      input.dispatchEvent(new InputEvent('beforeinput', {
+        bubbles: true, cancelable: true, data: 'ni', inputType: 'insertCompositionText', isComposing: true,
+      }));
+      input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true, data: 'ni' }));
+    });
+    expect(input.value).toBe('');
+    const [tab, sequence] = provider.timelineEditingLease!.renew.mock.calls[0].slice(1) as [string, number];
+    await act(async () => {
+      pending.get(sequence)!(response(tab, sequence));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(reconcileCanonical).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('ni');
+    expect(hook.result.current).toBe(true);
+    hook.unmount();
+    root.remove();
+  });
+
+  it('replays queued caret movement between native insertions', async () => {
+    const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn((_timelineId, tab, sequence) => new Promise((resolve) => {
+      pending.set(sequence, value => resolve(value));
+    }));
+    const root = document.createElement('div');
+    const input = document.createElement('input');
+    root.append(input);
+    document.body.append(root);
+    const shellRootRef = { current: root };
+    const reconcileCanonical = vi.fn(async () => {});
+    const hook = renderHook(() => useTimelineEditingLease(options(provider, { reconcileCanonical, shellRootRef })));
+
+    act(() => {
+      input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, data: 'A', inputType: 'insertText' }));
+      input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, data: 'B', inputType: 'insertText' }));
+      input.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowLeft' }));
+      input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, data: 'C', inputType: 'insertText' }));
+    });
+    expect(input.value).toBe('');
+    const [tab, sequence] = provider.timelineEditingLease!.renew.mock.calls[0].slice(1) as [string, number];
+    await act(async () => {
+      pending.get(sequence)!(response(tab, sequence));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(0);
+      await Promise.resolve();
+    });
+
+    expect(reconcileCanonical).toHaveBeenCalledTimes(1);
+    expect(input.value).toBe('ACB');
+    expect(hook.result.current).toBe(true);
+    hook.unmount();
+    root.remove();
+  });
+
+  it('queues a gesture start and its outside-shell movement and release until admission completes', async () => {
+    const pending = new Map<number, (value: ReturnType<typeof response>) => void>();
+    const provider = makeProvider();
+    provider.timelineEditingLease!.renew = vi.fn((_timelineId, tab, sequence) => new Promise((resolve) => {
+      pending.set(sequence, value => resolve(value));
+    }));
+    const root = document.createElement('div');
+    const target = document.createElement('button');
+    const outside = document.createElement('div');
+    root.append(target);
+    document.body.append(root, outside);
+    const shellRootRef = { current: root };
+    const observed: string[] = [];
+    target.addEventListener('pointerdown', () => observed.push('down'));
+    target.addEventListener('pointermove', () => observed.push('move'));
+    target.addEventListener('pointerup', () => observed.push('up'));
+    const reconcileCanonical = vi.fn(async () => {});
+    const hook = renderHook(() => useTimelineEditingLease(options(provider, {
+      reconcileCanonical, shellRootRef,
+    })));
+    act(() => {
+      target.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, cancelable: true, clientX: 10, clientY: 12 }));
+      outside.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, cancelable: true, clientX: 15, clientY: 18 }));
+      outside.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, cancelable: true, clientX: 15, clientY: 18 }));
+    });
+    expect(observed).toEqual([]);
+    expect(provider.timelineEditingLease!.renew).toHaveBeenCalledTimes(1);
+    const [tab, sequence] = provider.timelineEditingLease!.renew.mock.calls[0].slice(1) as [string, number];
+    await act(async () => {
+      pending.get(sequence)!(response(tab, sequence));
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(1);
+      await Promise.resolve();
+    });
+    expect(reconcileCanonical).toHaveBeenCalledTimes(1);
+    expect(observed).toEqual(['down', 'move', 'up']);
+    expect(hook.result.current).toBe(true);
+    hook.unmount();
+    root.remove();
+    outside.remove();
   });
 
   it('renews every three seconds while editing and sends no heartbeat while idle', () => {
@@ -245,6 +487,36 @@ describe('useTimelineEditingLease', () => {
     expect(activeLeases.has(tabAId as string)).toBe(false);
     expect(activeLeases.has(tabBId as string)).toBe(true);
     tabB.unmount();
+  });
+
+  it('gives two mounted editors using the same sessionStorage independent lease owners', () => {
+    const provider = makeProvider();
+    const active = new Set<string>();
+    provider.timelineEditingLease!.renew = vi.fn(async (_timelineId, tab, sequence) => {
+      active.add(tab);
+      return response(tab, sequence);
+    });
+    provider.timelineEditingLease!.release = vi.fn(async (_timelineId, tab, sequence) => {
+      active.delete(tab);
+      return response(tab, sequence, false);
+    });
+    const storage = fakeStorage();
+    Object.defineProperty(window, 'sessionStorage', { configurable: true, value: storage });
+
+    const first = renderHook(() => useTimelineEditingLease(options(provider, { dirty: true, editSeq: 1 })));
+    const second = renderHook(() => useTimelineEditingLease(options(provider, { dirty: true, editSeq: 1 })));
+    const firstTab = provider.timelineEditingLease!.renew.mock.calls[0][1] as string;
+    const secondTab = provider.timelineEditingLease!.renew.mock.calls[1][1] as string;
+    expect(firstTab).not.toBe(secondTab);
+    expect(active).toEqual(new Set([firstTab, secondTab]));
+
+    first.unmount();
+
+    expect(provider.timelineEditingLease!.release).toHaveBeenCalledTimes(1);
+    expect(provider.timelineEditingLease!.release.mock.calls[0][1]).toBe(firstTab);
+    expect(active.has(firstTab)).toBe(false);
+    expect(active.has(secondTab)).toBe(true);
+    second.unmount();
   });
 
   it('renews on visibility restoration and pageshow after a best-effort pagehide release', () => {

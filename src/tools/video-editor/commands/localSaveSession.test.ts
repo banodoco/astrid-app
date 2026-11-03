@@ -423,7 +423,7 @@ describe('local editor saves through the durable outbox', () => {
     });
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(session.getState()).toMatchObject({ status: status === 409 ? 'conflict' : 'error', error: { code: 'binding_changed', details } });
-    expect(env.visible()).toEqual(canonical.canonicalDocument.parent_revision.payload);
+    expect(env.visible()).toEqual(status === 409 ? trimmed : canonical.canonicalDocument.parent_revision.payload);
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents).toHaveLength(1);
     expect(stored.intents[0].payload).toEqual(originalRecord.intents[1].payload);
@@ -432,6 +432,8 @@ describe('local editor saves through the durable outbox', () => {
     const recovered = await env.mount();
     await recovered.recover(stored.ownerId);
     expect(recovered.getState().status).toBe(status === 409 ? 'conflict' : 'error');
+    expect(env.visible()).toEqual(status === 409 ? trimmed : canonical.canonicalDocument.parent_revision.payload);
+    if (status === 409) expect(env.prepareDisplay).toHaveBeenLastCalledWith(expect.objectContaining({ head: h0 }), trimmed);
     expect(env.send).toHaveBeenCalledTimes(2);
     expect((await env.outboxes.list(scope))[0].pending?.request).toEqual(exact);
     await recovered.dispose();

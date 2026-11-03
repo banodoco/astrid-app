@@ -119,11 +119,28 @@ export async function createLocalSaveSession(options: Options) {
     // the user must reload history before another undo can be offered.
     const conflict = inverse || (failure.error && typeof failure.error === 'object' && !Array.isArray(failure.error)
       && failure.error.kind === 'conflict');
+    // Restore the complete authored suffix, even if an accepted prefix was
+    // projected while the next request was in flight or this owner recovered
+    // after a restart. Keep uses the displayed draft and its original basis.
+    if (conflict && !inverse && record?.intents.length) {
+      try {
+        const last = saveOf(record.intents[record.intents.length - 1].payload);
+        const draftBasis = clone(last.displayBasis);
+        checkBasis(draftBasis);
+        const draft = clone(last.after);
+        const prepared = await options.prepareDisplay(draftBasis, draft);
+        if (closed || at !== generation) return true;
+        displayBasis = draftBasis;
+        document = toOutboxJson(prepared.document);
+        prepared.adopt();
+        publish('conflict', failure.error);
+      } catch (error) {
+        if (closed || at !== generation) return true;
+        publish('error', { failure: failure.error, message: `Draft retained; restore failed: ${errorMessage(error)}` });
+      }
+      return true;
+    }
     publish(conflict ? 'conflict' : 'error', failure.error);
-    // Ordinary edit conflicts need the visible draft for the conflict dialog's
-    // Keep action. Replacing it with the remote head makes that action preserve
-    // the other writer's work instead. Guarded history inverses still reload.
-    if (conflict && !inverse) return true;
     try {
       const latest = await options.loadLatest();
       checkBasis(latest);

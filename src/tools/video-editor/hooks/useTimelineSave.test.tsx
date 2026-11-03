@@ -544,7 +544,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(stored.intents[0].payload).toMatchObject({ after: { parent_revision: { payload: { config: { clips: mode === 'video'
             ? [expect.any(Object), expect.objectContaining({ hold: .5, at: 2 }), expect.any(Object), expect.any(Object)]
             : [{ hold: 1, at: 1.2667 }] } } } } });
-          expect(harness.hook.result.current.dataRef.current!.config.clips[mode === 'video' ? 1 : 0].at).toBe(canonicalAt);
+          expect(harness.hook.result.current.dataRef.current!.config.clips[mode === 'video' ? 1 : 0]).toMatchObject({ at: mode === 'video' ? 2 : 1.2667, hold: mode === 'video' ? .5 : 1 });
           expect(harness.hook.result.current.localSaveState?.error).toMatchObject({ message: expect.stringContaining('Media track changed') });
           return;
         }
@@ -559,7 +559,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(stored.intents).toHaveLength(1);
           expect(stored.intents[0].payload).toMatchObject({ after: { parent_revision: { payload: { config: { clips: mode === 'video'
             ? [expect.any(Object), expect.any(Object), expect.any(Object), expect.any(Object)] : [expect.any(Object)] } } } } });
-          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual(data.config.clips);
+          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual((stored.intents[0].payload as any).after.parent_revision.payload.config.clips);
           expect(harness.hook.result.current.localSaveState?.error).toMatchObject({ message: expect.stringContaining('Media track changed') });
           return;
         }
@@ -783,7 +783,9 @@ describe('useTimelineSave — recovered draft durability', () => {
           await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status)
             .toBe(boundary === 'before poll adoption' ? 'conflict' : 'saved'));
           expect(harness.hook.result.current.dataRef.current?.config.clips.find((clip) => clip.id === rightId))
-            .toEqual({ ...right, from: boundary === 'before poll adoption' ? 0 : 3 });
+            .toEqual(boundary === 'before poll adoption'
+              ? (intent.payload as any).after.parent_revision.payload.config.clips.find((clip: { id: string }) => clip.id === rightId)
+              : { ...right, from: 3 });
         }
         expect(harness.saveTimeline).not.toHaveBeenCalled();
       } finally {
@@ -1561,7 +1563,11 @@ describe('useTimelineSave — recovered draft durability', () => {
           steps: [{ command_ordinals: [0], intent: 'Save local editor changes' }] });
         if (outcome === 'conflict' || outcome === 'invalid') {
           expect(stored.intents).toHaveLength(1);
-          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(config.output.file);
+          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(outcome === 'conflict' ? 'authored.mp4' : config.output.file);
+          if (outcome === 'conflict') {
+            await act(async () => { await harness.hook.result.current.retrySaveAfterConflict(); });
+            expect((await loadTimelineDraft('timeline-1'))?.draft.config.output.file).toBe('authored.mp4');
+          }
           expect(harness.hook.result.current.localSaveState?.status).toBe(outcome === 'conflict' ? 'conflict' : 'error');
         } else if (restart) {
           const exact = structuredClone(send.mock.calls[0]);

@@ -661,26 +661,28 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
           Output · source tracks excluded
         </div>
       )}
-      {displayedRevisionLabel && (
-        <div
-          data-testid="preview-revision-label"
-          aria-label={displayedRevisionLabel}
-          title={delivery.revision.reason}
-          className="pointer-events-none absolute right-3 top-3 z-10 rounded bg-background/90 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
-        >
-          {displayedRevisionLabel}
-        </div>
-      )}
-      {unavailableTarget && (
-        <div
-          data-testid="preview-revision-unavailable"
-          aria-label={previewUnavailableLabel(unavailableTarget)}
-          title={unavailableTarget.reason}
-          className="pointer-events-none absolute right-3 top-10 z-10 max-w-[min(75%,24rem)] rounded bg-destructive/90 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-destructive-foreground"
-        >
-          {previewUnavailableLabel(unavailableTarget)}
-        </div>
-      )}
+      <div className="pointer-events-none absolute right-3 top-3 z-10 flex max-w-[min(75%,24rem)] flex-col items-end gap-1">
+        {displayedRevisionLabel && (
+          <div
+            data-testid="preview-revision-label"
+            aria-label={displayedRevisionLabel}
+            title={delivery.revision.reason}
+            className="max-w-full break-all rounded bg-background/90 px-2 py-1 text-[10px] uppercase tracking-[0.12em] text-muted-foreground"
+          >
+            {displayedRevisionLabel}
+          </div>
+        )}
+        {unavailableTarget && (
+          <div
+            data-testid="preview-revision-unavailable"
+            aria-label={previewUnavailableLabel(unavailableTarget)}
+            title={unavailableTarget.reason}
+            className="max-w-full break-all rounded bg-destructive/90 px-2 py-1 text-[10px] uppercase tracking-[0.08em] text-destructive-foreground"
+          >
+            {previewUnavailableLabel(unavailableTarget)}
+          </div>
+        )}
+      </div>
       <div className="h-full w-full">
         <Player
           ref={playerRef}

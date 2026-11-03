@@ -12,15 +12,18 @@ export type PreviewRevision = Readonly<{
 }>;
 
 export function previewRevisionLabel(revision: PreviewRevision): string {
+  if (revision.kind === 'committed' && revision.revisionId) {
+    return `Committed ${revision.revisionId}`;
+  }
   if (revision.kind === 'local') {
     return 'Unsaved local';
   }
   if (revision.kind === 'unavailable') {
-    return 'Preview unavailable';
+    return revision.unavailableTarget ? previewUnavailableLabel(revision.unavailableTarget) : 'Preview unavailable';
   }
   return '';
 }
 
-export function previewUnavailableLabel(_target: PreviewUnavailableTarget): string {
-  return 'Preview unavailable';
+export function previewUnavailableLabel(target: PreviewUnavailableTarget): string {
+  return target.targetRevisionId ? `Preview of ${target.targetRevisionId} unavailable` : 'Preview unavailable';
 }

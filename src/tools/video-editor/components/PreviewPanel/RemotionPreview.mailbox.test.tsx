@@ -220,20 +220,23 @@ it('cancels pending mailbox and paused timer work on unmount', () => {
   expect(boundary.applied).not.toContain(b);
 });
 
-it('keeps the committed revision identity out of the preview caption', () => {
+it('labels the delivered committed revision and a distinct unavailable target', () => {
   const revisionId = `authoring-parent-revision-${'a'.repeat(64)}`;
-  const { view } = preview(config('accepted'), { kind: 'committed', revisionId });
+  const targetRevisionId = `authoring-parent-revision-${'b'.repeat(64)}`;
+  preview(config('accepted'), { kind: 'committed', revisionId,
+    unavailableTarget: { targetRevisionId, reason: 'Could not load target' } });
 
-  expect(screen.queryByTestId('preview-revision-label')).not.toBeInTheDocument();
-  expect(view.container).not.toHaveTextContent(revisionId);
-  expect(boundary.props.inputProps.previewRevision).toEqual({ kind: 'committed', revisionId });
+  expect(screen.getByTestId('preview-revision-label')).toHaveTextContent(`Committed ${revisionId}`);
+  expect(screen.getByTestId('preview-revision-unavailable')).toHaveTextContent(`Preview of ${targetRevisionId} unavailable`);
+  expect(boundary.props.inputProps.previewRevision).toEqual({ kind: 'committed', revisionId,
+    unavailableTarget: { targetRevisionId, reason: 'Could not load target' } });
 });
 
 it('keeps a pending local preview from claiming the accepted revision', () => {
   const h = preview(config('accepted'), { kind: 'committed', revisionId: 'accepted-before' });
 
   h.replace(config('pending'), { kind: 'local', baseRevisionId: 'accepted-before' });
-  expect(screen.queryByTestId('preview-revision-label')).not.toBeInTheDocument();
+  expect(screen.getByTestId('preview-revision-label')).toHaveTextContent('Committed accepted-before');
 
   advance(150);
   expect(screen.getByTestId('preview-revision-label')).toHaveTextContent(/^Unsaved local$/);

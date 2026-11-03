@@ -5,11 +5,14 @@ describe('preview captions', () => {
   const revisionId = `authoring-parent-revision-${'a'.repeat(64)}`;
   const target = { targetRevisionId: revisionId, reason: 'Preview could not be loaded' };
 
-  it('leaves saved previews unlabelled and keeps revision ids out of status captions', () => {
-    expect(previewRevisionLabel({ kind: 'committed', revisionId })).toBe('');
+  it('labels the delivered committed revision and unavailable target', () => {
+    expect(previewRevisionLabel({ kind: 'committed', revisionId })).toBe(`Committed ${revisionId}`);
+    expect(previewRevisionLabel({ kind: 'committed' })).toBe('');
     expect(previewRevisionLabel({ kind: 'unknown' })).toBe('');
     expect(previewRevisionLabel({ kind: 'local', baseRevisionId: revisionId })).toBe('Unsaved local');
-    expect(previewRevisionLabel({ kind: 'unavailable', unavailableTarget: target })).toBe('Preview unavailable');
-    expect(previewUnavailableLabel(target)).toBe('Preview unavailable');
+    expect(previewRevisionLabel({ kind: 'unavailable', unavailableTarget: target })).toBe(`Preview of ${revisionId} unavailable`);
+    expect(previewUnavailableLabel(target)).toBe(`Preview of ${revisionId} unavailable`);
+    expect(previewRevisionLabel({ kind: 'unavailable' })).toBe('Preview unavailable');
+    expect(previewUnavailableLabel({ reason: target.reason })).toBe('Preview unavailable');
   });
 });

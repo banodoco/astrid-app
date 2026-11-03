@@ -67,7 +67,7 @@ describe('Runtime timeline editing lease client', () => {
     const transport: Transport = async (method, path, headers, body) => {
       if (path.endsWith('/editing')) {
         const request = JSON.parse(new TextDecoder().decode(body));
-        if (method === 'PUT' && request.sequence > 1) {
+        if (method === 'PUT') {
           return await new Promise(resolve => renewalReplies.set(request.sequence, resolve));
         }
         return { status: 200, headers: {}, body: json({ data: { ...request,
@@ -88,12 +88,20 @@ describe('Runtime timeline editing lease client', () => {
     };
     const sendCommit = () => client.commitTimeline(PROJECT_ID, TIMELINE_ID, wireBody, 'same-body-key');
 
-    await client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 1 });
+    const initial = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 1 });
     const earlier = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 2 });
     const later = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'stable-owner', sequence: 3 });
-    await waitForRenewalReplies(renewalReplies, [2, 3]);
+    await waitForRenewalReplies(renewalReplies, [1, 2, 3]);
 
-    // The earlier successful renewal arrives while a newer renewal is still in flight.
+    // The initial successful acknowledgment arrives while renewals 2 and 3 are pending.
+    // It must make the cold-start owner usable even though newer requests were already sent.
+    renewalReplies.get(1)!({ status: 200, headers: {}, body: json({ data: {
+      tab_session_id: 'stable-owner', sequence: 1, active: true, expires_in_seconds: 10,
+    } }) });
+    await initial;
+    await sendCommit();
+
+    // A later successful renewal remains usable while the newest request is still in flight.
     renewalReplies.get(2)!({ status: 200, headers: {}, body: json({ data: {
       tab_session_id: 'stable-owner', sequence: 2, active: true, expires_in_seconds: 10,
     } }) });
@@ -113,10 +121,10 @@ describe('Runtime timeline editing lease client', () => {
     await later;
     await sendCommit();
 
-    expect(commits).toHaveLength(2);
-    expect(commits.map(commit => commit.key)).toEqual(['same-body-key', 'same-body-key']);
-    expect(commits.map(commit => commit.headers['X-Timeline-Editing-Session'])).toEqual(['stable-owner', 'stable-owner']);
-    expect(commits.map(commit => commit.body)).toEqual([JSON.stringify(wireBody), JSON.stringify(wireBody)]);
+    expect(commits).toHaveLength(3);
+    expect(commits.map(commit => commit.key)).toEqual(['same-body-key', 'same-body-key', 'same-body-key']);
+    expect(commits.map(commit => commit.headers['X-Timeline-Editing-Session'])).toEqual(['stable-owner', 'stable-owner', 'stable-owner']);
+    expect(commits.map(commit => commit.body)).toEqual([JSON.stringify(wireBody), JSON.stringify(wireBody), JSON.stringify(wireBody)]);
   });
 
   it('sends only its acknowledged timeline lease credential and fences late renewal acknowledgements after release', async () => {

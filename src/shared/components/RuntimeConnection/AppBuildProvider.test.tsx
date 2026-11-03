@@ -11,7 +11,7 @@ describe('AppBuildProvider stale-build notice', () => {
   it('stays above an interactive editor surface and reloads after mounted drafts flush', async () => {
     const reload = vi.fn();
     const flush = vi.fn(async () => undefined);
-    const unregister = registerDraftSafeReloadGuard({ label: 'Timeline', flush });
+    const unregister = registerDraftSafeReloadGuard({ label: 'Timeline', flush, isDirty: () => false });
     render(
       <AppBuildProvider reload={reload}>
         <div data-testid="editor-surface" className="fixed inset-0 z-[100100]">Editor</div>
@@ -37,6 +37,25 @@ describe('AppBuildProvider stale-build notice', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('Agent chat: bridge unavailable');
+    expect(reload).not.toHaveBeenCalled();
+    unregister();
+  });
+
+  it('requires the Timeline save even when recovery-only reload could preserve the draft', async () => {
+    const reload = vi.fn();
+    const preserveForReload = vi.fn(async () => undefined);
+    const unregister = registerDraftSafeReloadGuard({
+      label: 'Timeline',
+      flush: async () => { throw new Error('commit failed'); },
+      isDirty: () => true,
+      flushForReload: preserveForReload,
+      isDirtyForReload: () => false,
+    });
+    render(<AppBuildProvider reload={reload}>Editor</AppBuildProvider>);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not safely reload: Timeline: commit failed');
+    expect(preserveForReload).not.toHaveBeenCalled();
     expect(reload).not.toHaveBeenCalled();
     unregister();
   });

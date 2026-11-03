@@ -351,7 +351,7 @@ export class AstridRuntimeClient {
   private readonly token: string | undefined;
   private readonly transport: Transport | undefined;
   private readonly workspaceClients = new Map<string, WorkspaceClient>();
-  private readonly editingSessions = new Map<string, { tab: string; sequence: number; active: boolean }>();
+  private readonly editingSessions = new Map<string, { tab: string; sequence: number; active: boolean; wanted: boolean; acknowledgedSequence: number }>();
   private expectedIdentity: RuntimeIdentityBinding | undefined;
   /** A default client with no pinned launch binding adopts the page's runtime config on its first session. */
   private usesRuntimeConfig: boolean;
@@ -925,14 +925,25 @@ export class AstridRuntimeClient {
   async updateTimelineEditing(projectId: string, timelineId: string, body: TimelineEditingRequest): Promise<TimelineEditingResponse> {
     const key = `${this.baseUrl}/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}`;
     const previous = this.editingSessions.get(key);
-    const selected = !previous || previous.tab !== body.tab_session_id || body.sequence > previous.sequence;
-    const lease = previous && !selected ? previous
-      : { tab: body.tab_session_id, sequence: body.sequence, active: previous?.active === true && previous.tab === body.tab_session_id };
-    if (selected) this.editingSessions.set(key, lease);
+    // A renewal advances sequence inside one ownership generation. Replacing
+    // the object for every send would fence all replies on a slow connection.
+    if (previous?.tab === body.tab_session_id && body.sequence <= previous.sequence) {
+      return this.withMutation(() => this.client.updateTimelineEditing(projectId, timelineId, body));
+    }
+    const lease = previous?.tab === body.tab_session_id && previous.wanted
+      ? previous
+      : { tab: body.tab_session_id, sequence: body.sequence, active: false, wanted: true, acknowledgedSequence: -1 };
+    lease.sequence = body.sequence;
+    this.editingSessions.set(key, lease);
     return this.withMutation(async () => {
       const response = await this.client.updateTimelineEditing(projectId, timelineId, body);
-      if (this.editingSessions.get(key) === lease && response.data.tab_session_id === lease.tab
-        && response.data.sequence === lease.sequence) lease.active = response.data.active;
+      if (this.editingSessions.get(key) === lease && lease.wanted
+        && response.data.tab_session_id === lease.tab
+        && response.data.sequence === body.sequence
+        && response.data.sequence > lease.acknowledgedSequence) {
+        lease.acknowledgedSequence = response.data.sequence;
+        lease.active = response.data.active;
+      }
       return response;
     });
   }
@@ -941,7 +952,9 @@ export class AstridRuntimeClient {
     const key = `${this.baseUrl}/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}`;
     const previous = this.editingSessions.get(key);
     if (!previous || (previous.tab === body.tab_session_id && body.sequence > previous.sequence)) {
-      this.editingSessions.set(key, { tab: body.tab_session_id, sequence: body.sequence, active: false });
+      // Replace on release, including release/reacquire of the same tab ID.
+      this.editingSessions.set(key, { tab: body.tab_session_id, sequence: body.sequence,
+        active: false, wanted: false, acknowledgedSequence: body.sequence });
     }
     return this.withMutation(() => this.client.releaseTimelineEditing(projectId, timelineId, body));
   }

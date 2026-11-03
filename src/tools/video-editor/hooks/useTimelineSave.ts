@@ -473,6 +473,15 @@ export function useTimelineSave(
     nestedDraftActive: Boolean(shots.canonicalDraft),
     interactionStateRef,
     shellRootRef,
+    reconcileCanonical: async () => {
+      // Existing dirty/recovery chains keep their original basis. A connected
+      // first edit is still intent only, so canonical adoption cannot erase it.
+      if (recoveryActiveRef.current && !recoveryPendingRef.current) throw new Error('Timeline draft recovery is still loading; edit intent retained.');
+      if (commit.editSeqRef.current === savedSeqRef.current && !shots.canonicalDraft
+        && !recoveryPendingRef.current && !recoveryActiveRef.current) {
+        await persistence.reloadFromServer({ preserveDraft: true });
+      }
+    },
   });
   const { clearDeferredRecoverySave, resumeDeferredRecoverySave } = persistence;
   localOperationBoundaryRef.current = persistence.invalidateTimelineRecovery;

@@ -671,6 +671,163 @@ test('hosted-loopback interleaving-1: admission racing serialized acceptance kee
     }
   });
 
+test('hosted-loopback admission-1: input waits for lease acknowledgement and reconciles a publication made before admission',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    const base = (await history(harness, seed3)).head;
+    const userLabel = 'Queued user input after canonical reconcile';
+    const agentLabel = 'Agent published before admission';
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    let releaseInitialPut!: () => void;
+    let initialPutHeld!: () => void;
+    const putGate = new Promise<void>(resolve => { releaseInitialPut = resolve; });
+    const held = new Promise<void>(resolve => { initialPutHeld = resolve; });
+    let firstPut = true;
+    let initialPutReleased = false;
+    const appSavePosts: Request[] = [];
+    page.on('request', request => {
+      if (request.method() === 'POST' && COMMITS.test(new URL(request.url()).pathname)) appSavePosts.push(request);
+    });
+    const routeInitialPut = async (route: Route) => {
+      if (route.request().method() === 'PUT' && !initialPutReleased) {
+        if (firstPut) { firstPut = false; initialPutHeld(); }
+        await putGate;
+        await route.continue();
+      } else await route.fallback();
+    };
+    await page.route(editingPath, routeInitialPut);
+    try {
+      await openApp(page, harness);
+      await expectConnected(page);
+      await openSeededTimeline(page, harness);
+      await expectSameRealm(page, harness, astrid);
+      const field = firstTrackName(page);
+      const leaseAckPromise = page.waitForResponse(response => response.request().method() === 'PUT'
+        && editingPath.test(new URL(response.url()).pathname), CEILING);
+      await field.fill(userLabel);
+      await held;
+      const agentKey = `hosted-loopback-admission-${seed3.timelineId}`;
+      const agentOutcome = await astrid.commitTrackLabelFromBase(seed3.projectSlug, seed3.timelineId, base,
+        'S1', agentLabel, agentKey);
+      expect(agentOutcome.kind, JSON.stringify(agentOutcome)).toBe('accepted');
+      const agentPin = pinOf(agentOutcome.result);
+      expect((await history(harness, seed3)).head.revision_id)
+        .toBe(agentPin.revision_id);
+      expect(appSavePosts, 'queued input cannot publish before lease acknowledgement and reconciliation').toHaveLength(0);
+      const postAdmissionSave = page.waitForResponse(response => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      initialPutReleased = true;
+      releaseInitialPut();
+      const leaseAck = await leaseAckPromise;
+      expect(leaseAck.status(), 'the real Runtime acknowledged the delayed initial PUT').toBe(200);
+      const leaseReceipt = await leaseAck.json();
+      expect(leaseReceipt.data).toMatchObject({ active: true, sequence: expect.any(Number), tab_session_id: expect.any(String) });
+      await expect(field).toHaveValue(userLabel, CEILING);
+      const appSave = await postAdmissionSave;
+      expect(appSave.status(), 'the App saved the queued input after canonical reconciliation').toBe(200);
+      const saved = await appSave.json() as CommitAcceptedMutation;
+      expect(appSave.request().headers()['x-timeline-editing-session']).toBe(leaseReceipt.data.tab_session_id);
+      expect(appSave.request().postDataJSON()).toMatchObject({
+        base_revision_id: agentOutcome.result.data.accepted_revision_id,
+        base_publication_id: agentPin.publication_id,
+        source: { via: 'app' },
+      });
+      const final = await revisionState(harness, seed3, saved.data.accepted_revision_id);
+      expect(final.trackLabel).toBe(userLabel);
+      expect(final.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe(agentLabel);
+    } finally {
+      initialPutReleased = true;
+      releaseInitialPut();
+      await page.unroute(editingPath, routeInitialPut).catch(() => {});
+    }
+  });
+
+test('hosted-loopback renewal-1: slow renewal replies keep save live and late renewal after release stays fenced',
+  async ({ page, harness, astrid, seed3 }) => {
+    await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+    const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+    const trace: Array<{ kind: string; method: string; sequence?: number; status?: number; elapsedMs?: number }> = [];
+    let delayedCommitSeen!: () => void;
+    let releaseCommit!: () => void;
+    const commitHeld = new Promise<void>(resolve => { delayedCommitSeen = resolve; });
+    const commitGate = new Promise<void>(resolve => { releaseCommit = resolve; });
+    let heldFirstCommit = false;
+    const delayedRenewals: Array<Promise<void>> = [];
+    const routeEditing = async (route: Route) => {
+      const request = route.request();
+      if (request.method() !== 'PUT') return route.fallback();
+      const sequence = Number(request.postDataJSON().sequence);
+      const startedAt = Date.now();
+      trace.push({ kind: 'renew-request', method: 'PUT', sequence });
+      const responseDelay = sequence === 1 ? 3_500 : sequence === 2 ? 3_700 : 6_500;
+      const operation = (async () => {
+        const response = await route.fetch({ maxRetries: 0 });
+        await new Promise(resolve => setTimeout(resolve, responseDelay));
+        trace.push({ kind: 'renew-response-released', method: 'PUT', sequence, status: response.status(), elapsedMs: Date.now() - startedAt });
+        await route.fulfill({ response });
+      })();
+      delayedRenewals.push(operation);
+      return operation;
+    };
+    page.on('response', response => {
+      if (response.request().method() === 'DELETE' && editingPath.test(new URL(response.url()).pathname)) {
+        trace.push({ kind: 'release-ack', method: 'DELETE', status: response.status() });
+      }
+    });
+    const routeCommit = async (route: Route) => {
+      if (route.request().method() !== 'POST' || heldFirstCommit) return route.fallback();
+      heldFirstCommit = true;
+      delayedCommitSeen();
+      await commitGate;
+      await route.continue();
+    };
+    await page.route(editingPath, routeEditing);
+    await page.route(COMMITS, routeCommit);
+    try {
+      await openApp(page, harness);
+      await expectConnected(page);
+      await openSeededTimeline(page, harness);
+      await expectSameRealm(page, harness, astrid);
+      const field = firstTrackName(page);
+      const firstLeaseAck = page.waitForResponse(response => response.request().method() === 'PUT'
+        && editingPath.test(new URL(response.url()).pathname), CEILING);
+      const slowRenewalAck = page.waitForResponse(response => response.request().method() === 'PUT'
+        && editingPath.test(new URL(response.url()).pathname)
+        && Number(response.request().postDataJSON().sequence) === 2, { timeout: 30_000 });
+      await field.fill('App save through slow renewal');
+      expect((await firstLeaseAck).status()).toBe(200);
+      await commitHeld;
+      const slowAck = await slowRenewalAck;
+      expect(slowAck.status(), 'the actual Runtime renewal eventually acknowledges').toBe(200);
+      expect(trace.find(event => event.kind === 'renew-response-released' && event.sequence === 2)?.elapsedMs)
+        .toBeGreaterThanOrEqual(3_500);
+      const releaseAckPromise = page.waitForResponse(response => response.request().method() === 'DELETE'
+        && editingPath.test(new URL(response.url()).pathname), { timeout: 20_000 });
+      const savedPromise = page.waitForResponse(response => response.request().method() === 'POST'
+        && COMMITS.test(new URL(response.url()).pathname), CEILING);
+      releaseCommit();
+      const saved = await savedPromise;
+      expect(saved.status(), 'the App save completes after the delayed successful renewal').toBe(200);
+      const receipt = await saved.json() as CommitAcceptedMutation;
+      expect(saved.request().headers()['x-timeline-editing-session']).toBeTruthy();
+      expect(receipt.data.status).toMatch(/^(accepted|merged|rebased)$/);
+      const releaseAck = await releaseAckPromise;
+      expect(releaseAck.status(), 'the Runtime acknowledges release after save and idle').toBe(200);
+      const lateRenewal = page.waitForResponse(response => response.request().method() === 'PUT'
+        && editingPath.test(new URL(response.url()).pathname)
+        && Number(response.request().postDataJSON().sequence) === 3, { timeout: 20_000 });
+      expect((await lateRenewal).status(), 'the higher-sequence DELETE fences the delayed earlier reply').toBe(200);
+      expect(trace.findIndex(event => event.kind === 'renew-response-released' && event.sequence === 3))
+        .toBeGreaterThan(trace.findIndex(event => event.kind === 'release-ack' && event.method === 'DELETE'));
+      expect(trace.filter(event => event.kind === 'renew-request' && event.sequence && event.sequence > 3)).toEqual([]);
+    } finally {
+      releaseCommit();
+      await Promise.allSettled(delayedRenewals);
+      await page.unroute(editingPath, routeEditing).catch(() => {});
+      await page.unroute(COMMITS, routeCommit).catch(() => {});
+    }
+  });
+
 test('hosted-loopback interleaving-2: Agent SDK replays the exact request after the hosted response is lost',
   async ({ page, harness, astrid, seed3 }) => {
     await harness.enableTimelineAuthoring(ASTRID_PYTHON);

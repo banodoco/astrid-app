@@ -159,7 +159,12 @@ export function TimeRuler({
       claimedOwnership: true,
     };
     setGestureOwner('ruler');
-    event.currentTarget.setPointerCapture(event.pointerId);
+    try { event.currentTarget.setPointerCapture(event.pointerId); }
+    catch (error) {
+      // Admission may replay a complete gesture after the native pointer ended.
+      // The retained move/up stream still drives this same gesture owner.
+      if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error;
+    }
     event.preventDefault();
   };
 

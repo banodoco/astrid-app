@@ -11,6 +11,7 @@ import type { MutableRefObject } from 'react';
 export interface InteractionState {
   drag: boolean;
   resize: boolean;
+  admissionPending?: boolean;
   listeners: Set<() => void>;
   startListeners: Set<() => void>;
 }
@@ -22,7 +23,7 @@ export function createInteractionState(): InteractionState {
 }
 
 export function isInteractionActive(ref: InteractionStateRef): boolean {
-  return ref.current.drag || ref.current.resize;
+  return ref.current.drag || ref.current.resize || ref.current.admissionPending === true;
 }
 
 /**
@@ -66,4 +67,19 @@ export function notifyInteractionEndIfIdle(ref: InteractionStateRef): void {
       console.error('[interactionState] listener threw', error);
     }
   }
+}
+
+// The mounted owner also admits programmatic nested-draft entry. DOM entry
+// points use the same owner through native capture before React can mutate.
+type EditAdmission = (intent: () => void) => Promise<void>;
+const editAdmissions = new WeakMap<HTMLElement, EditAdmission>();
+export function registerTimelineEditAdmission(root: HTMLElement, admit: EditAdmission): () => void {
+  editAdmissions.set(root, admit);
+  return () => { if (editAdmissions.get(root) === admit) editAdmissions.delete(root); };
+}
+export function admitTimelineEdit(root: HTMLElement | null | undefined, intent: () => void): Promise<void> {
+  const admit = root ? editAdmissions.get(root) : undefined;
+  if (admit) return admit(intent);
+  intent();
+  return Promise.resolve();
 }

@@ -196,7 +196,12 @@ export function useTimelineMarkerDrag<T>({
     sessionRef.current = session;
 
     if (typeof target.setPointerCapture === 'function') {
-      target.setPointerCapture(event.pointerId);
+      try { target.setPointerCapture(event.pointerId); }
+      catch (error) {
+        // Admission may replay a complete gesture after the native pointer ended.
+        // The retained move/up stream still drives this same gesture owner.
+        if (!(error instanceof DOMException && error.name === 'NotFoundError')) throw error;
+      }
     }
 
     const handlePointerMove = (moveEvent: PointerEvent) => {

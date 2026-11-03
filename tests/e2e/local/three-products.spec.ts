@@ -3008,14 +3008,20 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   expect(acceptedHistory.head).toEqual(pinOf(cleared));
   const revisionCount = (await allRevisions(harness, seed3)).length;
   await harness.restartRuntime();
+  // Hold the automatically initiated replay so the retained owner can be
+  // inspected after reload before the response clears its outbox.
+  wire.armRecoveryRetry();
+  const attemptsBeforeReload = wire.observed.length;
   await page.reload();
   await expectConnected(page);
   await openSeededTimeline(page, harness);
+  await expect.poll(() => wire.observed.length, CEILING).toBe(attemptsBeforeReload + 1);
+  expect(wire.observed[attemptsBeforeReload]).toEqual({ body: retained.pending!.request.body, key: retained.pending!.request.key });
   expect((await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === retained.ownerId)?.pending?.request)
     .toEqual(retained.pending!.request);
   expect(wire.posts).toHaveLength(1);
   expectRawTransitionsCleared((await revisionState(harness, seed3, pinOf(cleared).revision_id)).parent, original.parent, [seed3.transitionClipId]);
-  await page.getByRole('button', { name: /^Recover saved edits/ }).and(page.locator(`[data-owner-id="${retained.ownerId}"]`)).click();
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);
   expect(wire.posts[1], 'exact bytes, key, receipt and accepted closure survive reload and Runtime restart').toEqual(wire.posts[0]);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);

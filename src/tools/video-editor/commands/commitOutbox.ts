@@ -75,6 +75,8 @@ export interface OutboxRecord {
   scope: OutboxScope;
   ownerId: string;
   generation: number;
+  /** Explicitly kept rejected work, retained verbatim and excluded from dispatch. */
+  disposition?: 'kept-copy';
   intents: OutboxIntent[];
   pending?: { intentId: string; request: OutboxRequest; outcome?: OutboxOutcome };
   // Only the last acknowledged prefix, also usable by a late dependent append.
@@ -95,6 +97,8 @@ export type OutboxRequestBuilder = (
 export interface ClaimedOutbox {
   read(): Promise<OutboxRecord>;
   assertActive(): void;
+  parkRejected(expected: OutboxRecord): Promise<OutboxRecord>;
+  restoreParked(): Promise<OutboxRecord>;
   reserveCreate(payload: OutboxJson, request: OutboxRequest): Promise<string>;
   append(payload: OutboxJson, basis: OutboxBasis): Promise<string>;
   cancel(intentId: string): Promise<void>;
@@ -282,7 +286,7 @@ export function createCommitOutbox(options: {
         if (!active) throw new Error('Stale outbox claim');
       }
 
-      function access<T>(mode: IDBTransactionMode, change: (record: OutboxRecord) => T): Promise<T> {
+      function access<T>(mode: IDBTransactionMode, change: (record: OutboxRecord) => T, allowParked = false): Promise<T> {
         let failure: unknown;
         return transaction<T>(mode, (store, finish) => {
           const request = store.get(key);
@@ -291,6 +295,9 @@ export function createCommitOutbox(options: {
               const current = request.result as OutboxRecord | undefined;
               if (!active || current?.generation !== generation) throw new Error('Stale outbox claim');
               const record = detached(current);
+              if (mode === 'readwrite' && record.disposition === 'kept-copy' && !allowParked) {
+                throw new Error('Kept copy requires explicit recovery');
+              }
               const result = change(record);
               if (mode === 'readwrite') store.put(record, key);
               finish(result);
@@ -306,6 +313,29 @@ export function createCommitOutbox(options: {
       const outbox: ClaimedOutbox = {
         read: () => access('readonly', detached),
         assertActive,
+        parkRejected(expectedInput) {
+          const expected = detached(expectedInput);
+          return access('readwrite', (record) => {
+            if (dispatching || capturing.size || record.pending?.outcome?.kind !== 'rejected'
+              || record.pending.intentId !== record.intents[0]?.id) throw new Error('Only a settled rejected owner can be kept');
+            // The whole owner is fenced: accepted prefix, exact request, commands,
+            // guards and all suffixes must still be the snapshot the user kept.
+            const current = { ...record };
+            delete current.disposition;
+            const comparison = { ...expected };
+            delete comparison.disposition;
+            if (JSON.stringify(current) !== JSON.stringify(comparison)) throw new Error('Retained work changed before keeping');
+            record.disposition = 'kept-copy';
+            return detached(record);
+          }, true);
+        },
+        restoreParked() {
+          return access('readwrite', (record) => {
+            if (record.disposition !== 'kept-copy') throw new Error('Owner is not a kept copy');
+            delete record.disposition;
+            return detached(record);
+          }, true);
+        },
         async reserveCreate(payload, request) {
           const intent = newIntent(payload, { create: true });
           const exact = detached(request);

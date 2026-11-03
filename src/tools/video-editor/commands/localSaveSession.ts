@@ -74,6 +74,7 @@ export async function createLocalSaveSession(options: Options) {
   let box: ClaimedOutbox | undefined;
   let record: OutboxRecord | undefined;
   let closed = false;
+  let resolving = false;
   let release: (() => void) | undefined;
   let lifetime: Promise<unknown> | undefined;
   let writes: Promise<unknown> = Promise.resolve();
@@ -93,7 +94,7 @@ export async function createLocalSaveSession(options: Options) {
   }
   function assertOpen() {
     if (!closed && recoveryError) throw recoveryError;
-    if (closed || !box) throw new Error('Local save session is closed or awaiting recovery');
+    if (closed || !box || resolving) throw new Error('Local save session is closed, resolving or awaiting recovery');
   }
   function checkBasis(value: TimelineCommandBasis) {
     if (!value.head.revisionId || !value.head.publicationId
@@ -291,7 +292,7 @@ export async function createLocalSaveSession(options: Options) {
     }
   }
 
-  const owners = (await storage.list(options.scope)).filter((owner) => owner.intents.length || owner.pending);
+  const owners = (await storage.list(options.scope)).filter((owner) => owner.disposition !== 'kept-copy' && (owner.intents.length || owner.pending));
   state.recoverableOwners = owners.map((owner) => owner.ownerId);
   if (owners.length) publish('recovery');
   else await claim();
@@ -330,6 +331,36 @@ export async function createLocalSaveSession(options: Options) {
   return {
     getState: () => clone(state),
     getDocument: () => clone(document),
+    /** The verified basis of the currently projected local document. */
+    getDisplayBasis: () => clone(displayBasis),
+    /** Park the complete rejected owner before switching to verified canonical data. */
+    async keepConflict(): Promise<TimelineCommandBasis> {
+      assertOpen();
+      if (state.status !== 'conflict' || !box || !record) throw new Error('No rejected conflict to keep');
+      resolving = true;
+      const activeBox = box;
+      const at = generation;
+      try {
+        await writes;
+        if (sending) await sending;
+        const latest = await options.loadLatest();
+        checkBasis(latest);
+        const prepared = await options.prepareDisplay(clone(latest));
+        if (closed || at !== generation || box !== activeBox) throw new Error('Local save owner changed during resolution');
+        const snapshot = await activeBox.read();
+        await activeBox.parkRejected(snapshot);
+        if (closed || at !== generation || box !== activeBox) throw new Error('Local save owner changed during resolution');
+        // The durable copy exists before canonical content is exposed.
+        prepared.adopt();
+        basis = clone(latest);
+        displayBasis = clone(latest);
+        document = toOutboxJson(prepared.document);
+        closed = true;
+        release?.();
+        await lifetime;
+        return clone(latest);
+      } finally { resolving = false; }
+    },
     /** Verified physical images with locally authored payloads; still an unsent intent. */
     appendDocument(input: Omit<Parameters<typeof documentPatchIntent>[0], 'basis'>): Promise<void> {
       assertOpen();

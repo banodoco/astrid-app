@@ -531,6 +531,44 @@ describe('durable command outbox', () => {
     });
   });
 
+  it('parks an exact rejected suffix durably, fenced and idempotent, until explicit recovery', async () => {
+    const env = environment();
+    const storage = env.open();
+    let ownerId = '';
+    let snapshot: Awaited<ReturnType<ClaimedOutbox['read']>>;
+    await storage.create(scope, async (box, id) => {
+      ownerId = id;
+      const first = await box.append(move(1), { head: h0 });
+      await box.dispatch(build, async () => accepted());
+      const semantic = { commands: [{ op: 'clip.add-media', args: { media: { generation_id: 'gen-1', variant_id: 'variant-1', object_id: 'sha256:original' } }, created: ['parent/clip:allocated'] }] };
+      const suffix = await box.append(semantic, { after: first });
+      await box.append(move(3), { after: suffix });
+      await box.dispatch(build, async () => ({ kind: 'rejected', error: { kind: 'conflict', media: { pin: 'exact' } } }));
+      snapshot = await box.read();
+      await expect(box.parkRejected({ ...snapshot, intents: [] })).rejects.toThrow('changed before keeping');
+      env.fault.abortNextWrite = true;
+      await expect(box.parkRejected(snapshot)).rejects.toThrow();
+      expect((await box.read()).disposition).toBeUndefined();
+      const parked = await box.parkRejected(snapshot);
+      expect(parked).toEqual({ ...snapshot, disposition: 'kept-copy' });
+      expect(await box.parkRejected(snapshot)).toEqual(parked);
+      await expect(box.dispatch(build, async () => accepted())).rejects.toThrow('explicit recovery');
+      await expect(box.append(move(4), { head: h0 })).rejects.toThrow('explicit recovery');
+    });
+    const [persisted] = await storage.list(scope);
+    expect(persisted.disposition).toBe('kept-copy');
+    expect(persisted.pending).toEqual(snapshot!.pending);
+    expect(persisted.accepted).toEqual(snapshot!.accepted);
+    expect(persisted.intents).toEqual(snapshot!.intents);
+    await storage.recover(scope, ownerId, async (box) => {
+      await expect(box.dispatch(build, async () => accepted())).rejects.toThrow('explicit recovery');
+      const restored = await box.restoreParked();
+      expect(restored.disposition).toBeUndefined();
+      expect(restored.pending).toEqual(snapshot!.pending);
+      expect(restored.intents).toEqual(snapshot!.intents);
+    });
+  });
+
   it('rejected A retains the original dependent suffix as conflict across reopen', async () => {
     const env = environment();
     let owner = '';

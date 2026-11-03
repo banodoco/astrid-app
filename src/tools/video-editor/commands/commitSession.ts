@@ -1290,8 +1290,8 @@ export async function createTimelineCommandSession(options: Options) {
       throw error;
     }
   }
-  const owners = (await storage.list(options.scope)).filter((owner) => owner.intents.length || owner.pending
-    || owner.placementContinuations?.some((item) => !item.placement?.accepted && !item.placement?.cancelled));
+  const owners = (await storage.list(options.scope)).filter((owner) => owner.disposition !== 'kept-copy' && (owner.intents.length || owner.pending
+    || owner.placementContinuations?.some((item) => !item.placement?.accepted && !item.placement?.cancelled)));
   const bootstrapOwners = new Set(owners.filter((owner) => {
     const payload = owner.intents[0]?.payload;
     return payload !== null && typeof payload === 'object' && !Array.isArray(payload)

@@ -300,6 +300,7 @@ export function createPlacementRequester(options: {
       const owners = await storage.list(identity);
       const results: PlacementProgress[] = [];
       for (const owner of owners) {
+        if (owner.disposition === 'kept-copy') continue;
         if (!owner.placementContinuations?.length) {
           results.push({ scope: owner.scope, ownerId: owner.ownerId, status: 'manual', message: 'No saved requester approval; manual placement only' });
           continue;

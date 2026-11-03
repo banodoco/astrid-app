@@ -288,6 +288,56 @@ describe('local editor saves through the durable outbox', () => {
     await session.dispose();
   });
 
+  it('keeps an accepted-prefix conflict without changing its semantic bytes or unrelated owners', async () => {
+    const separate = environment();
+    const session = await separate.mount();
+    let otherId = '';
+    await separate.outboxes.create(scope, async (box, id) => {
+      otherId = id;
+      await box.append({ kind: 'other', media: { pin: 'unrelated' } }, { head: h0 });
+    });
+    const otherBefore = (await separate.outboxes.list(scope)).find((row) => row.ownerId === otherId)!;
+    await separate.append(session, splitSave());
+    await separate.append(session, trimSave());
+    separate.send.mockResolvedValueOnce(result(split)).mockRejectedValueOnce(new ApiError(409, 'conflict', 'Changed', '', { status: 'conflict' }));
+    const latest = result({ ...original, agent: true }, { revisionId: 'remote-r', publicationId: 'remote-p' });
+    separate.loadLatest.mockResolvedValue({ head: latest.accepted, canonicalDocument: latest.canonicalDocument });
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    const before = (await separate.outboxes.list(scope)).find((row) => row.ownerId === session.getState().ownerId)!;
+    expect(before.accepted).toBeDefined();
+    expect(separate.visible()).toEqual(trimmed);
+    await session.keepConflict();
+    expect(separate.visible()).toEqual({ ...original, agent: true });
+    const parked = (await separate.outboxes.list(scope)).find((row) => row.ownerId === before.ownerId)!;
+    expect(parked).toEqual({ ...before, disposition: 'kept-copy' });
+    expect((await separate.outboxes.list(scope)).find((row) => row.ownerId === otherId)).toEqual(otherBefore);
+    // The unrelated owner is active work and remains separately discoverable.
+    await separate.outboxes.recover(scope, otherId, async (box) => {
+      const row = await box.read();
+      await box.cancel(row.intents[0].id);
+    });
+    const reopened = await separate.mount();
+    expect(reopened.getState().status).toBe('saved');
+    expect(reopened.getState().recoverableOwners).toEqual([]);
+    expect(separate.send).toHaveBeenCalledTimes(2);
+    await reopened.dispose();
+  });
+
+  it('keeps the rejected owner and visible draft unchanged when loading the canonical head fails', async () => {
+    const env = environment();
+    const session = await env.mount();
+    await env.append(session, splitSave());
+    env.send.mockRejectedValueOnce(new ApiError(409, 'conflict', 'Changed', '', { status: 'conflict' }));
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    const [before] = await env.outboxes.list(scope);
+    env.loadLatest.mockRejectedValueOnce(new Error('Offline'));
+    await expect(session.keepConflict()).rejects.toThrow('Offline');
+    expect((await env.outboxes.list(scope))[0]).toEqual(before);
+    expect(env.visible()).toEqual(split);
+    expect(session.getState().status).toBe('conflict');
+    await session.dispose();
+  });
+
   it('retains validation code/path/hint and preserves drafts when canonical rollback cannot load', async () => {
     const env = environment();
     const session = await env.mount();

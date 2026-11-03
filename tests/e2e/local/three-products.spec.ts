@@ -3017,6 +3017,9 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   await expectImmutableClosure(harness, seed3, cleared);
   await expectRecordedTransitionClears(harness, seed3, cleared, JSON.parse(wire.posts[0].body), original.parentClips);
   await wire.loseAck();
+  // The fault fixture deliberately holds the automatic replay; release that
+  // failed transport before exercising the explicit retry control.
+  await wire.abortStagedRetry();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
   await page.getByRole('button', { name: 'Retry save', exact: true }).and(page.getByTestId('timeline-command-retry')).click();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);

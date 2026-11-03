@@ -287,6 +287,11 @@ async function expectOpaqueDataKept(harness: DirectHarness, seed: ThreeProductsS
 /** The agent's CLI draft verbs and Runtime-backed authoring session. */
 function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' | 'projectSlug'>) {
   const common = [seed.timelineId, '--project', seed.projectSlug];
+  type TimelineInspection = {
+    kind: 'timeline-inspection';
+    summary: { head_revision_id: string; revision_id: string; is_current_head: boolean };
+    clips: Array<{ clip_id: string; asset: string | null }>;
+  };
   let edits: string[][] = [];
   return {
     checkout: async () => { edits = []; return astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']); },
@@ -350,7 +355,25 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
       }
     },
     status: async () => (await astrid.json<{ current_head: string }>(['timelines', 'status', ...common, '--json'])).data!,
-    show: async () => (await astrid.json<{ head_revision_id: string; rows: Array<{ layers: Array<{ clip_id: string; asset: string | null }> }> }>(['timelines', 'show', ...common, '--published', '--json'])).data!,
+    show: async () => {
+      const args = ['timelines', 'show', ...common, '--published', '--json'];
+      const run = await astrid.astrid(args);
+      const envelope = JSON.parse(run.stdout.trim().split('\n').at(-1)!) as { ok: boolean; data?: TimelineInspection; error?: unknown };
+      expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
+      expect(envelope.data, 'the CLI returned an inspection projection').toMatchObject({
+        kind: 'timeline-inspection',
+        summary: { head_revision_id: expect.any(String), revision_id: expect.any(String), is_current_head: expect.any(Boolean) },
+        clips: expect.any(Array),
+      });
+      const inspection = envelope.data!;
+      for (const clip of inspection.clips) {
+        expect(typeof clip.clip_id, 'inspection clips retain their clip identity').toBe('string');
+        expect(clip.asset === null || typeof clip.asset === 'string', 'inspection clips retain their observed asset value').toBe(true);
+      }
+      // Keep the successful read's observed shape, command, and inner exit code in focused Playwright logs.
+      console.info(`ASTRID_SHOW_EVIDENCE ${JSON.stringify({ command: ['python', '-m', 'astrid', ...args], exitCode: run.exitCode, envelope })}`);
+      return inspection;
+    },
   };
 }
 
@@ -530,7 +553,9 @@ test('agent -> open App: an Astrid task and its publication appear in the open A
   const state = await revisionState(harness, seed3, published.new_head);
   expect(state.shotRegistry[seed3.markerAssetKey].media_id).toBe(output!.object_id);
   expect(state.shotClips[seed3.agentClipId].asset).toBe(seed3.markerAssetKey);
-  expect((await agent.show()).head_revision_id, 'the agent reads the head it published').toBe(published.new_head);
+  const publishedRead = await agent.show();
+  expect(publishedRead.summary.head_revision_id, 'the agent reads the head it published').toBe(published.new_head);
+  expect(publishedRead.summary.revision_id, 'the inspection is loaded at the published revision').toBe(published.new_head);
   const agentHead = (await history(harness, seed3)).head;
   expect(agentHead.revision_id).toBe(published.new_head);
   // The App's next save is built on the agent's head, and the Runtime accepts it (the parent-head check of the retired handoff case).
@@ -724,9 +749,9 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(transitionSelect(page)).toContainText('crossfade');
   expect((await agent.status()).current_head).toBe(headB);
   const shown = await agent.show();
-  expect(shown.head_revision_id).toBe(headB);
-  const layers = shown.rows.flatMap((row) => row.layers);
-  expect(layers.find((layer) => layer.clip_id === seed3.agentClearClipId)?.asset, 'the agent sees the clear').toBeNull();
+  expect(shown.summary.head_revision_id).toBe(headB);
+  expect(shown.summary.revision_id, 'the inspection is loaded at head B').toBe(headB);
+  expect(shown.clips.find((clip) => clip.clip_id === seed3.agentClearClipId)?.asset, 'the agent sees the clear').toBeNull();
   journey.facts.headB = headB;
   await sniff.expectClean(page, seed3.timelineId);
 });
@@ -810,7 +835,9 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   // The agent reads what the App saved after the relaunch.
   const headAfter = await currentHead(harness);
   expect((await agent.status()).current_head).toBe(headAfter);
-  expect((await agent.show()).head_revision_id).toBe(headAfter);
+  const restartedRead = await agent.show();
+  expect(restartedRead.summary.head_revision_id).toBe(headAfter);
+  expect(restartedRead.summary.revision_id, 'the inspection is loaded at the saved head').toBe(headAfter);
   const state = await revisionState(harness, seed3, headAfter);
   expect(state.trackLabel, 'the saved revision is the draft').toBe('F2 kept across restart');
   expect(result.receipt.receipt_id, 'the post-restart publication keeps its persisted retry identity').toBe(keyAfter);
@@ -3483,7 +3510,8 @@ test('quick: Astrid edit then App edit are visible and readable on the adopted t
   const status = await agent.status();
   const show = await agent.show();
   expect(status.current_head).toBe(savedRevisionId);
-  expect(show.head_revision_id).toBe(savedRevisionId);
+  expect(show.summary.head_revision_id).toBe(savedRevisionId);
+  expect(show.summary.revision_id, 'the inspection is loaded at the App-saved revision').toBe(savedRevisionId);
   const lineage = (await allRevisions(harness, quickSeed)).map((revision) => revision.revision_id);
   expect(lineage.indexOf(savedRevisionId)).toBeGreaterThanOrEqual(0);
   expect(lineage.indexOf(savedRevisionId)).toBeLessThan(lineage.indexOf(astridRevisionId));

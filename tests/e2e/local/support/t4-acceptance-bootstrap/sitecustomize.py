@@ -23,11 +23,12 @@ if len(sys.argv) >= 2 and sys.argv[:2] == ["-m", "start"]:
             context = port._provider_context()
             if armed.is_file() and json.loads(armed.read_text())["key"] == context["idempotency_key"]:
                 armed.unlink()
-                (directory / "ready.json").write_text(json.dumps({
+                (directory / "ready.tmp").write_text(json.dumps({
                     "key": context["idempotency_key"],
                     "base_revision_id": context["request"]["base_revision_id"],
                     "base_publication_id": context["request"]["base_publication_id"],
                 }))
+                (directory / "ready.tmp").replace(directory / "ready.json")
                 deadline = time.monotonic() + 90
                 while not (directory / "release").is_file():
                     if time.monotonic() >= deadline:

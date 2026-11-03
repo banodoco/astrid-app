@@ -649,7 +649,8 @@ export class DirectHarness {
     const directory = this.acceptanceBarrierDirectory;
     if (!directory) throw new Error('timeline acceptance barrier was not selected at harness construction');
     for (const name of ['ready.json', 'release']) rmSync(path.join(directory, name), { force: true });
-    writeFileSync(path.join(directory, 'arm.json'), JSON.stringify({ key }));
+    writeFileSync(path.join(directory, 'arm.tmp'), JSON.stringify({ key }));
+    renameSync(path.join(directory, 'arm.tmp'), path.join(directory, 'arm.json'));
     return {
       ready: () => existsSync(path.join(directory, 'ready.json'))
         ? JSON.parse(readFileSync(path.join(directory, 'ready.json'), 'utf8')) : undefined,

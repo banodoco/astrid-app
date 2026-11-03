@@ -294,7 +294,41 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
       const directory = mkdtempSync(path.join(tmpdir(), 'astrid-candidate-'));
       const candidate = path.join(directory, 'candidate.json');
       try {
-        await astrid.python(['-c', 'import sys; from astrid.sdk.timeline_checkout import Checkout; Checkout.draft(sys.argv[1], sys.argv[2]).save(sys.argv[3], quiet=True)', seed.projectSlug, seed.timelineId, candidate]);
+        // Task handles resolve the output, but a detached commit also needs a Runtime catalog
+        // association so its media admission can verify the new registry entry.
+        const prepare = [
+          'import sys',
+          'from pathlib import Path',
+          'from astrid.sdk import AstridClient',
+          'from astrid.sdk.authoring_bundle import plan_authoring_media, import_authoring_media',
+          'from astrid.sdk.media_handles import resolve_media_handle',
+          'from astrid.sdk.timeline_checkout import Checkout',
+          'project, timeline, target, key = sys.argv[1:]',
+          'checkout = Checkout.draft(project, timeline)',
+          'candidate = checkout.document()',
+          'with AstridClient.open_from_launcher(start_pack_host=False) as client:',
+          '    count = 0',
+          '    for shot in candidate.get("shots", {}).values():',
+          '        for entry in shot.get("internal_timeline", {}).get("registry", {}).get("assets", {}).values():',
+          '            source = entry.get("source", "")',
+          '            if not isinstance(source, str) or not source.startswith("task:"): continue',
+          '            descriptor, _ = resolve_media_handle(client, project, source)',
+          '            assert descriptor["digest"] == entry["media_id"], "task output differs from draft"',
+          '            local = Path(target).parent / (str(count) + "-" + Path(descriptor["filename"]).name)',
+          '            local.write_bytes(client.media.read_bytes(descriptor["digest"]))',
+          '            imported = client.media.import_file(project=project, path=local, idempotency_key=f"{key}-media-{count}")',
+          '            if not imported.ok: raise RuntimeError(str(imported.error))',
+          '            assert imported.data["object_id"] == descriptor["digest"], "import changed task output"',
+          '            entry["media_id"] = imported.data["object_id"]',
+          '            entry["local_path"] = str(local)',
+          '            count += 1',
+          '    if count:',
+          '        plan = plan_authoring_media(candidate, base_directory=Path(target).parent)',
+          '        candidate = import_authoring_media(plan, client._remote._transport)["candidate"]',
+          'checkout.bundle = candidate',
+          'checkout.save(target, quiet=True)',
+        ].join('\n');
+        await astrid.python(['-c', prepare, seed.projectSlug, seed.timelineId, candidate, idempotencyKey]);
         const envelope = await astrid.json<{ status: string; previous_revision_id: string; accepted_revision_id: string }>(['timelines', 'commit', ...common, '--file', candidate, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
         expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
         expect(envelope.data?.status, JSON.stringify(envelope)).toBe('accepted');

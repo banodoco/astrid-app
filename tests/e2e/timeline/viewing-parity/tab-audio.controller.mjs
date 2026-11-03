@@ -413,7 +413,7 @@ export function discover(appRoot) {
     const stdout = openSync(stdoutPath, 'w');
     const stderr = openSync(stderrPath, 'w');
     try {
-      result = spawnSync(NODE20.executable, [playwright, 'test', '--config', 'playwright.viewing-parity.native-codec.config.ts', '--list'], {
+      result = spawnSync(NODE20.executable, [playwright, 'test', '--config', 'config/playwright.viewing-parity.native-codec.config.ts', '--list'], {
         cwd: appRoot, stdio: ['ignore', stdout, stderr],
       });
     } finally {

@@ -4,8 +4,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import baseline from '../../../../playwright.viewing-parity.config';
-import nativeCodec from '../../../../playwright.viewing-parity.native-codec.config';
+import baseline from '../../../../config/playwright.viewing-parity.config';
+import nativeCodec from '../../../../config/playwright.viewing-parity.native-codec.config';
 import { browserExecutableHash, playerBrowserProfile, verifyPlayerBrowser } from './browser-profile';
 import { PLAYER_BROWSER, sourceVersions } from './harness';
 

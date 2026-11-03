@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import baseline from '../../../../playwright.viewing-parity.config';
-import nativeCodec from '../../../../playwright.viewing-parity.native-codec.config';
-import native1920 from '../../../../playwright.viewing-parity.normal-profile-native1920.config';
+import baseline from '../../../../config/playwright.viewing-parity.config';
+import nativeCodec from '../../../../config/playwright.viewing-parity.native-codec.config';
+import native1920 from '../../../../config/playwright.viewing-parity.normal-profile-native1920.config';
 import { EXPLICIT_CANVAS_640, NORMAL_PROFILE_NATIVE1920, ORIGINAL_640, readCanvasFrameMarker } from './canvas';
 import { assertFrameWithinBound, compareRgbFrames } from './compare';
 import { PARITY_FRAMES } from './fixture';
@@ -76,7 +76,7 @@ test('original640 stays the default; only the separately named config selects na
   assert.equal(nativeCodec.testMatch, baseline.testMatch);
   assert.equal(native1920.testMatch, 'player-export-normal-profile-native1920.spec.ts');
   assert.deepEqual(native1920.projects, nativeCodec.projects);
-  assert.equal(native1920.globalSetup, './tests/e2e/timeline/viewing-parity/global-setup.ts');
+  assert.equal(native1920.globalSetup, '../tests/e2e/timeline/viewing-parity/global-setup.ts');
   const { testMatch: _match, globalSetup: _setup, ...shared } = native1920;
   const { testMatch: _original, globalSetup: _oldSetup, ...expected } = nativeCodec;
   assert.deepEqual(shared, expected);

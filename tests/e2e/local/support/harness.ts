@@ -9,6 +9,7 @@
  * Everything lives in one throwaway temp directory that `stop()` removes. Child processes
  * run in their own process groups and are killed by group.
  */
+import { test } from '@playwright/test';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { createHash, randomBytes, randomUUID, X509Certificate } from 'node:crypto';
 import { accessSync, chmodSync, constants as fsConstants, createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -1244,18 +1245,74 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     };
     const sceneClipId = 'journey-scene-clip';
     const speechClipId = 'journey-speech-clip';
+    const timelineId = randomUUID();
+    // Derive a reproducible identity from this newly allocated timeline, distinct from bootstrap V1/A1.
+    const trackId = `journey-extensions-${timelineId}`;
     const clips = [
-      // The scene fills the first five seconds; the media clip (the transcript's carrier) follows it on the same track.
-      { id: sceneClipId, at: 0, track: 'V1', clipType: 'haus.astrid.liveScene', from: 0, to: 5, speed: 1, app: { liveScene } },
-      { id: speechClipId, at: 5, track: 'V1', clipType: 'media', asset: assetKey, from: 0, to: 6, speed: 1 },
+      // The scene fills the first five seconds; the media clip follows it on the same track.
+      { id: sceneClipId, at: 0, track: trackId, clipType: 'haus.astrid.liveScene', from: 0, to: 5, speed: 1, app: { liveScene } },
+      { id: speechClipId, at: 5, track: trackId, clipType: 'media', asset: assetKey, from: 0, to: 6, speed: 1 },
     ];
     const registry = { assets: { [assetKey]: { file: 'journey-speech.webm', type: 'video', duration: 12, media_id: video.objectId, content_sha256: video.digest } } };
-    const timelineId = randomUUID();
+    const timelinePath = `/v1/projects/${projectId}/timelines/${timelineId}`;
+    const created = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines`, { timeline_id: timelineId, name: 'Extensions' });
+    if (created.status !== 201) throw new Error(`create extensions timeline: ${created.status} ${JSON.stringify(created.body)}`);
+    const timeline = await this.runtimeJson('GET', timelinePath);
+    if (timeline.status !== 200) throw new Error(`read extensions head: ${timeline.status} ${JSON.stringify(timeline.body)}`);
+    const { head_revision_id: revisionId, head_publication_id: publicationId } = timeline.body;
+    if (typeof revisionId !== 'string' || !revisionId || typeof publicationId !== 'string' || !publicationId) throw new Error('extensions timeline has no Runtime head pair');
+    const base = await this.runtimeJson('GET', `${timelinePath}/composition-revisions/${revisionId}`);
+    if (base.status !== 200 || !base.body?.payload) throw new Error(`read extensions revision: ${base.status} ${JSON.stringify(base.body)}`);
     const publication = compositionPublication({ projectId, timelineId }, null, 'Extensions', 30);
-    publication.parent_composition.config = { ...publication.parent_composition.config, clips, bundle } as typeof publication.parent_composition.config;
+    publication.parent_composition.config = {
+      ...publication.parent_composition.config, clips, bundle,
+      tracks: [...base.body.payload.config.tracks, { id: trackId, kind: 'visual', label: trackId }],
+    } as typeof publication.parent_composition.config;
     publication.parent_composition.clips = clips as unknown as typeof publication.parent_composition.clips;
     publication.parent_composition.registry = registry as unknown as typeof publication.parent_composition.registry;
-    const published = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, publication);
+    const change = { op: 'set', ref: 'parent', path: [], before: { state: 'present', value: base.body.payload }, value: publication.parent_composition };
+    const commands = [
+      { schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [`parent/track:${trackId}`, `parent/clip:${sceneClipId}`, `parent/clip:${speechClipId}`, `parent/asset:${assetKey}`], args: { changes: [change] } },
+      { schema_version: 1, op: 'media.admit', version: '1', select: null, args: { inputs: [{ pin: { media_id: video.objectId, content_digest: video.digest } }] } },
+    ];
+    const request = {
+      api_version: 1, project_id: projectId, timeline_id: timelineId,
+      base_revision_id: revisionId, base_publication_id: publicationId, commands,
+      label: 'Seed extensions', merge: 'atomic', reads: [{ kind: 'scope', ref: 'timeline', path: [] }],
+      steps: [
+        { id: 'extensions', label: 'Seed extensions', intent: 'Initialize extensions timeline', tags: [], command_ordinals: [0], patch: [change] },
+        { id: 'media', label: 'Capture extensions media', intent: 'Verify media through Runtime', tags: [], command_ordinals: [1], patch: [] },
+      ],
+      source: { via: 'app' },
+    };
+    const idempotencyKey = randomUUID();
+    const readHistory = async () => {
+      try { return await this.runtimeJson('GET', `${timelinePath}/commits?limit=50`); }
+      catch (error) { return { error: String(error) }; }
+    };
+    const historyBefore = await readHistory();
+    let published: { status: number; body: any } | undefined;
+    let historyAfter: Awaited<ReturnType<typeof readHistory>> | undefined;
+    let transportError: string | undefined;
+    try {
+      published = await this.runtimeJson('POST', `${timelinePath}/commit`, request, { 'Idempotency-Key': idempotencyKey });
+      historyAfter = await readHistory();
+    } catch (error) {
+      transportError = String(error);
+      throw error;
+    } finally {
+      await test.info().attach('extensions-seed-commit.json', {
+        body: Buffer.from(JSON.stringify({
+          identity: { projectId, timelineId, trackId, trackRef: `parent/track:${trackId}`, revisionId, publicationId, idempotencyKey },
+          request, historyBefore, response: published, historyAfter, transportError,
+          baseHistoryEntry: 'body' in historyBefore
+            ? historyBefore.body?.items?.find((entry: any) => entry.publication_id === publicationId) : undefined,
+          acceptedHistoryEntry: historyAfter && 'body' in historyAfter
+            ? historyAfter.body?.items?.find((entry: any) => entry.publication_id === published?.body?.receipt?.receipt_id) : undefined,
+        }, null, 2)),
+        contentType: 'application/json',
+      });
+    }
     if (published.status !== 200) throw new Error(`seed extensions timeline: ${published.status} ${JSON.stringify(published.body)}`);
     this.extensionsSeed = { projectSlug: (project.body.data ?? project.body).slug, timelineId, transcriptTexts, sceneClipId, speechClipId, sceneMarker: SCENE_MARKER, scenePackage, sceneEntry: entry };
     return this.extensionsSeed;

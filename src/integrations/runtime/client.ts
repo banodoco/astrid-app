@@ -322,7 +322,8 @@ export function classifyRuntimeCommitFailure(error: unknown): RuntimeCommitFailu
   if (!(error instanceof ApiError)) return 'unknown';
   // These typed refusals leave the exact request retryable, including 409
   // head contention. Keep them in the session's unknown-outcome retry lane.
-  if (error.details?.reason === 'head_busy' || error.details?.reason === 'runtime_unavailable') return 'unknown';
+  if (error.details?.reason === 'head_busy' || error.details?.reason === 'runtime_unavailable'
+    || error.details?.reason === 'user_editing') return 'unknown';
   const status = error.details?.status;
   if (status === 'conflict') return 'conflict';
   if (status === 'refused') return 'refused';

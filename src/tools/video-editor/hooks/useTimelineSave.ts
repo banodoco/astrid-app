@@ -339,6 +339,7 @@ export function useTimelineSave(
           initial: verified.initial, document: toOutboxJson(verified.initial.canonicalDocument),
           send: (request, key) => provider.commitTimeline!(request, key),
           loadLatest: () => provider.loadTimelineCommandBasis!(timelineId),
+          retainConflictDraft: (failure) => (failure as { details?: { reason?: unknown } } | null)?.details?.reason === 'value_conflict',
           changed: (state) => {
             if (isCurrent() && ['retry', 'blocked', 'conflict', 'error'].includes(state.status)) recordDraftReloadFailure();
             emitTimelineSaveDiagnostic('session-changed', () => ({ owner: localOwner, timelineId,

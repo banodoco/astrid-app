@@ -50,6 +50,8 @@ interface Options {
   prepareDisplay(basis: TimelineCommandBasis, draft?: OutboxJson,
     adoption?: DisplayAdoption): Promise<{ document: OutboxJson; adopt(): void }>;
   changed(state: LocalSaveState): void;
+  /** The composing editor selects which conflicts retain its live preview. */
+  retainConflictDraft?(failure: OutboxJson): boolean;
 }
 
 const same = (a: OutboxJson, b: OutboxJson): boolean => {
@@ -75,6 +77,7 @@ function saveOf(payload: OutboxJson): StoredSave {
 /** One existing durable owner; commands and guards are never recaptured after an ACK. */
 export async function createLocalSaveSession(options: Options) {
   const storage = options.outboxes ?? createCommitOutbox();
+  const retainConflictDraft = options.retainConflictDraft ?? (() => false);
   let basis = clone(options.initial);
   let displayBasis = clone(options.initial);
   let document = toOutboxJson(options.document);
@@ -132,7 +135,7 @@ export async function createLocalSaveSession(options: Options) {
       const latest = await options.loadLatest();
       checkBasis(latest);
       if (closed || at !== generation) return true;
-      const retained = conflict && recovering && replaying && record?.intents.length
+      const retained = conflict && ((recovering && replaying) || retainConflictDraft(failure.error)) && record?.intents.length
         ? { basis: clone(saveOf(record.intents[0].payload).displayBasis),
           document: clone(saveOf(record.intents[record.intents.length - 1].payload).after) } : undefined;
       const prepared = await options.prepareDisplay(clone(latest), undefined,

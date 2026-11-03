@@ -221,7 +221,7 @@ it.each(['valid', 'dependent', 'conflict', 'missing', 'copied', 'forged', 'wrong
     }
   });
 
-it('mounts the retained native-none two-clip transition clear through selection, outbox, and commit dispatch', async () => {
+it.each(['native', 'document'] as const)('mounts the %s two-clip transition clear through selection, outbox, and commit dispatch', async (mode) => {
   const nativeScope = { ...scope, timelineId: 'timeline-native-none' };
   // This is the authored native-none source from the three-products harness.
   // Keep the unknown transition siblings and registry metadata here; the
@@ -329,6 +329,7 @@ it('mounts the retained native-none two-clip transition clear through selection,
     return <>
       <button type="button" onClick={() => ops.selectClip('f2-app-clip')}>f2-app-clip</button>
       <button type="button" onClick={(event) => ops.selectClip('f2-transition-clip', { toggle: event.shiftKey })}>f2-transition-clip</button>
+      <button type="button" onClick={() => ops.handleUpdateClipsDeep(['f2-app-clip', 'f2-transition-clip'], () => ({ transition: undefined }))}>generic clear</button>
       <PropertiesPanel />
     </>;
   }
@@ -355,7 +356,8 @@ it('mounts the retained native-none two-clip transition clear through selection,
     const noneOption = screen.getAllByRole('option', { name: 'None', exact: true })
       .find(option => option.closest('[role="listbox"]')?.id === transitionListId);
     expect(noneOption).toBeDefined();
-    await user.click(noneOption!);
+    if (mode === 'native') await user.click(noneOption!);
+    else { await user.keyboard('{Escape}'); fireEvent.click(screen.getByRole('button', { name: 'generic clear' })); }
     await waitFor(() => expect(transitionSelect).toHaveTextContent('None'));
     await waitFor(() => expect(editor.data?.config.clips.find(clip => clip.id === 'f2-app-clip')?.transition).toBeUndefined());
 
@@ -377,7 +379,7 @@ it('mounts the retained native-none two-clip transition clear through selection,
     const step = request.steps?.[0];
     expect(step?.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
     expect(idempotencyKey).toEqual(expect.any(String));
-    expect(request).toEqual({
+    if (mode === 'document') expect(request).toEqual({
       api_version: 1,
       project_id: nativeScope.projectId,
       timeline_id: nativeScope.timelineId,
@@ -391,6 +393,17 @@ it('mounts the retained native-none two-clip transition clear through selection,
       dry_run: false,
       source: { via: 'app' },
     });
+    else {
+      expect(request).toMatchObject({ base_revision_id: 'r0', base_publication_id: 'p0', merge: 'fields' });
+      expect(request.commands.map(command => command.select)).toEqual(selectedIds.map(id => `parent/clip:${id}`));
+      for (const command of request.commands) {
+        const id = command.select!.slice('parent/clip:'.length);
+        expect(command).toMatchObject({ op: 'clip.set', args: { values: {}, clear: ['transition'] },
+          bindings: { 'scalar.target': command.select },
+          expect: { [`${command.select}::transition`]: { state: 'present', value: sourceClip(id).transition } } });
+        expect(command.reads!.length).toBeGreaterThan(0);
+      }
+    }
     const [stored] = await createCommitOutbox().list(nativeScope);
     expect(stored.pending?.request.key).toBe(idempotencyKey);
     expect(JSON.parse(stored.pending!.request.body)).toEqual(request);

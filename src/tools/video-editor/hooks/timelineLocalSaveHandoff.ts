@@ -13,6 +13,7 @@ import { markTimelineSaveRejection, type TimelineSaveRejectionCode } from '../li
 import { applyTimelineOperation, type TimelineElementOperation } from '../runtime/element-adapter.ts';
 import type { AstridAgentElementContext } from '../runtime/element-contract.ts';
 import { documentPatchIntent } from '../commands/documentPatchIntent.ts';
+import { captureClipClear } from '../commands/clipScalarCapture.ts';
 import type { PlacePreparedMediaCommand } from '../commands/media.ts';
 
 export interface TimelineSaveSource {
@@ -29,7 +30,7 @@ export type TimelineGestureReadBasis = {
   clipId: string;
 } & ({ kind: 'split'; timeSeconds: number } | { kind: 'move'; trackId: string } | {
   kind: 'trim'; patch: Partial<Pick<TimelineConfig['clips'][number], 'from' | 'to' | 'hold' | 'speed'>>;
-} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext });
+} | { kind: 'transition-clear'; clipIds: string[]; native?: boolean } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext });
 
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
@@ -264,8 +265,8 @@ export function createTimelineLocalSaveHandoff(options: {
     }
     return authoredJson(next);
   }
-  const handoff: TimelineLocalSaveHandoff = {
-    capture(input, gestureBasis) {
+  let captureChain: Promise<void> = Promise.resolve();
+  async function capture(input: TimelineSaveSource, gestureBasis?: TimelineGestureReadBasis): Promise<void> {
       try {
         const next = structuredClone(input);
         checkHead(initial, source, 'capture-source-head-unavailable');
@@ -408,6 +409,12 @@ export function createTimelineLocalSaveHandoff(options: {
         let mediaReads: CommitRequest['reads'];
         let mediaSteps: CommitRequest['steps'];
         let mediaLabel = 'Add media';
+        if (gestureBasis?.kind === 'transition-clear' && gestureBasis.native) {
+          const bundle = await authoringBundleFromDocument(before);
+          if (!same(options.session.getDocument(), before)) refuse('local authored document changed during gesture capture', 'local-document-changed');
+          commands = gestureBasis.clipIds.map(id => captureClipClear(bundle, `parent/clip:${id}`, 'transition'));
+          mediaLabel = 'Clear transitions';
+        }
         if (gestureBasis?.kind === 'prepared-media') {
           if (gestureBasis.command.type !== 'place-prepared-media') refuse('prepared media command is unavailable');
           const prepared = gestureBasis.command.payload;
@@ -669,9 +676,18 @@ export function createTimelineLocalSaveHandoff(options: {
           : new TimelineSaveError(`Local document save retained: ${error instanceof Error ? error.message : String(error)}`);
         return Promise.reject(rejection);
       }
+  }
+  const handoff: TimelineLocalSaveHandoff = {
+    capture(input, gestureBasis) {
+      const original = structuredClone(input);
+      const originalGesture = gestureBasis && structuredClone(gestureBasis);
+      const pending = captureChain.then(() => capture(original, originalGesture));
+      captureChain = pending.catch(() => {});
+      return pending;
     },
     async flush() {
       try {
+        await captureChain;
         const basis = await options.session.flush();
         const adopted = options.adopted(basis);
         const head = adopted.receipt.head;

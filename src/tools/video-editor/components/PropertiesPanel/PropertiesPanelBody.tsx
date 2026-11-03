@@ -382,7 +382,7 @@ function PropertiesPanelComponent({
             sharedTransitionType={bulkTransitionType}
             sharedTransitionDuration={bulkTransitionDuration}
             onChange={(patch) => { if (!readOnly) handleUpdateClips(selectedClipIdsList, patch); }}
-            onChangeDeep={(patchFn) => { if (!readOnly) handleUpdateClipsDeep(selectedClipIdsList, patchFn); }}
+            onChangeDeep={(patchFn) => { if (!readOnly) handleUpdateClipsDeep(selectedClipIdsList, patchFn, true); }}
             onResetPosition={() => { if (!readOnly) handleResetClipsPosition(selectedClipIdsList); }}
             onToggleMute={() => { if (!readOnly) handleToggleMuteClips(selectedClipIdsList); }}
             onClose={clearSelection}
@@ -399,7 +399,7 @@ function PropertiesPanelComponent({
             track={selectedTrack}
             deviceClass={deviceClass}
             hasPredecessor={selectedClipHasPredecessor}
-            onChange={readOnly ? () => {} : handleSelectedClipChange}
+            onChange={readOnly ? () => {} : patch => handleSelectedClipChange(patch, undefined, true)}
             onResetPosition={readOnly ? () => {} : handleResetClipPosition}
             onClose={clearSelection}
             onDelete={!readOnly && selectedClip ? () => handleDeleteClip(selectedClip.id) : undefined}

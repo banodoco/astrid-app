@@ -89,6 +89,13 @@ describe('RuntimeTaskList', () => {
     expect(screen.getByText('5 min ago')).toBeInTheDocument();
   });
 
+  it('shows the completion state in the task peek alongside the relative time', () => {
+    const recent = new Date(Date.now() - 5 * 60_000).toISOString();
+    renderList([task('marker', 'f2.marker', { updated_at: recent })], { showComplete: true });
+    expect(screen.getByText('Complete')).toBeVisible();
+    expect(screen.getByText(/5 min ago/)).toBeVisible();
+  });
+
   it('never shows ids, hashes or paths as the detail line', () => {
     renderList([task('s', 'pixel.snap', {}, { image: 'sha256:4a3dfeedbeef1234' }), task('c', 'pixel.cutout', {}, { image: { filename: 'media-0a6d9eb54aa9.png' } })]);
     expect(document.body.textContent).not.toMatch(/sha256|media-0a6d/);

@@ -525,6 +525,7 @@ describe('Runtime timeline commit capability', () => {
 
   it.each([
     [409, 'head_busy'],
+    [409, 'user_editing'],
     [503, 'runtime_unavailable'],
   ])('keeps %s %s retryable with its typed reason and exact request', async (status, reason) => {
     const response = accepted('r1', 'p1', 'r0', 'p0');

@@ -124,7 +124,7 @@ type MountedHarness = {
   transportCalls: Array<{ method: string; path: string; headers: Record<string, string>; rawBody?: string; body?: unknown }>;
 };
 
-async function mountHarness(outcome: 'accepted' | 'refused') : Promise<MountedHarness> {
+async function mountHarness(outcome: 'accepted' | 'refused' | 'value-conflict') : Promise<MountedHarness> {
   const config = authoredConfig();
   const basis = makeBasis(config);
   let latest = basis;
@@ -147,14 +147,15 @@ async function mountHarness(outcome: 'accepted' | 'refused') : Promise<MountedHa
       return { status: 200, headers: {}, body: json({ realm_id: scope.realmId, display_name: 'track fixture', version: 1, created_at: '2026-10-19T00:00:00Z' }) };
     }
     if (method === 'POST' && path === `/v1/projects/${scope.projectId}/timelines/${scope.timelineId}/commit`) {
-      if (outcome === 'refused') {
+      if (outcome === 'refused' || outcome === 'value-conflict') {
         const remoteConfig = authoredConfig();
         remoteConfig.tracks = [remoteConfig.tracks![0], remoteConfig.tracks![2], remoteConfig.tracks![1]];
+        if (outcome === 'value-conflict') remoteConfig.tracks[0].label = 'Other App saved label';
         latest = makeBasis(remoteConfig, 'remote-r2', 'remote-p2');
         return { status: 409, headers: {}, body: json({
           code: 'selection_changed', message: 'Track order changed at the Runtime head', request_id: 'request-track',
           details: {
-            status: 'conflict', reason: 'selection_changed',
+            status: 'conflict', reason: outcome === 'value-conflict' ? 'value_conflict' : 'selection_changed',
             base: { revision_id: 'r0', publication_id: 'p0' },
             current: { revision_id: 'remote-r2', publication_id: 'remote-p2' },
             conflicts: [], code: 'selection_changed', path: ['parent', 'config', 'tracks'],
@@ -230,6 +231,31 @@ describe('mounted track reorder persistence through A2', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  it('keeps the live App track-label draft and its original basis after another App saves the same field', async () => {
+    const mounted = await mountHarness('value-conflict');
+    try {
+      act(() => mounted.hook.result.current.tracks.handleTrackPopoverChange('picture', { label: 'My live App draft' }));
+      await waitFor(() => expect(mounted.send).toHaveBeenCalledTimes(1), { timeout: 3000 });
+      await waitFor(() => expect(mounted.hook.result.current.save.localSaveState?.status).toBe('conflict'));
+      await settlePromises();
+      expect(mounted.hook.result.current.save.dataRef.current?.config.tracks?.find(track => track.id === 'picture')?.label)
+        .toBe('My live App draft');
+      expect(mounted.hook.result.current.save.dataRef.current?.head)
+        .toMatchObject({ headRevisionId: 'r0', headPublicationId: 'p0' });
+      const [stored] = await createCommitOutbox().list(scope);
+      expect(stored.intents).toHaveLength(1);
+      expect(stored.pending?.outcome).toMatchObject({ kind: 'rejected', error: { details: { reason: 'value_conflict' } } });
+      const request = JSON.parse(stored.pending!.request.body) as CommitRequest;
+      expect(request).toMatchObject({ base_revision_id: 'r0', base_publication_id: 'p0', merge: 'fields',
+        commands: [{ op: 'doc.patch', args: { changes: [{ path: ['config', 'tracks', 'id:picture', 'label'],
+          before: { state: 'present', value: 'Picture' }, value: 'My live App draft' }] } }] });
+      expect(mounted.send.mock.calls[0]).toEqual([request, stored.pending!.request.key]);
+    } finally {
+      mounted.hook.unmount();
+      await settlePromises();
+    }
   });
 
   it('uses the real hook consumer and persists a guarded generic doc.patch list.move', async () => {

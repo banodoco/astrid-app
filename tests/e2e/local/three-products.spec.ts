@@ -49,6 +49,27 @@ const CONFLICT_TITLE = 'This timeline changed somewhere else';
 const COMMITS = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/commit$/;
 const FULL_SHA = /^[0-9a-f]{40}$/;
 
+function trackRoute(handler: (route: Route) => Promise<void>) {
+  const operations: Promise<void>[] = [];
+  return Object.assign((route: Route) => {
+    const operation = handler(route);
+    operations.push(operation);
+    // Observe immediately, while preserving the original failure for both
+    // Playwright and the explicit drain below.
+    void operation.catch(() => {});
+    return operation;
+  }, { async drain() {
+    let consumed = 0;
+    while (consumed < operations.length) {
+      const batch = operations.slice(consumed);
+      consumed = operations.length;
+      const results = await Promise.allSettled(batch);
+      for (const result of results) if (result.status === 'rejected') throw result.reason;
+    }
+  } });
+}
+
+
 const test = appTest.extend<object, { seed3: ThreeProductsSeed; astrid: AstridCli; quickAstrid: AstridCli }>({
   // P3 owns initialization of the common bootstrap's single pristine Runtime shell.
   // eslint-disable-next-line no-empty-pattern
@@ -1028,12 +1049,12 @@ test('hosted-loopback interleaving-7: retry cancellation stops resend and preser
     let releaseDelete!: () => void;
     const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
     let releaseHeld = false;
-    const holdRelease = async (route: Route) => {
+    const holdRelease = trackRoute(async (route: Route) => {
       if (route.request().method() !== 'DELETE') return route.fallback();
       releaseHeld = true;
       await releaseGate;
       await route.continue();
-    };
+    });
     await page.route(editingPath, holdRelease);
     try {
       const savePromise = page.waitForResponse((response) => response.request().method() === 'POST'
@@ -1059,6 +1080,7 @@ test('hosted-loopback interleaving-7: retry cancellation stops resend and preser
         pendingChanges: cancelled.pending_changes };
     } finally {
       releaseDelete();
+      await holdRelease.drain();
       await page.unroute(editingPath, holdRelease).catch(() => {});
     }
   });
@@ -1075,12 +1097,12 @@ test('hosted-loopback interleaving-6: Agent SDK source.via app spoof remains beh
     let releaseDelete!: () => void;
     const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
     let releaseHeld = false;
-    const holdRelease = async (route: Route) => {
+    const holdRelease = trackRoute(async (route: Route) => {
       if (route.request().method() !== 'DELETE') return route.fallback();
       releaseHeld = true;
       await releaseGate;
       await route.continue();
-    };
+    });
     await page.route(editingPath, holdRelease);
     try {
       const userLabel = 'Hosted user keeps editing during spoof probe';
@@ -1119,6 +1141,7 @@ test('hosted-loopback interleaving-6: Agent SDK source.via app spoof remains beh
         userLabelPreserved: state.trackLabel };
     } finally {
       releaseDelete();
+      await holdRelease.drain();
       await page.unroute(editingPath, holdRelease).catch(() => {});
     }
   });
@@ -1135,12 +1158,12 @@ test('hosted-loopback interleaving-5: Runtime restart drops the process-local le
     let releaseDelete!: () => void;
     const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
     let releaseHeld = false;
-    const holdRelease = async (route: Route) => {
+    const holdRelease = trackRoute(async (route: Route) => {
       if (route.request().method() !== 'DELETE') return route.fallback();
       releaseHeld = true;
       await releaseGate;
       await route.continue();
-    };
+    });
     await page.route(editingPath, holdRelease);
     try {
       const userLabel = 'Hosted saved value before Runtime restart';
@@ -1180,6 +1203,7 @@ test('hosted-loopback interleaving-5: Runtime restart drops the process-local le
         preservedUserLabel: state.trackLabel, leasePersistence: 'process-local; restart clears lease' };
     } finally {
       releaseDelete();
+      await holdRelease.drain();
       await page.unroute(editingPath, holdRelease).catch(() => {});
     }
   });
@@ -1197,7 +1221,7 @@ test('hosted-loopback interleaving-4: stopped lease renewal reaches TTL expiry a
     let releaseDelete!: () => void;
     const releaseGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
     let releaseHeld = false;
-    const controlLease = async (route: Route) => {
+    const controlLease = trackRoute(async (route: Route) => {
       if (route.request().method() === 'PUT') {
         putCount += 1;
         if (putCount > 1) return route.abort('connectionreset');
@@ -1206,7 +1230,7 @@ test('hosted-loopback interleaving-4: stopped lease renewal reaches TTL expiry a
       releaseHeld = true;
       await releaseGate;
       await route.continue();
-    };
+    });
     await page.route(editingPath, controlLease);
     try {
       const userLabel = 'Hosted user saved before TTL expiry';
@@ -1237,6 +1261,7 @@ test('hosted-loopback interleaving-4: stopped lease renewal reaches TTL expiry a
         key, posts, acceptedRevision: accepted, userLabelPreserved: state.trackLabel };
     } finally {
       releaseDelete();
+      await controlLease.drain();
       await page.unroute(editingPath, controlLease).catch(() => {});
     }
   });

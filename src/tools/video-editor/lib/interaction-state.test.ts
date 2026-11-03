@@ -10,13 +10,16 @@ import {
 const makeRef = (): InteractionStateRef => ({ current: createInteractionState() });
 
 describe('interaction-state helpers', () => {
-  it('reports active when either flag is set', () => {
+  it('reports active for gestures, resize, and pending edit admission', () => {
     const ref = makeRef();
     expect(isInteractionActive(ref)).toBe(false);
     ref.current.drag = true;
     expect(isInteractionActive(ref)).toBe(true);
     ref.current.drag = false;
     ref.current.resize = true;
+    expect(isInteractionActive(ref)).toBe(true);
+    ref.current.resize = false;
+    (ref.current as typeof ref.current & { admissionPending?: boolean }).admissionPending = true;
     expect(isInteractionActive(ref)).toBe(true);
   });
 

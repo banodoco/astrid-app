@@ -425,8 +425,27 @@ test.describe('core journey', () => {
     await expectConnected(page);
     await openSeededTimeline(page, harness);
     const head = await currentHead(harness);
-    const second = await harness.runtimeJson('POST', `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
-    expect(second.status).toBe(200);
+    const { projectId, timelineId } = harness.seed;
+    const timelinePath = `/v1/projects/${projectId}/timelines/${timelineId}`;
+    const timeline = await harness.runtimeJson('GET', timelinePath);
+    expect(timeline.status).toBe(200);
+    expect(timeline.body.head_revision_id).toBe(head);
+    const base = await harness.runtimeJson('GET', `${timelinePath}/composition-revisions/${head}`);
+    expect(base.status).toBe(200);
+    const parent = structuredClone(base.body.payload);
+    parent.name = 'Second writer';
+    parent.config.output.fps = 24;
+    const change = { op: 'set', ref: 'parent', path: [], before: { state: 'present', value: base.body.payload }, value: parent };
+    const second = await harness.runtimeJson('POST', `${timelinePath}/commit`, {
+      api_version: 1, project_id: projectId, timeline_id: timelineId,
+      base_revision_id: head, base_publication_id: timeline.body.head_publication_id,
+      commands: [{ schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [], args: { changes: [change] } }],
+      label: 'Second writer', merge: 'atomic', reads: [{ kind: 'scope', ref: 'timeline', path: [] }],
+      source: { via: 'app' },
+    });
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    expect(second.body.data.accepted_revision_id).not.toBe(head);
+    expect(await currentHead(harness)).toBe(second.body.data.accepted_revision_id);
     await editFirstTrackName(page, 'Draft from the first writer');
     const conflict = page.getByRole('alertdialog', { name: 'This timeline changed somewhere else' });
     await expect(conflict).toBeVisible({ timeout: 20_000 });
@@ -437,7 +456,7 @@ test.describe('core journey', () => {
     const draftField = page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first();
     await expect(draftField).toHaveValue('Draft from the first writer');
     // The stale save was refused, not applied: the second writer's revision is still the head.
-    expect(await currentHead(harness)).toBe(second.body.data.new_head);
+    expect(await currentHead(harness)).toBe(second.body.data.accepted_revision_id);
   });
 
   test('through the hosted origin: open, read the timeline, save with the expected head, reload byte-identical', async ({ page, harness }) => {

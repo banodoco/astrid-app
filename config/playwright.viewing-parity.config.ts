@@ -13,6 +13,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   forbidOnly: !!process.env.CI,
-  reporter: [['list'], ['./testing/playwrightSkipGuard.ts']],
+  // Discovery does not execute tests; enforce the skip guard on real runs.
+  reporter: process.argv.includes('--list') ? [['list']] : [['list'], ['./testing/playwrightSkipGuard.ts']],
   use: { acceptDownloads: true, trace: 'retain-on-failure' },
 });

@@ -305,7 +305,7 @@ describe('local editor saves through the durable outbox', () => {
     await session.dispose();
   });
 
-  it('rolls back a failed predecessor visibly, retaining the complete split → trim chain and error details across restart', async () => {
+  it('keeps a conflicted predecessor visible and retains the complete split → trim chain and error details across restart', async () => {
     const env = environment();
     const session = await env.mount();
     await env.append(session, splitSave());
@@ -317,7 +317,8 @@ describe('local editor saves through the durable outbox', () => {
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(env.send).toHaveBeenCalledTimes(1);
     expect(session.getState()).toMatchObject({ status: 'conflict', error: { code: 'dependency_changed', details } });
-    expect(env.visible()).toEqual({ ...original, agent: true });
+    expect(env.visible()).toEqual(trimmed);
+    expect(env.loadLatest).not.toHaveBeenCalled();
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents.map((intent) => intent.payload)).toEqual([
       expect.objectContaining({ before: original, after: split, commands: splitCommands }),

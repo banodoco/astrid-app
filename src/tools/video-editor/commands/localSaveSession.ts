@@ -113,13 +113,17 @@ export async function createLocalSaveSession(options: Options) {
       return commands?.some((command) => command.op === 'timeline.inverse') ?? false;
     }) ?? false;
     const at = generation;
-    // Retain the entire rejected chain in the outbox; only the visible preview rolls back.
+    // Retain the entire rejected chain in the outbox.
     // A guarded inverse refusal is an authoritative-history conflict even
     // when Runtime reports the guard as a typed refusal/validation response;
     // the user must reload history before another undo can be offered.
     const conflict = inverse || (failure.error && typeof failure.error === 'object' && !Array.isArray(failure.error)
       && failure.error.kind === 'conflict');
     publish(conflict ? 'conflict' : 'error', failure.error);
+    // Ordinary edit conflicts need the visible draft for the conflict dialog's
+    // Keep action. Replacing it with the remote head makes that action preserve
+    // the other writer's work instead. Guarded history inverses still reload.
+    if (conflict && !inverse) return true;
     try {
       const latest = await options.loadLatest();
       checkBasis(latest);

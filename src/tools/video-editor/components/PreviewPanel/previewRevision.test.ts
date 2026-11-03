@@ -13,6 +13,6 @@ describe('preview captions', () => {
     expect(previewRevisionLabel({ kind: 'unavailable', unavailableTarget: target })).toBe(`Preview of ${revisionId} unavailable`);
     expect(previewUnavailableLabel(target)).toBe(`Preview of ${revisionId} unavailable`);
     expect(previewRevisionLabel({ kind: 'unavailable' })).toBe('Preview unavailable');
-    expect(previewUnavailableLabel({ reason: target.reason })).toBe('Preview unavailable');
+    expect(previewUnavailableLabel({ reason: target.reason })).toBe('Preview target unavailable');
   });
 });

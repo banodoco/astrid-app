@@ -25,5 +25,5 @@ export function previewRevisionLabel(revision: PreviewRevision): string {
 }
 
 export function previewUnavailableLabel(target: PreviewUnavailableTarget): string {
-  return target.targetRevisionId ? `Preview of ${target.targetRevisionId} unavailable` : 'Preview unavailable';
+  return target.targetRevisionId ? `Preview of ${target.targetRevisionId} unavailable` : 'Preview target unavailable';
 }

@@ -290,7 +290,7 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
   type TimelineInspection = {
     kind: 'timeline-inspection';
     summary: { head_revision_id: string; revision_id: string; is_current_head: boolean };
-    clips: Array<{ clip_id: string; asset: string | null }>;
+    clips: Array<{ clip_id: string; asset_id: string | null }>;
   };
   let edits: string[][] = [];
   return {
@@ -359,6 +359,13 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
       const args = ['timelines', 'show', ...common, '--published', '--json'];
       const run = await astrid.astrid(args);
       const envelope = JSON.parse(run.stdout.trim().split('\n').at(-1)!) as { ok: boolean; data?: TimelineInspection; error?: unknown };
+      // Capture before validation so an unexpected projection remains diagnosable.
+      console.info(`ASTRID_SHOW_EVIDENCE ${JSON.stringify({ command: ['python', '-m', 'astrid', ...args], exitCode: run.exitCode, envelope,
+        assets: envelope.data?.clips?.map((clip) => {
+          const asset = (clip as unknown as { asset?: unknown }).asset;
+          return { clip_id: clip.clip_id, present: Object.hasOwn(clip, 'asset'), type: asset === null ? 'null' : typeof asset, value: asset,
+            asset_id: clip.asset_id, asset_id_type: clip.asset_id === null ? 'null' : typeof clip.asset_id };
+        }) })}`);
       expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
       expect(envelope.data, 'the CLI returned an inspection projection').toMatchObject({
         kind: 'timeline-inspection',
@@ -368,10 +375,8 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
       const inspection = envelope.data!;
       for (const clip of inspection.clips) {
         expect(typeof clip.clip_id, 'inspection clips retain their clip identity').toBe('string');
-        expect(clip.asset === null || typeof clip.asset === 'string', 'inspection clips retain their observed asset value').toBe(true);
+        expect(clip.asset_id === null || typeof clip.asset_id === 'string', 'inspection clips retain their observed asset identity').toBe(true);
       }
-      // Keep the successful read's observed shape, command, and inner exit code in focused Playwright logs.
-      console.info(`ASTRID_SHOW_EVIDENCE ${JSON.stringify({ command: ['python', '-m', 'astrid', ...args], exitCode: run.exitCode, envelope })}`);
       return inspection;
     },
   };
@@ -751,7 +756,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   const shown = await agent.show();
   expect(shown.summary.head_revision_id).toBe(headB);
   expect(shown.summary.revision_id, 'the inspection is loaded at head B').toBe(headB);
-  expect(shown.clips.find((clip) => clip.clip_id === seed3.agentClearClipId)?.asset, 'the agent sees the clear').toBeNull();
+  expect(shown.clips.find((clip) => clip.clip_id === seed3.agentClearClipId)?.asset_id, 'the agent sees the clear').toBeNull();
   journey.facts.headB = headB;
   await sniff.expectClean(page, seed3.timelineId);
 });

@@ -559,7 +559,8 @@ function PropertiesPanelComponent({ visible = true }: PropertiesPanelProps) {
             track={selectedTrack}
             deviceClass={deviceClass}
             hasPredecessor={selectedClipHasPredecessor}
-            onChange={patch => handleSelectedClipChange(patch, elementOwner, true)}
+            onChange={patch => Object.keys(patch).length === 1 && Object.prototype.hasOwnProperty.call(patch, 'transition') && patch.transition === undefined
+              ? handleSelectedClipChange(patch, elementOwner, true) : handleSelectedClipChange(patch, elementOwner)}
             onResetPosition={handleResetClipPosition}
             onClose={clearSelection}
             onDelete={selectedClip ? () => {

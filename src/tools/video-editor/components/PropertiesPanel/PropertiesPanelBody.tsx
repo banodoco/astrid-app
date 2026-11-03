@@ -399,7 +399,8 @@ function PropertiesPanelComponent({
             track={selectedTrack}
             deviceClass={deviceClass}
             hasPredecessor={selectedClipHasPredecessor}
-            onChange={readOnly ? () => {} : patch => handleSelectedClipChange(patch, undefined, true)}
+            onChange={readOnly ? () => {} : patch => Object.keys(patch).length === 1 && Object.prototype.hasOwnProperty.call(patch, 'transition') && patch.transition === undefined
+              ? handleSelectedClipChange(patch, undefined, true) : handleSelectedClipChange(patch)}
             onResetPosition={readOnly ? () => {} : handleResetClipPosition}
             onClose={clearSelection}
             onDelete={!readOnly && selectedClip ? () => handleDeleteClip(selectedClip.id) : undefined}

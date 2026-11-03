@@ -27,15 +27,17 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
-      runtime_ref:
-        description: Full Runtime commit SHA or ref for both journey jobs
+      app_sha:
+        description: Full lowercase App commit SHA
         required: true
-        default: "5453366458f7b4ee874c94d15ae7952e3e82d3c3"
         type: string
-      agent_ref:
-        description: Full Agent commit SHA or ref for both journey jobs
+      runtime_sha:
+        description: Full lowercase Runtime commit SHA
         required: true
-        default: "e425903f7a9fa5b82973281d15054c0716b46e2d"
+        type: string
+      agent_sha:
+        description: Full lowercase Agent commit SHA
+        required: true
         type: string
 
 concurrency:
@@ -46,26 +48,62 @@ jobs:
   direct-journey:
     runs-on: ubuntu-24.04
     steps:
+      - name: Validate dispatch SHAs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          APP_SHA: ${{ inputs.app_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+          AGENT_SHA: ${{ inputs.agent_sha }}
+        run: |
+          for name in APP_SHA RUNTIME_SHA AGENT_SHA; do
+            if [[ ! ${!name} =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::$name must be exactly 40 lowercase hexadecimal characters"
+              exit 1
+            fi
+          done
+
       # The harness finds the Runtime at ../astrid-runtime and Agent at ../astrid-agent,
       # so all three repos are checked out as siblings under $GITHUB_WORKSPACE: App in astrid-app.
       - uses: actions/checkout@v4
         id: app-checkout
         with:
           path: astrid-app
+          ref: ${{ inputs.app_sha || github.sha }}
       - uses: actions/checkout@v4
         id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
+          ref: ${{ inputs.runtime_sha || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_sha || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+
+      - name: Record and verify dispatch checkout SHAs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          APP_SHA: ${{ inputs.app_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+          AGENT_SHA: ${{ inputs.agent_sha }}
+        run: |
+          mismatch=0
+          echo '### Effective checkout SHAs' >> "$GITHUB_STEP_SUMMARY"
+          for entry in "astrid-app:APP_SHA" "astrid-runtime:RUNTIME_SHA" "astrid-agent:AGENT_SHA"; do
+            repo=${entry%%:*}
+            name=${entry#*:}
+            actual=$(git -C "$repo" rev-parse HEAD)
+            printf -- '- %s: `%s` (requested `%s`)\n' "$repo" "$actual" "${!name}" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$actual" != "${!name}" ]]; then
+              echo "::error::$repo checkout $actual differs from requested ${!name}"
+              mismatch=1
+            fi
+          done
+          exit "$mismatch"
 
       - name: Resolve effective checkout SHAs
         id: checkout-shas
@@ -198,26 +236,62 @@ jobs:
       group: three-products-${{ github.ref }}
       cancel-in-progress: true
     steps:
+      - name: Validate dispatch SHAs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          APP_SHA: ${{ inputs.app_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+          AGENT_SHA: ${{ inputs.agent_sha }}
+        run: |
+          for name in APP_SHA RUNTIME_SHA AGENT_SHA; do
+            if [[ ! ${!name} =~ ^[0-9a-f]{40}$ ]]; then
+              echo "::error::$name must be exactly 40 lowercase hexadecimal characters"
+              exit 1
+            fi
+          done
+
       # The harness finds Astrid at ../astrid-agent (ASTRID_CHECKOUT overrides) and the Runtime at ../astrid-runtime,
       # so all three checkouts are siblings under $GITHUB_WORKSPACE.
       - uses: actions/checkout@v4
         id: app-checkout
         with:
           path: astrid-app
+          ref: ${{ inputs.app_sha || github.sha }}
       - uses: actions/checkout@v4
         id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
+          ref: ${{ inputs.runtime_sha || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_sha || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+
+      - name: Record and verify dispatch checkout SHAs
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          APP_SHA: ${{ inputs.app_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+          AGENT_SHA: ${{ inputs.agent_sha }}
+        run: |
+          mismatch=0
+          echo '### Effective checkout SHAs' >> "$GITHUB_STEP_SUMMARY"
+          for entry in "astrid-app:APP_SHA" "astrid-runtime:RUNTIME_SHA" "astrid-agent:AGENT_SHA"; do
+            repo=${entry%%:*}
+            name=${entry#*:}
+            actual=$(git -C "$repo" rev-parse HEAD)
+            printf -- '- %s: `%s` (requested `%s`)\n' "$repo" "$actual" "${!name}" >> "$GITHUB_STEP_SUMMARY"
+            if [[ "$actual" != "${!name}" ]]; then
+              echo "::error::$repo checkout $actual differs from requested ${!name}"
+              mismatch=1
+            fi
+          done
+          exit "$mismatch"
 
       - name: Resolve effective checkout SHAs
         id: checkout-shas

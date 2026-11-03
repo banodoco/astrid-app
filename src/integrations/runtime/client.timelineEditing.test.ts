@@ -17,6 +17,49 @@ async function waitForRenewalReplies(
 }
 
 describe('Runtime timeline editing lease client', () => {
+  it('accepts a same-sequence retry after a lost initial PUT acknowledgement', async () => {
+    const fixture = runtimeFixture();
+    const requests: Array<{ method: string; path: string; headers: Record<string, string>; body: string }> = [];
+    let firstPut = true;
+    const wireBody: CommitRequest = {
+      api_version: 1, project_id: PROJECT_ID, timeline_id: TIMELINE_ID,
+      base_revision_id: 'r0', base_publication_id: 'p0', source: { via: 'app' },
+      commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: 'App' } } }],
+    };
+    const transport: Transport = async (method, path, headers, body) => {
+      const request = { method, path, headers, body: body ? new TextDecoder().decode(body) : '' };
+      requests.push(request);
+      if (path.endsWith('/editing')) {
+        if (method === 'PUT' && firstPut) {
+          firstPut = false;
+          throw new TypeError('connection lost after Runtime accepted request');
+        }
+        const payload = JSON.parse(request.body);
+        return { status: 200, headers: {}, body: json({ data: { ...payload,
+          active: method === 'PUT', expires_in_seconds: method === 'PUT' ? 10 : 0 } }) };
+      }
+      if (path.endsWith('/commit')) {
+        return { status: 200, headers: {}, body: json(acceptedCommit(
+          { revision_id: 'r1', publication_id: 'p1' }, { revision_id: 'r0', publication_id: 'p0' })) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+    const client = new AstridRuntimeClient({ baseUrl: 'http://runtime.test', transport });
+    const leaseBody = { tab_session_id: 'retry-owner', sequence: 1 };
+
+    await expect(client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, leaseBody)).rejects.toThrow(TypeError);
+    await client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, leaseBody);
+    await client.commitTimeline(PROJECT_ID, TIMELINE_ID, wireBody, 'retry-body-key');
+
+    const puts = requests.filter(request => request.method === 'PUT' && request.path.endsWith('/editing'));
+    const commit = requests.find(request => request.method === 'POST' && request.path.endsWith('/commit'))!;
+    expect(puts).toHaveLength(2);
+    expect(puts.map(request => JSON.parse(request.body))).toEqual([leaseBody, leaseBody]);
+    expect(commit.headers['X-Timeline-Editing-Session']).toBe('retry-owner');
+    expect(commit.headers['Idempotency-Key']).toBe('retry-body-key');
+    expect(JSON.parse(commit.body)).toEqual(wireBody);
+  });
+
   it('keeps same-generation renewals usable when acknowledgements arrive out of order', async () => {
     const fixture = runtimeFixture();
     const renewalReplies = new Map<number, (value: Awaited<ReturnType<Transport>>) => void>();

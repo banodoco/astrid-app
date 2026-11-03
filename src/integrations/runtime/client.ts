@@ -927,20 +927,21 @@ export class AstridRuntimeClient {
     const previous = this.editingSessions.get(key);
     // A renewal advances sequence inside one ownership generation. Replacing
     // the object for every send would fence all replies on a slow connection.
-    if (previous?.tab === body.tab_session_id && body.sequence <= previous.sequence) {
+    if (previous?.tab === body.tab_session_id && !previous.wanted && body.sequence <= previous.sequence) {
       return this.withMutation(() => this.client.updateTimelineEditing(projectId, timelineId, body));
     }
     const lease = previous?.tab === body.tab_session_id && previous.wanted
       ? previous
       : { tab: body.tab_session_id, sequence: body.sequence, active: false, wanted: true, acknowledgedSequence: -1 };
-    lease.sequence = body.sequence;
+    lease.sequence = Math.max(lease.sequence, body.sequence);
     this.editingSessions.set(key, lease);
     return this.withMutation(async () => {
       const response = await this.client.updateTimelineEditing(projectId, timelineId, body);
       if (this.editingSessions.get(key) === lease && lease.wanted
         && response.data.tab_session_id === lease.tab
         && response.data.sequence === body.sequence
-        && response.data.sequence > lease.acknowledgedSequence) {
+        && (response.data.sequence > lease.acknowledgedSequence
+          || response.data.sequence === lease.acknowledgedSequence && !response.data.active)) {
         lease.acknowledgedSequence = response.data.sequence;
         lease.active = response.data.active;
       }

@@ -777,6 +777,15 @@ test('hosted-loopback J5 interleaving-3: App/App same-field recovery keeps the s
       await openApp(second, harness);
       await expectConnected(second);
       await openSeededTimeline(second, harness);
+      // Field visibility precedes the verified basis/identity read and durable
+      // owner claim. Reuse the canonical mounted-bootstrap readiness boundary;
+      // an early edit is intentionally retained without authoring a POST.
+      await expect.poll(async () => (await commandOutboxes(second, seed3.timelineId)).some(owner =>
+        owner.scope.projectId === harness.seed.projectId && !owner.pending && owner.intents.length === 0),
+      { ...CEILING, message: 'the independent App owns a verified save session before editing' }).toBe(true);
+      await expect.poll(() => second.evaluate(() => (window as any).__saveEvents.some((event: any) =>
+        event.phase === 'handoff-ready' && event.current === true)),
+      { ...CEILING, message: 'the independent App completed its original save handoff' }).toBe(true);
       await second.route(COMMITS, async (route) => {
         if (route.request().method() !== 'POST') return route.fallback();
         heldSecond = { route, body: route.request().postDataJSON(), key: route.request().headers()['idempotency-key'] };

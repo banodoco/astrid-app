@@ -1,342 +1,148 @@
-# Same-machine "direct" journey (Plan A, card A0.3): a production build on a hosted-style HTTPS origin,
-# a real Runtime daemon on throwaway SQLite serving it through its own browser door, and Chromium.
-# Local equivalent: npm run test:e2e:direct (tests/e2e/local/support/harness.ts).
-#
-# Runtime and Agent checkouts are private, so actions/checkout needs tokens that can read them. Add repository
-# secrets RUNTIME_READ_TOKEN and ASTRID_READ_TOKEN with read access to banodoco/astrid-runtime and
-# banodoco/astrid-agent. When either secret is not set, that checkout falls back to github.token, which only
-# works if its repo is readable by this repository. Pull requests from forks get no secrets.
-#
-# Pass rule (a skip means a missing harness, R-9): exactly M tests expected to fail (M is the journey
-# file's budget in scripts/quality/check-known-failures.mjs), none unexpected, none flaky, none skipped.
-name: Direct Journey
-
+name: I-AP-36 focused direct journey
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/direct-journey.yml"
-      - "scripts/runtime-discovery-proxy.mjs"
-      - "scripts/dev-local-workspace*"
-      - "src/integrations/runtime/**"
-      - "src/shared/lib/media/**"
-      - "tests/e2e/local/**"
-      - "tests/e2e/support/**"
-      - "playwright.direct.config.ts"
-      - "playwright.three-products.config.ts"
-  schedule:
-    - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
-      runtime_ref:
-        description: Full Runtime commit SHA or ref for both journey jobs
+      agent_sha:
+        description: Exact Agent commit SHA
         required: true
-        default: "5453366458f7b4ee874c94d15ae7952e3e82d3c3"
         type: string
-      agent_ref:
-        description: Full Agent commit SHA or ref for both journey jobs
+      runtime_sha:
+        description: Exact Runtime commit SHA
         required: true
-        default: "e425903f7a9fa5b82973281d15054c0716b46e2d"
         type: string
-
-concurrency:
-  group: direct-journey-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
-
+      case_1:
+        description: Playwright file and line for save and reload
+        required: true
+        type: string
+      case_2:
+        description: Playwright file and line for stale writer
+        required: true
+        type: string
+permissions:
+  contents: read
 jobs:
-  direct-journey:
+  focused:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      # The harness finds the Runtime at ../astrid-runtime and Agent at ../astrid-agent,
-      # so all three repos are checked out as siblings under $GITHUB_WORKSPACE: App in astrid-app.
+      - name: Validate exact inputs
+        env:
+          AGENT_SHA: ${{ inputs.agent_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+          CASE_1: ${{ inputs.case_1 }}
+          CASE_2: ${{ inputs.case_2 }}
+        run: |
+          set -euo pipefail
+          test "$AGENT_SHA" = 1d3f6fbbd9b2cdf7709c274a13bd9fbd3ccf34e7
+          test "$RUNTIME_SHA" = e57750df0c3e5767fb1f6d2b5ec1eec46474e077
+          test "$CASE_1" = tests/e2e/local/direct-journey.spec.ts:421
+          test "$CASE_2" = tests/e2e/local/direct-journey.spec.ts:438
       - uses: actions/checkout@v4
-        id: app-checkout
         with:
           path: astrid-app
       - uses: actions/checkout@v4
-        id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
+          ref: ${{ inputs.runtime_sha }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
-        id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_sha }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
-
-      - name: Resolve effective checkout SHAs
-        id: checkout-shas
+      - name: Record and verify checkout identities
+        env:
+          AGENT_SHA: ${{ inputs.agent_sha }}
+          RUNTIME_SHA: ${{ inputs.runtime_sha }}
+          CASE_1: ${{ inputs.case_1 }}
+          CASE_2: ${{ inputs.case_2 }}
         run: |
-          app_head="$(git -C astrid-app rev-parse --verify HEAD)"
-          runtime_head="$(git -C astrid-runtime rev-parse --verify HEAD)"
-          agent_head="$(git -C astrid-agent rev-parse --verify HEAD)"
-          for head in "$app_head" "$runtime_head" "$agent_head"; do
-            [[ "$head" =~ ^[0-9a-f]{40}$ ]]
-          done
-          printf 'app_head=%s\n' "$app_head" >> "$GITHUB_OUTPUT"
-          printf 'runtime_head=%s\n' "$runtime_head" >> "$GITHUB_OUTPUT"
-          printf 'agent_head=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
-          printf 'APP_CHECKOUT_SHA=%s\n' "$app_head" >> "$GITHUB_ENV"
-          printf 'RUNTIME_CHECKOUT_SHA=%s\n' "$runtime_head" >> "$GITHUB_ENV"
-          printf 'AGENT_CHECKOUT_SHA=%s\n' "$agent_head" >> "$GITHUB_ENV"
-
-      - name: Restore npm cache (C-08)
-        id: c08-app-direct-journey-2
-        uses: actions/cache/restore@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/iap36"
+          {
+            printf 'run_url=%s/%s/actions/runs/%s\nrun_id=%s\nrun_attempt=%s\nworkflow_ref=%s\nworkflow_sha=%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_WORKFLOW_REF" "$GITHUB_WORKFLOW_SHA"
+            printf 'app_product_source=f8396909b4a41f0442f516a28d7a9b50dddd2ad2\napp_checkout=%s\nagent_checkout=%s\nruntime_checkout=%s\ncase_1=%s\ncase_2=%s\n' "$(git -C astrid-app rev-parse HEAD)" "$(git -C astrid-agent rev-parse HEAD)" "$(git -C astrid-runtime rev-parse HEAD)" "$CASE_1" "$CASE_2"
+          } | tee "$RUNNER_TEMP/iap36/identities.txt"
+          test "$(git -C astrid-app rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git -C astrid-agent rev-parse HEAD)" = "$AGENT_SHA"
+          test "$(git -C astrid-runtime rev-parse HEAD)" = "$RUNTIME_SHA"
       - uses: actions/setup-node@v4
         with:
-          node-version: "20.19.0"
+          node-version: '20.19.0'
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-
-      - name: Build the Runtime venv
+          python-version: '3.11'
+      - name: Build Runtime venv
         working-directory: astrid-runtime
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
           .venv/bin/python -m runtime_protocol.cli --help > /dev/null
-
-      - name: Build the Astrid venv
+      - name: Build Agent venv
         working-directory: astrid-agent
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
-          # Astrid imports runtime_protocol but does not declare it: use the pinned sibling Runtime under test.
           .venv/bin/python -m pip install --no-deps -e ../astrid-runtime
           .venv/bin/python -m astrid.core.dev.cross_client --help > /dev/null
-
-      - name: Install App dependencies, Chromium and ffmpeg
+      - name: Install App dependencies and browser
         working-directory: astrid-app
         run: |
           npm ci --legacy-peer-deps
           npx playwright install --with-deps chromium
           sudo apt-get install -y --no-install-recommends ffmpeg
-
-      - name: Run the journey
+      - name: Run the two exact cases
         working-directory: astrid-app
         env:
-          # Written by the JSON reporter itself: the config's globalSetup prints to stdout, so a shell redirect would corrupt the file.
-          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/direct-journey.json
-          PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/direct-results
+          CASE_1: ${{ inputs.case_1 }}
+          CASE_2: ${{ inputs.case_2 }}
           NODE_OPTIONS: --max-old-space-size=4096
-          ASTRID_APP_DIRECT_DOOR_PORT: "17341"
+          ASTRID_APP_DIRECT_DOOR_PORT: '17341'
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
           ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
-          ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
-          APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
-          RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}
-          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_head }}
-          # A missing dependency in this job is a failure, never a skip (config/testing/skipRegistry.mjs).
           ASTRID_REQUIRE_LANES: direct-journey
-        run: npx playwright test -c playwright.direct.config.ts --reporter=json,list,./config/testing/playwrightSkipGuard.ts
-
-      - name: Check the outcome counts
-        if: ${{ !cancelled() }}
-        working-directory: astrid-app
-        env:
-          REPORT: ${{ runner.temp }}/direct-journey.json
         run: |
-          jq '
-            [.. | objects | select(has("expectedStatus") and has("results"))] as $tests
-            | {
-                total: ($tests | length),
-                expected_failures: ($tests | map(select(.expectedStatus == "failed")) | length),
-                expected_failures_that_failed: ($tests | map(select(.expectedStatus == "failed" and .status == "expected")) | length),
-                unexpected: .stats.unexpected,
-                flaky: .stats.flaky,
-                skipped: .stats.skipped
-              }
-            | . as $r | $r, (
-                if $r.total > 0 and $r.expected_failures == 0 and $r.expected_failures_that_failed == 0
-                   and $r.unexpected == 0 and $r.flaky == 0 and $r.skipped == 0
-                then empty else error("direct journey: want 0 expected failures, 0 unexpected, 0 flaky, 0 skipped; got \($r)") end)
-          ' "$REPORT"
-
-      - name: Collect artifacts
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/direct-artifacts"
-          cp "${{ runner.temp }}/direct-journey.json" "$RUNNER_TEMP/direct-artifacts/" || true
-          find "${{ runner.temp }}/direct-results" -name 'direct-measurements.json' -exec cp {} "$RUNNER_TEMP/direct-artifacts/" \; || true
-      - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
-        with:
-          name: direct-journey
-          path: ${{ runner.temp }}/direct-artifacts/
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: ${{ failure() }}
-        with:
-          name: direct-journey-traces
-          path: ${{ runner.temp }}/direct-results/
-          if-no-files-found: ignore
-
-  # Three products on one realm (testing plan F2, thin slice): the same hosted build and real Runtime (with its browser door) as the
-  # job above, plus the real Astrid CLI as a second client. Local equivalent: npm run test:e2e:three-products.
-  # Astrid is private to this lane's token: add a repository secret ASTRID_READ_TOKEN (a fine-grained PAT with read access to
-  # banodoco/astrid-agent, or whichever repository holds Astrid). Without it the job falls back to github.token, which
-  # only reads Astrid if this repository can. A missing checkout or interpreter fails the job by name (R-9); it never skips.
-  # Until the Astrid branch carrying astrid/core/dev/cross_client.py (tidy-w2) merges to its main, this job checks out an Astrid
-  # without that module, so any PR touching tests/e2e/local/** (or the paths above) is red here until that merge.
-      - name: Save npm cache on main or int branches (C-08)
-        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-direct-journey-2.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
-
-  three-products:
-    runs-on: ubuntu-24.04
-    concurrency:
-      group: three-products-${{ github.ref }}
-      cancel-in-progress: true
-    steps:
-      # The harness finds Astrid at ../astrid-agent (ASTRID_CHECKOUT overrides) and the Runtime at ../astrid-runtime,
-      # so all three checkouts are siblings under $GITHUB_WORKSPACE.
-      - uses: actions/checkout@v4
-        id: app-checkout
-        with:
-          path: astrid-app
-      - uses: actions/checkout@v4
-        id: runtime-checkout
-        with:
-          repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
-          path: astrid-runtime
-          token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
-      - uses: actions/checkout@v4
-        id: agent-checkout
-        with:
-          repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
-          path: astrid-agent
-          token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
-
-      - name: Resolve effective checkout SHAs
-        id: checkout-shas
-        run: |
-          app_head="$(git -C astrid-app rev-parse --verify HEAD)"
-          runtime_head="$(git -C astrid-runtime rev-parse --verify HEAD)"
-          agent_head="$(git -C astrid-agent rev-parse --verify HEAD)"
-          for head in "$app_head" "$runtime_head" "$agent_head"; do
-            [[ "$head" =~ ^[0-9a-f]{40}$ ]]
+          set -uo pipefail
+          for n in 1 2; do
+            var="CASE_$n"
+            export PLAYWRIGHT_JSON_OUTPUT_NAME="$RUNNER_TEMP/iap36/case-$n.json"
+            export PLAYWRIGHT_OUTPUT_DIR="$RUNNER_TEMP/iap36/results-$n"
+            printf 'command: npx playwright test -c playwright.direct.config.ts %s --reporter=json,list,./config/testing/playwrightSkipGuard.ts\n' "${!var}" | tee "$RUNNER_TEMP/iap36/case-$n.log"
+            npx playwright test -c playwright.direct.config.ts "${!var}" --reporter=json,list,./config/testing/playwrightSkipGuard.ts 2>&1 | tee -a "$RUNNER_TEMP/iap36/case-$n.log"
+            code=${PIPESTATUS[0]}
+            printf '%s\n' "$code" > "$RUNNER_TEMP/iap36/case-$n.exit"
+            printf 'inner_exit=%s\n' "$code" | tee -a "$RUNNER_TEMP/iap36/case-$n.log"
           done
-          printf 'app_head=%s\n' "$app_head" >> "$GITHUB_OUTPUT"
-          printf 'runtime_head=%s\n' "$runtime_head" >> "$GITHUB_OUTPUT"
-          printf 'agent_head=%s\n' "$agent_head" >> "$GITHUB_OUTPUT"
-          printf 'APP_CHECKOUT_SHA=%s\n' "$app_head" >> "$GITHUB_ENV"
-          printf 'RUNTIME_CHECKOUT_SHA=%s\n' "$runtime_head" >> "$GITHUB_ENV"
-          printf 'AGENT_CHECKOUT_SHA=%s\n' "$agent_head" >> "$GITHUB_ENV"
-
-      - name: Restore npm cache (C-08)
-        id: c08-app-direct-journey-1
-        uses: actions/cache/restore@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20.19.0"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-
-      - name: Build the Runtime venv
-        working-directory: astrid-runtime
+          node <<'NODE'
+          const fs = require('fs');
+          const path = require('path');
+          const root = process.env.RUNNER_TEMP + '/iap36';
+          const titles = ['App: open the seeded project, edit, save, reload byte-identical', 'App: a second writer saves first, the App shows the conflict and keeps the draft'];
+          let ok = true;
+          for (let i = 1; i <= 2; i++) {
+            try {
+              const report = JSON.parse(fs.readFileSync(path.join(root, `case-${i}.json`)));
+              const specs = [];
+              function visit(s) { for (const spec of s.specs || []) specs.push(spec); for (const sub of s.suites || []) visit(sub); }
+              for (const suite of report.suites || []) visit(suite);
+              const tests = specs.flatMap(s => (s.tests || []).map(t => ({title:s.title, ...t})));
+              const pass = fs.readFileSync(path.join(root, `case-${i}.exit`), 'utf8').trim() === '0' && tests.length === 1 && tests[0].title === titles[i-1] && tests[0].expectedStatus === 'passed' && tests[0].status === 'expected' && tests[0].results.length === 1 && tests[0].results[0].status === 'passed' && report.stats.unexpected === 0 && report.stats.flaky === 0 && report.stats.skipped === 0;
+              console.log(`case_${i}_gate=${pass ? 'passed' : 'failed'} title=${titles[i-1]} count=${tests.length}`);
+              ok &&= pass;
+            } catch (e) { console.error(`case_${i}_gate=failed`, e.message); ok = false; }
+          }
+          process.exit(ok ? 0 : 1);
+          NODE
+      - name: Hash evidence
+        if: ${{ always() }}
         run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -e .
-          .venv/bin/python -m runtime_protocol.cli --help > /dev/null
-
-      - name: Build the Astrid venv
-        working-directory: astrid-agent
-        run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install -e .
-          # Astrid imports runtime_protocol but does not declare it: the installer puts the Runtime beside it with --no-deps
-          # (astrid/installer/backend.py, scripts/ci_install_runtime.py). Here the Runtime under test is the sibling checkout.
-          .venv/bin/python -m pip install --no-deps -e ../astrid-runtime
-          .venv/bin/python -m astrid.core.dev.cross_client --help > /dev/null
-
-      # Chrome, not Chromium: the render case plays an H.264 film (the bundled Chromium cannot decode it) and a missing Chrome
-      # fails at browser launch. ffmpeg makes the case's real VP8 and Opus media, and the host's ffmpeg renderer makes the render.
-      - name: Install App dependencies, Chrome and ffmpeg
-        working-directory: astrid-app
-        run: |
-          npm ci --legacy-peer-deps
-          npx playwright install --with-deps chromium chrome
-          sudo apt-get install -y --no-install-recommends ffmpeg
-
-      - name: Run the three-product journey
-        working-directory: astrid-app
-        env:
-          ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
-          ASTRID_REQUIRE_LANES: direct-journey
-          ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
-          ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
-          APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
-          RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}
-          AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_head }}
-          TIMELINE_BUNDLE_AGENT_HEAD: ${{ steps.checkout-shas.outputs.agent_head }}
-          TIMELINE_BUNDLE_RUNTIME_HEAD: ${{ steps.checkout-shas.outputs.runtime_head }}
-          # Written by the JSON reporter itself (the globalSetup prints to stdout, so a shell redirect would corrupt the file).
-          PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
-          PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
-          NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
-
-      # Pass rule (R-9, same as the direct journey): no quarantined cases exist for this spec, so every case must pass. Durations are
-      # written to three-products-summary.json and recorded, never judged (R-10).
-      - name: Check the outcome counts
-        if: ${{ !cancelled() }}
-        working-directory: astrid-app
-        env:
-          REPORT: ${{ runner.temp }}/three-products.json
-        run: |
-          jq '
-            [.. | objects | select(has("expectedStatus") and has("results"))] as $tests
-            | {
-                total: ($tests | length),
-                expected_failures: ($tests | map(select(.expectedStatus == "failed")) | length),
-                expected_failures_that_failed: ($tests | map(select(.expectedStatus == "failed" and .status == "expected")) | length),
-                unexpected: .stats.unexpected,
-                flaky: .stats.flaky,
-                skipped: .stats.skipped
-              }
-            | . as $r | $r, (
-                if $r.total > 0 and $r.expected_failures == 0 and $r.expected_failures_that_failed == 0
-                   and $r.unexpected == 0 and $r.flaky == 0 and $r.skipped == 0
-                then empty else error("three-product journey: want cases, 0 expected failures, 0 unexpected, 0 flaky, 0 skipped; got \($r)") end)
-          ' "$REPORT"
-
-      - name: Collect artifacts
-        if: ${{ !cancelled() }}
-        run: |
-          mkdir -p "$RUNNER_TEMP/three-products-artifacts"
-          cp "${{ runner.temp }}/three-products.json" "$RUNNER_TEMP/three-products-artifacts/" || true
-          find "${{ runner.temp }}/three-products-results" -name 'three-products-summary.json' -exec cp {} "$RUNNER_TEMP/three-products-artifacts/" \; || true
+          mkdir -p "$RUNNER_TEMP/iap36"
+          (cd "$RUNNER_TEMP/iap36" && find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 -r sha256sum > SHA256SUMS)
       - uses: actions/upload-artifact@v4
-        if: ${{ !cancelled() }}
+        if: ${{ always() }}
         with:
-          name: three-products
-          path: ${{ runner.temp }}/three-products-artifacts/
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v4
-        if: ${{ failure() }}
-        with:
-          name: three-products-traces
-          path: ${{ runner.temp }}/three-products-results/
-          if-no-files-found: ignore
-      - name: Save npm cache on main or int branches (C-08)
-        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-direct-journey-1.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+          name: iap36-focused-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/iap36/
+          if-no-files-found: error

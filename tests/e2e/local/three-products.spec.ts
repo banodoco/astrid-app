@@ -294,10 +294,9 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
       const directory = mkdtempSync(path.join(tmpdir(), 'astrid-candidate-'));
       const candidate = path.join(directory, 'candidate.json');
       try {
-        // Task handles resolve the output, but a detached commit also needs a Runtime catalog
-        // association so its media admission can verify the new registry entry.
+        // Resolve task output bytes, then admit the exact raw object through the media CLI.
         const prepare = [
-          'import sys',
+          'import json, subprocess, sys',
           'from pathlib import Path',
           'from astrid.sdk import AstridClient',
           'from astrid.sdk.authoring_bundle import plan_authoring_media, import_authoring_media',
@@ -316,10 +315,12 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
           '            assert descriptor["digest"] == entry["media_id"], "task output differs from draft"',
           '            local = Path(target).parent / (str(count) + "-" + Path(descriptor["filename"]).name)',
           '            local.write_bytes(client.media.read_bytes(descriptor["digest"]))',
-          '            imported = client.media.import_file(project=project, path=local, idempotency_key=f"{key}-media-{count}")',
-          '            if not imported.ok: raise RuntimeError(str(imported.error))',
-          '            assert imported.data["object_id"] == descriptor["digest"], "import changed task output"',
-          '            entry["media_id"] = imported.data["object_id"]',
+          '            result = subprocess.run([sys.executable, "-m", "astrid", "media", "import", str(local), "--project", project, "--realm", "managed_local", "--idempotency-key", f"{key}-media-{count}", "--json"], check=True, capture_output=True, text=True)',
+          '            imported = json.loads(result.stdout)',
+          '            if not imported.get("ok"): raise RuntimeError(str(imported.get("error")))',
+          '            object_id = imported["data"]["object_id"]',
+          '            assert object_id == descriptor["digest"], "import changed task output"',
+          '            entry["media_id"] = object_id',
           '            entry["local_path"] = str(local)',
           '            count += 1',
           '    if count:',

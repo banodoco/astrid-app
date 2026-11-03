@@ -330,11 +330,9 @@ export class AstridCli {
       '    except CommitConflict as exc:',
       '        current = Timeline.open(project, timeline_id, client=client, outbox_path=outbox_path,',
       '                               user_editing_timeout=8, user_editing_interval=0.05)',
-      ...(mode === 'commit-fn' ? [
-        '        recovery = {"status": "re_derive", "summary": exc.fix}',
-      ] : [
-        '        recovery = current.retry(exc)',
-      ]),
+      // Passing the exception can carry retry_fn and invoke user code. Retry
+      // by pending ID to present the captured conflict without rerunning it.
+      '        recovery = current.retry(exc.pending_id)',
       '        print(json.dumps({"kind": "conflict", "pending_id": exc.pending_id,',
       '                          "detail": exc.detail, "fix": exc.fix, "failure": exc.failure,',
       '                          "presentation": exc.presentation, "clash": exc.clash,',

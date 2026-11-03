@@ -1206,6 +1206,8 @@ describe('useTimelineSave — recovered draft durability', () => {
             harness.hook.unmount();
             await vi.waitFor(() => expect(locks.size).toBe(0));
             harness = await mount();
+            await vi.waitFor(() => expect(harness!.hook.result.current.localSaveState?.status).toBe('recovery'));
+            act(() => harness!.hook.result.current.recoverLocalOwner(harness!.hook.result.current.localSaveState!.recoverableOwners[0]));
             await vi.waitFor(() => expect(harness!.hook.result.current.localSaveState?.status).toBe('conflict'));
             expect(harness.hook.result.current.history.canUndo).toBe(false);
             expect(posted).toHaveLength(1);
@@ -1226,6 +1228,10 @@ describe('useTimelineSave — recovered draft durability', () => {
         harness.hook.unmount();
         await vi.waitFor(() => expect(locks.size).toBe(0));
         harness = await mount();
+        if (lost) {
+          await vi.waitFor(() => expect(harness!.hook.result.current.localSaveState?.status).toBe('recovery'));
+          act(() => harness!.hook.result.current.recoverLocalOwner(harness!.hook.result.current.localSaveState!.recoverableOwners[0]));
+        }
         await vi.waitFor(() => expect(harness!.hook.result.current.history.canRedo).toBe(true));
         if (lost) expect(posted[1]).toEqual(posted[0]);
         act(() => harness!.hook.result.current.history.redo());
@@ -1252,7 +1258,7 @@ describe('useTimelineSave — recovered draft durability', () => {
   it.each([
     ['accepted', 'before reload'], ['merged', 'before reload'],
     ['accepted', 'after replay'], ['merged', 'after replay'],
-  ] as const)('automatically replays a mounted lost-ACK %s with Runtime restart %s, before a late observer', async (outcome, restartAt) => {
+  ] as const)('replays a mounted lost-ACK after explicit recovery %s with Runtime restart %s, before a late observer', async (outcome, restartAt) => {
     const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
     const locks = new Set<string>();
     Object.defineProperty(navigator, 'locks', { configurable: true, value: {
@@ -1425,6 +1431,8 @@ describe('useTimelineSave — recovered draft durability', () => {
       harness = await mount();
       expect(harness.identity).toEqual(identity);
       expect(harness.basis.head).toEqual({ revisionId: 'r1', publicationId: 'p1' });
+      await vi.waitFor(() => expect(harness!.hook.result.current.localSaveState?.status).toBe('recovery'));
+      act(() => harness!.hook.result.current.recoverLocalOwner(harness!.hook.result.current.localSaveState!.recoverableOwners[0]));
       await vi.waitFor(() => expect(harness!.hook.result.current.localSaveState?.status).toBe('saved'));
       expect(posts).toHaveLength(3);
       expect(posts[2]).toEqual(posts[1]);
@@ -1578,6 +1586,8 @@ describe('useTimelineSave — recovered draft durability', () => {
               act(() => recovered.rerenderRuntime({ assetResolver: { resolveAssetUrl: async file => file } }));
               await act(async () => { finishRead!(); });
             }
+            await vi.waitFor(() => expect(recovered.hook.result.current.localSaveState?.status).toBe('recovery'));
+            act(() => recovered.hook.result.current.recoverLocalOwner(recovered.hook.result.current.localSaveState!.recoverableOwners[0]));
             await vi.waitFor(() => expect(recovered.hook.result.current.localSaveState?.status).toBe('saved'));
             expect(send.mock.calls[1]).toEqual(exact);
             expect(JSON.stringify(send.mock.calls[1][0])).toBe(pending?.body);

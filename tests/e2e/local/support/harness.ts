@@ -643,6 +643,20 @@ export class DirectHarness {
   private hungStackCapture?: HungRequestStackCapture;
   private hungStackRunId?: string;
   private seedHead?: { revisionId: string; publicationId: string };
+  private acceptanceBarrierDirectory?: string;
+
+  armTimelineAcceptanceBarrier(key: string) {
+    const directory = this.acceptanceBarrierDirectory;
+    if (!directory) throw new Error('timeline acceptance barrier was not selected at harness construction');
+    for (const name of ['ready.json', 'release']) rmSync(path.join(directory, name), { force: true });
+    writeFileSync(path.join(directory, 'arm.tmp'), JSON.stringify({ key }));
+    renameSync(path.join(directory, 'arm.tmp'), path.join(directory, 'arm.json'));
+    return {
+      ready: () => existsSync(path.join(directory, 'ready.json'))
+        ? JSON.parse(readFileSync(path.join(directory, 'ready.json'), 'utf8')) : undefined,
+      release: () => writeFileSync(path.join(directory, 'release'), ''),
+    };
+  }
 
   /** The hosted site's extension release config: on by default, as deployed; a case sets 'missing' to see the closed posture. */
 
@@ -679,7 +693,7 @@ export class DirectHarness {
     ];
   }
 
-  async start(options: { deferTimelineInitialization?: boolean } = {}): Promise<this> {
+  async start(options: { deferTimelineInitialization?: boolean; timelineAcceptanceBarrier?: boolean } = {}): Promise<this> {
     process.on('SIGTERM', () => { void this.stop().finally(() => process.exit(143)); });
     try {
       const configuredRuntimeLogDirectory = process.env.D66_RUNTIME_LOG_DIR?.trim() || undefined;
@@ -693,6 +707,10 @@ export class DirectHarness {
       // symlink.  Store the canonical task-local directory for all Runtime
       // roots while the browser can keep using the compatibility alias.
       this.tmp = realpathSync(mkdtempSync(path.join(tmpdir(), 'astrid-direct-')));
+      if (options.timelineAcceptanceBarrier) {
+        this.acceptanceBarrierDirectory = path.join(this.tmp, 'timeline-acceptance-barrier');
+        mkdirSync(this.acceptanceBarrierDirectory, { recursive: true });
+      }
       if (!this.attachment) await assertPortFree(this.doorPort, 'door');
       const tls = makeCertificate(this.tmp);
       this.spki = tls.spki;
@@ -763,6 +781,11 @@ export class DirectHarness {
       if (config.helperSha256) env.ASTRID_P2_COMMIT_PHASE_CAPTURE_HELPER_SHA256 = config.helperSha256;
       const watchdogSeconds = process.env.ASTRID_P2_COMMIT_PHASE_CAPTURE_WATCHDOG_SECONDS?.trim();
       if (watchdogSeconds) env.ASTRID_P2_COMMIT_PHASE_CAPTURE_WATCHDOG_SECONDS = watchdogSeconds;
+    }
+    if (this.acceptanceBarrierDirectory) {
+      if (captureSink) throw new Error('select either phase observation or the T4 acceptance barrier');
+      env.PYTHONPATH = [path.join(here, 't4-acceptance-bootstrap'), RUNTIME_CHECKOUT, agent].join(path.delimiter);
+      env.ASTRID_T4_ACCEPTANCE_BARRIER = this.acceptanceBarrierDirectory;
     }
     return env;
   }
@@ -1553,7 +1576,7 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
   }
 }
 
-export async function startDirectHarness(options: { deferTimelineInitialization?: boolean } = {}): Promise<DirectHarness> {
+export async function startDirectHarness(options: { deferTimelineInitialization?: boolean; timelineAcceptanceBarrier?: boolean } = {}): Promise<DirectHarness> {
   return new DirectHarness().start(options);
 }
 

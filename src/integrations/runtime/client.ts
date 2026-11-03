@@ -350,6 +350,7 @@ export class AstridRuntimeClient {
   private readonly token: string | undefined;
   private readonly transport: Transport | undefined;
   private readonly workspaceClients = new Map<string, WorkspaceClient>();
+  private readonly editingSessions = new Map<string, { tab: string; sequence: number; active: boolean }>();
   private expectedIdentity: RuntimeIdentityBinding | undefined;
   /** A default client with no pinned launch binding adopts the page's runtime config on its first session. */
   private usesRuntimeConfig: boolean;
@@ -397,22 +398,26 @@ export class AstridRuntimeClient {
     let client = this.workspaceClients.get(base);
     if (!client) {
       const signal = this.signal;
-      const transport: Transport | undefined = signal ? async (method, path, headers, body) => {
-        signal.throwIfAborted();
+      const transport: Transport = async (method, path, headers, body) => {
+        signal?.throwIfAborted();
+        if (method === 'POST' && path.endsWith('/commit')) {
+          const lease = this.editingSessions.get(`${base}${path.slice(0, -'/commit'.length)}`);
+          if (lease?.active) headers = { ...headers, 'X-Timeline-Editing-Session': lease.tab };
+        }
         if (this.transport) {
           const response = await this.transport(method, path, headers, body);
-          signal.throwIfAborted();
+          signal?.throwIfAborted();
           return response;
         }
         const response = await fetch(`${base.replace(/\/$/, '')}${path}`, {
           method, headers, body: body as BodyInit | undefined, signal,
         });
         const bytes = new Uint8Array(await response.arrayBuffer());
-        signal.throwIfAborted();
+        signal?.throwIfAborted();
         const responseHeaders: Record<string, string> = {};
         response.headers.forEach((value, key) => { responseHeaders[key] = value; });
         return { status: response.status, headers: responseHeaders, body: bytes };
-      } : this.transport;
+      };
       this.workspaceClients.set(base, client = new WorkspaceClient(base, this.token, transport));
     }
     return client;
@@ -917,10 +922,26 @@ export class AstridRuntimeClient {
   }
 
   async updateTimelineEditing(projectId: string, timelineId: string, body: TimelineEditingRequest): Promise<TimelineEditingResponse> {
-    return this.withMutation(() => this.client.updateTimelineEditing(projectId, timelineId, body));
+    const key = `${this.baseUrl}/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}`;
+    const previous = this.editingSessions.get(key);
+    const selected = !previous || previous.tab !== body.tab_session_id || body.sequence > previous.sequence;
+    const lease = previous && !selected ? previous
+      : { tab: body.tab_session_id, sequence: body.sequence, active: previous?.active === true && previous.tab === body.tab_session_id };
+    if (selected) this.editingSessions.set(key, lease);
+    return this.withMutation(async () => {
+      const response = await this.client.updateTimelineEditing(projectId, timelineId, body);
+      if (this.editingSessions.get(key) === lease && response.data.tab_session_id === lease.tab
+        && response.data.sequence === lease.sequence) lease.active = response.data.active;
+      return response;
+    });
   }
 
   async releaseTimelineEditing(projectId: string, timelineId: string, body: TimelineEditingRelease): Promise<TimelineEditingResponse> {
+    const key = `${this.baseUrl}/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}`;
+    const previous = this.editingSessions.get(key);
+    if (!previous || (previous.tab === body.tab_session_id && body.sequence > previous.sequence)) {
+      this.editingSessions.set(key, { tab: body.tab_session_id, sequence: body.sequence, active: false });
+    }
     return this.withMutation(() => this.client.releaseTimelineEditing(projectId, timelineId, body));
   }
 

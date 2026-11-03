@@ -57,6 +57,30 @@ export const RECOMMENDED_SETUP_CHOICES: SetupChoices = Object.freeze({
   skillCopies: false,
 });
 
+const PENDING_SETUP_KEY = 'astrid:pending-setup-v1';
+export interface PendingSetupState { readonly alreadySetUp: boolean; readonly choices: SetupChoices }
+export function hasPendingSetupState(): boolean {
+  try { return localStorage.getItem(PENDING_SETUP_KEY) !== null; } catch { return false; }
+}
+export function readPendingSetupState(): PendingSetupState {
+  try {
+    const raw = localStorage.getItem(PENDING_SETUP_KEY);
+    if (raw) {
+      const value = JSON.parse(raw) as Partial<PendingSetupState>;
+      if (typeof value.alreadySetUp === 'boolean' && value.choices &&
+        ['autostart', 'command', 'skills', 'skillCopies'].every(key => typeof value.choices?.[key as keyof SetupChoices] === 'boolean')) {
+        return { alreadySetUp: value.alreadySetUp, choices: value.choices as SetupChoices };
+      }
+    }
+  } catch { /* The current setup screen can proceed without durable storage. */ }
+  return { alreadySetUp: false, choices: RECOMMENDED_SETUP_CHOICES };
+}
+
+export function writePendingSetupState(state: PendingSetupState): void {
+  try { localStorage.setItem(PENDING_SETUP_KEY, JSON.stringify(state)); }
+  catch { /* The current setup screen can proceed without durable storage. */ }
+}
+
 const SETUP_FLAGS = [
   ['autostart', '--autostart'],
   ['command', '--command'],
@@ -246,10 +270,11 @@ function serviceBrief(services: readonly ServiceStatus[] | undefined, platform: 
     : `If a service fails, inspect its service-<name>.log under ${runtimeLogDirectory(platform)}.`;
 }
 
-export function installCommand(mode: CommandMode, choices: SetupChoices = RECOMMENDED_SETUP_CHOICES, explicitChoices = false): string {
+export function installCommand(mode: CommandMode, choices?: SetupChoices, explicitChoices = false): string {
   const windows = detectPlatform() === 'windows';
-  if (mode === 'update') return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
-  const args = ['--yes', ...(explicitChoices ? explicitSetupChoiceFlags(choices) : setupChoiceFlags(choices))].join(' ');
+  if (mode === 'update' && choices === undefined && !explicitChoices) return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
+  const selected = choices ?? RECOMMENDED_SETUP_CHOICES;
+  const args = ['--yes', ...(mode === 'update' ? ['--update'] : []), ...(explicitChoices ? explicitSetupChoiceFlags(selected) : setupChoiceFlags(selected))].join(' ');
   return windows
     ? `& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) ${args}`
     : `${ASTRID_COMMANDS.macLinux} -s -- ${args}`;
@@ -278,14 +303,14 @@ export function agentInstructions(
   const command = installCommand(mode, choices, setup.explicitChoices ?? false);
   return [
     `Please ${mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
-    mode === 'install' && !alreadySetup ? 'Before you run the command, ask me once: “May I install Astrid with these setup choices?” Wait for my answer, then run the command only if I agree.' : null,
-    mode === 'install' && !alreadySetup ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
+    !alreadySetup ? `Before you run the command, ask me once: “May I ${mode === 'update' ? 'update Astrid' : 'install Astrid'} with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
+    !alreadySetup ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
     'First inspect the existing installation, running services, profile, selected workspace and data root. Preserve my projects, media, credentials and agent instructions. Do not reset or delete my workspace, or replace it with an empty one.',
     "Use the current official Astrid installer; read it before running it. The installer adopts an existing workspace itself; don't run workspace or migration commands by hand. Do not bypass ownership guards or overwrite a directory just because the installer refuses it.",
     windows && mode === 'install'
       ? `The command offered by this page, in PowerShell:\n${command}\nFrom Git Bash or another shell:\n${command.replace(/^& /, 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& ').replace(/$/, '"')}\nInstall from Windows, not inside WSL.`
       : windows && mode === 'update'
-        ? `The command offered by this page, in PowerShell:\n${command}\nFrom Git Bash or another shell:\n${ASTRID_COMMANDS.windowsAgentUpdate}\nUpdate from Windows, not inside WSL.`
+        ? `The command offered by this page, in PowerShell:\n${command}\nFrom Git Bash or another shell:\npowershell -NoProfile -ExecutionPolicy Bypass -Command "${command}"\nUpdate from Windows, not inside WSL.`
       : `${mode === 'update' ? 'If you installed Astrid with the installer, the command offered by this page is' : 'The command offered by this page is'}:\n${command}${windows ? '\nInstall from Windows, not inside WSL.' : ''}`,
     mode === 'update'
       ? localBuild ? `${UPDATE_ROUTES.source} Before running the installer, check whether this computer runs Astrid from source checkouts (for example, a running runtime_protocol from a git checkout). If it does, update those checkouts instead of running the installer.` : null

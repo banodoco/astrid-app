@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { finishEditorTour } from '@/tools/video-editor/tour/runner/tourBeats';
 import { registerBrowserTourFinish } from '@/tools/video-editor/tour/runner/tourBeats';
 import { startEditorTour, setEditorTourBeat, getEditorTourState } from '@/shared/state/editorTourStore';
@@ -26,6 +26,7 @@ beforeEach(() => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh) Chrome/131.0.0.0 Safari/537.36');
   window.history.replaceState({}, '', '/tools/video-editor');
 });
+afterEach(() => vi.unstubAllGlobals());
 for (const action of ['Skip', 'Done']) it(`${action} opens the run-mode choice`, async () => {
   render(<WelcomeFlow entry="tour" />);
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('tour');
@@ -88,6 +89,39 @@ it('keeps a saved local setup when an installer connection handoff arrives', asy
   expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('local');
   expect(spies.connected).not.toHaveBeenCalled();
+});
+
+it('keeps local mode through a reload in setup and an installer connection handoff', async () => {
+  const first = render(<WelcomeFlow entry="choose" />);
+  fireEvent.click(screen.getByText('Local'));
+  expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
+  expect(localStorage.getItem('astrid:welcome-run-mode-v1')).toBe('local');
+  localStorage.setItem('astrid:welcome-v1', 'setup');
+  // Simulate the next document using the persisted phase and installer query route.
+  window.history.replaceState({}, '', '/tools/video-editor?connect=1');
+  first.unmount();
+  render(<WelcomeFlow entry="connection" />);
+  expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
+  expect(screen.getByText('npm run dev:local')).toBeInTheDocument();
+  expect(spies.connected).not.toHaveBeenCalled();
+});
+
+it('keeps the combined work destination and hash through the setup completion handoff', async () => {
+  const replaced: string[] = [];
+  const browserWindow = window;
+  vi.stubGlobal('window', new Proxy(browserWindow, { get(target, property) {
+    if (property === 'location') return { href: target.location.href, origin: target.location.origin, pathname: target.location.pathname,
+      search: target.location.search, hash: target.location.hash, replace: (url: string) => replaced.push(url) };
+    const value = Reflect.get(target, property, target);
+    return ['addEventListener', 'removeEventListener', 'dispatchEvent'].includes(String(property)) ? value.bind(target) : value;
+  } }));
+  window.history.replaceState({}, '', '/tools/video-editor?project=requested&timeline=cut&connect=1#edit');
+  render(<WelcomeFlow entry="setup" />);
+  expect(screen.getByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
+  expect(replaced).toEqual(['/tools/video-editor?project=requested&timeline=cut&connect=1#edit']);
+  expect(spies.connected).not.toHaveBeenCalled();
+  vi.stubGlobal('window', browserWindow);
 });
 
 it('does not let a stale onboarding tab overwrite completed setup', () => {

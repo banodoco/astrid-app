@@ -235,6 +235,31 @@ it('keeps an absent Runtime in setup, and Back returns to the real chooser so lo
   expect(door.unexpected).toEqual([]);
 });
 
+it('carries all-off and copies-on choices plus the checked state from Welcome into the real Not-running handoff', async () => {
+  permission.state = 'granted';
+  const door = runtimeDoor({ unavailable: true });
+  render(<WelcomeFlow entry="choose" />);
+  fireEvent.click(screen.getByRole('button', { name: 'Continue in this tab' }));
+  fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Start Astrid at sign-in' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Add the `astrid` terminal command' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Install skills for coding agents' }));
+  fireEvent.click(screen.getByRole('checkbox', { name: 'Use copies for skills' }));
+  const checkbox = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
+  fireEvent.click(checkbox);
+  const setupCommand = screen.getByText(/--yes --autostart off --command off --skills off --skill-copies on/).textContent;
+  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
+  await waitFor(() => expect(door.requests).toHaveLength(1));
+  fireEvent.focus(window);
+
+  expect(await screen.findByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
+  expect(screen.getByRole('checkbox', { name: "I've already set up Astrid" })).toBeChecked();
+  expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+  expect(screen.getByText(/--yes --autostart off --command off --skills off --skill-copies on/).textContent).toBe(setupCommand);
+  expect(localStorage.getItem('astrid:pending-setup-v1')).toContain('"alreadySetUp":true');
+  expect(door.unexpected).toEqual([]);
+});
+
 it('offers Open editor after real project discovery fails, with a reload-safe editor entry when browser storage is unavailable', async () => {
   permission.state = 'granted';
   const door = runtimeDoor({ failDiscovery: true });

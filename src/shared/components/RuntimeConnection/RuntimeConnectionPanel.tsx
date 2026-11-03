@@ -317,7 +317,7 @@ function BlockedCard({ onBack }: { readonly onBack?: () => void }) {
 function NotRunningCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
   const { notRunning } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
-  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <SetupBlock initiallySetUp={connection.connectedBefore} forceCustomize localBuild={runtimeOrigin() === ''} />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} showHelp />;
+  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <SetupBlock initiallySetUp={connection.connectedBefore} localBuild={runtimeOrigin() === ''} />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} showHelp />;
 }
 
 /** Astrid answered, but not this page: no install help, because Astrid is already running. Polling continues. */

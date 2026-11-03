@@ -1,6 +1,7 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 beforeEach(() => { localStorage.clear(); sessionStorage.clear(); vi.resetModules(); });
+afterEach(() => vi.restoreAllMocks());
 
 describe('welcome entry', () => {
   it.each([
@@ -15,6 +16,7 @@ describe('welcome entry', () => {
     ['/tools/video-editor?localProject=p', 'tour', 'setup'],
     ['/tools/video-editor?localTimeline=t', 'tour', 'setup'],
     ['/tools/video-editor?project=p&connect=1', 'tour', 'setup'],
+    ['/tools/video-editor?project=p&timeline=t&connect=1#edit', 'tour', 'setup'],
     ['/tools/video-editor?entry=editor', null, 'setup'],
     ['/tools/video-editor?entry=editor', 'tour', 'setup'],
     ['/tools/video-editor?entry=editor', 'local', 'setup'],
@@ -76,12 +78,22 @@ describe('welcome entry', () => {
     expect(freshProgress.entryFor(new URL(`https://astrid.haus${target}`), freshProgress.readWelcomePhase())).toBe('editor');
   });
 
-  it.each(['/tools/video-editor?entry=editor#edit', '/tools/video-editor?connect=1#continue', '/tools/video-editor?project=p&timeline=t'])('requires setup once and resumes the requested route for %s', async target => {
+  it.each(['/tools/video-editor?entry=editor#edit', '/tools/video-editor?connect=1#continue', '/tools/video-editor?project=p&timeline=t', '/tools/video-editor?project=p&timeline=t&connect=1#edit'])('requires setup once and resumes the requested route for %s', async target => {
     const progress = await import('./welcomeProgress');
     const url = new URL(target, 'https://astrid.haus');
     expect(progress.entryFor(url, null)).toBe('setup');
     progress.writeWelcomePhase('complete');
     progress.rememberSetupDestination(url);
-    expect(progress.entryFor(url, progress.readWelcomePhase())).toBe(url.searchParams.get('connect') === '1' ? 'connection' : 'editor');
+    const hasWorkTarget = url.searchParams.has('project') || url.searchParams.has('timeline') || url.searchParams.get('entry') === 'editor';
+    expect(progress.entryFor(url, progress.readWelcomePhase())).toBe(url.searchParams.get('connect') === '1' && !hasWorkTarget ? 'connection' : 'editor');
+  });
+
+  it('persists the local run-mode choice for a reload and installer handoff', async () => {
+    const progress = await import('./welcomeProgress');
+    progress.writeWelcomeRunMode('local');
+    progress.writeWelcomePhase('setup');
+    expect(localStorage.getItem('astrid:welcome-run-mode-v1')).toBe('local');
+    expect(progress.readWelcomeRunMode()).toBe('local');
+    expect(progress.entryFor(new URL('https://astrid.haus/tools/video-editor?connect=1'), progress.readWelcomePhase())).toBe('setup');
   });
 });

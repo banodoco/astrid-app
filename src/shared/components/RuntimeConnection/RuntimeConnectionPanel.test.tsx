@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { consumeAutoConnectQuery } from '@/integrations/runtime/autoConnectRequest.ts';
 import { CONNECTED_MIN_MS, LEAVE_MS, RuntimeConnectionPanel, SETTLED_QUIET_MS } from './RuntimeConnectionPanel.tsx';
@@ -12,6 +12,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+beforeEach(() => localStorage.clear());
 
 function panel(connection: RuntimeConnectionValue) {
   return render(<RuntimeConnectionPanel connection={connection} />);
@@ -140,7 +141,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(card).toHaveClass('border-border', 'bg-card', 'text-center');
     expect(card.parentElement).toHaveClass('max-w-[576px]');
     expect(screen.getByRole('heading', { level: 1 })).toHaveClass('font-theme-heading', 'text-[25px]', 'text-foreground');
-    expect(screen.getAllByRole('button')).toHaveLength(4);
+    expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.agent.copy })).toHaveClass('w-full');
     // The waiting line is the card's last line, not a banner above it.
@@ -296,7 +297,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
     const sentence = screen.getByText("Your coding agent can start it, or install it if it isn't there yet.");
     expect(sentence).toHaveClass('text-sm', 'text-muted-foreground');
-    expect(screen.getAllByRole('button')).toHaveLength(4);
+    expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
     expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
@@ -319,7 +320,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
     expect(screen.getByText("Your coding agent can start it, or install it if it isn't there yet.")).toBeInTheDocument();
     expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
-    expect(screen.getAllByRole('button')).toHaveLength(4);
+    expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
     expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
     expect(shownText()).not.toMatch(/reload/i);
@@ -347,6 +348,26 @@ describe('RuntimeConnectionPanel', () => {
     }
     fireEvent.click(retry);
     expect(connect).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the checked path authoritative at the real Not-running panel caller', async () => {
+    const clipboard = vi.fn(async () => undefined);
+    stubClipboard(clipboard);
+    panel(connectionFor({ status: 'not_running' }, { connectedBefore: true }));
+    const checkbox = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
+    expect(checkbox).toBeChecked();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+    const command = screen.getByText(installCommand('install'), { exact: true }).textContent;
+    fireEvent.click(screen.getByRole('button', { name: COPY.agent.copy }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
+    expect(clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
+    clipboard.mockClear();
+    fireEvent.click(checkbox);
+    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(command);
+    fireEvent.click(screen.getByRole('button', { name: COPY.agent.copied }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
+    expect(clipboard.mock.calls[0][0]).toContain('May I install Astrid with these setup choices?');
   });
 
   it('Pinokio update guidance points to Pinokio without installer steps', () => {
@@ -500,7 +521,8 @@ describe('RuntimeConnectionPanel', () => {
       panel(connectionFor({ status }));
       const primary = screen.getByRole('button', { name: 'Copy for your agent' });
       const commandCopy = screen.getByRole('button', { name: 'Copy command' });
-      expect(screen.getByRole('button', { name: 'Customize' }).compareDocumentPosition(primary) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+      expect(primary.compareDocumentPosition(commandCopy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(commandCopy.parentElement).toContainElement(screen.getByText(installCommand('install'), { exact: true }));
       fireEvent.click(primary);
       await waitFor(() => expect(writeText).toHaveBeenCalledOnce());

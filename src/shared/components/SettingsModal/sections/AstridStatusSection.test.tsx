@@ -16,7 +16,8 @@ const mocks = vi.hoisted(() => ({
   connection: {
     state: { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } },
     isChecking: false, isConnected: true, managedByPinokio: false, schemaDigest: null, localServiceOutOfDate: false, connect: () => {},
-  } as { state: { status: string; realm?: { realm_id: string; display_name: string } }; isChecking: boolean; isConnected: boolean; managedByPinokio: boolean; schemaDigest: string | null; localServiceOutOfDate: boolean; connect: () => void },
+    connectedBefore: true,
+  } as { state: { status: string; realm?: { realm_id: string; display_name: string } }; isChecking: boolean; isConnected: boolean; managedByPinokio: boolean; schemaDigest: string | null; localServiceOutOfDate: boolean; connectedBefore: boolean; connect: () => void },
 }));
 
 vi.mock('@/integrations/runtime/client.ts', () => ({
@@ -51,6 +52,7 @@ async function openDetails() {
 
 describe('AstridStatusSection', () => {
   beforeEach(() => {
+    localStorage.clear();
     mocks.connection.state = { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } };
     mocks.connection.isChecking = false;
     mocks.connection.schemaDigest = null;
@@ -255,6 +257,25 @@ describe('AstridStatusSection', () => {
     expect(brief).toContain(settingsInstallCommand());
     expect(brief).not.toBe(settingsInstallCommand());
     expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+  });
+
+  it('lets the Settings checkbox control Customize and consent wording without changing command bytes', async () => {
+    render(<AstridStatusSection isOpen />);
+    const checkbox = await screen.findByRole('checkbox', { name: "I've already set up Astrid" });
+    expect(checkbox).toBeChecked();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+    const command = screen.getByRole('code').textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
+    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
+    expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
+
+    fireEvent.click(checkbox);
+    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.getByRole('code').textContent).toBe(command);
+    mocks.clipboard.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Copied. Paste them into your agent.' }));
+    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
+    expect(mocks.clipboard.mock.calls[0][0]).toContain('May I install Astrid with these setup choices?');
   });
 
   it('shows Needs an update with the update command when Astrid on this computer is older than this page', async () => {

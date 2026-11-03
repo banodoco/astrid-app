@@ -85,7 +85,7 @@ export function RuntimeConnectionPill({
     return (
       <div data-testid="runtime-connection-status" data-state="stopped" role="alert" className={CARD_CLASS} style={CARD_STYLE}>
         <CardText title={COPY.stopped.title} sentence={pinokioManaged ? COPY.stopped.pinokioSentence : withCommandShell(COPY.stopped.sentence)} />
-        {!pinokioManaged && <SetupBlock initiallySetUp={connection.connectedBefore} forceCustomize localBuild={runtimeOrigin() === ''} />}
+        {!pinokioManaged && <SetupBlock initiallySetUp={connection.connectedBefore} localBuild={runtimeOrigin() === ''} />}
       </div>
     );
   }

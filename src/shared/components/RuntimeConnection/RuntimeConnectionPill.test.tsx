@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { RuntimeConnectionPill } from './RuntimeConnectionPill.tsx';
 import { installCommand, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
@@ -10,6 +10,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
 });
+beforeEach(() => localStorage.clear());
 
 const json = (body: unknown, status = 200) => () => new Response(JSON.stringify(body), {
   status,
@@ -102,6 +103,13 @@ describe('RuntimeConnectionPill', () => {
     route.answer = unreachable;
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
+    const checkedSetup = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
+    expect(checkedSetup).toBeChecked();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+    const setupCommand = screen.getByText(installCommand('install'), { exact: true }).textContent;
+    fireEvent.click(checkedSetup);
+    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(setupCommand);
     expect(screen.getByText('Give these instructions to your coding agent to start Astrid again. Your changes are kept.')).toBeInTheDocument();
     expect(status()).toHaveAttribute('data-state', 'stopped');
     expect(status()).not.toHaveTextContent('Connected');

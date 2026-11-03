@@ -2,6 +2,8 @@ import { APP_ENTRY_PATH } from '@/app/entryClassification.ts';
 
 export const WELCOME_PROGRESS_KEY = 'astrid:welcome-v1';
 const SETUP_DESTINATION_KEY = 'astrid:welcome-setup-destination';
+const RUN_MODE_KEY = 'astrid:welcome-run-mode-v1';
+export type WelcomeRunMode = 'hosted' | 'local';
 export type WelcomePhase = 'tour' | 'choose' | 'setup' | 'connection' | 'local' | 'complete';
 export type WelcomeEntry = WelcomePhase | 'editor';
 const LEGACY_KEYS = [
@@ -41,6 +43,15 @@ export function hasRememberedConnection(): boolean {
   catch { return false; }
 }
 
+export function readWelcomeRunMode(): WelcomeRunMode | null {
+  try { const value = localStorage.getItem(RUN_MODE_KEY); return value === 'hosted' || value === 'local' ? value : null; }
+  catch { return null; }
+}
+
+export function writeWelcomeRunMode(mode: WelcomeRunMode): void {
+  try { localStorage.setItem(RUN_MODE_KEY, mode); } catch { /* This visit still progresses. */ }
+}
+
 /** Preserve the one-time setup completion across the destination reload when localStorage is unavailable. */
 export function rememberSetupDestination(url: URL): void {
   try {
@@ -59,7 +70,8 @@ export function entryFor(url: URL, phase: WelcomePhase | null, localBuild = fals
       const state = { ...(current as Record<string, unknown>) };
       delete state[SETUP_DESTINATION_KEY];
       window.history.replaceState(state, '');
-      return url.searchParams.get('connect') === '1' ? 'connection' : 'editor';
+      const hasWorkTarget = url.searchParams.get('entry') === 'editor' || ['project', 'timeline', 'localProject', 'localTimeline'].some(key => url.searchParams.has(key));
+      return url.searchParams.get('connect') === '1' && !hasWorkTarget ? 'connection' : 'editor';
     }
   } catch { /* Storage may be blocked. */ }
   if (['project', 'timeline', 'localProject', 'localTimeline'].some(key => url.searchParams.has(key))) return phase === 'complete' ? 'editor' : 'setup';

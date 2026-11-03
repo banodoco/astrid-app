@@ -32,7 +32,7 @@
  *   a button named "Reload" in the "Astrid restarted" card; the "Astrid stopped" card clears by itself
  */
 import { expect, type Page, type Route } from '@playwright/test';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { BIG_DOWNLOAD_BYTES, BIG_UPLOAD_BYTES, DirectHarness, DOOR_PORT, rawRequest, sha256Hex, compositionPublication } from './support/harness.ts';
@@ -71,6 +71,21 @@ const json = <T = any>(response: PageResponse): T => JSON.parse(response.text);
 
 async function openHostedPage(page: Page, harness: DirectHarness) {
   await page.goto(`${harness.origin}/__blank.html`);
+}
+
+/** Build a whole-parent atomic edit against a specific Timeline revision/publication pair. */
+function timelineCommit(projectId: string, timelineId: string, revisionId: string, publicationId: string, base: any, name: string, fps: number) {
+  const parent = structuredClone(base);
+  parent.name = name;
+  parent.config.output.fps = fps;
+  return {
+    api_version: 1, project_id: projectId, timeline_id: timelineId,
+    base_revision_id: revisionId, base_publication_id: publicationId,
+    commands: [{ schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [], args: {
+      changes: [{ op: 'set', ref: 'parent', path: [], before: { state: 'present', value: base }, value: parent }],
+    } }],
+    label: name, merge: 'atomic', reads: [{ kind: 'scope', ref: 'timeline', path: [] }], source: { via: 'app' },
+  };
 }
 
 function reportRss(what: string, baselineBytes: number, growthBytes: number) {
@@ -474,24 +489,35 @@ test.describe('core journey', () => {
     const direct = await harness.runtimeFetch(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     expect(read.text).toBe(await direct.text());
 
-    const head = await currentHead(harness);
-    const publication = compositionPublication(harness.seed, head, 'Main (edited through the door)', 24);
-    const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify(publication),
+    const timelinePath = `/v1/projects/${projectId}/timelines/${timelineId}`;
+    const timeline = await call(timelinePath);
+    expect(timeline.status).toBe(200);
+    const { head_revision_id: head, head_publication_id: publicationId } = json(timeline);
+    expect(head).toBe(await currentHead(harness));
+    const base = await call(`${timelinePath}/composition-revisions/${head}`);
+    expect(base.status).toBe(200);
+    const commit = timelineCommit(projectId, timelineId, head, publicationId, json(base).payload, 'Main (edited through the door)', 24);
+    const saved = await call(`${timelinePath}/commit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-save' }, body: JSON.stringify(commit),
     });
     expect(saved.status, saved.text).toBe(200);
-    const newHead: string = json(saved).data.new_head;
+    const newHead: string = json(saved).data.accepted_revision_id;
     expect(newHead).not.toBe(head);
+    expect(await currentHead(harness)).toBe(newHead);
 
-    const revisionPath = `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions/${newHead}`;
+    const revisionPath = `${timelinePath}/composition-revisions/${newHead}`;
     const beforeReload = await call(revisionPath);
     expect(beforeReload.status).toBe(200);
-    expect(beforeReload.text).toContain('Main (edited through the door)');
+    expect(json(beforeReload).payload.name).toBe('Main (edited through the door)');
+    expect(json(beforeReload).payload.config.output.fps).toBe(24);
     const afterReadInspect = await call(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+    expect(afterReadInspect.status).toBe(200);
 
     await page.reload();
     const afterReload = await call(revisionPath);
+    expect(afterReload.status).toBe(200);
     expect(afterReload.text).toBe(beforeReload.text);
+    expect(await currentHead(harness)).toBe(newHead);
     expect((await call(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' })).text).toBe(afterReadInspect.text);
     // And the bytes the Runtime holds are the same bytes the page saw.
     expect(await (await harness.runtimeFetch(revisionPath)).text()).toBe(afterReload.text);
@@ -500,22 +526,47 @@ test.describe('core journey', () => {
   test('through the hosted origin: a second writer saves first, the stale save is refused and the first writer keeps its draft', async ({ page, harness }) => {
     const { projectId, timelineId } = harness.seed;
     await openHostedPage(page, harness);
-    const publishUrl = `${harness.doorBase}/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`;
-    const head = await currentHead(harness);
-    const draft = compositionPublication(harness.seed, head, 'First writer draft', 12); // held by the caller
+    const timelinePath = `/v1/projects/${projectId}/timelines/${timelineId}`;
+    const commitUrl = `${harness.doorBase}${timelinePath}/commit`;
+    const timeline = await harness.runtimeJson('GET', timelinePath);
+    expect(timeline.status).toBe(200);
+    const { head_revision_id: head, head_publication_id: publicationId } = timeline.body;
+    const base = await harness.runtimeJson('GET', `${timelinePath}/composition-revisions/${head}`);
+    expect(base.status).toBe(200);
+    const draft = timelineCommit(projectId, timelineId, head, publicationId, base.body.payload, 'First writer draft', 12); // held by the caller
+    const draftBefore = JSON.stringify(draft);
 
-    const second = await harness.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
-    expect(second.status).toBe(200);
+    const second = await harness.runtimeJson('POST', `${timelinePath}/commit`, timelineCommit(projectId, timelineId, head, publicationId, base.body.payload, 'Second writer', 24));
+    expect(second.status, JSON.stringify(second.body)).toBe(200);
+    const winningHead = second.body.data.accepted_revision_id;
+    const winningPublication = second.body.receipt.receipt_id;
+    expect(winningHead).not.toBe(head);
+    const winningRevision = await harness.runtimeJson('GET', `${timelinePath}/composition-revisions/${winningHead}`);
+    expect(winningRevision.status).toBe(200);
 
-    const refused = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: JSON.stringify(draft) });
-    expect(refused.status).toBe(409);
-    expect(json(refused).details).toMatchObject({ reason: 'stale_head', expected_head: head, actual_head: second.body.data.new_head });
-    // Nothing of the draft reached the Runtime; the draft object itself is untouched for a retry.
-    expect(await currentHead(harness)).toBe(second.body.data.new_head);
-    expect(draft.expected_head).toBe(head);
-    expect(draft.parent_composition.name).toBe('First writer draft');
-    const rebased = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify({ ...draft, expected_head: second.body.data.new_head }) });
-    expect(rebased.status, rebased.text).toBe(200);
+    const refused = await pageFetch(page, commitUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: draftBefore });
+    expect(refused.status, refused.text).toBe(409);
+    expect(json(refused).details).toMatchObject({
+      code: 'atomic_scope_changed', base: { revision_id: head, publication_id: publicationId },
+      current: { revision_id: winningHead, publication_id: winningPublication },
+    });
+    // Neither the winning head nor its revision changes, and the caller retains the entire draft for retry.
+    const afterRefusal = await harness.runtimeJson('GET', timelinePath);
+    expect(afterRefusal.status).toBe(200);
+    expect(afterRefusal.body).toMatchObject({ head_revision_id: winningHead, head_publication_id: winningPublication });
+    expect((await harness.runtimeJson('GET', `${timelinePath}/composition-revisions/${winningHead}`)).body).toEqual(winningRevision.body);
+    expect(JSON.stringify(draft)).toBe(draftBefore);
+    expect(draft.commands[0].args.changes[0].value.name).toBe('First writer draft');
+    const rebased = timelineCommit(projectId, timelineId, winningHead, winningPublication, winningRevision.body.payload, 'First writer draft', 12);
+    const retry = await pageFetch(page, commitUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify(rebased) });
+    expect(retry.status, retry.text).toBe(200);
+    const retryHead = json(retry).data.accepted_revision_id;
+    expect(retryHead).not.toBe(winningHead);
+    expect(await currentHead(harness)).toBe(retryHead);
+    const retriedRevision = await harness.runtimeJson('GET', `${timelinePath}/composition-revisions/${retryHead}`);
+    expect(retriedRevision.status).toBe(200);
+    expect(retriedRevision.body.payload.name).toBe('First writer draft');
+    expect(retriedRevision.body.payload.config.output.fps).toBe(12);
   });
 });
 

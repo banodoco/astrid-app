@@ -316,7 +316,8 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
           '            assert "sha256:" + hashlib.sha256(local.read_bytes()).hexdigest() == descriptor["digest"], "output bytes differ from descriptor"',
           '            value = (alias, str(local))',
           '        prepared.append((clip_id, operation, value))',
-          '    session = timeline_sdk.open(project=project, timeline=timeline, client=client)',
+          // Keep this session's capture and receipts with its temporary authored media.
+          '    session = timeline_sdk.open(project=project, timeline=timeline, client=client, outbox_path=Path(directory) / "outbox.json")',
           '    def apply(draft):',
           '        for clip_id, operation, value in prepared:',
           '            clip = draft.clip(clip_id)',
@@ -476,8 +477,6 @@ async function plantNoReloadFlag(page: Page) {
 // ---------------------------------------------------------------------------------------------
 // 1. agent -> open App
 
-// Bundle 1 blocker: the original Agent swap below still needs native asset + registry/task-output capture.
-// Keep the task/adoption/media assertions until that operation ships; the final App label uses commands now.
 test('agent -> open App: an Astrid task and its publication appear in the open App without a reload', async ({ page, harness, astrid, seed3 }) => {
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const agent = agentOf(astrid, seed3);

@@ -64,7 +64,7 @@ function environment() {
   const states: LocalSaveState[] = [];
   let visible: OutboxJson = structuredClone(original);
   const adopted: OutboxJson[] = [];
-  const prepareDisplay = vi.fn(async (basis: TimelineCommandBasis, draft?: OutboxJson) => {
+  const prepareDisplay = vi.fn<Parameters<typeof createLocalSaveSession>[0]['prepareDisplay']>(async (basis, draft) => {
     const document = structuredClone(draft ?? basis.canonicalDocument.parent_revision.payload) as OutboxJson;
     return { document, adopt() { visible = document; adopted.push(document); } };
   });
@@ -196,6 +196,7 @@ describe('local editor saves through the durable outbox', () => {
     const mergedTrim = { ...trimmed, meta: mergedSplit.meta };
     env.send.mockResolvedValueOnce(result(mergedSplit, h1, h0, true)).mockImplementationOnce(async (request) => {
       expect(env.visible()).toEqual(mergedSplit);
+      expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: 'pending' });
       expect(session.getDocument()).toEqual(mergedSplit);
       expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1', commands: trimCommands });
       return result(mergedTrim, h2, h1);
@@ -317,6 +318,7 @@ describe('local editor saves through the durable outbox', () => {
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(env.send).toHaveBeenCalledTimes(1);
     expect(session.getState()).toMatchObject({ status: 'conflict', error: { code: 'dependency_changed', details } });
+    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: 'conflict' });
     expect(env.visible()).toEqual({ ...original, agent: true });
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents.map((intent) => intent.payload)).toEqual([
@@ -422,6 +424,7 @@ describe('local editor saves through the durable outbox', () => {
     });
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(session.getState()).toMatchObject({ status: status === 409 ? 'conflict' : 'error', error: { code: 'binding_changed', details } });
+    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: status === 409 ? 'conflict' : 'settled' });
     expect(env.visible()).toEqual(canonical.canonicalDocument.parent_revision.payload);
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents).toHaveLength(1);
@@ -434,6 +437,27 @@ describe('local editor saves through the durable outbox', () => {
     expect(env.send).toHaveBeenCalledTimes(2);
     expect((await env.outboxes.list(scope))[0].pending?.request).toEqual(exact);
     await recovered.dispose();
+  });
+
+  it('offers the original dependent draft after a lost prefix acknowledgement and suffix conflict', async () => {
+    const env = environment();
+    const session = await env.mount();
+    await env.append(session, splitSave());
+    await env.append(session, trimSave());
+    const [authored] = await env.outboxes.list(scope);
+    env.send.mockRejectedValueOnce(new Error('Lost prefix acknowledgement'));
+    await expect(session.flush()).rejects.toThrow('unacknowledged');
+    const original = structuredClone(env.send.mock.calls[0]);
+    env.send.mockResolvedValueOnce(result(split)).mockRejectedValueOnce(new ApiError(409,
+      'dependency_changed', 'Trim conflicts with the current user field', '', { status: 'conflict' }));
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    expect(env.send.mock.calls[1]).toEqual(original);
+    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: 'conflict', retainedDraft: {
+      basis: authored.intents[1].payload.displayBasis, document: trimmed,
+    } });
+    const [retained] = await env.outboxes.list(scope);
+    expect(retained.intents[0].payload).toEqual(authored.intents[1].payload);
+    await session.dispose();
   });
 
   it('fences a canonical projection on unmount and adopts the durable prefix before recovered suffix dispatch', async () => {

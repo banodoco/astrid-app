@@ -346,24 +346,33 @@ export function useTimelineSave(
               sessionPresent: Boolean(localOwner.session) }));
             if (isCurrent()) setLocalSaveState(state);
           },
-          prepareDisplay: async (basis, draft) => {
-            const document = (draft ?? basis.canonicalDocument) as unknown as typeof basis.canonicalDocument;
+          prepareDisplay: async (basis, draft, adoption) => {
+            const retained = adoption?.retainedDraft;
+            const displayBasis = retained?.basis ?? basis;
+            const document = (draft ?? retained?.document ?? basis.canonicalDocument) as unknown as typeof basis.canonicalDocument;
             const parent = document.parent_revision.payload;
             const { bundle, ...config } = parent.config as unknown as TimelineConfig & { bundle?: TimelineBundleEnvelope };
             const registry = parent.registry as unknown as AssetRegistry;
             if (bundle) parseTimelineBundle(bundle);
             const head: TimelineHeadRevision = { projectId: document.project_id, timelineId: document.timeline_id,
-              headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId };
+              headRevisionId: displayBasis.head.revisionId, headPublicationId: displayBasis.head.publicationId };
             // The numeric UI counter is local; it is never used as a physical pin.
             const next = await buildTimelineData({ ...config, ...withDefaultTimelineOutput(config) }, registry, resolveAssetUrl,
               configVersionRef.current, bundle?.itemsBySchemaRef, head, bundle?.transcriptReferences);
             const source: TimelineSaveSource = { config: next.config, registry: next.registry, head,
               ...(bundle === undefined ? {} : { bundle }) };
-            return { document: toOutboxJson(document), adopt() {
+            return { document: toOutboxJson(retained ? basis.canonicalDocument : document), adopt() {
+              if (!isCurrent()) return;
+              // The session adopts the canonical conflict basis. Its retained
+              // suffix supplies the user's visible recovery draft, without
+              // relabelling that draft as authored on the new remote head.
+              if (retained) {
+                adoptCanonicalData(next, { save: false, skipHistory: true });
+                return;
+              }
               emitTimelineSaveDiagnostic('adoption-start', () => ({ owner: localOwner, timelineId,
                 mounted: localDataRef.current, source, current: isCurrent(), generation,
                 scopeMatched: head.timelineId === timelineId && head.projectId === verified.initial.canonicalDocument.project_id }));
-              if (!isCurrent()) return;
               adoptedSource = source;
               localOwner.headKey = canonicalJsonStringify(head);
               headRevisionRef.current = head;
@@ -572,7 +581,8 @@ export function useTimelineSave(
       || record.baseHeadProjectId !== scope.projectId
       || record.baseHeadTimelineId !== scope.timelineId
       || !(record.baseHeadRevisionId === null || (typeof record.baseHeadRevisionId === 'string' && record.baseHeadRevisionId.length > 0))) return undefined;
-    return { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: record.baseHeadRevisionId };
+    return { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: record.baseHeadRevisionId,
+      ...(record.baseHeadPublicationId === undefined ? {} : { headPublicationId: record.baseHeadPublicationId }) };
   }, [commit.dataRef, timelineId]);
   const offerRecovery = useCallback((record: TimelineDraftRecord) => {
     recoveryPendingRef.current = true;

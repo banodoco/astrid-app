@@ -280,6 +280,7 @@ export const embeddedShotNameInput = (dialog: import('@playwright/test').Locator
 );
 
 export async function editFirstTrackName(page: Page, name: string) {
+  await page.locator('[data-track-id="V1"][data-track-label]').hover();
   const field = firstTrackName(page);
   await field.fill(name);
   await field.press('Enter');

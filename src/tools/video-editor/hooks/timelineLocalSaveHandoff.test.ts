@@ -282,6 +282,45 @@ describe('upstream local document handoff', () => {
     expect(outcomes[1]).toEqual(outcomes[0]);
   });
 
+  it.each([false, true])('binds a parent track label without flattening its child closure (topLevel=%s)', async (topLevel) => {
+    const env = await environment(true, true, ['authored'], undefined, undefined, topLevel);
+    const before = structuredClone(env.initial.canonicalDocument);
+    const next = structuredClone(env.source);
+    next.config.tracks[0].label = 'User title';
+    await env.handoff.capture(next, { kind: 'track-label', trackId: 'V1',
+      config: env.source.config, registry: env.source.registry });
+    const expected = structuredClone(before);
+    (expected.parent_revision.payload.config.tracks as Array<Record<string, unknown>>)[0].label = 'User title';
+    expect(env.session.getDocument()).toEqual(expected);
+    const [stored] = await env.outboxes.list(env.scope);
+    expect(stored.intents).toHaveLength(1);
+    expect(stored.intents[0].payload.documentIntent).toMatchObject({ merge: 'fields',
+      changes: [{ op: 'set', ref: 'parent', path: ['config', 'tracks', 'id:V1', 'label'],
+        before: { state: 'present', value: 'V1' }, value: 'User title' }],
+      reads: [{ kind: 'field', ref: 'parent', path: ['config', 'tracks', 'id:V1', 'id'],
+        state: { state: 'present', value: 'V1' } },
+      { kind: 'field', ref: 'parent', path: ['config', 'tracks', 'id:V1', 'label'],
+        state: { state: 'present', value: 'V1' } }],
+    });
+    await env.session.dispose();
+  });
+
+  it.each(['mixed', 'synthetic', 'stale'] as const)('refuses a %s parent label capture atomically', async (fault) => {
+    const env = await environment(true, true);
+    const next = structuredClone(env.source);
+    next.config.tracks[0].label = 'Retained title';
+    const basis = { kind: 'track-label' as const, trackId: 'V1',
+      config: structuredClone(env.source.config), registry: env.source.registry };
+    if (fault === 'mixed') next.config.clips[0].hold = 7;
+    if (fault === 'synthetic') basis.trackId = 'display-only';
+    if (fault === 'stale') basis.config.tracks[0].label = 'Wrong basis';
+    await expect(env.handoff.capture(next, basis)).rejects.toThrow();
+    expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
+    expect((await env.outboxes.list(env.scope))[0].intents).toHaveLength(0);
+    expect(env.send).not.toHaveBeenCalled();
+    await env.session.dispose();
+  });
+
   it.each([false, true])('clears only selected parent transitions with full child closure (topLevel=%s)', async (topLevel) => {
     contractFixture.digest = CURRENT_V2_DIGEST;
     const env = await environment(true, true, ['authored', 'sibling', 'untouched'], undefined, undefined, topLevel, true);

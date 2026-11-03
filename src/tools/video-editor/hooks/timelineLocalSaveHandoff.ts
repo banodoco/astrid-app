@@ -26,10 +26,17 @@ export interface TimelineSaveSource {
 export type TimelineGestureReadBasis = {
   config: TimelineConfig;
   registry: AssetRegistry;
-  clipId: string;
-} & ({ kind: 'split'; timeSeconds: number } | { kind: 'move'; trackId: string } | {
-  kind: 'trim'; patch: Partial<Pick<TimelineConfig['clips'][number], 'from' | 'to' | 'hold' | 'speed'>>;
-} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext });
+} & (
+  { kind: 'track-label'; trackId: string; clipId?: never }
+  | ({ clipId: string } & (
+    { kind: 'split'; timeSeconds: number }
+    | { kind: 'move'; trackId: string }
+    | { kind: 'trim'; patch: Partial<Pick<TimelineConfig['clips'][number], 'from' | 'to' | 'hold' | 'speed'>> }
+    | { kind: 'transition-clear'; clipIds: string[] }
+    | { kind: 'prepared-media'; command: PlacePreparedMediaCommand }
+    | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext }
+  ))
+);
 
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
@@ -275,13 +282,14 @@ export function createTimelineLocalSaveHandoff(options: {
         const hasChildren = before.shot_revisions.length || before.internal_timeline_revisions.length
           || (Array.isArray(parent.occurrences) && parent.occurrences.length);
         const parentGesture = gestureBasis?.kind === 'move' || gestureBasis?.kind === 'transition-clear';
-        if (hasChildren && !parentGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+        const parentLabel = gestureBasis?.kind === 'track-label';
+        if (hasChildren && !parentGesture && !parentLabel && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
-        const topLevelClips = (parentGesture || gestureBasis?.kind === 'prepared-media' || gestureBasis?.kind === 'element') && object(parent.config)
+        const topLevelClips = (parentGesture || parentLabel || gestureBasis?.kind === 'prepared-media' || gestureBasis?.kind === 'element') && object(parent.config)
           && !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips);
         const configBefore = topLevelClips ? { ...parent.config as Record<string, OutboxJson>, clips: parent.clips } : parent.config;
         const configSource = topLevelClips && !source.config.clips.length
@@ -318,7 +326,7 @@ export function createTimelineLocalSaveHandoff(options: {
           // the prepared-media guard below proves the one new track exactly.
           const gestureConfig = gestureBasis.kind === 'prepared-media'
             ? { ...gestureBasis.config, tracks: authoringSource.config.tracks } : gestureBasis.config;
-          if (!['split', 'trim', 'move', 'transition-clear', 'prepared-media', 'element'].includes(gestureBasis.kind)
+          if (!['split', 'trim', 'move', 'transition-clear', 'track-label', 'prepared-media', 'element'].includes(gestureBasis.kind)
             || !same(authoredJson(gestureConfig), authoredJson(authoringSource.config))
             || !same(authoredJson(gestureBasis.registry), authoredJson(authoringSource.registry))) {
             refuse('gesture read basis differs from the original local authoring input', 'gesture-basis-mismatch');
@@ -326,6 +334,24 @@ export function createTimelineLocalSaveHandoff(options: {
         }
         // Authority comes from the original parent selection and causal input,
         // never from observing that a flattened diff happens to touch one field.
+        if (parentLabel) {
+          const tracks = (configBefore as Record<string, OutboxJson>).tracks;
+          const raw = Array.isArray(tracks) && tracks.filter(track => object(track) && track.id === gestureBasis.trackId);
+          const selected = next.config.tracks.filter(track => track.id === gestureBasis.trackId);
+          const expected = structuredClone(authoringSource);
+          const originals = expected.config.tracks.filter(track => track.id === gestureBasis.trackId);
+          if (!raw || raw.length !== 1 || !object(raw[0]) || originals.length !== 1 || selected.length !== 1
+            || typeof selected[0].label !== 'string') refuse('track label requires one authored parent track');
+          const rawTrack = raw[0];
+          originals[0].label = selected[0].label;
+          if (!same(authoredJson(expected.config), authoredJson(next.config))
+            || !same(authoredJson(expected.registry), authoredJson(next.registry))
+            || !same(expected.bundle, next.bundle)) refuse('track label changes more than its selected parent field');
+          reads = ['id', 'label'].map(key => ({ kind: 'field', ref: 'parent',
+            path: ['config', 'tracks', `id:${gestureBasis.trackId}`, key],
+            state: Object.prototype.hasOwnProperty.call(rawTrack, key)
+              ? { state: 'present', value: rawTrack[key] } : { state: 'absent' } }));
+        }
         if (parentGesture) {
           const ids = gestureBasis.kind === 'move' ? [gestureBasis.clipId] : gestureBasis.clipIds;
           if (!ids.length || ids[0] !== gestureBasis.clipId || new Set(ids).size !== ids.length
@@ -535,7 +561,7 @@ export function createTimelineLocalSaveHandoff(options: {
           }
         }
         // Verified parent recipes preserve the complete child closure cloned above.
-        if (hasChildren && !parentGesture && !commands && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+        if (hasChildren && !parentGesture && !parentLabel && !commands && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
         if (topLevelClips) delete (payload.config as Record<string, OutboxJson>).clips;
         if (!commands) {
           const clips = (payload.config as Record<string, OutboxJson>).clips;
@@ -567,7 +593,7 @@ export function createTimelineLocalSaveHandoff(options: {
             state: Object.prototype.hasOwnProperty.call(configBefore, 'pinnedShotGroups')
               ? { state: 'present', value: (configBefore as Record<string, OutboxJson>).pinnedShotGroups } : { state: 'absent' } });
         }
-        if (gestureBasis && gestureBasis.kind !== 'prepared-media' && gestureBasis.kind !== 'element' && gestureBasis.kind !== 'transition-clear') {
+        if (gestureBasis?.kind === 'split' || gestureBasis?.kind === 'move' || gestureBasis?.kind === 'trim') {
           const config = parent.config as Record<string, unknown>;
           const clips = (configBefore as Record<string, unknown>).clips;
           const clipPath = topLevelClips ? ['clips'] : ['config', 'clips'];
@@ -650,7 +676,8 @@ export function createTimelineLocalSaveHandoff(options: {
             : gestureBasis.kind === 'move' ? `Move ${gestureBasis.clipId} on ${gestureBasis.trackId}`
               : gestureBasis.kind === 'transition-clear' ? `Clear transitions: ${gestureBasis.clipIds.join(', ')}`
               : gestureBasis.kind === 'trim' ? `Trim ${gestureBasis.clipId}: ${canonicalJsonStringify(gestureBasis.patch)}`
-                : gestureBasis.kind === 'element' ? gestureBasis.operation.name : 'Add media') : 'Save local editor changes', tags: [], ...(gestureBasis?.kind === 'element' || parentGesture ? { reads } : {}) } });
+                : gestureBasis.kind === 'track-label' ? `Rename parent track ${gestureBasis.trackId}`
+                : gestureBasis.kind === 'element' ? gestureBasis.operation.name : 'Add media') : 'Save local editor changes', tags: [], ...(gestureBasis?.kind === 'element' || parentGesture || parentLabel ? { reads } : {}) } });
         source = { ...next,
           config: changes(source.config, source.config, next.config, ['config'], gestureBasis?.kind === 'element') as TimelineConfig,
           registry: changes(source.registry, source.registry, next.registry, ['registry']) as AssetRegistry,

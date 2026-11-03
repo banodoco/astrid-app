@@ -251,6 +251,107 @@ export class AstridCli {
     return { data: result.data, receipt: result.receipt } as CommitAcceptedMutation;
   }
 
+  /** Submit one original SDK command from a pinned base and expose the shipped pending re-derive result. */
+  async commitTrackLabelFromBase(projectSlug: string, timelineId: string, base: HeadPin, trackId: string, label: string, key: string) {
+    const program = [
+      'import json, sys',
+      'from pathlib import Path',
+      'from astrid.sdk.client import AstridClient',
+      'from astrid.sdk.timeline.commit_session import Timeline',
+      'from astrid.sdk.timeline.sync import TimelineSession, CommitConflict',
+      'from astrid.sdk.timeline.store import fetch_bundle',
+      'from astrid.sdk.timeline._track_commands import capture_track_set',
+      'project, timeline_id, base, track_id, label, key, outbox_path, trace_path = json.loads(sys.argv[1])',
+      'with AstridClient.open_from_launcher(start_pack_host=False, client_name="three-products-timeline-edit") as client:',
+      '    generated = client._remote._transport._generated',
+      '    original_request = generated._request',
+      '    def observe_request(method, path, **kwargs):',
+      '        if method != "POST" or not path.endswith("/commit"):',
+      '            return original_request(method, path, **kwargs)',
+      '        entry = {"method": method, "path": path, "body": kwargs["body"].decode(),',
+      '                 "key": kwargs.get("headers", {}).get("Idempotency-Key")}',
+      '        try:',
+      '            response = original_request(method, path, **kwargs)',
+      '            entry.update(status=response[0], response=json.loads(response[2]))',
+      '            return response',
+      '        except Exception as exc:',
+      '            entry.update(status=getattr(exc, "status", None), code=getattr(exc, "code", None), details=getattr(exc, "details", {}))',
+      '            raise',
+      '        finally:',
+      '            with Path(trace_path).open("a") as sink:',
+      '                sink.write(json.dumps(entry) + "\\n")',
+      '    generated._request = observe_request',
+      '    session = TimelineSession.open(project, timeline_id, client=client, outbox_path=outbox_path,',
+      '        base_revision_id=base["revision_id"], base_publication_id=base["publication_id"],',
+      '        user_editing_timeout=8, user_editing_interval=0.05)',
+      '    bundle = fetch_bundle(session.project_id, session.timeline_id, revision_id=base["revision_id"],',
+      '                          publication_id=base["publication_id"], client=client)',
+      '    command = capture_track_set(bundle, "parent/track:" + track_id, values={"label": label})',
+      '    try:',
+      '        result = session.commit(command, idempotency_key=key, label="Agent track label")',
+      '        print(json.dumps({"kind": "accepted", "result": result}))',
+      '    except CommitConflict as exc:',
+      '        current = Timeline.open(project, timeline_id, client=client, outbox_path=outbox_path,',
+      '                               user_editing_timeout=8, user_editing_interval=0.05)',
+      '        recovery = current.retry(exc)',
+      '        print(json.dumps({"kind": "conflict", "pending_id": exc.pending_id,',
+      '                          "detail": exc.detail, "fix": exc.fix, "failure": exc.failure,',
+      '                          "pending": current.pending_show(exc.pending_id), "recovery": recovery}))',
+      '    except Exception as exc:',
+      '        print(json.dumps({"kind": "error", "type": type(exc).__name__, "message": str(exc)}))',
+    ].join('\n');
+    const outboxPath = path.join(this.data, 't4-outboxes', `${key}.json`);
+    mkdirSync(path.dirname(outboxPath), { recursive: true });
+    const run = await this.python(['-c', program, JSON.stringify([projectSlug, timelineId, base, trackId, label, key, outboxPath, `${outboxPath}.posts.jsonl`])]);
+    return JSON.parse(run.stdout.trim().split('\n').at(-1)!);
+  }
+
+  trackLabelPosts(key: string): Array<{ method: string; path: string; body: string; key: string; status: number; code?: string; details?: any; response?: any }> {
+    const file = path.join(this.data, 't4-outboxes', `${key}.json.posts.jsonl`);
+    return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+  }
+
+  /** One real SDK publication: child extension/clear plus a competing parent transition. */
+  async commitRecoveryChanges(project: string, timelineId: string, base: HeadPin,
+    ids: { agentClipId: string; agentClearClipId: string; transitionClipId: string }) {
+    const program = [
+      'import copy, json, sys',
+      'from astrid.sdk.client import AstridClient',
+      'from astrid.sdk.timeline.sync import TimelineSession',
+      'from astrid.sdk.timeline.store import fetch_bundle',
+      'from astrid.sdk.timeline.commit import document_from_bundle',
+      'project, timeline_id, base, ids, outbox = json.loads(sys.argv[1])',
+      'with AstridClient.open_from_launcher(start_pack_host=False, client_name="three-products-recovery") as client:',
+      '    session = TimelineSession.open(project, timeline_id, client=client, outbox_path=outbox,',
+      '        base_revision_id=base["revision_id"], base_publication_id=base["publication_id"])',
+      '    bundle = fetch_bundle(session.project_id, session.timeline_id, revision_id=base["revision_id"], publication_id=base["publication_id"], client=client)',
+      '    document = document_from_bundle(bundle)',
+      '    changes = []',
+      '    for name, field in (("agentClipId", "hold"), ("agentClearClipId", "asset")):',
+      '        matches = [(image, row) for image in document["internal_timeline_revisions"] for row in image["payload"].get("clips", []) if row["id"] == ids[name]]',
+      '        assert len(matches) == 1, matches',
+      '        image, row = matches[0]',
+      '        change = {"op": "set" if field == "hold" else "remove", "ref": "internal-revision:" + image["revision_id"],',
+      '                  "path": ["clips", "id:" + row["id"], field], "before": {"state": "present", "value": row[field]}}',
+      '        if field == "hold": change["value"] = row[field] + 1',
+      '        changes.append(change)',
+      '    parent = document["parent_revision"]["payload"]',
+      '    clip_path = ["clips"] if "clips" in parent else ["config", "clips"]',
+      '    clips = parent["clips"] if len(clip_path) == 1 else parent["config"]["clips"]',
+      '    selected = [row for row in clips if row["id"] == ids["transitionClipId"]]; assert len(selected) == 1',
+      '    transition = copy.deepcopy(selected[0]["transition"]); transition["duration"] += 0.125',
+      '    changes.append({"op": "set", "ref": "parent", "path": clip_path + ["id:" + selected[0]["id"], "transition"],',
+      '                    "before": {"state": "present", "value": selected[0]["transition"]}, "value": transition})',
+      '    command = {"schema_version": 1, "op": "doc.patch", "version": "1", "select": None, "args": {"changes": changes}}',
+      '    result = session.commit(command, idempotency_key="recovery-agent-" + timeline_id, label="Competing recovery edits")',
+      '    print(json.dumps({"result": result, "transition": transition}))',
+    ].join('\n');
+    const outbox = path.join(this.data, 't4-outboxes', `recovery-${timelineId}.json`);
+    mkdirSync(path.dirname(outbox), { recursive: true });
+    const run = await this.python(['-c', program, JSON.stringify([project, timelineId, base, ids, outbox])]);
+    return JSON.parse(run.stdout.trim().split('\n').at(-1)!);
+  }
+
   /** `python -m astrid <args>` where the last stdout line is the `--json` envelope; the caller passes `--json`. */
   async json<T = any>(args: string[], options?: { timeoutMs?: number }): Promise<AstridEnvelope<T>> {
     const run = await this.astrid(args, options);

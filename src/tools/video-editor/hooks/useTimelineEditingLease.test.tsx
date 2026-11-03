@@ -101,6 +101,23 @@ describe('useTimelineEditingLease', () => {
     hook.unmount();
   });
 
+  it('releases after a save acknowledged just before a heartbeat without losing its idle timer', () => {
+    const provider = makeProvider();
+    const hook = renderHook(({ pending }) => useTimelineEditingLease(options(provider, {
+      editSeq: 1, dirty: pending, saving: pending,
+    })), { initialProps: { pending: true } });
+    act(() => { vi.advanceTimersByTime(TIMELINE_EDITING_LEASE_RENEW_MS - 500); });
+    hook.rerender({ pending: false });
+    act(() => { vi.advanceTimersByTime(TIMELINE_EDITING_IDLE_MS - 1); });
+    expect(provider.timelineEditingLease!.renew).toHaveBeenCalledTimes(2);
+    expect(provider.timelineEditingLease!.release).not.toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(1); });
+    expect(provider.timelineEditingLease!.release).toHaveBeenCalledTimes(1);
+    act(() => { vi.advanceTimersByTime(TIMELINE_EDITING_LEASE_RENEW_MS); });
+    expect(provider.timelineEditingLease!.renew).toHaveBeenCalledTimes(2);
+    hook.unmount();
+  });
+
   it('starts on a gesture transition, stays active through the gesture, then applies the inactivity grace', () => {
     const provider = makeProvider();
     const state = { current: createInteractionState() };
@@ -141,6 +158,32 @@ describe('useTimelineEditingLease', () => {
     expect(provider.timelineEditingLease!.renew).toHaveBeenCalledTimes(2);
     act(() => { input.dispatchEvent(new FocusEvent('focusout', { bubbles: true, relatedTarget: document.body })); });
     expect(provider.timelineEditingLease!.release).toHaveBeenCalledTimes(2);
+    hook.unmount();
+    root.remove();
+  });
+
+  it('records native text activity without rendering ahead of the controlled input handler', () => {
+    const provider = makeProvider();
+    // No acknowledgement arrives during the native event. Only the input's
+    // React owner may render its new value before the synthetic change runs.
+    provider.timelineEditingLease!.renew = vi.fn(() => new Promise(() => {}));
+    const root = document.createElement('div');
+    const input = document.createElement('input');
+    root.append(input);
+    document.body.append(root);
+    let renders = 0;
+    const shellRootRef = { current: root };
+    const hook = renderHook(() => {
+      renders++;
+      return useTimelineEditingLease(options(provider, { shellRootRef }));
+    });
+    const before = renders;
+    act(() => {
+      input.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, data: 'A' }));
+      input.dispatchEvent(new InputEvent('input', { bubbles: true, data: 'A' }));
+    });
+    expect(provider.timelineEditingLease!.renew).toHaveBeenCalledTimes(1);
+    expect(renders).toBe(before);
     hook.unmount();
     root.remove();
   });

@@ -97,6 +97,22 @@ describe('reorderTracksByDirection', () => {
 });
 
 describe('runtime editability at commit', () => {
+  it('captures the parent track and original input before changing its label', async () => {
+    const data = await buildTimelineData(makeResolvedConfig([makeTrack('V1', 'visual')]), { assets: {} });
+    const applyEdit = vi.fn();
+    const { result } = renderHook(() => useTimelineTrackManagement({ dataRef: { current: data },
+      resolvedConfig: data.resolvedConfig, selectedClipId: null, setSelectedTrackId: vi.fn(), applyEdit }));
+    act(() => result.current.handleTrackPopoverChange('V1', { label: 'User title' }));
+    expect(applyEdit).toHaveBeenCalledTimes(1);
+    const [mutation, options] = applyEdit.mock.calls[0];
+    expect(mutation.resolvedConfig.tracks[0].label).toBe('User title');
+    expect(options).toEqual({ selectedTrackId: 'V1', gestureBasis: {
+      kind: 'track-label', trackId: 'V1', config: data.config, registry: data.registry,
+    } });
+    expect(options.gestureBasis.config).not.toBe(data.config);
+    expect(data.config.tracks[0].label).toBe('V1');
+  });
+
   it.each(['V1', 'V2'])('captures original same-row move inputs without claiming a cross-track basis: %s', async (target) => {
     const config = makeResolvedConfig([makeTrack('V1', 'visual'), makeTrack('V2', 'visual')]);
     const data = await buildTimelineData(config, { assets: {} });

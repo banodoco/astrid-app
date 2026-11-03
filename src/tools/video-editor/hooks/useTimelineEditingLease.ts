@@ -88,7 +88,6 @@ export function useTimelineEditingLease({
   const reconcileRef = useRef<() => void>(() => {});
   const composingRef = useRef(false);
   const [acknowledged, setAcknowledged] = useState(false);
-  const [, rerender] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -109,12 +108,12 @@ export function useTimelineEditingLease({
     };
     const sendPut = (force = false) => {
       if (!mounted || !leaseApi || !timelineId) return;
-      clearIdleTimer();
       if (wantedRef.current && !force && hasLeaseRef.current) return;
       wantedRef.current = true;
       hasLeaseRef.current = true;
       startHeartbeat();
-      clearIdleTimer();
+      // Heartbeat renewal must preserve the idle-release deadline established
+      // after a save acknowledgement. Activity reconciliation owns that timer.
       const sequence = nextSequence(owner);
       latestSequenceRef.current = sequence;
       acknowledgedSequenceRef.current = null;
@@ -176,7 +175,9 @@ export function useTimelineEditingLease({
     };
     const markActivity = (forcePut = true) => {
       lastActivityAtRef.current = Date.now();
-      rerender((value) => value + 1);
+      // Native capture listeners run before React's input/change handlers.
+      // Keep activity in refs: rendering here can restore a controlled input's
+      // old value before React has captured what the user just typed.
       if (forcePut) sendPut();
       reconcile();
     };

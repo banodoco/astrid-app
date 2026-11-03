@@ -1343,7 +1343,6 @@ export async function createTimelineCommandSession(options: Options) {
     occurrenceAddMediaPort,
     occurrenceDuplicatePort,
     useLatest: () => resolveRejected(false),
-    keepLabelChanges: () => resolveRejected(true),
     getState: () => state,
     // Existing task events and canonical reconnect reads wake this same pump.
     resumePlacements,

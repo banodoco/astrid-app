@@ -166,6 +166,56 @@ describe('Runtime timeline editing lease client', () => {
     expect(sent.map(request => request.credential)).toEqual([undefined, 'opaque-app-tab', undefined, undefined]);
   });
 
+  it('attaches the acknowledged owner only to restore and fences a late renewal after release', async () => {
+    const fixture = runtimeFixture();
+    const requests: Array<{ method: string; path: string; headers: Record<string, string>; body: string }> = [];
+    let finishRenewal: ((value: Awaited<ReturnType<Transport>>) => void) | undefined;
+    let holdRenewal = false;
+    const transport: Transport = async (method, path, headers, body) => {
+      const request = { method, path, headers, body: body ? new TextDecoder().decode(body) : '' };
+      requests.push(request);
+      if (path.endsWith('/editing')) {
+        const payload = JSON.parse(request.body);
+        if (method === 'PUT' && holdRenewal) {
+          return await new Promise(resolve => { finishRenewal = resolve; });
+        }
+        return { status: 200, headers: {}, body: json({ data: { ...payload,
+          active: method === 'PUT', expires_in_seconds: method === 'PUT' ? 10 : 0 } }) };
+      }
+      if (path.endsWith('/restore')) {
+        return { status: 200, headers: {}, body: json(acceptedCommit(
+          { revision_id: 'r2', publication_id: 'p2' }, { revision_id: 'r1', publication_id: 'p1' })) };
+      }
+      return fixture.transport(method, path, headers, body);
+    };
+    const client = new AstridRuntimeClient({ baseUrl: 'http://runtime.test', transport });
+    const restore = (key: string) => client.restoreProjectParentCompositionRevision(
+      PROJECT_ID, TIMELINE_ID, 'revision/one', 'head/one', 'publication/one', key,
+    );
+    await client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'restore-owner', sequence: 1 });
+    await restore('restore-key-1');
+
+    holdRenewal = true;
+    const renewal = client.updateTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'restore-owner', sequence: 2 });
+    for (let attempt = 0; attempt < 100 && !finishRenewal; attempt++) await new Promise(resolve => setTimeout(resolve, 1));
+    expect(finishRenewal).toBeDefined();
+    await client.releaseTimelineEditing(PROJECT_ID, TIMELINE_ID, { tab_session_id: 'restore-owner', sequence: 3 });
+    finishRenewal!({ status: 200, headers: {}, body: json({ data: {
+      tab_session_id: 'restore-owner', sequence: 2, active: true, expires_in_seconds: 10,
+    } }) });
+    await renewal;
+    await restore('restore-key-2');
+
+    const restores = requests.filter(request => request.path.endsWith('/restore'));
+    expect(restores).toHaveLength(2);
+    expect(restores.map(request => request.headers['X-Timeline-Editing-Session'])).toEqual(['restore-owner', undefined]);
+    expect(restores.map(request => request.headers['Idempotency-Key'])).toEqual(['restore-key-1', 'restore-key-2']);
+    expect(restores.map(request => JSON.parse(request.body))).toEqual([
+      { expected_head: 'head/one', expected_publication_id: 'publication/one' },
+      { expected_head: 'head/one', expected_publication_id: 'publication/one' },
+    ]);
+  });
+
   it('uses the T1 PUT and DELETE route, body shape, and authenticated mutation boundary', async () => {
     const requests: Array<{ method: string; path: string; body?: unknown }> = [];
     const transport: Transport = async (method, path, _headers, body) => {

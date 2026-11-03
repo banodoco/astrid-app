@@ -401,8 +401,10 @@ export class AstridRuntimeClient {
       const signal = this.signal;
       const transport: Transport = async (method, path, headers, body) => {
         signal?.throwIfAborted();
-        if (method === 'POST' && path.endsWith('/commit')) {
-          const lease = this.editingSessions.get(`${base}${path.slice(0, -'/commit'.length)}`);
+        if (method === 'POST') {
+          const resource = path.endsWith('/commit') ? path.slice(0, -'/commit'.length)
+            : path.match(/^(\/v1\/projects\/[^/]+\/timelines\/[^/]+)\/composition-revisions\/[^/]+\/restore$/)?.[1];
+          const lease = resource ? this.editingSessions.get(`${base}${resource}`) : undefined;
           if (lease?.active) headers = { ...headers, 'X-Timeline-Editing-Session': lease.tab };
         }
         if (this.transport) {

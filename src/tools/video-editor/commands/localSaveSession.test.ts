@@ -329,6 +329,23 @@ describe('local editor saves through the durable outbox', () => {
     await reopened.dispose();
   });
 
+  it('uses the latest document only after the user discards the exact rejected chain', async () => {
+    const env = environment();
+    const session = await env.mount();
+    await env.append(session, splitSave());
+    env.send.mockRejectedValueOnce(new ApiError(409, 'conflict', 'Changed', '', { status: 'conflict' }));
+    const latest = result({ ...original, agent: true }, { revisionId: 'remote-r', publicationId: 'remote-p' });
+    env.loadLatest.mockResolvedValue({ head: latest.accepted, canonicalDocument: latest.canonicalDocument });
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    await session.discardConflict();
+    expect(env.visible()).toEqual({ ...original, agent: true });
+    const [owner] = await env.outboxes.list(scope);
+    expect(owner.intents).toEqual([]);
+    expect(owner.pending).toBeUndefined();
+    expect(owner.disposition).toBeUndefined();
+    expect(env.send).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the rejected owner and visible draft unchanged when loading the canonical head fails', async () => {
     const env = environment();
     const session = await env.mount();

@@ -332,13 +332,7 @@ export async function createLocalSaveSession(options: Options) {
     return write;
   }
 
-  return {
-    getState: () => clone(state),
-    getDocument: () => clone(document),
-    /** The verified basis of the currently projected local document. */
-    getDisplayBasis: () => clone(displayBasis),
-    /** Park the complete rejected owner before switching to verified canonical data. */
-    async keepConflict(): Promise<TimelineCommandBasis> {
+  async function disposeConflict(kind: 'keep' | 'discard'): Promise<TimelineCommandBasis> {
       assertOpen();
       if (state.status !== 'conflict' || !box || !record) throw new Error('No rejected conflict to keep');
       resolving = true;
@@ -352,9 +346,11 @@ export async function createLocalSaveSession(options: Options) {
         const prepared = await options.prepareDisplay(clone(latest));
         if (closed || at !== generation || box !== activeBox) throw new Error('Local save owner changed during resolution');
         const snapshot = await activeBox.read();
-        await activeBox.parkRejected(snapshot);
+        if (kind === 'keep') await activeBox.parkRejected(snapshot);
+        else await activeBox.resolveRejected(snapshot.intents.map((intent) => intent.id), undefined,
+          () => !closed && at === generation && box === activeBox);
         if (closed || at !== generation || box !== activeBox) throw new Error('Local save owner changed during resolution');
-        // The durable copy exists before canonical content is exposed.
+        // Complete the chosen durable disposition before exposing canonical content.
         prepared.adopt();
         basis = clone(latest);
         displayBasis = clone(latest);
@@ -364,7 +360,16 @@ export async function createLocalSaveSession(options: Options) {
         await lifetime;
         return clone(latest);
       } finally { resolving = false; }
-    },
+    }
+
+  return {
+    getState: () => clone(state),
+    getDocument: () => clone(document),
+    /** The verified basis of the currently projected local document. */
+    getDisplayBasis: () => clone(displayBasis),
+    /** Resolve the rejected owner before switching to verified canonical data. */
+    keepConflict: () => disposeConflict('keep'),
+    discardConflict: () => disposeConflict('discard'),
     /** Verified physical images with locally authored payloads; still an unsent intent. */
     appendDocument(input: Omit<Parameters<typeof documentPatchIntent>[0], 'basis'>): Promise<void> {
       assertOpen();

@@ -79,7 +79,7 @@
       "version": "7.0.2",
       "assets": {
         "linux-x64": {
-          "url": "https://johnvansickle.com/ffmpeg/releases/ffmpeg-7.0.2-amd64-static.tar.xz",
+          "url": "https://github.com/banodoco/astrid-agent/releases/download/deps-ffmpeg-7.0.2-20261104/ffmpeg-7.0.2-amd64-static.tar.xz",
           "sha256": "abda8d77ce8309141f83ab8edf0596834087c52467f6badf376a6a2a4c87cf67"
         },
         "linux-arm64": {

@@ -229,6 +229,67 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     }
   });
 
+  it('keeps normal saves held when the genuine initial IndexedDB recovery read rejects', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const listener = (event: Event) => records.push((event as CustomEvent).detail);
+    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    window.addEventListener('timeline:save-diagnostic', listener);
+
+    const realOpen = indexedDB.open.bind(indexedDB);
+    const indexedDbOpen = vi.spyOn(indexedDB, 'open').mockImplementation((name, version) => {
+      if (name === 'astrid.timeline-drafts') throw new Error('IndexedDB open rejected for recovery read');
+      return realOpen(name, version);
+    });
+
+    let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
+    try {
+      const editor = await mountRecoveryEditor({ seedRecovery: false });
+      hook = editor.hook;
+      await waitFor(() => expect(indexedDbOpen).toHaveBeenCalledWith('astrid.timeline-drafts', 1));
+      await act(async () => {
+        for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
+      });
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
+      expect(records.find((record) => record.phase === 'recovery-current-snapshot')).toMatchObject({
+        recoveryReadState: 'rejected',
+        recoveryFinalizer: 'applied',
+        recoveryCompleted: true,
+        recoveryPending: false,
+        recoveryActive: true,
+      });
+
+      vi.useFakeTimers();
+      const edited = await buildTimelineData(
+        timelineConfig('edited-after-recovery-read-rejection'),
+        registry,
+        editor.provider.resolveAssetUrl,
+        12,
+      );
+      act(() => { hook!.result.current.commitData(edited, { save: true }); });
+      await advance(600);
+
+      const scheduled = records.find((record) => record.phase === 'schedule-disposition'
+        && record.disposition === 'recovery-active');
+      expect(scheduled).toMatchObject({ recoveryPending: false, recoveryActive: true });
+      const checkAtSchedule = records.find((record) => record.phase === 'schedule'
+        && record.recoveryCheckOrdinal !== undefined);
+      expect(checkAtSchedule).toMatchObject({
+        recoveryReadState: 'rejected',
+        recoveryFinalizer: 'applied',
+        recoveryPending: false,
+        recoveryActive: true,
+      });
+      expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
+    } finally {
+      hook?.unmount();
+      indexedDbOpen.mockRestore();
+      window.removeEventListener('timeline:save-diagnostic', listener);
+      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
+      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
+    }
+  });
+
   it('only emits a recovery snapshot on explicit opt-in and removes the request listener on unmount', async () => {
     const records: Array<Record<string, unknown>> = [];
     const listener = (event: Event) => records.push((event as CustomEvent).detail);

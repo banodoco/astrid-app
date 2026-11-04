@@ -6,6 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createFakeIndexedDB, IDBKeyRange } from 'fake-indexeddb';
 import { PREVIEW_ALLOWED_HOSTS } from '../../config/vite/policy.ts';
+import { loadTimelineDraft } from '../tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { migrateAstridBrowserStorage } from './astridRenameBrowserMigration.ts';
 
 const OLD_LOCAL_STORAGE_KEYS = [
@@ -252,6 +253,52 @@ describe('Astrid browser rename migration', () => {
     expect(browserStorage.getItem('astrid:videoEditor:pendingAdds')).toBe('["generation-1"]');
     expect(browserStorage.getItem(OLD_LOCAL_STORAGE_KEYS[0].oldName)).toBeNull();
     expect(browserStorage.getItem(COMPLETION_KEY)).toBe('complete');
+  });
+
+  it('empty legacy v1 migration leaves actual draft load usable', async () => {
+    await seedDatabase(OLD_DATABASES.timelineDrafts.oldName, []);
+
+    expect(await migrateAstridBrowserStorage()).toEqual({ success: true });
+    await expect(loadTimelineDraft('missing-timeline')).resolves.toBeNull();
+    expect(await readStoreSchema(OLD_DATABASES.timelineDrafts.newName, 'timeline-drafts')).toEqual({
+      keyPath: 'key',
+      indexes: [],
+    });
+    expect(browserStorage.getItem(COMPLETION_KEY)).toBeTruthy();
+  });
+
+  it('concurrent legacy migration opens leave actual draft load usable', async () => {
+    const factory = indexedDB;
+    const realOpen = factory.open.bind(factory);
+    const realDeleteDatabase = factory.deleteDatabase.bind(factory);
+    const events: string[] = [];
+    const legacyName = OLD_DATABASES.timelineDrafts.oldName;
+    vi.spyOn(factory, 'open').mockImplementation((name, version) => {
+      if (name === legacyName) events.push('open-queued');
+      return version === undefined ? realOpen(name) : realOpen(name, version);
+    });
+    vi.spyOn(factory, 'deleteDatabase').mockImplementation((name) => {
+      const request = realDeleteDatabase(name);
+      if (name === legacyName) {
+        request.addEventListener('success', () => events.push('legacy-delete-complete'), { once: true });
+      }
+      return request;
+    });
+
+    const firstMigration = migrateAstridBrowserStorage();
+    const secondMigration = migrateAstridBrowserStorage();
+    const outcomes = await Promise.all([firstMigration, secondMigration]);
+
+    expect(outcomes).toEqual([{ success: true }, { success: true }]);
+    const firstDeleteCompletion = events.indexOf('legacy-delete-complete');
+    expect(firstDeleteCompletion).toBeGreaterThanOrEqual(2);
+    expect(events.slice(0, firstDeleteCompletion).filter((event) => event === 'open-queued')).toHaveLength(2);
+    await expect(loadTimelineDraft('missing-timeline')).resolves.toBeNull();
+    expect(await readStoreSchema(OLD_DATABASES.timelineDrafts.newName, 'timeline-drafts')).toEqual({
+      keyPath: 'key',
+      indexes: [],
+    });
+    expect(browserStorage.getItem(COMPLETION_KEY)).toBeTruthy();
   });
 
   it('leaves all old data and sets no marker when a copy fails part-way through', async () => {

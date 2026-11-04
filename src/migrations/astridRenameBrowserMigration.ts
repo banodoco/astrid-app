@@ -142,6 +142,10 @@ async function readDatabaseSnapshot(oldName: string, newName: string): Promise<D
 
   try {
     const storeNames = stringListValues(database.objectStoreNames);
+    // Another startup can open an absent-name probe before its deletion finishes.
+    // An empty legacy schema has nothing to copy; let the destination owner create
+    // its schema instead of publishing a storeless database at the same version.
+    if (storeNames.length === 0) return null;
     const stores: Array<StoreSchema & { records: StoreRecord[] }> = [];
     for (const oldStoreName of storeNames) {
       const transaction = database.transaction(oldStoreName, 'readonly');

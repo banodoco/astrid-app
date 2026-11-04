@@ -5,7 +5,8 @@ vi.mock('@playwright/test', () => ({ chromium: {}, expect: Object.assign(() => u
 vi.mock('../../../../tests/e2e/local/support/harness.ts', () => ({ DOOR_PORT: 1, startDirectHarness: vi.fn() }));
 vi.mock('../../../../tests/e2e/local/mounted-readiness-safety.ts', () => ({ clearMountedBootstrapFailure: vi.fn(),
   MountedBootstrapError: class extends Error {}, recordMountedBootstrapFailure: vi.fn(), retainMountedBootstrapDiagnostics: vi.fn() }));
-import { captureTerminalSaveDiagnostics } from '../../../../tests/e2e/local/support/app.ts';
+import { captureTerminalSaveDiagnostics, installRecoveredRetryDiagnosticObserver,
+  observeRecoveredRetryDiagnostics } from '../../../../tests/e2e/local/support/app.ts';
 
 describe('timeline save diagnostic projection', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -394,5 +395,141 @@ describe('timeline save diagnostic projection', () => {
       expect(JSON.stringify(detail)).not.toMatch(/private DOM text|private Error text|private arbitrary|private proxy trap/);
     }
     expect(trap).not.toHaveBeenCalled();
+  });
+
+  it('keeps recovered Retry observation opt-in and removes its listener on cleanup', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', false);
+    const listener = vi.spyOn(window, 'addEventListener');
+    const cleanup = installRecoveredRetryDiagnosticObserver();
+    window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: { phase: 'recovery-retry' } }));
+    expect(listener).not.toHaveBeenCalledWith('timeline:save-diagnostic', expect.any(Function));
+    cleanup();
+    expect((window as unknown as { __retainRecoveredRetryDiagnostic?: unknown }).__retainRecoveredRetryDiagnostic).toBeUndefined();
+  });
+
+  it('streams only fixed scalar retry events and samples dialog visibility for each event', async () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const records: Record<string, unknown>[] = [];
+    vi.stubGlobal('__retainRecoveredRetryDiagnostic', async (record: Record<string, unknown>) => { records.push(record); });
+    const dialog = document.createElement('div');
+    dialog.setAttribute('role', 'alertdialog');
+    dialog.textContent = 'This timeline changed somewhere else';
+    vi.spyOn(dialog, 'getBoundingClientRect').mockReturnValue({ width: 100, height: 40 } as DOMRect);
+    const cleanup = installRecoveredRetryDiagnosticObserver();
+    try {
+      const getter = vi.fn(() => { throw new Error('private getter'); });
+      const hostile = Object.defineProperty({ phase: 'capture-rejected', retryStage: 'build', retryOutcome: 'ready',
+        errorCode: 'capture-input-head-unavailable', errorClass: 'TimelineVersionConflictError', returnReason: 'error',
+        disposition: 'scheduled', sequence: 3, time: 4, payload: 'private payload', url: 'https://private.invalid',
+        headers: { authorization: 'secret' } }, 'privateGetter', { get: getter });
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: hostile }));
+      await Promise.resolve();
+      document.body.append(dialog);
+      // DOM changes alone do not add probes or schedule diagnostic work.
+      await Promise.resolve();
+      expect(records).toHaveLength(1);
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: { phase: 'save-return', returnReason: 'error' } }));
+      await Promise.resolve();
+      expect(records[0]).toMatchObject({ phase: 'capture-rejected', retryStage: 'build', retryOutcome: 'ready',
+        captureError: 'capture-input-head-unavailable', captureErrorClass: 'TimelineVersionConflictError',
+        saveReturn: 'error', disposition: 'scheduled', conflictDialogVisible: false });
+      expect(records.at(-1)).toMatchObject({ phase: 'save-return', saveReturn: 'error', conflictDialogVisible: true });
+      expect(getter).not.toHaveBeenCalled();
+      expect(JSON.stringify(records)).not.toMatch(/private getter|private payload|private\.invalid|authorization|secret/);
+      expect(records.every(record => Object.keys(record).every(key => ['phase', 'sequence', 'time', 'ownerAlias', 'timelineId', 'retryStage',
+        'retryOutcome', 'captureError', 'captureErrorClass', 'saveReturn', 'disposition', 'conflictDialogVisible'].includes(key)))).toBe(true);
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: { phase: 'invalid-phase', retryStage: 'secret' } }));
+      await Promise.resolve();
+      expect(records).toHaveLength(2);
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: { phase: 'recovery-retry', retryStage: 'secret',
+        retryOutcome: 'secret', sequence: -1, time: Infinity } }));
+      await Promise.resolve();
+      expect(records.at(-1)).toMatchObject({ phase: 'recovery-retry', retryStage: 'UNKNOWN', retryOutcome: 'UNKNOWN',
+        sequence: 'UNKNOWN', time: 'UNKNOWN' });
+      cleanup();
+      expect(records.at(-1)).toMatchObject({ phase: 'terminal-dialog', conflictDialogVisible: true });
+      const afterCleanup = records.length;
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: { phase: 'save-return' } }));
+      dialog.remove();
+      await Promise.resolve();
+      expect(records).toHaveLength(afterCleanup);
+    } finally { cleanup(); dialog.remove(); }
+  });
+
+  it('retains an event before a failing assertion and caps the stream at 300', async () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const records: Record<string, unknown>[] = [];
+    vi.stubGlobal('__retainRecoveredRetryDiagnostic', async (record: Record<string, unknown>) => { records.push(record); });
+    const cleanup = installRecoveredRetryDiagnosticObserver();
+    try {
+      const assertion = new Error('original assertion');
+      const work = async () => {
+        window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: {
+          phase: 'recovery-retry', retryStage: 'entry', retryOutcome: 'started', sequence: 1, time: 1,
+        } }));
+        expect(records).toHaveLength(1);
+        throw assertion;
+      };
+      await expect(captureDiagnosticsPreservingOutcome(work, async () => {})).rejects.toBe(assertion);
+      expect(records).toHaveLength(1);
+      for (let index = 0; index < 305; index++) window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', {
+        detail: { phase: 'recovery-retry', retryStage: 'entry', retryOutcome: 'started', sequence: index, time: index },
+      }));
+      await Promise.resolve();
+      expect(records).toHaveLength(299);
+      cleanup();
+      expect(records.at(-1)).toMatchObject({ phase: 'terminal-dialog' });
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: { phase: 'save-return' } }));
+      await Promise.resolve();
+      expect(records).toHaveLength(300);
+    } finally { cleanup(); }
+  });
+
+  it('preserves the exact assertion when the recovered Retry bridge fails during capture', async () => {
+    const assertion = new Error('original assertion');
+    const page = { exposeBinding: async () => { throw new Error('private bridge failure'); }, evaluateHandle: vi.fn() };
+    const capture = vi.fn(() => observeRecoveredRetryDiagnostics(page as never, () => {}));
+    const work = vi.fn(async () => { throw assertion; });
+    await expect(captureDiagnosticsPreservingOutcome(work, capture)).rejects.toBe(assertion);
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(work).toHaveBeenCalledTimes(1);
+  });
+
+  it('retains existing capture codes while omitting foreign error text', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const records: Record<string, unknown>[] = [];
+    vi.stubGlobal('__retainRecoveredRetryDiagnostic', async (record: Record<string, unknown>) => { records.push(record); });
+    const cleanup = installRecoveredRetryDiagnosticObserver();
+    try {
+      for (const code of ['local-document-changed', 'owner-history-invalidated'] as const) {
+        emitTimelineSaveDiagnostic('capture-rejected', () => ({ error: markTimelineSaveRejection(new Error('secret error'), code) }));
+      }
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: {
+        phase: 'capture-rejected', errorCode: 'secret code', errorClass: 'secret class', timelineId: 'private/path?key=secret',
+      } }));
+      expect(records.map(record => record.captureError)).toEqual(['local-document-changed', 'owner-history-invalidated', 'UNKNOWN']);
+      expect(JSON.stringify(records)).not.toContain('secret');
+      expect(records[2]).toMatchObject({ captureErrorClass: 'UNKNOWN', timelineId: 'UNKNOWN' });
+    } finally { cleanup(); }
+  });
+
+  it('preserves assertion identity when retention and terminal bridge cleanup fail', async () => {
+    const cleanupFailure = new Error('private cleanup');
+    const handle = { evaluate: vi.fn(async () => { throw cleanupFailure; }), dispose: vi.fn(async () => { throw cleanupFailure; }) };
+    let bridge: (_source: unknown, record: Record<string, unknown>) => void = () => {};
+    const page = { exposeBinding: vi.fn(async (_name: string, callback: typeof bridge) => { bridge = callback; }),
+      evaluateHandle: vi.fn(async () => handle) };
+    const retain = vi.fn(() => { throw new Error('private retention'); });
+    const stop = await observeRecoveredRetryDiagnostics(page as never, retain);
+    const assertion = new Error('original assertion');
+    const capture = vi.fn(stop);
+    await expect(captureDiagnosticsPreservingOutcome(async () => {
+      expect(() => bridge({}, { phase: 'save-return', saveReturn: 'error' })).not.toThrow();
+      throw assertion;
+    }, capture)).rejects.toBe(assertion);
+    expect(capture).toHaveBeenCalledTimes(1);
+    expect(handle.evaluate).toHaveBeenCalledTimes(1);
+    expect(handle.dispose).toHaveBeenCalledTimes(1);
+    expect(retain).toHaveBeenCalledWith({ phase: 'observer-unavailable', outcome: 'terminal-unavailable' });
   });
 });

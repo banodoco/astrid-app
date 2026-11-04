@@ -219,6 +219,105 @@ export async function captureTerminalSaveDiagnostics(page: Page): Promise<Termin
   } catch { return unavailable('capture-unavailable'); }
 }
 
+/** Runs in the page, only around the public recovered Retry. No product work is awaited. */
+export function installRecoveredRetryDiagnosticObserver(): () => void {
+  const target = window as unknown as {
+    __timelineSaveDiagnosticsEnabled?: boolean;
+    __retainRecoveredRetryDiagnostic?: (record: Record<string, unknown>) => Promise<unknown>;
+  };
+  if (target.__timelineSaveDiagnosticsEnabled !== true) return () => {};
+  let count = 0;
+  let stopped = false;
+  const own = (value: unknown, key: string): unknown => {
+    try { return value && typeof value === 'object' ? Object.getOwnPropertyDescriptor(value, key)?.value : undefined; }
+    catch { return undefined; }
+  };
+  const choice = (value: unknown, allowed: readonly string[]) => typeof value === 'string' && allowed.includes(value) ? value : 'UNKNOWN';
+  const counter = (value: unknown) => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 1_000_000_000 ? value : 'UNKNOWN';
+  const identifier = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length <= 160
+    && /^[a-zA-Z0-9_.:-]+$/.test(value) ? value : 'UNKNOWN';
+  const visible = (): boolean => Array.from(document.querySelectorAll<HTMLElement>('[role="alertdialog"]')).some(dialog => {
+    if (!dialog.textContent?.includes('This timeline changed somewhere else')) return false;
+    const rect = dialog.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && getComputedStyle(dialog).visibility !== 'hidden';
+  });
+  const deliver = (record: Record<string, unknown>) => {
+    if (stopped || count >= 300 || target.__timelineSaveDiagnosticsEnabled !== true) return;
+    count++;
+    try { void target.__retainRecoveredRetryDiagnostic?.(Object.freeze(record))?.catch(() => {}); }
+    catch { /* Retention must never affect dispatch or the original assertion. */ }
+  };
+  const phases = ['recovery-retry', 'schedule', 'schedule-disposition', 'debounce-fired', 'save-entry',
+    'capture-called', 'capture-resolved', 'capture-rejected', 'local-capture-start', 'local-capture-settled',
+    'local-capture-error', 'save-return'];
+  // Mirror the existing diagnostic rejection vocabulary in this self-contained
+  // page function; Playwright serializes it without module closures.
+  const captureErrors = ['operation-rejected', 'original-head-unavailable', 'capture-source-head-unavailable',
+    'capture-input-head-unavailable', 'source-parent-unavailable', 'source-parent-mismatch', 'source-clip-identity',
+    'source-track-identity', 'source-bundle-mismatch', 'original-read-unavailable', 'authored-collection-unavailable',
+    'authored-binding-ambiguous', 'authored-identity-unavailable', 'display-container-unbound', 'trim-binding-mismatch',
+    'explicit-clear-unavailable', 'display-value-unbound', 'child-ownership-unavailable', 'local-document-changed',
+    'parent-mirror-mismatch', 'gesture-basis-mismatch', 'gesture-clips-unavailable', 'gesture-clip-ambiguous',
+    'gesture-registry-unavailable', 'registry-mirror-mismatch', 'split-time-unavailable', 'move-track-mismatch',
+    'move-tracks-unavailable', 'move-track-ambiguous', 'move-routing-unavailable', 'trim-operands-unavailable',
+    'capture-owner-unavailable', 'capture-owner-replaced', 'owner-original-read-invalidated', 'owner-identity-invalidated',
+    'owner-retirement-invalidated', 'owner-claim-invalidated', 'owner-recovery-ambiguous', 'owner-history-invalidated'];
+  const onDiagnostic = (event: Event) => {
+    try {
+      // Reserve the last bounded record for the terminal dialog read.
+      if (stopped || count >= 299 || target.__timelineSaveDiagnosticsEnabled !== true) return;
+      const detail = own(event, 'detail');
+      // CustomEvent.detail is a platform accessor, not an untrusted payload accessor.
+      const source = event instanceof CustomEvent ? event.detail : detail;
+      const phase = choice(own(source, 'phase'), phases);
+      if (phase === 'UNKNOWN') return;
+      const time = own(source, 'time');
+      deliver({ phase, sequence: counter(own(source, 'sequence')),
+        time: typeof time === 'number' && Number.isFinite(time) && time >= 0 ? time : 'UNKNOWN',
+        ownerAlias: counter(own(source, 'ownerAlias')), timelineId: identifier(own(source, 'timelineId')),
+        retryStage: choice(own(source, 'retryStage'), ['entry', 'read', 'head', 'build', 'current', 'permission', 'commit']),
+        retryOutcome: choice(own(source, 'retryOutcome'), ['started', 'blocked-reload', 'blocked-conflict', 'rejected', 'stale',
+          'empty', 'record', 'untrusted', 'missing-data', 'ready', 'denied', 'allowed', 'returned']),
+        captureError: phase === 'capture-rejected' ? choice(own(source, 'errorCode'), captureErrors) : 'UNKNOWN',
+        captureErrorClass: phase === 'capture-rejected' ? choice(own(source, 'errorClass'),
+          ['TimelineVersionConflictError', 'TimelineSaveError', 'Error']) : 'UNKNOWN',
+        saveReturn: choice(own(source, 'returnReason'), ['reload', 'recovery', 'session-invalidated', 'saving-queued', 'success', 'error']),
+        disposition: choice(own(source, 'disposition'), ['scheduled', 'recovery-pending', 'recovery-active', 'reload-active',
+          'persistence-disabled', 'interaction-active', 'conflict-exhausted', 'schema-incompatible', 'saving-queued', 'retry-queued']),
+        conflictDialogVisible: visible() });
+    } catch { /* Hostile events and detached DOM are disposable observations. */ }
+  };
+  window.addEventListener('timeline:save-diagnostic', onDiagnostic);
+  return () => {
+    // A false value at synchronous error dispatch alone does not establish a
+    // missing React dialog. Read it once more at the original terminal boundary.
+    try { deliver({ phase: 'terminal-dialog', time: performance.now(), conflictDialogVisible: visible() }); }
+    catch { /* Page may be detached before terminal collection. */ }
+    stopped = true;
+    window.removeEventListener('timeline:save-diagnostic', onDiagnostic);
+  };
+}
+
+/** Stream bounded fixed fields to the runner before an assertion can time out. */
+export async function observeRecoveredRetryDiagnostics(page: Page, retain: (record: Record<string, unknown>) => void): Promise<() => Promise<void>> {
+  try {
+    await page.exposeBinding('__retainRecoveredRetryDiagnostic', (_source, record) => {
+      try { retain(record); } catch { /* Evidence I/O cannot replace the test outcome. */ }
+    });
+    const observer = await page.evaluateHandle(installRecoveredRetryDiagnosticObserver);
+    return async () => {
+      try { await observer.evaluate(stop => stop()); }
+      catch {
+        try { retain({ phase: 'observer-unavailable', outcome: 'terminal-unavailable' }); } catch { /* Disposable evidence. */ }
+      }
+      try { await observer.dispose(); } catch { /* Diagnostic handle cleanup is disposable. */ }
+    };
+  } catch {
+    try { retain({ phase: 'observer-unavailable', outcome: 'setup-unavailable' }); } catch { /* Disposable evidence. */ }
+    return async () => {};
+  }
+}
+
 export async function waitForAudit(harness: DirectHarness, predicate: (entry: ReturnType<DirectHarness['audit']>[number]) => boolean, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

@@ -802,12 +802,9 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
   const held: Array<{ page: Page; route: Route; request: Request }> = [];
   const releases: Array<() => void> = [];
   const pendingCommitRoutes = new Set<Promise<void>>();
-  const heldNotices: Array<Promise<void>> = [];
   const leaseAcks: Array<Promise<PlaywrightResponse>> = [];
   const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
   const installHold = async (target: Page) => {
-    let notifyHeld!: () => void;
-    heldNotices.push(new Promise<void>((resolve) => { notifyHeld = resolve; }));
     let release!: () => void;
     const gate = new Promise<void>((resolve) => { release = resolve; });
     releases.push(release);
@@ -815,7 +812,6 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
       const operation = (async () => {
         if (route.request().method() !== 'POST') return route.fallback();
         held.push({ page: target, route, request: route.request() });
-        notifyHeld();
         await gate;
         await route.continue();
       })();
@@ -827,6 +823,17 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
       && editingPath.test(new URL(response.url()).pathname), CEILING));
   };
   await Promise.all([installHold(tabA), installHold(tabB)]);
+  for (const tab of [tabA, tabB]) {
+    await tab.addInitScript(() => {
+      const target = window as unknown as { __timelineSaveDiagnosticsEnabled: boolean; __saveEvents: unknown[] };
+      target.__timelineSaveDiagnosticsEnabled = true;
+      target.__saveEvents = [];
+      window.addEventListener('timeline:save-diagnostic', event => {
+        if (target.__saveEvents.length < 300) target.__saveEvents.push((event as CustomEvent).detail);
+      });
+    });
+  }
+
 
   try {
     await Promise.all([openApp(tabA, harness), openApp(tabB, harness)]);
@@ -834,7 +841,14 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
     await Promise.all([openSeededTimeline(tabA, harness), openSeededTimeline(tabB, harness)]);
     const sameRealm = await Promise.all([expectSameRealm(tabA, harness, astrid), expectSameRealm(tabB, harness, astrid)]);
 
-    await Promise.all([editFirstTrackName(tabA, appLabelA), editFirstTrackName(tabB, appLabelB)]);
+    await editFirstTrackName(tabA, appLabelA);
+    await expect.poll(() => held.length, {
+      message: 'tab A App commit reaches the hold route before tab B editing starts', timeout: 10_000,
+    }).toBe(1);
+    await editFirstTrackName(tabB, appLabelB);
+    await expect.poll(() => held.length, {
+      message: 'tab B App commit reaches the hold route while tab A remains held', timeout: 10_000,
+    }).toBe(2);
     await Promise.all([expect(firstTrackName(tabA)).toHaveValue(appLabelA), expect(firstTrackName(tabB)).toHaveValue(appLabelB)]);
     const [leaseAckA, leaseAckB] = await Promise.all(leaseAcks);
     expect(leaseAckA.status()).toBe(200);
@@ -844,7 +858,6 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
     expect(leaseReceiptA.data).toMatchObject({ active: true, sequence: expect.any(Number), tab_session_id: expect.any(String) });
     expect(leaseReceiptB.data).toMatchObject({ active: true, sequence: expect.any(Number), tab_session_id: expect.any(String) });
     expect(leaseReceiptA.data.tab_session_id).not.toBe(leaseReceiptB.data.tab_session_id);
-    await Promise.all(heldNotices);
     expect(held).toHaveLength(2);
     const requestA = held.find((item) => item.page === tabA)!.request;
     const requestB = held.find((item) => item.page === tabB)!.request;
@@ -906,6 +919,9 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
     await sniff.expectClean(tabA, seed3.timelineId);
     await sniff.expectClean(tabB, seed3.timelineId);
   } finally {
+    journey.facts = { ...journey.facts, heldCommitCount: held.length,
+      saveDiagnostics: await Promise.all([tabA, tabB].map(tab => tab.evaluate(
+        () => (window as unknown as { __saveEvents?: unknown[] }).__saveEvents).catch(() => []))) };
     releases.forEach((release) => release());
     await Promise.all([tabA.unroute(COMMITS).catch(() => {}), tabB.unroute(COMMITS).catch(() => {})]);
     await Promise.allSettled([...pendingCommitRoutes]);

@@ -216,9 +216,9 @@ export function emitTimelineSaveDiagnostic(boundary: SaveDiagnosticPhase | (() =
       persistenceEnabled: bool(observed.persistenceEnabled), recoveryPending: bool(observed.recoveryPending),
       recoveryActive: bool(observed.recoveryActive), interactionActive: bool(observed.interactionActive),
       ...(phase === 'recovery-retry' ? {
-        retryStage: choice(own(observed, 'retryStage'), ['entry', 'read', 'head', 'build', 'current', 'permission', 'schedule']),
+        retryStage: choice(own(observed, 'retryStage'), ['entry', 'read', 'head', 'build', 'current', 'permission', 'commit']),
         retryOutcome: choice(own(observed, 'retryOutcome'), ['started', 'blocked-reload', 'blocked-conflict', 'rejected', 'stale',
-          'empty', 'record', 'untrusted', 'missing-data', 'ready', 'denied', 'allowed', 'scheduled']),
+          'empty', 'record', 'untrusted', 'missing-data', 'ready', 'denied', 'allowed', 'returned']),
         retryGeneration: counter(own(observed, 'retryGeneration')),
         retryGenerationCurrent: counter(own(observed, 'retryGenerationCurrent')),
       } : {}),

@@ -1564,10 +1564,15 @@ describe('useTimelineSave — recovered draft durability', () => {
       let harness: Awaited<ReturnType<typeof mount>> | undefined;
       let dispatchFailure: { mockRestore(): void } | undefined;
       try {
-        if (recovery === 'seeded') await saveTimelineDraft(timelineId, { config: configC, registry }, 1, {
-          baseHeadProjectId: projectId, baseHeadTimelineId: timelineId,
-          baseHeadRevisionId: headA.headRevisionId, baseHeadPublicationId: headA.headPublicationId,
-        });
+        if (recovery === 'seeded') {
+          // Real recovery slots contain the mounted builder's persisted config,
+          // including its track defaults, rather than a raw input config.
+          const recovered = await buildTimelineData(configC, registry, undefined, 1, undefined, headA);
+          await saveTimelineDraft(timelineId, { config: recovered.config, registry: recovered.registry, bundle: null }, 1, {
+            baseHeadProjectId: projectId, baseHeadTimelineId: timelineId,
+            baseHeadRevisionId: headA.headRevisionId, baseHeadPublicationId: headA.headPublicationId,
+          });
+        }
         harness = await mount();
         await vi.waitFor(() => expect(observations.some(event => event.phase === 'handoff-ready')).toBe(true));
         await settleInitialRecoveryCheck();
@@ -1616,7 +1621,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(retryEvents.map(event => [event.retryStage, event.retryOutcome])).toEqual([
             ['entry', 'started'], ['read', 'started'], ['read', 'record'], ['head', 'ready'],
             ['build', 'started'], ['build', 'ready'], ['current', 'ready'], ['permission', 'allowed'],
-            ['schedule', 'started'], ['schedule', 'scheduled'],
+            ['commit', 'started'], ['commit', 'returned'],
           ]);
           expect(new Set(retryEvents.map(event => event.retryGeneration)).size).toBe(1);
           expect(retryEvents.every(event => event.retryGenerationCurrent === event.retryGeneration)).toBe(true);
@@ -1631,7 +1636,12 @@ describe('useTimelineSave — recovered draft durability', () => {
         expect(harness.hook.result.current.dataRef.current?.config.clips[0].transition).toBeUndefined();
         expect(harness.hook.result.current.isConflictExhausted).toBe(true);
         expect(posts).toHaveLength(postCount); // Local typed stale-head refusal needs no extra publication.
-        expect((await loadTimelineDraft(timelineId))?.baseHeadRevisionId).toBe('rA');
+        const retriedDraft = await loadTimelineDraft(timelineId);
+        expect(retriedDraft).toMatchObject({ baseHeadProjectId: projectId, baseHeadTimelineId: timelineId,
+          baseHeadRevisionId: 'rA', baseHeadPublicationId: 'pA' });
+        expect(retriedDraft?.draft.config).toEqual(retained?.draft.config);
+        expect(retriedDraft?.draft.registry).toEqual(retained?.draft.registry);
+        expect(retriedDraft?.draft.bundle ?? null).toEqual(retained?.draft.bundle ?? null);
         expect(current).toBe(imageB);
         // Use latest discards this recovery slot only and retains canonical B.
         await saveTimelineDraft('other-timeline', { config: configC, registry }, 1);
@@ -2200,7 +2210,7 @@ describe('useTimelineSave — recovered draft durability', () => {
       expect(records.filter(event => event.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
         retryStage: 'permission', retryOutcome: 'denied', recoveryPending: true, recoveryActive: true,
       }));
-      expect(records.some(event => event.phase === 'recovery-retry' && event.retryStage === 'schedule')).toBe(false);
+      expect(records.some(event => event.phase === 'recovery-retry' && event.retryStage === 'commit')).toBe(false);
       expect(harness!.hook.result.current.data?.config.output.file).toBe('output-server.mp4');
       expect(await loadTimelineDraft('timeline-1')).not.toBeNull();
     } finally {

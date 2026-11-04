@@ -848,9 +848,9 @@ export function useTimelineSave(
     // Keep the slot and visible recovery controls until a durable ACK. A 409
     // or transport failure must leave the recovered work retryable.
     setRecoveredAsDirty(true);
-    observeRetry('schedule', 'started', actionGeneration);
+    observeRetry('commit', 'started', actionGeneration);
     commit.commitData(recovered, { save: true });
-    observeRetry('schedule', 'scheduled', actionGeneration);
+    observeRetry('commit', 'returned', actionGeneration);
   }, [localOwner, timelineId, canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef]);
 
   const reloadCanonicalFromServer = persistence.reloadFromServer;

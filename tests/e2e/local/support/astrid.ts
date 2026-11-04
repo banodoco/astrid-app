@@ -306,6 +306,105 @@ export class AstridCli {
     return JSON.parse(run.stdout.trim().split('\n').at(-1)!);
   }
 
+  /** Run a CE journey commit with the pinned SDK's supported bounded user-editing wait. */
+  async commitTrackLabelForJourney(projectSlug: string, timelineId: string, base: HeadPin, trackId: string,
+    label: string, key: string, options: { timeout: number; interval: number; functionCommit?: boolean }) {
+    const program = [
+      'import json, sys',
+      'from astrid.sdk.client import AstridClient',
+      'from astrid.sdk.timeline.commit_session import Timeline',
+      'from astrid.sdk.timeline.sync import TimelineSession, CommitConflict, CommitRefused',
+      'from astrid.sdk.timeline.store import fetch_bundle',
+      'from astrid.sdk.timeline._track_commands import capture_track_set',
+      'project, timeline_id, base, track_id, label, key, outbox_path, trace_path, timeout, interval, function_commit = json.loads(sys.argv[1])',
+      'with AstridClient.open_from_launcher(start_pack_host=False, client_name="three-products-ce-journey") as client:',
+      '    generated = client._remote._transport._generated',
+      '    original_request = generated._request',
+      '    def observe_request(method, path, **kwargs):',
+      '        if method != "POST" or not path.endswith("/commit"):',
+      '            return original_request(method, path, **kwargs)',
+      '        entry = {"method": method, "path": path, "body": kwargs["body"].decode(), "key": kwargs.get("headers", {}).get("Idempotency-Key")}',
+      '        try:',
+      '            response = original_request(method, path, **kwargs)',
+      '            entry.update(status=response[0], response=json.loads(response[2]))',
+      '            return response',
+      '        except Exception as exc:',
+      '            entry.update(status=getattr(exc, "status", None), code=getattr(exc, "code", None), details=getattr(exc, "details", {}))',
+      '            raise',
+      '        finally:',
+      '            with open(trace_path, "a") as sink: sink.write(json.dumps(entry) + "\\n")',
+      '    generated._request = observe_request',
+      '    session = TimelineSession.open(project, timeline_id, client=client, outbox_path=outbox_path,',
+      '        base_revision_id=base["revision_id"], base_publication_id=base["publication_id"],',
+      '        user_editing_timeout=timeout, user_editing_interval=interval)',
+      '    try:',
+      '        if function_commit:',
+      '            bundle = fetch_bundle(session.project_id, session.timeline_id, revision_id=base["revision_id"],',
+      '                                  publication_id=base["publication_id"], client=client)',
+      '            timeline = Timeline(session, bundle, base)',
+      '            def edit(current):',
+      '                current.command(capture_track_set(current.bundle, "parent/track:" + track_id, values={"label": label}), label="Agent track label")',
+      '            result = timeline.commit(edit, label="Agent track label", key=key)',
+      '        else:',
+      '            bundle = fetch_bundle(session.project_id, session.timeline_id, revision_id=base["revision_id"],',
+      '                                  publication_id=base["publication_id"], client=client)',
+      '            command = capture_track_set(bundle, "parent/track:" + track_id, values={"label": label})',
+      '            result = session.commit(command, idempotency_key=key, label="Agent track label")',
+      '        print(json.dumps({"kind": "accepted", "result": result}))',
+      '    except (CommitConflict, CommitRefused) as exc:',
+      '        current = Timeline.open(project, timeline_id, client=client, outbox_path=outbox_path,',
+      '            user_editing_timeout=timeout, user_editing_interval=interval)',
+      '        pending = current.pending_show(exc.pending_id) if exc.pending_id else None',
+      '        print(json.dumps({"kind": "pending" if isinstance(exc, CommitRefused) else "conflict",',
+      '            "error_type": type(exc).__name__, "pending_id": exc.pending_id, "message": str(exc),',
+      '            "headline": getattr(exc, "headline", None), "detail": getattr(exc, "detail", None),',
+      '            "fix": getattr(exc, "fix", None), "failure": exc.failure, "pending": pending}))',
+      '    except Exception as exc:',
+      '        print(json.dumps({"kind": "error", "type": type(exc).__name__, "message": str(exc)}))',
+    ].join('\n');
+    const outboxPath = path.join(this.data, 't4-outboxes', `${key}.json`);
+    mkdirSync(path.dirname(outboxPath), { recursive: true });
+    const run = await this.python(['-c', program, JSON.stringify([projectSlug, timelineId, base, trackId, label, key,
+      outboxPath, `${outboxPath}.posts.jsonl`, options.timeout, options.interval, Boolean(options.functionCommit)])]);
+    return JSON.parse(run.stdout.trim().split('\n').at(-1)!);
+  }
+
+  /** Explicitly resume a previously saved user-editing record; previews are approved through Timeline.commit(preview). */
+  async retryTrackLabelPending(projectSlug: string, timelineId: string, pendingId: string, key: string,
+    options: { timeout: number; interval: number }) {
+    const program = [
+      'import json, sys',
+      'from astrid.sdk.client import AstridClient',
+      'from astrid.sdk.timeline.commit_session import Timeline',
+      'project, timeline_id, pending_id, outbox_path, timeout, interval = json.loads(sys.argv[1])',
+      'with AstridClient.open_from_launcher(start_pack_host=False, client_name="three-products-ce-retry") as client:',
+      '    generated = client._remote._transport._generated',
+      '    original_request = generated._request',
+      '    def observe_request(method, path, **kwargs):',
+      '        if method != "POST" or not path.endswith("/commit"): return original_request(method, path, **kwargs)',
+      '        entry = {"method": method, "path": path, "body": kwargs["body"].decode(), "key": kwargs.get("headers", {}).get("Idempotency-Key")}',
+      '        try:',
+      '            response = original_request(method, path, **kwargs)',
+      '            entry.update(status=response[0], response=json.loads(response[2]))',
+      '            return response',
+      '        except Exception as exc:',
+      '            entry.update(status=getattr(exc, "status", None), code=getattr(exc, "code", None), details=getattr(exc, "details", {}))',
+      '            raise',
+      '        finally:',
+      '            with open(outbox_path + ".posts.jsonl", "a") as sink: sink.write(json.dumps(entry) + "\\n")',
+      '    generated._request = observe_request',
+      '    timeline = Timeline.open(project, timeline_id, client=client, outbox_path=outbox_path,',
+      '        user_editing_timeout=timeout, user_editing_interval=interval)',
+      '    result = timeline.retry(pending_id)',
+      '    if result.get("status") == "preview": result = timeline.commit(result)',
+      '    print(json.dumps({"result": result, "pending": timeline.pending_show(pending_id)}))',
+    ].join('\n');
+    const outboxPath = path.join(this.data, 't4-outboxes', `${key}.json`);
+    const run = await this.python(['-c', program, JSON.stringify([projectSlug, timelineId, pendingId, outboxPath,
+      options.timeout, options.interval])]);
+    return JSON.parse(run.stdout.trim().split('\n').at(-1)!);
+  }
+
   trackLabelPosts(key: string): Array<{ method: string; path: string; body: string; key: string; status: number; code?: string; details?: any; response?: any }> {
     const file = path.join(this.data, 't4-outboxes', `${key}.json.posts.jsonl`);
     return existsSync(file) ? readFileSync(file, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];

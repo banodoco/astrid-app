@@ -26,7 +26,7 @@
  * output) and never judged (R-10). Waits are hang ceilings, not budgets. The ordering of events is made by awaited CLI calls and
  * route holds, never by sleeping.
  */
-import { expect, type Locator, type Page, type Request, type Route } from '@playwright/test';
+import { expect, type Locator, type Page, type Request, type Response as PlaywrightResponse, type Route } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
 import path from 'node:path';
@@ -572,6 +572,208 @@ async function runHostedLoopbackLeaseJourney(
   }
 }
 
+async function runNewHostedLeaseJourney(page: Page, harness: DirectHarness, astrid: AstridCli, seed3: ThreeProductsSeed,
+  scenario: { id: 'J3-command' | 'J3-function' | 'J4-disjoint' | 'J4-contradictory'; appLabel: string; agentLabel: string;
+    agentTrack: 'V1' | 'S1'; functionCommit?: boolean; boundedWait?: boolean }) {
+  await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+  const sniff = new TokenSniff(secretsOf(harness, astrid));
+  sniff.attach(page);
+  const trace: Array<{ kind: string; method?: string; path?: string; status?: number; body?: any }> = [];
+  const pendingLeaseRoutes = new Set<Promise<void>>();
+  let releaseDelete!: () => void;
+  const deleteGate = new Promise<void>((resolve) => { releaseDelete = resolve; });
+  const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+  const holdLeaseRelease = (route: Route) => {
+    const operation = (async () => {
+      const request = route.request();
+      const path = new URL(request.url()).pathname;
+      trace.push({ kind: 'lease-request', method: request.method(), path });
+      if (request.method() === 'DELETE') {
+        trace.push({ kind: 'lease-release-held', method: request.method(), path });
+        await deleteGate;
+        await route.continue();
+      } else await route.fallback();
+    })();
+    pendingLeaseRoutes.add(operation);
+    void operation.finally(() => pendingLeaseRoutes.delete(operation));
+    return operation;
+  };
+  page.on('response', async (response) => {
+    const path = new URL(response.url()).pathname;
+    if (!editingPath.test(path) && !COMMITS.test(path)) return;
+    trace.push({ kind: path.endsWith('/editing') ? 'lease-ack' : 'app-save-ack',
+      method: response.request().method(), path, status: response.status() });
+  });
+  await page.route(editingPath, holdLeaseRelease);
+  try {
+    await openApp(page, harness);
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    const sameRealm = await expectSameRealm(page, harness, astrid);
+    const base = (await history(harness, seed3)).head;
+    const leaseAckPromise = page.waitForResponse((response) => response.request().method() === 'PUT'
+      && editingPath.test(new URL(response.url()).pathname), CEILING);
+    const saveAckPromise = page.waitForResponse((response) => response.request().method() === 'POST'
+      && COMMITS.test(new URL(response.url()).pathname), { timeout: 15_000 });
+    await editFirstTrackName(page, scenario.appLabel);
+    const leaseAck = await leaseAckPromise;
+    expect(leaseAck.status()).toBe(200);
+    const leaseReceipt = await leaseAck.json();
+    expect(leaseReceipt.data).toMatchObject({ active: true, sequence: expect.any(Number), tab_session_id: expect.any(String) });
+    const saveAck = await saveAckPromise;
+    expect(saveAck.status(), 'App B was durably acknowledged before the Agent submission').toBe(200);
+    const saved = await saveAck.json() as CommitAcceptedMutation;
+    const appHead = pinOf(saved);
+    expect(saveAck.request().postDataJSON()).toMatchObject({
+      base_revision_id: base.revision_id, base_publication_id: base.publication_id,
+      source: { via: 'app' }, commands: [{ op: 'doc.patch', args: { changes: [{ op: 'set', ref: 'parent',
+        path: ['config', 'tracks', 'id:V1', 'label'], value: scenario.appLabel }] } }],
+    });
+    expect((await history(harness, seed3)).head).toEqual(appHead);
+    await expect.poll(() => trace.some((event) => event.kind === 'lease-release-held'), CEILING).toBe(true);
+
+    const key = `hosted-loopback-${scenario.id.toLowerCase()}-${seed3.timelineId}`;
+    let firstOutcome: any;
+    if (scenario.boundedWait) {
+      firstOutcome = await astrid.commitTrackLabelForJourney(seed3.projectSlug, seed3.timelineId, base,
+        scenario.agentTrack, scenario.agentLabel, key, { timeout: 1, interval: 2 });
+      const beforeRetry = astrid.trackLabelPosts(key);
+      expect(beforeRetry, 'the SDK stops after one refusal when the total wait budget expires').toHaveLength(1);
+      expect(beforeRetry[0]).toMatchObject({ status: 409, details: { status: 'refused', reason: 'user_editing' } });
+      expect(firstOutcome).toMatchObject({ kind: 'pending', error_type: 'CommitRefused',
+        pending: { state: 'pending', origin: 'list', failure: { details: { reason: 'user_editing' } } } });
+      expect(firstOutcome.pending_id).toMatch(/^pc_/);
+      expect(firstOutcome.message).toContain(`The user is still editing; your change is saved as ${firstOutcome.pending_id}`);
+      expect(firstOutcome.fix).toBe(`tl.retry("${firstOutcome.pending_id}")`);
+      expect(firstOutcome.pending_id).toBe(firstOutcome.pending.id);
+      expect(firstOutcome.pending).toMatchObject({ key,
+        parts: [{ base: { revision_id: base.revision_id, publication_id: base.publication_id } }] });
+      expect(JSON.parse(beforeRetry[0].body)).toMatchObject({ base_revision_id: base.revision_id,
+        base_publication_id: base.publication_id, commands: firstOutcome.pending.parts[0].commands });
+      expect(firstOutcome.pending.parts[0].commands).toEqual(JSON.parse(beforeRetry[0].body).commands);
+      expect((await history(harness, seed3)).head).toEqual(appHead);
+    }
+
+    const releaseAckPromise = page.waitForResponse(response => response.request().method() === 'DELETE'
+      && editingPath.test(new URL(response.url()).pathname), CEILING);
+    releaseDelete();
+    const releaseAck = await releaseAckPromise;
+    expect(releaseAck.status()).toBe(200);
+    const releaseReceipt = await releaseAck.json();
+    expect(releaseReceipt.data).toMatchObject({ active: false, tab_session_id: leaseReceipt.data.tab_session_id });
+    expect(releaseReceipt.data.sequence).toBeGreaterThan(leaseReceipt.data.sequence);
+
+    let outcome: any;
+    if (!scenario.boundedWait) {
+      // The base is pinned by the test before B. The separate Agent process opens that exact pair after
+      // the App lease release ACK, then captures/submits its command against A.
+      firstOutcome = await astrid.commitTrackLabelForJourney(seed3.projectSlug, seed3.timelineId, base,
+        scenario.agentTrack, scenario.agentLabel, key,
+        { timeout: 8, interval: 0.05, functionCommit: scenario.functionCommit });
+      expect(firstOutcome.kind).toBe('conflict');
+      expect(firstOutcome.pending).toMatchObject({ state: 'pending', origin: scenario.functionCommit ? 'function' : 'list', key,
+        parts: [{ base: { revision_id: base.revision_id, publication_id: base.publication_id } }] });
+      expect(firstOutcome.pending_id).toMatch(/^pc_/);
+      expect(firstOutcome.pending_id).toBe(firstOutcome.pending.id);
+      const initialPosts = astrid.trackLabelPosts(key);
+      expect(initialPosts.length).toBeGreaterThan(0);
+      expect(JSON.parse(initialPosts[0].body)).toMatchObject({ base_revision_id: base.revision_id,
+        base_publication_id: base.publication_id, commands: [{ op: 'track.set',
+          select: `parent/track:${scenario.agentTrack}`, args: { values: { label: scenario.agentLabel } } }] });
+      expect(initialPosts.some(post => post.status === 409 && post.details?.reason === 'user_editing')).toBe(false);
+      if (scenario.functionCommit) {
+        const guidance = firstOutcome.pending.clash;
+        expect(guidance.schema).toBe('astrid.clash/2');
+        expect(guidance.summary).toContain('the user (editor)');
+        expect(guidance.summary).toMatch(/label/i);
+        expect(guidance.head).toEqual(appHead);
+        expect(guidance.conflicts).toEqual(expect.arrayContaining([
+          expect.objectContaining({ ref: 'parent', path: ['config', 'tracks', 'id:V1', 'label'] }),
+        ]));
+        expect(guidance.receipts).toEqual(expect.arrayContaining([
+          expect.objectContaining({ via: 'app', touches_conflict: true }),
+        ]));
+        expect(guidance.next).toBe(`tl.retry('${firstOutcome.pending_id}', your_function)`);
+        outcome = guidance;
+      } else {
+        outcome = await astrid.retryTrackLabelPending(seed3.projectSlug, seed3.timelineId, firstOutcome.pending_id, key,
+          { timeout: 8, interval: 0.05 });
+        expect(outcome.result.status).toBe('re_derive');
+        expect(outcome.result.summary).toContain(`The user value is '${scenario.appLabel}'`);
+        expect(outcome.result.summary).toMatch(/label/i);
+        expect(outcome.result.summary).toMatch(/preserve it and re-derive only compatible work/i);
+      }
+      expect((await history(harness, seed3)).head).toEqual(appHead);
+      const state = await revisionState(harness, seed3, appHead.revision_id);
+      expect(state.trackLabel).toBe(scenario.appLabel);
+      expect(firstOutcome.pending).toMatchObject({ state: 'pending', key,
+        parts: [{ base: { revision_id: base.revision_id, publication_id: base.publication_id } }] });
+      if (scenario.functionCommit) expect(firstOutcome.pending.failure.details.reason).toBe('intervening_write');
+      else expect(firstOutcome.pending.failure.details.reason).toBe('value_conflict');
+    } else {
+      const beforeRetry = firstOutcome.pending;
+      const retry = await astrid.retryTrackLabelPending(seed3.projectSlug, seed3.timelineId, firstOutcome.pending_id, key,
+        { timeout: 1, interval: 2 });
+      expect(retry.pending.key).toBe(beforeRetry.key);
+      expect(retry.pending.parts[0].base).toEqual(beforeRetry.parts[0].base);
+      expect(retry.pending.parts[0].commands).toEqual(beforeRetry.parts[0].commands);
+      const posts = astrid.trackLabelPosts(key);
+      expect(posts.length).toBeGreaterThan(1);
+      for (const post of posts.slice(1)) {
+        expect(JSON.parse(post.body)).toMatchObject({ base_revision_id: base.revision_id,
+          base_publication_id: base.publication_id, commands: beforeRetry.parts[0].commands });
+      }
+      if (scenario.agentTrack === 'S1') {
+        const landedPosts = posts.filter(post => JSON.parse(post.body).dry_run !== true);
+        expect(landedPosts).toHaveLength(2);
+        expect(landedPosts[1].body).toBe(landedPosts[0].body);
+        expect(landedPosts[1].key).toBe(landedPosts[0].key);
+        expect(retry.result.status).toMatch(/^(accepted|merged|rebased)$/);
+        const state = await revisionState(harness, seed3, retry.result.data.accepted_revision_id);
+        expect(state.trackLabel).toBe(scenario.appLabel);
+        expect(state.parent.config.tracks.find((track: any) => track.id === 'S1')?.label).toBe(scenario.agentLabel);
+      } else {
+        expect(posts.filter(post => JSON.parse(post.body).dry_run !== true)).toHaveLength(1);
+        expect(retry.result.status).toBe('re_derive');
+        expect(retry.result.summary).toContain(`The user value is '${scenario.appLabel}'`);
+        expect(retry.result.summary).toMatch(/label/i);
+        expect(retry.result.summary).toMatch(/preserve it and re-derive only compatible work/i);
+        expect((await history(harness, seed3)).head).toEqual(appHead);
+        expect((await revisionState(harness, seed3, appHead.revision_id)).trackLabel).toBe(scenario.appLabel);
+      }
+      outcome = retry;
+    }
+    journey.facts = { ...journey.facts, sameRealm, transport: 'hosted-loopback (hosted App -> Runtime door -> Runtime; Astrid SDK -> same Runtime)',
+      journey: scenario.id, base, appHead, leaseReceipt, releaseReceipt, firstOutcome, outcome,
+      agentPosts: astrid.trackLabelPosts(key), eventTrace: trace };
+  } finally {
+    releaseDelete();
+    await Promise.allSettled([...pendingLeaseRoutes]);
+    await page.unroute(editingPath, holdLeaseRelease).catch(() => {});
+    await sniff.expectClean(page, seed3.timelineId);
+  }
+}
+
+test('hosted-loopback J3 command list: a captured A command submitted after App B conflicts and preserves B', async ({ page, harness, astrid, seed3 }) => {
+  await runNewHostedLeaseJourney(page, harness, astrid, seed3,
+    { id: 'J3-command', appLabel: 'Hosted user wins J3 command', agentLabel: 'Agent wanted J3 command', agentTrack: 'V1' });
+});
+
+test('hosted-loopback J3 function: a native function based on A reports intervening_write and preserves B', async ({ page, harness, astrid, seed3 }) => {
+  await runNewHostedLeaseJourney(page, harness, astrid, seed3,
+    { id: 'J3-function', appLabel: 'Hosted user wins J3 function', agentLabel: 'Agent wanted J3 function', agentTrack: 'V1', functionCommit: true });
+});
+
+test('hosted-loopback J4: bounded Agent wait saves a retryable pending disjoint edit and then merges', async ({ page, harness, astrid, seed3 }) => {
+  await runNewHostedLeaseJourney(page, harness, astrid, seed3,
+    { id: 'J4-disjoint', appLabel: 'Hosted user wins J4 disjoint', agentLabel: 'Agent disjoint J4', agentTrack: 'S1', boundedWait: true });
+});
+
+test('hosted-loopback J4: bounded Agent wait saves a retryable pending contradiction and re-derives', async ({ page, harness, astrid, seed3 }) => {
+  await runNewHostedLeaseJourney(page, harness, astrid, seed3,
+    { id: 'J4-contradictory', appLabel: 'Hosted user wins J4 contradiction', agentLabel: 'Agent wanted J4 contradiction', agentTrack: 'V1', boundedWait: true });
+});
+
 test('hosted-loopback J1: acknowledged App save holds the original Agent POST; a field conflict preserves the user value and re-derive guidance', async ({ page, harness, astrid, seed3 }) => {
   await runHostedLoopbackLeaseJourney(page, harness, astrid, seed3,
     { journey: 'J1', appLabel: 'Hosted user wins J1', agentLabel: 'Agent wanted J1', agentTrack: 'V1' });
@@ -580,6 +782,130 @@ test('hosted-loopback J1: acknowledged App save holds the original Agent POST; a
 test('hosted-loopback J2: acknowledged App save holds the original Agent POST; a disjoint field merges after lease release', async ({ page, harness, astrid, seed3 }) => {
   await runHostedLoopbackLeaseJourney(page, harness, astrid, seed3,
     { journey: 'J2', appLabel: 'Hosted user wins J2', agentLabel: 'Agent disjoint J2', agentTrack: 'S1' });
+});
+
+test('hosted-loopback J5: two acknowledged App tabs submit from one head; the losing user draft stays recoverable', async ({ page, context, harness, astrid, seed3 }) => {
+  await harness.enableTimelineAuthoring(ASTRID_PYTHON);
+  const tabA = page;
+  const tabB = await context.newPage();
+  const sniff = new TokenSniff(secretsOf(harness, astrid));
+  sniff.attach(tabA);
+  sniff.attach(tabB);
+  const base = (await history(harness, seed3)).head;
+  const appLabelA = 'App tab A J5';
+  const appLabelB = 'App tab B J5';
+  const held: Array<{ page: Page; route: Route; request: Request }> = [];
+  const releases: Array<() => void> = [];
+  const pendingCommitRoutes = new Set<Promise<void>>();
+  const heldNotices: Array<Promise<void>> = [];
+  const leaseAcks: Array<Promise<PlaywrightResponse>> = [];
+  const editingPath = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/editing$/;
+  const installHold = async (target: Page) => {
+    let notifyHeld!: () => void;
+    heldNotices.push(new Promise<void>((resolve) => { notifyHeld = resolve; }));
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    releases.push(release);
+    await target.route(COMMITS, (route) => {
+      const operation = (async () => {
+        if (route.request().method() !== 'POST') return route.fallback();
+        held.push({ page: target, route, request: route.request() });
+        notifyHeld();
+        await gate;
+        await route.continue();
+      })();
+      pendingCommitRoutes.add(operation);
+      void operation.finally(() => pendingCommitRoutes.delete(operation));
+      return operation;
+    });
+    leaseAcks.push(target.waitForResponse((response) => response.request().method() === 'PUT'
+      && editingPath.test(new URL(response.url()).pathname), CEILING));
+  };
+  await Promise.all([installHold(tabA), installHold(tabB)]);
+
+  try {
+    await Promise.all([openApp(tabA, harness), openApp(tabB, harness)]);
+    await Promise.all([expectConnected(tabA), expectConnected(tabB)]);
+    await Promise.all([openSeededTimeline(tabA, harness), openSeededTimeline(tabB, harness)]);
+    const sameRealm = await Promise.all([expectSameRealm(tabA, harness, astrid), expectSameRealm(tabB, harness, astrid)]);
+
+    await Promise.all([editFirstTrackName(tabA, appLabelA), editFirstTrackName(tabB, appLabelB)]);
+    await Promise.all([expect(firstTrackName(tabA)).toHaveValue(appLabelA), expect(firstTrackName(tabB)).toHaveValue(appLabelB)]);
+    const [leaseAckA, leaseAckB] = await Promise.all(leaseAcks);
+    expect(leaseAckA.status()).toBe(200);
+    expect(leaseAckB.status()).toBe(200);
+    const leaseReceiptA = await leaseAckA.json();
+    const leaseReceiptB = await leaseAckB.json();
+    expect(leaseReceiptA.data).toMatchObject({ active: true, sequence: expect.any(Number), tab_session_id: expect.any(String) });
+    expect(leaseReceiptB.data).toMatchObject({ active: true, sequence: expect.any(Number), tab_session_id: expect.any(String) });
+    expect(leaseReceiptA.data.tab_session_id).not.toBe(leaseReceiptB.data.tab_session_id);
+    await Promise.all(heldNotices);
+    expect(held).toHaveLength(2);
+    const requestA = held.find((item) => item.page === tabA)!.request;
+    const requestB = held.find((item) => item.page === tabB)!.request;
+    for (const request of [requestA, requestB]) {
+      expect(request.postDataJSON()).toMatchObject({
+        base_revision_id: base.revision_id,
+        base_publication_id: base.publication_id,
+        source: { via: 'app' },
+        commands: [{ op: 'doc.patch', args: { changes: [{ op: 'set', ref: 'parent',
+          path: ['config', 'tracks', 'id:V1', 'label'] }] } }],
+      });
+    }
+    expect(requestA.postDataJSON().commands[0].args.changes[0].value).toBe(appLabelA);
+    expect(requestB.postDataJSON().commands[0].args.changes[0].value).toBe(appLabelB);
+
+    const responseAWait = tabA.waitForResponse((response) => response.request() === requestA, CEILING);
+    releases[0]();
+    const responseA = await responseAWait;
+    expect(responseA.status(), 'tab A App commit is accepted while tab B holds an active App lease').toBe(200);
+    const acceptedA = await responseA.json() as CommitAcceptedMutation;
+    expect(acceptedA.data.status).toMatch(/^(accepted|merged|rebased)$/);
+    const winnerHead = pinOf(acceptedA);
+    expect((await history(harness, seed3)).head).toEqual(winnerHead);
+    expect((await revisionState(harness, seed3, winnerHead.revision_id)).trackLabel).toBe(appLabelA);
+
+    const responseBWait = tabB.waitForResponse((response) => response.request() === requestB, CEILING);
+    releases[1]();
+    const responseB = await responseBWait;
+    expect(responseB.status(), 'tab B reaches a commit conflict instead of the Agent user-editing refusal').toBe(409);
+    const rejectedB = await responseB.json();
+    expect(rejectedB.code).toBe('conflict');
+    expect(rejectedB.details?.reason).not.toBe('user_editing');
+    const conflict = tabB.getByRole('alertdialog', { name: CONFLICT_TITLE });
+    await expect(conflict).toBeVisible(CEILING);
+    await expect(conflict.getByRole('heading', { name: 'This timeline changed somewhere else' })).toBeVisible();
+    await expect(conflict).toContainText('Keep your changes, or switch to the latest version.');
+    await expect(conflict.getByRole('button', { name: 'Keep my changes' })).toBeVisible();
+    await expect(conflict.getByRole('button', { name: 'Use latest version' })).toBeVisible();
+    await expect(tabB.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue(appLabelB);
+    expect((await history(harness, seed3)).head).toEqual(winnerHead);
+
+    await conflict.getByRole('button', { name: 'Keep my changes' }).click();
+    await expect(conflict).toHaveCount(0, CEILING);
+    await expect(firstTrackName(tabB)).toHaveValue(appLabelA);
+    await expect.poll(async () => (await timelineDraft(tabB, seed3.timelineId))
+      ?.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label, CEILING)
+      .toBe(appLabelB);
+    const keptDraft = await timelineDraft(tabB, seed3.timelineId);
+    expect(keptDraft?.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label).toBe(appLabelB);
+    expect(keptDraft?.baseHeadProjectId).toBe(harness.seed.projectId);
+    expect(keptDraft?.baseHeadTimelineId).toBe(seed3.timelineId);
+    expect(keptDraft?.baseHeadRevisionId).toBe(base.revision_id);
+    expect(keptDraft?.baseHeadPublicationId).toBe(base.publication_id);
+    expect((await history(harness, seed3)).head).toEqual(winnerHead);
+    journey.facts = { journey: 'J5', transport: 'two hosted App tabs -> same Runtime door -> Runtime',
+      sameRealm, base, leaseReceipts: [leaseReceiptA, leaseReceiptB], appAccepted: acceptedA,
+      appConflict: { status: responseB.status(), body: rejectedB }, winnerHead,
+      losingDraft: keptDraft?.draft, tabSessionIdsDistinct: true };
+    await sniff.expectClean(tabA, seed3.timelineId);
+    await sniff.expectClean(tabB, seed3.timelineId);
+  } finally {
+    releases.forEach((release) => release());
+    await Promise.all([tabA.unroute(COMMITS).catch(() => {}), tabB.unroute(COMMITS).catch(() => {})]);
+    await Promise.allSettled([...pendingCommitRoutes]);
+    await tabB.close();
+  }
 });
 
 // ---------------------------------------------------------------------------------------------

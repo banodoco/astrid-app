@@ -841,6 +841,18 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
     await Promise.all([openSeededTimeline(tabA, harness), openSeededTimeline(tabB, harness)]);
     const sameRealm = await Promise.all([expectSameRealm(tabA, harness, astrid), expectSameRealm(tabB, harness, astrid)]);
 
+    // Field visibility precedes the verified local-save handoff during owner startup.
+    // Observe readiness only; never manufacture a session, response or save acknowledgement.
+    await Promise.all([tabA, tabB].map(target => expect.poll(() => target.evaluate(() => {
+      const events = (window as unknown as { __saveEvents?: Array<Record<string, unknown>> }).__saveEvents ?? [];
+      return events.some((ready, index) => ready.phase === 'handoff-ready'
+        && ready.current === true && ready.sessionPresent === true && ready.basisStatus === 'ready'
+        && !events.slice(index + 1).some(later => later.ownerAlias === ready.ownerAlias
+          && (later.phase === 'owner-closed' || later.phase === 'owner-retired'
+            || (later.phase === 'owner-error' && later.current === true)
+            || (later.phase === 'lifecycle-cancel' && later.sessionPresent === false))));
+    }), { message: 'J5 tab has a current verified local-save handoff before editing', timeout: 10_000 }).toBe(true)));
+
     await editFirstTrackName(tabA, appLabelA);
     await expect.poll(() => held.length, {
       message: 'tab A App commit reaches the hold route before tab B editing starts', timeout: 10_000,

@@ -264,6 +264,48 @@ describe('timeline save diagnostic projection', () => {
     }
   });
 
+  it('projects retry diagnostics only in the retry phase through fixed enums and bounded counters', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const dispatch = vi.spyOn(window, 'dispatchEvent').mockReturnValue(true);
+    const valid = {
+      retryStage: 'permission', retryOutcome: 'denied', retryGeneration: 4,
+      retryGenerationCurrent: 4, recoveryPending: true, recoveryActive: false,
+      conflictExhausted: false, generation: 4, current: true,
+    };
+    emitTimelineSaveDiagnostic('recovery-retry', () => valid);
+    const detail = (dispatch.mock.lastCall![0] as CustomEvent).detail;
+    expect(detail).toMatchObject({ phase: 'recovery-retry', retryStage: 'permission', retryOutcome: 'denied',
+      retryGeneration: 4, retryGenerationCurrent: 4, recoveryPending: true, recoveryActive: false,
+      conflictExhausted: false, generation: 4, current: true });
+    expect(detail).not.toHaveProperty('retrySecret');
+
+    emitTimelineSaveDiagnostic('recovery-retry', () => ({
+      retryStage: { private: 'stage' }, retryOutcome: 'private outcome', retryGeneration: -1,
+      retryGenerationCurrent: Infinity, retrySecret: { nested: 'private retry details' },
+    }));
+    const bounded = (dispatch.mock.lastCall![0] as CustomEvent).detail;
+    expect(bounded).toMatchObject({ retryStage: 'UNKNOWN', retryOutcome: 'UNKNOWN',
+      retryGeneration: 'UNKNOWN', retryGenerationCurrent: 'UNKNOWN' });
+    expect(bounded).not.toHaveProperty('retrySecret');
+    expect(JSON.stringify(bounded)).not.toMatch(/private outcome|private retry details/);
+
+    const hostileGetter = vi.fn(() => 'private accessor value');
+    const hostileObservation = Object.defineProperty({}, 'retryStage', { get: hostileGetter });
+    emitTimelineSaveDiagnostic('recovery-retry', () => hostileObservation);
+    expect((dispatch.mock.lastCall![0] as CustomEvent).detail.retryStage).toBe('UNKNOWN');
+    expect(hostileGetter).not.toHaveBeenCalled();
+
+    emitTimelineSaveDiagnostic('save-entry', () => valid);
+    expect((dispatch.mock.lastCall![0] as CustomEvent).detail).not.toHaveProperty('retryStage');
+  });
+
+  it('keeps retry observations lazy when diagnostics are opted out', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', false);
+    const read = vi.fn(() => ({ retryStage: 'entry' }));
+    emitTimelineSaveDiagnostic('recovery-retry', read);
+    expect(read).not.toHaveBeenCalled();
+  });
+
   it('projects scheduled recovery observations through frozen enums and bounded counters', () => {
     vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
     const dispatch = vi.spyOn(window, 'dispatchEvent').mockReturnValue(true);

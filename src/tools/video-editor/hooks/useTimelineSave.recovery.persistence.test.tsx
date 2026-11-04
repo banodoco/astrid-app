@@ -399,6 +399,76 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     hook.unmount();
   });
 
+  it('keeps the recovery gate and slot when public Retry cannot read the draft', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const listener = (event: Event) => records.push((event as CustomEvent).detail);
+    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    window.addEventListener('timeline:save-diagnostic', listener);
+    let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
+    let retryRead: { mockRestore(): void } | undefined;
+    try {
+      const editor = await mountRecoveryEditor();
+      hook = editor.hook;
+      const indexedDbModule = await import('@/tools/video-editor/data/timelineDraftIndexedDb.ts');
+      retryRead = vi.spyOn(indexedDbModule, 'loadTimelineDraft').mockRejectedValueOnce(new Error('private retry read error'));
+      await act(async () => { await hook!.result.current.retryRecoveredDraft(); });
+
+      expect(records.filter((record) => record.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
+        retryStage: 'read', retryOutcome: 'rejected', recoveryPending: true, recoveryActive: true,
+      }));
+      expect(JSON.stringify(records)).not.toContain('private retry read error');
+      expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 });
+      expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
+
+      vi.useFakeTimers();
+      const edited = await buildTimelineData(timelineConfig('edited-after-retry-read-rejection'), registry,
+        editor.provider.resolveAssetUrl, 12);
+      act(() => { hook!.result.current.commitData(edited, { save: true }); });
+      await advance(600);
+      expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
+      expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 });
+    } finally {
+      hook?.unmount();
+      retryRead?.mockRestore();
+      window.removeEventListener('timeline:save-diagnostic', listener);
+      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
+      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
+    }
+  });
+
+  it('rethrows the original Retry build failure and emits only a bounded rejection stage', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const listener = (event: Event) => records.push((event as CustomEvent).detail);
+    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    window.addEventListener('timeline:save-diagnostic', listener);
+    let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
+    try {
+      const editor = await mountRecoveryEditor();
+      hook = editor.hook;
+      const original = new Error('private build failure');
+      const timelineDataModule = await import('@/tools/video-editor/lib/timeline-data.ts');
+      vi.spyOn(timelineDataModule, 'buildTimelineData').mockRejectedValueOnce(original);
+      let retry!: Promise<void>;
+      act(() => { retry = hook!.result.current.retryRecoveredDraft(); });
+      await act(async () => { await expect(retry).rejects.toBe(original); });
+
+      expect(records.filter((record) => record.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
+        retryStage: 'build', retryOutcome: 'rejected', recoveryPending: true, recoveryActive: true,
+      }));
+      expect(JSON.stringify(records)).not.toContain('private build failure');
+      expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 });
+      expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
+      expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
+    } finally {
+      hook?.unmount();
+      window.removeEventListener('timeline:save-diagnostic', listener);
+      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
+      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
+    }
+  });
+
   it('keeps a recovered draft through a transient save failure, then Retry saves at its base version and clears recovery and the slot', async () => {
     const saveTimeline = vi.fn()
       .mockRejectedValueOnce(new Error('bridge unreachable'))
@@ -492,36 +562,52 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
   });
 
   it('invalidates async Retry when Save as copy uses the persistence hook reload path', async () => {
-    const loadCanonicalTimeline = vi.fn(async () => ({ config: timelineConfig('canonical'), configVersion: 14 }));
-    const { hook, provider, canonical, recovered } = await mountRecoveryEditor({ loadCanonicalTimeline });
-    const recoveredData = await buildTimelineData(recovered, registry, provider.resolveAssetUrl, 5);
-    let buildStarted!: () => void;
-    const buildStartedPromise = new Promise<void>((resolve) => { buildStarted = resolve; });
-    let finishBuild!: (data: TimelineData) => void;
-    const pendingBuild = new Promise<TimelineData>((resolve) => { finishBuild = resolve; });
-    const timelineDataModule = await import('@/tools/video-editor/lib/timeline-data.ts');
-    vi.spyOn(timelineDataModule, 'buildTimelineData').mockImplementationOnce(async () => {
-      buildStarted();
-      return pendingBuild;
-    });
-    vi.useFakeTimers();
+    const records: Array<Record<string, unknown>> = [];
+    const listener = (event: Event) => records.push((event as CustomEvent).detail);
+    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    window.addEventListener('timeline:save-diagnostic', listener);
+    let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
+    try {
+      const loadCanonicalTimeline = vi.fn(async () => ({ config: timelineConfig('canonical'), configVersion: 14 }));
+      const editor = await mountRecoveryEditor({ loadCanonicalTimeline });
+      hook = editor.hook;
+      const recoveredData = await buildTimelineData(editor.recovered, registry, editor.provider.resolveAssetUrl, 5);
+      let buildStarted!: () => void;
+      const buildStartedPromise = new Promise<void>((resolve) => { buildStarted = resolve; });
+      let finishBuild!: (data: TimelineData) => void;
+      const pendingBuild = new Promise<TimelineData>((resolve) => { finishBuild = resolve; });
+      const timelineDataModule = await import('@/tools/video-editor/lib/timeline-data.ts');
+      vi.spyOn(timelineDataModule, 'buildTimelineData').mockImplementationOnce(async () => {
+        buildStarted();
+        return pendingBuild;
+      });
+      vi.useFakeTimers();
 
-    let retry!: Promise<void>;
-    act(() => { retry = hook.result.current.retryRecoveredDraft(); });
-    await act(async () => { await buildStartedPromise; });
+      let retry!: Promise<void>;
+      act(() => { retry = hook!.result.current.retryRecoveredDraft(); });
+      await act(async () => { await buildStartedPromise; });
 
-    await act(async () => { await hook.result.current.retrySaveAfterConflict(); });
-    expect(loadCanonicalTimeline).toHaveBeenCalledTimes(1);
-    expect(hook.result.current.data?.config.clips).toEqual(canonical.clips);
+      await act(async () => { await hook!.result.current.retrySaveAfterConflict(); });
+      expect(loadCanonicalTimeline).toHaveBeenCalledTimes(1);
+      expect(hook.result.current.data?.config.clips).toEqual(editor.canonical.clips);
 
-    await act(async () => {
-      finishBuild(recoveredData);
-      await retry;
-    });
-    await advance(1000);
-    expect(provider.saveTimeline).not.toHaveBeenCalled();
-    expect(hook.result.current.data?.config.clips).toEqual(canonical.clips);
-    hook.unmount();
+      await act(async () => {
+        finishBuild(recoveredData);
+        await retry;
+      });
+      await advance(1000);
+      expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
+      expect(hook.result.current.data?.config.clips).toEqual(editor.canonical.clips);
+      expect(records.filter((record) => record.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
+        retryStage: 'current', retryOutcome: 'stale',
+      }));
+    } finally {
+      hook?.unmount();
+      window.removeEventListener('timeline:save-diagnostic', listener);
+      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
+      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
+    }
   });
 
   it('does not start Retry while canonical Discard is waiting on its reload', async () => {

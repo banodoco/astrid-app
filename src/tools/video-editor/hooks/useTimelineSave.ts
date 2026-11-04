@@ -755,18 +755,33 @@ export function useTimelineSave(
   const retryRecoveredDraft = useCallback(async () => {
     // A Retry started during Reload would get a newer generation than the
     // reload's invalidation and could commit after canonical adoption.
-    if (canonicalReloadInProgressRef.current || persistence.isConflictExhaustedRef?.current) return;
+    const observeRetry = (retryStage: string, retryOutcome: string, retryGeneration?: number) => {
+      emitTimelineSaveDiagnostic('recovery-retry', () => ({ owner: localOwner, timelineId,
+        retryStage, retryOutcome, retryGeneration,
+        retryGenerationCurrent: recoveryActionGenerationRef.current,
+        recoveryPending: recoveryPendingRef.current, recoveryActive: recoveryActiveRef.current,
+        conflictExhausted: persistence.isConflictExhaustedRef?.current,
+      }));
+    };
+    if (canonicalReloadInProgressRef.current || persistence.isConflictExhaustedRef?.current) {
+      observeRetry('entry', canonicalReloadInProgressRef.current ? 'blocked-reload' : 'blocked-conflict');
+      return;
+    }
     const actionGeneration = ++recoveryActionGenerationRef.current;
     const isCurrentAction = () => recoveryActionGenerationRef.current === actionGeneration;
+    observeRetry('entry', 'started', actionGeneration);
+    observeRetry('read', 'started', actionGeneration);
     let record: Awaited<ReturnType<typeof loadTimelineDraft>>;
     try {
       record = await loadTimelineDraft(recoveryKey);
     } catch {
+      observeRetry('read', 'rejected', actionGeneration);
       // A temporary read failure is not a discard. Keep the recovery controls
       // and write freeze so the original slot remains safe and resolvable.
       return;
     }
-    if (!isCurrentAction()) return;
+    observeRetry('read', record ? 'record' : 'empty', actionGeneration);
+    if (!isCurrentAction()) { observeRetry('current', 'stale', actionGeneration); return; }
     if (!record) {
       setRecoveryDraft(null);
       setRecoveredAsDirty(false);
@@ -777,29 +792,48 @@ export function useTimelineSave(
     }
     const recoveredHead = trustedRecoveryHead(record);
     if (provider.saveTimelineAtHead && !recoveredHead) {
+      observeRetry('head', 'untrusted', actionGeneration);
       offerRecovery(record);
       return;
     }
+    observeRetry('head', 'ready', actionGeneration);
     const draft = record.draft as { config?: TimelineConfig; registry?: AssetRegistry; bundle?: TimelineBundleEnvelope | null };
     if (!draft.config || !commit.data) {
+      observeRetry('build', 'missing-data', actionGeneration);
       return;
     }
-    if (draft.bundle) parseTimelineBundle(draft.bundle);
-    const recovered = await buildTimelineData(
-      draft.config,
-      draft.registry ?? { assets: {} },
-      resolveAssetUrl ?? ((file) => provider.resolveAssetUrl(file)),
-      record.baseVersion,
-      draft.bundle?.itemsBySchemaRef,
-      recoveredHead,
-      draft.bundle?.transcriptReferences,
-    );
+    observeRetry('build', 'started', actionGeneration);
+    let recovered: TimelineData;
+    try {
+      if (draft.bundle) parseTimelineBundle(draft.bundle);
+      recovered = await buildTimelineData(
+        draft.config,
+        draft.registry ?? { assets: {} },
+        resolveAssetUrl ?? ((file) => provider.resolveAssetUrl(file)),
+        record.baseVersion,
+        draft.bundle?.itemsBySchemaRef,
+        recoveredHead,
+        draft.bundle?.transcriptReferences,
+      );
+    } catch (error) {
+      observeRetry('build', 'rejected', actionGeneration);
+      throw error;
+    }
+    observeRetry('build', 'ready', actionGeneration);
     // Reload/Discard can finish while this async recovery build is running.
     // Never let that stale candidate reach commitData afterward.
-    if (!isCurrentAction() || persistence.isConflictExhaustedRef?.current) return;
+    if (!isCurrentAction() || persistence.isConflictExhaustedRef?.current) {
+      observeRetry('current', !isCurrentAction() ? 'stale' : 'blocked-conflict', actionGeneration);
+      return;
+    }
+    observeRetry('current', 'ready', actionGeneration);
     // Recovery Retry is a user-triggered whole-timeline replacement; recheck
     // after the async build so a canonical-head transition cannot publish H0.
-    if (timelineEditability?.checkTimeline && !timelineEditability.checkTimeline().allowed) return;
+    if (timelineEditability?.checkTimeline && !timelineEditability.checkTimeline().allowed) {
+      observeRetry('permission', 'denied', actionGeneration);
+      return;
+    }
+    observeRetry('permission', 'allowed', actionGeneration);
     // Retry against the version captured with the draft. Using a newer
     // polled version here would turn a stale recovery into an unconditional
     // overwrite instead of an honest CAS conflict.
@@ -814,8 +848,10 @@ export function useTimelineSave(
     // Keep the slot and visible recovery controls until a durable ACK. A 409
     // or transport failure must leave the recovered work retryable.
     setRecoveredAsDirty(true);
+    observeRetry('schedule', 'started', actionGeneration);
     commit.commitData(recovered, { save: true });
-  }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef]);
+    observeRetry('schedule', 'scheduled', actionGeneration);
+  }, [localOwner, timelineId, canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef]);
 
   const reloadCanonicalFromServer = persistence.reloadFromServer;
   const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean }) => {

@@ -19,7 +19,7 @@ const SAVE_DIAGNOSTIC_PHASES = ['schedule', 'capture-called', 'capture-resolved'
   'basis-read', 'basis-ready', 'basis-unavailable', 'basis-error',
   'identity-read', 'session-created', 'session-recovered', 'session-changed',
   'adoption-start', 'adoption-complete', 'adopted-read', 'handoff-ready', 'owner-error',
-  'recovery-current-snapshot'] as const;
+  'recovery-current-snapshot', 'recovery-retry'] as const;
 type SaveDiagnosticPhase = typeof SAVE_DIAGNOSTIC_PHASES[number];
 
 const SAVE_REJECTION_CODES = [
@@ -109,6 +109,10 @@ interface SaveDiagnosticObservation extends TimelineRecoveryCheckObservation {
   timelineId?: unknown;
   clipId?: unknown;
   generation?: unknown;
+  retryStage?: unknown;
+  retryOutcome?: unknown;
+  retryGeneration?: unknown;
+  retryGenerationCurrent?: unknown;
   sessionPresent?: unknown;
   closed?: unknown;
   current?: unknown;
@@ -211,6 +215,13 @@ export function emitTimelineSaveDiagnostic(boundary: SaveDiagnosticPhase | (() =
       captureStage: choice(observed.captureStage, ['capture-call', 'capture-set', 'local-capture']),
       persistenceEnabled: bool(observed.persistenceEnabled), recoveryPending: bool(observed.recoveryPending),
       recoveryActive: bool(observed.recoveryActive), interactionActive: bool(observed.interactionActive),
+      ...(phase === 'recovery-retry' ? {
+        retryStage: choice(own(observed, 'retryStage'), ['entry', 'read', 'head', 'build', 'current', 'permission', 'schedule']),
+        retryOutcome: choice(own(observed, 'retryOutcome'), ['started', 'blocked-reload', 'blocked-conflict', 'rejected', 'stale',
+          'empty', 'record', 'untrusted', 'missing-data', 'ready', 'denied', 'allowed', 'scheduled']),
+        retryGeneration: counter(own(observed, 'retryGeneration')),
+        retryGenerationCurrent: counter(own(observed, 'retryGenerationCurrent')),
+      } : {}),
       ...(['schedule', 'recovery-current-snapshot'].includes(phase) && observed.recoveryCheckOrdinal !== undefined ? {
         recoveryCheckOrdinal: counter(observed.recoveryCheckOrdinal),
         recoveryReadState: choice(observed.recoveryReadState, ['not-started', 'pending', 'empty', 'record', 'rejected']),

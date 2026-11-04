@@ -1477,6 +1477,185 @@ describe('useTimelineSave — recovered draft durability', () => {
     }
   });
 
+  it.each((['seeded', 'kept and remounted'] as const).flatMap(recovery =>
+    (['enabled', 'disabled', 'failing'] as const).map(diagnostics => ({ recovery, diagnostics }))))(
+    'retries a recovered A+C draft against the real B command owner ($recovery; diagnostics $diagnostics)', async ({ recovery, diagnostics }) => {
+      vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+      const observations: Array<Record<string, unknown>> = [];
+      const observe = (event: Event) => { if (observations.length < 200) observations.push((event as CustomEvent).detail); };
+      window.addEventListener('timeline:save-diagnostic', observe);
+      const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+      const locks = new Set<string>();
+      Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+        request: async (name: string, _options: unknown, work: (lock: object | null) => Promise<unknown>) => {
+          if (locks.has(name)) return work(null);
+          locks.add(name);
+          try { return await work({}); } finally { locks.delete(name); }
+        },
+      } });
+      const projectId = 'project-commit';
+      const timelineId = 'timeline-1';
+      const registry = { assets: {} };
+      const configA = createDefaultTimelineConfig();
+      configA.tracks[0].label = 'App A';
+      configA.clips = [{ id: 'parent-transition', track: 'V1', at: 0, hold: 2, clipType: 'hold',
+        transition: { type: 'crossfade', duration: 0.25 } }];
+      const configB = structuredClone(configA);
+      configB.tracks[0].label = 'Agent B';
+      const configC = structuredClone(configA);
+      configC.tracks[0].label = 'App A';
+      delete configC.clips[0].transition;
+      const headA = { projectId, timelineId, headRevisionId: 'rA', headPublicationId: 'pA' };
+      const makeImage = (revision: string, publication: string, config: typeof configA) => {
+        const reply = acceptedCommit({ revision_id: revision, publication_id: publication },
+          { revision_id: 'rA', publication_id: 'pA' }, { projectId, timelineId, children: true });
+        const parent = reply.data.canonical_document.parent_revision;
+        parent.payload.config = structuredClone(config) as unknown as typeof parent.payload.config;
+        parent.payload.clips = structuredClone(config.clips) as unknown as typeof parent.payload.clips;
+        parent.content_digest = fixtureDigest(parent.payload);
+        reply.data.document_digest = fixtureDigest(reply.data.canonical_document);
+        return reply;
+      };
+      const imageA = makeImage('rA', 'pA', configA);
+      const imageB = makeImage('rB', 'pB', configB);
+      let current = recovery === 'seeded' ? imageB : imageA;
+      const posts: CommitRequest[] = [];
+      const fixture = runtimeFixture();
+      const runtime = new RuntimeDataProvider({ projectId, transport: async (method, path, headers, body) => {
+        const document = current.data.canonical_document;
+        if (method === 'GET' && path.includes('/commits?')) return { status: 200, headers: {}, body: json({
+          items: [], next_cursor: null,
+          head: { revision_id: current.data.accepted_revision_id, publication_id: current.receipt.receipt_id },
+        }) };
+        if (method === 'GET' && path.includes('/composition-revisions/')) return { status: 200, headers: {}, body: json({
+          project_id: projectId, timeline_id: timelineId, revision_id: document.parent_revision.revision_id,
+          payload: document.parent_revision.payload, content_digest: document.parent_revision.content_digest,
+          dependency_manifest: document.dependency_manifest,
+        }) };
+        if (method === 'GET' && path.includes('/shots/shot-1/revisions/')) return { status: 200, headers: {}, body: json({
+          project_id: projectId, ...document.shot_revisions[0],
+        }) };
+        if (method === 'GET' && path.includes('/timelines/child-timeline/revisions/')) return { status: 200, headers: {}, body: json({
+          project_id: projectId, ...document.internal_timeline_revisions[0],
+        }) };
+        if (method === 'POST' && path.endsWith('/commit')) {
+          posts.push(JSON.parse(new TextDecoder().decode(body as Uint8Array)));
+          current = imageB;
+          return { status: 409, headers: {}, body: json({ code: 'stale_head', message: 'Timeline changed',
+            request_id: 'recovered-conflict', details: { status: 'conflict' } }) };
+        }
+        return fixture.transport(method, path, headers, body);
+      } });
+      const canonical = () => ({ config: current === imageB ? configB : configA, configVersion: 2,
+        head: { projectId, timelineId, headRevisionId: current.data.accepted_revision_id,
+          headPublicationId: current.receipt.receipt_id } });
+      const mount = async () => {
+        const loaded = canonical();
+        const data = await buildTimelineData(loaded.config, registry, undefined, loaded.configVersion, undefined, loaded.head);
+        return setup(async () => { throw new Error('No snapshot save'); }, undefined, { data,
+          loadBasis: () => runtime.loadTimelineCommandBasis(timelineId), capabilities: {
+            commitTimeline: (request, key) => runtime.commitTimeline(request, key),
+            getRecoverableIdentity: () => runtime.getRecoverableIdentity(),
+            saveTimelineAtHead: (...args) => runtime.saveTimelineAtHead(...args),
+            loadCanonicalTimeline: async () => canonical(),
+            loadAssetRegistry: async () => registry,
+          } });
+      };
+      let harness: Awaited<ReturnType<typeof mount>> | undefined;
+      let dispatchFailure: { mockRestore(): void } | undefined;
+      try {
+        if (recovery === 'seeded') await saveTimelineDraft(timelineId, { config: configC, registry }, 1, {
+          baseHeadProjectId: projectId, baseHeadTimelineId: timelineId,
+          baseHeadRevisionId: headA.headRevisionId, baseHeadPublicationId: headA.headPublicationId,
+        });
+        harness = await mount();
+        await vi.waitFor(() => expect(observations.some(event => event.phase === 'handoff-ready')).toBe(true));
+        await settleInitialRecoveryCheck();
+        if (recovery === 'kept and remounted') {
+          const edited = await buildTimelineData(configC, registry, undefined, 1, undefined, headA);
+          await act(async () => {
+            harness!.hook.result.current.commitData(edited, { save: true, gestureBasis: {
+              kind: 'transition-clear', clipId: 'parent-transition', clipIds: ['parent-transition'],
+              config: harness!.hook.result.current.dataRef.current!.config, registry,
+            } });
+            await expect(harness!.hook.result.current.flushPendingSave()).rejects.toThrow();
+          });
+          expect(harness.hook.result.current.isConflictExhausted).toBe(true);
+          expect(posts).toHaveLength(1);
+          expect(posts[0]).toMatchObject({ base_revision_id: 'rA', base_publication_id: 'pA' });
+          await act(async () => { await harness!.hook.result.current.retrySaveAfterConflict(); });
+          expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('rB');
+          const identity = await runtime.getRecoverableIdentity();
+          const [outbox] = await createCommitOutbox().list({ ...identity, projectId, timelineId });
+          expect(outbox.pending?.outcome?.kind).toBe('rejected');
+          expect(outbox.intents).toHaveLength(1);
+          harness.hook.unmount();
+          await vi.waitFor(() => expect(locks.size).toBe(0));
+          observations.length = 0;
+          harness = await mount();
+          await vi.waitFor(() => expect(observations.some(event => event.phase === 'handoff-ready' || event.phase === 'owner-error')).toBe(true));
+          await settleInitialRecoveryCheck();
+        }
+        await vi.waitFor(() => expect(harness!.hook.result.current.recoveryDraft?.retryAllowed).toBe(true));
+        const retained = await loadTimelineDraft(timelineId);
+        expect(retained).toMatchObject({ baseHeadRevisionId: 'rA', baseHeadPublicationId: 'pA',
+          draft: { config: { tracks: expect.arrayContaining([expect.objectContaining({ label: 'App A' })]) } } });
+        const postCount = posts.length;
+        observations.length = 0;
+        vi.stubGlobal('__timelineSaveDiagnosticsEnabled', diagnostics !== 'disabled');
+        if (diagnostics === 'failing') {
+          const dispatch = window.dispatchEvent.bind(window);
+          dispatchFailure = vi.spyOn(window, 'dispatchEvent').mockImplementation(event => {
+            if (event.type === 'timeline:save-diagnostic') throw new Error('diagnostic dispatch failed');
+            return dispatch(event);
+          });
+        }
+        await act(async () => { await harness!.hook.result.current.retryRecoveredDraft(); });
+        const retryEvents = observations.filter(event => event.phase === 'recovery-retry');
+        if (diagnostics === 'enabled') {
+          expect(retryEvents.map(event => [event.retryStage, event.retryOutcome])).toEqual([
+            ['entry', 'started'], ['read', 'started'], ['read', 'record'], ['head', 'ready'],
+            ['build', 'started'], ['build', 'ready'], ['current', 'ready'], ['permission', 'allowed'],
+            ['schedule', 'started'], ['schedule', 'scheduled'],
+          ]);
+          expect(new Set(retryEvents.map(event => event.retryGeneration)).size).toBe(1);
+          expect(retryEvents.every(event => event.retryGenerationCurrent === event.retryGeneration)).toBe(true);
+          expect(retryEvents.every(event => event.timelineId === timelineId && typeof event.ownerAlias === 'number')).toBe(true);
+        } else expect(retryEvents).toEqual([]);
+        dispatchFailure?.mockRestore();
+        dispatchFailure = undefined;
+        await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+        await flush();
+        expect(harness.hook.result.current.dataRef.current?.head).toEqual(headA);
+        expect(harness.hook.result.current.dataRef.current?.config.tracks[0].label).toBe('App A');
+        expect(harness.hook.result.current.dataRef.current?.config.clips[0].transition).toBeUndefined();
+        expect(harness.hook.result.current.isConflictExhausted).toBe(true);
+        expect(posts).toHaveLength(postCount); // Local typed stale-head refusal needs no extra publication.
+        expect((await loadTimelineDraft(timelineId))?.baseHeadRevisionId).toBe('rA');
+        expect(current).toBe(imageB);
+        // Use latest discards this recovery slot only and retains canonical B.
+        await saveTimelineDraft('other-timeline', { config: configC, registry }, 1);
+        await act(async () => { await harness!.hook.result.current.reloadFromServer(); });
+        expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('rB');
+        expect(harness.hook.result.current.dataRef.current?.config.tracks[0].label).toBe('Agent B');
+        expect(harness.hook.result.current.isConflictExhausted).toBe(false);
+        expect(await loadTimelineDraft(timelineId)).toBeNull();
+        expect(await loadTimelineDraft('other-timeline')).not.toBeNull();
+        expect(posts).toHaveLength(postCount);
+        expect(harness.saveTimeline).not.toHaveBeenCalled();
+        expect(imageB.data.canonical_document.shot_revisions).toHaveLength(1);
+        expect(imageB.data.canonical_document.internal_timeline_revisions).toHaveLength(1);
+      } finally {
+        dispatchFailure?.mockRestore();
+        window.removeEventListener('timeline:save-diagnostic', observe);
+        vi.stubGlobal('__timelineSaveDiagnosticsEnabled', false);
+        harness?.hook.unmount();
+        await vi.waitFor(() => expect(locks.size).toBe(0));
+        if (descriptor) Object.defineProperty(navigator, 'locks', descriptor);
+        else Reflect.deleteProperty(navigator, 'locks');
+      }
+    });
+
   it.each(['accepted', 'merged', 'conflict', 'conflict keep', 'conflict latest', 'invalid', 'restart', 'restart after cleanup', 'dependent', 'merged dependent', 'late reply', 'strict'] as const)(
     'the production caller uses it: mounted local document %s', async (outcome) => {
       const conflict = outcome === 'conflict' || outcome === 'conflict keep' || outcome === 'conflict latest';
@@ -1993,28 +2172,42 @@ describe('useTimelineSave — recovered draft durability', () => {
   });
 
   it('does not retry a recovered draft while whole-timeline editing is denied', async () => {
-    const harness = setup(async () => 8, {
-      checkTimeline: () => ({ allowed: false, reason: 'timeline_read_only' }),
-    });
-    const recovered = makeTimelineData('blocked-recovery');
-    await saveTimelineDraft('timeline-1', { config: recovered.config, registry: recovered.registry }, 7);
-    act(() => {
-      harness.hook.result.current.commitData(makeTimelineData('server'), { save: false });
-    });
-    await flush();
-
-    await act(async () => {
-      await harness.hook.result.current.retryRecoveredDraft();
-    });
-    await act(async () => {
-      vi.advanceTimersByTime(600);
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const records: Array<Record<string, unknown>> = [];
+    const observe = (event: Event) => records.push((event as CustomEvent).detail);
+    window.addEventListener('timeline:save-diagnostic', observe);
+    let harness: SetupResult | undefined;
+    try {
+      harness = setup(async () => 8, {
+        checkTimeline: () => ({ allowed: false, reason: 'timeline_read_only' }),
+      });
+      const recovered = makeTimelineData('blocked-recovery');
+      await saveTimelineDraft('timeline-1', { config: recovered.config, registry: recovered.registry }, 7);
+      act(() => {
+        harness!.hook.result.current.commitData(makeTimelineData('server'), { save: false });
+      });
       await flush();
-    });
 
-    expect(harness.saveTimeline).not.toHaveBeenCalled();
-    expect(harness.hook.result.current.data?.config.output.file).toBe('output-server.mp4');
-    expect(await loadTimelineDraft('timeline-1')).not.toBeNull();
-    harness.hook.unmount();
+      await act(async () => {
+        await harness!.hook.result.current.retryRecoveredDraft();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(600);
+        await flush();
+      });
+
+      expect(harness!.saveTimeline).not.toHaveBeenCalled();
+      expect(records.filter(event => event.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
+        retryStage: 'permission', retryOutcome: 'denied', recoveryPending: true, recoveryActive: true,
+      }));
+      expect(records.some(event => event.phase === 'recovery-retry' && event.retryStage === 'schedule')).toBe(false);
+      expect(harness!.hook.result.current.data?.config.output.file).toBe('output-server.mp4');
+      expect(await loadTimelineDraft('timeline-1')).not.toBeNull();
+    } finally {
+      harness?.hook.unmount();
+      window.removeEventListener('timeline:save-diagnostic', observe);
+      vi.stubGlobal('__timelineSaveDiagnosticsEnabled', false);
+    }
   });
 
   it.each([

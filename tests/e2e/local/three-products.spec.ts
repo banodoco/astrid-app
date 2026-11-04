@@ -1185,17 +1185,31 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText('crossfade');
-  await recovered.getByRole('button', { name: 'Save them' }).click();
-  await expect(conflict).toBeVisible(CEILING);
-  await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
-  await expect(transitionSelect(page)).toContainText('None');
-  expect(await currentHead(harness)).toBe(headB);
-  await conflict.getByRole('button', { name: 'Use latest version' }).click();
-  await expect(conflict).toHaveCount(0, CEILING);
-  await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
-  await expect.poll(() => timelineDraft(page, seed3.timelineId), CEILING).toBeNull();
-  await expect(recovered).toHaveCount(0);
-  expect((await allRevisions(harness, seed3)).length, 'resolution creates no extra publication').toBe(revisionsBefore + 2);
+  // Observe only this explicit public Retry, after discovery and selection.
+  await page.evaluate(() => {
+    const target = window as unknown as { __timelineSaveDiagnosticsEnabled: boolean; __saveEvents: unknown[] };
+    target.__timelineSaveDiagnosticsEnabled = true;
+    target.__saveEvents = [];
+    window.addEventListener('timeline:save-diagnostic', event => {
+      if (target.__saveEvents.length < 300) target.__saveEvents.push((event as CustomEvent).detail);
+    });
+  });
+  await captureDiagnosticsPreservingOutcome(async () => {
+    await recovered.getByRole('button', { name: 'Save them' }).click();
+    await expect(conflict).toBeVisible(CEILING);
+    await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
+    await expect(transitionSelect(page)).toContainText('None');
+    expect(await currentHead(harness)).toBe(headB);
+    await conflict.getByRole('button', { name: 'Use latest version' }).click();
+    await expect(conflict).toHaveCount(0, CEILING);
+    await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
+    await expect.poll(() => timelineDraft(page, seed3.timelineId), CEILING).toBeNull();
+    await expect(recovered).toHaveCount(0);
+    expect((await allRevisions(harness, seed3)).length, 'resolution creates no extra publication').toBe(revisionsBefore + 2);
+  }, async () => {
+    const terminal = await captureTerminalSaveDiagnostics(page);
+    journey.facts.recoveredRetryDiagnostics = terminal;
+  });
 
   // Both clients agree after another reload: the App reads head B and shows A; the agent reads B.
   const readsBeforeReload = watched.urls.length;

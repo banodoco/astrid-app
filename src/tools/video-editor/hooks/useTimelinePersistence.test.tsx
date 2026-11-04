@@ -786,7 +786,8 @@ describe('useTimelinePersistence — interaction gating', () => {
       const mutationDispatch = diagnostics.findIndex(row => row.phase === 'mutation-dispatch');
       expect(localCaptureSettled).toBeGreaterThanOrEqual(0);
       expect(mutationDispatch).toBeGreaterThan(localCaptureSettled);
-      expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+      expect(handoff.flush).toHaveBeenCalledTimes(1);
+      expect(harness.result.current.saveStatus).toBe('saved');
     } finally {
       harness.unmount();
       window.removeEventListener('timeline:save-diagnostic', observe);
@@ -802,16 +803,28 @@ describe('useTimelinePersistence — interaction gating', () => {
     const observe = (event: Event) => diagnostics.push((event as CustomEvent).detail);
     window.addEventListener('timeline:save-diagnostic', observe);
     const harness = setup();
+    const originalSetTimeout = globalThis.setTimeout;
+    const queuedDebounces: Array<() => void> = [];
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
+      if (timeout === SAVE_DEBOUNCE_MS && typeof handler === 'function') {
+        queuedDebounces.push(() => handler(...args));
+      }
+      return originalSetTimeout(handler, timeout, ...args);
+    }) as typeof setTimeout);
     try {
       harness.scheduleSave(makeTimelineData('stale-session'));
+      expect(queuedDebounces).toHaveLength(1);
       harness.replaceSession(harness.provider, 'timeline-replaced');
-      await act(async () => { await vi.advanceTimersByTimeAsync(600); for (let i = 0; i < 10; i++) await Promise.resolve(); });
+      // Session replacement cancels the timer. Invoke its already-queued callback to
+      // exercise doSave's real session-identity guard after cancellation.
+      await act(async () => { queuedDebounces[0](); await Promise.resolve(); });
       expect(diagnostics.some(row => row.phase === 'save-return' && row.returnReason === 'session-invalidated')).toBe(true);
       expect(diagnostics.some(row => row.phase === 'mutation-dispatch')).toBe(false);
       expect(harness.saveTimeline).not.toHaveBeenCalled();
     } finally {
       harness.unmount();
       window.removeEventListener('timeline:save-diagnostic', observe);
+      vi.restoreAllMocks();
       Object.assign(window, { __timelineSaveDiagnosticsEnabled: false });
       vi.useRealTimers();
     }
@@ -842,7 +855,8 @@ describe('useTimelinePersistence — interaction gating', () => {
       act(() => harness.result.current.resumeDeferredRecoverySave());
       await act(async () => { await vi.advanceTimersByTimeAsync(600); for (let i = 0; i < 20; i++) await Promise.resolve(); });
       expect(handoff.capture).toHaveBeenCalledTimes(1);
-      expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+      expect(handoff.flush).toHaveBeenCalledTimes(1);
+      expect(harness.result.current.saveStatus).toBe('saved');
     } finally {
       harness.unmount();
       window.removeEventListener('timeline:save-diagnostic', observe);

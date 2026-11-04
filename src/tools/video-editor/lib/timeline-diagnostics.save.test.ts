@@ -172,4 +172,91 @@ describe('timeline save diagnostic projection', () => {
     }
   });
 
+  it('projects recovery checks through frozen enums and bounded counters without leaking unknown fields', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const dispatch = vi.spyOn(window, 'dispatchEvent').mockReturnValue(true);
+    const privateGetter = vi.fn(() => 'secret draft key');
+    const observation = Object.defineProperties({
+      recoveryCheckOrdinal: 3,
+      recoveryReadState: 'pending',
+      recoverySkipReason: 'none',
+      recoveryFinalizer: 'not-run',
+      recoveryScopeMatches: true,
+      recoveryDataPresent: false,
+      recoveryCancelled: false,
+      recoveryCompleted: false,
+      recoveryFinalizerApplied: false,
+      recoveryGenerationAtCheck: 4,
+      recoveryGenerationCurrent: 4,
+      recoveryEditSeqAtCheck: 8,
+      recoveryEditSeqCurrent: 8,
+      draft: 'private draft contents',
+      recoveryKey: 'private-key',
+      error: new Error('private error text'),
+    }, { arbitraryUnknownField: { get: privateGetter } });
+    emitTimelineSaveDiagnostic('recovery-check-at-schedule', () => observation);
+    const detail = (dispatch.mock.calls[0][0] as CustomEvent).detail;
+    expect(detail).toMatchObject({
+      phase: 'recovery-check-at-schedule',
+      recoveryCheckOrdinal: 3,
+      recoveryReadState: 'pending',
+      recoverySkipReason: 'none',
+      recoveryFinalizer: 'not-run',
+      recoveryScopeMatches: true,
+      recoveryDataPresent: false,
+      recoveryCancelled: false,
+      recoveryCompleted: false,
+      recoveryFinalizerApplied: false,
+      recoveryGenerationAtCheck: 4,
+      recoveryGenerationCurrent: 4,
+      recoveryEditSeqAtCheck: 8,
+      recoveryEditSeqCurrent: 8,
+    });
+    expect(Object.isFrozen(detail)).toBe(true);
+    expect(privateGetter).not.toHaveBeenCalled();
+    expect(JSON.stringify(detail)).not.toMatch(/private draft contents|private-key|private error text|secret draft key/);
+
+    emitTimelineSaveDiagnostic('recovery-check-at-schedule', () => ({
+      recoveryCheckOrdinal: 1_000_000_001,
+      recoveryReadState: 'secret state',
+      recoverySkipReason: 'secret reason',
+      recoveryFinalizer: 'secret finalizer',
+      recoveryGenerationAtCheck: -1,
+      recoveryGenerationCurrent: Infinity,
+      recoveryEditSeqAtCheck: 1.5,
+      recoveryEditSeqCurrent: '8',
+    }));
+    const bounded = (dispatch.mock.calls[1][0] as CustomEvent).detail;
+    expect(bounded).toMatchObject({
+      recoveryCheckOrdinal: 'UNKNOWN', recoveryReadState: 'UNKNOWN', recoverySkipReason: 'UNKNOWN',
+      recoveryFinalizer: 'UNKNOWN', recoveryGenerationAtCheck: 'UNKNOWN',
+      recoveryGenerationCurrent: 'UNKNOWN', recoveryEditSeqAtCheck: 'UNKNOWN', recoveryEditSeqCurrent: 'UNKNOWN',
+    });
+  });
+
+  it('keeps untagged recovery rejections unknown without inspecting properties or prototypes', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const dispatch = vi.spyOn(window, 'dispatchEvent').mockReturnValue(true);
+    const trap = vi.fn(() => { throw new Error('private proxy trap'); });
+    const hostile = new Proxy({}, { get: trap, getPrototypeOf: trap, getOwnPropertyDescriptor: trap });
+    const accessor = Object.defineProperties({}, {
+      name: { get: trap },
+      message: { get: trap },
+    });
+    const errors: Array<[unknown, string]> = [
+      [new DOMException('private DOM text'), 'unknown'],
+      [new Error('private Error text'), 'unknown'],
+      [{ name: 'private arbitrary name', message: 'private arbitrary message' }, 'unknown'],
+      [accessor, 'unknown'],
+      [hostile, 'unknown'],
+    ];
+    for (const [error, errorClass] of errors) {
+      emitTimelineSaveDiagnostic('recovery-read-settled', () => ({ recoveryCheckOrdinal: 7,
+        recoveryReadState: 'rejected', recoverySkipReason: 'none', recoveryFinalizer: 'not-run', error }));
+      const detail = (dispatch.mock.lastCall![0] as CustomEvent).detail;
+      expect(detail).toMatchObject({ recoveryCheckOrdinal: 7, recoveryReadState: 'rejected', recoveryReadErrorClass: errorClass });
+      expect(JSON.stringify(detail)).not.toMatch(/private DOM text|private Error text|private arbitrary|private proxy trap/);
+    }
+    expect(trap).not.toHaveBeenCalled();
+  });
 });

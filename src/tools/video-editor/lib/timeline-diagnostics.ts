@@ -18,7 +18,9 @@ const SAVE_DIAGNOSTIC_PHASES = ['schedule', 'capture-called', 'capture-resolved'
   'basis-operation', 'basis-dependencies-committed', 'owner-init', 'owner-closed', 'owner-retired', 'lifecycle-cancel',
   'basis-read', 'basis-ready', 'basis-unavailable', 'basis-error',
   'identity-read', 'session-created', 'session-recovered', 'session-changed',
-  'adoption-start', 'adoption-complete', 'adopted-read', 'handoff-ready', 'owner-error'] as const;
+  'adoption-start', 'adoption-complete', 'adopted-read', 'handoff-ready', 'owner-error',
+  'recovery-check-start', 'recovery-check-skipped', 'recovery-check-at-schedule',
+  'recovery-read-settled', 'recovery-check-error', 'recovery-cleanup', 'recovery-finally'] as const;
 type SaveDiagnosticPhase = typeof SAVE_DIAGNOSTIC_PHASES[number];
 
 const SAVE_REJECTION_CODES = [
@@ -53,7 +55,23 @@ export function markTimelineSaveRejection<T extends Error>(error: T, code: Timel
   return error;
 }
 
-interface SaveDiagnosticObservation {
+export interface TimelineRecoveryCheckObservation {
+  recoveryCheckOrdinal?: unknown;
+  recoveryReadState?: unknown;
+  recoverySkipReason?: unknown;
+  recoveryFinalizer?: unknown;
+  recoveryScopeMatches?: unknown;
+  recoveryDataPresent?: unknown;
+  recoveryCancelled?: unknown;
+  recoveryCompleted?: unknown;
+  recoveryFinalizerApplied?: unknown;
+  recoveryGenerationAtCheck?: unknown;
+  recoveryGenerationCurrent?: unknown;
+  recoveryEditSeqAtCheck?: unknown;
+  recoveryEditSeqCurrent?: unknown;
+}
+
+interface SaveDiagnosticObservation extends TimelineRecoveryCheckObservation {
   disposition?: unknown;
   returnReason?: unknown;
   captureCode?: unknown;
@@ -186,6 +204,24 @@ export function emitTimelineSaveDiagnostic(boundary: SaveDiagnosticPhase | (() =
       captureStage: choice(observed.captureStage, ['capture-call', 'capture-set', 'local-capture']),
       persistenceEnabled: bool(observed.persistenceEnabled), recoveryPending: bool(observed.recoveryPending),
       recoveryActive: bool(observed.recoveryActive), interactionActive: bool(observed.interactionActive),
+      ...(observed.recoveryCheckOrdinal === undefined ? {} : {
+        recoveryCheckOrdinal: counter(observed.recoveryCheckOrdinal),
+        recoveryReadState: choice(observed.recoveryReadState, ['not-started', 'pending', 'empty', 'record', 'rejected']),
+        recoverySkipReason: choice(observed.recoverySkipReason, ['none', 'data-unavailable', 'scope-already-checked',
+          'data-ref-empty', 'cancelled', 'scope-mismatch', 'generation-mismatch', 'edit-raced']),
+        recoveryFinalizer: choice(observed.recoveryFinalizer, ['not-run', 'applied', 'skipped-cancelled', 'skipped-generation']),
+        recoveryScopeMatches: bool(observed.recoveryScopeMatches), recoveryDataPresent: bool(observed.recoveryDataPresent),
+        recoveryCancelled: bool(observed.recoveryCancelled), recoveryCompleted: bool(observed.recoveryCompleted),
+        recoveryFinalizerApplied: bool(observed.recoveryFinalizerApplied),
+        recoveryGenerationAtCheck: counter(observed.recoveryGenerationAtCheck),
+        recoveryGenerationCurrent: counter(observed.recoveryGenerationCurrent),
+        recoveryEditSeqAtCheck: counter(observed.recoveryEditSeqAtCheck),
+        recoveryEditSeqCurrent: counter(observed.recoveryEditSeqCurrent),
+        // Draft-read errors are untagged foreign values. Even instanceof can
+        // execute a proxy's prototype trap; retain the safe unknown class.
+        recoveryReadErrorClass: phase === 'recovery-read-settled' && observed.recoveryReadState === 'rejected'
+          ? 'unknown' : UNKNOWN,
+      }),
       conflictExhausted: bool(observed.conflictExhausted), schemaIncompatible: bool(observed.schemaIncompatible),
       sequenceNumber: counter(observed.sequenceNumber),
       projectId: identifier(own(mountedHead, 'projectId') ?? own(own(observed.source, 'head'), 'projectId')),

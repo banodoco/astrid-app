@@ -155,6 +155,70 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
   });
 
+  it('defers a normal save until the initial recovery read settles', async () => {
+    let finishRecoveryRead!: (value: Awaited<ReturnType<typeof loadTimelineDraft>>) => void;
+    const pendingRecoveryRead = new Promise<Awaited<ReturnType<typeof loadTimelineDraft>>>((resolve) => {
+      finishRecoveryRead = resolve;
+    });
+    const indexedDbModule = await import('@/tools/video-editor/data/timelineDraftIndexedDb.ts');
+    const recoveryRead = vi.spyOn(indexedDbModule, 'loadTimelineDraft').mockImplementation(() => pendingRecoveryRead);
+    const records: Array<Record<string, unknown>> = [];
+    const listener = (event: Event) => records.push((event as CustomEvent).detail);
+    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    window.addEventListener('timeline:save-diagnostic', listener);
+
+    let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
+    try {
+      const editor = await mountRecoveryEditor({ seedRecovery: false });
+      hook = editor.hook;
+      await waitFor(() => expect(recoveryRead).toHaveBeenCalledTimes(1));
+      vi.useFakeTimers();
+      const edited = await buildTimelineData(
+        timelineConfig('edited-while-recovery-loads'),
+        registry,
+        editor.provider.resolveAssetUrl,
+        12,
+      );
+      act(() => { hook!.result.current.commitData(edited, { save: true }); });
+      await advance(600);
+
+      const scheduled = records.find((record) => record.phase === 'schedule-disposition' && record.disposition === 'recovery-active');
+      expect(scheduled).toMatchObject({ recoveryPending: false, recoveryActive: true });
+      expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
+      const checkAtSchedule = records.find((record) => record.phase === 'recovery-check-at-schedule');
+      expect(checkAtSchedule).toMatchObject({
+        recoveryReadState: 'pending',
+        recoveryFinalizer: 'not-run',
+      });
+      expect(checkAtSchedule?.recoveryCheckOrdinal).toEqual(expect.any(Number));
+      expect(checkAtSchedule?.recoveryCheckOrdinal).toBe(records.find((record) => record.phase === 'recovery-check-start')?.recoveryCheckOrdinal);
+      expect(records.some((record) => record.phase === 'recovery-finally'
+        && record.recoveryCheckOrdinal === checkAtSchedule?.recoveryCheckOrdinal)).toBe(false);
+
+      await act(async () => { finishRecoveryRead(null); await pendingRecoveryRead; });
+      expect(records.find((record) => record.phase === 'recovery-read-settled')).toMatchObject({
+        recoveryCheckOrdinal: checkAtSchedule?.recoveryCheckOrdinal,
+        recoveryReadState: 'empty',
+      });
+      expect(records.find((record) => record.phase === 'recovery-finally')).toMatchObject({
+        recoveryCheckOrdinal: checkAtSchedule?.recoveryCheckOrdinal,
+        recoveryFinalizer: 'applied',
+      });
+
+      await advance(600);
+      expect(editor.provider.saveTimeline).toHaveBeenCalledTimes(1);
+      expect(editor.provider.saveTimeline.mock.calls[0]?.[1].output.file).toBe('edited-while-recovery-loads.mp4');
+    } finally {
+      finishRecoveryRead(null);
+      hook?.unmount();
+      recoveryRead.mockRestore();
+      window.removeEventListener('timeline:save-diagnostic', listener);
+      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
+      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
+    }
+  });
+
   it('reloads the latest guarded timeline draft through the next editor recovery offer', async () => {
     const latest = timelineConfig('latest-before-runtime-restart');
     const { hook } = await mountRecoveryEditor({ seedRecovery: false, initialConfig: latest });

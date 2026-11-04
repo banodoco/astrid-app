@@ -484,6 +484,20 @@ test.describe('core journey', () => {
     await expect(draftField).toHaveValue('Draft from the first writer');
     // The stale save was refused, not applied: the second writer's revision is still the head.
     expect(await currentHead(harness)).toBe(acceptedHead(second.body).revisionId);
+    await conflict.getByRole('button', { name: 'Keep my changes' }).click();
+    await expect(conflict).toBeHidden({ timeout: 20_000 });
+    await expect(firstTrackName(page)).toHaveValue('Second writer');
+    await expect(page.getByRole('button', { name: 'Open kept changes 1' })).toBeVisible();
+    expect(await currentHead(harness)).toBe(acceptedHead(second.body).revisionId);
+    await page.reload();
+    await expectConnected(page);
+    await openSeededTimeline(page, harness);
+    await expect(firstTrackName(page)).toHaveValue('Second writer');
+    await expect(page.getByText(/You have unsaved changes from/)).toHaveCount(0);
+    await page.getByRole('button', { name: 'Open kept changes 1' }).click();
+    await expect(conflict).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('Draft from the first writer');
+    expect(await currentHead(harness)).toBe(acceptedHead(second.body).revisionId);
   });
 
   test('through the hosted origin: open, read the timeline, save with the expected head, reload byte-identical', async ({ page, harness }) => {

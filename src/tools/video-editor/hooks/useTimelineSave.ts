@@ -801,11 +801,11 @@ export function useTimelineSave(
     try {
       if (!localOwner.pendingDisposition) {
         const outboxOwner = session!.getState().ownerId;
-        const legacySnapshot = choice === 'discard' ? await loadTimelineDraft(recoveryKey) : null;
-        if (choice === 'discard' && outboxOwner && legacySnapshot?.outboxOwnerId === outboxOwner) {
-          // Clear only the slot proven to be this outbox's draft. Do this
-          // before discarding the outbox: a crash can then leave the owner
-          // recoverable, but cannot resurrect an already discarded edit.
+        const legacySnapshot = await loadTimelineDraft(recoveryKey);
+        if (outboxOwner && legacySnapshot?.outboxOwnerId === outboxOwner) {
+          // Both choices dispose of this exact outbox-owned duplicate. Clear it
+          // first: a failed disposition or crash still leaves the outbox intact,
+          // while unrelated or unproven legacy drafts remain untouched.
           if (await clearTimelineDraftIfSnapshotMatches(recoveryKey, legacySnapshot)) {
             setRecoveryDraft(null);
             recoveryPendingRef.current = false;

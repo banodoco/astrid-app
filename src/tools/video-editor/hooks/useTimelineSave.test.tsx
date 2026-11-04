@@ -1467,7 +1467,7 @@ describe('useTimelineSave — recovered draft durability', () => {
     }
   });
 
-  it.each(['accepted', 'merged', 'conflict', 'invalid', 'restart', 'restart after cleanup', 'dependent', 'merged dependent', 'recovered dependent conflict', 'recovered dependent discard', 'recovered dependent discard linked', 'recovered dependent discard abort', 'recovered dependent dirty', 'recovered dependent retry', 'recovered dependent loadfailure', 'late reply', 'strict'] as const)(
+  it.each(['accepted', 'merged', 'conflict', 'invalid', 'restart', 'restart after cleanup', 'dependent', 'merged dependent', 'recovered dependent conflict', 'recovered dependent discard', 'recovered dependent discard linked', 'recovered dependent keep linked', 'recovered dependent keep loadfailure', 'recovered dependent keep abort', 'recovered dependent discard abort', 'recovered dependent dirty', 'recovered dependent retry', 'recovered dependent loadfailure', 'late reply', 'strict'] as const)(
     'the production caller uses it: mounted local document %s', async (outcome) => {
       const recoveringConflict = outcome.startsWith('recovered dependent');
       const dependent = outcome === 'dependent' || outcome === 'merged dependent' || recoveringConflict;
@@ -1571,7 +1571,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           harness.hook.unmount();
           await vi.waitFor(() => expect(locks.size).toBe(0));
           if (outcome === 'recovered dependent conflict' || outcome === 'recovered dependent dirty') await clearTimelineDraft('timeline-1');
-          else if (outcome !== 'recovered dependent discard linked' && outcome !== 'recovered dependent discard abort') await saveTimelineDraft('timeline-1', { config: { ...config, output: { ...config.output, file: 'unrelated.mp4' } }, registry: data.registry }, 77,
+          else if (outcome !== 'recovered dependent discard linked' && outcome !== 'recovered dependent keep linked' && outcome !== 'recovered dependent keep loadfailure' && outcome !== 'recovered dependent keep abort' && outcome !== 'recovered dependent discard abort') await saveTimelineDraft('timeline-1', { config: { ...config, output: { ...config.output, file: 'unrelated.mp4' } }, registry: data.registry }, 77,
             { ownerId: 'independent-owner', baseHeadProjectId: 'project-commit', baseHeadTimelineId: 'timeline-1', baseHeadRevisionId: 'independent-r' });
           const remoteHead = { ...head, headRevisionId: 'remote-r', headPublicationId: 'remote-p' };
           const remoteConfig = { ...config, output: { ...config.output, file: 'remote.mp4' } };
@@ -1595,12 +1595,12 @@ describe('useTimelineSave — recovered draft durability', () => {
             expect(send).toHaveBeenCalledTimes(2);
             expect((await createCommitOutbox().list(scope))[0].pending?.request).toEqual(originalRequest);
             const legacyBefore = await loadTimelineDraft('timeline-1');
-            if (outcome === 'recovered dependent discard linked' || outcome === 'recovered dependent discard abort') expect(legacyBefore?.outboxOwnerId).toBe(stored.ownerId);
+            if (outcome === 'recovered dependent discard linked' || outcome === 'recovered dependent keep linked' || outcome === 'recovered dependent keep loadfailure' || outcome === 'recovered dependent keep abort' || outcome === 'recovered dependent discard abort') expect(legacyBefore?.outboxOwnerId).toBe(stored.ownerId);
             else if (outcome !== 'recovered dependent conflict' && outcome !== 'recovered dependent dirty') {
               expect(legacyBefore?.ownerId).toBe('independent-owner');
               expect(legacyBefore?.draft.config.output.file).toBe('unrelated.mp4');
             }
-            if (outcome === 'recovered dependent discard abort') {
+            if (outcome === 'recovered dependent discard abort' || outcome === 'recovered dependent keep abort') {
               const factory = indexedDB as any;
               const originalOpen = factory.open.bind(factory);
               let injected = false;
@@ -1634,7 +1634,8 @@ describe('useTimelineSave — recovered draft durability', () => {
                 return request;
               });
               try {
-                await act(async () => { await expect(recovered.hook.result.current.reloadFromServer()).rejects.toThrow(/aborted/i); });
+                await act(async () => { await expect(outcome === 'recovered dependent keep abort'
+                  ? recovered.hook.result.current.retrySaveAfterConflict() : recovered.hook.result.current.reloadFromServer()).rejects.toThrow(/aborted/i); });
               } finally { spy.mockRestore(); }
               expect(injected).toBe(true);
               const unchanged = (await createCommitOutbox().list(scope)).find((row) => row.ownerId === stored.ownerId)!;
@@ -1645,11 +1646,17 @@ describe('useTimelineSave — recovered draft durability', () => {
               expect(recovered.hook.result.current.dataRef.current?.config.output.file).toBe('dependent.mp4');
               expect(recovered.hook.result.current.isConflictExhausted).toBe(true);
               expect(send).toHaveBeenCalledTimes(2);
-              await act(async () => { await recovered.hook.result.current.reloadFromServer(); });
+              await act(async () => { await (outcome === 'recovered dependent keep abort'
+                ? recovered.hook.result.current.retrySaveAfterConflict() : recovered.hook.result.current.reloadFromServer()); });
               await vi.waitFor(() => expect(recovered.hook.result.current.localSaveState?.status).toBe('saved'));
               const afterRetry = (await createCommitOutbox().list(scope)).find((row) => row.ownerId === stored.ownerId)!;
-              expect(afterRetry.intents).toEqual([]);
-              expect(afterRetry.pending).toBeUndefined();
+              if (outcome === 'recovered dependent keep abort') {
+                expect(afterRetry.disposition).toBe('kept-copy');
+                expect(afterRetry.pending?.request).toEqual(originalRequest);
+              } else {
+                expect(afterRetry.intents).toEqual([]);
+                expect(afterRetry.pending).toBeUndefined();
+              }
               expect(await loadTimelineDraft('timeline-1')).toBeNull();
               expect(send).toHaveBeenCalledTimes(2);
               return;
@@ -1666,14 +1673,14 @@ describe('useTimelineSave — recovered draft durability', () => {
               expect(send).toHaveBeenCalledTimes(2);
               return;
             }
-            if (outcome === 'recovered dependent loadfailure') {
+            if (outcome === 'recovered dependent loadfailure' || outcome === 'recovered dependent keep loadfailure') {
               loadRemoteBasis.mockRejectedValueOnce(new Error('Head unavailable'));
               await act(async () => { await expect(recovered.hook.result.current.retrySaveAfterConflict()).rejects.toThrow('Head unavailable'); });
               const unchanged = (await createCommitOutbox().list(scope)).find((row) => row.ownerId === stored.ownerId)!;
               expect(unchanged.disposition).toBeUndefined();
               expect(unchanged.pending?.request).toEqual(originalRequest);
               expect(recovered.hook.result.current.dataRef.current?.config.output.file).toBe('dependent.mp4');
-              expect(await loadTimelineDraft('timeline-1')).toEqual(legacyBefore);
+              expect(await loadTimelineDraft('timeline-1')).toEqual(outcome === 'recovered dependent keep loadfailure' ? null : legacyBefore);
             }
             if (outcome === 'recovered dependent retry') {
               await act(async () => { await expect(recovered.hook.result.current.retrySaveAfterConflict()).rejects.toThrow('Reload unavailable'); });
@@ -1708,8 +1715,8 @@ describe('useTimelineSave — recovered draft durability', () => {
             expect(parked.pending?.request).toEqual(originalRequest);
             expect((parked.intents[0].payload as any).after.parent_revision.payload.config.output.file).toBe('dependent.mp4');
             expect((parked.intents[0].payload as any).displayBasis.head.revisionId).toBe('r0');
-            expect(await loadTimelineDraft('timeline-1')).toEqual(legacyBefore);
-            if (legacyBefore) expect(recovered.hook.result.current.recoveryDraft).not.toBeNull();
+            expect(await loadTimelineDraft('timeline-1')).toEqual((outcome === 'recovered dependent keep linked' || outcome === 'recovered dependent keep loadfailure') ? null : legacyBefore);
+            if (legacyBefore && outcome !== 'recovered dependent keep linked' && outcome !== 'recovered dependent keep loadfailure') expect(recovered.hook.result.current.recoveryDraft).not.toBeNull();
             expect(recovered.hook.result.current.keptCopies).toContain(stored.ownerId);
             if (outcome === 'recovered dependent dirty') {
               const dirty = await buildTimelineData({ ...remoteConfig, output: { ...remoteConfig.output, file: 'new-unsaved.mp4' } }, data.registry, undefined, 1, undefined, remoteHead);
@@ -1717,7 +1724,7 @@ describe('useTimelineSave — recovered draft durability', () => {
               await expect(recovered.hook.result.current.openKeptCopy(stored.ownerId)).rejects.toThrow('Finish current edits');
               expect(recovered.hook.result.current.dataRef.current?.config.output.file).toBe('new-unsaved.mp4');
               expect((await createCommitOutbox().list(scope)).find((row) => row.ownerId === stored.ownerId)?.disposition).toBe('kept-copy');
-            } else if (!legacyBefore) {
+            } else if (!legacyBefore || outcome === 'recovered dependent keep linked' || outcome === 'recovered dependent keep loadfailure') {
               await act(async () => { await recovered.hook.result.current.openKeptCopy(stored.ownerId); });
               await vi.waitFor(() => expect(recovered.hook.result.current.localSaveState?.status).toBe('conflict'));
               expect(recovered.hook.result.current.dataRef.current?.config.output.file).toBe('dependent.mp4');

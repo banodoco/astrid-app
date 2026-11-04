@@ -31,7 +31,8 @@ import { loadTimelineDraft, saveTimelineDraft } from '../data/timelineDraftIndex
 import type { AssetRegistry } from '../types/index.ts';
 import type { VideoEditorRuntimeContextValue } from '../contexts/VideoEditorRuntimeContext';
 import type { TimelineEditability } from '../lib/timeline-editability';
-import { createCommitOutbox } from '../commands/commitOutbox.ts';
+import { createCommitOutbox, type OutboxRecord } from '../commands/commitOutbox.ts';
+import { editorSelectTimelineClip, getTimelineItemSelection } from '@/shared/state/selectionStore.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import { compileFunction } from 'node:vm';
 import ts from 'typescript';
@@ -1497,6 +1498,7 @@ describe('useTimelineSave — recovered draft durability', () => {
         transition: { type: 'crossfade', duration: 0.25 } }];
       const configB = structuredClone(configA);
       configB.tracks[0].label = 'Agent B';
+      configB.clips[0].transition!.duration += 0.125;
       const configC = structuredClone(configA);
       configC.tracks[0].label = 'App A';
       delete configC.clips[0].transition;
@@ -1557,6 +1559,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           } });
       };
       let harness: Awaited<ReturnType<typeof mount>> | undefined;
+      let keptOwner: OutboxRecord | undefined;
       try {
         if (recovery === 'seeded') {
           // Real recovery slots contain the mounted builder's persisted config,
@@ -1584,16 +1587,21 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(posts[0]).toMatchObject({ base_revision_id: 'rA', base_publication_id: 'pA' });
           await act(async () => { await harness!.hook.result.current.retrySaveAfterConflict(); });
           expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('rB');
+          expect(harness.hook.result.current.dataRef.current?.config.clips[0].transition).toEqual(configB.clips[0].transition);
           const identity = await runtime.getRecoverableIdentity();
           const [outbox] = await createCommitOutbox().list({ ...identity, projectId, timelineId });
           expect(outbox.pending?.outcome?.kind).toBe('rejected');
           expect(outbox.intents).toHaveLength(1);
+          keptOwner = structuredClone(outbox);
           harness.hook.unmount();
           await vi.waitFor(() => expect(locks.size).toBe(0));
           harness = await mount();
           await vi.waitFor(() => expect(
             harness!.hook.result.current.localDocumentSave?.remoteHistoryAvailable()
-              || harness!.hook.result.current.localSaveState?.status === 'error',
+              || harness!.hook.result.current.localSaveState?.status === 'error'
+              // A claimed rejected owner is ready but deliberately has no
+              // settled remote history while its original draft is unresolved.
+              || harness!.hook.result.current.localSaveState?.status === 'conflict',
           ).toBe(true));
           await settleInitialRecoveryCheck();
         }
@@ -1601,6 +1609,33 @@ describe('useTimelineSave — recovered draft durability', () => {
         const retained = await loadTimelineDraft(timelineId);
         expect(retained).toMatchObject({ baseHeadRevisionId: 'rA', baseHeadPublicationId: 'pA',
           draft: { config: { tracks: expect.arrayContaining([expect.objectContaining({ label: 'App A' })]) } } });
+        expect(current).toBe(imageB);
+        const beforeSelectionPosts = posts.length;
+        // Re-establish the actual editor selection after recovery/remount. The
+        // selected editor model must still be canonical B while the kept C draft
+        // remains available for Retry below.
+        act(() => editorSelectTimelineClip('parent-transition'));
+        expect(getTimelineItemSelection().clipIds).toEqual(['parent-transition']);
+        expect(harness.hook.result.current.selectedClipIdRef.current).toBe('parent-transition');
+        expect(harness.hook.result.current.dataRef.current?.config.clips[0].transition)
+          .toEqual(configB.clips[0].transition);
+        expect(harness.hook.result.current.dataRef.current?.resolvedConfig?.clips[0].transition)
+          .toEqual(configB.clips[0].transition);
+        expect(harness.hook.result.current.dataRef.current?.head).toEqual(canonical().head);
+        expect(retained?.draft.config.clips[0].transition).toBeUndefined();
+        expect(posts).toHaveLength(beforeSelectionPosts);
+        if (recovery === 'kept and remounted') {
+          expect(harness.hook.result.current.localSaveState?.status).toBe('conflict');
+          expect(harness.hook.result.current.localDocumentSave?.remoteHistoryAvailable()).toBe(false);
+          const identity = await runtime.getRecoverableIdentity();
+          const [claimed] = await createCommitOutbox().list({ ...identity, projectId, timelineId });
+          expect(claimed.ownerId).toBe(keptOwner!.ownerId);
+          expect(claimed.generation).toBeGreaterThan(keptOwner!.generation);
+          expect(claimed.intents).toEqual(keptOwner!.intents);
+          expect(claimed.pending).toEqual(keptOwner!.pending);
+          expect(claimed.accepted).toEqual(keptOwner!.accepted);
+          expect(posts).toHaveLength(1);
+        }
         const postCount = posts.length;
         await act(async () => { await harness!.hook.result.current.retryRecoveredDraft(); });
         await act(async () => { await vi.advanceTimersByTimeAsync(500); });
@@ -1622,6 +1657,7 @@ describe('useTimelineSave — recovered draft durability', () => {
         await act(async () => { await harness!.hook.result.current.reloadFromServer(); });
         expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('rB');
         expect(harness.hook.result.current.dataRef.current?.config.tracks[0].label).toBe('Agent B');
+        expect(harness.hook.result.current.dataRef.current?.config.clips[0].transition).toEqual(configB.clips[0].transition);
         expect(harness.hook.result.current.isConflictExhausted).toBe(false);
         expect(await loadTimelineDraft(timelineId)).toBeNull();
         expect(await loadTimelineDraft('other-timeline')).not.toBeNull();

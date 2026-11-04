@@ -334,6 +334,7 @@ export function useTimelineSave(
         await previousDisposal;
         if (!isCurrent()) throw markTimelineSaveRejection(new Error('Local save session replaced during owner retirement'), 'owner-retirement-invalidated', 'Error');
         let adoptedSource = structuredClone(verified.source);
+        let restoringOwner = false;
         sessionCreation = createLocalSaveSession({
           scope: { ...identity, projectId: verified.initial.canonicalDocument.project_id, timelineId },
           initial: verified.initial, document: toOutboxJson(verified.initial.canonicalDocument),
@@ -363,6 +364,11 @@ export function useTimelineSave(
               ...(bundle === undefined ? {} : { bundle }) };
             return { document: toOutboxJson(retained ? basis.canonicalDocument : document), adopt() {
               if (!isCurrent()) return;
+              // Claiming an old owner restores its durable chain, not the user's
+              // choice to display it. Keep the mounted canonical model until
+              // Retry explicitly applies the recovery slot. Landed canonical
+              // adoptions still run, and live conflicts retain their draft.
+              if (restoringOwner && (draft || retained)) return;
               // The session adopts the canonical conflict basis. Its retained
               // suffix supplies the user's visible recovery draft, without
               // relabelling that draft as authored on the new remote head.
@@ -388,7 +394,11 @@ export function useTimelineSave(
         emitTimelineSaveDiagnostic('session-created', () => ({ owner: localOwner, timelineId,
           sessionPresent: true, current: isCurrent(), generation, basis: verified, mounted: localDataRef.current }));
         const owners = session.getState().recoverableOwners;
-        if (owners.length === 1) { localOwner.recovered = true; await session.recover(owners[0]);
+        if (owners.length === 1) {
+          localOwner.recovered = true;
+          restoringOwner = true;
+          try { await session.recover(owners[0]); }
+          finally { restoringOwner = false; }
           emitTimelineSaveDiagnostic('session-recovered', () => ({ owner: localOwner, timelineId,
             current: isCurrent(), generation, sessionPresent: true }));
         }

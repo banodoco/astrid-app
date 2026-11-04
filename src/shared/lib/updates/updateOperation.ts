@@ -1,4 +1,4 @@
-import { AstridRuntimeClient, INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
+import { AstridRuntimeClient, INSTALLER_UPDATE_REASON_MESSAGES, isInstallerUpdateOutcome, isInstallerUpdateRefusalReason, isInstallerUpdateStatusState, type InstallerUpdateReason, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
@@ -16,14 +16,18 @@ export interface UpdateOperationSnapshot {
 
 export function installerUpdateReasonOf(status: InstallerUpdateStatus | null | undefined): InstallerUpdateReason | null {
   if (!status) return null;
+  if (status.reason !== undefined) {
+    return status.state === 'none' && isInstallerUpdateRefusalReason(status.reason) ? status.reason : null;
+  }
   if (status.state === 'recovery-needed') return 'recovery-needed';
-  if (status.reason === 'busy' || status.reason === 'autostart-off' || status.reason === 'unsupported-service-manager') return status.reason;
   return null;
 }
 
 export function canStartInstallerUpdate(status: InstallerUpdateStatus | null | undefined): boolean {
-  const refusal = installerUpdateReasonOf(status);
-  return Boolean(status && (status.state === 'recovery-needed' || (status.available && !refusal)));
+  if (!status || status.reason !== undefined || !isInstallerUpdateStatusState(status.state)) return false;
+  if (status.state === 'terminal') return status.available && isInstallerUpdateOutcome(status.outcome);
+  if (status.state === 'recovery-needed') return true;
+  return status.available;
 }
 
 /** Translate the Runtime's transaction vocabulary into a status a person can act on. */
@@ -128,9 +132,16 @@ export class UpdateOperation {
     this.operationId = null;
     this.acknowledgementBaseline = this.snapshot.status?.operation_id;
     try {
-      const accepted = await this.client.startInstallerUpdate();
-      this.operationId = accepted.operation_id;
-      this.publish({ status: { available: true, state: 'active', operation_id: accepted.operation_id, result: accepted.message } });
+      const response = await this.client.startInstallerUpdate();
+      this.operationId = response.operation_id;
+      if (response.accepted === false) {
+        this.publish({
+          status: { available: true, state: 'terminal', operation_id: response.operation_id, outcome: response.state, result: response.message },
+          pending: false, fresh: true, error: null,
+        });
+      } else {
+        this.publish({ status: { available: true, state: 'active', operation_id: response.operation_id, result: response.message } });
+      }
     } catch (cause) {
       // Never retry a POST, even when its acknowledgement never arrived.
       const definiteRefusal = cause instanceof ApiError && cause.status >= 400 && cause.status < 500

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AstridRuntimeClient, type InstallerUpdateHealth, type InstallerUpdateStatus } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import { installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
+import { canStartInstallerUpdate, installerUpdateReasonOf, installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
 
 vi.mock('./updateStatus.ts', () => ({ checkHostedUpdate: vi.fn(async () => null) }));
@@ -51,6 +51,63 @@ function makeOperation(options: {
 }
 
 describe('UpdateOperation', () => {
+  it.each(['accepted', 'launching', 'active'] as const)('projects an admitted %s response as the existing active and pending state', async (state) => {
+    const acceptedJob: InstallerUpdateStatus = { available: true, state: 'active', operation_id: 'f'.repeat(32), result: 'Update accepted.' };
+    const { operation, client } = makeOperation({
+      statuses: [NONE, acceptedJob],
+      start: async () => ({ accepted: true, state, operation_id: acceptedJob.operation_id!, message: acceptedJob.result! }),
+    });
+
+    await operation.refresh();
+    await operation.start(() => true);
+
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+    expect(operation.getSnapshot()).toMatchObject({ status: acceptedJob, pending: true, fresh: true });
+  });
+
+  it.each(['updated', 'rolled_back', 'failed'] as const)('projects a terminal %s response without retrying', async (outcome) => {
+    const terminalJob: InstallerUpdateStatus = {
+      available: true, state: 'terminal', operation_id: 'b'.repeat(32), outcome, result: `${outcome} message`,
+    };
+    const { operation, client } = makeOperation({
+      statuses: [NONE, terminalJob],
+      start: async () => ({ accepted: false, state: outcome, operation_id: terminalJob.operation_id!, message: terminalJob.result! }),
+    });
+
+    await operation.refresh();
+    await operation.start(() => true);
+
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+    expect(operation.getSnapshot()).toMatchObject({ status: terminalJob, pending: false, fresh: true });
+    expect(client.readInstallerUpdateStatus).toHaveBeenCalledTimes(2);
+  });
+
+  it.each([
+    { available: true, state: 'none', reason: 'future-reason' },
+    { available: true, state: 'none', reason: 'busy' },
+    { available: false, state: 'recovery-needed', reason: 'busy' },
+  ])('does not authorize a POST for an unknown or misplaced status reason %#', async (status) => {
+    expect(canStartInstallerUpdate(status as InstallerUpdateStatus)).toBe(false);
+    const { operation, client } = makeOperation({ statuses: [status as InstallerUpdateStatus] });
+
+    await operation.refresh();
+    await operation.start(() => true);
+
+    expect(client.startInstallerUpdate).not.toHaveBeenCalled();
+  });
+
+  it('keeps recovery-needed executable only through the explicit start call', async () => {
+    const recovery: InstallerUpdateStatus = { available: false, state: 'recovery-needed' };
+    expect(installerUpdateReasonOf(recovery)).toBe('recovery-needed');
+    expect(canStartInstallerUpdate(recovery)).toBe(true);
+    const { operation, client } = makeOperation({ statuses: [recovery] });
+
+    await operation.refresh();
+
+    expect(client.startInstallerUpdate).not.toHaveBeenCalled();
+    expect(operation.getSnapshot()).toMatchObject({ status: recovery, fresh: true, pending: false });
+  });
+
   it('keeps authenticated release ordering when an older Runtime has no F1 status route', async () => {
     const releaseStatus = {
       release: 12, app: 'page', servedRelease: 4, servedApp: 'served', behind: false,

@@ -121,7 +121,7 @@ export async function createLocalSaveSession(options: Options) {
       return commands?.some((command) => command.op === 'timeline.inverse') ?? false;
     }) ?? false;
     const at = generation;
-    // Retain the entire rejected chain in the outbox; only the visible preview rolls back.
+    // Retain the entire rejected chain in the outbox while refreshing its canonical basis.
     // A guarded inverse refusal is an authoritative-history conflict even
     // when Runtime reports the guard as a typed refusal/validation response;
     // the user must reload history before another undo can be offered.
@@ -132,7 +132,10 @@ export async function createLocalSaveSession(options: Options) {
       const latest = await options.loadLatest();
       checkBasis(latest);
       if (closed || at !== generation) return true;
-      const retained = conflict && recovering && replaying && record?.intents.length
+      // A live conflicting edit is still the user's visible draft until an
+      // explicit resolution; only internal canonical basis advances here.
+      // History inverses keep their existing authoritative rollback behavior.
+      const retained = conflict && record?.intents.length && (!inverse || (recovering && replaying))
         ? { basis: clone(saveOf(record.intents[0].payload).displayBasis),
           document: clone(saveOf(record.intents[record.intents.length - 1].payload).after) } : undefined;
       const prepared = await options.prepareDisplay(clone(latest), undefined,

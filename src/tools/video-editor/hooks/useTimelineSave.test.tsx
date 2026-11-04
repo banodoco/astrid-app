@@ -544,7 +544,8 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(stored.intents[0].payload).toMatchObject({ after: { parent_revision: { payload: { config: { clips: mode === 'video'
             ? [expect.any(Object), expect.objectContaining({ hold: .5, at: 2 }), expect.any(Object), expect.any(Object)]
             : [{ hold: 1, at: 1.2667 }] } } } } });
-          expect(harness.hook.result.current.dataRef.current!.config.clips[mode === 'video' ? 1 : 0].at).toBe(canonicalAt);
+          expect(harness.hook.result.current.dataRef.current!.config.clips[mode === 'video' ? 1 : 0].at).toBe(mode === 'video' ? 2 : 1.2667);
+          expect(harness.hook.result.current.dataRef.current!.head).toEqual(head);
           expect(harness.hook.result.current.localSaveState?.error).toMatchObject({ message: expect.stringContaining('Media track changed') });
           return;
         }
@@ -559,7 +560,9 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(stored.intents).toHaveLength(1);
           expect(stored.intents[0].payload).toMatchObject({ after: { parent_revision: { payload: { config: { clips: mode === 'video'
             ? [expect.any(Object), expect.any(Object), expect.any(Object), expect.any(Object)] : [expect.any(Object)] } } } } });
-          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual(data.config.clips);
+          const retained = stored.intents[0].payload as unknown as { after: { parent_revision: { payload: { config: { clips: unknown[] } } } } };
+          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual(retained.after.parent_revision.payload.config.clips);
+          expect(harness.hook.result.current.dataRef.current!.head).toEqual(head);
           expect(harness.hook.result.current.localSaveState?.error).toMatchObject({ message: expect.stringContaining('Media track changed') });
           return;
         }
@@ -782,8 +785,15 @@ describe('useTimelineSave — recovered draft durability', () => {
           await act(async () => { finishSend(); });
           await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status)
             .toBe(boundary === 'before poll adoption' ? 'conflict' : 'saved'));
-          expect(harness.hook.result.current.dataRef.current?.config.clips.find((clip) => clip.id === rightId))
-            .toEqual({ ...right, from: boundary === 'before poll adoption' ? 0 : 3 });
+          if (boundary === 'before poll adoption') {
+            const retained = intent.payload as unknown as { after: { parent_revision: { payload: { config: { clips: Array<{ id: string }> } } } } };
+            expect(harness.hook.result.current.dataRef.current?.config.clips.find((clip) => clip.id === rightId))
+              .toEqual(retained.after.parent_revision.payload.config.clips.find((clip) => clip.id === rightId));
+            expect(harness.hook.result.current.dataRef.current?.head).toMatchObject({ headRevisionId: 'r1', headPublicationId: 'p1' });
+          } else {
+            expect(harness.hook.result.current.dataRef.current?.config.clips.find((clip) => clip.id === rightId))
+              .toEqual({ ...right, from: 3 });
+          }
         }
         expect(harness.saveTimeline).not.toHaveBeenCalled();
       } finally {
@@ -1465,8 +1475,9 @@ describe('useTimelineSave — recovered draft durability', () => {
     }
   });
 
-  it.each(['accepted', 'merged', 'conflict', 'invalid', 'restart', 'restart after cleanup', 'dependent', 'merged dependent', 'late reply', 'strict'] as const)(
+  it.each(['accepted', 'merged', 'conflict', 'conflict keep', 'conflict latest', 'invalid', 'restart', 'restart after cleanup', 'dependent', 'merged dependent', 'late reply', 'strict'] as const)(
     'the production caller uses it: mounted local document %s', async (outcome) => {
+      const conflict = outcome === 'conflict' || outcome === 'conflict keep' || outcome === 'conflict latest';
       const dependent = outcome === 'dependent' || outcome === 'merged dependent';
       const restart = outcome === 'restart' || outcome === 'restart after cleanup';
       const locks = new Set<string>();
@@ -1502,11 +1513,21 @@ describe('useTimelineSave — recovered draft durability', () => {
       if (dependent || outcome === 'late reply') {
         send.mockImplementationOnce(() => new Promise((resolve) => { acknowledge = () => resolve(accepted); }));
       }
-      if (outcome === 'conflict' || outcome === 'invalid') send.mockRejectedValueOnce(new ApiError(
-        outcome === 'conflict' ? 409 : 422, outcome, 'Retain original intent', '', { status: outcome, path: ['output'], hint: 'Read latest' }));
+      const remoteConfig = { ...config, output: { ...config.output, file: 'remote-winner.mp4' } };
+      const remoteHead = { ...head, headRevisionId: 'remote-r', headPublicationId: 'remote-p' };
+      const remoteDocument = structuredClone(document);
+      remoteDocument.parent_revision.revision_id = 'remote-r';
+      remoteDocument.parent_revision.payload.config = JSON.parse(JSON.stringify(remoteConfig));
+      const loadBasis = vi.fn(async () => initial);
+      if (conflict || outcome === 'invalid') send.mockImplementationOnce(async () => {
+        if (conflict) loadBasis.mockResolvedValue({ head: { revisionId: 'remote-r', publicationId: 'remote-p' }, canonicalDocument: remoteDocument });
+        throw new ApiError(conflict ? 409 : 422, conflict ? 'conflict' : outcome, 'Retain original intent', '',
+          { status: conflict ? 'conflict' : outcome, path: ['output'], hint: 'Read latest' });
+      });
       if (restart) send.mockRejectedValueOnce(new Error('Lost acknowledgement'));
-      const original = { data, loadBasis: vi.fn(async () => initial), strict: outcome === 'strict', capabilities: {
+      const original = { data, loadBasis, strict: outcome === 'strict', capabilities: {
         commitTimeline: send, getRecoverableIdentity: vi.fn(async () => ({ actorId: 'actor', realmId: 'realm' })),
+        loadCanonicalTimeline: vi.fn(async () => ({ config: remoteConfig, configVersion: 2, head: remoteHead })),
       } };
       const harness = setup(async () => { throw new Error('Legacy save must not be called'); }, undefined, original);
       try {
@@ -1546,7 +1567,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           await act(async () => { acknowledge(); await Promise.resolve(); });
         }
         const flushing = act(async () => {
-          if (outcome === 'conflict' || outcome === 'invalid' || restart) {
+          if (conflict || outcome === 'invalid' || restart) {
             await expect(harness.hook.result.current.flushPendingSave()).rejects.toThrow();
           } else await harness.hook.result.current.flushPendingSave();
         });
@@ -1559,10 +1580,34 @@ describe('useTimelineSave — recovered draft durability', () => {
           commands: [{ op: 'doc.patch', args: { changes: [{ op: 'set', ref: 'parent', path: ['config', 'output', 'file'],
             before: { state: 'present', value: config.output.file }, value: 'authored.mp4' }] } }],
           steps: [{ command_ordinals: [0], intent: 'Save local editor changes' }] });
-        if (outcome === 'conflict' || outcome === 'invalid') {
+        if (conflict || outcome === 'invalid') {
           expect(stored.intents).toHaveLength(1);
-          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(config.output.file);
-          expect(harness.hook.result.current.localSaveState?.status).toBe(outcome === 'conflict' ? 'conflict' : 'error');
+          // A live 409 must not replace the user's visible draft with the
+          // remote canonical snapshot before Keep / Use latest is chosen.
+          expect(harness.hook.result.current.dataRef.current?.config.output.file)
+            .toBe(conflict ? edited.config.output.file : config.output.file);
+          if (conflict) {
+            expect(harness.hook.result.current.dataRef.current?.head).toEqual(head);
+            expect(send).toHaveBeenCalledTimes(1);
+            const draft = await loadTimelineDraft('timeline-1');
+            expect(draft?.draft.config.output.file).toBe(edited.config.output.file);
+            expect(harness.hook.result.current.localSaveState?.status).toBe('conflict');
+            if (outcome === 'conflict keep' || outcome === 'conflict latest') {
+              if (outcome === 'conflict keep') {
+                await act(async () => { await harness.hook.result.current.retrySaveAfterConflict(); });
+                expect((await loadTimelineDraft('timeline-1'))?.draft.config.output.file).toBe(edited.config.output.file);
+              } else {
+                await act(async () => { await harness.hook.result.current.reloadFromServer(); });
+                expect(await loadTimelineDraft('timeline-1')).toBeNull();
+              }
+              expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(remoteConfig.output.file);
+              expect(harness.hook.result.current.dataRef.current?.head).toEqual(remoteHead);
+              expect(send).toHaveBeenCalledTimes(1);
+            }
+          }
+          if (outcome !== 'conflict keep' && outcome !== 'conflict latest') {
+            expect(harness.hook.result.current.localSaveState?.status).toBe(conflict ? 'conflict' : 'error');
+          }
         } else if (restart) {
           const exact = structuredClone(send.mock.calls[0]);
           const pending = structuredClone(stored.pending?.request);

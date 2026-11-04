@@ -64,9 +64,10 @@ function environment() {
   const states: LocalSaveState[] = [];
   let visible: OutboxJson = structuredClone(original);
   const adopted: OutboxJson[] = [];
-  const prepareDisplay = vi.fn<Parameters<typeof createLocalSaveSession>[0]['prepareDisplay']>(async (basis, draft) => {
+  const prepareDisplay = vi.fn<Parameters<typeof createLocalSaveSession>[0]['prepareDisplay']>(async (basis, draft, adoption) => {
     const document = structuredClone(draft ?? basis.canonicalDocument.parent_revision.payload) as OutboxJson;
-    return { document, adopt() { visible = document; adopted.push(document); } };
+    const display = structuredClone(adoption?.retainedDraft?.document ?? document);
+    return { document, adopt() { visible = display; adopted.push(display); } };
   });
   const mount = () => createLocalSaveSession({ scope, initial, document: original, outboxes,
     send, loadLatest, prepareDisplay, changed: (state) => states.push(state) });
@@ -306,7 +307,7 @@ describe('local editor saves through the durable outbox', () => {
     await session.dispose();
   });
 
-  it('rolls back a failed predecessor visibly, retaining the complete split → trim chain and error details across restart', async () => {
+  it('retains a live conflicting predecessor draft and its complete split → trim chain across restart', async () => {
     const env = environment();
     const session = await env.mount();
     await env.append(session, splitSave());
@@ -318,8 +319,9 @@ describe('local editor saves through the durable outbox', () => {
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(env.send).toHaveBeenCalledTimes(1);
     expect(session.getState()).toMatchObject({ status: 'conflict', error: { code: 'dependency_changed', details } });
-    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: 'conflict' });
-    expect(env.visible()).toEqual({ ...original, agent: true });
+    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: 'conflict',
+      retainedDraft: { basis: env.initial, document: trimmed } });
+    expect(env.visible()).toEqual(trimmed);
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents.map((intent) => intent.payload)).toEqual([
       expect.objectContaining({ before: original, after: split, commands: splitCommands }),
@@ -424,8 +426,10 @@ describe('local editor saves through the durable outbox', () => {
     });
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(session.getState()).toMatchObject({ status: status === 409 ? 'conflict' : 'error', error: { code: 'binding_changed', details } });
-    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual({ kind: status === 409 ? 'conflict' : 'settled' });
-    expect(env.visible()).toEqual(canonical.canonicalDocument.parent_revision.payload);
+    expect(env.prepareDisplay.mock.lastCall?.[2]).toEqual(status === 409
+      ? { kind: 'conflict', retainedDraft: { basis: env.initial, document: trimmed } }
+      : { kind: 'settled' });
+    expect(env.visible()).toEqual(status === 409 ? trimmed : canonical.canonicalDocument.parent_revision.payload);
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents).toHaveLength(1);
     expect(stored.intents[0].payload).toEqual(originalRecord.intents[1].payload);

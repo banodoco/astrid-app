@@ -27,14 +27,13 @@
  * route holds, never by sleeping.
  */
 import { expect, type Locator, type Page, type Request, type Response as PlaywrightResponse, type Route } from '@playwright/test';
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
 import path from 'node:path';
 import { getTimelineLabelWidth } from '../../../src/tools/video-editor/lib/coordinate-utils.ts';
-import { captureDiagnosticsPreservingOutcome } from '../../../src/tools/video-editor/lib/timeline-diagnostics.ts';
 import { PREVIEW_SURFACE, calibrateRuler, seekRulerToFrame, type RulerSeek } from '../support/previewRuler.ts';
 import { harnessUnavailableReason, startDirectHarness, sha256Hex, THREE_PRODUCTS_REFERENCE_AT, type DirectHarness, type ThreeProductsSeed } from './support/harness.ts';
-import { APP_ENTRY_ROUTE, captureTerminalSaveDiagnostics, commandOutboxes, currentHead, dragTimelineClip, dropFileOnTimeline, editFirstTrackName, expectConnected, firstTrackName, holdCommandRequests, holdTimelineCreation, observeRecoveredRetryDiagnostics, openApp, openSeededTimeline, revisionBody, test as appTest, timelineDraft, UI, waitForAudit } from './support/app.ts';
+import { APP_ENTRY_ROUTE, commandOutboxes, currentHead, dragTimelineClip, dropFileOnTimeline, editFirstTrackName, expectConnected, firstTrackName, holdCommandRequests, holdTimelineCreation, openApp, openSeededTimeline, revisionBody, test as appTest, timelineDraft, UI, waitForAudit } from './support/app.ts';
 import { allowlistedEvidenceMethod, allowlistedEvidenceStatus, relevantEvidenceRoute, type EvidenceMethod, type EvidenceRoute } from './support/auto-real-proxy-helpers.ts';
 import { timelineBase as runtimeTimelineBase, timelineFromList, type TimelineListPage, type TimelineScope } from './support/timeline-scope.ts';
 import type { CanonicalDocument, CommitAcceptedMutation, CommitRequest, EditCommand, HeadPin, HistoryEntry, HistoryPage } from '../../../src/integrations/runtime/timeline-commit-types.ts';
@@ -837,7 +836,6 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
 
 
   try {
-    await captureDiagnosticsPreservingOutcome(async () => {
     await Promise.all([openApp(tabA, harness), openApp(tabB, harness)]);
     await Promise.all([expectConnected(tabA), expectConnected(tabB)]);
     await Promise.all([openSeededTimeline(tabA, harness), openSeededTimeline(tabB, harness)]);
@@ -932,13 +930,10 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
       losingDraft: keptDraft?.draft, tabSessionIdsDistinct: true };
     await sniff.expectClean(tabA, seed3.timelineId);
     await sniff.expectClean(tabB, seed3.timelineId);
-    }, async () => {
-      const terminal = await Promise.all([tabA, tabB].map(captureTerminalSaveDiagnostics));
-      journey.facts = { ...journey.facts, heldCommitCount: held.length,
-        saveDiagnostics: terminal.map((entry) => entry.saveDiagnostics),
-        terminalSnapshots: terminal.map(({ captureTiming, requestedAt, snapshots }) => ({ captureTiming, requestedAt, snapshots })) };
-    });
   } finally {
+    journey.facts = { ...journey.facts, heldCommitCount: held.length,
+      saveDiagnostics: await Promise.all([tabA, tabB].map(tab => tab.evaluate(
+        () => (window as unknown as { __saveEvents?: unknown[] }).__saveEvents).catch(() => []))) };
     releases.forEach((release) => release());
     await Promise.all([tabA.unroute(COMMITS).catch(() => {}), tabB.unroute(COMMITS).catch(() => {})]);
     await Promise.allSettled([...pendingCommitRoutes]);
@@ -1185,60 +1180,17 @@ test('hosted-loopback recovery: the App names the conflict, keeps the user draft
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText('crossfade');
-  // Observe only this explicit public Retry, after discovery and selection.
-  await page.evaluate(() => {
-    const target = window as unknown as { __timelineSaveDiagnosticsEnabled: boolean; __saveEvents: unknown[] };
-    target.__timelineSaveDiagnosticsEnabled = true;
-    target.__saveEvents = [];
-    window.addEventListener('timeline:save-diagnostic', event => {
-      if (target.__saveEvents.length < 300) target.__saveEvents.push((event as CustomEvent).detail);
-    });
-  });
-  const retryTrace = {
-    captureTiming: 'incremental-after-retry-opt-in',
-    outcome: 'running' as 'running' | 'passed' | 'failed',
-    discrepancy: 'none' as 'none' | 'original-assertion-failed',
-    retention: 'available' as 'available' | 'unavailable',
-    events: [] as Record<string, unknown>[],
-  };
-  journey.facts.recoveredRetryIncremental = retryTrace;
-  const retainRetryRecord = (record: Record<string, unknown>) => {
-    try {
-      const retryTracePath = test.info().outputPath('recovered-retry-events.jsonl');
-      mkdirSync(path.dirname(retryTracePath), { recursive: true });
-      appendFileSync(retryTracePath, `${JSON.stringify(record)}\n`, { mode: 0o600 });
-    } catch { retryTrace.retention = 'unavailable'; }
-  };
-  const stopRetryObservation = await observeRecoveredRetryDiagnostics(page, record => {
-    if (retryTrace.events.length >= 300) return;
-    retryTrace.events.push(record);
-    retainRetryRecord(record);
-  });
-  let retryAssertionsPassed = false;
-  await captureDiagnosticsPreservingOutcome(async () => {
-    await recovered.getByRole('button', { name: 'Save them' }).click();
-    await expect(conflict).toBeVisible(CEILING);
-    await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
-    await expect(transitionSelect(page)).toContainText('None');
-    expect(await currentHead(harness)).toBe(headB);
-    await conflict.getByRole('button', { name: 'Use latest version' }).click();
-    await expect(conflict).toHaveCount(0, CEILING);
-    await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
-    await expect.poll(() => timelineDraft(page, seed3.timelineId), CEILING).toBeNull();
-    await expect(recovered).toHaveCount(0);
-    expect((await allRevisions(harness, seed3)).length, 'resolution creates no extra publication').toBe(revisionsBefore + 2);
-    retryAssertionsPassed = true;
-  }, async () => {
-    // The original assertions decide discrepancy and stop the external replay.
-    // Neither retention nor terminal capture may replace their original error.
-    retryTrace.outcome = retryAssertionsPassed ? 'passed' : 'failed';
-    retryTrace.discrepancy = retryAssertionsPassed ? 'none' : 'original-assertion-failed';
-    retainRetryRecord({ phase: 'terminal-outcome', outcome: retryTrace.outcome, discrepancy: retryTrace.discrepancy });
-    try {
-      const terminal = await captureTerminalSaveDiagnostics(page);
-      journey.facts.recoveredRetryDiagnostics = terminal;
-    } finally { await stopRetryObservation(); }
-  });
+  await recovered.getByRole('button', { name: 'Save them' }).click();
+  await expect(conflict).toBeVisible(CEILING);
+  await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
+  await expect(transitionSelect(page)).toContainText('None');
+  expect(await currentHead(harness)).toBe(headB);
+  await conflict.getByRole('button', { name: 'Use latest version' }).click();
+  await expect(conflict).toHaveCount(0, CEILING);
+  await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
+  await expect.poll(() => timelineDraft(page, seed3.timelineId), CEILING).toBeNull();
+  await expect(recovered).toHaveCount(0);
+  expect((await allRevisions(harness, seed3)).length, 'resolution creates no extra publication').toBe(revisionsBefore + 2);
 
   // Both clients agree after another reload: the App reads head B and shows A; the agent reads B.
   const readsBeforeReload = watched.urls.length;

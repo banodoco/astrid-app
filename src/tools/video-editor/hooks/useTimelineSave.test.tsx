@@ -14,6 +14,7 @@ import type { HistoryEntry, HistoryPage, CommitRequest } from '@/integrations/ru
 import { bindElementParameterOwner, useTimelineSave } from './useTimelineSave';
 import * as timelinePersistenceModule from './useTimelinePersistence';
 import { TimelineEventBus } from './useTimelineEventBus';
+import * as timelineDiagnostics from '../lib/timeline-diagnostics';
 import type { UsePollSyncQueries } from './usePollSync';
 import { useClipEditing } from './useClipEditing';
 import { useVideoEditorRuntime, VideoEditorRuntimeProvider } from '../contexts/VideoEditorRuntimeContext';
@@ -32,7 +33,6 @@ import type { VideoEditorRuntimeContextValue } from '../contexts/VideoEditorRunt
 import type { TimelineEditability } from '../lib/timeline-editability';
 import { createCommitOutbox } from '../commands/commitOutbox.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import * as timelineDiagnostics from '../lib/timeline-diagnostics';
 import { compileFunction } from 'node:vm';
 import ts from 'typescript';
 import p2TourSource from '../../../../tests/e2e/local/three-products.p2-tour.spec.ts?raw';
@@ -1477,13 +1477,8 @@ describe('useTimelineSave — recovered draft durability', () => {
     }
   });
 
-  it.each((['seeded', 'kept and remounted'] as const).flatMap(recovery =>
-    (['enabled', 'disabled', 'failing'] as const).map(diagnostics => ({ recovery, diagnostics }))))(
-    'retries a recovered A+C draft against the real B command owner ($recovery; diagnostics $diagnostics)', async ({ recovery, diagnostics }) => {
-      vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
-      const observations: Array<Record<string, unknown>> = [];
-      const observe = (event: Event) => { if (observations.length < 200) observations.push((event as CustomEvent).detail); };
-      window.addEventListener('timeline:save-diagnostic', observe);
+  it.each(['seeded', 'kept and remounted'] as const)(
+    'retries a recovered A+C draft against the real B command owner (%s)', async (recovery) => {
       const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
       const locks = new Set<string>();
       Object.defineProperty(navigator, 'locks', { configurable: true, value: {
@@ -1562,7 +1557,6 @@ describe('useTimelineSave — recovered draft durability', () => {
           } });
       };
       let harness: Awaited<ReturnType<typeof mount>> | undefined;
-      let dispatchFailure: { mockRestore(): void } | undefined;
       try {
         if (recovery === 'seeded') {
           // Real recovery slots contain the mounted builder's persisted config,
@@ -1574,7 +1568,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           });
         }
         harness = await mount();
-        await vi.waitFor(() => expect(observations.some(event => event.phase === 'handoff-ready')).toBe(true));
+        await vi.waitFor(() => expect(harness!.hook.result.current.localDocumentSave?.remoteHistoryAvailable()).toBe(true));
         await settleInitialRecoveryCheck();
         if (recovery === 'kept and remounted') {
           const edited = await buildTimelineData(configC, registry, undefined, 1, undefined, headA);
@@ -1596,9 +1590,11 @@ describe('useTimelineSave — recovered draft durability', () => {
           expect(outbox.intents).toHaveLength(1);
           harness.hook.unmount();
           await vi.waitFor(() => expect(locks.size).toBe(0));
-          observations.length = 0;
           harness = await mount();
-          await vi.waitFor(() => expect(observations.some(event => event.phase === 'handoff-ready' || event.phase === 'owner-error')).toBe(true));
+          await vi.waitFor(() => expect(
+            harness!.hook.result.current.localDocumentSave?.remoteHistoryAvailable()
+              || harness!.hook.result.current.localSaveState?.status === 'error',
+          ).toBe(true));
           await settleInitialRecoveryCheck();
         }
         await vi.waitFor(() => expect(harness!.hook.result.current.recoveryDraft?.retryAllowed).toBe(true));
@@ -1606,29 +1602,7 @@ describe('useTimelineSave — recovered draft durability', () => {
         expect(retained).toMatchObject({ baseHeadRevisionId: 'rA', baseHeadPublicationId: 'pA',
           draft: { config: { tracks: expect.arrayContaining([expect.objectContaining({ label: 'App A' })]) } } });
         const postCount = posts.length;
-        observations.length = 0;
-        vi.stubGlobal('__timelineSaveDiagnosticsEnabled', diagnostics !== 'disabled');
-        if (diagnostics === 'failing') {
-          const dispatch = window.dispatchEvent.bind(window);
-          dispatchFailure = vi.spyOn(window, 'dispatchEvent').mockImplementation(event => {
-            if (event.type === 'timeline:save-diagnostic') throw new Error('diagnostic dispatch failed');
-            return dispatch(event);
-          });
-        }
         await act(async () => { await harness!.hook.result.current.retryRecoveredDraft(); });
-        const retryEvents = observations.filter(event => event.phase === 'recovery-retry');
-        if (diagnostics === 'enabled') {
-          expect(retryEvents.map(event => [event.retryStage, event.retryOutcome])).toEqual([
-            ['entry', 'started'], ['read', 'started'], ['read', 'record'], ['head', 'ready'],
-            ['build', 'started'], ['build', 'ready'], ['current', 'ready'], ['permission', 'allowed'],
-            ['commit', 'started'], ['commit', 'returned'],
-          ]);
-          expect(new Set(retryEvents.map(event => event.retryGeneration)).size).toBe(1);
-          expect(retryEvents.every(event => event.retryGenerationCurrent === event.retryGeneration)).toBe(true);
-          expect(retryEvents.every(event => event.timelineId === timelineId && typeof event.ownerAlias === 'number')).toBe(true);
-        } else expect(retryEvents).toEqual([]);
-        dispatchFailure?.mockRestore();
-        dispatchFailure = undefined;
         await act(async () => { await vi.advanceTimersByTimeAsync(500); });
         await flush();
         expect(harness.hook.result.current.dataRef.current?.head).toEqual(headA);
@@ -1656,9 +1630,6 @@ describe('useTimelineSave — recovered draft durability', () => {
         expect(imageB.data.canonical_document.shot_revisions).toHaveLength(1);
         expect(imageB.data.canonical_document.internal_timeline_revisions).toHaveLength(1);
       } finally {
-        dispatchFailure?.mockRestore();
-        window.removeEventListener('timeline:save-diagnostic', observe);
-        vi.stubGlobal('__timelineSaveDiagnosticsEnabled', false);
         harness?.hook.unmount();
         await vi.waitFor(() => expect(locks.size).toBe(0));
         if (descriptor) Object.defineProperty(navigator, 'locks', descriptor);
@@ -2182,10 +2153,6 @@ describe('useTimelineSave — recovered draft durability', () => {
   });
 
   it('does not retry a recovered draft while whole-timeline editing is denied', async () => {
-    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
-    const records: Array<Record<string, unknown>> = [];
-    const observe = (event: Event) => records.push((event as CustomEvent).detail);
-    window.addEventListener('timeline:save-diagnostic', observe);
     let harness: SetupResult | undefined;
     try {
       harness = setup(async () => 8, {
@@ -2207,16 +2174,10 @@ describe('useTimelineSave — recovered draft durability', () => {
       });
 
       expect(harness!.saveTimeline).not.toHaveBeenCalled();
-      expect(records.filter(event => event.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
-        retryStage: 'permission', retryOutcome: 'denied', recoveryPending: true, recoveryActive: true,
-      }));
-      expect(records.some(event => event.phase === 'recovery-retry' && event.retryStage === 'commit')).toBe(false);
       expect(harness!.hook.result.current.data?.config.output.file).toBe('output-server.mp4');
       expect(await loadTimelineDraft('timeline-1')).not.toBeNull();
     } finally {
       harness?.hook.unmount();
-      window.removeEventListener('timeline:save-diagnostic', observe);
-      vi.stubGlobal('__timelineSaveDiagnosticsEnabled', false);
     }
   });
 

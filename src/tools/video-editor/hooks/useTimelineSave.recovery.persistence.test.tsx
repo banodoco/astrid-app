@@ -162,12 +162,6 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     });
     const indexedDbModule = await import('@/tools/video-editor/data/timelineDraftIndexedDb.ts');
     const recoveryRead = vi.spyOn(indexedDbModule, 'loadTimelineDraft').mockImplementation(() => pendingRecoveryRead);
-    const records: Array<Record<string, unknown>> = [];
-    const listener = (event: Event) => records.push((event as CustomEvent).detail);
-    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
-    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
-    window.addEventListener('timeline:save-diagnostic', listener);
-
     let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
     try {
       const editor = await mountRecoveryEditor({ seedRecovery: false });
@@ -183,39 +177,9 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       act(() => { hook!.result.current.commitData(edited, { save: true }); });
       await advance(600);
 
-      const scheduled = records.find((record) => record.phase === 'schedule-disposition' && record.disposition === 'recovery-active');
-      expect(scheduled).toMatchObject({ recoveryPending: false, recoveryActive: true });
       expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
-      const checkAtSchedule = records.find((record) => record.phase === 'schedule'
-        && record.recoveryCheckOrdinal !== undefined);
-      expect(checkAtSchedule).toMatchObject({
-        recoveryReadState: 'pending',
-        recoveryFinalizer: 'not-run',
-      });
-      expect(checkAtSchedule?.recoveryCheckOrdinal).toEqual(expect.any(Number));
-      const scheduleObservation = structuredClone(checkAtSchedule);
-      const recoveryPhase = (record: Record<string, unknown>) => (
-        typeof record.phase === 'string' && record.phase.startsWith('recovery-')
-      );
-      expect(records.some(recoveryPhase)).toBe(false);
 
       await act(async () => { finishRecoveryRead(null); await pendingRecoveryRead; });
-      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
-      const recoverySnapshot = records.find((record) => record.phase === 'recovery-current-snapshot');
-      expect(recoverySnapshot).toMatchObject({
-        recoveryCheckOrdinal: checkAtSchedule?.recoveryCheckOrdinal,
-        ownerAlias: checkAtSchedule?.ownerAlias,
-        timelineId: checkAtSchedule?.timelineId,
-        recoveryReadState: 'empty',
-        recoveryFinalizer: 'applied',
-        recoveryCompleted: true,
-        recoveryPending: false,
-        recoveryActive: false,
-      });
-      expect(records.filter(recoveryPhase))
-        .toEqual([recoverySnapshot]);
-      expect(checkAtSchedule).toEqual(scheduleObservation);
-
       await advance(600);
       expect(editor.provider.saveTimeline).toHaveBeenCalledTimes(1);
       expect(editor.provider.saveTimeline.mock.calls[0]?.[1].output.file).toBe('edited-while-recovery-loads.mp4');
@@ -223,19 +187,10 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       finishRecoveryRead(null);
       hook?.unmount();
       recoveryRead.mockRestore();
-      window.removeEventListener('timeline:save-diagnostic', listener);
-      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
-      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
     }
   });
 
   it('keeps normal saves held when the genuine initial IndexedDB recovery read rejects', async () => {
-    const records: Array<Record<string, unknown>> = [];
-    const listener = (event: Event) => records.push((event as CustomEvent).detail);
-    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
-    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
-    window.addEventListener('timeline:save-diagnostic', listener);
-
     const realOpen = indexedDB.open.bind(indexedDB);
     const indexedDbOpen = vi.spyOn(indexedDB, 'open').mockImplementation((name, version) => {
       if (name === 'astrid.timeline-drafts') throw new Error('IndexedDB open rejected for recovery read');
@@ -250,15 +205,6 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       await act(async () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
-      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
-      expect(records.find((record) => record.phase === 'recovery-current-snapshot')).toMatchObject({
-        recoveryReadState: 'rejected',
-        recoveryFinalizer: 'applied',
-        recoveryCompleted: true,
-        recoveryPending: false,
-        recoveryActive: true,
-      });
-
       vi.useFakeTimers();
       const edited = await buildTimelineData(
         timelineConfig('edited-after-recovery-read-rejection'),
@@ -269,70 +215,10 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       act(() => { hook!.result.current.commitData(edited, { save: true }); });
       await advance(600);
 
-      const scheduled = records.find((record) => record.phase === 'schedule-disposition'
-        && record.disposition === 'recovery-active');
-      expect(scheduled).toMatchObject({ recoveryPending: false, recoveryActive: true });
-      const checkAtSchedule = records.find((record) => record.phase === 'schedule'
-        && record.recoveryCheckOrdinal !== undefined);
-      expect(checkAtSchedule).toMatchObject({
-        recoveryReadState: 'rejected',
-        recoveryFinalizer: 'applied',
-        recoveryPending: false,
-        recoveryActive: true,
-      });
       expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
     } finally {
       hook?.unmount();
       indexedDbOpen.mockRestore();
-      window.removeEventListener('timeline:save-diagnostic', listener);
-      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
-      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
-    }
-  });
-
-  it('only emits a recovery snapshot on explicit opt-in and removes the request listener on unmount', async () => {
-    const records: Array<Record<string, unknown>> = [];
-    const listener = (event: Event) => records.push((event as CustomEvent).detail);
-    window.addEventListener('timeline:save-diagnostic', listener);
-    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
-    const indexedDbModule = await import('@/tools/video-editor/data/timelineDraftIndexedDb.ts');
-    const recoveryRead = vi.spyOn(indexedDbModule, 'loadTimelineDraft').mockResolvedValue(null);
-    let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
-    try {
-      ({ hook } = await mountRecoveryEditor({ seedRecovery: false }));
-      await waitFor(() => expect(recoveryRead).toHaveBeenCalledTimes(1));
-      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
-      expect(records).toEqual([]);
-      hook.unmount();
-      hook = undefined;
-
-      Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
-      ({ hook } = await mountRecoveryEditor({ seedRecovery: false }));
-      await waitFor(() => expect(recoveryRead).toHaveBeenCalledTimes(2));
-      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
-      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
-      expect(records.filter((record) => record.phase === 'recovery-current-snapshot')).toHaveLength(1);
-      expect(records.find((record) => record.phase === 'recovery-current-snapshot')).toMatchObject({
-        recoveryReadState: 'empty',
-        recoveryFinalizer: 'applied',
-        recoveryCompleted: true,
-        recoveryPending: false,
-        recoveryActive: false,
-      });
-      expect(records.some((record) => typeof record.phase === 'string'
-        && record.phase.startsWith('recovery-') && record.phase !== 'recovery-current-snapshot')).toBe(false);
-
-      hook?.unmount();
-      records.length = 0;
-      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
-      expect(records).toEqual([]);
-    } finally {
-      hook?.unmount();
-      recoveryRead.mockRestore();
-      window.removeEventListener('timeline:save-diagnostic', listener);
-      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
-      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
     }
   });
 
@@ -400,11 +286,6 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
   });
 
   it('keeps the recovery gate and slot when public Retry cannot read the draft', async () => {
-    const records: Array<Record<string, unknown>> = [];
-    const listener = (event: Event) => records.push((event as CustomEvent).detail);
-    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
-    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
-    window.addEventListener('timeline:save-diagnostic', listener);
     let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
     let retryRead: { mockRestore(): void } | undefined;
     try {
@@ -414,10 +295,6 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       retryRead = vi.spyOn(indexedDbModule, 'loadTimelineDraft').mockRejectedValueOnce(new Error('private retry read error'));
       await act(async () => { await hook!.result.current.retryRecoveredDraft(); });
 
-      expect(records.filter((record) => record.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
-        retryStage: 'read', retryOutcome: 'rejected', recoveryPending: true, recoveryActive: true,
-      }));
-      expect(JSON.stringify(records)).not.toContain('private retry read error');
       expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 });
       expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
 
@@ -431,18 +308,10 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     } finally {
       hook?.unmount();
       retryRead?.mockRestore();
-      window.removeEventListener('timeline:save-diagnostic', listener);
-      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
-      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
     }
   });
 
-  it('rethrows the original Retry build failure and emits only a bounded rejection stage', async () => {
-    const records: Array<Record<string, unknown>> = [];
-    const listener = (event: Event) => records.push((event as CustomEvent).detail);
-    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
-    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
-    window.addEventListener('timeline:save-diagnostic', listener);
+  it('rethrows the original Retry build failure and retains the draft', async () => {
     let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
     try {
       const editor = await mountRecoveryEditor();
@@ -454,18 +323,11 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       act(() => { retry = hook!.result.current.retryRecoveredDraft(); });
       await act(async () => { await expect(retry).rejects.toBe(original); });
 
-      expect(records.filter((record) => record.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
-        retryStage: 'build', retryOutcome: 'rejected', recoveryPending: true, recoveryActive: true,
-      }));
-      expect(JSON.stringify(records)).not.toContain('private build failure');
       expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 });
       expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
       expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
     } finally {
       hook?.unmount();
-      window.removeEventListener('timeline:save-diagnostic', listener);
-      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
-      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
     }
   });
 
@@ -562,11 +424,6 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
   });
 
   it('invalidates async Retry when Save as copy uses the persistence hook reload path', async () => {
-    const records: Array<Record<string, unknown>> = [];
-    const listener = (event: Event) => records.push((event as CustomEvent).detail);
-    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
-    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
-    window.addEventListener('timeline:save-diagnostic', listener);
     let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
     try {
       const loadCanonicalTimeline = vi.fn(async () => ({ config: timelineConfig('canonical'), configVersion: 14 }));
@@ -599,14 +456,8 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       await advance(1000);
       expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
       expect(hook.result.current.data?.config.clips).toEqual(editor.canonical.clips);
-      expect(records.filter((record) => record.phase === 'recovery-retry')).toContainEqual(expect.objectContaining({
-        retryStage: 'current', retryOutcome: 'stale',
-      }));
     } finally {
       hook?.unmount();
-      window.removeEventListener('timeline:save-diagnostic', listener);
-      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
-      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
     }
   });
 

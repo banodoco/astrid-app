@@ -33,7 +33,7 @@ export type TimelineGestureReadBasis = {
 
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
-  capture(source: TimelineSaveSource, gestureBasis?: TimelineGestureReadBasis): Promise<void>;
+  capture(source: TimelineSaveSource, gestureBasis?: TimelineGestureReadBasis, recoveryOwnerId?: string): Promise<void>;
   flush(): Promise<TimelineSaveReceipt>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
@@ -44,7 +44,9 @@ export interface TimelineLocalSaveHandoff {
 }
 
 /** Scoped editors supply their own verified physical-image join and durable owner. */
-export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush'>;
+export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush'> & {
+  bindRecoveryDraft?(recoveryKey: string, draftOwnerId: string): Promise<void>;
+};
 export interface TimelinePersistenceBinding {
   readonly provider: DataProvider;
   readonly timelineId: string;

@@ -378,6 +378,73 @@ describe('local editor saves through the durable outbox', () => {
     await session.dispose();
   });
 
+  it('keeps a single conflicted draft visible and its refused request recoverable without retry', async () => {
+    const env = environment();
+    const session = await env.mount();
+    await env.append(session, splitSave());
+    const details = { status: 'conflict', reason: 'atomic_scope_changed' };
+    env.send.mockRejectedValueOnce(new ApiError(409, 'atomic_scope_changed', 'Head changed', '', details));
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    expect(session.getState()).toMatchObject({ status: 'conflict', error: { code: 'atomic_scope_changed', details } });
+    expect(env.visible()).toEqual(split);
+    expect(session.getDocument()).toEqual(split);
+    expect(env.loadLatest).not.toHaveBeenCalled();
+    expect(env.send).toHaveBeenCalledTimes(1);
+    const [stored] = await env.outboxes.list(scope);
+    expect(stored.intents).toHaveLength(1);
+    expect(stored.intents[0].payload).toMatchObject({ before: original, after: split, commands: splitCommands });
+    expect(stored.pending).toMatchObject({ request: { key: env.send.mock.calls[0][1] }, outcome: { kind: 'rejected' } });
+    expect(() => session.append(trimSave())).toThrow('retained local saves');
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    expect(env.send).toHaveBeenCalledTimes(1);
+    await session.dispose();
+
+    const recovered = await env.mount();
+    await recovered.recover(stored.ownerId);
+    expect(recovered.getState().status).toBe('conflict');
+    expect(env.visible()).toEqual(split);
+    expect(recovered.getDocument()).toEqual(split);
+    const [restored] = await env.outboxes.list(scope);
+    expect(restored.intents).toEqual(stored.intents);
+    expect(restored.pending).toEqual(stored.pending);
+    expect(env.send).toHaveBeenCalledTimes(1);
+    await recovered.dispose();
+  });
+
+  it('rolls back a single validation refusal to the latest canonical display', async () => {
+    const env = environment();
+    const session = await env.mount();
+    await env.append(session, splitSave());
+    env.send.mockRejectedValueOnce(new ApiError(422, 'invalid_timing', 'Invalid duration', '', {}));
+    const remote = result({ ...original, agent: true }, h1);
+    env.loadLatest.mockResolvedValue({ head: remote.accepted, canonicalDocument: remote.canonicalDocument });
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    expect(session.getState().status).toBe('error');
+    expect(env.visible()).toEqual({ ...original, agent: true });
+    expect((await env.outboxes.list(scope))[0].intents).toHaveLength(1);
+    await session.dispose();
+  });
+
+  it.each([409, 422])('rolls back a single guarded inverse refusal (%s)', async (status) => {
+    const env = environment();
+    const session = await env.mount();
+    const inverse: LocalSave = { ...splitSave(), commands: [{ schema_version: 1, op: 'timeline.inverse',
+      version: '1', select: null, args: { publications: ['p1'] } }] };
+    await env.append(session, inverse);
+    env.send.mockRejectedValueOnce(new ApiError(status, 'guard_changed', 'History changed', '',
+      { status: status === 409 ? 'conflict' : 'invalid' }));
+    const remote = result({ ...original, agent: true }, h1);
+    env.loadLatest.mockResolvedValue({ head: remote.accepted, canonicalDocument: remote.canonicalDocument });
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    expect(session.getState().status).toBe('conflict');
+    expect(env.visible()).toEqual({ ...original, agent: true });
+    const [stored] = await env.outboxes.list(scope);
+    expect(stored.intents[0].payload).toMatchObject({ after: split, commands: inverse.commands });
+    expect(stored.pending?.outcome?.kind).toBe('rejected');
+    expect(env.send).toHaveBeenCalledTimes(1);
+    await session.dispose();
+  });
+
   it('keeps a conflicted predecessor visible and retains the complete split → trim chain and error details across restart', async () => {
     const env = environment();
     const session = await env.mount();

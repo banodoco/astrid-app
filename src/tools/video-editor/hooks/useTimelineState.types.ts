@@ -233,6 +233,8 @@ export interface TimelineChromeContextValue {
   unusedTrackCount: TimelineTrackManagementHook['unusedTrackCount'];
   reloadFromServer: TimelineReloadFromServer;
   retrySaveAfterConflict: TimelineRetrySaveAfterConflict;
+  keptCopies?: string[];
+  openKeptCopy?: (ownerId: string) => Promise<void>;
   /**
    * Write-ack watchdog: true when an edit went unacknowledged past the grace
    * period or was dropped on the null-data path. The shell renders a

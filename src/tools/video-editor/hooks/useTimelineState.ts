@@ -386,6 +386,8 @@ function useTimelineChromeContextValue({
   trackManagement,
   reloadFromServer,
   retrySaveAfterConflict,
+  keptCopies,
+  openKeptCopy,
   startRender,
   loadError,
   retryLoad,
@@ -415,6 +417,8 @@ function useTimelineChromeContextValue({
   trackManagement: Pick<TimelineTrackManagementHook, 'handleAddTrack' | 'handleClearUnusedTracks' | 'unusedTrackCount'>;
   reloadFromServer: ReturnType<typeof useTimelineSave>['reloadFromServer'];
   retrySaveAfterConflict: ReturnType<typeof useTimelineSave>['retrySaveAfterConflict'];
+  keptCopies: ReturnType<typeof useTimelineSave>['keptCopies'];
+  openKeptCopy: ReturnType<typeof useTimelineSave>['openKeptCopy'];
   startRender: ReturnType<typeof useRenderState>['startRender'];
   watchdogTripped: boolean;
   watchdogReason: 'timeout' | 'lost-edit' | null;
@@ -471,6 +475,8 @@ function useTimelineChromeContextValue({
     unusedTrackCount: trackManagement.unusedTrackCount,
     reloadFromServer,
     retrySaveAfterConflict,
+    keptCopies,
+    openKeptCopy,
     watchdogTripped,
     watchdogReason,
     retryWatchdog,
@@ -524,6 +530,8 @@ function useTimelineChromeContextValue({
     render.setRenderDestination,
     render.cancelRender,
     retrySaveAfterConflict,
+    keptCopies,
+    openKeptCopy,
     retryWatchdog,
     retryPendingSave,
     flushPendingSave,
@@ -1236,6 +1244,8 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     preserveTimelineDraftForReload: save.preserveTimelineDraftForReload,
     isTimelineDraftDurableForReload: save.isTimelineDraftDurableForReload,
     isTimelineSavePending: save.isTimelineSavePending,
+    keptCopies: save.keptCopies,
+    openKeptCopy: save.openKeptCopy,
     recoveryDraft: save.recoveryDraft,
     retryRecoveredDraft: save.retryRecoveredDraft,
     discardRecoveredDraft: save.discardRecoveredDraft,

@@ -1082,9 +1082,12 @@ export function useTimelinePersistence({
       try {
         localCapture = session.localDocumentSave.capture({
           ...snapshot.draft, bundle: snapshot.wireBundle, head: snapshot.baseHead,
-        }, gestureBasis);
+        }, gestureBasis, snapshot.draftOwnerId);
       } catch (error) { localCapture = Promise.reject(error); }
-      localCapture = localCapture.catch((error: unknown) => {
+      localCapture = localCapture.then(async () => {
+        await draftWrite;
+        if (persistenceEnabled) await session.localDocumentSave?.bindRecoveryDraft?.(snapshot.draftRecoveryKey, snapshot.draftOwnerId);
+      }).catch((error: unknown) => {
         session.captureFailure = error;
         recordDraftReloadFailure();
         throw error;
@@ -1095,7 +1098,7 @@ export function useTimelinePersistence({
     const scheduledSave: ScheduledSave = { ...snapshot, draftWrite, localCapture };
     latestScheduledSaveRef.current = scheduledSave;
     return scheduledSave;
-  }, [buildRecoverySnapshot, session, writeRecoverySnapshot]);
+  }, [buildRecoverySnapshot, session, writeRecoverySnapshot, persistenceEnabled]);
 
   const scheduleSaveWithCapture = useCallback((
     nextData: TimelineData,

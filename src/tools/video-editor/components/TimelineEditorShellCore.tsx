@@ -828,10 +828,10 @@ function TimelineEditorShellCoreComponent({
     >
       <span>{TIMELINE_CONFLICT_SENTENCE}</span>
       <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer()}>
+        <Button type="button" size="sm" variant="outline" onClick={() => { void Promise.resolve(chrome.reloadFromServer()).catch(() => {}); }}>
           {TIMELINE_CONFLICT_USE_LATEST}
         </Button>
-        <Button type="button" size="sm" onClick={chrome.retrySaveAfterConflict}>
+        <Button type="button" size="sm" onClick={() => { void Promise.resolve(chrome.retrySaveAfterConflict()).catch(() => {}); }}>
           {TIMELINE_CONFLICT_KEEP_MINE}
         </Button>
       </div>
@@ -857,7 +857,7 @@ function TimelineEditorShellCoreComponent({
           </span>
         )}
       </span>
-      <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer()}>
+      <Button type="button" size="sm" variant="outline" onClick={() => { void Promise.resolve(chrome.reloadFromServer()).catch(() => {}); }}>
         Reload
       </Button>
     </div>
@@ -897,6 +897,15 @@ function TimelineEditorShellCoreComponent({
   const timelineRegion = (
     <>
       {conflictBanner}
+      {(chrome.keptCopies?.length ?? 0) > 0 && !chrome.isConflictExhausted && (
+        <div role="status" className="flex items-center gap-2 border-b border-border p-2 text-sm">
+          <span>Kept timeline changes:</span>
+          {chrome.keptCopies!.map((ownerId, index) => (
+            <Button key={ownerId} type="button" size="sm" variant="outline"
+              onClick={() => { void Promise.resolve(chrome.openKeptCopy?.(ownerId)).catch(() => {}); }}>Open kept changes {index + 1}</Button>
+          ))}
+        </div>
+      )}
       {incompatibleBanner}
       {watchdogBanner}
       {recoveryBanner}
@@ -1189,8 +1198,8 @@ function TimelineEditorShellCoreComponent({
             <AlertDialogDescription>{TIMELINE_CONFLICT_SENTENCE}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => void conflict.discardAndReload()}>{TIMELINE_CONFLICT_USE_LATEST}</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void conflict.keepLocalChanges()}>{TIMELINE_CONFLICT_KEEP_MINE}</AlertDialogAction>
+            <AlertDialogCancel onClick={() => { void Promise.resolve(conflict.discardAndReload()).catch(() => {}); }}>{TIMELINE_CONFLICT_USE_LATEST}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => { void Promise.resolve(conflict.keepLocalChanges()).catch(() => {}); }}>{TIMELINE_CONFLICT_KEEP_MINE}</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

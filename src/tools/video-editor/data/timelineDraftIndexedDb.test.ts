@@ -8,6 +8,8 @@ vi.stubGlobal('IDBKeyRange', (await import('fake-indexeddb')).IDBKeyRange);
 
 import {
   advanceTimelineDraftBaseAfterHeadAcknowledgement,
+  bindTimelineDraftOutboxOwner,
+  clearTimelineDraftIfSnapshotMatches,
   clearTimelineDraft,
   clearTimelineDraftIfMatches,
   loadTimelineDraft,
@@ -211,6 +213,67 @@ describe('timelineDraftIndexedDb — one-slot recovery draft (plan-v5 B9)', () =
       baseHeadRevisionId: 'head-1',
       draft: { config: { name: 'B' } },
     });
+  });
+
+  it('links only the exact saved owner and fences deletion against a replacement', async () => {
+    await saveTimelineDraft('tl-1', { config: { name: 'owned' } }, 1, { ownerId: 'edit-a', draftIdentity: 'identity-a' });
+    expect(await bindTimelineDraftOutboxOwner('tl-1', 'other-edit', 'outbox-a')).toBe(false);
+    expect(await bindTimelineDraftOutboxOwner('tl-1', 'edit-a', 'outbox-a')).toBe(true);
+    const observed = (await loadTimelineDraft('tl-1'))!;
+    expect(observed.outboxOwnerId).toBe('outbox-a');
+    await saveTimelineDraft('tl-1', { config: { name: 'unrelated' } }, 2, { ownerId: 'edit-b', draftIdentity: 'identity-b' });
+    expect(await clearTimelineDraftIfSnapshotMatches('tl-1', observed)).toBe(false);
+    expect(await loadTimelineDraft('tl-1')).toMatchObject({ ownerId: 'edit-b', draft: { config: { name: 'unrelated' } } });
+    expect(await bindTimelineDraftOutboxOwner('tl-1', 'edit-a', 'outbox-a')).toBe(false);
+  });
+
+  it('rejects an aborted snapshot delete, closes the database and preserves the linked owner', async () => {
+    await saveTimelineDraft('tl-1', { config: { name: 'owned' } }, 1, { ownerId: 'edit-a', draftIdentity: 'identity-a' });
+    await bindTimelineDraftOutboxOwner('tl-1', 'edit-a', 'outbox-a');
+    const observed = (await loadTimelineDraft('tl-1'))!;
+    const originalOpen = fakeIndexedDb.open.bind(fakeIndexedDb);
+    let closed = false;
+    let injected = false;
+    const openSpy = vi.spyOn(fakeIndexedDb, 'open').mockImplementation((...args) => {
+      const request = originalOpen(...args);
+      request.addEventListener('success', () => {
+        const db = request.result as any;
+        const originalClose = db.close.bind(db);
+        db.close = () => { closed = true; originalClose(); };
+        const originalTransaction = db.transaction.bind(db);
+        db.transaction = (store: string, mode: string) => {
+          const tx = originalTransaction(store, mode);
+          if (mode !== 'readwrite' || injected) return tx;
+          injected = true;
+          const records = db.recordsByStore.get(store);
+          const before = new Map(records);
+          const dispatch = tx.dispatch.bind(tx);
+          let aborted = false;
+          tx.dispatch = (type: string, event: unknown) => {
+            if (type === 'complete' && !aborted) { tx.abort(); return; }
+            if (type === 'abort') {
+              aborted = true;
+              records.clear();
+              for (const [key, value] of before) records.set(key, value);
+            }
+            if (type === 'complete' && aborted) return;
+            dispatch(type, event);
+          };
+          return tx;
+        };
+      });
+      return request;
+    });
+    try {
+      const settled = await Promise.race([
+        clearTimelineDraftIfSnapshotMatches('tl-1', observed).then(() => 'resolved', (error) => error.message),
+        new Promise<string>((resolve) => setTimeout(() => resolve('timed out'), 500)),
+      ]);
+      expect(settled).toMatch(/aborted/i);
+      expect(injected).toBe(true);
+      expect(closed).toBe(true);
+    } finally { openSpy.mockRestore(); }
+    expect(await loadTimelineDraft('tl-1')).toEqual(observed);
   });
 
   it('drafts for different timelines do not collide', async () => {

@@ -2078,6 +2078,14 @@ describe('TimelineEditorShellCore — diverged conflict banner', () => {
     expect(screen.getAllByRole('button', { name: 'Use latest version' })).toHaveLength(1);
   });
 
+  it('offers each kept copy for explicit recovery', () => {
+    const openKeptCopy = vi.fn();
+    __chromeOverrides = { keptCopies: ['first-owner', 'second-owner'], openKeptCopy };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open kept changes 2' }));
+    expect(openKeptCopy).toHaveBeenCalledWith('second-owner');
+  });
+
   it('does not render the diverged banner when clean', () => {
     render(<TimelineEditorShellCore timelineId="test-timeline" />);
     expect(screen.queryByText('Keep your changes, or switch to the latest version.')).toBeNull();

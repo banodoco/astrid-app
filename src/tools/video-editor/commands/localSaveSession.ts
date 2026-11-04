@@ -394,6 +394,17 @@ export async function createLocalSaveSession(options: Options) {
       await claim(ownerId);
       await pump();
     },
+    /** Activate a kept owner for a new mounted session without dispatching it. */
+    async activateKept(ownerId: string) {
+      assertOpen();
+      if (state.status !== 'saved' || !state.keptOwners?.includes(ownerId) || sending) throw new Error('Kept copy cannot be opened while edits are pending');
+      resolving = true;
+      try {
+        await writes;
+        await storage.recover(options.scope, ownerId, (claimed) => claimed.restoreParked());
+        state.keptOwners = state.keptOwners.filter((id) => id !== ownerId);
+      } finally { resolving = false; }
+    },
     /** Explicitly reopen one parked owner; never retry it automatically. */
     async recoverKept(ownerId: string) {
       assertOpen();

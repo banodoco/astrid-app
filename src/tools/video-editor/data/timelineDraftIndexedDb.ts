@@ -34,6 +34,8 @@ export interface TimelineDraftRecord {
   baseCanonicalGraph?: Record<string, unknown>;
   draftIdentity?: string;
   acknowledgementIdentity?: string;
+  /** Exact durable outbox owner that captured this slot, when proven. */
+  outboxOwnerId?: string;
 }
 
 export interface TimelineDraftRecoveryMetadata {
@@ -411,30 +413,57 @@ export async function reconcileTimelineDraftHeadMarker(
   return reconciled;
 }
 
+/** Associate a slot with its durable outbox only if that exact save still owns it. */
+export async function bindTimelineDraftOutboxOwner(recoveryKey: string, draftOwnerId: string, outboxOwnerId: string): Promise<boolean> {
+  if (typeof indexedDB === 'undefined') throw new Error('Durable timeline recovery is unavailable');
+  const database = await openDatabase();
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const transaction = database.transaction(DRAFT_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(DRAFT_STORE_NAME);
+      const request = store.get(buildKey(recoveryKey));
+      let bound = false;
+      request.addEventListener('success', () => {
+        const current = request.result as TimelineDraftRecord | undefined;
+        if (!current || current.ownerId !== draftOwnerId) return;
+        store.put({ ...current, outboxOwnerId });
+        bound = true;
+      });
+      request.addEventListener('error', () => reject(request.error));
+      transaction.addEventListener('complete', () => resolve(bound));
+      transaction.addEventListener('error', () => reject(transaction.error));
+      transaction.addEventListener('abort', () => reject(transaction.error ?? new Error('Draft owner binding aborted')));
+    });
+  } finally { database.close(); }
+}
+
 /** Clear only the recovery snapshot observed by an explicit reload/discard. */
 export async function clearTimelineDraftIfSnapshotMatches(
   recoveryKey: string,
-  snapshot: Pick<TimelineDraftRecord, 'updatedAt' | 'draftIdentity'>,
+  snapshot: Pick<TimelineDraftRecord, 'updatedAt' | 'draftIdentity'> & Partial<Pick<TimelineDraftRecord, 'ownerId' | 'outboxOwnerId'>>,
 ): Promise<boolean> {
   if (typeof indexedDB === 'undefined') return false;
   const database = await openDatabase();
-  const cleared = await new Promise<boolean>((resolve, reject) => {
-    const transaction = database.transaction(DRAFT_STORE_NAME, 'readwrite');
-    const store = transaction.objectStore(DRAFT_STORE_NAME);
-    const request = store.get(buildKey(recoveryKey));
-    let matched = false;
-    request.addEventListener('success', () => {
-      const current = request.result as TimelineDraftRecord | undefined;
-      if (current?.updatedAt === snapshot.updatedAt
-        && current.draftIdentity === snapshot.draftIdentity) {
-        matched = true;
-        store.delete(buildKey(recoveryKey));
-      }
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const transaction = database.transaction(DRAFT_STORE_NAME, 'readwrite');
+      const store = transaction.objectStore(DRAFT_STORE_NAME);
+      const request = store.get(buildKey(recoveryKey));
+      let matched = false;
+      request.addEventListener('success', () => {
+        const current = request.result as TimelineDraftRecord | undefined;
+        if (current?.updatedAt === snapshot.updatedAt
+          && current.draftIdentity === snapshot.draftIdentity
+          && (!('ownerId' in snapshot) || current.ownerId === snapshot.ownerId)
+          && (!('outboxOwnerId' in snapshot) || current.outboxOwnerId === snapshot.outboxOwnerId)) {
+          matched = true;
+          store.delete(buildKey(recoveryKey));
+        }
+      });
+      request.addEventListener('error', () => reject(request.error));
+      transaction.addEventListener('complete', () => resolve(matched));
+      transaction.addEventListener('error', () => reject(transaction.error));
+      transaction.addEventListener('abort', () => reject(transaction.error ?? new Error('Draft deletion aborted')));
     });
-    request.addEventListener('error', () => reject(request.error));
-    transaction.addEventListener('complete', () => resolve(matched));
-    transaction.addEventListener('error', () => reject(transaction.error));
-  });
-  database.close();
-  return cleared;
+  } finally { database.close(); }
 }

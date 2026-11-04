@@ -638,10 +638,15 @@ async function runNewHostedLeaseJourney(page: Page, harness: DirectHarness, astr
       firstOutcome = await astrid.commitTrackLabelForJourney(seed3.projectSlug, seed3.timelineId, base,
         scenario.agentTrack, scenario.agentLabel, key, { timeout: 1, interval: 2 });
       const beforeRetry = astrid.trackLabelPosts(key);
+      // CE-2 checks the monotonic deadline before each resend.
       expect(beforeRetry, 'the SDK stops after one refusal when the total wait budget expires').toHaveLength(1);
       expect(beforeRetry[0]).toMatchObject({ status: 409, details: { status: 'refused', reason: 'user_editing' } });
       expect(firstOutcome).toMatchObject({ kind: 'pending', error_type: 'CommitRefused',
+        headline: 'The user is still editing',
         pending: { state: 'pending', origin: 'list', failure: { details: { reason: 'user_editing' } } } });
+      expect(firstOutcome.commit_elapsed_seconds,
+        'the App lease stays held until the configured total user-editing wait budget elapses')
+        .toBeGreaterThanOrEqual(1);
       expect(firstOutcome.pending_id).toMatch(/^pc_/);
       expect(firstOutcome.message).toContain(`The user is still editing; your change is saved as ${firstOutcome.pending_id}`);
       expect(firstOutcome.fix).toBe(`tl.retry("${firstOutcome.pending_id}")`);

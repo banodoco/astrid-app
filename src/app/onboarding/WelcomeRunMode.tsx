@@ -119,7 +119,7 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
           </RadioGroup>
           <Button type="button" className="h-11 w-full rounded-xl" onClick={() => {
             if (scenario === 'unsupported' && runMode === 'hosted') void linkCopy.copy();
-            else if (canInstall && windowMode === 'app-window') void installApp();
+            else if (runMode === 'hosted' && canInstall && windowMode === 'app-window') void installApp();
             else continueHere();
           }}>{runMode === 'hosted' && scenario === 'unsupported' ? linkCopy.status === 'copied' ? 'Copied. Open it in Chrome or Edge.' : 'Copy link for Chrome or Edge' : buttonLabel}</Button>
           {runMode === 'hosted' && scenario === 'unsupported' && linkCopy.status === 'failed' && <CopyFallback text={window.location.href} label="Copy link for Chrome or Edge" />}

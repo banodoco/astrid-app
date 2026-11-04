@@ -13,6 +13,8 @@ export function isTimelineDiagnosticsEnabled(): boolean {
 }
 
 const SAVE_DIAGNOSTIC_PHASES = ['schedule', 'capture-called', 'capture-resolved', 'capture-rejected',
+  'schedule-disposition', 'debounce-fired', 'save-entry', 'save-return', 'local-capture-start',
+  'local-capture-settled', 'local-capture-error', 'mutation-dispatch', 'mutation-error',
   'basis-operation', 'basis-dependencies-committed', 'owner-init', 'owner-closed', 'owner-retired', 'lifecycle-cancel',
   'basis-read', 'basis-ready', 'basis-unavailable', 'basis-error',
   'identity-read', 'session-created', 'session-recovered', 'session-changed',
@@ -52,6 +54,17 @@ export function markTimelineSaveRejection<T extends Error>(error: T, code: Timel
 }
 
 interface SaveDiagnosticObservation {
+  disposition?: unknown;
+  returnReason?: unknown;
+  captureCode?: unknown;
+  captureStage?: unknown;
+  persistenceEnabled?: unknown;
+  recoveryPending?: unknown;
+  recoveryActive?: unknown;
+  interactionActive?: unknown;
+  conflictExhausted?: unknown;
+  schemaIncompatible?: unknown;
+  sequenceNumber?: unknown;
   dependencyBaselinePresent?: unknown;
   providerChanged?: unknown;
   timelineChanged?: unknown;
@@ -167,6 +180,14 @@ export function emitTimelineSaveDiagnostic(boundary: SaveDiagnosticPhase | (() =
     const time = performance.now();
     if (Number.isFinite(time)) saveDiagnosticTime = Math.max(saveDiagnosticTime, time);
     const detail = Object.freeze({ version: 1, sequence: ++saveDiagnosticSequence, time: saveDiagnosticTime, phase,
+      disposition: choice(observed.disposition, ['scheduled', 'recovery-pending', 'recovery-active', 'reload-active', 'persistence-disabled', 'interaction-active', 'conflict-exhausted', 'schema-incompatible', 'saving-queued', 'retry-queued']),
+      returnReason: choice(observed.returnReason, ['reload', 'recovery', 'session-invalidated', 'saving-queued', 'success', 'error']),
+      captureCode: choice(observed.captureCode, ['sync-throw', 'rejected', 'resolved']),
+      captureStage: choice(observed.captureStage, ['capture-call', 'capture-set', 'local-capture']),
+      persistenceEnabled: bool(observed.persistenceEnabled), recoveryPending: bool(observed.recoveryPending),
+      recoveryActive: bool(observed.recoveryActive), interactionActive: bool(observed.interactionActive),
+      conflictExhausted: bool(observed.conflictExhausted), schemaIncompatible: bool(observed.schemaIncompatible),
+      sequenceNumber: counter(observed.sequenceNumber),
       projectId: identifier(own(mountedHead, 'projectId') ?? own(own(observed.source, 'head'), 'projectId')),
       timelineId: identifier(observed.timelineId), clipId: identifier(clipId), ownerAlias,
       dependencyBaselinePresent: bool(observed.dependencyBaselinePresent),

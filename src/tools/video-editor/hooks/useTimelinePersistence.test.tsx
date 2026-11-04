@@ -166,6 +166,8 @@ interface SetupOptions {
   loadAssetRegistryImpl?: DataProvider['loadAssetRegistry'];
   loadReferencedTimelineImpl?: NonNullable<DataProvider['loadReferencedTimeline']>;
   recoveryMetadata?: TimelineDraftRecoveryMetadata;
+  recoveryPendingRef?: { current: boolean };
+  recoveryActiveRef?: { current: boolean };
 }
 
 function setup(options?: SetupOptions): TestHarness {
@@ -235,6 +237,8 @@ function setup(options?: SetupOptions): TestHarness {
       configVersionRef,
       lastSavedSignatureRef,
       interactionStateRef,
+      recoveryPendingRef: options?.recoveryPendingRef,
+      recoveryActiveRef: options?.recoveryActiveRef,
     }),
     { wrapper, initialProps: { provider, timelineId: options?.timelineId ?? 'timeline-1' } },
   );
@@ -746,6 +750,156 @@ describe('useTimelinePersistence — interaction gating', () => {
     });
 
     expect(harness.saveTimeline).not.toHaveBeenCalled();
+  });
+
+  it('records interaction deferral and waits for local capture before mutation dispatch', async () => {
+    vi.useFakeTimers();
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const observe = (event: Event) => diagnostics.push((event as CustomEvent).detail);
+    window.addEventListener('timeline:save-diagnostic', observe);
+    let resolveCapture!: () => void;
+    const captureGate = new Promise<void>(resolve => { resolveCapture = resolve; });
+    const handoff = { capture: vi.fn(() => captureGate), flush: vi.fn(async () => 2),
+      remoteHistoryAvailable: () => true, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(async () => {}), redo: vi.fn(async () => {}) } as unknown as TimelineLocalSaveHandoff;
+    const harness = setup({ localDocumentSave: handoff });
+    try {
+      harness.interactionStateRef.current.drag = true;
+      harness.scheduleSave(makeTimelineData('diagnostic-interaction'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); await Promise.resolve(); });
+      expect(diagnostics.some(row => row.phase === 'schedule-disposition' && row.disposition === 'interaction-active'
+        && row.interactionActive === true)).toBe(true);
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+
+      harness.interactionStateRef.current.drag = false;
+      notifyInteractionEndIfIdle(harness.interactionStateRef);
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); await Promise.resolve(); });
+      expect(diagnostics.some(row => row.phase === 'local-capture-start' && row.captureStage === 'capture-set')).toBe(true);
+      expect(diagnostics.some(row => row.phase === 'mutation-dispatch')).toBe(false);
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+
+      await act(async () => { resolveCapture(); await captureGate; await Promise.resolve(); });
+      await act(async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); });
+      const localCaptureSettled = diagnostics.findIndex(row => row.phase === 'local-capture-settled'
+        && row.captureStage === 'local-capture' && row.captureCode === 'resolved');
+      const mutationDispatch = diagnostics.findIndex(row => row.phase === 'mutation-dispatch');
+      expect(localCaptureSettled).toBeGreaterThanOrEqual(0);
+      expect(mutationDispatch).toBeGreaterThan(localCaptureSettled);
+      expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.unmount();
+      window.removeEventListener('timeline:save-diagnostic', observe);
+      Object.assign(window, { __timelineSaveDiagnosticsEnabled: false });
+      vi.useRealTimers();
+    }
+  });
+
+  it('records a stale scheduled session return before any mutation dispatch', async () => {
+    vi.useFakeTimers();
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const observe = (event: Event) => diagnostics.push((event as CustomEvent).detail);
+    window.addEventListener('timeline:save-diagnostic', observe);
+    const harness = setup();
+    try {
+      harness.scheduleSave(makeTimelineData('stale-session'));
+      harness.replaceSession(harness.provider, 'timeline-replaced');
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); for (let i = 0; i < 10; i++) await Promise.resolve(); });
+      expect(diagnostics.some(row => row.phase === 'save-return' && row.returnReason === 'session-invalidated')).toBe(true);
+      expect(diagnostics.some(row => row.phase === 'mutation-dispatch')).toBe(false);
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+    } finally {
+      harness.unmount();
+      window.removeEventListener('timeline:save-diagnostic', observe);
+      Object.assign(window, { __timelineSaveDiagnosticsEnabled: false });
+      vi.useRealTimers();
+    }
+  });
+
+  it.each([
+    { state: 'pending', disposition: 'recovery-pending', recoveryPendingRef: { current: true } },
+    { state: 'active', disposition: 'recovery-active', recoveryActiveRef: { current: true } },
+  ] as Array<{ state: string; disposition: string; recoveryPendingRef?: { current: boolean }; recoveryActiveRef?: { current: boolean } }>)('records $state recovery deferral without arming a save', async ({ disposition, ...recovery }) => {
+    vi.useFakeTimers();
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const observe = (event: Event) => diagnostics.push((event as CustomEvent).detail);
+    window.addEventListener('timeline:save-diagnostic', observe);
+    const handoff = { capture: vi.fn(async () => {}), flush: vi.fn(async () => 2),
+      remoteHistoryAvailable: () => true, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(async () => {}), redo: vi.fn(async () => {}) } as unknown as TimelineLocalSaveHandoff;
+    const harness = setup({ ...recovery, localDocumentSave: handoff });
+    try {
+      harness.scheduleSave(makeTimelineData('recovery-diagnostic'));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      expect(diagnostics.some(row => row.phase === 'schedule-disposition' && row.disposition === disposition)).toBe(true);
+      expect(diagnostics.some(row => row.phase === 'mutation-dispatch')).toBe(false);
+      expect(handoff.capture).not.toHaveBeenCalled();
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+      const recoveryRef = recovery.recoveryPendingRef ?? recovery.recoveryActiveRef;
+      recoveryRef!.current = false;
+      act(() => harness.result.current.resumeDeferredRecoverySave());
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); for (let i = 0; i < 20; i++) await Promise.resolve(); });
+      expect(handoff.capture).toHaveBeenCalledTimes(1);
+      expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+    } finally {
+      harness.unmount();
+      window.removeEventListener('timeline:save-diagnostic', observe);
+      Object.assign(window, { __timelineSaveDiagnosticsEnabled: false });
+      vi.useRealTimers();
+    }
+  });
+
+  it('records rejected local capture without dispatching a mutation or reporting success', async () => {
+    vi.useFakeTimers();
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    const diagnostics: Array<Record<string, unknown>> = [];
+    const observe = (event: Event) => diagnostics.push((event as CustomEvent).detail);
+    window.addEventListener('timeline:save-diagnostic', observe);
+    const handoff = { capture: vi.fn(async () => { throw new Error('private capture failure'); }),
+      flush: vi.fn(async () => 2), remoteHistoryAvailable: () => true, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(async () => {}), redo: vi.fn(async () => {}) } as unknown as TimelineLocalSaveHandoff;
+    const harness = setup({ localDocumentSave: handoff });
+    try {
+      harness.scheduleSave(makeTimelineData('rejected-diagnostic-capture'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); for (let i = 0; i < 20; i++) await Promise.resolve(); });
+      expect(diagnostics.some(row => row.phase === 'local-capture-error' && row.captureStage === 'capture-call'
+        && row.captureCode === 'rejected')).toBe(true);
+      expect(diagnostics.some(row => row.phase === 'local-capture-settled' && row.captureStage === 'capture-call'
+        && row.captureCode === 'rejected')).toBe(true);
+      expect(diagnostics.some(row => row.phase === 'mutation-dispatch')).toBe(false);
+      expect(diagnostics.some(row => row.phase === 'save-return' && row.returnReason === 'error')).toBe(true);
+      expect(diagnostics.some(row => row.phase === 'save-return' && row.returnReason === 'success')).toBe(false);
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+    } finally {
+      harness.unmount();
+      window.removeEventListener('timeline:save-diagnostic', observe);
+      Object.assign(window, { __timelineSaveDiagnosticsEnabled: false });
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps a real save acknowledged when diagnostic dispatch throws', async () => {
+    vi.useFakeTimers();
+    Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+    const dispatch = window.dispatchEvent.bind(window);
+    vi.spyOn(window, 'dispatchEvent').mockImplementation((event) => {
+      if (event.type === 'timeline:save-diagnostic') throw new Error('observer failure');
+      return dispatch(event);
+    });
+    const harness = setup();
+    try {
+      harness.scheduleSave(makeTimelineData('observer-throws'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); for (let i = 0; i < 20; i++) await Promise.resolve(); });
+      expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+      expect(harness.result.current.saveStatus).toBe('saved');
+    } finally {
+      harness.unmount();
+      vi.restoreAllMocks();
+      Object.assign(window, { __timelineSaveDiagnosticsEnabled: false });
+      vi.useRealTimers();
+    }
   });
 
   it('does NOT fire saveTimeline while a resize interaction is active', async () => {

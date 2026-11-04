@@ -6,14 +6,17 @@ describe('timeline save diagnostic projection', () => {
 
   it('does not evaluate observations unless the browser flag is exactly true', () => {
     const read = vi.fn(() => ({}));
+    const boundary = vi.fn(() => 'schedule' as const);
     for (const flag of [undefined, false, 1, 'true']) {
       vi.stubGlobal('__timelineSaveDiagnosticsEnabled', flag);
-      emitTimelineSaveDiagnostic('schedule', read);
+      emitTimelineSaveDiagnostic(boundary, read);
     }
     expect(read).not.toHaveBeenCalled();
+    expect(boundary).not.toHaveBeenCalled();
     Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', { configurable: true, get() { throw new Error('flag'); } });
     expect(() => emitTimelineSaveDiagnostic('schedule', read)).not.toThrow();
     expect(read).not.toHaveBeenCalled();
+    expect(boundary).not.toHaveBeenCalled();
   });
 
   it('emits detached bounded scalar records with stable non-auth aliases', () => {
@@ -133,6 +136,40 @@ describe('timeline save diagnostic projection', () => {
       basisReadOrdinal: Infinity, operationOrdinal: -1, resolverChanged: 1 }));
     expect((dispatch.mock.lastCall![0] as CustomEvent).detail).toMatchObject({ operation: 'UNKNOWN',
       operationState: 'UNKNOWN', basisReadOrdinal: 'UNKNOWN', operationOrdinal: 'UNKNOWN', resolverChanged: 'UNKNOWN' });
+  });
+
+  it('projects persistence-path diagnostics to fixed enums, booleans and bounded counters', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const dispatch = vi.spyOn(window, 'dispatchEvent').mockReturnValue(true);
+    emitTimelineSaveDiagnostic('schedule-disposition', () => ({
+      disposition: 'interaction-active', persistenceEnabled: true, recoveryPending: false,
+      recoveryActive: false, interactionActive: true, conflictExhausted: false,
+      schemaIncompatible: false, sequenceNumber: 12, source: { privateValue: 'secret' },
+    }));
+    const detail = (dispatch.mock.lastCall![0] as CustomEvent).detail;
+    expect(detail).toMatchObject({ phase: 'schedule-disposition', disposition: 'interaction-active',
+      persistenceEnabled: true, recoveryPending: false, recoveryActive: false, interactionActive: true,
+      conflictExhausted: false, schemaIncompatible: false, sequenceNumber: 12 });
+    expect(JSON.stringify(detail)).not.toContain('secret');
+    emitTimelineSaveDiagnostic('save-return', () => ({ returnReason: 'private reason', sequenceNumber: -1,
+      captureStage: 'private stage', captureCode: 'private code' }));
+    expect((dispatch.mock.lastCall![0] as CustomEvent).detail).toMatchObject({ returnReason: 'UNKNOWN',
+      sequenceNumber: 'UNKNOWN', captureStage: 'UNKNOWN', captureCode: 'UNKNOWN' });
+
+    const validCases = [
+      ['schedule-disposition', { disposition: 'recovery-pending' }],
+      ['save-return', { returnReason: 'session-invalidated' }],
+      ['local-capture-start', { captureStage: 'capture-call' }],
+      ['local-capture-settled', { captureStage: 'capture-set', captureCode: 'resolved' }],
+      ['local-capture-error', { captureStage: 'local-capture', captureCode: 'rejected' }],
+      ['mutation-error', { sequenceNumber: 7 }],
+    ] as const;
+    for (const [phase, observation] of validCases) {
+      emitTimelineSaveDiagnostic(phase, () => observation);
+      const projected = (dispatch.mock.lastCall![0] as CustomEvent).detail;
+      expect(projected.phase).toBe(phase);
+      for (const [key, value] of Object.entries(observation)) expect(projected[key]).toBe(value);
+    }
   });
 
 });

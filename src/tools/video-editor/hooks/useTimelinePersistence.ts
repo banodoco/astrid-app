@@ -664,15 +664,29 @@ export function useTimelinePersistence({
       traceId?: string;
     },
   ) => {
-    if (reloadInProgressRef.current) return;
-    if (recoveryPendingRef?.current || recoveryActiveRef?.current) return;
+    emitTimelineSaveDiagnostic('save-entry', () => ({ timelineId, sequenceNumber: scheduledOrAttempt.seq,
+      persistenceEnabled, recoveryPending: recoveryPendingRef?.current, recoveryActive: recoveryActiveRef?.current,
+      conflictExhausted: isConflictExhaustedRef.current, schemaIncompatible: isSchemaIncompatibleRef.current,
+      generation: scheduledOrAttempt.generation, sessionPresent: scheduledOrAttempt.session === activeTargetRef.current }));
+    if (reloadInProgressRef.current) {
+      emitTimelineSaveDiagnostic('save-return', () => ({ timelineId, returnReason: 'reload', sequenceNumber: scheduledOrAttempt.seq }));
+      return;
+    }
+    if (recoveryPendingRef?.current || recoveryActiveRef?.current) {
+      emitTimelineSaveDiagnostic('save-return', () => ({ timelineId, returnReason: 'recovery', sequenceNumber: scheduledOrAttempt.seq }));
+      return;
+    }
     if (scheduledOrAttempt.session !== activeTargetRef.current
       || scheduledOrAttempt.generation !== scheduledOrAttempt.session.generation
-      || scheduledOrAttempt.session.cancelledRanges.some((range) => scheduledOrAttempt.seq >= range.from && scheduledOrAttempt.seq <= range.through)) return;
+      || scheduledOrAttempt.session.cancelledRanges.some((range) => scheduledOrAttempt.seq >= range.from && scheduledOrAttempt.seq <= range.through)) {
+      emitTimelineSaveDiagnostic('save-return', () => ({ timelineId, returnReason: 'session-invalidated', sequenceNumber: scheduledOrAttempt.seq }));
+      return;
+    }
     if (isSavingRef.current && !options?.bypassQueue) {
       if (!('expectedVersion' in scheduledOrAttempt)) {
         pendingSaveRef.current = scheduledOrAttempt;
       }
+      emitTimelineSaveDiagnostic('save-return', () => ({ timelineId, returnReason: 'saving-queued', sequenceNumber: scheduledOrAttempt.seq }));
       return;
     }
 
@@ -694,6 +708,9 @@ export function useTimelinePersistence({
           stableSignature: scheduledOrAttempt.data.stableSignature,
         };
     let retryScheduled = false;
+    // These values classify the existing await boundaries for diagnostics only.
+    let diagnosticStage: 'capture-set' | 'local-capture' | 'mutation' = 'capture-set';
+    let diagnosticOutcome: 'success' | 'error' = 'success';
 
     if (!options?.bypassQueue) {
       isSavingRef.current = true;
@@ -702,9 +719,16 @@ export function useTimelinePersistence({
 
     attempt.session.activeAttempts.add(attempt);
     try {
+      emitTimelineSaveDiagnostic('local-capture-start', () => ({ timelineId, captureStage: 'capture-set', sequenceNumber: attempt.seq }));
       await Promise.all([...(attempt.session.captures ?? [])]);
+      emitTimelineSaveDiagnostic('local-capture-settled', () => ({ timelineId, captureStage: 'capture-set', captureCode: 'resolved', sequenceNumber: attempt.seq }));
       if (attempt.session.captureFailure) throw attempt.session.captureFailure;
+      diagnosticStage = 'local-capture';
+      emitTimelineSaveDiagnostic('local-capture-start', () => ({ timelineId, captureStage: 'local-capture', sequenceNumber: attempt.seq }));
       await attempt.localCapture;
+      emitTimelineSaveDiagnostic('local-capture-settled', () => ({ timelineId, captureStage: 'local-capture', captureCode: 'resolved', sequenceNumber: attempt.seq }));
+      diagnosticStage = 'mutation';
+      emitTimelineSaveDiagnostic('mutation-dispatch', () => ({ timelineId, sequenceNumber: attempt.seq }));
       await saveMutation.mutateAsync(
         {
           config: attempt.config,
@@ -804,6 +828,13 @@ export function useTimelinePersistence({
         },
       );
     } catch (error) {
+      diagnosticOutcome = 'error';
+      emitTimelineSaveDiagnostic(() => diagnosticStage === 'mutation' ? 'mutation-error' : 'local-capture-error', () => ({
+        timelineId,
+        captureStage: diagnosticStage === 'mutation' ? undefined : diagnosticStage,
+        captureCode: 'rejected',
+        sequenceNumber: attempt.seq,
+      }));
       recordDraftReloadFailure();
       // An obsolete request may settle after replacement/unmount. It cannot
       // reject a new session's waiters, update its state, or start a retry.
@@ -941,6 +972,7 @@ export function useTimelinePersistence({
         setSaveStatus('error');
       }
     } finally {
+      emitTimelineSaveDiagnostic('save-return', () => ({ timelineId, returnReason: diagnosticOutcome, sequenceNumber: attempt.seq }));
       attempt.session.activeAttempts.delete(attempt);
       if (!options?.bypassQueue) {
         isSavingRef.current = false;
@@ -1081,16 +1113,27 @@ export function useTimelinePersistence({
     const captures = session.captures ??= new Set();
     let localCapture: Promise<void> | undefined;
     if (session.localDocumentSave) {
+      let captureFailed = false;
+      emitTimelineSaveDiagnostic('local-capture-start', () => ({ timelineId, captureStage: 'capture-call', sequenceNumber: seq }));
       try {
         localCapture = session.localDocumentSave.capture({
           ...snapshot.draft, bundle: snapshot.wireBundle, head: snapshot.baseHead,
         }, gestureBasis);
-      } catch (error) { localCapture = Promise.reject(error); }
+      } catch (error) {
+        captureFailed = true;
+        emitTimelineSaveDiagnostic('local-capture-error', () => ({ timelineId, captureStage: 'capture-call', captureCode: 'sync-throw', sequenceNumber: seq }));
+        localCapture = Promise.reject(error);
+      }
       localCapture = localCapture.catch((error: unknown) => {
+        captureFailed = true;
+        emitTimelineSaveDiagnostic('local-capture-error', () => ({ timelineId, captureStage: 'capture-call', captureCode: 'rejected', sequenceNumber: seq }));
         session.captureFailure = error;
         recordDraftReloadFailure();
         throw error;
-      }).finally(() => { captures.delete(localCapture!); });
+      }).finally(() => {
+        emitTimelineSaveDiagnostic('local-capture-settled', () => ({ timelineId, captureStage: 'capture-call', captureCode: captureFailed ? 'rejected' : 'resolved', sequenceNumber: seq }));
+        captures.delete(localCapture!);
+      });
       captures.add(localCapture);
     }
     void localCapture?.catch(() => {});
@@ -1117,6 +1160,7 @@ export function useTimelinePersistence({
     // ordering silently replaced the old recovery record and then returned,
     // leaving the UI looking saved even though no POST had happened.
     if (recoveryPendingRef?.current || recoveryActiveRef?.current) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: recoveryPendingRef?.current ? 'recovery-pending' : 'recovery-active', recoveryPending: recoveryPendingRef?.current, recoveryActive: recoveryActiveRef?.current, sequenceNumber: editSeqRef.current }));
       deferredDuringRecoveryRef.current = {
         data: nextData,
         gestureBasis: options?.gestureBasis,
@@ -1135,6 +1179,7 @@ export function useTimelinePersistence({
     const scheduledSave = captured ?? createScheduledSave(nextData, editSeqRef.current, options?.gestureBasis);
 
     if (reloadInProgressRef.current) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'reload-active', sequenceNumber: scheduledSave.seq }));
       // A user edit made while canonical Reload is pending supersedes that
       // reload. Keep it durably recoverable, then resume its normal autosave
       // path once the reload has stopped; never let the reload commit over it.
@@ -1145,6 +1190,7 @@ export function useTimelinePersistence({
     }
 
     if (!persistenceEnabled) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'persistence-disabled', persistenceEnabled, sequenceNumber: scheduledSave.seq }));
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
         saveTimer.current = null;
@@ -1167,6 +1213,7 @@ export function useTimelinePersistence({
     // debounce, not mid-gesture). The deferred payload is re-flushed through
     // this same path when the gesture ends, arming the watchdog then.
     if (isInteractionActive(getInteractionStateRef())) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'interaction-active', interactionActive: true, sequenceNumber: scheduledSave.seq }));
       deferredSaveRef.current = { save: scheduledSave, preserveStatus: options?.preserveStatus };
       if (saveTimer.current) {
         clearTimeout(saveTimer.current);
@@ -1193,9 +1240,11 @@ export function useTimelinePersistence({
     // was already coalesced into the one-slot recovery store above; the banner
     // offers Reload / Save as copy.
     if (isConflictExhausted) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'conflict-exhausted', conflictExhausted: true, sequenceNumber: scheduledSave.seq }));
       return;
     }
     if (schemaIncompatible) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'schema-incompatible', schemaIncompatible: true, sequenceNumber: scheduledSave.seq }));
       return;
     }
 
@@ -1208,6 +1257,7 @@ export function useTimelinePersistence({
     }
 
     if (isSavingRef.current) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'saving-queued', sequenceNumber: scheduledSave.seq }));
       pendingSaveRef.current = scheduledSave;
       return;
     }
@@ -1215,13 +1265,16 @@ export function useTimelinePersistence({
     // An ambiguous transport attempt owns its retry tuple. A newer mutation
     // waits behind it instead of cancelling the retry and borrowing its seq.
     if (errorRetryTimer.current) {
+      emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'retry-queued', sequenceNumber: scheduledSave.seq }));
       pendingSaveRef.current = scheduledSave;
       return;
     }
 
+    emitTimelineSaveDiagnostic('schedule-disposition', () => ({ timelineId, disposition: 'scheduled', persistenceEnabled, sequenceNumber: scheduledSave.seq }));
     recordShotTimelinePhase(scheduledSave.traceId, 'local-commit', { saveDelayMs: SAVE_DEBOUNCE_MS });
     saveTimer.current = setTimeout(() => {
       saveTimer.current = null;
+      emitTimelineSaveDiagnostic('debounce-fired', () => ({ timelineId, sequenceNumber: scheduledSave.seq }));
       recordShotTimelinePhase(scheduledSave.traceId, 'debounce-fired');
       void doSave(scheduledSave);
     }, SAVE_DEBOUNCE_MS);

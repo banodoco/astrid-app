@@ -12,6 +12,8 @@ import { RuntimeDataProvider } from '@/integrations/runtime/dataProvider.ts';
 import { json, runtimeFixture } from '@/test/fakeWorkspaceRuntime.ts';
 import type { HistoryEntry, HistoryPage, CommitRequest } from '@/integrations/runtime/timeline-commit-types.ts';
 import { bindElementParameterOwner, useTimelineSave } from './useTimelineSave';
+import * as timelinePersistenceModule from './useTimelinePersistence';
+import { TimelineEventBus } from './useTimelineEventBus';
 import type { UsePollSyncQueries } from './usePollSync';
 import { useClipEditing } from './useClipEditing';
 import { useVideoEditorRuntime, VideoEditorRuntimeProvider } from '../contexts/VideoEditorRuntimeContext';
@@ -2052,6 +2054,49 @@ describe('useTimelineSave mounted save diagnostics', () => {
     vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
   });
   afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.unstubAllGlobals(); });
+
+  it('registers the persistence scheduleSave callback directly and forwards the original event arguments', async () => {
+    const persistenceSpy = vi.spyOn(timelinePersistenceModule, 'useTimelinePersistence');
+    const registrationSpy = vi.spyOn(TimelineEventBus.prototype, 'on');
+    const records: Array<{ phase: string; [key: string]: unknown }> = [];
+    const listener = (event: Event) => records.push((event as CustomEvent).detail);
+    window.addEventListener('timeline:save-diagnostic', listener);
+    const data = makeTimelineData('event-bus-schedule');
+    const harness = setup(async () => 1, undefined, { data, loadBasis: vi.fn() });
+    try {
+      await settleInitialRecoveryCheck();
+
+      const eventBus = harness.hook.result.current.eventBus;
+      const scheduleRegistrationIndex = registrationSpy.mock.calls.reduce((lastIndex, [eventName], index) =>
+        eventName === 'scheduleSave' && registrationSpy.mock.contexts[index] === eventBus ? index : lastIndex, -1);
+      expect(scheduleRegistrationIndex).toBeGreaterThanOrEqual(0);
+      const registeredListener = registrationSpy.mock.calls[scheduleRegistrationIndex][1];
+      expect(persistenceSpy.mock.results.some(result =>
+        (result.value as ReturnType<typeof timelinePersistenceModule.useTimelinePersistence> | undefined)?.scheduleSave === registeredListener,
+      )).toBe(true);
+
+      const nextData = makeTimelineData('event-bus-scheduled-value');
+      const options = { preserveStatus: true };
+      expect(harness.hook.result.current.saveStatus).toBe('saved');
+      act(() => eventBus.emit('scheduleSave', nextData, options));
+      expect(records.find(record => record.phase === 'schedule')).toMatchObject({ timelineId: 'timeline-1' });
+      expect(records.find(record => record.phase === 'schedule-disposition')).toMatchObject({ disposition: 'scheduled' });
+      expect(harness.hook.result.current.saveStatus).toBe('saved');
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+      await flush();
+      expect(harness.saveTimeline).toHaveBeenCalledTimes(1);
+      expect(harness.saveTimeline.mock.calls[0]?.[0]).toBe('timeline-1');
+      expect(harness.saveTimeline.mock.calls[0]?.[1]).toEqual(nextData.config);
+      expect(harness.saveTimeline.mock.calls[0]?.[2]).toBe(nextData.configVersion);
+      expect(harness.saveTimeline.mock.calls[0]?.[3]).toEqual(nextData.registry);
+    } finally {
+      harness.hook.unmount();
+      window.removeEventListener('timeline:save-diagnostic', listener);
+      registrationSpy.mockRestore();
+      persistenceSpy.mockRestore();
+    }
+  });
 
   it('joins delayed production history and immutable completion to the cancelled generation and committed resolver change', async () => {
     const locksDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');

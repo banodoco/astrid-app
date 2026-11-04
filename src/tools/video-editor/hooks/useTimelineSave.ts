@@ -216,6 +216,19 @@ export function useTimelineSave(
     };
   }, [localOwner]);
   const { dataRef: localDataRef, editSeqRef: localEditSeqRef, commitData: adoptCanonicalData } = commit;
+  if (recoveryCheckObservationRef.current === null) {
+    // A terminal request can precede discovery admission. Keep that distinct
+    // from a started read that is still pending, without retaining recovery data.
+    recoveryCheckObservationRef.current = () => ({
+      recoveryCheckOrdinal: 0, recoveryReadState: 'not-started', recoverySkipReason: 'data-unavailable',
+      recoveryFinalizer: 'not-run', recoveryScopeMatches: false,
+      recoveryDataPresent: Boolean(localDataRef.current), recoveryCancelled: false,
+      recoveryCompleted: false, recoveryFinalizerApplied: false,
+      recoveryGenerationCurrent: recoveryActionGenerationRef.current,
+      recoveryEditSeqCurrent: localEditSeqRef.current,
+      recoveryPending: recoveryPendingRef.current, recoveryActive: recoveryActiveRef.current,
+    });
+  }
   const originalHeadKey = canonicalJsonStringify(commit.data?.head ?? null);
   // Updated only after commit. A suspended/aborted render cannot supply a
   // dependency-change claim. Cleanup alone cannot distinguish unmount from
@@ -466,6 +479,7 @@ export function useTimelineSave(
     onCanonicalReloadStart: invalidateRecoveryAction,
     localDocumentSave,
     diagnosticOwner: localOwner,
+    diagnosticRecoveryCheckRef: recoveryCheckObservationRef,
   });
   useTimelineEditingLease({
     provider,
@@ -525,14 +539,26 @@ export function useTimelineSave(
   resumeDeferredRecoverySaveRef.current = resumeDeferredRecoverySave;
 
   useEffect(() => {
-    return eventBusRef.current.on('scheduleSave', (...args) => {
-      emitTimelineSaveDiagnostic('recovery-check-at-schedule', () => ({
-        ...recoveryCheckObservationRef.current?.(),
-        recoveryPending: recoveryPendingRef.current, recoveryActive: recoveryActiveRef.current,
-      }));
-      persistence.scheduleSave(...args);
-    });
+    return eventBusRef.current.on('scheduleSave', persistence.scheduleSave);
   }, [persistence.scheduleSave]);
+
+  useEffect(() => {
+    // This listener belongs to this mounted hook, and reads only on an explicit
+    // terminal diagnostic request. It never resumes or advances recovery.
+    const snapshot = () => emitTimelineSaveDiagnostic('recovery-current-snapshot', () => ({
+      ...recoveryCheckObservationRef.current?.(), owner: localOwner, timelineId,
+      recoveryPending: recoveryPendingRef.current, recoveryActive: recoveryActiveRef.current,
+    }));
+    try {
+      if (typeof window === 'undefined'
+        || (window as unknown as { __timelineSaveDiagnosticsEnabled?: unknown }).__timelineSaveDiagnosticsEnabled !== true) return;
+      window.addEventListener('timeline:save-diagnostic-snapshot-request', snapshot);
+    } catch { return; /* Diagnostic opt-in/registration cannot affect the hook. */ }
+    return () => {
+      try { window.removeEventListener('timeline:save-diagnostic-snapshot-request', snapshot); }
+      catch { /* Diagnostic cleanup cannot affect the hook. */ }
+    };
+  }, [localOwner, timelineId]);
 
   usePollSync({
     store,
@@ -603,16 +629,7 @@ export function useTimelineSave(
   useEffect(() => {
     // No durable persistence (a read-only example, the editor tour) means no draft was ever written to offer.
     if (!isDataProviderPersistenceEnabled(provider)) return;
-    if (!hasTimelineData || recoveryCheckedScopeRef.current === recoveryScope) {
-      emitTimelineSaveDiagnostic('recovery-check-skipped', () => ({
-        ...recoveryCheckObservationRef.current?.(), recoveryCheckOrdinal: recoveryCheckOrdinalRef.current,
-        recoverySkipReason: !hasTimelineData ? 'data-unavailable' : 'scope-already-checked',
-        recoveryScopeMatches: recoveryCheckedScopeRef.current === recoveryScope,
-        recoveryDataPresent: Boolean(commit.dataRef.current),
-        recoveryPending: recoveryPendingRef.current, recoveryActive: recoveryActiveRef.current,
-      }));
-      return;
-    }
+    if (!hasTimelineData || recoveryCheckedScopeRef.current === recoveryScope) return;
     recoveryCheckedScopeRef.current = recoveryScope;
     const loadedData = commit.dataRef.current;
     const checkStartedAt = loadedData ? Date.now() : 0;
@@ -635,7 +652,6 @@ export function useTimelineSave(
       recoveryPending: recoveryPendingRef.current, recoveryActive: recoveryActiveRef.current,
     });
     recoveryCheckObservationRef.current = observeCheck;
-    emitTimelineSaveDiagnostic(loadedData ? 'recovery-check-start' : 'recovery-check-skipped', observeCheck);
     if (!loadedData) return;
     void Promise.resolve().then(() => {
       if (typeof indexedDB === 'undefined') throw new Error('Timeline recovery storage is unavailable.');
@@ -646,7 +662,6 @@ export function useTimelineSave(
         skipReason = cancelled ? 'cancelled' : !record ? 'none'
           : recoveryCheckedScopeRef.current !== recoveryScope ? 'scope-mismatch'
           : recoveryActionGenerationRef.current !== actionGenerationAtCheck ? 'generation-mismatch' : 'none';
-        emitTimelineSaveDiagnostic('recovery-read-settled', observeCheck);
         if (cancelled || !record
           || recoveryCheckedScopeRef.current !== recoveryScope
           || recoveryActionGenerationRef.current !== actionGenerationAtCheck) {
@@ -660,7 +675,6 @@ export function useTimelineSave(
           && Number.isFinite(updatedAt)
           && updatedAt >= checkStartedAt) {
           skipReason = 'edit-raced';
-          emitTimelineSaveDiagnostic('recovery-check-skipped', observeCheck);
           return;
         }
         const draft = record.draft as { config?: TimelineConfig; registry?: AssetRegistry; bundle?: TimelineBundleEnvelope | null };
@@ -708,18 +722,14 @@ export function useTimelineSave(
         if (readState === 'pending') readState = 'rejected';
         discoveryFailed = true;
         recordDraftReloadFailure();
-        emitTimelineSaveDiagnostic(readState === 'rejected' ? 'recovery-read-settled' : 'recovery-check-error',
-          observeCheck);
       }).finally(() => {
         completed = true;
         if (!cancelled && recoveryActionGenerationRef.current === actionGenerationAtCheck) {
           recoveryActiveRef.current = discoveryFailed || recoveryPendingRef.current;
           finalizer = 'applied';
-          emitTimelineSaveDiagnostic('recovery-finally', observeCheck);
           if (!recoveryActiveRef.current) resumeDeferredRecoverySaveRef.current();
         } else {
           finalizer = cancelled ? 'skipped-cancelled' : 'skipped-generation';
-          emitTimelineSaveDiagnostic('recovery-finally', observeCheck);
         }
       });
     return () => {
@@ -727,7 +737,6 @@ export function useTimelineSave(
       // StrictMode can retire the first check before it resolves. Its
       // replacement must perform the read that releases the recovery gate.
       if (!completed && recoveryCheckedScopeRef.current === recoveryScope) recoveryCheckedScopeRef.current = null;
-      emitTimelineSaveDiagnostic('recovery-cleanup', observeCheck);
     };
   }, [commit.dataRef, commit.editSeqRef, hasTimelineData, recoveryKey, recoveryScope, timelineId, offerRecovery, provider, trustedRecoveryHead]);
   useEffect(() => {

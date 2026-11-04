@@ -186,31 +186,87 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
       const scheduled = records.find((record) => record.phase === 'schedule-disposition' && record.disposition === 'recovery-active');
       expect(scheduled).toMatchObject({ recoveryPending: false, recoveryActive: true });
       expect(editor.provider.saveTimeline).not.toHaveBeenCalled();
-      const checkAtSchedule = records.find((record) => record.phase === 'recovery-check-at-schedule');
+      const checkAtSchedule = records.find((record) => record.phase === 'schedule'
+        && record.recoveryCheckOrdinal !== undefined);
       expect(checkAtSchedule).toMatchObject({
         recoveryReadState: 'pending',
         recoveryFinalizer: 'not-run',
       });
       expect(checkAtSchedule?.recoveryCheckOrdinal).toEqual(expect.any(Number));
-      expect(checkAtSchedule?.recoveryCheckOrdinal).toBe(records.find((record) => record.phase === 'recovery-check-start')?.recoveryCheckOrdinal);
-      expect(records.some((record) => record.phase === 'recovery-finally'
-        && record.recoveryCheckOrdinal === checkAtSchedule?.recoveryCheckOrdinal)).toBe(false);
+      const scheduleObservation = structuredClone(checkAtSchedule);
+      const recoveryPhase = (record: Record<string, unknown>) => (
+        typeof record.phase === 'string' && record.phase.startsWith('recovery-')
+      );
+      expect(records.some(recoveryPhase)).toBe(false);
 
       await act(async () => { finishRecoveryRead(null); await pendingRecoveryRead; });
-      expect(records.find((record) => record.phase === 'recovery-read-settled')).toMatchObject({
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
+      const recoverySnapshot = records.find((record) => record.phase === 'recovery-current-snapshot');
+      expect(recoverySnapshot).toMatchObject({
         recoveryCheckOrdinal: checkAtSchedule?.recoveryCheckOrdinal,
+        ownerAlias: checkAtSchedule?.ownerAlias,
+        timelineId: checkAtSchedule?.timelineId,
         recoveryReadState: 'empty',
-      });
-      expect(records.find((record) => record.phase === 'recovery-finally')).toMatchObject({
-        recoveryCheckOrdinal: checkAtSchedule?.recoveryCheckOrdinal,
         recoveryFinalizer: 'applied',
+        recoveryCompleted: true,
+        recoveryPending: false,
+        recoveryActive: false,
       });
+      expect(records.filter(recoveryPhase))
+        .toEqual([recoverySnapshot]);
+      expect(checkAtSchedule).toEqual(scheduleObservation);
 
       await advance(600);
       expect(editor.provider.saveTimeline).toHaveBeenCalledTimes(1);
       expect(editor.provider.saveTimeline.mock.calls[0]?.[1].output.file).toBe('edited-while-recovery-loads.mp4');
     } finally {
       finishRecoveryRead(null);
+      hook?.unmount();
+      recoveryRead.mockRestore();
+      window.removeEventListener('timeline:save-diagnostic', listener);
+      if (diagnosticsDescriptor) Object.defineProperty(window, '__timelineSaveDiagnosticsEnabled', diagnosticsDescriptor);
+      else Reflect.deleteProperty(window, '__timelineSaveDiagnosticsEnabled');
+    }
+  });
+
+  it('only emits a recovery snapshot on explicit opt-in and removes the request listener on unmount', async () => {
+    const records: Array<Record<string, unknown>> = [];
+    const listener = (event: Event) => records.push((event as CustomEvent).detail);
+    window.addEventListener('timeline:save-diagnostic', listener);
+    const diagnosticsDescriptor = Object.getOwnPropertyDescriptor(window, '__timelineSaveDiagnosticsEnabled');
+    const indexedDbModule = await import('@/tools/video-editor/data/timelineDraftIndexedDb.ts');
+    const recoveryRead = vi.spyOn(indexedDbModule, 'loadTimelineDraft').mockResolvedValue(null);
+    let hook: Awaited<ReturnType<typeof mountRecoveryEditor>>['hook'] | undefined;
+    try {
+      ({ hook } = await mountRecoveryEditor({ seedRecovery: false }));
+      await waitFor(() => expect(recoveryRead).toHaveBeenCalledTimes(1));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
+      expect(records).toEqual([]);
+      hook.unmount();
+      hook = undefined;
+
+      Object.assign(window, { __timelineSaveDiagnosticsEnabled: true });
+      ({ hook } = await mountRecoveryEditor({ seedRecovery: false }));
+      await waitFor(() => expect(recoveryRead).toHaveBeenCalledTimes(2));
+      await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
+      expect(records.filter((record) => record.phase === 'recovery-current-snapshot')).toHaveLength(1);
+      expect(records.find((record) => record.phase === 'recovery-current-snapshot')).toMatchObject({
+        recoveryReadState: 'empty',
+        recoveryFinalizer: 'applied',
+        recoveryCompleted: true,
+        recoveryPending: false,
+        recoveryActive: false,
+      });
+      expect(records.some((record) => typeof record.phase === 'string'
+        && record.phase.startsWith('recovery-') && record.phase !== 'recovery-current-snapshot')).toBe(false);
+
+      hook?.unmount();
+      records.length = 0;
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
+      expect(records).toEqual([]);
+    } finally {
       hook?.unmount();
       recoveryRead.mockRestore();
       window.removeEventListener('timeline:save-diagnostic', listener);

@@ -183,6 +183,42 @@ export async function currentHead(harness: DirectHarness): Promise<string> {
   return timelines.body.items.find((item: any) => item.is_current_head).revision_id;
 }
 
+export interface TerminalSaveDiagnostics {
+  captureTiming: 'terminal-after-assertions';
+  requestedAt: number | null;
+  snapshots: Record<string, unknown>[];
+  saveDiagnostics: unknown[];
+}
+
+/** Request one synchronous recovery snapshot, then read the existing bounded event buffer once. */
+export async function captureTerminalSaveDiagnostics(page: Page): Promise<TerminalSaveDiagnostics> {
+  const unavailable = (reason: 'page-unavailable' | 'capture-unavailable'): TerminalSaveDiagnostics => ({
+    captureTiming: 'terminal-after-assertions', requestedAt: null,
+    snapshots: [{ phase: 'unavailable', reason }], saveDiagnostics: [],
+  });
+  try {
+    if (page.isClosed()) return unavailable('page-unavailable');
+    return await page.evaluate(() => {
+      const snapshots: Record<string, unknown>[] = [];
+      const onDiagnostic = (event: Event) => {
+        const detail = (event as CustomEvent).detail;
+        if (detail && detail.phase === 'recovery-current-snapshot' && snapshots.length < 32) snapshots.push(detail);
+      };
+      window.addEventListener('timeline:save-diagnostic', onDiagnostic);
+      let requestedAt: number;
+      try {
+        requestedAt = performance.now();
+        window.dispatchEvent(new CustomEvent('timeline:save-diagnostic-snapshot-request'));
+      }
+      finally { window.removeEventListener('timeline:save-diagnostic', onDiagnostic); }
+      const saveDiagnostics = (window as unknown as { __saveEvents?: unknown[] }).__saveEvents;
+      return { captureTiming: 'terminal-after-assertions' as const,
+        requestedAt, snapshots: snapshots.length ? snapshots : [{ phase: 'unavailable', reason: 'snapshot-not-emitted' }],
+        saveDiagnostics: Array.isArray(saveDiagnostics) ? saveDiagnostics.slice(0, 300) : [] };
+    });
+  } catch { return unavailable('capture-unavailable'); }
+}
+
 export async function waitForAudit(harness: DirectHarness, predicate: (entry: ReturnType<DirectHarness['audit']>[number]) => boolean, timeoutMs = 3000) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

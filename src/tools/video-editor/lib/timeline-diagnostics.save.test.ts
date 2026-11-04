@@ -1,8 +1,74 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { emitTimelineSaveDiagnostic, markTimelineSaveRejection } from './timeline-diagnostics';
+import { captureDiagnosticsPreservingOutcome, emitTimelineSaveDiagnostic, markTimelineSaveRejection } from './timeline-diagnostics';
+
+vi.mock('@playwright/test', () => ({ chromium: {}, expect: Object.assign(() => undefined, { poll: () => undefined }), test: { extend: () => ({}) } }));
+vi.mock('../../../../tests/e2e/local/support/harness.ts', () => ({ DOOR_PORT: 1, startDirectHarness: vi.fn() }));
+vi.mock('../../../../tests/e2e/local/mounted-readiness-safety.ts', () => ({ clearMountedBootstrapFailure: vi.fn(),
+  MountedBootstrapError: class extends Error {}, recordMountedBootstrapFailure: vi.fn(), retainMountedBootstrapDiagnostics: vi.fn() }));
+import { captureTerminalSaveDiagnostics } from '../../../../tests/e2e/local/support/app.ts';
 
 describe('timeline save diagnostic projection', () => {
   afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+  it('captures once after success and preserves the original assertion when capture fails', async () => {
+    const captureFailure = new Error('diagnostic capture failed');
+    const success = vi.fn(async () => 'success');
+    const successCapture = vi.fn(async () => { throw captureFailure; });
+    await expect(captureDiagnosticsPreservingOutcome(success, successCapture)).resolves.toBe('success');
+    expect(successCapture).toHaveBeenCalledTimes(1);
+
+    const assertion = new Error('original assertion');
+    const order: string[] = [];
+    const failure = vi.fn(async () => { order.push('work'); throw assertion; });
+    const failedCapture = vi.fn(async () => { order.push('capture'); throw captureFailure; });
+    await expect(captureDiagnosticsPreservingOutcome(failure, failedCapture)).rejects.toBe(assertion);
+    expect(failedCapture).toHaveBeenCalledTimes(1);
+    expect(order).toEqual(['work', 'capture']);
+  });
+
+  it('requests one live snapshot, retains each bounded response and reads the capped event buffer', async () => {
+    let requestCount = 0;
+    const page = { isClosed: () => false, evaluate: async (operation: () => unknown) => operation() };
+    const onRequest = () => {
+      requestCount++;
+      for (let index = 1; index <= 40; index++) {
+        window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: {
+          phase: 'recovery-current-snapshot', ownerAlias: index, timelineId: `timeline-${index}`, recoveryReadState: 'empty',
+        } }));
+      }
+      window.dispatchEvent(new CustomEvent('timeline:save-diagnostic', { detail: { phase: 'schedule', privateValue: 'ignored' } }));
+    };
+    window.addEventListener('timeline:save-diagnostic-snapshot-request', onRequest);
+    (window as unknown as { __saveEvents: unknown[] }).__saveEvents = Array.from({ length: 305 }, (_, index) => index);
+    try {
+      const result = await captureTerminalSaveDiagnostics(page as never);
+      expect(requestCount).toBe(1);
+      expect(result.captureTiming).toBe('terminal-after-assertions');
+      expect(result.requestedAt).toEqual(expect.any(Number));
+      expect(result.snapshots).toHaveLength(32);
+      expect(result.snapshots[0]).toMatchObject({ ownerAlias: 1, timelineId: 'timeline-1' });
+      expect(result.snapshots[31]).toMatchObject({ ownerAlias: 32, timelineId: 'timeline-32' });
+      expect(result.snapshots.every((snapshot) => snapshot.phase === 'recovery-current-snapshot')).toBe(true);
+      expect(result.saveDiagnostics).toHaveLength(300);
+    } finally {
+      window.removeEventListener('timeline:save-diagnostic-snapshot-request', onRequest);
+      delete (window as unknown as { __saveEvents?: unknown[] }).__saveEvents;
+    }
+  });
+
+  it('returns fixed unavailable records for closed pages and evaluation failures', async () => {
+    const closed = await captureTerminalSaveDiagnostics({ isClosed: () => true, evaluate: vi.fn() } as never);
+    expect(closed).toEqual({ captureTiming: 'terminal-after-assertions', requestedAt: null,
+      snapshots: [{ phase: 'unavailable', reason: 'page-unavailable' }], saveDiagnostics: [] });
+    const failed = await captureTerminalSaveDiagnostics({ isClosed: () => false,
+      evaluate: async () => { throw new Error('private evaluation failure'); } } as never);
+    expect(failed).toEqual({ captureTiming: 'terminal-after-assertions', requestedAt: null,
+      snapshots: [{ phase: 'unavailable', reason: 'capture-unavailable' }], saveDiagnostics: [] });
+    expect(JSON.stringify(failed)).not.toContain('private evaluation failure');
+    const statusFailed = await captureTerminalSaveDiagnostics({ isClosed: () => { throw new Error('private page status'); },
+      evaluate: vi.fn() } as never);
+    expect(statusFailed.snapshots).toEqual([{ phase: 'unavailable', reason: 'capture-unavailable' }]);
+  });
 
   it('does not evaluate observations unless the browser flag is exactly true', () => {
     const read = vi.fn(() => ({}));
@@ -17,6 +83,32 @@ describe('timeline save diagnostic projection', () => {
     expect(() => emitTimelineSaveDiagnostic('schedule', read)).not.toThrow();
     expect(read).not.toHaveBeenCalled();
     expect(boundary).not.toHaveBeenCalled();
+  });
+
+  it('keeps current recovery snapshots on the bounded scalar allowlist and honors opt-out', () => {
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
+    const dispatch = vi.spyOn(window, 'dispatchEvent').mockReturnValue(true);
+    emitTimelineSaveDiagnostic('recovery-current-snapshot', () => ({ recoveryCheckOrdinal: 2,
+      recoveryReadState: 'record', recoverySkipReason: 'none', recoveryFinalizer: 'applied',
+      recoveryScopeMatches: true, recoveryDataPresent: true, recoveryCancelled: false,
+      recoveryCompleted: true, recoveryFinalizerApplied: true, recoveryGenerationAtCheck: 4,
+      recoveryGenerationCurrent: 4, recoveryEditSeqAtCheck: 9, recoveryEditSeqCurrent: 9,
+      recoveryDraft: 'private draft', recoveryKey: 'private key' }));
+    const detail = (dispatch.mock.lastCall![0] as CustomEvent).detail;
+    expect(detail).toMatchObject({ phase: 'recovery-current-snapshot', recoveryCheckOrdinal: 2,
+      recoveryReadState: 'record', recoverySkipReason: 'none', recoveryFinalizer: 'applied',
+      recoveryScopeMatches: true, recoveryDataPresent: true, recoveryCancelled: false,
+      recoveryCompleted: true, recoveryFinalizerApplied: true, recoveryGenerationAtCheck: 4,
+      recoveryGenerationCurrent: 4, recoveryEditSeqAtCheck: 9, recoveryEditSeqCurrent: 9 });
+    expect(detail).not.toHaveProperty('recoveryDraft');
+    expect(detail).not.toHaveProperty('recoveryKey');
+    expect(JSON.stringify(detail)).not.toMatch(/private draft|private key/);
+
+    vi.stubGlobal('__timelineSaveDiagnosticsEnabled', false);
+    const read = vi.fn(() => ({ recoveryCheckOrdinal: 3 }));
+    emitTimelineSaveDiagnostic('recovery-current-snapshot', read);
+    expect(read).not.toHaveBeenCalled();
+    expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it('emits detached bounded scalar records with stable non-auth aliases', () => {
@@ -172,7 +264,7 @@ describe('timeline save diagnostic projection', () => {
     }
   });
 
-  it('projects recovery checks through frozen enums and bounded counters without leaking unknown fields', () => {
+  it('projects scheduled recovery observations through frozen enums and bounded counters', () => {
     vi.stubGlobal('__timelineSaveDiagnosticsEnabled', true);
     const dispatch = vi.spyOn(window, 'dispatchEvent').mockReturnValue(true);
     const privateGetter = vi.fn(() => 'secret draft key');
@@ -194,10 +286,10 @@ describe('timeline save diagnostic projection', () => {
       recoveryKey: 'private-key',
       error: new Error('private error text'),
     }, { arbitraryUnknownField: { get: privateGetter } });
-    emitTimelineSaveDiagnostic('recovery-check-at-schedule', () => observation);
+    emitTimelineSaveDiagnostic('schedule', () => observation);
     const detail = (dispatch.mock.calls[0][0] as CustomEvent).detail;
     expect(detail).toMatchObject({
-      phase: 'recovery-check-at-schedule',
+      phase: 'schedule',
       recoveryCheckOrdinal: 3,
       recoveryReadState: 'pending',
       recoverySkipReason: 'none',
@@ -216,7 +308,7 @@ describe('timeline save diagnostic projection', () => {
     expect(privateGetter).not.toHaveBeenCalled();
     expect(JSON.stringify(detail)).not.toMatch(/private draft contents|private-key|private error text|secret draft key/);
 
-    emitTimelineSaveDiagnostic('recovery-check-at-schedule', () => ({
+    emitTimelineSaveDiagnostic('recovery-current-snapshot', () => ({
       recoveryCheckOrdinal: 1_000_000_001,
       recoveryReadState: 'secret state',
       recoverySkipReason: 'secret reason',
@@ -232,6 +324,8 @@ describe('timeline save diagnostic projection', () => {
       recoveryFinalizer: 'UNKNOWN', recoveryGenerationAtCheck: 'UNKNOWN',
       recoveryGenerationCurrent: 'UNKNOWN', recoveryEditSeqAtCheck: 'UNKNOWN', recoveryEditSeqCurrent: 'UNKNOWN',
     });
+    emitTimelineSaveDiagnostic('save-entry', () => observation);
+    expect((dispatch.mock.lastCall![0] as CustomEvent).detail).not.toHaveProperty('recoveryCheckOrdinal');
   });
 
   it('keeps untagged recovery rejections unknown without inspecting properties or prototypes', () => {
@@ -251,7 +345,7 @@ describe('timeline save diagnostic projection', () => {
       [hostile, 'unknown'],
     ];
     for (const [error, errorClass] of errors) {
-      emitTimelineSaveDiagnostic('recovery-read-settled', () => ({ recoveryCheckOrdinal: 7,
+      emitTimelineSaveDiagnostic('recovery-current-snapshot', () => ({ recoveryCheckOrdinal: 7,
         recoveryReadState: 'rejected', recoverySkipReason: 'none', recoveryFinalizer: 'not-run', error }));
       const detail = (dispatch.mock.lastCall![0] as CustomEvent).detail;
       expect(detail).toMatchObject({ recoveryCheckOrdinal: 7, recoveryReadState: 'rejected', recoveryReadErrorClass: errorClass });

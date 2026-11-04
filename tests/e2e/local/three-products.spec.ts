@@ -31,9 +31,10 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
 import path from 'node:path';
 import { getTimelineLabelWidth } from '../../../src/tools/video-editor/lib/coordinate-utils.ts';
+import { captureDiagnosticsPreservingOutcome } from '../../../src/tools/video-editor/lib/timeline-diagnostics.ts';
 import { PREVIEW_SURFACE, calibrateRuler, seekRulerToFrame, type RulerSeek } from '../support/previewRuler.ts';
 import { harnessUnavailableReason, startDirectHarness, sha256Hex, THREE_PRODUCTS_REFERENCE_AT, type DirectHarness, type ThreeProductsSeed } from './support/harness.ts';
-import { APP_ENTRY_ROUTE, commandOutboxes, currentHead, dragTimelineClip, dropFileOnTimeline, editFirstTrackName, expectConnected, firstTrackName, holdCommandRequests, holdTimelineCreation, openApp, openSeededTimeline, revisionBody, test as appTest, timelineDraft, UI, waitForAudit } from './support/app.ts';
+import { APP_ENTRY_ROUTE, captureTerminalSaveDiagnostics, commandOutboxes, currentHead, dragTimelineClip, dropFileOnTimeline, editFirstTrackName, expectConnected, firstTrackName, holdCommandRequests, holdTimelineCreation, openApp, openSeededTimeline, revisionBody, test as appTest, timelineDraft, UI, waitForAudit } from './support/app.ts';
 import { allowlistedEvidenceMethod, allowlistedEvidenceStatus, relevantEvidenceRoute, type EvidenceMethod, type EvidenceRoute } from './support/auto-real-proxy-helpers.ts';
 import { timelineBase as runtimeTimelineBase, timelineFromList, type TimelineListPage, type TimelineScope } from './support/timeline-scope.ts';
 import type { CanonicalDocument, CommitAcceptedMutation, CommitRequest, EditCommand, HeadPin, HistoryEntry, HistoryPage } from '../../../src/integrations/runtime/timeline-commit-types.ts';
@@ -836,6 +837,7 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
 
 
   try {
+    await captureDiagnosticsPreservingOutcome(async () => {
     await Promise.all([openApp(tabA, harness), openApp(tabB, harness)]);
     await Promise.all([expectConnected(tabA), expectConnected(tabB)]);
     await Promise.all([openSeededTimeline(tabA, harness), openSeededTimeline(tabB, harness)]);
@@ -930,10 +932,13 @@ test('hosted-loopback J5: two acknowledged App tabs submit from one head; the lo
       losingDraft: keptDraft?.draft, tabSessionIdsDistinct: true };
     await sniff.expectClean(tabA, seed3.timelineId);
     await sniff.expectClean(tabB, seed3.timelineId);
+    }, async () => {
+      const terminal = await Promise.all([tabA, tabB].map(captureTerminalSaveDiagnostics));
+      journey.facts = { ...journey.facts, heldCommitCount: held.length,
+        saveDiagnostics: terminal.map((entry) => entry.saveDiagnostics),
+        terminalSnapshots: terminal.map(({ captureTiming, requestedAt, snapshots }) => ({ captureTiming, requestedAt, snapshots })) };
+    });
   } finally {
-    journey.facts = { ...journey.facts, heldCommitCount: held.length,
-      saveDiagnostics: await Promise.all([tabA, tabB].map(tab => tab.evaluate(
-        () => (window as unknown as { __saveEvents?: unknown[] }).__saveEvents).catch(() => []))) };
     releases.forEach((release) => release());
     await Promise.all([tabA.unroute(COMMITS).catch(() => {}), tabB.unroute(COMMITS).catch(() => {})]);
     await Promise.allSettled([...pendingCommitRoutes]);

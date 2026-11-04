@@ -19,8 +19,7 @@ const SAVE_DIAGNOSTIC_PHASES = ['schedule', 'capture-called', 'capture-resolved'
   'basis-read', 'basis-ready', 'basis-unavailable', 'basis-error',
   'identity-read', 'session-created', 'session-recovered', 'session-changed',
   'adoption-start', 'adoption-complete', 'adopted-read', 'handoff-ready', 'owner-error',
-  'recovery-check-start', 'recovery-check-skipped', 'recovery-check-at-schedule',
-  'recovery-read-settled', 'recovery-check-error', 'recovery-cleanup', 'recovery-finally'] as const;
+  'recovery-current-snapshot'] as const;
 type SaveDiagnosticPhase = typeof SAVE_DIAGNOSTIC_PHASES[number];
 
 const SAVE_REJECTION_CODES = [
@@ -53,6 +52,14 @@ export function markTimelineSaveRejection<T extends Error>(error: T, code: Timel
     }
   } catch { /* Diagnostic tagging cannot affect the original throw. */ }
   return error;
+}
+
+/** Run one bounded diagnostic capture after an operation without changing its outcome. */
+export async function captureDiagnosticsPreservingOutcome<T>(work: () => Promise<T>, capture: () => Promise<unknown>): Promise<T> {
+  try { return await work(); }
+  finally {
+    try { await capture(); } catch { /* Diagnostic capture cannot replace the operation's outcome. */ }
+  }
 }
 
 export interface TimelineRecoveryCheckObservation {
@@ -204,7 +211,7 @@ export function emitTimelineSaveDiagnostic(boundary: SaveDiagnosticPhase | (() =
       captureStage: choice(observed.captureStage, ['capture-call', 'capture-set', 'local-capture']),
       persistenceEnabled: bool(observed.persistenceEnabled), recoveryPending: bool(observed.recoveryPending),
       recoveryActive: bool(observed.recoveryActive), interactionActive: bool(observed.interactionActive),
-      ...(observed.recoveryCheckOrdinal === undefined ? {} : {
+      ...(['schedule', 'recovery-current-snapshot'].includes(phase) && observed.recoveryCheckOrdinal !== undefined ? {
         recoveryCheckOrdinal: counter(observed.recoveryCheckOrdinal),
         recoveryReadState: choice(observed.recoveryReadState, ['not-started', 'pending', 'empty', 'record', 'rejected']),
         recoverySkipReason: choice(observed.recoverySkipReason, ['none', 'data-unavailable', 'scope-already-checked',
@@ -219,9 +226,9 @@ export function emitTimelineSaveDiagnostic(boundary: SaveDiagnosticPhase | (() =
         recoveryEditSeqCurrent: counter(observed.recoveryEditSeqCurrent),
         // Draft-read errors are untagged foreign values. Even instanceof can
         // execute a proxy's prototype trap; retain the safe unknown class.
-        recoveryReadErrorClass: phase === 'recovery-read-settled' && observed.recoveryReadState === 'rejected'
+        recoveryReadErrorClass: observed.recoveryReadState === 'rejected'
           ? 'unknown' : UNKNOWN,
-      }),
+      } : {}),
       conflictExhausted: bool(observed.conflictExhausted), schemaIncompatible: bool(observed.schemaIncompatible),
       sequenceNumber: counter(observed.sequenceNumber),
       projectId: identifier(own(mountedHead, 'projectId') ?? own(own(observed.source, 'head'), 'projectId')),

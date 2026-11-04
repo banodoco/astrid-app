@@ -38,7 +38,7 @@ import { canonicalJsonStringify, type TimelineBundleEnvelope } from '@/tools/vid
 import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import type { CommitDataOptions, ScheduleSaveFn } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
 import { generateUUID } from '@/shared/lib/taskCreation/ids.ts';
-import { emitTimelineSaveDiagnostic, isTimelineDiagnosticsEnabled } from '@/tools/video-editor/lib/timeline-diagnostics.ts';
+import { emitTimelineSaveDiagnostic, isTimelineDiagnosticsEnabled, type TimelineRecoveryCheckObservation } from '@/tools/video-editor/lib/timeline-diagnostics.ts';
 import { TimelinePersistenceHandoffContext, resolveTimelinePersistenceHandoff, type TimelineGestureReadBasis, type TimelinePersistenceHandoff } from './timelineLocalSaveHandoff.ts';
 
 export type SaveStatus = 'saved' | 'saving' | 'dirty' | 'retrying' | 'error';
@@ -110,6 +110,8 @@ interface UseTimelinePersistenceOptions {
   localDocumentSave?: TimelinePersistenceHandoff;
   /** Actual hook owner, inspected only by the opt-in diagnostic projection. */
   diagnosticOwner?: { generation: number; closed: boolean; session?: unknown };
+  /** Stable scalar observation getter; read only by the opt-in schedule projection. */
+  diagnosticRecoveryCheckRef?: MutableRefObject<(() => TimelineRecoveryCheckObservation) | null>;
 }
 
 export type TimelineSaveTarget = Readonly<{ session: object; timelineId: string; targetSeq: number; generation: number }>;
@@ -272,6 +274,7 @@ export function useTimelinePersistence({
   onCanonicalReloadStart,
   localDocumentSave: suppliedLocalDocumentSave,
   diagnosticOwner,
+  diagnosticRecoveryCheckRef,
 }: UseTimelinePersistenceOptions): UseTimelinePersistenceResult {
   const scopedLocalDocumentSave = useContext(TimelinePersistenceHandoffContext);
   const localDocumentSave = resolveTimelinePersistenceHandoff(scopedLocalDocumentSave, provider, timelineId)
@@ -1148,7 +1151,8 @@ export function useTimelinePersistence({
   ) => {
     if (!captured) invalidateDraftReload();
     reloadPreservedSeqRef.current = null;
-    emitTimelineSaveDiagnostic('schedule', () => ({ timelineId, owner: diagnosticOwner ?? session.identity,
+    emitTimelineSaveDiagnostic('schedule', () => ({ ...diagnosticRecoveryCheckRef?.current?.(),
+      timelineId, owner: diagnosticOwner ?? session.identity,
       mounted: getDataRef().current, source: nextData, gesture: options?.gestureBasis,
       clipId: options?.gestureBasis?.clipId ?? selectedClipIdRef.current,
       generation: diagnosticOwner?.generation ?? session.generation, closed: diagnosticOwner?.closed,

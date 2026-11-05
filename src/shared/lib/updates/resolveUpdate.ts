@@ -49,11 +49,11 @@ export function installTypeOf(managedBy: string | null | undefined, mode: { mana
 
 /** Action labels the UI matches on; the source label is owned by the Runtime contract. */
 export const UPDATE_IN_PINOKIO_ACTION = 'Update in Pinokio';
-export const COPY_FOR_AGENT_ACTION = 'Copy for your agent';
+export const COPY_FOR_AGENT_ACTION = 'Copy instructions for your agent';
 export const RUN_IT_YOURSELF_ACTION = 'Run it yourself';
 export const RELOAD_ACTION = 'Reload';
 
-const settingsAction: UpdateAction = { label: 'Update now', destination: 'settings-updates' };
+const settingsAction: UpdateAction = { label: 'See updates', destination: 'settings-updates' };
 const COPY_FOR_AGENT: UpdateAction = { label: COPY_FOR_AGENT_ACTION };
 const commandActions = (input: UpdateResolutionInput): Pick<UpdateResolution, 'primary' | 'secondary'> => ({
   primary: COPY_FOR_AGENT,

@@ -51,7 +51,7 @@ describe('fully-local update guidance', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
 
-    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
     expect(section.textContent).not.toContain('npm run update');

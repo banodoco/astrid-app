@@ -188,9 +188,9 @@ describe('RuntimeConnectionPill', () => {
       Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Download diagnostics' })); await Promise.resolve(); });
-      expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
       expect(screen.getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
-      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' })); await Promise.resolve(); });
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' })); await Promise.resolve(); });
       expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/doctor.*log directory named in its report/));
 
       answer.step = healthy('instance-1');
@@ -238,8 +238,9 @@ describe('RuntimeConnectionPill', () => {
       expect(report).toContain('App build: served-app-build\nApp release: 42');
       expect(report.match(/^App build:/gm)).toHaveLength(1);
       expect(report.match(/^App release:/gm)).toHaveLength(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:diagnostics');
-      expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
     } finally {
       vi.useRealTimers();
     }

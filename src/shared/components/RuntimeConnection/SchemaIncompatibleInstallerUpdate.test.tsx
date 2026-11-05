@@ -92,7 +92,7 @@ it.each([
     await waitFor(() => expect(screen.getAllByRole('button', { name: 'Update now' })).toHaveLength(2));
     expect(screen.getByTestId('auth-state')).toHaveTextContent('true');
     expect(screen.getByTestId('connection-auth-state')).toHaveTextContent('true');
-    expect(screen.getAllByRole('button', { name: 'Copy for your agent' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Copy instructions for your agent' }).length).toBeGreaterThan(0);
     expect(requests.some((request) => request.url.endsWith('/v1/realm'))).toBe(false);
     expect(requests.filter((request) => request.url.endsWith('/v1/update') && request.method === 'POST')).toHaveLength(0);
     expect(requests.some((request) => request.url.endsWith('/v1/update/status'))).toBe(true);
@@ -143,7 +143,7 @@ it.each([
     expect(await screen.findByRole('heading', { name: 'Update Astrid' })).toBeInTheDocument();
     await waitFor(() => expect(requests.some((request) => request.url.endsWith('/v1/update/status'))).toBe(true));
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
-    expect(screen.getAllByRole('button', { name: 'Copy for your agent' }).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: 'Copy instructions for your agent' }).length).toBeGreaterThan(0);
     expect(requests.some((request) => request.url.endsWith('/v1/update/status'))).toBe(true);
     expect(requests.filter((request) => request.url.endsWith('/v1/update') && request.method === 'POST')).toHaveLength(0);
   }

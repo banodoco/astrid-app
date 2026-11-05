@@ -13,6 +13,8 @@ export interface CopyInstallCommandProps {
   readonly services?: readonly ServiceStatus[];
   /** A fully local install updates its checkout with this command instead of the installer. */
   readonly localCommand?: string;
+  /** The primary action's label where a resolver card names it; the default is the install brief's label. */
+  readonly agentLabel?: string;
 }
 
 type CopyStatus = 'idle' | 'copied' | 'failed';
@@ -74,7 +76,7 @@ export function CopyCommandRow({ command, label, copiedLabel = label }: { readon
  * Agent handoff first, as the one primary action; the manual command is the quiet alternative under it, with its own
  * copy action. Nothing else: the card around it says what the instructions are for.
  */
-export function CopyInstallCommand({ mode = 'install', services, localCommand }: CopyInstallCommandProps) {
+export function CopyInstallCommand({ mode = 'install', services, localCommand, agentLabel }: CopyInstallCommandProps) {
   const copy = RUNTIME_CONNECTION_COPY.agent;
   const localBuild = runtimeOrigin() === '';
   const fullyLocal = localCommand !== undefined;
@@ -88,7 +90,7 @@ export function CopyInstallCommand({ mode = 'install', services, localCommand }:
       <div className="space-y-2">
         {detectPlatform() === 'windows' && <p className="text-xs text-muted-foreground">{RUNTIME_CONNECTION_COPY.windowsBeta}</p>}
         <Button type="button" className="h-11 w-full justify-between rounded-xl px-4 text-sm" onClick={() => void agentCopy.copy()}>
-          <span aria-live="polite">{agentCopied ? copy.copied : copy.copy}</span>
+          <span aria-live="polite">{agentCopied ? copy.copied : agentLabel ?? copy.copy}</span>
           {agentCopied ? <Check aria-hidden="true" className="h-4 w-4" /> : <Copy aria-hidden="true" className="h-4 w-4" />}
         </Button>
         {agentCopy.status === 'failed' && <CopyFallback text={instructions} label={copy.copyFailed} />}

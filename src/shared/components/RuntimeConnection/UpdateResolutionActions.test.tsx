@@ -31,7 +31,9 @@ describe('update resolution Settings actions', () => {
   it('routes a soft update nudge to the expanded Updates destination and preserves the URL hash', () => {
     window.history.replaceState({}, '', '/tools/video-editor?project=film#edit');
     const onOpen = mountWithEventCapture(resolveUpdate({ installedRelease: 1, servedRelease: 2, releaseBehind: true }));
-    fireEvent.click(screen.getByRole('button', { name: 'Update now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'See updates' }));
+    // See updates already goes to Settings Updates, so the card does not repeat it as Details.
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
     expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
     expect(window.location.search).toContain('settings=updates');
     expect(window.location.search).toContain('project=film');
@@ -44,6 +46,12 @@ describe('update resolution Settings actions', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
     expect(window.location.search).toContain('settings=updates');
+  });
+
+  it('leaves Details out in Settings, which is the Details destination', () => {
+    render(<UpdateResolutionActions resolution={resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'pinokio' }, 'settings')} context="settings" />);
+    expect(screen.getByText('Update in Pinokio')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
   });
 
   it('shows the install update command for fully-local installs', () => {

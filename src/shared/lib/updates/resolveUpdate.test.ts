@@ -55,10 +55,10 @@ describe('resolveUpdate', () => {
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'installer', updateNowAvailable: true }).primary)
       .toEqual({ label: 'Update now', execute: 'installer-update' });
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' } })).toMatchObject({
-      primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
+      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' },
     });
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'installer', updateNowAvailable: true }).secondary)
-      .toEqual({ label: 'Copy for your agent' });
+      .toEqual({ label: 'Copy instructions for your agent' });
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'pinokio' }).primary)
       .toEqual({ label: 'Update in Pinokio' });
     expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'source' }).primary)
@@ -66,14 +66,14 @@ describe('resolveUpdate', () => {
   });
 
   it('keeps mid-session schema errors on the mounted-editor banner path', () => {
-    expect(resolveUpdate({ midSessionSchemaMismatch: true })).toMatchObject({ card: 'mid-session', title: 'Editor updated', primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' } });
+    expect(resolveUpdate({ midSessionSchemaMismatch: true })).toMatchObject({ card: 'mid-session', title: 'Editor updated', primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' } });
   });
 
   it('routes soft release actions to Settings on the page and keeps command choices in Settings', () => {
     const status = { releaseBehind: true, installType: 'installer' as const };
-    expect(resolveUpdate(status).primary).toEqual({ label: 'Update now', destination: 'settings-updates' });
+    expect(resolveUpdate(status).primary).toEqual({ label: 'See updates', destination: 'settings-updates' });
     expect(resolveUpdate(status, 'settings')).toMatchObject({
-      primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
+      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' },
     });
     expect(resolveUpdate({ ...status, installType: 'pinokio' }, 'settings').primary).toEqual({ label: 'Update in Pinokio' });
   });
@@ -81,11 +81,11 @@ describe('resolveUpdate', () => {
   it('uses the install command for fully-local guidance and preserves Pinokio routing', () => {
     const schema = { compatibility: { kind: 'schema' as const, detail: 'old' } };
     expect(resolveUpdate({ ...schema, installType: 'fully-local' }, 'settings')).toMatchObject({
-      primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
+      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' },
     });
     expect(resolveUpdate({ ...schema, installType: 'fully-local' }, 'settings').secondary).not.toHaveProperty('command');
     expect(resolveUpdate({ releaseBehind: true, installType: 'fully-local' })).toMatchObject({
-      primary: { label: 'Copy for your agent' }, secondary: { label: 'Run it yourself' },
+      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' },
     });
     expect(resolveUpdate({ ...schema, installType: 'pinokio' }, 'settings')).toMatchObject({
       primary: { label: 'Update in Pinokio' }, secondary: null,

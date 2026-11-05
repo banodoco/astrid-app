@@ -50,16 +50,16 @@ describe('source checkout Runtime with a served required release', () => {
 
     const section = screen.getByRole('region', { name: 'Updates' });
     // The Settings release row shows the identity it read, so its check has finished; let the page-level loads settle too.
-    expect(await within(section).findByText('Release 0')).toBeInTheDocument();
+    expect(await within(section).findByText(/Astrid is up to date \(Release 0\)/)).toBeInTheDocument();
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 20)); });
 
     expect(screen.queryByTestId('quiet-update-notice')).not.toBeInTheDocument();
     expect(screen.queryByTestId('settings-update-indicator')).not.toBeInTheDocument();
     expect(section).not.toHaveTextContent('This update is required');
     // The status line is the resolver's result: a source checkout has no release to be behind on.
-    expect(await within(section).findByText('Astrid is up to date')).toBeInTheDocument();
+    expect(within(section).getByText(/Astrid is up to date/)).toBeInTheDocument();
     expect(section).not.toHaveTextContent('Update available');
-    expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
     expect(screen.queryByText('Run it yourself')).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
   });

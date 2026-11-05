@@ -9,7 +9,7 @@ export async function fetchDiagnosticsReport(fetchImpl: typeof fetch = fetch): P
   ]);
   if (!response.ok) throw new Error('Runtime could not provide diagnostics.');
   const payload = await response.json() as { report?: unknown };
-  if (typeof payload.report !== 'string') throw new Error('Runtime diagnostics response was invalid.');
+  if (typeof payload.report !== 'string' || !payload.report.trim()) throw new Error('Runtime diagnostics response was invalid.');
 
   const report = payload.report.split(/\r?\n/).filter(line => !/^App (?:build|release): /.test(line));
   const appBuild = APP_BUILD || build?.app;
@@ -24,6 +24,14 @@ export function saveDiagnosticsReport(report: string): void {
   const link = document.createElement('a');
   link.href = url;
   link.download = 'astrid-diagnostics.txt';
-  link.click();
-  URL.revokeObjectURL(url);
+  link.hidden = true;
+  // Browsers such as Firefox only start a download from an anchor that is in the document.
+  document.body.append(link);
+  try {
+    link.click();
+  } finally {
+    link.remove();
+    // Revoking synchronously can cancel the download before the browser starts it.
+    window.setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
 }

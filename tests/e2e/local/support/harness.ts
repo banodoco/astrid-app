@@ -977,6 +977,9 @@ if not opened.ok:
 bundle = opened.data['bundle']
 commands = []
 verified = [item['verified'] for item in case.get('media', {}).values()]
+# Raw Runtime objects admitted by exact pin (no catalog selection), as astrid.sdk.remote does for authored configs.
+raw_pins = [{'media_id': media_id, 'content_digest': media_id} for media_id in case.get('raw_media', [])]
+verified += [{'object_id': pin['media_id'], 'pin': pin} for pin in raw_pins]
 pins = {key: item['pin'] for key, item in case.get('media', {}).items()}
 
 def add(command):
@@ -1085,6 +1088,27 @@ if case['fixture'] == 'three-products':
     if patches:
         bundle = execute(before, patches, verified_media=verified).bundle
         commands.extend(patches)
+elif case['fixture'] == 'parent':
+    # A caller-authored parent payload (clips, registry, config extras). Extra tracks are created through the provider first,
+    # so the payload keeps the Runtime-normalized track rows.
+    for track_id in case.get('tracks', []):
+        if not any(track.get('id') == track_id for track in bundle['parent']['config']['tracks']):
+            add(capture_track_create(bundle, 'parent', {'id': track_id, 'kind': 'visual', 'label': track_id}))
+    before = copy.deepcopy(bundle)
+    after = copy.deepcopy(bundle)
+    authored = case['parent']
+    expected_parent = {'slug': 'main', 'name': authored['name'], 'registry': copy.deepcopy(authored['registry']),
+                       'clips': copy.deepcopy(authored['clips']),
+                       'config': {'output': {'resolution': '1280x720', 'fps': 30, 'file': 'out.mp4'},
+                                  **copy.deepcopy(authored.get('config', {})), 'clips': copy.deepcopy(authored['clips']),
+                                  'tracks': copy.deepcopy(before['parent']['config']['tracks'])}}
+    after['parent'] = copy.deepcopy(expected_parent)
+    # The admission and the patches that consume it execute together (an unconsumed admission is refused).
+    admit = [{'schema_version': 1, 'op': 'media.admit', 'version': '1', 'select': None,
+              'args': {'inputs': [{'pin': pin} for pin in raw_pins]}}] if raw_pins else []
+    patches = admit + emit_document_commands(before, after)
+    bundle = execute(before, patches, verified_media=verified).bundle
+    commands.extend(patches)
 else:
     before = copy.deepcopy(bundle)
     after = copy.deepcopy(bundle)
@@ -1096,7 +1120,7 @@ else:
     for command in emit_document_commands(before, after):
         add(command)
 
-label = 'Seed three products' if case['fixture'] == 'three-products' else 'Initialize journey timeline'
+label = 'Seed three products' if case['fixture'] == 'three-products' else case.get('label', 'Initialize journey timeline')
 scope_reads = [{'kind': 'scope', 'ref': 'timeline', 'path': []}]
 steps = [{'id': 'seed-' + str(ordinal), 'label': command['op'], 'intent': label, 'tags': [],
           'command_ordinals': [ordinal],
@@ -1260,12 +1284,14 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     ];
     const registry = { assets: { [assetKey]: { file: 'journey-speech.webm', type: 'video', duration: 12, media_id: video.objectId, content_sha256: video.digest } } };
     const timelineId = randomUUID();
-    const publication = compositionPublication({ projectId, timelineId }, null, 'Extensions', 30);
-    publication.parent_composition.config = { ...publication.parent_composition.config, clips, bundle } as typeof publication.parent_composition.config;
-    publication.parent_composition.clips = clips as unknown as typeof publication.parent_composition.clips;
-    publication.parent_composition.registry = registry as unknown as typeof publication.parent_composition.registry;
-    const published = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, publication);
-    if (published.status !== 200) throw new Error(`seed extensions timeline: ${published.status} ${JSON.stringify(published.body)}`);
+    // Runtime retired `composition-revisions` publication (410 retired_route); seed through `POST .../timelines/{t}/commit`.
+    // The commit route admits only media the same commit names (`media.admit`): the speech asset is the seeded video object.
+    const shell = await this.createCommitTimeline(projectId, timelineId, 'Extensions');
+    await this.commitNativeSeed({
+      fixture: 'parent', initialize: true, label: 'Seed extensions timeline', project_id: projectId, timeline_id: timelineId,
+      head_revision_id: shell.revisionId, base_publication_id: shell.publicationId, idempotency_key: randomUUID(),
+      raw_media: [video.objectId], parent: { name: 'Extensions', clips, registry, config: { bundle } },
+    });
     this.extensionsComposition = { clips, bundle, registry };
     this.extensionsSeed = { projectSlug: (project.body.data ?? project.body).slug, timelineId, transcriptTexts, sceneClipId, speechClipId, sceneMarker: SCENE_MARKER, scenePackage, sceneEntry: entry };
     return this.extensionsSeed;
@@ -1279,22 +1305,34 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
   async addPackEffectClip(effectId: string): Promise<{ clipId: string; revisionId: string }> {
     const seed = await this.seedExtensions();
     const { projectId } = this.seed;
-    const base = `/v1/projects/${projectId}/timelines/${seed.timelineId}/composition-revisions`;
-    const heads = await this.runtimeJson('GET', `${base}?limit=1`);
-    const head = heads.body.items?.find((item: any) => item.is_current_head)?.revision_id;
-    if (heads.status !== 200 || !head) throw new Error(`pack effect clip: no head for ${seed.timelineId}: ${heads.status} ${JSON.stringify(heads.body)}`);
+    const head = await this.timelineHead(projectId, seed.timelineId);
     const clipId = 'journey-pack-effect-clip';
     const { clips, bundle, registry } = this.extensionsComposition!;
     const effectClip = { id: clipId, at: 0, track: 'V2', clipType: 'effect-layer', hold: 5, continuous: { type: effectId, intensity: 1, params: {} } };
-    const allClips = [...clips, effectClip];
-    const publication = compositionPublication({ projectId, timelineId: seed.timelineId }, head, 'Extensions', 30);
-    const tracks = [{ id: 'V1', kind: 'visual', label: 'V1' }, { id: 'V2', kind: 'visual', label: 'V2' }];
-    publication.parent_composition.config = { ...publication.parent_composition.config, clips: allClips, bundle, tracks } as typeof publication.parent_composition.config;
-    publication.parent_composition.clips = allClips as unknown as typeof publication.parent_composition.clips;
-    publication.parent_composition.registry = registry as unknown as typeof publication.parent_composition.registry;
-    const published = await this.runtimeJson('POST', base, publication);
-    if (published.status !== 200) throw new Error(`pack effect clip: ${published.status} ${JSON.stringify(published.body)}`);
-    return { clipId, revisionId: published.body.data?.revision_id ?? published.body.revision_id ?? '' };
+    const committed = await this.commitNativeSeed({
+      fixture: 'parent', initialize: false, label: 'Add pack effect clip', tracks: ['V2'], project_id: projectId, timeline_id: seed.timelineId,
+      head_revision_id: head.revisionId, base_publication_id: head.publicationId, idempotency_key: randomUUID(),
+      parent: { name: 'Extensions', clips: [...clips, effectClip], registry, config: { bundle } },
+    });
+    return { clipId, revisionId: committed.revisionId };
+  }
+
+  /** The Runtime head pair of a timeline (`GET /v1/projects/{p}/timelines/{t}`). */
+  private async timelineHead(projectId: string, timelineId: string): Promise<{ revisionId: string; publicationId: string }> {
+    const timeline = await this.runtimeJson('GET', `/v1/projects/${projectId}/timelines/${timelineId}`);
+    const { head_revision_id: revisionId, head_publication_id: publicationId } = timeline.body ?? {};
+    if (timeline.status !== 200 || typeof revisionId !== 'string' || !revisionId || typeof publicationId !== 'string' || !publicationId) {
+      throw new Error(`timeline head ${timelineId}: ${timeline.status} ${JSON.stringify(timeline.body)}`);
+    }
+    return { revisionId, publicationId };
+  }
+
+  /** Create an empty timeline shell for the commit route and return its head pair (the authoring Runtime is required). */
+  private async createCommitTimeline(projectId: string, timelineId: string, name: string): Promise<{ revisionId: string; publicationId: string }> {
+    await this.enableTimelineAuthoring(authoringPythonPath());
+    const created = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines`, { timeline_id: timelineId, name });
+    if (created.status !== 201) throw new Error(`create timeline ${name}: ${created.status} ${JSON.stringify(created.body)}`);
+    return this.timelineHead(projectId, timelineId);
   }
 
   /**

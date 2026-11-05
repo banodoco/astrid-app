@@ -12,6 +12,7 @@
 
 import type {
   AstridExtension,
+  ExtensionContext,
   ExtensionManifest,
   ExtensionDiagnostic,
   InstalledExtensionPackage,
@@ -39,10 +40,156 @@ import {
 } from '@/tools/video-editor/runtime/extensionPackageManifest';
 import {
   verifyIntegrity,
+  computeSha256,
 } from '@/tools/video-editor/runtime/extensionIntegrity';
 import {
   syncEnabledPackLockEntries,
 } from '@/tools/video-editor/runtime/extensionLockMetadata';
+
+const moduleLeases = new WeakMap<AstridExtension, () => void>();
+export function releaseAdmittedExtensionAssets(extension: AstridExtension): void {
+  moduleLeases.get(extension)?.();
+}
+
+/** Build-time singleton bindings; the browser never constructs an import map. */
+const SHARED_SPECIFIERS = [
+  'react', 'react/jsx-runtime', 'react/jsx-dev-runtime',
+  'react-dom/client', 'remotion', '@astrid/editor-sdk',
+] as const;
+const SHA256 = /^[a-f0-9]{64}$/;
+
+function record(value: unknown): value is Record<string, any> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** Canonical JSON used by the builder and Runtime for artifact identity M. */
+function canonical(value: any): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (record(value)) {
+    return `{${Object.keys(value).filter((key) => value[key] !== undefined).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+/**
+ * The local descriptor is only a carrier. Live Runtime inventory grants admission;
+ * its M commits the descriptor, including manifest identity and singleton bindings.
+ */
+async function importAdmittedExtension(
+  pack: InstalledExtensionPackage,
+  artifact: unknown,
+): Promise<AstridExtension> {
+  let revision: number | null = null;
+  function moduleError(code: string, message: string): Error {
+    return Object.assign(new Error(message), { code, detail: {
+      packId: record(artifact) ? artifact.packId : null, revision,
+    } });
+  }
+  if (!record(artifact) || artifact.version !== 1 || !SHA256.test(artifact.digest)
+    || !SHA256.test(artifact.sourceDigest) || !SHA256.test(artifact.graphIndexDigest)
+    || !SHA256.test(artifact.toolchainDigest) || artifact.entry !== 'index.js'
+    || typeof artifact.packId !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(artifact.packId)
+    || !record(artifact.extensionManifest) || !record(artifact.sharedModules)
+    || !Array.isArray(artifact.files)) {
+    throw moduleError('loader/invalid-artifact', 'A complete admitted artifact manifest is required. Rebuild and install the pack.');
+  }
+  const admittedManifest = artifact.extensionManifest;
+  if (canonical(admittedManifest) !== canonical(pack.manifest)
+    || admittedManifest.id !== pack.metadata.extensionId
+    || admittedManifest.version !== pack.metadata.version
+    || admittedManifest.apiVersion !== 1 || pack.metadata.apiVersion !== 1) {
+    throw moduleError('loader/module-identity', 'Artifact extension identity or API does not match the installed record.');
+  }
+  const response = await fetch('/api/runtime/packs/inventory', { cache: 'no-store', credentials: 'same-origin' });
+  if (!response.ok || response.redirected) throw moduleError('loader/not-admitted', 'Runtime pack inventory is unavailable.');
+  const inventory = await response.json();
+  if (!record(inventory) || inventory.version !== 1 || !Number.isSafeInteger(inventory.revision)
+    || inventory.revision < 0 || !Array.isArray(inventory.packs)) {
+    throw moduleError('loader/not-admitted', 'Runtime returned an invalid pack inventory.');
+  }
+  revision = inventory.revision;
+  const matches = inventory.packs.filter((item: any) => item?.packId === artifact.packId);
+  const admission = matches[0];
+  const url = `/api/runtime/packs/assets/${artifact.packId}/${artifact.digest}/index.js`;
+  if (matches.length !== 1 || !record(admission) || admission.enabled !== true
+    || admission.digest !== artifact.digest || admission.sourceDigest !== artifact.sourceDigest
+    || admission.url !== url || admission.artifactManifestDigest !== await computeSha256(canonical(artifact))) {
+    throw moduleError('loader/not-admitted', 'Runtime has not admitted this exact artifact manifest and entry URL.');
+  }
+  const files = artifact.files;
+  const entry = files.filter((file: any) => file?.path === 'index.js');
+  if (entry.length !== 1 || entry[0].sha256 !== artifact.digest || entry[0].mime !== 'text/javascript') {
+    throw moduleError('loader/invalid-artifact', 'The admitted entry is missing or is not JavaScript.');
+  }
+  // Both scripts are emitted before the host module script by the build plugin.
+  // Fail closed in development or older releases without the pinned map.
+  const mapElement = document.getElementById('astrid-extension-importmap');
+  const lockElement = document.getElementById('astrid-extension-shared-modules');
+  let map: any;
+  let lock: any;
+  try {
+    map = JSON.parse(mapElement?.textContent ?? '');
+    const envelope = JSON.parse(lockElement?.textContent ?? '');
+    if (envelope.version !== 1) throw new Error('Unsupported shared-module lock');
+    lock = envelope.shared_modules;
+  } catch {
+    throw moduleError('loader/shared-modules', 'The host build has no pinned extension import map.');
+  }
+  if (mapElement?.getAttribute('type') !== 'importmap' || !record(map?.imports) || map.scopes !== undefined || !record(lock)
+    || canonical(Object.keys(artifact.sharedModules).sort()) !== canonical([...SHARED_SPECIFIERS].sort())) {
+    throw moduleError('loader/shared-modules', 'All six host singleton bindings are required.');
+  }
+  for (const specifier of SHARED_SPECIFIERS) {
+    const binding = artifact.sharedModules[specifier];
+    if (!record(binding) || !SHA256.test(binding.sha256) || typeof binding.version !== 'string'
+      || typeof binding.url !== 'string' || !/^\/assets\/[a-zA-Z0-9_.-]+\.js$/.test(binding.url)
+      || map.imports[specifier] !== binding.url || canonical(binding) !== canonical(lock[specifier])) {
+      throw moduleError('loader/shared-modules', `Singleton binding mismatch for ${specifier}. Rebuild against this host release.`);
+    }
+  }
+  let releaseLease = () => {};
+  {
+    const leased = await fetch(`/api/runtime/packs/leases/${artifact.packId}/${artifact.digest}`, {
+      method: 'POST', credentials: 'same-origin',
+    });
+    if (!leased.ok || leased.redirected) throw moduleError('loader/not-admitted', 'Runtime could not retain the admitted revision.');
+    const lease = await leased.json();
+    if (lease.version !== 1 || typeof lease.lease !== 'string' || !SHA256.test(lease.lease)) {
+      throw moduleError('loader/not-admitted', 'Runtime returned an invalid artifact lease.');
+    }
+    let released = false;
+    releaseLease = () => {
+      if (released) return;
+      released = true;
+      window.removeEventListener('pagehide', releaseLease);
+      void fetch(`/api/runtime/packs/leases/${lease.lease}`, { method: 'DELETE',
+        credentials: 'same-origin', keepalive: true }).catch(() => {});
+    };
+    window.addEventListener('pagehide', releaseLease, { once: true });
+  }
+  let namespace: any;
+  try {
+    namespace = await import(/* @vite-ignore */ new URL(url, location.origin).href);
+  } catch (error) {
+    releaseLease();
+    throw moduleError('loader/module-import-failed', `Entry or chunk import failed: ${String(error)}`);
+  }
+  const extension = namespace.default;
+  if (!record(extension) || !record(extension.manifest) || typeof extension.activate !== 'function'
+    || canonical(extension.manifest) !== canonical(admittedManifest)) {
+    releaseLease();
+    throw moduleError('loader/module-identity', 'Default export must be an activatable AstridExtension with the exact admitted manifest and API.');
+  }
+  const retained = { ...extension, activate(context: ExtensionContext) {
+    try {
+      const handle = extension.activate(context);
+      return { dispose() { try { handle?.dispose(); } finally { releaseLease(); } } };
+    } catch (error) { releaseLease(); throw error; }
+  } } as AstridExtension;
+  moduleLeases.set(retained, releaseLease);
+  return retained;
+}
 
 // ---------------------------------------------------------------------------
 // Semver helpers
@@ -541,6 +688,8 @@ export interface InstalledExtensionInput {
   readonly kind: 'installed';
   readonly packRecord: ExtensionPackRecord;
   readonly bundleContent: string;
+  /** Untrusted builder manifest; its canonical hash must match live Runtime M. */
+  readonly artifactManifest?: unknown;
 }
 
 /** Union of all extension loader inputs. */
@@ -783,9 +932,9 @@ export interface ExtensionLoader {
    *
    * For workspace-source packages, the original AstridExtension is returned
    * as-is.  For installed-bundle packages, bundleContent integrity is
-   * verified against the pack record, and a synthetic AstridExtension is
-   * created from the manifest snapshot (no activate function — installed
-   * bundles use module evaluation for their activate export).
+   * verified against the pack record, then the real default export is imported
+   * from its Runtime-admitted URL through the host's pinned singleton map.
+   * Activation belongs exclusively to the existing lifecycle host.
    *
    * Per-pack failure isolation: a failed integrity check, missing bundle
    * content, or dependency resolution failure only affects that single
@@ -821,6 +970,7 @@ export function createExtensionLoader(
 ): ExtensionLoader {
   const repo = repository ?? null;
   const disposed = false;
+  const directExtensions = new WeakMap<ExtensionManifest, AstridExtension>();
 
   // ---- helpers ----------------------------------------------------------
 
@@ -1085,6 +1235,7 @@ export function createExtensionLoader(
         const pkgResult: PackageValidationResult = validateWorkspaceSourcePackage(raw);
 
         const valid = pkgResult.valid;
+        if (valid) directExtensions.set(ext.manifest, ext);
         if (!valid) allValid = false;
 
         const validatedPackage: ValidatedPackage | null = valid
@@ -1123,6 +1274,10 @@ export function createExtensionLoader(
           bundleContent: input.bundleContent,
         };
 
+        let artifact = input.artifactManifest;
+        if (artifact === undefined) {
+          try { artifact = JSON.parse(input.bundleContent); } catch { /* Legacy text cannot grant module admission. */ }
+        }
         const pkgResult = validateInstalledBundlePackage(installedPkg);
         const valid = pkgResult.valid;
         if (!valid) allValid = false;
@@ -1131,6 +1286,7 @@ export function createExtensionLoader(
           ? deepFreeze({
               form: 'installed-bundle' as const,
               pack: installedPkg,
+              artifactManifest: artifact,
             } as InstalledBundlePackage)
           : null;
 
@@ -1361,8 +1517,8 @@ export function createExtensionLoader(
         const wsPkg = pkg as WorkspaceSourcePackage;
         const lifecycleEvents: ExtensionLifecycleEvent[] = [];
 
-        // Synthesize a basic AstridExtension from the manifest.
-        const syntheticExt = defineExtension({ manifest: wsPkg.manifest });
+        // Preserve the caller's activation function through repository hydration.
+        const syntheticExt = directExtensions.get(wsPkg.manifest) ?? defineExtension({ manifest: wsPkg.manifest });
 
         const loadEvent = createLifecycleEvent(
           extId,
@@ -1483,9 +1639,25 @@ export function createExtensionLoader(
           }
         }
 
+        let importedExtension: AstridExtension | null = null;
         if (errors.length === 0) {
-          // Create synthetic AstridExtension from manifest snapshot.
-          const syntheticExt = defineExtension({ manifest: ibPkg.pack.manifest });
+          try {
+            let artifact = (ibPkg as InstalledBundlePackage & { artifactManifest?: unknown }).artifactManifest;
+            if (artifact === undefined) {
+              try { artifact = JSON.parse(bundleContent!); } catch { /* Refused below. */ }
+            }
+            importedExtension = await importAdmittedExtension(ibPkg.pack, artifact);
+          } catch (error) {
+            const failure = error as Error & { code?: string; detail?: Record<string, unknown> };
+            errors.push(Object.freeze({
+              ...blockDiag(extId, failure.code ?? 'loader/module-import-failed',
+                error instanceof Error ? error.message : String(error)),
+              detail: failure.detail,
+            }));
+          }
+        }
+        if (errors.length === 0 && importedExtension) {
+          const loadedExtension = importedExtension;
 
           const loadEvent = createLifecycleEvent(
             extId,
@@ -1500,7 +1672,7 @@ export function createExtensionLoader(
           lifecycleEvents.push(loadEvent);
           await appendLifecycleEvent(loadEvent);
 
-          loadedExtensions.push(syntheticExt);
+          loadedExtensions.push(loadedExtension);
 
           const degradedReason = degradedIds.has(extId)
             ? `Loaded (degraded) — optional dependencies missing or mismatched.`
@@ -1508,7 +1680,7 @@ export function createExtensionLoader(
 
           entries.push(makeActivatedEntry(
             extId,
-            syntheticExt,
+            loadedExtension,
             'loaded',
             degradedReason,
             metadata,

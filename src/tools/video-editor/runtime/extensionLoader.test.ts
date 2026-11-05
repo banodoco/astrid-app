@@ -22,9 +22,16 @@
  *    - Contribution-scoped diagnostics.
  */
 
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
+import { register } from 'node:module';
+import { mkdtemp, writeFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createServer, type Server } from 'node:http';
+import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest';
 import {
-  createExtensionLoader,
+  createExtensionLoader as createExtensionLoaderBase,
   resolveDependencies,
   satisfiesSemverRange,
 } from '@/tools/video-editor/runtime/extensionLoader';
@@ -66,6 +73,170 @@ import type {
   WorkspaceSourcePackage,
   InstalledBundlePackage,
 } from '@/tools/video-editor/runtime/extensionPackageManifest';
+
+const extensionEntries = new Map<string, string>();
+const admittedArtifacts = new Map<string, Record<string, any>>();
+let fixtureServer: Server;
+let fixtureOrigin = '';
+let transportRoot = '';
+
+const singletonSpecifiers = [
+  'react', 'react/jsx-runtime', 'react/jsx-dev-runtime',
+  'react-dom/client', 'remotion', '@astrid/editor-sdk',
+] as const;
+
+function sha256(value: string | Buffer): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function canonical(value: any): string {
+  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).filter((key) => value[key] !== undefined).sort()
+      .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
+}
+
+function fixtureSharedModules(): Record<string, { url: string; sha256: string; version: string }> {
+  return Object.fromEntries(singletonSpecifiers.map((specifier) => [specifier, {
+    url: `/assets/test-${sha256(specifier).slice(0, 12)}.js`,
+    sha256: sha256(`host-singleton:${specifier}`),
+    version: specifier === 'remotion' ? '4.0.509'
+      : specifier === '@astrid/editor-sdk' ? '1.0.0' : '18.3.1',
+  }]));
+}
+
+function artifactFixture(
+  packRecord: ExtensionPackRecord,
+  bundleContent: string,
+  moduleBody = 'export default { manifest, activate() { return { dispose() {} }; } };',
+): Record<string, any> {
+  const manifest = packRecord.manifestSnapshot as unknown as Record<string, unknown>;
+  const moduleBytes = `const manifest = ${JSON.stringify(manifest)};\n` +
+    `${moduleBody}\n`;
+  const digest = sha256(moduleBytes);
+  const artifact = {
+    version: 1,
+    packId: packRecord.extensionId,
+    sourceDigest: sha256(bundleContent),
+    digest,
+    graphIndexDigest: sha256('[]'),
+    toolchainDigest: sha256('test-toolchain'),
+    entry: 'index.js',
+    extensionManifest: manifest,
+    sharedModules: fixtureSharedModules(),
+    files: [{ path: 'index.js', disk: `.build/${digest}.js`, sha256: digest, size: Buffer.byteLength(moduleBytes), mime: 'text/javascript' }],
+  };
+  extensionEntries.set(`/api/runtime/packs/assets/${artifact.packId}/${digest}/index.js`, moduleBytes);
+  admittedArtifacts.set(artifact.packId, artifact);
+  return artifact;
+}
+
+function withArtifactInputs(inputs: readonly ExtensionLoaderInput[]): ExtensionLoaderInput[] {
+  return inputs.map((input) => input.kind === 'installed' && input.artifactManifest === undefined
+    ? { ...input, artifactManifest: artifactFixture(input.packRecord, input.bundleContent) }
+    : input);
+}
+
+/** Keep installed unit fixtures honest: imports are fetched as real ESM over HTTP. */
+function createExtensionLoader(repository?: ExtensionStateRepository | null): ExtensionLoader {
+  const loader = createExtensionLoaderBase(repository);
+  const validate = loader.validate.bind(loader);
+  loader.validate = (inputs) => validate(withArtifactInputs(inputs));
+  return loader;
+}
+
+beforeAll(async () => {
+  fixtureServer = createServer((request, response) => {
+    const pathname = new URL(request.url ?? '/', fixtureOrigin || 'http://127.0.0.1').pathname;
+    const moduleBytes = extensionEntries.get(pathname);
+    if (!moduleBytes) {
+      response.writeHead(404);
+      response.end('not found');
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': 'application/javascript; charset=utf-8' });
+    response.end(moduleBytes);
+  });
+  await new Promise<void>((resolve, reject) => {
+    fixtureServer.once('error', reject);
+    fixtureServer.listen(0, '127.0.0.1', resolve);
+  });
+  const address = fixtureServer.address();
+  if (!address || typeof address === 'string') throw new Error('Could not bind module fixture server');
+  fixtureOrigin = `http://127.0.0.1:${address.port}`;
+  // Node 20 has no built-in HTTP module loader. This test-only transport hook
+  // supplies actual response bytes to Node's native ESM evaluator. It handles
+  // only this selected HTTP origin; all other imports retain Node resolution.
+  // The browser composition test uses the browser's native HTTP importer.
+  transportRoot = await mkdtemp(path.join(tmpdir(), 'extension-test-transport-'));
+  const transportFile = path.join(transportRoot, 'http-loader.mjs');
+  await writeFile(transportFile, `
+    let origin;
+    export function initialize(data) { origin=data.origin; }
+    export async function resolve(specifier,context,next) {
+      const networkParent=context.parentURL?.startsWith(origin+'/');
+      if(specifier.startsWith(origin+'/') || (networkParent && specifier.startsWith('.'))) {
+        const url=new URL(specifier,context.parentURL).href;
+        if(new URL(url).origin!==origin) throw new Error('Unselected test network origin');
+        return {url,shortCircuit:true};
+      }
+      return next(specifier,context);
+    }
+    export async function load(url,context,next) {
+      if(!url.startsWith(origin+'/')) return next(url,context);
+      const response=await fetch(url);
+      if(!response.ok) throw new Error('Test Runtime HTTP '+response.status+': '+url);
+      return {format:'module',source:await response.text(),shortCircuit:true};
+    }
+  `);
+  register(pathToFileURL(transportFile), { data: { origin: fixtureOrigin } });
+
+  vi.stubGlobal('location', { origin: fixtureOrigin });
+  const shared = fixtureSharedModules();
+  document.body.innerHTML = '<script id="astrid-extension-importmap" type="importmap"></script>' +
+    '<script id="astrid-extension-shared-modules" type="application/json"></script>';
+  document.getElementById('astrid-extension-importmap')!.textContent = JSON.stringify({
+    imports: Object.fromEntries(Object.entries(shared).map(([specifier, binding]) => [specifier, binding.url])),
+  });
+  document.getElementById('astrid-extension-shared-modules')!.textContent = JSON.stringify({
+    version: 1,
+    shared_modules: shared,
+  });
+  const originalFetch = globalThis.fetch;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).startsWith('/api/runtime/packs/leases/')) {
+      return { ok: true, redirected: false, json: async () => ({ version: 1, lease: 'e'.repeat(64), released: true }) } as Response;
+    }
+    if (String(input) === '/api/runtime/packs/inventory') {
+      return {
+        ok: true,
+        redirected: false,
+        json: async () => ({
+          version: 1,
+          revision: 1,
+          packs: [...admittedArtifacts.values()].map((artifact) => ({
+            packId: artifact.packId,
+            sourceDigest: artifact.sourceDigest,
+            digest: artifact.digest,
+            artifactManifestDigest: sha256(canonical(artifact)),
+            url: `/api/runtime/packs/assets/${artifact.packId}/${artifact.digest}/index.js`,
+            enabled: true,
+          })),
+        }),
+      } as Response;
+    }
+    return originalFetch(input, init);
+  }));
+});
+
+afterAll(async () => {
+  vi.unstubAllGlobals();
+  if (fixtureServer?.listening) await new Promise<void>((resolve) => fixtureServer.close(() => resolve()));
+  document.body.innerHTML = '';
+  if (transportRoot) await rm(transportRoot, {recursive:true,force:true});
+});
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -138,6 +309,7 @@ async function makePackRecord(
     manifestSnapshot: {
       id: extensionId as any,
       version,
+      apiVersion: 1,
       label: `Extension ${extensionId}`,
       publisher: 'Test Publisher',
       license: 'MIT',
@@ -160,9 +332,15 @@ function directValidatedPackage(ext: AstridExtension): ValidatedPackage {
 
 /** Build an installed validated package from pack + bundle. */
 function installedValidatedPackage(pack: InstalledExtensionPackage): ValidatedPackage {
+  const artifactManifest = artifactFixture({
+    extensionId: pack.metadata.extensionId,
+    version: pack.metadata.version,
+    manifestSnapshot: pack.manifest,
+  } as ExtensionPackRecord, pack.bundleContent);
   return {
     form: 'installed-bundle',
     pack,
+    artifactManifest,
   } as InstalledBundlePackage;
 }
 
@@ -1055,6 +1233,196 @@ describe('ExtensionLoader.load — installed bundle', () => {
     expect(events.some((e) => e.kind === 'load')).toBe(true);
   });
 
+  it('refuses a module whose admitted manifest identity or API differs from the installed record', async () => {
+    const bundleContent = 'identity refusal fixture';
+    const packRecord = await makePackRecord('com.test.identity-refusal', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent);
+    artifactManifest.extensionManifest = { ...artifactManifest.extensionManifest, apiVersion: 2 };
+    admittedArtifacts.set(artifactManifest.packId, artifactManifest);
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+
+    expect(result.allLoaded).toBe(false);
+    expect(result.loadedExtensions).toHaveLength(0);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/module-identity');
+  });
+
+  it('refuses a module whose manifest ID differs from the installed package ID', async () => {
+    const bundleContent = 'manifest ID refusal fixture';
+    const packRecord = await makePackRecord('com.test.manifest-id-refusal', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent);
+    artifactManifest.extensionManifest = {
+      ...artifactManifest.extensionManifest,
+      id: 'com.test.different-id',
+    };
+    admittedArtifacts.set(artifactManifest.packId, artifactManifest);
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+
+    expect(result.allLoaded).toBe(false);
+    expect(result.loadedExtensions).toHaveLength(0);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/module-identity');
+  });
+
+  it('refuses an artifact that is not present in live Runtime inventory', async () => {
+    const bundleContent = 'not admitted fixture';
+    const packRecord = await makePackRecord('com.test.not-admitted', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent);
+    admittedArtifacts.delete(artifactManifest.packId);
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+
+    expect(result.allLoaded).toBe(false);
+    expect(result.loadedExtensions).toHaveLength(0);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/not-admitted');
+  });
+
+  it('refuses mismatched host singleton bindings before importing the entry', async () => {
+    const bundleContent = 'singleton refusal fixture';
+    const packRecord = await makePackRecord('com.test.shared-module-refusal', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent);
+    artifactManifest.sharedModules = {
+      ...artifactManifest.sharedModules,
+      react: { ...artifactManifest.sharedModules.react, url: '/assets/unpinned-react.js' },
+    };
+    admittedArtifacts.set(artifactManifest.packId, artifactManifest);
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+
+    expect(result.allLoaded).toBe(false);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/shared-modules');
+  });
+
+  it('refuses a real entry import failure and leaves the pack unloaded', async () => {
+    const bundleContent = 'entry failure fixture';
+    const packRecord = await makePackRecord('com.test.entry-failure', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent);
+    extensionEntries.delete(`/api/runtime/packs/assets/${artifactManifest.packId}/${artifactManifest.digest}/index.js`);
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+
+    expect(result.allLoaded).toBe(false);
+    expect(result.loadedExtensions).toHaveLength(0);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/module-import-failed');
+    expect(result.entries[0].errors.find((error) => error.code === 'loader/module-import-failed')?.detail)
+      .toEqual({packId: artifactManifest.packId, revision: 1});
+  });
+
+  it('refuses descriptor-only ESM defaults without an activate function', async () => {
+    const bundleContent = 'descriptor refusal fixture';
+    const packRecord = await makePackRecord('com.test.descriptor-refusal', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent, 'export default { manifest };');
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+
+    expect(result.allLoaded).toBe(false);
+    expect(result.loadedExtensions).toHaveLength(0);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/module-identity');
+  });
+
+  it('keeps lazy imports real and fails when a referenced chunk is unavailable', async () => {
+    const bundleContent = 'lazy chunk refusal fixture';
+    const packRecord = await makePackRecord('com.test.lazy-chunk-failure', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(
+      packRecord,
+      bundleContent,
+      "export default { manifest, activate() { return { dispose() {} }; }, loadLazy: () => import('./chunks/lazy.js') };",
+    );
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+    expect(result.allLoaded).toBe(true);
+    const extension = result.loadedExtensions[0] as AstridExtension & { loadLazy(): Promise<unknown> };
+
+    await expect(extension.loadLazy()).rejects.toThrow();
+  });
+
+  it('refuses a chunk failure during entry evaluation without a load success event', async () => {
+    const bundleContent = 'entry awaited chunk refusal';
+    const packRecord = await makePackRecord('com.test.awaited-chunk', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent,
+      "await import('./chunks/missing.js'); export default {manifest,activate(){}};");
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{kind:'installed',packRecord,bundleContent,artifactManifest}]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+    expect(result.allLoaded).toBe(false);
+    expect(result.loadedExtensions).toHaveLength(0);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/module-import-failed');
+    expect(result.entries[0].lifecycleEvents.some((event) => event.kind === 'load')).toBe(false);
+  });
+
+  it.each([
+    ['wrong-id', "export default {manifest:{...manifest,id:'com.test.another'},activate(){}};"],
+    ['wrong-api', 'export default {manifest:{...manifest,apiVersion:2},activate(){}};'],
+    ['missing-default', 'export const extension = {manifest,activate(){}};'],
+    ['primitive-default', 'export default 42;'],
+  ])('refuses the loaded default export: %s', async (name, moduleBody) => {
+    const bundleContent = `invalid loaded module ${name}`;
+    const packRecord = await makePackRecord(`com.test.loaded-${name}`, '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord,bundleContent,moduleBody);
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{kind:'installed',packRecord,bundleContent,artifactManifest}]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+    expect(result.allLoaded).toBe(false);
+    expect(result.loadedExtensions).toHaveLength(0);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/module-identity');
+  });
+
+  it.each(['https://example.invalid/entry.js','file:///tmp/entry.js','data:text/javascript,export default 1','blob:https://example.invalid/id',
+    '/api/runtime/packs/assets/other/'+'a'.repeat(64)+'/index.js'])('refuses an unadmitted import URL: %s', async (url) => {
+    const bundleContent = `unadmitted URL ${url}`;
+    const packRecord = await makePackRecord('com.test.url-refusal','1.0.0',bundleContent);
+    const artifactManifest = artifactFixture(packRecord,bundleContent);
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('fetch', async () => ({ok:true,redirected:false,json:async()=>({version:1,revision:1,packs:[{
+      packId:artifactManifest.packId,sourceDigest:artifactManifest.sourceDigest,digest:artifactManifest.digest,
+      artifactManifestDigest:sha256(canonical(artifactManifest)),enabled:true,url,
+    }]})} as Response));
+    try {
+      const loader = createExtensionLoader();
+      const validation = loader.validate([{kind:'installed',packRecord,bundleContent,artifactManifest}]);
+      const result = await loader.load([validation.entries[0].validatedPackage!]);
+      expect(result.allLoaded).toBe(false);
+      expect(result.loadedExtensions).toHaveLength(0);
+      expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/not-admitted');
+    } finally { vi.stubGlobal('fetch',originalFetch); }
+  });
+
+  it('refuses changed descriptor bytes when Runtime retains the original M', async () => {
+    const bundleContent = 'tampered carrier';
+    const packRecord = await makePackRecord('com.test.carrier-tamper','1.0.0',bundleContent);
+    const artifactManifest = artifactFixture(packRecord,bundleContent);
+    // Freeze the Runtime snapshot independently of the local carrier.
+    admittedArtifacts.set(artifactManifest.packId,structuredClone(artifactManifest));
+    artifactManifest.toolchainDigest = 'c'.repeat(64);
+    const loader = createExtensionLoader();
+    const validation = loader.validate([{kind:'installed',packRecord,bundleContent,artifactManifest}]);
+    const result = await loader.load([validation.entries[0].validatedPackage!]);
+    expect(result.allLoaded).toBe(false);
+    expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/not-admitted');
+  });
+
+  it('refuses unsupported host lock versions', async () => {
+    const element=document.getElementById('astrid-extension-shared-modules')!;
+    const original=element.textContent;
+    element.textContent=JSON.stringify({version:2,shared_modules:fixtureSharedModules()});
+    try {
+      const bundleContent='future host lock';
+      const packRecord=await makePackRecord('com.test.future-lock','1.0.0',bundleContent);
+      const loader=createExtensionLoader();
+      const validation=loader.validate([{kind:'installed',packRecord,bundleContent}]);
+      const result=await loader.load([validation.entries[0].validatedPackage!]);
+      expect(result.allLoaded).toBe(false);
+      expect(result.entries[0].errors.map((error) => error.code)).toContain('loader/shared-modules');
+    } finally { element.textContent=original; }
+  });
+
   it('fails an installed bundle with integrity mismatch', async () => {
     const repo = createMockRepository();
     const loader = createExtensionLoader(repo);
@@ -1135,6 +1503,15 @@ describe('ExtensionLoader.load — installed bundle', () => {
 // ---------------------------------------------------------------------------
 
 describe('ExtensionLoader.load — mixed', () => {
+  it('preserves the direct extension and its activation function through validation', async () => {
+    const extension=makeExtensionWithId('com.test.direct-identity');
+    const loader=createExtensionLoader();
+    const validation=loader.validate([{kind:'direct',extension}]);
+    const result=await loader.load([validation.entries[0].validatedPackage!]);
+    expect(result.loadedExtensions[0]).toBe(extension);
+    expect(result.loadedExtensions[0].activate).toBe(extension.activate);
+  });
+
   it('loads a mix of workspace source and installed bundle packages', async () => {
     const repo = createMockRepository();
     const loader = createExtensionLoader(repo);
@@ -2898,6 +3275,7 @@ describe('ExtensionLoader.load — package state classification', () => {
       manifestSnapshot: {
         id: 'com.test.meta' as any,
         version: '2.0.0',
+        apiVersion: 1,
         label: 'My Installed Extension',
         publisher: 'Test Publisher',
         description: 'An installed test extension',

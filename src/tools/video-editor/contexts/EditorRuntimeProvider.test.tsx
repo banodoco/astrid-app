@@ -477,6 +477,48 @@ describe('EditorRuntimeProvider effect registry lifecycle', () => {
     });
   });
 
+  it('preserves working registrations on failed replacement and commits declarations before new handlers', async () => {
+    const id = 'com.test.live-replacement';
+    const command = `${id}.ping`;
+    const first = vi.fn();
+    const second = vi.fn();
+    let runtime!: ReturnType<typeof useVideoEditorRuntime>;
+    let registry!: ReturnType<typeof useEffectRegistryContext>['registry'];
+    function Capture() { runtime = useVideoEditorRuntime(); registry = useEffectRegistryContext().registry; return null; }
+    const First = () => null;
+    const Second = () => null;
+    const extension = (component: typeof First, handler: typeof first, fail = false) => defineExtension({
+      manifest: { id: id as never, version: '1.0.0', label: 'Live replacement', contributions: [
+        { id: 'effect' as never, kind: 'effect', effectId: 'live-replacement' },
+        { id: 'ping' as never, kind: 'command', command, label: 'Ping' },
+      ] },
+      activate(ctx) {
+        ctx.effects.registerComponent('live-replacement', component);
+        ctx.commands.registerCommand(command, handler);
+        if (fail) throw new Error('candidate activation failed');
+      },
+    });
+    const dataProvider = {} as DataProvider;
+    const tree = (extensions: AstridExtension[]) => <EditorRuntimeProvider astridElementHost={fixtureAstridElementHost}
+      dataProvider={dataProvider} timelineId="replacement" extensions={extensions}><Capture /></EditorRuntimeProvider>;
+    const view = render(tree([extension(First, first)]));
+    await waitFor(() => expect(registry.resolve('live-replacement')?.component).toBe(First));
+    expect(await runtime.commandRegistry!.executeCommand(command)).toBe(true);
+    view.rerender(tree([extension(Second, second, true)]));
+    await act(async () => {});
+    expect(registry.resolve('live-replacement')?.component).toBe(First);
+    expect(await runtime.commandRegistry!.executeCommand(command)).toBe(true);
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(second).not.toHaveBeenCalled();
+    view.rerender(tree([extension(Second, second)]));
+    await waitFor(() => expect(registry.resolve('live-replacement')?.component).toBe(Second));
+    expect(await runtime.commandRegistry!.executeCommand(command)).toBe(true);
+    expect(second).toHaveBeenCalledTimes(1);
+    view.rerender(tree([]));
+    await waitFor(() => expect(registry.resolve('live-replacement')).toBeUndefined());
+    expect(await runtime.commandRegistry!.executeCommand(command)).toBe(false);
+  });
+
   it('cleans extension-owned effect records and command contributions on removal after HMR replacement', async () => {
     const extensionId = 'com.example.lifecycle';
     const commandId = `${extensionId}.run`;

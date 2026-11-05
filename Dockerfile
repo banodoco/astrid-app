@@ -52,6 +52,11 @@ COPY --chown=node:node config ./config
 # whole; vendor/ also keeps node_modules' file: links valid.
 COPY --chown=node:node src ./src
 COPY --chown=node:node vendor ./vendor
+# config/vite/*.ts imports ../../scripts/*.mjs (local-update-control, runtime-discovery-proxy)
+# and reads public/install-manifest.json at preview startup; without them `vite preview`
+# exits with ERR_MODULE_NOT_FOUND and the Railway healthcheck never passes.
+COPY --chown=node:node scripts ./scripts
+COPY --chown=node:node public/install-manifest.json ./public/install-manifest.json
 COPY --chown=node:node --from=build /app/dist ./dist
 
 EXPOSE 8080

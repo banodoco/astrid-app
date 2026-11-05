@@ -1298,9 +1298,13 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
   }
 
   /**
-   * Plan 06 PK-14: publish the next revision of the extensions timeline with one effect-layer clip (on its own track V2)
-   * whose effect comes from a pack that is not installed yet. The project names the effect; opening it must stay passive,
-   * and the effect renders only once a pack providing it is installed.
+   * Plan 06 PK-14: publish the next revision of the extensions timeline with one effect-layer clip whose effect comes from a
+   * pack that is not installed yet. The project names the effect; opening it must stay passive, and the effect renders only
+   * once a pack providing it is installed.
+   *
+   * An effect layer wraps only the visual tracks below its own (`TimelineRenderer` renders the track list bottom-up, so the
+   * first visual track is the top one), and the Runtime appends a new track after the existing ones. So the effect goes on
+   * V1, the top track, and this revision moves the visual clips that were on V1 down to the new V2 beneath it.
    */
   async addPackEffectClip(effectId: string): Promise<{ clipId: string; revisionId: string }> {
     const seed = await this.seedExtensions();
@@ -1308,11 +1312,12 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     const head = await this.timelineHead(projectId, seed.timelineId);
     const clipId = 'journey-pack-effect-clip';
     const { clips, bundle, registry } = this.extensionsComposition!;
-    const effectClip = { id: clipId, at: 0, track: 'V2', clipType: 'effect-layer', hold: 5, continuous: { type: effectId, intensity: 1, params: {} } };
+    const effectClip = { id: clipId, at: 0, track: 'V1', clipType: 'effect-layer', hold: 5, continuous: { type: effectId, intensity: 1, params: {} } };
+    const below = (clips as Array<{ track?: string }>).map((clip) => (clip.track === 'V1' ? { ...clip, track: 'V2' } : clip));
     const committed = await this.commitNativeSeed({
       fixture: 'parent', initialize: false, label: 'Add pack effect clip', tracks: ['V2'], project_id: projectId, timeline_id: seed.timelineId,
       head_revision_id: head.revisionId, base_publication_id: head.publicationId, idempotency_key: randomUUID(),
-      parent: { name: 'Extensions', clips: [...clips, effectClip], registry, config: { bundle } },
+      parent: { name: 'Extensions', clips: [...below, effectClip], registry, config: { bundle } },
     });
     return { clipId, revisionId: committed.revisionId };
   }

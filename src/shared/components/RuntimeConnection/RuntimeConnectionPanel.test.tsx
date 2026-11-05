@@ -505,7 +505,7 @@ describe('RuntimeConnectionPanel', () => {
       const writeText = vi.fn(async (_text: string) => undefined);
       stubClipboard(writeText);
       panel(connectionFor({ status }));
-      const primary = screen.getByRole('button', { name: 'Copy for your agent' });
+      const primary = screen.getByRole('button', { name: status === 'update_needed' ? 'Copy instructions for your agent' : 'Copy for your agent' });
       const commandCopy = screen.getByRole('button', { name: 'Copy command' });
       expect(screen.getAllByRole('button')[0]).toBe(primary);
       expect(commandCopy.parentElement).toContainElement(screen.getByRole('code'));

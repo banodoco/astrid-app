@@ -48,7 +48,7 @@ export const INSTALL_LINE_LABEL = 'Install or update Astrid';
 
 /** One owner for G1's offline diagnostics fallback, shared by Settings and recovery surfaces. */
 export const DIAGNOSTICS_FALLBACK_COPY = {
-  intro: 'Runtime could not answer. You can still collect diagnostics:',
+  intro: "Couldn't collect diagnostics from Astrid. Copy the command below and run it yourself.",
   agent: 'Run `astrid-runtime doctor` and read the log directory named in its report.',
   command: 'astrid-runtime doctor > astrid-diagnostics.txt',
 } as const;

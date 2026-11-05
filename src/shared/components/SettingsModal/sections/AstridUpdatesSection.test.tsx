@@ -32,6 +32,7 @@ describe('Astrid Updates Settings section', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     expect(await within(section).findByText('The update did not finish. Astrid was restored to its previous version.')).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
     fireEvent.click(within(section).getByText('View log'));
     expect(within(section).getByText('transaction line')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
@@ -54,6 +55,8 @@ describe('Astrid Updates Settings section', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
+    fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
+    expect(within(section).getByText("Couldn't collect diagnostics from Astrid. Copy the command below and run it yourself.")).toBeInTheDocument();
     expect(await within(section).findByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
     expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
   });
@@ -62,13 +65,14 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'app-a', servedRelease: 4, servedApp: 'app-b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
     expect(readStatusMock).toHaveBeenCalledOnce();
     expect(hostedCheckMock).toHaveBeenCalledOnce();
-    expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(within(section).getByText(/No coding agent\? Run this in a terminal/)).toBeInTheDocument();
-    expect(within(section).getByText('Release 3')).toBeInTheDocument();
+    expect(within(section).queryByRole('button', { name: 'Check for updates' })).toBeNull();
+    fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
     expect(within(section).getByText(/App build/)).toBeInTheDocument();
   });
 
@@ -78,7 +82,7 @@ describe('Astrid Updates Settings section', () => {
     const section = screen.getByRole('region', { name: 'Updates' });
     await waitFor(() => expect(within(section).getByRole('status')).toHaveTextContent('Could not check Astrid update status. Check your connection and try again.'));
     expect(within(section).queryByText('offline')).toBeNull();
-    expect(within(section).queryByText('Astrid is up to date')).toBeNull();
+    expect(within(section).queryByText(/Astrid is up to date/)).toBeNull();
     fireEvent.click(within(section).getByRole('button', { name: 'Check for updates' }));
     expect(within(section).getByRole('status')).toHaveTextContent('Checking for updates…');
     await waitFor(() => expect(within(section).getByRole('status')).toHaveTextContent('Could not check Astrid update status. Check your connection and try again.'));
@@ -88,8 +92,8 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
-    expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(localCheckMock).not.toHaveBeenCalled();
   });
@@ -99,9 +103,9 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
     expect(within(section).getByText('Update in Pinokio')).toBeInTheDocument();
-    expect(within(section).queryByRole('button', { name: 'Copy for your agent' })).toBeNull();
+    expect(within(section).queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
   });
 
   it('gets fully-local status only from the launcher and offers its resolver actions', async () => {
@@ -110,10 +114,10 @@ describe('Astrid Updates Settings section', () => {
     localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
     expect(localCheckMock).toHaveBeenCalledOnce();
     expect(readStatusMock).not.toHaveBeenCalled();
-    expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
   });
 
@@ -123,9 +127,9 @@ describe('Astrid Updates Settings section', () => {
     localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · Release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
-    expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(within(section).getByRole('code')).toHaveTextContent(installCommand('update'));
     expect(within(section).queryByText(/npm run update/)).toBeNull();
@@ -133,7 +137,7 @@ describe('Astrid Updates Settings section', () => {
 
   it.each([
     ['Pinokio', 'pinokio', false, 'Update in Pinokio'],
-    ['fully-local', 'fully-local', true, 'Copy for your agent'],
+    ['fully-local', 'fully-local', true, 'Copy instructions for your agent'],
   ] as const)('shows required reason and the %s primary action', async (_name, mode, local, primary) => {
     if (mode === 'pinokio') connectionMock.value = { isConnected: true, managedByPinokio: true };
     if (local) {
@@ -157,16 +161,16 @@ describe('Astrid Updates Settings section', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     expect(await within(section).findByRole('status')).toHaveTextContent('Could not check Astrid update status. Check your connection and try again.');
-    expect(within(section).queryByText('Astrid is up to date')).toBeNull();
+    expect(within(section).queryByText(/Astrid is up to date/)).toBeNull();
   });
 
   it('shows required reason and keeps required-update precedence', async () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 5, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 5, requiredRelease: 4, requiredReason: 'Security fix', releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available · Release 5')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 5 (current: Release 3)')).toBeInTheDocument();
     expect(within(section).getByText('This update is required: Security fix')).toBeInTheDocument();
-    expect(within(section).getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     const onOpen = vi.fn();
     window.addEventListener('openSettings', (event) => onOpen((event as CustomEvent).detail), { once: true });
     fireEvent.click(within(section).getByRole('button', { name: 'Details' }));
@@ -180,9 +184,41 @@ describe('Astrid Updates Settings section', () => {
     const view = render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     expect(await within(section).findByText(/newer than astrid\.haus/)).toBeInTheDocument();
-    expect(within(section).queryByRole('button', { name: 'Copy for your agent' })).toBeNull();
+    expect(within(section).queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
     fireEvent.click(within(section).getByRole('button', { name: 'Check for updates' }));
-    expect(await within(section).findByText('Astrid is up to date')).toBeInTheDocument();
+    expect(await within(section).findByText(/^Astrid is up to date/)).toBeInTheDocument();
     view.unmount();
+  });
+
+  it('leaves out the empty last result and the empty log when no in-app update has run', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      const buildResponse = String(input) === '/build.json';
+      return Promise.resolve(new Response(JSON.stringify(buildResponse
+        ? { app: 'served-app-build', release: 1 }
+        : { report: 'Astrid diagnostics\nLast update result: none\nInstaller transaction log:\n\nRetained back-end copies: 0 bytes' }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    }));
+    hostedCheckMock.mockResolvedValue({ release: 1, app: 'served-app-build', servedRelease: 1, servedApp: 'served-app-build', behind: false, resolution: { installedRelease: 1, servedRelease: 1, releaseBehind: false } });
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(section).findByText('Astrid is up to date (Release 1)')).toBeInTheDocument();
+    expect(within(section).queryByText('Last result:')).toBeNull();
+    expect(within(section).getByRole('button', { name: 'Check for updates' })).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
+    expect(within(section).queryByText('View log')).toBeNull();
+  });
+
+  it('shows the inline message and the fallback when the diagnostics download comes back empty', async () => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/build.json') return Promise.resolve(new Response(JSON.stringify({ app: 'a', release: 1 }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ report: '   ' }), { status: 200 }));
+    }));
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:empty');
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    fireEvent.click(await within(section).findByRole('button', { name: 'Diagnostics' }));
+    fireEvent.click(within(section).getByRole('button', { name: 'Download diagnostics' }));
+    expect(await within(section).findByText("Couldn't collect diagnostics from Astrid. Copy the command below and run it yourself.")).toBeInTheDocument();
+    expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 });

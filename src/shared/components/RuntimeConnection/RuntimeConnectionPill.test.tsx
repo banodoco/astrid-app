@@ -238,6 +238,7 @@ describe('RuntimeConnectionPill', () => {
       expect(report).toContain('App build: served-app-build\nApp release: 42');
       expect(report.match(/^App build:/gm)).toHaveLength(1);
       expect(report.match(/^App release:/gm)).toHaveLength(1);
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
       expect(revokeObjectURL).toHaveBeenCalledWith('blob:diagnostics');
       expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
     } finally {

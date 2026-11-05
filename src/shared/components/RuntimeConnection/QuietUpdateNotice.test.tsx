@@ -29,7 +29,7 @@ describe('quiet Update available notice', () => {
     expect(readStatusMock).toHaveBeenCalledOnce();
     expect(hostedCheckMock).toHaveBeenCalledOnce();
     expect(screen.getByTestId('quiet-update-notice')).toHaveTextContent('Update available · Release 4');
-    fireEvent.click(screen.getByRole('button', { name: 'Update now' }));
+    fireEvent.click(screen.getByRole('button', { name: 'See updates' }));
     expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
     expect(window.location.search).toContain('settings=updates');
     expect(window.location.hash).toBe('#edit');

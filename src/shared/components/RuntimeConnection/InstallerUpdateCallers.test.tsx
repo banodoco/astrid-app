@@ -108,7 +108,7 @@ describe('installer update callers', () => {
     harness.connection = { isConnected: false, managedByPinokio: false, state: { status: 'blocked' } };
     view.rerender(<AstridUpdatesSection isOpen />);
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(screen.getByText('Run it yourself')).toBeInTheDocument();
     fireEvent.click(staleButton);
     await act(async () => { fireEvent.focus(window); });
@@ -122,7 +122,7 @@ describe('installer update callers', () => {
       return original(input, init);
     }));
     render(<AstridUpdatesSection isOpen />);
-    await screen.findByRole('button', { name: 'Copy for your agent' });
+    await screen.findByRole('button', { name: 'Copy instructions for your agent' });
     expect(screen.getByText('Run it yourself')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
@@ -138,11 +138,9 @@ describe('installer update callers', () => {
     const statusReads = calls().filter((call) => call.url.endsWith('/v1/update/status'));
     expect(statusReads.length).toBeGreaterThan(0);
     expect(statusReads.every((call) => call.method === 'GET')).toBe(true);
-    expect(screen.getAllByRole('button', { name: 'Copy for your agent' }).length).toBeGreaterThan(0);
-    const checkForUpdates = await screen.findByRole('button', { name: 'Check for updates' });
-    expect(checkForUpdates).toBeEnabled();
-    fireEvent.click(checkForUpdates);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Check for updates' })).toBeEnabled());
+    expect(screen.getAllByRole('button', { name: 'Copy instructions for your agent' }).length).toBeGreaterThan(0);
+    // An available update replaces the quiet Check for updates link.
+    expect(screen.queryByRole('button', { name: 'Check for updates' })).not.toBeInTheDocument();
     expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(0);
 
     const updateNow = (await screen.findAllByRole('button', { name: 'Update now' })).at(-1)!;
@@ -239,11 +237,11 @@ describe('installer update callers', () => {
   ])('respects installer action availability and explicit recovery Update when %s', async (_label, configure) => {
     configure();
     render(<AstridUpdatesSection isOpen />);
-    await screen.findByRole('button', { name: 'Check for updates' });
+    await waitFor(() => expect(calls().some((call) => call.url.endsWith('/v1/update/status'))).toBe(true));
     if (_label === 'disconnected') await screen.findByText('Connect to Astrid before checking its release.');
     else if (_label === 'source managed') {
       // A source checkout has no release to install: the status line follows the resolver, which has no update to offer.
-      await screen.findAllByText('Astrid is up to date');
+      await screen.findAllByText(/^Astrid is up to date/);
       expect(screen.queryByText(/Update available/)).not.toBeInTheDocument();
     } else if (_label === 'recovery required') {
       const recoveryCopy = 'Astrid needs recovery. Select Update to check the previous operation before continuing.';
@@ -256,7 +254,7 @@ describe('installer update callers', () => {
       fireEvent.click(update);
       await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
     }
-    else await screen.findAllByText('Update available · Release 4');
+    else await screen.findAllByText('Update available: Release 4 (current: Release 3)');
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     const postCount = calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
     expect(postCount).toBe(_label === 'recovery required' ? 1 : 0);

@@ -38,7 +38,7 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
     {(resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
-    {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} />}
+    {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} agentLabel={COPY_FOR_AGENT_ACTION} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}

@@ -46,7 +46,7 @@ describe('required update on the connected page', () => {
     const card = await waitFor(() => screen.getByTestId('quiet-update-notice'));
     expect(within(card).getByText('Update Astrid')).toBeVisible();
     expect(card).toHaveTextContent('This update is required: security fix');
-    expect(within(card).getByText('Copy for your agent')).toBeVisible();
+    expect(within(card).getByText('Copy instructions for your agent')).toBeVisible();
     expect(within(card).getByText('Run it yourself')).toBeVisible();
     expect(screen.getByTestId('settings-update-indicator')).toBeVisible();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();

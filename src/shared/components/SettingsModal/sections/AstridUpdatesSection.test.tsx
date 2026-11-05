@@ -216,7 +216,9 @@ describe('Astrid Updates Settings section', () => {
       if (String(input) === '/build.json') return Promise.resolve(new Response(JSON.stringify({ app: 'a', release: 1 }), { status: 200 }));
       return Promise.resolve(new Response(JSON.stringify({ report: '   ' }), { status: 200 }));
     }));
+    // The spy from the earlier download test is still installed (this file does not restore mocks), so clear its calls.
     const createObjectURL = vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:empty');
+    createObjectURL.mockClear();
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     fireEvent.click(await within(section).findByRole('button', { name: 'Diagnostics' }));

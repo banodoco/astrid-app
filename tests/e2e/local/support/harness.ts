@@ -628,6 +628,7 @@ export class DirectHarness {
   private https?: HttpsServer;
   private stopped = false;
   private extensionsSeed?: ExtensionsSeed;
+  private extensionsComposition?: { clips: unknown[]; bundle: unknown; registry: unknown };
   private mediaSeed?: MediaSeed;
   private threeProductsSeed?: ThreeProductsSeed;
   private renderSeed?: RenderSeed;
@@ -651,6 +652,13 @@ export class DirectHarness {
   get auditPath() { return path.join(this.tmp, 'door-audit.jsonl'); }
   /** The product credential the door acts with, as `astrid-runtime up` would provision it. */
   get credentialPath() { return path.join(this.tmp, 'product-credential.json'); }
+  /**
+   * The harness's temporary installed pack collection (Plan 06 PK-14). The Runtime reads its admitted inventory from here
+   * (`--installed-pack-root`) and the journey's Agent installs into it with `--packs-root`; nothing reads a real ~/Astrid.
+   */
+  get packsRoot() { return path.join(this.tmp, 'packs'); }
+  /** A temporary HOME for the Agent CLI the journey drives, so its defaults never resolve into the user's home. */
+  get agentHome() { return path.join(this.tmp, 'agent-home'); }
   /** The App's Runtime base (`runtimeApiBase()`) under the door's origin. */
   get doorBase() { return `http://127.0.0.1:${this.doorPort}${this.doorPrefix}`; }
   get doorPrefix() { return '/api/runtime'; }
@@ -817,6 +825,7 @@ export class DirectHarness {
     try {
       managed = spawnGroup(interpreter, ['-m', 'runtime_protocol.cli', 'start', '--root', this.realmDir, '--support-root', this.supportDir, '--port', String(port), '--display-name', 'Direct Journey',
       '--door-origin', this.origin, '--door-port', String(this.doorPort), '--door-credential-file', this.credentialPath, '--door-audit-log', this.auditPath,
+      '--installed-pack-root', this.packsRoot,
       ...(this.timelineAuthoring ? ['--authoring-profile', 'astrid'] : [])], { cwd: this.tmp, env: this.runtimeEnv(captureSink) });
     } catch {
       lifecycle.failure = { code: 'startup_failed', class: 'startup', stage: 'spawn' };
@@ -1257,8 +1266,35 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     publication.parent_composition.registry = registry as unknown as typeof publication.parent_composition.registry;
     const published = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, publication);
     if (published.status !== 200) throw new Error(`seed extensions timeline: ${published.status} ${JSON.stringify(published.body)}`);
+    this.extensionsComposition = { clips, bundle, registry };
     this.extensionsSeed = { projectSlug: (project.body.data ?? project.body).slug, timelineId, transcriptTexts, sceneClipId, speechClipId, sceneMarker: SCENE_MARKER, scenePackage, sceneEntry: entry };
     return this.extensionsSeed;
+  }
+
+  /**
+   * Plan 06 PK-14: publish the next revision of the extensions timeline with one effect-layer clip (on its own track V2)
+   * whose effect comes from a pack that is not installed yet. The project names the effect; opening it must stay passive,
+   * and the effect renders only once a pack providing it is installed.
+   */
+  async addPackEffectClip(effectId: string): Promise<{ clipId: string; revisionId: string }> {
+    const seed = await this.seedExtensions();
+    const { projectId } = this.seed;
+    const base = `/v1/projects/${projectId}/timelines/${seed.timelineId}/composition-revisions`;
+    const heads = await this.runtimeJson('GET', `${base}?limit=1`);
+    const head = heads.body.items?.find((item: any) => item.is_current_head)?.revision_id;
+    if (heads.status !== 200 || !head) throw new Error(`pack effect clip: no head for ${seed.timelineId}: ${heads.status} ${JSON.stringify(heads.body)}`);
+    const clipId = 'journey-pack-effect-clip';
+    const { clips, bundle, registry } = this.extensionsComposition!;
+    const effectClip = { id: clipId, at: 0, track: 'V2', clipType: 'effect-layer', hold: 5, continuous: { type: effectId, intensity: 1, params: {} } };
+    const allClips = [...clips, effectClip];
+    const publication = compositionPublication({ projectId, timelineId: seed.timelineId }, head, 'Extensions', 30);
+    const tracks = [{ id: 'V1', kind: 'visual', label: 'V1' }, { id: 'V2', kind: 'visual', label: 'V2' }];
+    publication.parent_composition.config = { ...publication.parent_composition.config, clips: allClips, bundle, tracks } as typeof publication.parent_composition.config;
+    publication.parent_composition.clips = allClips as unknown as typeof publication.parent_composition.clips;
+    publication.parent_composition.registry = registry as unknown as typeof publication.parent_composition.registry;
+    const published = await this.runtimeJson('POST', base, publication);
+    if (published.status !== 200) throw new Error(`pack effect clip: ${published.status} ${JSON.stringify(published.body)}`);
+    return { clipId, revisionId: published.body.data?.revision_id ?? published.body.revision_id ?? '' };
   }
 
   /**

@@ -1,0 +1,9 @@
+# Revision v2-broken: the PK-14 journey updates to this and expects validation to refuse it.
+# It declares no name and an unknown schema version, so the manifest fails validation before any build or swap.
+schema_version: 99
+id: live_effect
+version: 2.0.0
+ui:
+  editor:
+    type: editor
+    entry: ui/live-effect/index.tsx

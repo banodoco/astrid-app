@@ -1,0 +1,12 @@
+{
+  "id": "com.astrid.test.live-effect",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "label": "Live effect",
+  "publisher": "Astrid PK-14 fixture",
+  "license": "MIT",
+  "settingsSchema": { "version": 1 },
+  "contributions": [
+    { "id": "effect", "kind": "effect", "effectId": "live-effect" }
+  ]
+}

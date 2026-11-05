@@ -33,8 +33,10 @@
  */
 import { expect, type Page, type Route } from '@playwright/test';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { BIG_DOWNLOAD_BYTES, BIG_UPLOAD_BYTES, DirectHarness, DOOR_PORT, rawRequest, sha256Hex, compositionPublication } from './support/harness.ts';
 import { APP_ENTRY_ROUTE, UI, currentHead, editFirstTrackName, expectConnected, firstTrackName, holdTimelineSaves, openApp, openSeededTimeline, revisionBody, test, waitForAudit } from './support/app.ts';
 import { skipWhen } from '../support/declaredSkip.ts';
@@ -970,6 +972,71 @@ async function openExtensionsTimeline(page: Page, harness: DirectHarness) {
   return openSeededTimelineByUrl(page, harness, await harness.seedExtensions());
 }
 
+// ---------------------------------------------------------------------------------------------
+// Plan 06 PK-14: an installed pack's effect, live in the open editor
+
+/** The fixture pack: `v1/` renders LIVE-EFFECT-V1; `v2-broken/` replaces its files with a manifest that fails validation. */
+const LIVE_EFFECT_FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/packs/live-effect');
+const LIVE_EFFECT_PACK_ID = 'live_effect';
+const LIVE_EFFECT_EXTENSION_ID = 'com.astrid.test.live-effect';
+const LIVE_EFFECT_EFFECT_ID = 'live-effect';
+const LIVE_EFFECT_MARKER = 'LIVE-EFFECT-V1';
+
+interface PacksCli { command: string; prefix: string[]; form: string; env: NodeJS.ProcessEnv }
+
+/**
+ * The Agent the journey drives (`ASTRID_PACKS_AGENT`, the Agent environment's `astrid` binary), always against the
+ * harness's temporary packs root and a temporary HOME. The verbs are `astrid packs <verb>`; until the installed
+ * console routes `packs`, they are the same verbs as `python -m astrid.core.pack.cli` from that environment
+ * (Plan 06 PK-9 step 3), and the case records which form ran.
+ */
+function packsCli(harness: DirectHarness): PacksCli {
+  const agent = process.env.ASTRID_PACKS_AGENT;
+  if (!agent) throw new Error('Set ASTRID_PACKS_AGENT to the Agent environment\'s astrid binary (Plan 06 PK-14 AGENT_BIN)');
+  mkdirSync(harness.agentHome, { recursive: true });
+  // An exact environment: no ASTRID_PACKS_PATH, no real HOME, nothing from the runner beyond PATH, locale and TMPDIR.
+  const env: NodeJS.ProcessEnv = { HOME: harness.agentHome, PATH: process.env.PATH ?? '/usr/bin:/bin', LANG: process.env.LANG ?? 'C.UTF-8', TMPDIR: process.env.TMPDIR ?? '/tmp', NO_COLOR: '1' };
+  const probe = spawnSync(agent, ['packs', '--help'], { cwd: harness.tmp, env, encoding: 'utf8', timeout: 120_000 });
+  if (probe.status === 0 && /\badd\b/.test(probe.stdout) && /\bremove\b/.test(probe.stdout)) return { command: agent, prefix: ['packs'], form: `${agent} packs`, env };
+  const python = path.join(path.dirname(agent), 'python');
+  return { command: python, prefix: ['-m', 'astrid.core.pack.cli'], form: `${python} -m astrid.core.pack.cli`, env };
+}
+
+function runPacks(harness: DirectHarness, cli: PacksCli, args: string[], input = '') {
+  const result = spawnSync(cli.command, [...cli.prefix, ...args], { cwd: harness.tmp, env: cli.env, input, encoding: 'utf8', timeout: 300_000 });
+  const transcript = `$ ${cli.form} ${args.join(' ')}\nexit ${result.status}\n--- stdout\n${result.stdout}\n--- stderr\n${result.stderr}`;
+  test.info().annotations.push({ type: 'packs-cli', description: transcript.slice(0, 4000) });
+  return { status: result.status, transcript };
+}
+
+/** A temporary Git source with two commits: the fixture's v1, then v1 with the v2-broken files laid over it. */
+function liveEffectSource(harness: DirectHarness): { source: string; v1: string; v2: string } {
+  const source = path.join(harness.tmp, 'live-effect-source');
+  mkdirSync(source, { recursive: true });
+  const git = (...args: string[]) => {
+    const result = spawnSync('git', ['-c', 'user.name=PK-14 journey', '-c', 'user.email=pk14@astrid.test', '-c', 'commit.gpgsign=false', ...args], { cwd: source, encoding: 'utf8', env: { PATH: process.env.PATH ?? '/usr/bin:/bin', HOME: harness.agentHome, GIT_CONFIG_NOSYSTEM: '1' } });
+    if (result.status !== 0) throw new Error(`git ${args.join(' ')}: ${result.stderr}`);
+    return result.stdout.trim();
+  };
+  git('init', '-q', '-b', 'main');
+  cpSync(path.join(LIVE_EFFECT_FIXTURE, 'v1'), source, { recursive: true });
+  git('add', '-A');
+  git('commit', '-q', '-m', 'live-effect v1');
+  const v1 = git('rev-parse', 'HEAD');
+  cpSync(path.join(LIVE_EFFECT_FIXTURE, 'v2-broken'), source, { recursive: true });
+  git('add', '-A');
+  git('commit', '-q', '-m', 'live-effect v2-broken');
+  return { source, v1, v2: git('rev-parse', 'HEAD') };
+}
+
+/** The installed pack's Runtime admission, as the Agent's transaction writes it (what the Runtime's inventory serves). */
+function admissionState(harness: DirectHarness): string {
+  const build = path.join(harness.packsRoot, LIVE_EFFECT_PACK_ID, '.build');
+  if (!existsSync(path.join(harness.packsRoot, LIVE_EFFECT_PACK_ID))) return 'pack folder absent';
+  if (!existsSync(build)) return 'no .build/ (the transaction built nothing, so the Runtime has nothing to admit)';
+  return `.build/: ${readdirSync(build).sort().join(', ')}`;
+}
+
 test.describe('pack extensions (App)', () => {
   test('extensions: the transcript lane renders its words from the door', async ({ page, harness }) => {
     const { seed } = await openExtensionsTimeline(page, harness);
@@ -1014,6 +1081,59 @@ test.describe('pack extensions (App)', () => {
     }, harness.doorBase);
     expect(inside).toEqual({ network: 'blocked', parentAccess: 'blocked', storage: 'blocked' });
     expect(harness.audit().filter((entry) => entry.origin === 'null'), 'the scene frame sent nothing to the door').toEqual([]);
+  });
+
+  test('extensions: an installed pack effect renders live, disable disposes it, a failed update keeps the old effect', async ({ page, harness }) => {
+    const cli = packsCli(harness);
+    test.info().annotations.push({ type: 'packs-agent', description: cli.form });
+    const { source, v1, v2 } = liveEffectSource(harness);
+    // The project names the pack's effect before any pack provides it.
+    await harness.seedExtensions();
+    await harness.addPackEffectClip(LIVE_EFFECT_EFFECT_ID);
+    const auditBeforeOpen = harness.audit().length;
+    await openExtensionsTimeline(page, harness);
+    await expect(page.locator('[data-lane-kind="astrid.transcript"]')).toBeVisible();
+    // A marker that only survives while the page is never reloaded.
+    await page.evaluate(() => { (window as any).__pk14SamePage = true; });
+    const samePage = () => page.evaluate(() => (window as any).__pk14SamePage === true);
+
+    // (4) Passive open: opening the project installed, fetched and ran nothing.
+    const openAudit = harness.audit().slice(auditBeforeOpen);
+    const packWrites = openAudit.filter((entry) => /\/packs\//.test(entry.path) && !['GET', 'HEAD'].includes(entry.method.toUpperCase()));
+    expect(packWrites, 'opening the project sent no pack lease, install or mutation through the door').toEqual([]);
+    expect(openAudit.filter((entry) => /install/i.test(entry.path)), 'no install request from opening the project').toEqual([]);
+    expect(openAudit.filter((entry) => /\/packs\/assets\//.test(entry.path)), 'no pack asset fetched on open').toEqual([]);
+    expect(existsSync(path.join(harness.packsRoot, '.group.json')), 'the temporary packs root has no committed group after the open').toBe(false);
+    await expect(page.getByTestId('live-effect-marker')).toHaveCount(0);
+
+    // (1) Install while the editor is open: the effect is listed and renders in the preview, without a reload.
+    const added = runPacks(harness, cli, ['add', source, '--pack-id', LIVE_EFFECT_PACK_ID, '--revision', v1, '--packs-root', harness.packsRoot, '--yes']);
+    expect(added.status, added.transcript).toBe(0);
+    expect.soft(admissionState(harness), 'the install committed a Runtime admission for the pack\'s editor effect').toMatch(/admission\.json/);
+    const inventory = await harness.runtimeJson('GET', '/api/runtime/packs/inventory');
+    test.info().annotations.push({ type: 'runtime-inventory', description: JSON.stringify(inventory.body).slice(0, 2000) });
+    await page.getByRole('button', { name: 'Manage extensions' }).click();
+    const listed = page.getByRole('dialog', { name: 'Extensions' }).getByRole('button', { name: `Disable ${LIVE_EFFECT_EXTENSION_ID}`, exact: true });
+    await expect(listed, 'the installed effect is listed in the open editor').toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press('Escape');
+    const marker = page.getByTestId('live-effect-marker');
+    await expect(marker, 'LIVE-EFFECT-V1 renders in the preview').toHaveText(LIVE_EFFECT_MARKER, { timeout: 30_000 });
+    expect(await samePage(), 'no reload').toBe(true);
+
+    // (2) Update to the broken revision: it fails, and the old effect still renders.
+    const updated = runPacks(harness, cli, ['update', '--source', source, '--revision', v2, '--pack', `${LIVE_EFFECT_PACK_ID}=.`, '--packs-root', harness.packsRoot], 'y\n');
+    expect(updated.status, `the broken revision is refused\n${updated.transcript}`).not.toBe(0);
+    await page.waitForTimeout(3_000); // more than one inventory refresh (2 s)
+    await expect(marker, 'the old effect still renders after the failed update').toHaveText(LIVE_EFFECT_MARKER);
+    expect(await samePage(), 'no reload').toBe(true);
+
+    // (3) Remove: the effect leaves the picker and the preview without a reload.
+    const removed = runPacks(harness, cli, ['remove', LIVE_EFFECT_PACK_ID, '--packs-root', harness.packsRoot, '--yes']);
+    expect(removed.status, removed.transcript).toBe(0);
+    await expect(marker, 'the removed effect is disposed from the preview').toHaveCount(0, { timeout: 30_000 });
+    await page.getByRole('button', { name: 'Manage extensions' }).click();
+    await expect(page.getByRole('dialog', { name: 'Extensions' }).getByRole('button', { name: `Disable ${LIVE_EFFECT_EXTENSION_ID}`, exact: true }), 'the removed effect is no longer listed').toHaveCount(0, { timeout: 30_000 });
+    expect(await samePage(), 'no reload').toBe(true);
   });
 
   test('extensions ship without fetching a deployment config', async ({ page, harness }) => {

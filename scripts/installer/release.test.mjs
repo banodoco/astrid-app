@@ -265,8 +265,9 @@ test('required.release cannot fall below a historical high-water above the curre
 test('the pin helper preserves unrelated manifest fields including schema_digest', async () => {
   const manifest = JSON.parse(await readFile(new URL('../../public/install-manifest.json', import.meta.url), 'utf8'));
   const schemaDigest = manifest.runtime.schema_digest;
+  const previousRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
   applyReleasePin(manifest, 'Required migration');
-  assert.equal(manifest.release, 1);
-  assert.equal(manifest.required.release, 1);
+  assert.equal(manifest.release, previousRelease + 1);
+  assert.equal(manifest.required.release, previousRelease + 1);
   assert.equal(manifest.runtime.schema_digest, schemaDigest);
 });

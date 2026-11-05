@@ -1,16 +1,14 @@
-import { ChevronLeft, Check, Copy } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { EditorCard, EditorCardFoot } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
 import { EditorCardLayer } from '@/shared/components/RuntimeConnection/EditorCardLayer.tsx';
 import { detectInstallScenario } from '@/pages/Home/installScenario.ts';
-import { LOCAL_SETUP, PINOKIO_INSTALL_COPY, RUNTIME_CONNECTION_COPY, localSetupInstructions, localSetupSteps } from '@/shared/components/RuntimeConnection/copy.ts';
-import { CopyCommandRow, CopyFallback, useCopyAction } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { LOCAL_SETUP, PINOKIO_INSTALL_COPY, localSetupSteps } from '@/shared/components/RuntimeConnection/copy.ts';
+import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
+import { CopyCommandRow } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
 
-export function WelcomeLocalSetup({ onBack }: { readonly onBack: () => void }) {
-  const instructions = localSetupInstructions();
+export function WelcomeLocalSetup({ onBack, initiallySetUp = false, onContinue }: { readonly onBack: () => void; readonly initiallySetUp?: boolean; readonly onContinue?: () => void }) {
   const steps = localSetupSteps();
-  const copy = useCopyAction(instructions);
-  const copied = copy.status === 'copied';
 
   return <main aria-label="Set up Astrid with your agent">
     <EditorCardLayer cardKey="local">
@@ -22,11 +20,7 @@ export function WelcomeLocalSetup({ onBack }: { readonly onBack: () => void }) {
         foot={<EditorCardFoot>When it&apos;s done, Astrid opens from your own computer.</EditorCardFoot>}
       >
         <div className="space-y-2">
-          <Button type="button" className="h-11 w-full justify-between rounded-xl px-4 text-sm" onClick={() => void copy.copy()}>
-            <span aria-live="polite">{copied ? RUNTIME_CONNECTION_COPY.agent.copied : RUNTIME_CONNECTION_COPY.agent.copy}</span>
-            {copied ? <Check aria-hidden="true" className="h-4 w-4" /> : <Copy aria-hidden="true" className="h-4 w-4" />}
-          </Button>
-          {copy.status === 'failed' && <CopyFallback text={instructions} label={RUNTIME_CONNECTION_COPY.agent.copy} />}
+          <SetupBlock initiallySetUp={initiallySetUp} localSetup localBuild onContinue={onContinue} continueLabel="Continue to Astrid" />
         </div>
         <section className="min-w-0 space-y-1.5 text-left">
           <p className="text-[13px] font-medium text-muted-foreground">Run it yourself</p>

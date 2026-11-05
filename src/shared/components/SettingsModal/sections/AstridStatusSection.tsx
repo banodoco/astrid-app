@@ -9,7 +9,9 @@ import { describeFailure, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/sh
 import { connectionStatus } from './ConnectionSection.tsx';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
+import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
 import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 import { ASTRID_STATUS_COPY as COPY, connectionStatusCopy } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
@@ -96,7 +98,8 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
   }, [isOpen, connected]);
 
   // The install type comes from the same identity-based rule as the Settings Updates section and the header notice.
-  const { installType } = useInstallerUpdate(connection);
+  const installerUpdate = useInstallerUpdate(connection);
+  const { installType } = installerUpdate;
   const summary = connectionStatus(connection, installType);
   const status = connection.state.status;
   const rawServices = details?.health.services;
@@ -114,6 +117,7 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
   const getHelp = <a className="text-muted-foreground underline underline-offset-4" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>;
   return (
     <SettingsSection title={COPY.title}>
+      {installType === 'installer' && installerUpdate.health?.identity?.managed_by === null && <SetupBlock initiallySetUp={connection.connectedBefore} explicitChoices services={services.filter((service) => service.state === 'failed' || service.reason || service.last_exit !== null)} />}
       <SettingsRow
         label={<span className="flex items-center gap-2">
           {statusIcon(summary.outOfDate ? 'update_needed' : connected ? needsRepair ? 'degraded' : 'connected' : status)}
@@ -123,9 +127,9 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
         action={summary.connect && <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => connection.connect()}>{RUNTIME_CONNECTION_COPY.permission.connect}</Button>}
       >
         {summary.checks && <SetupStatusLine checks={summary.checks} mink={false} announce={false} className="items-start" />}
-        {summary.outOfDate === 'runtime' && summary.updateResolution && <UpdateResolutionActions resolution={summary.updateResolution} />}
-        {summary.outOfDate === 'chat' && <CopyInstallCommand mode="update" />}
-        {connected && details && needsRepair && (
+        {summary.outOfDate === 'runtime' && summary.updateResolution && <UpdateResolutionActions installType={installType} resolution={summary.updateResolution} />}
+        {summary.outOfDate === 'chat' && (runtimeOrigin() === '' ? <CopyInstallCommand mode="update" /> : <SetupBlock mode="update" />)}
+        {connected && details && needsRepair && !(installType === 'installer' && installerUpdate.health?.identity?.managed_by === null) && (
           <>
             <CopyInstallCommand
               mode="install"
@@ -134,7 +138,7 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
             <p>{getHelp}</p>
           </>
         )}
-        {(loadFailed || !connected && status !== 'connecting' && status !== 'needs_permission') && <p>{getHelp}</p>}
+        {(loadFailed || !connected && status !== 'connecting' && status !== 'needs_permission' || connected && details && needsRepair && installType === 'installer' && installerUpdate.health?.identity?.managed_by === null) && <p>{getHelp}</p>}
       </SettingsRow>
 
       {connected && details && (

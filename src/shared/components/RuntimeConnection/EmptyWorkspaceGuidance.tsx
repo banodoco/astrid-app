@@ -22,7 +22,7 @@ function emptyWorkspaceDiagnostic(identity: WorkspaceIdentity, pageOrigin: strin
     '1. Find out which Astrid is running now, and the folder it runs from.',
     '2. Look for other install.json files and check whether they contain "owner": "haus.astrid.runtime". Each Astrid install keeps its own workspace.',
     '3. Tell me what you found, and ask me which one holds my work before you change anything.',
-    `4. This install line uses the Astrid installation saved for sign-in, or the default install folder if none is saved. It keeps the saved workspace; otherwise it checks the default and old workspace locations. It does not select the folder I choose here: ${installCommand('install')}`,
+    `4. Astrid is already set up, so restart it without asking me to install it again. This command has no changed setup choices: an existing installation keeps its saved choices; a fresh install uses the recommendations (start at sign-in on, \`astrid\` command on, skills on, skill copies off). It uses the Astrid installation saved for sign-in, or the default install folder if none is saved. It keeps the saved workspace; otherwise it checks the default and old workspace locations. It does not select the folder I choose here: ${installCommand('install')}`,
     "   Check that those choices match the Astrid I chose before running it. If they differ, stop and explain what needs to change. Don't reset, replace or delete any existing data. Then I'll reload this page.",
     '',
     'Never create, reset or delete a workspace, project or install to work around this.',

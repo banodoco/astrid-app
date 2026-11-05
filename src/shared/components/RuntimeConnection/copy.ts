@@ -1,4 +1,4 @@
-import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
+import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { RuntimeAuthenticationError, RuntimeCompatibilityError, RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import type { ServiceStatus } from '@/integrations/runtime/generated.ts';
 import { installBrowserName } from '@/pages/Home/installScenario.ts';
@@ -43,8 +43,61 @@ export const ASTRID_COMMANDS = {
   windowsUpdate: '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update',
 } as const;
 
-/** K8's shared label for the standard install line, which also updates and repairs. */
-export const INSTALL_LINE_LABEL = 'Install or update Astrid';
+export interface SetupChoices {
+  readonly autostart: boolean;
+  readonly command: boolean;
+  readonly skills: boolean;
+  readonly skillCopies: boolean;
+}
+
+export const RECOMMENDED_SETUP_CHOICES: SetupChoices = Object.freeze({
+  autostart: true,
+  command: true,
+  skills: true,
+  skillCopies: false,
+});
+
+const PENDING_SETUP_KEY = 'astrid:pending-setup-v1';
+export interface PendingSetupState { readonly alreadySetUp: boolean; readonly choices: SetupChoices }
+export function hasPendingSetupState(): boolean {
+  try { return localStorage.getItem(PENDING_SETUP_KEY) !== null; } catch { return false; }
+}
+export function readPendingSetupState(): PendingSetupState {
+  try {
+    const raw = localStorage.getItem(PENDING_SETUP_KEY);
+    if (raw) {
+      const value = JSON.parse(raw) as Partial<PendingSetupState>;
+      if (typeof value.alreadySetUp === 'boolean' && value.choices &&
+        ['autostart', 'command', 'skills', 'skillCopies'].every(key => typeof value.choices?.[key as keyof SetupChoices] === 'boolean')) {
+        return { alreadySetUp: value.alreadySetUp, choices: value.choices as SetupChoices };
+      }
+    }
+  } catch { /* The current setup screen can proceed without durable storage. */ }
+  return { alreadySetUp: false, choices: RECOMMENDED_SETUP_CHOICES };
+}
+
+export function writePendingSetupState(state: PendingSetupState): void {
+  try { localStorage.setItem(PENDING_SETUP_KEY, JSON.stringify(state)); }
+  catch { /* The current setup screen can proceed without durable storage. */ }
+}
+
+const SETUP_FLAGS = [
+  ['autostart', '--autostart'],
+  ['command', '--command'],
+  ['skills', '--skills'],
+  ['skillCopies', '--skill-copies'],
+] as const satisfies readonly (readonly [keyof SetupChoices, string])[];
+
+/** Flags stay in one place so the terminal line and agent handoff always describe the same choices. */
+export function setupChoiceFlags(choices: SetupChoices = RECOMMENDED_SETUP_CHOICES): string[] {
+  return SETUP_FLAGS.flatMap(([key, flag]) => choices[key] === RECOMMENDED_SETUP_CHOICES[key]
+    ? [] : [flag, choices[key] ? 'on' : 'off']);
+}
+
+/** Settings cannot read saved Runtime choices yet, so its visible selections are applied explicitly. */
+export function explicitSetupChoiceFlags(choices: SetupChoices): string[] {
+  return SETUP_FLAGS.flatMap(([key, flag]) => [flag, choices[key] ? 'on' : 'off']);
+}
 
 /** One owner for G1's offline diagnostics fallback, shared by Settings and recovery surfaces. */
 export const DIAGNOSTICS_FALLBACK_COPY = {
@@ -58,8 +111,6 @@ const LOCAL_SETUP_DIRECTORY = 'astrid-app';
 
 /** The fully local setup: the editor's source, how to start it, and where it serves. */
 export const LOCAL_SETUP = {
-  macLinuxInstaller: ASTRID_COMMANDS.macLinux,
-  windowsInstaller: ASTRID_COMMANDS.windows,
   repoUrl: ASTRID_REPO_URL,
   repoDirectory: LOCAL_SETUP_DIRECTORY,
   cloneCommand: `git clone ${ASTRID_REPO_URL}.git`,
@@ -87,14 +138,7 @@ export interface LocalSetupStep {
 /** The concise, human-readable version of the fully local setup, using the same commands as the agent handoff. */
 export function localSetupSteps(): readonly LocalSetupStep[] {
   const L = LOCAL_SETUP;
-  const windows = detectPlatform() === 'windows';
   return [
-    {
-      line: `${INSTALL_LINE_LABEL}: in ${windows ? 'PowerShell' : 'Terminal'} run`,
-      command: windows ? L.windowsInstaller : L.macLinuxInstaller,
-      commandLabel: 'Copy the install command',
-      ...(windows ? { hint: 'If pasting gives nothing, select the command and press Ctrl+C.' } : {}),
-    },
     { line: "Install Git and Node.js 20 (20.19 or newer), if you don't have them." },
     {
       line: 'Get the editor:',
@@ -116,16 +160,18 @@ export function localSetupSteps(): readonly LocalSetupStep[] {
 
 export type WindowMode = 'app-window' | 'browser-tab';
 
-export function localSetupInstructions(): string {
+export function localSetupInstructions(choices: SetupChoices = RECOMMENDED_SETUP_CHOICES, alreadySetup = false, explicitChoices = false): string {
   const L = LOCAL_SETUP;
   return [
-    'Please set up Astrid to run fully on this computer, including the editor, so I can change Astrid itself. Do the work yourself and verify the result.',
-    `1. Install or repair Astrid with the official installer. Fetch and read the script before running it. macOS/Linux: \`${L.macLinuxInstaller}\`. Windows PowerShell: \`${L.windowsInstaller}\`. Keep my existing workspace, projects, media, credentials, and agent instructions. The installer may open astrid.haus; finish this setup in the local editor below.`,
+    `Please ${alreadySetup ? 'restart Astrid and set up the fully local editor' : 'set up Astrid to run fully on this computer, including the editor'} so I can change Astrid itself. Do the work yourself and verify the result.`,
+    alreadySetup ? null : 'Before you run the command, ask me once: “May I install Astrid with these setup choices?” Wait for my answer, then run it only if I agree.',
+    `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.`,
+    `1. Install or repair Astrid with the official installer. Fetch and read the script before running it. Run this official installer command: \`${installCommand('install', choices, explicitChoices)}\`. Keep my existing workspace, projects, media, credentials, and agent instructions. The installer may open astrid.haus; finish this setup in the local editor below.`,
     `2. Get the editor's code from ${L.repoUrl}. Install Git and Node.js 20.19 or newer in the Node 20 release line if needed. Clone with \`${L.cloneCommand}\`, then \`${L.changeDirectoryCommand}\` and \`${L.installDependenciesCommand}\`. If a clone already exists, preserve its changes and update it to \`main\` without discarding work; use \`git pull --ff-only origin main\` when it can fast-forward and resolve any divergence before continuing.`,
     `3. In that clone, run \`${L.startCommand}\` in a terminal that stays open. This starts the source editor on port 5180, checks the installed Runtime and selected workspace, and connects through the editor's own server. Keep the existing hosted door for https://astrid.haus; do not change its origin or turn it off. If the launcher reports a problem, diagnose it and repair through the official installer when needed. Do not delete or replace my workspace or credentials.`,
     `4. Open ${L.openUrl} in my browser. The editor opens with my project. This first-open address resumes at connection because I already completed the tour. Verify \`/api/runtime/v1/health\` and \`/api/runtime/v1/realm\` through http://127.0.0.1:5180 and confirm the editor uses my existing Runtime workspace. No browser local-network permission is needed for this route. Do not claim success if any check could not be run; tell me the actual result.`,
     `5. Tell me the absolute path of the clone so you or I can edit it. Source edits appear through Vite's normal development workflow. To start later: \`cd\` to that clone and run \`${L.startCommand}\`, then open the local address it prints. To stop the editor: Ctrl+C in its terminal. That stops the editor and proxy, plus any Runtime it started; a Runtime it attached to keeps running for astrid.haus. To update the editor: stop it, save or commit local source changes, then run \`git pull --ff-only origin main\`, \`${L.installDependenciesCommand}\`, and \`${L.startCommand}\`. To update the Runtime and agent: use \`${ASTRID_COMMANDS.macLinuxUpdate}\` on macOS/Linux, or \`${ASTRID_COMMANDS.windowsAgentUpdate}\` in Windows PowerShell, then restart the editor. Read the update script before running it. The local editor can open offline after its dependencies are installed; online models and providers still need internet.`,
-  ].join('\n');
+  ].filter((part): part is string => part !== null).join('\n');
 }
 
 export type CommandMode = 'install' | 'update';
@@ -198,7 +244,8 @@ export function describeFailure(value: unknown, platform: Platform = detectPlatf
 
 export function healthCheckCommand(apiBase: string, origin?: string, platform: Platform = detectPlatform()): string {
   const base = apiBase.replace(/\/+$/, '');
-  const runtimeBase = base.endsWith('/api/runtime') ? base : `${base}/api/runtime`;
+  const runtimePath = runtimeApiBase().slice(runtimeOrigin().length);
+  const runtimeBase = base.endsWith(runtimePath) ? base : `${base}${runtimePath}`;
   const url = `${runtimeBase}/v1/health`;
   if (platform === 'windows') {
     const headers = origin ? ` -Headers @{ Origin = '${origin.replace(/'/g, "''")}' }` : '';
@@ -223,10 +270,14 @@ function serviceBrief(services: readonly ServiceStatus[] | undefined, platform: 
     : `If a service fails, inspect its service-<name>.log under ${runtimeLogDirectory(platform)}.`;
 }
 
-export function installCommand(mode: CommandMode): string {
+export function installCommand(mode: CommandMode, choices?: SetupChoices, explicitChoices = false): string {
   const windows = detectPlatform() === 'windows';
-  if (mode === 'update') return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
-  return windows ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
+  if (mode === 'update' && choices === undefined && !explicitChoices) return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
+  const selected = choices ?? RECOMMENDED_SETUP_CHOICES;
+  const args = ['--yes', ...(mode === 'update' ? ['--update'] : []), ...(explicitChoices ? explicitSetupChoiceFlags(selected) : setupChoiceFlags(selected))].join(' ');
+  return windows
+    ? `& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) ${args}`
+    : `${ASTRID_COMMANDS.macLinux} -s -- ${args}`;
 }
 
 const SETUP_GUIDE_URL = 'https://github.com/banodoco/astrid-agent/blob/main/docs/setup/SKILL.md';
@@ -238,25 +289,35 @@ export const UPDATE_ROUTES = {
 } as const;
 
 /** A complete handoff: retain an existing workspace and diagnose failures before retrying. */
-export function agentInstructions(mode: CommandMode, pageOrigin: string, localBuild = false, services?: readonly ServiceStatus[]): string {
+export function agentInstructions(
+  mode: CommandMode,
+  pageOrigin: string,
+  localBuild = false,
+  services?: readonly ServiceStatus[],
+  setup: { readonly choices?: SetupChoices; readonly alreadySetup?: boolean; readonly explicitChoices?: boolean } = {},
+): string {
   const platform = detectPlatform();
   const windows = platform === 'windows';
-  const command = installCommand(mode);
+  const choices = setup.choices ?? RECOMMENDED_SETUP_CHOICES;
+  const alreadySetup = setup.alreadySetup ?? false;
+  const command = installCommand(mode, choices, setup.explicitChoices ?? false);
   return [
-    `Please ${mode === 'update' ? 'update my existing Astrid installation' : 'set up or restart Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
+    `Please ${mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
+    !alreadySetup ? `Before you run the command, ask me once: “May I ${mode === 'update' ? 'update Astrid' : 'install Astrid'} with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
+    !alreadySetup ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
     'First inspect the existing installation, running services, profile, selected workspace and data root. Preserve my projects, media, credentials and agent instructions. Do not reset or delete my workspace, or replace it with an empty one.',
     "Use the current official Astrid installer; read it before running it. The installer adopts an existing workspace itself; don't run workspace or migration commands by hand. Do not bypass ownership guards or overwrite a directory just because the installer refuses it.",
     windows && mode === 'install'
-      ? `The command offered by this page, in PowerShell:\n${command}\nFrom Git Bash or another shell:\n${ASTRID_COMMANDS.windowsAgent}\nInstall from Windows, not inside WSL.`
+      ? `The command offered by this page, in PowerShell:\n${command}\nFrom Git Bash or another shell:\n${command.replace(/^& /, 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& ').replace(/$/, '"')}\nInstall from Windows, not inside WSL.`
       : windows && mode === 'update'
-        ? `The command offered by this page, in PowerShell:\n${command}\nFrom Git Bash or another shell:\n${ASTRID_COMMANDS.windowsAgentUpdate}\nUpdate from Windows, not inside WSL.`
+        ? `The command offered by this page, in PowerShell:\n${command}\nFrom Git Bash or another shell:\npowershell -NoProfile -ExecutionPolicy Bypass -Command "${command}"\nUpdate from Windows, not inside WSL.`
       : `${mode === 'update' ? 'If you installed Astrid with the installer, the command offered by this page is' : 'The command offered by this page is'}:\n${command}${windows ? '\nInstall from Windows, not inside WSL.' : ''}`,
     mode === 'update'
       ? localBuild ? `${UPDATE_ROUTES.source} Before running the installer, check whether this computer runs Astrid from source checkouts (for example, a running runtime_protocol from a git checkout). If it does, update those checkouts instead of running the installer.` : null
       : null,
     'If installation or startup fails, read the log path printed by the installer, diagnose the actual cause and resolve it before retrying. Keep the existing workspace selection and data root connected; do not infer that no installation exists merely because the browser cannot reach it.',
     serviceBrief(services, platform),
-    `Check Runtime health: \`${healthCheckCommand(`${runtimeOrigin() || pageOrigin}/api/runtime`, pageOrigin, platform)}\`.`,
+    `Check Runtime health: \`${healthCheckCommand(new URL(runtimeApiBase(), runtimeOrigin() || pageOrigin).toString(), pageOrigin, platform)}\`.`,
     `The installer verifies Astrid and opens astrid.haus. Tell me to choose Allow if Chrome or Edge asks, and confirm Astrid shows Connected. Setup guide: ${SETUP_GUIDE_URL}`,
     "If the installer couldn't open a browser, open https://astrid.haus/?connect=1.",
     'My astrid.haus tab connects by itself once Astrid answers; if it shows a Connect button, click it.',

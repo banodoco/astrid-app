@@ -34,12 +34,13 @@
 import { expect, type Page, type Route } from '@playwright/test';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BIG_DOWNLOAD_BYTES, BIG_UPLOAD_BYTES, DirectHarness, DOOR_PORT, rawRequest, sha256Hex, compositionPublication } from './support/harness.ts';
 import { APP_ENTRY_ROUTE, UI, currentHead, editFirstTrackName, expectConnected, firstTrackName, holdTimelineSaves, openApp, openSeededTimeline, revisionBody, test, waitForAudit } from './support/app.ts';
 import { skipWhen } from '../support/declaredSkip.ts';
+import { DIST_DIR } from '../../../config/testing/skipConditions.mjs';
 import { SpeedTable } from './support/measure.ts';
 import { LOCAL_NETWORK_PERMISSION, readLocalNetworkState, setLocalNetworkPermission } from './support/permission.ts';
 
@@ -976,6 +977,7 @@ async function openExtensionsTimeline(page: Page, harness: DirectHarness) {
 // Plan 06 PK-14: an installed pack's effect, live in the open editor
 
 /** The fixture pack: `v1/` renders LIVE-EFFECT-V1; `v2-broken/` replaces its files with a manifest that fails validation. */
+const APP_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
 const LIVE_EFFECT_FIXTURE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../fixtures/packs/live-effect');
 const LIVE_EFFECT_PACK_ID = 'live_effect';
 const LIVE_EFFECT_EXTENSION_ID = 'com.astrid.test.live-effect';
@@ -986,8 +988,8 @@ interface PacksCli { command: string; prefix: string[]; form: string; env: NodeJ
 
 /**
  * The Agent the journey drives (`ASTRID_PACKS_AGENT`, the Agent environment's `astrid` binary), always against the
- * harness's temporary packs root and a temporary HOME. The verbs are `astrid packs <verb>`; until the installed
- * console routes `packs`, they are the same verbs as `python -m astrid.core.pack.cli` from that environment
+ * harness's temporary packs root and a temporary HOME. The verbs are `astrid packs <verb>`; an Agent whose console
+ * does not route `packs` falls back to the same verbs as `python -m astrid.core.pack.cli` from that environment
  * (Plan 06 PK-9 step 3), and the case records which form ran.
  */
 function packsCli(harness: DirectHarness): PacksCli {
@@ -1007,6 +1009,33 @@ function runPacks(harness: DirectHarness, cli: PacksCli, args: string[], input =
   const transcript = `$ ${cli.form} ${args.join(' ')}\nexit ${result.status}\n--- stdout\n${result.stdout}\n--- stderr\n${result.stderr}`;
   test.info().annotations.push({ type: 'packs-cli', description: transcript.slice(0, 4000) });
   return { status: result.status, transcript };
+}
+
+/**
+ * The pinned browser build toolchain the Agent builds the pack's editor effect with (`packs add/update --toolchain`, Agent
+ * S28 lock format, exactly these keys): this Node, the App's own esbuild 0.27.7 (`node_modules/esbuild/bin/esbuild`, whose
+ * `lib/main.js` is the builder's pinned API) and the App build's shared-module lock. Written into the test's temporary dir.
+ */
+function liveEffectToolchain(harness: DirectHarness): string {
+  const sha256File = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+  const esbuild = path.join(APP_ROOT, 'node_modules', 'esbuild', 'bin', 'esbuild');
+  const esbuildVersion = JSON.parse(readFileSync(path.join(APP_ROOT, 'node_modules', 'esbuild', 'package.json'), 'utf8')).version as string;
+  const sharedModulesLock = path.join(DIST_DIR, 'extension-shared-modules.json');
+  if (!existsSync(sharedModulesLock)) throw new Error(`no App shared-module lock at ${sharedModulesLock}: build the App first`);
+  const lock = {
+    version: 1,
+    node_path: process.execPath,
+    node_version: process.version.replace(/^v/, ''),
+    node_sha256: sha256File(process.execPath),
+    esbuild_path: esbuild,
+    esbuild_version: esbuildVersion,
+    esbuild_sha256: sha256File(esbuild),
+    shared_modules_lock: sharedModulesLock,
+  };
+  const file = path.join(harness.tmp, 'pk14-toolchain.json');
+  writeFileSync(file, `${JSON.stringify(lock, null, 2)}\n`);
+  test.info().annotations.push({ type: 'packs-toolchain', description: JSON.stringify(lock) });
+  return file;
 }
 
 /** A temporary Git source with two commits: the fixture's v1, then v1 with the v2-broken files laid over it. */
@@ -1086,6 +1115,7 @@ test.describe('pack extensions (App)', () => {
   test('extensions: an installed pack effect renders live, disable disposes it, a failed update keeps the old effect', async ({ page, harness }) => {
     const cli = packsCli(harness);
     test.info().annotations.push({ type: 'packs-agent', description: cli.form });
+    const toolchain = liveEffectToolchain(harness);
     const { source, v1, v2 } = liveEffectSource(harness);
     // The project names the pack's effect before any pack provides it.
     await harness.seedExtensions();
@@ -1107,7 +1137,7 @@ test.describe('pack extensions (App)', () => {
     await expect(page.getByTestId('live-effect-marker')).toHaveCount(0);
 
     // (1) Install while the editor is open: the effect is listed and renders in the preview, without a reload.
-    const added = runPacks(harness, cli, ['add', source, '--pack-id', LIVE_EFFECT_PACK_ID, '--revision', v1, '--packs-root', harness.packsRoot, '--yes']);
+    const added = runPacks(harness, cli, ['add', source, '--pack-id', LIVE_EFFECT_PACK_ID, '--revision', v1, '--packs-root', harness.packsRoot, '--toolchain', toolchain, '--yes']);
     expect(added.status, added.transcript).toBe(0);
     expect.soft(admissionState(harness), 'the install committed a Runtime admission for the pack\'s editor effect').toMatch(/admission\.json/);
     const inventory = await harness.runtimeJson('GET', '/api/runtime/packs/inventory');
@@ -1121,7 +1151,7 @@ test.describe('pack extensions (App)', () => {
     expect(await samePage(), 'no reload').toBe(true);
 
     // (2) Update to the broken revision: it fails, and the old effect still renders.
-    const updated = runPacks(harness, cli, ['update', '--source', source, '--revision', v2, '--pack', `${LIVE_EFFECT_PACK_ID}=.`, '--packs-root', harness.packsRoot], 'y\n');
+    const updated = runPacks(harness, cli, ['update', '--source', source, '--revision', v2, '--pack', `${LIVE_EFFECT_PACK_ID}=.`, '--packs-root', harness.packsRoot, '--toolchain', toolchain], 'y\n');
     expect(updated.status, `the broken revision is refused\n${updated.transcript}`).not.toBe(0);
     await page.waitForTimeout(3_000); // more than one inventory refresh (2 s)
     await expect(marker, 'the old effect still renders after the failed update').toHaveText(LIVE_EFFECT_MARKER);

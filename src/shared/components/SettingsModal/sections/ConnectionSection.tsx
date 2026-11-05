@@ -23,7 +23,7 @@ const LOOKING: SetupChecks = { runtime: 'checking', workspace: 'checking', ready
 
 /** The caller supplies the install type from the Runtime's identity (`installTypeOf`), never from the connection alone. */
 function schemaUpdateStatus(checks: SetupChecks, installType: InstallType): ConnectionStatus {
-  const resolution = resolveUpdate({ compatibility: { kind: 'schema', detail: COPY.updateNeeded.sentence }, installType });
+  const resolution = resolveUpdate({ compatibility: { kind: 'schema', detail: COPY.updateNeeded.sentence }, installType, ...(installType === 'fully-local' ? { command: 'npm run update' } : {}) });
   return { title: resolution.title ?? COPY.updateNeeded.title, detail: resolution.body ?? COPY.updateNeeded.sentence, checks, outOfDate: 'runtime', updateResolution: resolution };
 }
 

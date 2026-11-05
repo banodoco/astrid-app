@@ -11,7 +11,9 @@ import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/components/ui/collapsible';
 import { Card } from '@/shared/components/ui/card';
+import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
 import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 import { ASTRID_STATUS_COPY as COPY, connectionStatusCopy } from './astridStatusCopy.ts';
 
@@ -106,7 +108,8 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
   }, [isOpen, connected]);
 
   // The install type comes from the same identity-based rule as the Settings Updates section and the header notice.
-  const { installType } = useInstallerUpdate(connection);
+  const installerUpdate = useInstallerUpdate(connection);
+  const { installType } = installerUpdate;
   const summary = connectionStatus(connection, installType);
   const status = connection.state.status;
   const rawServices = details?.health.services;
@@ -123,6 +126,10 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
 
   return (
     <section className="mb-6" aria-labelledby="astrid-status-title">
+      {installType === 'installer' && installerUpdate.health?.identity?.managed_by === null && <div className="mb-4 rounded-lg border p-4">
+        <h2 className="mb-3 text-base font-semibold">Setup</h2>
+        <SetupBlock initiallySetUp={connection.connectedBefore} explicitChoices services={services.filter((service) => service.state === 'failed' || service.reason || service.last_exit !== null)} />
+      </div>}
       <Card className="p-4">
         <div className="flex items-start gap-3">
           {statusIcon(summary.outOfDate ? 'update_needed' : connected ? needsRepair ? 'degraded' : 'connected' : status)}
@@ -135,15 +142,11 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
 
             {summary.checks && <SetupStatusLine checks={summary.checks} mink={false} announce={false} />}
             {(!connected || summary.outOfDate) && summary.detail && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">{summary.outOfDate ? withCommandShell(summary.detail) : summary.detail}</p>}
-            {summary.outOfDate === 'runtime' && summary.updateResolution && <UpdateResolutionActions resolution={summary.updateResolution} />}
-            {summary.outOfDate === 'chat' && <CopyInstallCommand mode="update" />}
+            {summary.outOfDate === 'runtime' && summary.updateResolution && <UpdateResolutionActions resolution={summary.updateResolution} installType={installType} />}
+            {summary.outOfDate === 'chat' && (runtimeOrigin() === '' ? <CopyInstallCommand mode="update" /> : <SetupBlock mode="update" />)}
             {summary.connect && <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => connection.connect()}>{RUNTIME_CONNECTION_COPY.permission.connect}</Button>}
             {connected && details && needsRepair && (
               <>
-                <CopyInstallCommand
-                  mode="install"
-                  services={services.filter((service) => service.state === 'failed' || service.reason || service.last_exit !== null)}
-                />
                 <a className="text-sm text-muted-foreground underline underline-offset-4" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>
               </>
             )}

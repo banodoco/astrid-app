@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { render, screen, within } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
-import { installCommand, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
+import { installCommand, RECOMMENDED_SETUP_CHOICES, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
 import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data/bridgeContract.ts';
 import { ChatUpdateNeeded, isChatUpdateError } from './ChatUpdateNeeded.tsx';
+
+beforeEach(() => localStorage.clear());
 
 describe('ChatUpdateNeeded', () => {
   it('renders the update copy, update command affordances, and raw details', () => {
@@ -18,7 +20,8 @@ describe('ChatUpdateNeeded', () => {
     expect(screen.getByText(withCommandShell(copy.updateNeeded.sentence))).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.agent.copy })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('update'), { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('update', RECOMMENDED_SETUP_CHOICES), { exact: true })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
 
     const details = screen.getByText('Details').closest('details');
     expect(details).not.toBeNull();

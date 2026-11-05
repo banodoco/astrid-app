@@ -5,9 +5,11 @@ import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { MinkRunner } from '@/shared/components/MinkRunner/MinkRunner.tsx';
 import { ToolbarPointer } from '@/shared/components/ToolbarPointer/ToolbarPointer.tsx';
 import type { RuntimeConnectionPanelExit, RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { useSendLinkToComputer } from '@/pages/Home/useSendLinkToComputer.ts';
-import { CopyFallback, CopyInstallCommand, useCopyAction } from './CopyInstallCommand.tsx';
+import { CopyFallback, useCopyAction } from './CopyInstallCommand.tsx';
+import { SetupBlock } from './SetupBlock.tsx';
 import { CardDisclosure, EditorCard, EditorCardFoot } from './EditorCard.tsx';
 import { EditorCardLayer } from './EditorCardLayer.tsx';
 import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
@@ -282,7 +284,7 @@ function PermissionCard({ connection, onBack }: { connection: RuntimeConnectionV
           </ol>
         </div>}
         <CardDisclosure label={permission.allowTitle}>{permission.allowDetails}</CardDisclosure>
-        <CardDisclosure label={permission.installTitle}><CopyInstallCommand mode="install" />{detectInstallScenario() === 'chromium' && <PinokioInstallHelp />}</CardDisclosure>
+        <CardDisclosure label={permission.installTitle}><SetupBlock initiallySetUp={connection.connectedBefore} localBuild={runtimeOrigin() === ''} />{detectInstallScenario() === 'chromium' && <PinokioInstallHelp />}</CardDisclosure>
       </div>}
     />
   );
@@ -315,7 +317,7 @@ function BlockedCard({ onBack }: { readonly onBack?: () => void }) {
 function NotRunningCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
   const { notRunning } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
-  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <CopyInstallCommand mode="install" />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} showHelp />;
+  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <SetupBlock initiallySetUp={connection.connectedBefore} localBuild={runtimeOrigin() === ''} />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} showHelp />;
 }
 
 /** Astrid answered, but not this page: no install help, because Astrid is already running. Polling continues. */

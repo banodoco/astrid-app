@@ -1,7 +1,8 @@
-import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
 import { RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
 import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data/bridgeContract.ts';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 
 /** A chat reply from this computer's Astrid that no longer matches what this page expects: an out-of-date service. */
 export function isChatUpdateError(error: unknown): error is BridgeRouteError {
@@ -19,7 +20,7 @@ export function ChatUpdateNeeded({ detail }: { readonly detail: string }) {
       <p>{RUNTIME_CONNECTION_COPY.chatNeedsUpdate}</p>
       <p className="font-medium">{copy.title}</p>
       <p>{withCommandShell(copy.sentence)}</p>
-      <CopyInstallCommand mode="update" />
+      <SetupBlock mode="update" localBuild={runtimeOrigin() === ''} />
       <details className="text-[11px] text-muted-foreground">
         <summary className="cursor-pointer">Details</summary>
         <p className="mt-1 break-words">{detail}</p>

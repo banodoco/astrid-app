@@ -3,7 +3,7 @@ import { Blocks, Check, ChevronDown, ChevronRight, Copy, Plus } from 'lucide-rea
 import { Command, CommandGroup, CommandItem, CommandList, CommandSeparator } from '@/shared/components/ui/command.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/components/ui/popover.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn';
-import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
 import { RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import type { LocalAgentChoice, LocalAgentId } from '@/integrations/astrid/localAgents.ts';
 import { AGENT_CHAT_COPY as copy, AGENT_INTEGRATION_PROMPT } from '@/integrations/astrid/chatCopy.ts';
@@ -16,6 +16,7 @@ import { NewChatModels, type NewChatAgentModels } from './NewChatModels.tsx';
 import { CommandLine } from './CommandLine.tsx';
 import { newChatChoice } from '@/shared/settings/declarations';
 import { useSetting } from '@/shared/settings/useSetting';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 
 export type { NewChatAgentModels, NewChatModelChoice } from './NewChatModels.tsx';
 
@@ -25,7 +26,7 @@ function NewChatUpdateNeeded({ detail }: { readonly detail: string }) {
   return (
     <div className="space-y-2 text-left text-foreground">
       <p className="font-medium">{RUNTIME_CONNECTION_COPY.chatNeedsUpdate}</p>
-      <CopyInstallCommand mode="update" />
+      <SetupBlock mode="update" localBuild={runtimeOrigin() === ''} />
       <details className="text-[11px] text-muted-foreground">
         <summary className="cursor-pointer">Details</summary>
         <p className="mt-1 break-words">{detail}</p>

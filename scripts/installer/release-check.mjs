@@ -53,6 +53,9 @@ export async function checkManifestRelease({ repo = process.cwd(), baseRef = 'or
   let requiredHighWater = 0;
   for (const commit of commits) {
     const bytes = git(repo, 'show', `${commit}:${manifestPath}`);
+    // A historical commit whose manifest never parsed was never servable, so it
+    // cannot have published a release floor; skip it instead of failing the check.
+    try { JSON.parse(bytes.toString('utf8')); } catch { continue; }
     highestRelease = Math.max(highestRelease, readRelease(bytes, `main history at ${commit}`));
     requiredHighWater = Math.max(requiredHighWater, readRequiredRelease(bytes, `main history at ${commit}`));
   }

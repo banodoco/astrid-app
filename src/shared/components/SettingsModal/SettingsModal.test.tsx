@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SCHEMA_DIGEST } from '@/integrations/runtime/generated-contract-metadata.ts';
 import { RUNTIME_CONNECTION_COPY as COPY, withBrowser } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_STATUS_COPY as STATUS_COPY } from './sections/astridStatusCopy.ts';
 
-const { connectionMock, readStatusMock } = vi.hoisted(() => ({
+const { connectionMock, readStatusMock, readHealthMock } = vi.hoisted(() => ({
   connectionMock: { value: null as unknown },
   readStatusMock: vi.fn(),
+  readHealthMock: vi.fn(),
 }));
 
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({
@@ -16,6 +17,7 @@ vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({
 vi.mock('@/integrations/runtime/client.ts', () => ({
   AstridRuntimeClient: class {
     readStatus = readStatusMock;
+    readInstallerUpdateHealth = readHealthMock;
   },
 }));
 vi.mock('@/shared/hooks/mobile', () => ({ useIsMobile: () => false }));
@@ -25,7 +27,7 @@ vi.mock('@/shared/hooks/useModal', () => ({
   }),
 }));
 vi.mock('@/shared/hooks/useScrollFade', () => ({ useScrollFade: () => ({ showFade: false, scrollRef: { current: null } }) }));
-vi.mock('./sections/PreferencesSection', () => ({ PreferencesSection: () => <div>Preferences</div> }));
+vi.mock('@/shared/components/TimeOfDay/TimeOfDayControl', () => ({ TimeOfDayControl: () => <div /> }));
 
 import { SettingsModal } from './SettingsModal';
 
@@ -66,6 +68,7 @@ function renderSettings() {
 
 beforeEach(() => {
   connectionMock.value = connection('connected');
+  readHealthMock.mockReset().mockRejectedValue(new Error('No installer health in these tests'));
   readStatusMock.mockReset().mockResolvedValue({
     health: { status: 'ok', protocol: 'workspace.v1', schema_digest: SCHEMA_DIGEST, services: [] },
     realm: { realm_id: 'realm-1', display_name: 'My Studio', version: 1, created_at: '2026-01-01T00:00:00Z' },
@@ -142,5 +145,29 @@ describe('SettingsModal Astrid status', () => {
     expect(within(section).getByText(COPY.blocked.steps.join(' '))).toBeTruthy();
     expect(within(section).queryByRole('button')).toBeNull();
     expect(readStatusMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('SettingsModal layout', () => {
+  it('gives every section a title, in one order', () => {
+    render(<SettingsModal isOpen onOpenChange={vi.fn()} onReplayTour={vi.fn()} />);
+    const regions = screen.getAllByRole('region');
+    expect(regions.map((region) => region.getAttribute('aria-labelledby') && document.getElementById(region.getAttribute('aria-labelledby')!)?.textContent))
+      .toEqual(['Updates', STATUS_COPY.title, 'Appearance', 'Tour']);
+    for (const region of regions) {
+      expect(within(region).getAllByRole('heading', { level: 2 })).toHaveLength(1);
+    }
+  });
+
+  it('opens on its title rather than the first control, so nothing is highlighted while the update check runs', async () => {
+    // While the check runs, Check for updates is disabled: the dialog's default focus (its first enabled control)
+    // used to be the Diagnostics disclosure, which then showed a focus ring as Settings opened.
+    readHealthMock.mockReturnValue(new Promise(() => undefined));
+    render(<SettingsModal isOpen onOpenChange={vi.fn()} />);
+    const title = screen.getByRole('heading', { name: 'App Settings' });
+    await waitFor(() => expect(title).toHaveFocus());
+    expect(screen.getByRole('button', { name: 'Check for updates' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Diagnostics' })).not.toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).not.toHaveFocus();
   });
 });

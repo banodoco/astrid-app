@@ -1,33 +1,28 @@
 import React from "react";
 import { TimeOfDayControl } from "@/shared/components/TimeOfDay/TimeOfDayControl";
 import { Button } from "@/shared/components/ui/button";
+import { SettingsRow, SettingsSection } from "../SettingsLayout.tsx";
 import type { PreferencesSectionProps } from "../types";
 
-const PreferencesSection: React.FC<PreferencesSectionProps> = ({
-  isMobile,
-  onReplayTour,
-}) => {
+const PreferencesSection: React.FC<PreferencesSectionProps> = ({ onReplayTour }) => {
   return (
-    <div className="space-y-6">
-      {/* Appearance Subsection */}
-      <div>
-        <h3 className="text-sm font-medium text-muted-foreground mb-3">Appearance</h3>
-        <div className={`${isMobile ? 'p-3' : 'p-4'} bg-muted/30 rounded-lg space-y-2`}>
-          <span className="font-medium">Brightness:</span>
+    <>
+      <SettingsSection title="Appearance">
+        <SettingsRow label="Brightness" description="How light or dark Astrid looks.">
           <TimeOfDayControl compact />
-        </div>
-      </div>
+        </SettingsRow>
+      </SettingsSection>
 
       {onReplayTour && (
-        <div>
-          <h3 className="text-sm font-medium text-muted-foreground mb-3">Tour</h3>
-          <div className={`${isMobile ? 'p-3' : 'p-4'} bg-muted/30 rounded-lg flex items-center justify-between gap-3`}>
-            <span className="text-xs text-muted-foreground">Walk through what Astrid can do, step by step</span>
-            <Button variant="retro-secondary" size="retro-sm" onClick={onReplayTour}>Replay tour</Button>
-          </div>
-        </div>
+        <SettingsSection title="Tour">
+          <SettingsRow
+            label="Astrid tour"
+            description="Walk through what Astrid can do, step by step."
+            action={<Button type="button" variant="retro-secondary" size="retro-sm" onClick={onReplayTour}>Replay tour</Button>}
+          />
+        </SettingsSection>
       )}
-    </div>
+    </>
   );
 };
 

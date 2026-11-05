@@ -1,5 +1,6 @@
 import { CheckCircle2, Loader2, Minus } from 'lucide-react';
 import { MinkRunner } from '@/shared/components/MinkRunner/MinkRunner';
+import { cn } from '@/shared/components/ui/contracts/cn';
 
 export type CheckState = 'checking' | 'pass' | 'fail' | 'later';
 
@@ -36,12 +37,12 @@ function statusMessage(checks: SetupChecks): string {
  * The same compact check rows in onboarding and App settings. `announce` makes the line its own live status; where a
  * sentence beside it already says the same thing (App settings), the marks stay out of the accessibility tree.
  */
-export function SetupStatusLine({ checks, mink = true, announce = true }: { checks: SetupChecks; mink?: boolean; announce?: boolean }) {
+export function SetupStatusLine({ checks, mink = true, announce = true, className }: { checks: SetupChecks; mink?: boolean; announce?: boolean; className?: string }) {
   const live = announce
     ? { role: 'status', 'aria-live': 'polite', 'aria-label': statusMessage(checks) } as const
     : { 'aria-hidden': true } as const;
   return (
-    <div className="flex flex-col items-center gap-2 text-xs text-muted-foreground" {...live}>
+    <div className={cn('flex flex-col items-center gap-2 text-xs text-muted-foreground', className)} {...live}>
       {mink && !checks.ready && <MinkRunner className="text-foreground" />}
       <span className="flex items-center gap-4">
         {CHECKS.flatMap(({ key, label, later }) => {

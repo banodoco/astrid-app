@@ -7,7 +7,7 @@ import {coversFrame, visualSeamSourceTrack} from './visualSeamCoverage.ts';
 type Json = Record<string, unknown>;
 const record = (v: unknown): Json => v && typeof v === 'object' && !Array.isArray(v) ? v as Json : {};
 const number = (v: unknown, fallback = 0): number => typeof v === 'number' && Number.isFinite(v) ? v : fallback;
-export type DisclosedOwner = IntentOwner & {lane?: string; clipId: string; ownerId: string; primary: boolean; disclosure: BoundaryDisclosure};
+export type DisclosedOwner = IntentOwner & {clipId: string; ownerId: string; primary: boolean; disclosure: BoundaryDisclosure};
 const NON_PICTURE = new Set(['effect-layer', 'frame-overlay', 'end-spanning-layer', 'text', 'audio']);
 
 /** Closed metadata adapter shared by normal preflight and portable authoring.
@@ -52,7 +52,6 @@ export function visualSeamOwners(config: ResolvedTimelineConfig, metadataOnly = 
     add(normalized, path, clip.id, occurrence ?? clip.id, start, end, start, binding, sourceType,
       track?.kind === 'visual' && track.role !== 'source' && isPicture
         && !['effect', 'animation', 'transition'].includes(String(elementKind)));
-    if (track?.app?.group) owners[owners.length - 1].lane = clip.track;
     local.forEach((raw, index) => {
       const effect = record(raw);
       const effectId = String(effect.id ?? index);
@@ -122,7 +121,7 @@ export function visualSeamOwners(config: ResolvedTimelineConfig, metadataOnly = 
 function boundaryOwners(owners: readonly DisclosedOwner[], frame: number): DisclosedOwner[] {
   const groups = new Map<string, DisclosedOwner[]>();
   for (const o of owners.filter(o => o.primary)) {
-    const key = o.lane ?? String(o.clip.track);
+    const key = String(o.clip.track);
     const group = groups.get(key) ?? [];
     group.push(o); groups.set(key, group);
   }

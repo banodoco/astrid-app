@@ -11,10 +11,10 @@ import { CopyFallback, CopyInstallCommand, useCopyAction } from './CopyInstallCo
 import { CardDisclosure, EditorCard, EditorCardFoot } from './EditorCard.tsx';
 import { EditorCardLayer } from './EditorCardLayer.tsx';
 import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
-import { PINOKIO_INSTALL_COPY, RECONNECT_AGENT_INSTRUCTIONS, RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from './copy.ts';
+import { PINOKIO_INSTALL_COPY, pinokioReconnectInstructions, RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from './copy.ts';
 import { detectInstallScenario } from '@/pages/Home/installScenario.ts';
 import { linkForSupportedBrowser } from '@/integrations/runtime/autoConnectRequest.ts';
-import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
+import { COPY_FOR_AGENT_ACTION, resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
@@ -130,10 +130,11 @@ function StatusLine({ text, help }: { text: string; help?: ReactNode }) {
           <span key={connected ? 'connected' : 'waiting'} className={connected ? 'animate-in fade-in-0 duration-300' : undefined}>{connected ? COPY.connected.sentence : text}</span>
         </p>
         {help && !connected && (
-          <>
+          // The separator travels with the action, so a narrow card wraps the pair and never ends a line on "·".
+          <span className="inline-flex max-w-full flex-wrap items-center justify-center gap-2">
             <span aria-hidden="true">·</span>
             {help}
-          </>
+          </span>
         )}
       </span>
     </EditorCardFoot>
@@ -316,17 +317,20 @@ function HelpLink() {
   return <a className="shrink-0 underline underline-offset-4 hover:text-foreground" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>;
 }
 
-/** The not-answering footer's one action: copies the instruction a person gives their agent to reconnect Astrid. */
+/**
+ * The Pinokio not-answering footer's one action, styled as the footer link it replaced: copies the reconnect brief.
+ * Other installs already lead with the install brief in the card, so they get no second agent button here.
+ */
 function ReconnectInstructionsCopy() {
-  const { notRunning } = COPY;
-  const copy = useCopyAction(RECONNECT_AGENT_INSTRUCTIONS);
+  const instructions = pinokioReconnectInstructions(window.location.origin);
+  const copy = useCopyAction(instructions);
   const copied = copy.status === 'copied';
   return <>
-    <Button type="button" variant="ghost" className="h-auto shrink-0 gap-1 rounded-md p-0 text-sm font-normal text-muted-foreground underline underline-offset-4 hover:bg-transparent hover:text-foreground" onClick={() => void copy.copy()}>
-      {copied ? notRunning.helpCopied : notRunning.helpCopy}
+    <button type="button" className="inline-flex items-center gap-1 rounded-sm underline underline-offset-4 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" onClick={() => void copy.copy()}>
+      <span aria-live="polite">{copied ? COPY.agent.copied : COPY_FOR_AGENT_ACTION}</span>
       {copied ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : <Copy aria-hidden="true" className="h-3.5 w-3.5" />}
-    </Button>
-    {copy.status === 'failed' && <div className="basis-full"><CopyFallback text={RECONNECT_AGENT_INSTRUCTIONS} label={notRunning.helpCopy} /></div>}
+    </button>
+    {copy.status === 'failed' && <div className="basis-full"><CopyFallback text={instructions} label={COPY_FOR_AGENT_ACTION} /></div>}
   </>;
 }
 
@@ -334,7 +338,7 @@ function ReconnectInstructionsCopy() {
 function NotRunningCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
   const { notRunning } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
-  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <CopyInstallCommand mode="install" />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} help={<ReconnectInstructionsCopy />} />;
+  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <CopyInstallCommand mode="install" agentLabel={COPY_FOR_AGENT_ACTION} />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} help={pinokioManaged ? <ReconnectInstructionsCopy /> : undefined} />;
 }
 
 /** Astrid answered, but not this page: no install help, because Astrid is already running. Polling continues. */

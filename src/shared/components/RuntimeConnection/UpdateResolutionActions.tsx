@@ -15,8 +15,11 @@ export function openUpdatesSettings() {
   dispatchAppEvent('openSettings', { tab: 'updates' });
 }
 
-/** Render only the actions selected by K6; source and Pinokio must never fall through to installer commands. */
-export function UpdateResolutionActions({ resolution, operation }: { readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView }) {
+/**
+ * Render only the actions selected by K6; source and Pinokio must never fall through to installer commands.
+ * `context` is where the actions sit: Settings is the Details destination, so it never links to itself.
+ */
+export function UpdateResolutionActions({ resolution, operation, context = 'page' }: { readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView; readonly context?: 'page' | 'settings' }) {
   const guarded = useGuardedReload();
   const actions = [resolution.primary, resolution.secondary].filter((action) => action !== null);
   if (actions.length === 0 && !operation?.pending && !operation?.status?.result && !operation?.error) return null;
@@ -27,6 +30,8 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
   const reload = actions.find((action) => action.label === RELOAD_ACTION);
   const execute = actions.find((action) => action.execute === 'installer-update');
   const localCommand = actions.find((action) => action.label === RUN_IT_YOURSELF_ACTION)?.command;
+  // Details opens Settings Updates; a card whose action already goes there (See updates) does not repeat it.
+  const details = context === 'page' && !route && (resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason;
   const startUpdate = async () => {
     const validate = await guarded.flush();
     if (validate) await operation?.start(validate);
@@ -36,7 +41,7 @@ export function UpdateResolutionActions({ resolution, operation }: { readonly re
     {reload && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{reload.label}</Button>}
     {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={operation.pending || guarded.pending} onClick={() => void startUpdate()}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
-    {(resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
+    {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} agentLabel={COPY_FOR_AGENT_ACTION} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}

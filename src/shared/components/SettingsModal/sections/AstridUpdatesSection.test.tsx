@@ -32,8 +32,12 @@ describe('Astrid Updates Settings section', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     expect(await within(section).findByText('The update did not finish. Astrid was restored to its previous version.')).toBeInTheDocument();
-    fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
-    fireEvent.click(within(section).getByText('View log'));
+    const diagnosticsToggle = within(section).getByRole('button', { name: 'Diagnostics' });
+    expect(diagnosticsToggle).toHaveAttribute('aria-expanded', 'false');
+    expect(within(section).queryByText('transaction line')).toBeNull();
+    fireEvent.click(diagnosticsToggle);
+    expect(diagnosticsToggle).toHaveAttribute('aria-expanded', 'true');
+    expect(within(section).getByRole('heading', { name: 'Update log' })).toBeInTheDocument();
     expect(within(section).getByText('transaction line')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
     const diagnosticCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes('/v1/diagnostics'));
@@ -56,8 +60,9 @@ describe('Astrid Updates Settings section', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
-    expect(within(section).getByText("Couldn't collect diagnostics from Astrid. Copy the command below and run it yourself.")).toBeInTheDocument();
-    expect(await within(section).findByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+    expect(within(section).getByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
+    expect(await within(section).findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
   });
 
@@ -65,7 +70,7 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'app-a', servedRelease: 4, servedApp: 'app-b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
     expect(readStatusMock).toHaveBeenCalledOnce();
     expect(hostedCheckMock).toHaveBeenCalledOnce();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
@@ -92,7 +97,7 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(localCheckMock).not.toHaveBeenCalled();
@@ -103,7 +108,7 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
     expect(within(section).getByText('Update in Pinokio')).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
   });
@@ -114,7 +119,7 @@ describe('Astrid Updates Settings section', () => {
     localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
     expect(localCheckMock).toHaveBeenCalledOnce();
     expect(readStatusMock).not.toHaveBeenCalled();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
@@ -127,7 +132,7 @@ describe('Astrid Updates Settings section', () => {
     localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 4 (current: Release 3)')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
@@ -168,14 +173,11 @@ describe('Astrid Updates Settings section', () => {
     hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 5, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 5, requiredRelease: 4, requiredReason: 'Security fix', releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 5 (current: Release 3)')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 5')).toBeInTheDocument();
     expect(within(section).getByText('This update is required: Security fix')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
-    const onOpen = vi.fn();
-    window.addEventListener('openSettings', (event) => onOpen((event as CustomEvent).detail), { once: true });
-    fireEvent.click(within(section).getByRole('button', { name: 'Details' }));
-    expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
-    expect(window.location.search).toContain('settings=updates');
+    // Settings is where Details leads, so the section does not link to itself.
+    expect(within(section).queryByRole('button', { name: 'Details' })).toBeNull();
   });
 
   it('reports newer-than-served before offering an update and clearly shows up-to-date', async () => {
@@ -201,10 +203,10 @@ describe('Astrid Updates Settings section', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     expect(await within(section).findByText('Astrid is up to date (Release 1)')).toBeInTheDocument();
-    expect(within(section).queryByText('Last result:')).toBeNull();
+    expect(within(section).queryByText(/^Last result:/)).toBeNull();
     expect(within(section).getByRole('button', { name: 'Check for updates' })).toBeInTheDocument();
     fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
-    expect(within(section).queryByText('View log')).toBeNull();
+    expect(within(section).queryByRole('heading', { name: 'Update log' })).toBeNull();
   });
 
   it('shows the inline message and the fallback when the diagnostics download comes back empty', async () => {
@@ -217,7 +219,7 @@ describe('Astrid Updates Settings section', () => {
     const section = screen.getByRole('region', { name: 'Updates' });
     fireEvent.click(await within(section).findByRole('button', { name: 'Diagnostics' }));
     fireEvent.click(within(section).getByRole('button', { name: 'Download diagnostics' }));
-    expect(await within(section).findByText("Couldn't collect diagnostics from Astrid. Copy the command below and run it yourself.")).toBeInTheDocument();
+    expect(await within(section).findByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
     expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
     expect(createObjectURL).not.toHaveBeenCalled();
   });

@@ -28,7 +28,7 @@ describe('quiet Update available notice', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     expect(readStatusMock).toHaveBeenCalledOnce();
     expect(hostedCheckMock).toHaveBeenCalledOnce();
-    expect(screen.getByTestId('quiet-update-notice')).toHaveTextContent('Update available · Release 4');
+    expect(screen.getByTestId('quiet-update-notice')).toHaveTextContent('Update available: Release 4');
     fireEvent.click(screen.getByRole('button', { name: 'See updates' }));
     expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
     expect(window.location.search).toContain('settings=updates');

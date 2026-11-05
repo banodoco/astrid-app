@@ -58,7 +58,7 @@ function renderSettings() {
   );
   const section = screen.getByRole('region', { name: STATUS_COPY.title });
   expect(screen.getAllByRole('region')[0]).toHaveAccessibleName('Updates');
-  expect(screen.queryByText('Last result:')).toBeNull();
+  expect(screen.queryByText(/^Last result:/)).toBeNull();
   expect(screen.queryByText('No update log yet.')).toBeNull();
   expect(screen.queryByRole('region', { name: 'Connection' })).toBeNull();
   return section;

@@ -134,7 +134,7 @@ describe('installer update callers', () => {
       <AstridUpdatesSection isOpen />
     </>);
 
-    await screen.findAllByText('Update available · Release 4');
+    await screen.findAllByText('Update available: Release 4');
     const statusReads = calls().filter((call) => call.url.endsWith('/v1/update/status'));
     expect(statusReads.length).toBeGreaterThan(0);
     expect(statusReads.every((call) => call.method === 'GET')).toBe(true);
@@ -254,7 +254,7 @@ describe('installer update callers', () => {
       fireEvent.click(update);
       await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
     }
-    else await screen.findAllByText('Update available: Release 4 (current: Release 3)');
+    else await screen.findAllByText('Update available: Release 4');
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     const postCount = calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
     expect(postCount).toBe(_label === 'recovery required' ? 1 : 0);
@@ -325,7 +325,7 @@ describe('installer update callers', () => {
       return new Response('{}', { status: 200 });
     }));
     render(<AstridUpdatesSection isOpen />);
-    await screen.findAllByText('Update available · Release 4');
+    await screen.findAllByText('Update available: Release 4');
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
   });

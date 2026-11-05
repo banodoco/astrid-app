@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { consumeAutoConnectQuery } from '@/integrations/runtime/autoConnectRequest.ts';
 import { CONNECTED_MIN_MS, LEAVE_MS, RuntimeConnectionPanel, SETTLED_QUIET_MS } from './RuntimeConnectionPanel.tsx';
-import { installCommand, PINOKIO_INSTALL_COPY, RECONNECT_AGENT_INSTRUCTIONS, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
+import { installCommand, PINOKIO_INSTALL_COPY, pinokioReconnectInstructions, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
+import { COPY_FOR_AGENT_ACTION } from '@/shared/lib/updates/resolveUpdate.ts';
 import { CONNECTED_REALM, connectionFor } from './connectionFixture.ts';
 
 afterEach(() => {
@@ -137,22 +138,28 @@ describe('RuntimeConnectionPanel', () => {
     expect(card).toHaveClass('border-border', 'bg-card', 'text-center');
     expect(card.parentElement).toHaveClass('max-w-[576px]');
     expect(screen.getByRole('heading', { level: 1 })).toHaveClass('font-theme-heading', 'text-[25px]', 'text-foreground');
-    expect(screen.getAllByRole('button')).toHaveLength(4);
+    expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: COPY.agent.copy })).toHaveClass('w-full');
+    // The card leads with the agent brief, so the footer does not offer a second agent button.
+    expect(screen.getByRole('button', { name: COPY_FOR_AGENT_ACTION })).toHaveClass('w-full');
     // The waiting line is the card's last line, not a banner above it.
     expect(card.lastElementChild).toContainElement(screen.getByText(COPY.waiting));
-    expect(card.lastElementChild).toContainElement(screen.getByRole('button', { name: COPY.notRunning.helpCopy }));
+    expect(card.lastElementChild!.querySelector('button')).toBeNull();
     expect(screen.queryByRole('link', { name: 'Get help' })).not.toBeInTheDocument();
   });
 
-  it('the not-answering footer copies the reconnect instructions for the agent', async () => {
+  it('the Pinokio not-answering footer copies the reconnect instructions for the agent', async () => {
     const writeText = vi.fn(async (_text: string) => undefined);
     stubClipboard(writeText);
-    panel(connectionFor({ status: 'not_running' }));
-    fireEvent.click(screen.getByRole('button', { name: COPY.notRunning.helpCopy }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith(RECONNECT_AGENT_INSTRUCTIONS));
-    expect(screen.getByRole('button', { name: COPY.notRunning.helpCopied })).toBeInTheDocument();
+    panel(connectionFor({ status: 'not_running' }, { managedByPinokio: true }));
+    const card = screen.getByTestId('runtime-not-connected').querySelector(CARD) as HTMLElement;
+    const footerCopy = screen.getByRole('button', { name: COPY_FOR_AGENT_ACTION });
+    expect(card.lastElementChild).toContainElement(footerCopy);
+    expect(screen.queryByRole('link', { name: 'Get help' })).not.toBeInTheDocument();
+    fireEvent.click(footerCopy);
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(pinokioReconnectInstructions(window.location.origin)));
+    expect(writeText.mock.calls[0]![0]).toContain('Open Pinokio and start Astrid');
+    expect(screen.getByRole('button', { name: COPY.agent.copied })).toBeInTheDocument();
   });
 
   describe('connecting', () => {
@@ -505,7 +512,7 @@ describe('RuntimeConnectionPanel', () => {
       const writeText = vi.fn(async (_text: string) => undefined);
       stubClipboard(writeText);
       panel(connectionFor({ status }));
-      const primary = screen.getByRole('button', { name: status === 'update_needed' ? 'Copy instructions for your agent' : 'Copy for your agent' });
+      const primary = screen.getByRole('button', { name: COPY_FOR_AGENT_ACTION });
       const commandCopy = screen.getByRole('button', { name: 'Copy command' });
       expect(screen.getAllByRole('button')[0]).toBe(primary);
       expect(commandCopy.parentElement).toContainElement(screen.getByRole('code'));
@@ -531,7 +538,7 @@ describe('RuntimeConnectionPanel', () => {
     it('keeps the full agent brief selectable when copying it fails', async () => {
       stubClipboard(vi.fn(async () => { throw new Error('Clipboard denied'); }));
       panel(connectionFor({ status: 'not_running' }));
-      fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
+      fireEvent.click(screen.getByRole('button', { name: COPY_FOR_AGENT_ACTION }));
       const field = await screen.findByRole('textbox', { name: COPY.agent.copyFailed }) as HTMLTextAreaElement;
       expect(field.value).toContain('selected workspace and data root');
       expect(field.value).toContain('read the log path printed by the installer');

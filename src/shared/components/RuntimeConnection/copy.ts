@@ -48,8 +48,8 @@ export const INSTALL_LINE_LABEL = 'Install or update Astrid';
 
 /** One owner for G1's offline diagnostics fallback, shared by Settings and recovery surfaces. */
 export const DIAGNOSTICS_FALLBACK_COPY = {
-  intro: "Couldn't collect diagnostics from Astrid. Copy the command below and run it yourself.",
-  agent: 'Run `astrid-runtime doctor` and read the log directory named in its report.',
+  intro: "Couldn't collect diagnostics from Astrid.",
+  agent: "Astrid couldn't produce its diagnostics from the page. Please run `astrid-runtime doctor > astrid-diagnostics.txt` on this computer, read the log directory named in its report, and tell me what's wrong. Don't change or delete my Astrid workspace.",
   command: 'astrid-runtime doctor > astrid-diagnostics.txt',
 } as const;
 
@@ -337,7 +337,7 @@ export interface RuntimeConnectionCopy {
     readonly footer: string;
   };
   /** Repeated probes went unanswered with permission granted. */
-  readonly notRunning: Message & { readonly retry: string; readonly pinokioHint: string; readonly helpCopy: string; readonly helpCopied: string };
+  readonly notRunning: Message & { readonly retry: string; readonly pinokioHint: string };
   /** Astrid answered the browser but would not let this page read the answer (it serves other origins only). */
   readonly refused: Message & { readonly retry: string };
   readonly updateNeeded: Message & { readonly pinokioSentence: string };
@@ -377,8 +377,19 @@ export interface RuntimeConnectionCopy {
   readonly composeDisabled: string;
 }
 
-/** The not-answering footer's action: the instruction a person pastes to their agent to reconnect this Astrid. */
-export const RECONNECT_AGENT_INSTRUCTIONS = "Astrid isn't answering on my computer and I need to reconnect to it. Please help me: 1) Check whether the Astrid Runtime is running on this machine. If I installed Astrid through Pinokio, start Astrid in Pinokio. Otherwise run the Astrid install line from https://astrid.haus again; it repairs or restarts the existing install and keeps my data. 2) If it still doesn't start, read the Astrid Runtime log (Linux: ~/.local/state/astrid-runtime/logs, macOS: ~/Library/Logs/Astrid Runtime, Windows: %LOCALAPPDATA%\\Astrid Runtime\\logs) and tell me the first error. 3) Then I'll reload astrid.haus so it reconnects. Don't delete my Astrid workspace data.";
+/**
+ * The not-answering footer's handoff for an Astrid that Pinokio runs: the card body has no agent action there (it says
+ * "Start Astrid in Pinokio"), so this is the one thing to paste to an agent. Other installs copy the install brief.
+ */
+export function pinokioReconnectInstructions(pageOrigin: string, platform: Platform = detectPlatform()): string {
+  return [
+    `Astrid isn't answering the page at ${pageOrigin}. It was installed with Pinokio. Please get it running again and verify the result.`,
+    'Open Pinokio and start Astrid. If Pinokio already shows it running, stop it and start it again.',
+    `If it doesn't start, read the output Pinokio shows for Astrid and the Astrid Runtime logs in ${runtimeLogDirectory(platform)}, fix the cause, and tell me what you changed.`,
+    "Don't reinstall Astrid outside Pinokio, and don't reset, delete or replace my workspace, projects or media.",
+    'My tab reconnects by itself once Astrid answers; if it shows a Connect button, click it.',
+  ].join('\n\n');
+}
 
 export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
   commands: ASTRID_COMMANDS,
@@ -424,8 +435,6 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
     retry: 'Try again',
     sentence: "Your coding agent can start it, or install it if it isn't there yet.",
     pinokioHint: 'Start Astrid in Pinokio.',
-    helpCopy: 'Copy instructions for your agent',
-    helpCopied: 'Copied',
   },
 
   refused: {

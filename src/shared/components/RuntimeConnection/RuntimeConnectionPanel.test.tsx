@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { consumeAutoConnectQuery } from '@/integrations/runtime/autoConnectRequest.ts';
 import { CONNECTED_MIN_MS, LEAVE_MS, RuntimeConnectionPanel, SETTLED_QUIET_MS } from './RuntimeConnectionPanel.tsx';
-import { installCommand, PINOKIO_INSTALL_COPY, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
+import { installCommand, PINOKIO_INSTALL_COPY, RECONNECT_AGENT_INSTRUCTIONS, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
 import { CONNECTED_REALM, connectionFor } from './connectionFixture.ts';
 
 afterEach(() => {
@@ -137,12 +137,22 @@ describe('RuntimeConnectionPanel', () => {
     expect(card).toHaveClass('border-border', 'bg-card', 'text-center');
     expect(card.parentElement).toHaveClass('max-w-[576px]');
     expect(screen.getByRole('heading', { level: 1 })).toHaveClass('font-theme-heading', 'text-[25px]', 'text-foreground');
-    expect(screen.getAllByRole('button')).toHaveLength(3);
+    expect(screen.getAllByRole('button')).toHaveLength(4);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.agent.copy })).toHaveClass('w-full');
     // The waiting line is the card's last line, not a banner above it.
     expect(card.lastElementChild).toContainElement(screen.getByText(COPY.waiting));
-    expect(card.lastElementChild).toContainElement(screen.getByRole('link', { name: 'Get help' }));
+    expect(card.lastElementChild).toContainElement(screen.getByRole('button', { name: COPY.notRunning.helpCopy }));
+    expect(screen.queryByRole('link', { name: 'Get help' })).not.toBeInTheDocument();
+  });
+
+  it('the not-answering footer copies the reconnect instructions for the agent', async () => {
+    const writeText = vi.fn(async (_text: string) => undefined);
+    stubClipboard(writeText);
+    panel(connectionFor({ status: 'not_running' }));
+    fireEvent.click(screen.getByRole('button', { name: COPY.notRunning.helpCopy }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(RECONNECT_AGENT_INSTRUCTIONS));
+    expect(screen.getByRole('button', { name: COPY.notRunning.helpCopied })).toBeInTheDocument();
   });
 
   describe('connecting', () => {

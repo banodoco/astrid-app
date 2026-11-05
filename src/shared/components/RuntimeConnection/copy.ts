@@ -337,7 +337,7 @@ export interface RuntimeConnectionCopy {
     readonly footer: string;
   };
   /** Repeated probes went unanswered with permission granted. */
-  readonly notRunning: Message & { readonly retry: string; readonly pinokioHint: string };
+  readonly notRunning: Message & { readonly retry: string; readonly pinokioHint: string; readonly helpCopy: string; readonly helpCopied: string };
   /** Astrid answered the browser but would not let this page read the answer (it serves other origins only). */
   readonly refused: Message & { readonly retry: string };
   readonly updateNeeded: Message & { readonly pinokioSentence: string };
@@ -376,6 +376,9 @@ export interface RuntimeConnectionCopy {
   /** Next to the compose controls the hosted build disables. */
   readonly composeDisabled: string;
 }
+
+/** The not-answering footer's action: the instruction a person pastes to their agent to reconnect this Astrid. */
+export const RECONNECT_AGENT_INSTRUCTIONS = "Astrid isn't answering on my computer and I need to reconnect to it. Please help me: 1) Check whether the Astrid Runtime is running on this machine. If I installed Astrid through Pinokio, start Astrid in Pinokio. Otherwise run the Astrid install line from https://astrid.haus again; it repairs or restarts the existing install and keeps my data. 2) If it still doesn't start, read the Astrid Runtime log (Linux: ~/.local/state/astrid-runtime/logs, macOS: ~/Library/Logs/Astrid Runtime, Windows: %LOCALAPPDATA%\\Astrid Runtime\\logs) and tell me the first error. 3) Then I'll reload astrid.haus so it reconnects. Don't delete my Astrid workspace data.";
 
 export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
   commands: ASTRID_COMMANDS,
@@ -421,6 +424,8 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
     retry: 'Try again',
     sentence: "Your coding agent can start it, or install it if it isn't there yet.",
     pinokioHint: 'Start Astrid in Pinokio.',
+    helpCopy: 'Copy instructions for your agent',
+    helpCopied: 'Copied',
   },
 
   refused: {

@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronLeft, Link2 } from 'lucide-react';
+import { Check, ChevronLeft, Copy, Link2 } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { MinkRunner } from '@/shared/components/MinkRunner/MinkRunner.tsx';
@@ -11,7 +11,7 @@ import { CopyFallback, CopyInstallCommand, useCopyAction } from './CopyInstallCo
 import { CardDisclosure, EditorCard, EditorCardFoot } from './EditorCard.tsx';
 import { EditorCardLayer } from './EditorCardLayer.tsx';
 import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
-import { PINOKIO_INSTALL_COPY, RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from './copy.ts';
+import { PINOKIO_INSTALL_COPY, RECONNECT_AGENT_INSTRUCTIONS, RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from './copy.ts';
 import { detectInstallScenario } from '@/pages/Home/installScenario.ts';
 import { linkForSupportedBrowser } from '@/integrations/runtime/autoConnectRequest.ts';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
@@ -108,7 +108,7 @@ function GateLayer({ dataState, exit, children }: { dataState: string; exit: Run
  * The card's quiet last line, along its foot: what the page is waiting for, with a live dot. When Astrid answers it
  * becomes the check and "Connected to Astrid", in the same place, before the card leaves.
  */
-function StatusLine({ text, help }: { text: string; help: boolean }) {
+function StatusLine({ text, help }: { text: string; help?: ReactNode }) {
   const connected = useContext(ConnectedContext);
   // The words after the mark keep the width they had while waiting, so the mark stays where it was as it turns into
   // the check and only the words change.
@@ -125,14 +125,14 @@ function StatusLine({ text, help }: { text: string; help: boolean }) {
           <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
         </span>
       </span>
-      <span ref={wordsRef} className="flex min-w-0 items-center gap-2" style={connected && waitingWidth.current ? { minWidth: waitingWidth.current } : undefined}>
+      <span ref={wordsRef} className="flex min-w-0 flex-wrap items-center gap-2" style={connected && waitingWidth.current ? { minWidth: waitingWidth.current } : undefined}>
         <p role="status" className={cn('min-w-0 text-pretty', connected && 'text-foreground')}>
           <span key={connected ? 'connected' : 'waiting'} className={connected ? 'animate-in fade-in-0 duration-300' : undefined}>{connected ? COPY.connected.sentence : text}</span>
         </p>
         {help && !connected && (
           <>
             <span aria-hidden="true">·</span>
-            <a className="shrink-0 underline underline-offset-4 hover:text-foreground" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>
+            {help}
           </>
         )}
       </span>
@@ -150,7 +150,7 @@ interface CardProps {
   /** The status line along the card's foot: the screen waits for something done elsewhere, then opens by itself. */
   readonly status?: string;
   /** Help in the status line, for a connection that needs attention. */
-  readonly showHelp?: boolean;
+  readonly help?: ReactNode;
   /** The word on a hand-drawn arrow, outside the card, aimed at the top left of the window: the browser's prompt is there. */
   readonly pointer?: string;
   readonly onBack?: () => void;
@@ -160,11 +160,11 @@ interface CardProps {
  * The one card every not-connected screen shares, in the install dialog's style (same width, radius, header and
  * button): the app icon, a serif heading, one short sentence, at most one primary action, and the status line.
  */
-function Card({ title, sentence, action, children, status, pointer, showHelp = false, onBack }: CardProps) {
+function Card({ title, sentence, action, children, status, pointer, help, onBack }: CardProps) {
   const connected = useContext(ConnectedContext);
-  if (connected) return <div className="overflow-hidden rounded-[18px] border border-border bg-card shadow-lg"><StatusLine text={COPY.connected.sentence} help={false} /></div>;
+  if (connected) return <div className="overflow-hidden rounded-[18px] border border-border bg-card shadow-lg"><StatusLine text={COPY.connected.sentence} /></div>;
   return <>
-    <EditorCard title={title} sentence={sentence} topLeft={onBack ? <BackButton onBack={onBack} /> : undefined} foot={(status || connected) ? <StatusLine text={status ?? COPY.waiting} help={showHelp} /> : undefined}>
+    <EditorCard title={title} sentence={sentence} topLeft={onBack ? <BackButton onBack={onBack} /> : undefined} foot={(status || connected) ? <StatusLine text={status ?? COPY.waiting} help={help} /> : undefined}>
       {children}
       {action}
     </EditorCard>
@@ -311,17 +311,36 @@ function BlockedCard({ onBack }: { readonly onBack?: () => void }) {
   );
 }
 
+/** The footer's help for a connection that needs attention: the link to the help page. */
+function HelpLink() {
+  return <a className="shrink-0 underline underline-offset-4 hover:text-foreground" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>;
+}
+
+/** The not-answering footer's one action: copies the instruction a person gives their agent to reconnect Astrid. */
+function ReconnectInstructionsCopy() {
+  const { notRunning } = COPY;
+  const copy = useCopyAction(RECONNECT_AGENT_INSTRUCTIONS);
+  const copied = copy.status === 'copied';
+  return <>
+    <Button type="button" variant="ghost" className="h-auto shrink-0 gap-1 rounded-md p-0 text-sm font-normal text-muted-foreground underline underline-offset-4 hover:bg-transparent hover:text-foreground" onClick={() => void copy.copy()}>
+      {copied ? notRunning.helpCopied : notRunning.helpCopy}
+      {copied ? <Check aria-hidden="true" className="h-3.5 w-3.5" /> : <Copy aria-hidden="true" className="h-3.5 w-3.5" />}
+    </Button>
+    {copy.status === 'failed' && <div className="basis-full"><CopyFallback text={RECONNECT_AGENT_INSTRUCTIONS} label={notRunning.helpCopy} /></div>}
+  </>;
+}
+
 /** Repeated probes went unanswered with permission granted; polling continues during install or repair. */
 function NotRunningCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
   const { notRunning } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
-  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <CopyInstallCommand mode="install" />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} showHelp />;
+  return <Card title={notRunning.title} sentence={pinokioManaged ? notRunning.pinokioHint : notRunning.sentence} onBack={onBack} action={<div className="space-y-2">{!pinokioManaged && <CopyInstallCommand mode="install" />}<Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{notRunning.retry}</Button></div>} status={COPY.waiting} help={<ReconnectInstructionsCopy />} />;
 }
 
 /** Astrid answered, but not this page: no install help, because Astrid is already running. Polling continues. */
 function RefusedCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
   const { refused } = COPY;
-  return <Card title={refused.title} sentence={withOrigin(refused.sentence, window.location.origin)} onBack={onBack} status={COPY.waiting} showHelp action={<div className="space-y-2">
+  return <Card title={refused.title} sentence={withOrigin(refused.sentence, window.location.origin)} onBack={onBack} status={COPY.waiting} help={<HelpLink />} action={<div className="space-y-2">
     <CopyRefusedInstructions />
     <Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{refused.retry}</Button>
   </div>} />;
@@ -333,7 +352,7 @@ function UpdateNeededCard({ connection, onBack }: { readonly connection: Runtime
   const { updateNeeded } = COPY;
   const pinokioManaged = connection.managedByPinokio === true;
   const resolution = resolveUpdate({ ...operation.releaseStatus?.resolution, pageStale, compatibility: { kind: 'schema', detail: pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence }, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason });
-  return <Card title={resolution.card === 'newer' ? 'Astrid on this computer is newer' : resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} operation={operation} />} status={COPY.waiting} showHelp />;
+  return <Card title={resolution.card === 'newer' ? 'Astrid on this computer is newer' : resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} operation={operation} />} status={COPY.waiting} help={<HelpLink />} />;
 }
 
 function RestartReloadButton() {

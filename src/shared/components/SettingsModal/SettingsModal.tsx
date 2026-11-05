@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useRef } from "react";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +21,9 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   onReplayTour,
 }) => {
   const isMobile = useIsMobile();
+  // Opening lands on the title, not the first control: while the update check runs its button is disabled, so the
+  // dialog's default (the first tabbable element) was the Diagnostics disclosure, which then showed a focus ring.
+  const titleRef = useRef<HTMLHeadingElement>(null);
 
   // Modal styling and scroll fade
   const modal = useLargeModal();
@@ -33,6 +36,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
   return (
     <Dialog open={isOpen} onOpenChange={onOpenChange}>
       <DialogContent
+        initialFocus={titleRef}
         className={modal.className}
         style={(() => {
           const desktopMaxHeight = 'calc(100vh - 24px)';
@@ -49,7 +53,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
         <div className={modal.headerClass}>
           <DialogHeader className={`${modal.isMobile ? 'px-2 pt-1 pb-1' : 'px-2 pt-1 pb-1'} flex-shrink-0 relative`}>
             <div className={`flex ${isMobile ? 'flex-col items-center gap-3' : 'items-center gap-4'}`}>
-              <DialogTitle className={`text-2xl ${isMobile ? 'mb-1' : 'md:mt-[11px]'}`}>
+              <DialogTitle ref={titleRef} tabIndex={-1} className={`text-2xl focus:outline-none ${isMobile ? 'mb-1' : 'md:mt-[11px]'}`}>
                 App Settings
               </DialogTitle>
             </div>
@@ -61,16 +65,16 @@ const SettingsModal: React.FC<SettingsModalProps> = ({
           ref={scrollRef}
           className={`${modal.scrollClass} ${modal.isMobile ? 'px-2' : 'px-2'} overflow-x-hidden [scrollbar-gutter:stable_both-edges] [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] sm:[&::-webkit-scrollbar]:block sm:[-ms-overflow-style:auto] sm:[scrollbar-width:auto] sm:pr-4`}
         >
-          <AstridUpdatesSection isOpen={isOpen} />
-          <AstridStatusSection isOpen={isOpen} />
-          <PreferencesSection
-            isMobile={isMobile}
-            onReplayTour={onReplayTour && (() => {
-              onOpenChange(false);
-              onReplayTour();
-            })}
-          />
-
+          <div className="space-y-8 pb-2">
+            <AstridUpdatesSection isOpen={isOpen} />
+            <AstridStatusSection isOpen={isOpen} />
+            <PreferencesSection
+              onReplayTour={onReplayTour && (() => {
+                onOpenChange(false);
+                onReplayTour();
+              })}
+            />
+          </div>
         </div>
 
         {/* Footer */}

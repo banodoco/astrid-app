@@ -35,7 +35,6 @@ export interface SettingsModalProps {
 }
 
 export interface PreferencesSectionProps {
-  isMobile: boolean;
   onReplayTour?: () => void;
 }
 

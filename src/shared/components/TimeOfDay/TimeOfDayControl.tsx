@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type Dispatch, type SetStateAction } from 'react';
-import { PUBLIC_ASTRID_SKY_PIXEL, renderPublicAstridSky, skyLevelBounds, skyState, sunTimes } from '@/pages/Home/publicAstridSkyRender';
+import { PUBLIC_ASTRID_SKY_PIXEL, renderPublicAstridSky, skyLevelBounds, skyState, sunTimes, type PublicAstridSkyRenderInput, type PublicAstridSkyState } from '@/pages/Home/publicAstridSkyRender';
 import { visitorLocation } from '@/pages/Home/publicAstridLocation';
 import { todayAtHour, useAppTheme } from '@/shared/hooks/core/useAppTheme';
 import { usePersistentState } from '@/shared/hooks/usePersistentState';
@@ -62,6 +62,60 @@ const PREVIEW_PIXEL = 4;
 const PREVIEW_SUN_SIZE = 0.3;
 const PREVIEW_MOON_SCALE = 0.62;
 const PREVIEW_ARC_LIFT = -0.34;
+/** The preview's moon fades in as dusk deepens to full dark, and out again before first light: from just above
+ *  the sky's darkness when the moon rises (about 0.57) to just short of fully dark (1). */
+const PREVIEW_MOON_FADE = { from: 0.6, to: 0.95 } as const;
+/** The share of its arc the preview's moon crosses through the night. The real moon rises low on the far left,
+ *  which in a frame this small is off the edge and behind the hills until well after full dark, the darkest
+ *  level a person can choose; kept to the middle of the arc, it is in view whenever it is up. */
+const PREVIEW_MOON_TRACK = { from: 0.3, to: 0.7 } as const;
+
+interface SkyFrame {
+  /** The sky to draw: the real one, with the preview's moon kept within the frame. */
+  state: PublicAstridSkyState;
+  showSun: boolean;
+  /** How far the moon has faded in, 0 to 1; 0 leaves it out. */
+  moon: number;
+}
+
+/**
+ * Which of the sun and moon a sky shows. With the environment off it is only its colour: no sun or moon (nor
+ * stars, clouds and hills). Otherwise the sun by day and the moon by night, the preview's moon fading in with
+ * the dark and crossing the middle of the frame; the twilight between them stays empty.
+ */
+export function skyFrame(state: PublicAstridSkyState, environment: boolean, variant: 'preview' | 'background'): SkyFrame {
+  if (!environment || state.body === 'none') return { state, showSun: false, moon: 0 };
+  if (state.body === 'sun') return { state, showSun: true, moon: 0 };
+  if (variant === 'background') return { state, showSun: false, moon: 1 };
+  const fade = Math.min(1, Math.max(0, (state.night - PREVIEW_MOON_FADE.from) / (PREVIEW_MOON_FADE.to - PREVIEW_MOON_FADE.from)));
+  const progress = PREVIEW_MOON_TRACK.from + (PREVIEW_MOON_TRACK.to - PREVIEW_MOON_TRACK.from) * state.progress;
+  return {
+    state: { ...state, progress, altitude: Math.sin(Math.PI * progress), rising: progress < 0.5 },
+    showSun: false,
+    moon: fade * fade * (3 - 2 * fade),
+  };
+}
+
+/** What the sky renderer is asked to paint for a sky, at the preview's or the app background's scale. */
+export function skyRenderInput(columns: number, rows: number, sky: PublicAstridSkyState, environment: boolean, variant: 'preview' | 'background'): PublicAstridSkyRenderInput {
+  const { state, showSun, moon } = skyFrame(sky, environment, variant);
+  const intensity = variant === 'background' ? 0.3 + 0.15 * state.night : 0.5;
+  return {
+    columns,
+    rows,
+    state,
+    phase: 0.5,
+    // The intensity only sets the sun's or moon's strength, so it carries the moon's fade.
+    intensity: moon > 0 ? intensity * moon : intensity,
+    path: 'arc',
+    size: variant === 'background' ? 1.18 : PREVIEW_SUN_SIZE,
+    lift: variant === 'background' ? 0 : PREVIEW_ARC_LIFT,
+    moonScale: PREVIEW_MOON_SCALE,
+    showSun,
+    showMoon: moon > 0,
+    showEnvironment: environment,
+  };
+}
 
 /** Gentle hills along the bottom of the preview, as the height of the ground (in art pixels) per column:
  *  a far ridge and a nearer one. */
@@ -114,6 +168,7 @@ export function TimeOfDaySky({
   visibility?: SkyPreviewVisibility;
   variant?: 'preview' | 'background';
 }) {
+  const { environment } = visibility;
   const sky = skyAtHour(hours);
   const { top, bottom } = skyAt(sky.night);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -142,24 +197,12 @@ export function TimeOfDaySky({
     if (!canvas || !context || !columns || !rows) return;
     canvas.width = columns;
     canvas.height = rows;
-    const state = skyAtHour(hours);
+    const input = skyRenderInput(columns, rows, skyAtHour(hours), environment, variant);
+    const { state } = input;
     const image = context.createImageData(columns, rows);
-    image.data.set(renderPublicAstridSky({
-      columns,
-      rows,
-      state,
-      phase: 0.5,
-      intensity: variant === 'background' ? 0.3 + 0.15 * state.night : 0.5,
-      path: 'arc',
-      size: variant === 'background' ? 1.18 : PREVIEW_SUN_SIZE,
-      lift: variant === 'background' ? 0 : PREVIEW_ARC_LIFT,
-      moonScale: PREVIEW_MOON_SCALE,
-      showSun: true,
-      showMoon: true,
-      showEnvironment: visibility.environment,
-    }));
+    image.data.set(renderPublicAstridSky(input));
     // The hills last, in front of everything, so the sun and moon rise and set behind them.
-    if (visibility.environment) {
+    if (environment) {
       const hills = hillHeights(columns, rows);
       const paint = (heights: number[], tone: Rgb) => {
         for (let x = 0; x < columns; x += 1) {
@@ -173,13 +216,13 @@ export function TimeOfDaySky({
       paint(hills.near, mix(HILL_TONES.near.day, HILL_TONES.near.night, state.night));
     }
     context.putImageData(image, 0, 0);
-  }, [size, hours, variant, visibility]);
+  }, [size, hours, variant, environment]);
 
   return (
     <div
       ref={wrapRef}
       className={`${variant === 'background' ? 'fixed inset-0 z-0' : 'relative rounded-xl'} overflow-hidden ${className}`}
-      style={{ background: visibility.environment ? `linear-gradient(${top}, ${bottom})` : 'hsl(var(--card))' } as CSSProperties}
+      style={{ background: environment ? `linear-gradient(${top}, ${bottom})` : 'hsl(var(--card))' } as CSSProperties}
       aria-hidden="true"
     >
       <canvas ref={canvasRef} className="absolute inset-0 h-full w-full" style={{ imageRendering: 'pixelated' }} />

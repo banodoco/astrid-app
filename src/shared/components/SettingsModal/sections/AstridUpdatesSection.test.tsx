@@ -36,11 +36,14 @@ describe('Astrid Updates Settings section', () => {
     const diagnosticsToggle = within(section).getByRole('button', { name: 'Diagnostics' });
     expect(diagnosticsToggle).toHaveAttribute('aria-expanded', 'false');
     expect(within(section).queryByText('transaction line')).toBeNull();
+    // The download sits on the Diagnostics row itself, so it is there before the detail opens.
+    expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
     fireEvent.click(diagnosticsToggle);
     expect(diagnosticsToggle).toHaveAttribute('aria-expanded', 'true');
     expect(within(section).getByRole('heading', { name: 'Update log' })).toBeInTheDocument();
     expect(within(section).getByText('transaction line')).toBeInTheDocument();
-    expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    // Opening the detail does not add a second download button.
+    expect(within(section).getAllByRole('button', { name: 'Download diagnostics' })).toHaveLength(1);
     const diagnosticCall = vi.mocked(fetch).mock.calls.find(([input]) => String(input).includes('/v1/diagnostics'));
     expect(diagnosticCall).toBeDefined();
     const requestUrl = new URL(String(diagnosticCall?.[0]), 'http://localhost');
@@ -226,5 +229,17 @@ describe('Astrid Updates Settings section', () => {
     expect(await within(section).findByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
     expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
     expect(createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('downloads diagnostics from the folded row, and shows the fallback there when Astrid cannot give the report', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')));
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([input]) => String(input).includes('/v1/diagnostics'))).toBe(true));
+    // A failed read alone stays quiet while the row is folded.
+    expect(within(section).queryByText("Couldn't collect diagnostics from Astrid.")).toBeNull();
+    fireEvent.click(within(section).getByRole('button', { name: 'Download diagnostics' }));
+    expect(await within(section).findByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Diagnostics' })).toHaveAttribute('aria-expanded', 'false');
   });
 });

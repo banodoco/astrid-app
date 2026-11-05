@@ -88,9 +88,8 @@ it('renders a real M1-installed effect in the open editor and retains the workin
           remotion: path.join(app, 'node_modules/remotion'), '@remotion/player': path.join(app, 'node_modules/@remotion/player'),
           '@remotion/layout-utils': path.join(app, 'node_modules/@remotion/layout-utils'),
           '@remotion/media': path.join(app, 'node_modules/@remotion/media'),
-          '@banodoco/timeline-composition/registry.generated': path.join(app, 'node_modules/@banodoco/timeline-composition/typescript/src/registry.generated.ts'),
-          '@banodoco/timeline-composition/theme-api': path.join(app, 'node_modules/@banodoco/timeline-composition/typescript/src/theme-api.ts'),
-          '@banodoco/timeline-composition': path.join(app, 'node_modules/@banodoco/timeline-composition'),
+          // @banodoco/timeline-composition resolves through its package exports, as in config/vite/vite.config.ts
+          // (pre-main ships it built under dist/; the old typescript/src subpath aliases no longer exist).
           '@workspace-effects': path.join(app, 'vendor/banodoco-effects'),
           '@workspace-animations': path.join(app, 'vendor/banodoco-animations'),
           '@workspace-transitions': path.join(app, 'vendor/banodoco-transitions'),
@@ -135,9 +134,11 @@ it('renders a real M1-installed effect in the open editor and retains the workin
       try {
         const filename = path.resolve(dist, url === '/' ? 'index.html' : url.slice(1));
         if (!filename.startsWith(dist + path.sep)) { response.writeHead(403).end(); return; }
+        // Read before writing headers, so a missing file is still a clean 404 (never a second writeHead).
+        const body = await readFile(filename);
         response.writeHead(200, { 'Content-Type': filename.endsWith('.html') ? 'text/html' : 'text/javascript' });
-        response.end(await readFile(filename));
-      } catch { response.writeHead(404).end(); }
+        response.end(body);
+      } catch { if (!response.headersSent) response.writeHead(404).end(); }
     });
     await new Promise<void>(resolve => server!.listen(0, '127.0.0.1', resolve));
     const address = server.address();

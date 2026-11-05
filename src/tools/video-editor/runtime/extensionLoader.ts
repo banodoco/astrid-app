@@ -45,6 +45,7 @@ import {
 import {
   syncEnabledPackLockEntries,
 } from '@/tools/video-editor/runtime/extensionLockMetadata';
+import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection';
 
 const moduleLeases = new WeakMap<AstridExtension, () => void>();
 export function releaseAdmittedExtensionAssets(extension: AstridExtension): void {
@@ -101,7 +102,7 @@ async function importAdmittedExtension(
     || admittedManifest.apiVersion !== 1 || pack.metadata.apiVersion !== 1) {
     throw moduleError('loader/module-identity', 'Artifact extension identity or API does not match the installed record.');
   }
-  const response = await fetch('/api/runtime/packs/inventory', { cache: 'no-store', credentials: 'same-origin' });
+  const response = await fetch(`${runtimeApiBase()}/packs/inventory`, { cache: 'no-store', credentials: 'same-origin' });
   if (!response.ok || response.redirected) throw moduleError('loader/not-admitted', 'Runtime pack inventory is unavailable.');
   const inventory = await response.json();
   if (!record(inventory) || inventory.version !== 1 || !Number.isSafeInteger(inventory.revision)
@@ -111,7 +112,10 @@ async function importAdmittedExtension(
   revision = inventory.revision;
   const matches = inventory.packs.filter((item: any) => item?.packId === artifact.packId);
   const admission = matches[0];
-  const url = `/api/runtime/packs/assets/${artifact.packId}/${artifact.digest}/index.js`;
+  // The browser fetches the entry from the Runtime's base (same-origin locally, the door's origin on
+  // the hosted build); the Runtime names it by its path on that base.
+  const entryUrl = `${runtimeApiBase()}/packs/assets/${artifact.packId}/${artifact.digest}/index.js`;
+  const url = entryUrl.slice(runtimeOrigin().length);
   if (matches.length !== 1 || !record(admission) || admission.enabled !== true
     || admission.digest !== artifact.digest || admission.sourceDigest !== artifact.sourceDigest
     || admission.url !== url || admission.artifactManifestDigest !== await computeSha256(canonical(artifact))) {
@@ -150,7 +154,7 @@ async function importAdmittedExtension(
   }
   let releaseLease = () => {};
   {
-    const leased = await fetch(`/api/runtime/packs/leases/${artifact.packId}/${artifact.digest}`, {
+    const leased = await fetch(`${runtimeApiBase()}/packs/leases/${artifact.packId}/${artifact.digest}`, {
       method: 'POST', credentials: 'same-origin',
     });
     if (!leased.ok || leased.redirected) throw moduleError('loader/not-admitted', 'Runtime could not retain the admitted revision.');
@@ -163,14 +167,14 @@ async function importAdmittedExtension(
       if (released) return;
       released = true;
       window.removeEventListener('pagehide', releaseLease);
-      void fetch(`/api/runtime/packs/leases/${lease.lease}`, { method: 'DELETE',
+      void fetch(`${runtimeApiBase()}/packs/leases/${lease.lease}`, { method: 'DELETE',
         credentials: 'same-origin', keepalive: true }).catch(() => {});
     };
     window.addEventListener('pagehide', releaseLease, { once: true });
   }
   let namespace: any;
   try {
-    namespace = await import(/* @vite-ignore */ new URL(url, location.origin).href);
+    namespace = await import(/* @vite-ignore */ new URL(entryUrl, location.origin).href);
   } catch (error) {
     releaseLease();
     throw moduleError('loader/module-import-failed', `Entry or chunk import failed: ${String(error)}`);

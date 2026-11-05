@@ -4,6 +4,7 @@ import { createIndexedDBExtensionStateRepository } from './extensionStateReposit
 import { generateIntegrityHash } from './extensionIntegrity';
 import type { ExtensionPackRecord } from './extensionStateRepository';
 import { useExtensionLoaderWiring } from './useExtensionLoaderWiring';
+import { runtimeApiBase } from '@/integrations/runtime/connection';
 
 /** Runtime owns installed presence and canonical manifests; IndexedDB is a carrier. */
 export function useRuntimePackExtensions(directExtensions: readonly AstridExtension[] | undefined, refreshIntervalMs: number) {
@@ -20,7 +21,7 @@ export function useRuntimePackExtensions(directExtensions: readonly AstridExtens
       running = true;
       try {
         await repo.initialize();
-        const response = await fetch('/api/runtime/packs/inventory', { cache: 'no-store', credentials: 'same-origin' });
+        const response = await fetch(`${runtimeApiBase()}/packs/inventory`, { cache: 'no-store', credentials: 'same-origin' });
         if (!response.ok || response.redirected) throw new Error('Runtime installed pack inventory is unavailable');
         const inventory = await response.json();
         if (inventory.version !== 1 || !Number.isSafeInteger(inventory.revision) || inventory.revision < 0 || !Array.isArray(inventory.packs)) {

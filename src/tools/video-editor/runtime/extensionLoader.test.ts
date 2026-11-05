@@ -74,6 +74,15 @@ import type {
   InstalledBundlePackage,
 } from '@/tools/video-editor/runtime/extensionPackageManifest';
 
+// The Runtime base the loader reads at request time. '' keeps every other test same-origin;
+// the runtimeApiBase() test below points it at a separate door origin (the hosted build).
+const runtimeBase = vi.hoisted(() => ({ origin: '' }));
+vi.mock('@/integrations/runtime/connection', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/integrations/runtime/connection')>()),
+  runtimeOrigin: () => runtimeBase.origin,
+  runtimeApiBase: () => `${runtimeBase.origin}/api/runtime`,
+}));
+
 const extensionEntries = new Map<string, string>();
 const admittedArtifacts = new Map<string, Record<string, any>>();
 let fixtureServer: Server;
@@ -3325,5 +3334,59 @@ describe('ExtensionLoader.load — package state classification', () => {
     expect(result.entries).toHaveLength(0);
     expect(result.loadedExtensions).toHaveLength(0);
     expect(result.allLoaded).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Pack routes use runtimeApiBase() (Plan 06, PK-14: the hosted build reaches the Runtime door)
+// ---------------------------------------------------------------------------
+
+describe('ExtensionLoader.load — pack routes use runtimeApiBase()', () => {
+  it('reads the inventory, leases, imports and releases on the Runtime base, not the page origin', async () => {
+    const bundleContent = 'door-routed pack';
+    const packRecord = await makePackRecord('com.test.door-routed', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent,
+      "export default { manifest, activate() { return { dispose() {} }; } };");
+    const door = fixtureOrigin; // the module fixture server stands in for the door
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    vi.stubGlobal('location', { origin: 'https://astrid.test' });
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      calls.push(`${init?.method ?? 'GET'} ${url}`);
+      if (url === `${door}/api/runtime/packs/inventory`) {
+        return { ok: true, redirected: false, json: async () => ({ version: 1, revision: 1, packs: [{
+          packId: artifactManifest.packId, sourceDigest: artifactManifest.sourceDigest, digest: artifactManifest.digest,
+          artifactManifestDigest: sha256(canonical(artifactManifest)), enabled: true,
+          // The Runtime names the entry by its door path, whichever origin serves it.
+          url: `/api/runtime/packs/assets/${artifactManifest.packId}/${artifactManifest.digest}/index.js`,
+        }] }) } as Response;
+      }
+      if (url.startsWith(`${door}/api/runtime/packs/leases/`)) {
+        return { ok: true, redirected: false, json: async () => ({ version: 1, lease: 'e'.repeat(64), released: true }) } as Response;
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    }));
+    runtimeBase.origin = door;
+    try {
+      const loader = createExtensionLoader();
+      const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+      const result = await loader.load([validation.entries[0].validatedPackage!]);
+      expect(result.entries[0].errors).toEqual([]);
+      expect(result.allLoaded).toBe(true);
+      expect(result.loadedExtensions.map((extension) => extension.manifest.id)).toEqual(['com.test.door-routed']);
+      const { releaseAdmittedExtensionAssets } = await import('@/tools/video-editor/runtime/extensionLoader');
+      releaseAdmittedExtensionAssets(result.loadedExtensions[0]);
+      expect(calls).toEqual([
+        `GET ${door}/api/runtime/packs/inventory`,
+        `POST ${door}/api/runtime/packs/leases/${artifactManifest.packId}/${artifactManifest.digest}`,
+        `DELETE ${door}/api/runtime/packs/leases/${'e'.repeat(64)}`,
+      ]);
+      expect(calls.some((call) => call.includes('https://astrid.test') || / \/api\//.test(call))).toBe(false);
+    } finally {
+      runtimeBase.origin = '';
+      vi.stubGlobal('fetch', originalFetch);
+      vi.stubGlobal('location', { origin: fixtureOrigin });
+    }
   });
 });

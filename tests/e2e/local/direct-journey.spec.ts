@@ -31,7 +31,7 @@
  *   a visible install/update command and a button named "Copy" inside that panel
  *   a button named "Reload" in the "Astrid restarted" card; the "Astrid stopped" card clears by itself
  */
-import { expect, type Page, type Route } from '@playwright/test';
+import { expect, type Frame, type Page, type Route } from '@playwright/test';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
@@ -1116,8 +1116,12 @@ test.describe('pack extensions (App)', () => {
     await expect(iframe).toHaveCount(1);
     // Scripts run, but in an opaque origin: allow-scripts alone, never allow-same-origin.
     await expect(iframe).toHaveAttribute('sandbox', 'allow-scripts');
-    const frame = await (await iframe.elementHandle())!.contentFrame();
-    expect(frame, 'the scene frame is reachable').not.toBeNull();
+    // contentFrame() is null while the displayed iframe is not attached yet (seen once in 9 runs), so poll for it.
+    let frame = null as Frame | null; // assigned in the poll below
+    await expect.poll(async () => {
+      frame = await (await iframe.elementHandle())?.contentFrame() ?? null;
+      return frame !== null;
+    }, { message: 'the scene frame is reachable', timeout: 10_000 }).toBe(true);
     await expect(frame!.locator('#scene')).toContainText(seed.sceneMarker);
     // From inside the frame: no network (the document's CSP is connect-src 'none') and no reach into the hosting page.
     const inside = await frame!.evaluate(async (doorBase) => {

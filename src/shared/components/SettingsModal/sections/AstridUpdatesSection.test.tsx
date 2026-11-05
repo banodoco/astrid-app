@@ -31,7 +31,8 @@ describe('Astrid Updates Settings section', () => {
   it('shows the report-backed last result and expandable update log', async () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('The update did not finish. Astrid was restored to its previous version.')).toBeInTheDocument();
+    // The result sits after the "Last result:" label in the same paragraph, so match its text as a substring.
+    expect(await within(section).findByText(/The update did not finish\. Astrid was restored to its previous version\./)).toBeInTheDocument();
     const diagnosticsToggle = within(section).getByRole('button', { name: 'Diagnostics' });
     expect(diagnosticsToggle).toHaveAttribute('aria-expanded', 'false');
     expect(within(section).queryByText('transaction line')).toBeNull();
@@ -60,7 +61,8 @@ describe('Astrid Updates Settings section', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
-    expect(within(section).getByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
+    // The mount-time diagnostics read fails asynchronously, so the fallback appears after the click settles.
+    expect(await within(section).findByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
     expect(await within(section).findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();

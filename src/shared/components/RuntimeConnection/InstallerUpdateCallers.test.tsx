@@ -237,7 +237,9 @@ describe('installer update callers', () => {
   ])('respects installer action availability and explicit recovery Update when %s', async (_label, configure) => {
     configure();
     render(<AstridUpdatesSection isOpen />);
-    await waitFor(() => expect(calls().some((call) => call.url.endsWith('/v1/update/status'))).toBe(true));
+    // Installer status is read only when the workspace is authenticated and the transport is up.
+    const statusReadable = !['unauthenticated', 'disconnected'].includes(_label);
+    if (statusReadable) await waitFor(() => expect(calls().some((call) => call.url.endsWith('/v1/update/status'))).toBe(true));
     if (_label === 'disconnected') await screen.findByText('Connect to Astrid before checking its release.');
     else if (_label === 'source managed') {
       // A source checkout has no release to install: the status line follows the resolver, which has no update to offer.
@@ -255,6 +257,7 @@ describe('installer update callers', () => {
       await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
     }
     else await screen.findAllByText('Update available: Release 4');
+    if (!statusReadable) expect(calls().some((call) => call.url.endsWith('/v1/update/status'))).toBe(false);
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     const postCount = calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
     expect(postCount).toBe(_label === 'recovery required' ? 1 : 0);

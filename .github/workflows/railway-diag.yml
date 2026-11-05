@@ -1,0 +1,25 @@
+name: Railway container diagnostic
+on:
+  push:
+    branches: ["diag/railway-container"]
+jobs:
+  build-and-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the production image exactly as Railway does
+        run: docker build -t astrid-app-diag . 2>&1 | tail -60
+      - name: Run the container with Railway's PORT and healthcheck
+        run: |
+          docker run -d --name app -e PORT=8080 -p 8080:8080 astrid-app-diag
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H 'Host: healthcheck.railway.app' http://127.0.0.1:8080/ || true)
+            echo "t=${i}s healthcheck-host status=$code"
+            [ "$code" = "200" ] && break
+            sleep 2
+          done
+          echo "--- localhost Host status: $(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/ || true)"
+          echo "--- public-domain Host status: $(curl -s -o /dev/null -w '%{http_code}' -H 'Host: astrid.haus' http://127.0.0.1:8080/ || true)"
+          echo "--- container state: $(docker inspect -f '{{.State.Status}} exit={{.State.ExitCode}}' app)"
+          echo "--- container logs:"; docker logs app 2>&1 | tail -80

@@ -12,7 +12,7 @@ import urllib.request
 
 root, agent, runtime, site, node, esbuild, lock_file = map(Path, sys.argv[1:])
 sys.path[:0] = [str(runtime), str(runtime / 'packages/python'), str(agent), str(site)]
-from astrid.core.pack.transaction import install_group, read_group, PackInstallError
+from astrid.core.pack.transaction import collection_write_custody, install_group, read_group, PackInstallError
 from runtime_protocol.daemon import RuntimeDaemon
 from runtime_protocol.store import RealmStore
 
@@ -98,7 +98,10 @@ try:
                 snapshot = read_group(installed)
                 record = snapshot.admissions['native_effect']
                 path = snapshot.paths['native_effect'] / f".build/{record['sourceDigest']}.js"
-                path.write_bytes(path.read_bytes() + b'// tampered')
+                # A direct write into the installed collection takes the collection custody every
+                # non-transaction writer must hold (LB-TXN r2 PK-14 precondition).
+                with collection_write_custody(installed):
+                    path.write_bytes(path.read_bytes() + b'// tampered')
                 result = {'tampered': True}
             else:
                 result = install(command)

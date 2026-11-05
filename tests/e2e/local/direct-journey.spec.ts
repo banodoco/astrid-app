@@ -1058,6 +1058,26 @@ function liveEffectSource(harness: DirectHarness): { source: string; v1: string;
   return { source, v1, v2: git('rev-parse', 'HEAD') };
 }
 
+/**
+ * Open the Extension Manager dialog: it is behind the right dock's Extensions tab (`Manage extensions` renders only on that
+ * tab), and the dock may start closed on a narrow viewport (the pattern of tests/e2e/extension-accessibility.spec.ts).
+ */
+async function openExtensionManager(page: Page) {
+  const dock = page.getByTestId('video-editor-right-panel-dock');
+  if ((await dock.getAttribute('data-open')) === 'false') {
+    await page.getByRole('button', { name: 'Panel display' }).click();
+    await page.getByRole('menuitemradio', { name: 'Full-height' }).click();
+    await expect(dock).toHaveAttribute('data-open', 'true');
+  }
+  const extensionsTab = page.getByRole('tab', { name: 'Extensions' });
+  await extensionsTab.click();
+  await expect(extensionsTab).toHaveAttribute('aria-selected', 'true');
+  await page.getByRole('button', { name: 'Manage extensions' }).click();
+  const manager = page.getByRole('dialog', { name: 'Extensions' });
+  await expect(manager).toBeVisible();
+  return manager;
+}
+
 /** The installed pack's Runtime admission, as the Agent's transaction writes it (what the Runtime's inventory serves). */
 function admissionState(harness: DirectHarness): string {
   const build = path.join(harness.packsRoot, LIVE_EFFECT_PACK_ID, '.build');
@@ -1142,10 +1162,11 @@ test.describe('pack extensions (App)', () => {
     expect.soft(admissionState(harness), 'the install committed a Runtime admission for the pack\'s editor effect').toMatch(/admission\.json/);
     const inventory = await harness.runtimeJson('GET', '/api/runtime/packs/inventory');
     test.info().annotations.push({ type: 'runtime-inventory', description: JSON.stringify(inventory.body).slice(0, 2000) });
-    await page.getByRole('button', { name: 'Manage extensions' }).click();
-    const listed = page.getByRole('dialog', { name: 'Extensions' }).getByRole('button', { name: `Disable ${LIVE_EFFECT_EXTENSION_ID}`, exact: true });
+    const manager = await openExtensionManager(page);
+    const listed = manager.getByRole('button', { name: `Disable ${LIVE_EFFECT_EXTENSION_ID}`, exact: true });
     await expect(listed, 'the installed effect is listed in the open editor').toBeVisible({ timeout: 30_000 });
     await page.keyboard.press('Escape');
+    await expect(manager).toBeHidden();
     const marker = page.getByTestId('live-effect-marker');
     await expect(marker, 'LIVE-EFFECT-V1 renders in the preview').toHaveText(LIVE_EFFECT_MARKER, { timeout: 30_000 });
     expect(await samePage(), 'no reload').toBe(true);
@@ -1161,8 +1182,8 @@ test.describe('pack extensions (App)', () => {
     const removed = runPacks(harness, cli, ['remove', LIVE_EFFECT_PACK_ID, '--packs-root', harness.packsRoot, '--yes']);
     expect(removed.status, removed.transcript).toBe(0);
     await expect(marker, 'the removed effect is disposed from the preview').toHaveCount(0, { timeout: 30_000 });
-    await page.getByRole('button', { name: 'Manage extensions' }).click();
-    await expect(page.getByRole('dialog', { name: 'Extensions' }).getByRole('button', { name: `Disable ${LIVE_EFFECT_EXTENSION_ID}`, exact: true }), 'the removed effect is no longer listed').toHaveCount(0, { timeout: 30_000 });
+    const managerAfterRemove = await openExtensionManager(page);
+    await expect(managerAfterRemove.getByRole('button', { name: `Disable ${LIVE_EFFECT_EXTENSION_ID}`, exact: true }), 'the removed effect is no longer listed').toHaveCount(0, { timeout: 30_000 });
     expect(await samePage(), 'no reload').toBe(true);
   });
 

@@ -1198,7 +1198,9 @@ test.describe('pack extensions (App)', () => {
     });
     await openExtensionsTimeline(page, harness);
     await expect(page.locator('[data-lane-kind="astrid.transcript"]')).toBeVisible();
-    await expect(page.getByTestId('astrid-live-scene-entry')).toHaveAttribute('data-phase', 'ready');
+    // The preview's scene. The right dock can show the scene too: after the live-effect case opened it on the Extensions tab,
+    // this case's page held three entries (preview, dock panel, shot still renderer), so the page-wide test id is ambiguous.
+    await expect(page.getByTestId('video-editor-preview-surface').getByTestId('astrid-live-scene-entry')).toHaveAttribute('data-phase', 'ready');
     expect(configRequests).toEqual([]);
   });
 });

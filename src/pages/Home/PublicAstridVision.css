@@ -688,3 +688,150 @@
   .astrid-vision-mobile-juggler .astrid-vision-juggler { display: block; --px: 2px; }
   .astrid-vision-mobile-juggler + .astrid-vision-issues { margin-top: 32px; }
 }
+
+
+/* GitHub-sourced vision content. Layout stays in App; wording stays in Astrid Dev. */
+.astrid-vision-markdown > :first-child { margin-top: 0; }
+.astrid-vision-markdown > :last-child { margin-bottom: 0; }
+.astrid-vision-markdown p, .astrid-vision-markdown li {
+  line-height: 1.58;
+}
+.astrid-vision-markdown p + p, .astrid-vision-markdown p + ul { margin-top: 9px; }
+.astrid-vision-markdown a { text-decoration: underline; text-underline-offset: 3px; }
+.astrid-vision-markdown ul { margin: 10px 0; padding-left: 19px; }
+
+.astrid-vision-lead p {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.astrid-vision-lead strong { color: var(--astrid-ink); font-weight: 550; }
+
+.astrid-vision-standards { margin-top: clamp(80px, 10vw, 128px); }
+.astrid-vision-standards-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(18px, 3vw, 40px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.astrid-vision-standards-list li {
+  border-top: 1px solid var(--astrid-line);
+  padding-top: 16px;
+}
+.astrid-vision-standards-list li > span {
+  color: var(--astrid-accent);
+  font: 12px "Departure Mono", ui-monospace, monospace;
+}
+.astrid-vision-standards-list h3 {
+  margin: 12px 0;
+  color: var(--astrid-ink);
+  font: 400 clamp(23px, 2vw, 30px)/1.2 var(--astrid-vision-serif);
+}
+.astrid-vision-standards-list .astrid-vision-markdown {
+  max-width: 46ch;
+  font-size: 15.5px;
+  color: var(--astrid-muted);
+}
+
+.astrid-vision-part .astrid-vision-part-number {
+  margin-top: 3px;
+  font: 500 clamp(18px, 2.2vw, 26px)/1.2 "Departure Mono", ui-monospace, monospace;
+  color: var(--astrid-accent);
+  letter-spacing: -.02em;
+  scale: none;
+}
+.astrid-vision-gap-state {
+  display: inline-block;
+  margin-bottom: 12px;
+  font: 500 11px/1.4 "Departure Mono", ui-monospace, monospace;
+  color: var(--astrid-accent);
+  text-transform: capitalize;
+}
+.astrid-vision-gap-missing-label { margin-top: 18px !important; }
+.astrid-vision-gap-plans {
+  display: grid;
+  gap: 4px;
+  margin-top: 17px;
+}
+.astrid-vision-gap-plans .astrid-vision-label { margin-bottom: 3px !important; }
+.astrid-vision-gap-plans a, .astrid-vision-source-link { font-size: 13.5px; line-height: 1.5; }
+.astrid-vision-source-link { display: inline-block; margin-top: 17px; }
+.astrid-vision-part-issue .astrid-vision-markdown { color: var(--astrid-ink); }
+.astrid-vision-part-issue .astrid-vision-markdown p:not(.astrid-vision-label) { color: inherit; }
+.astrid-vision-part-issue .astrid-vision-markdown ul { list-style: disc; padding-left: 20px; }
+.astrid-vision-part-issue .astrid-vision-markdown li { padding-left: 0; }
+.astrid-vision-part-issue .astrid-vision-markdown li::before { display: none; }
+.astrid-vision-part-issue .astrid-vision-markdown a { word-break: break-word; }
+
+.astrid-vision-more-button {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 20px;
+  padding: 11px 16px;
+  border: 1px solid var(--astrid-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--astrid-ink);
+  font: 600 14px/1.3 inherit;
+  cursor: pointer;
+}
+.astrid-vision-more-button:hover { border-color: var(--astrid-accent); }
+.astrid-vision-more-button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+
+.astrid-vision-project-list .astrid-vision-project-row {
+  display: grid;
+  grid-template-columns: minmax(185px, .8fr) minmax(0, 1.3fr) auto;
+  align-items: baseline;
+  gap: 16px 24px;
+  padding: 22px 4px;
+}
+.astrid-vision-project-head h3 {
+  margin: 7px 0 0;
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--astrid-ink);
+}
+.astrid-vision-project-status {
+  color: var(--astrid-accent);
+  font: 500 11px/1.35 "Departure Mono", ui-monospace, monospace;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.astrid-vision-project-status[data-status="active"] { color: #598342; }
+.astrid-vision-project-list .astrid-vision-markdown { color: var(--astrid-muted); font-size: 14px; }
+.astrid-vision-project-row > a {
+  color: var(--astrid-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.astrid-vision-content-source {
+  max-width: 70ch;
+  margin: 0 auto 12px;
+  color: var(--astrid-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+.astrid-vision-content-source a { color: var(--astrid-ink); text-decoration: underline; }
+
+@media (max-width: 900px) {
+  .astrid-vision-project-list .astrid-vision-project-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1 / -1; grid-row: 2; }
+  .astrid-vision-project-row > a { grid-column: 2; grid-row: 1; }
+}
+@media (max-width: 760px) {
+  .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 22px; }
+  .astrid-vision-standards-list li { padding-top: 14px; }
+  .astrid-vision-project-list .astrid-vision-project-row { grid-template-columns: 1fr; gap: 10px; }
+  .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1; grid-row: auto; }
+  .astrid-vision-project-row > a { grid-column: 1; grid-row: auto; }
+}

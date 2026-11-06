@@ -230,7 +230,9 @@
       "estimate": "TBD",
       "waitingOn": "—",
       "priorityOrder": 1,
-      "gapIds": [],
+      "gapIds": [
+        "F-001"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/07-pinokio/plan.md"
     },
     {
@@ -242,7 +244,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement",
       "priorityOrder": 2,
-      "gapIds": [],
+      "gapIds": [
+        "F-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/20-zero-to-first-image/plan.md"
     },
     {
@@ -254,7 +258,9 @@
       "estimate": "TBD",
       "waitingOn": "—",
       "priorityOrder": 3,
-      "gapIds": [],
+      "gapIds": [
+        "F-001"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/09-install-and-update-confidence/plan.md"
     },
     {
@@ -266,7 +272,9 @@
       "estimate": "0.5–1 day",
       "waitingOn": "—",
       "priorityOrder": 4,
-      "gapIds": [],
+      "gapIds": [
+        "F-002"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/01-installer-consent/plan.md"
     },
     {
@@ -278,7 +286,9 @@
       "estimate": "4–5 days after Plan 01 (includes the RunPod dry-run work, the installed-package test and the final rebase), plus a Linux x86_64 environment",
       "waitingOn": "Plan 01 (from phase 3); a Linux x86_64 environment for task V2 only",
       "priorityOrder": 5,
-      "gapIds": [],
+      "gapIds": [
+        "F-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/02-consistent-generation/plan.md"
     },
     {
@@ -290,7 +300,10 @@
       "estimate": "TBD",
       "waitingOn": "—",
       "priorityOrder": 6,
-      "gapIds": [],
+      "gapIds": [
+        "F-001",
+        "F-002"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/10-pinokio-qualification/plan.md"
     },
     {

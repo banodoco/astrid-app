@@ -65,30 +65,6 @@ function Tinkerer() {
   );
 }
 
-/**
- * The old saying, struck through, and the idean Astrid is built on beneath it. Each part rises in with the
- * page's shared reveal, a beat apart as in the other sections; the strike draws across once the quote
- * is in place.
- */
-function ToolsShift() {
-  return (
-    <figure className="astrid-vision-shift">
-      <blockquote className="astrid-vision-shift-old" data-reveal>
-        <p><span>“We shape our tools, and thereafter our tools shape&nbsp;us.”</span></p>
-      </blockquote>
-      {/* The mink comes before the supporting line so, on a phone, that line can wrap around him. */}
-      <div className="astrid-vision-shift-grow">
-        <p className="astrid-vision-shift-new" data-reveal style={{ '--reveal-delay': '90ms' } as CSSProperties}>Together with our AI, we grow into our tools as we use&nbsp;them.</p>
-        <Tinkerer />
-        <p className="astrid-vision-shift-support" data-reveal style={{ '--reveal-delay': '180ms' } as CSSProperties}>
-          Every part of a tool should be shaped as you work, around the project in front of you.
-        </p>
-      </div>
-    </figure>
-  );
-}
-
-
 function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined, allGapsVisible: boolean) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -163,7 +139,7 @@ function ProjectRow({ project }: { project: PublicVisionProject }) {
 }
 
 
-const VISION_QUIET_TEXT = '.astrid-vision-hero-copy, .astrid-vision-section-head, .astrid-vision-standards, .astrid-vision-parts-head, .astrid-vision-part h3, .astrid-vision-part-vision, .astrid-vision-issues-head, .astrid-vision-project-list, .astrid-vision-shift';
+const VISION_QUIET_TEXT = '.astrid-vision-hero-copy, .astrid-vision-section-head, .astrid-vision-standards, .astrid-vision-parts-head, .astrid-vision-part h3, .astrid-vision-part-vision, .astrid-vision-issues-head, .astrid-vision-project-list';
 
 export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment, skySession: suppliedSkySession }: { onGoHome?: () => void; environment?: PublicAstridEnvironment; skySession?: PublicAstridSkySession } = {}) {
   const { content, error, retry } = usePublicVisionContent();
@@ -340,21 +316,19 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </p>
       </section>
 
-      <div className="astrid-vision-mobile-juggler" aria-hidden="true"><Juggler /></div>
       </>)}
-      <ToolsShift />
       {content?.vision.contributeMarkdown && (
         <section className="astrid-vision-contribute" aria-labelledby="astrid-vision-contribute-title" data-reveal>
-          <p className="astrid-vision-eyebrow">Get involved</p>
-          <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
-          <MarkdownText value={content.vision.contributeMarkdown} />
-          <a href={PUBLIC_VISION_REPO_URL + '/blob/' + content.source.revision + '/plans/index.md'}
-            target="_blank" rel="noreferrer">Explore projects on GitHub</a>
+          <div className="astrid-vision-contribute-copy">
+            <p className="astrid-vision-eyebrow">Get involved</p>
+            <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
+            <MarkdownText value={content.vision.contributeMarkdown} />
+          </div>
+          <Tinkerer />
         </section>
       )}
       <footer className="astrid-vision-footer">
         {error && content && <p className="astrid-vision-content-source" role="status">Showing the last loaded vision; the latest update could not be checked. <button type="button" onClick={retry}>Retry</button></p>}
-        <p className="astrid-vision-content-source">Vision, gaps and projects generated from <a href={SOURCE_URL} target="_blank" rel="noreferrer">Astrid Dev</a>. The source records explain what has and hasn't been demonstrated.</p>
         <div className="astrid-vision-end" />
         <PublicAstridSocialLinks className="astrid-vision-social" />
       </footer>

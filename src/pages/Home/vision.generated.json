@@ -50,6 +50,91 @@
       "bodyMarkdown": "Creative decisions, project data, agent permissions, installed tools, execution location and spending remain under the person's authority. Agents should make consequential proposals legible and reversible where possible. Private knowledge stays private unless its owner chooses to share it. This principle requires concrete safety and reliability evidence, not just good intentions."
     }
   ],
-  "gaps": [],
+  "gaps": [
+    {
+      "id": "AA-001",
+      "title": "Sustained, ambitious creative work",
+      "assessment": "open",
+      "assessmentDetail": "Open, initial source assessment (2026-11-06); not a live product qualification.",
+      "appliesTo": [
+        "pillar:artistic-ambition",
+        "principle:in-the-creators-control"
+      ],
+      "desiredMarkdown": "A person can pursue a substantial, distinctive creative vision from early exploration through deep iteration to finished work, retaining control of their artistic decisions and improving their craft.",
+      "currentMarkdown": "Astrid provides a video editor, generation capabilities, agent-led timeline editing and creative packs. These are substantial foundations, but a coherent, demanding creator-led journey has **not been demonstrated by the evidence reviewed for this vision**.",
+      "missingMarkdown": "The ceiling on sustained artistic control, continuity, revision and creative quality is not yet established through an ambitious end-to-end project.",
+      "closureEvidenceMarkdown": "A real artist-led project is completed through repeated revision, with demonstrable continuity, editable results, preserved creative intent and serious creator/peer assessment. Record what the tools enabled, where they constrained ambition and what remains unresolved."
+    },
+    {
+      "id": "CA-001",
+      "title": "A culture that challenges people artistically",
+      "assessment": "open",
+      "assessmentDetail": "Open; founder-described community practices, no current program/outcome audit.",
+      "appliesTo": [
+        "pillar:shared-endeavour"
+      ],
+      "desiredMarkdown": "People have compelling reasons to attempt work beyond their current abilities: artistic challenges, collaboration, critiques, showcases and high standards that encourage originality and growth.",
+      "currentMarkdown": "The founder describes Banodoco community activity and art competitions. This is evidence of an intention and starting point, **not** evidence that a repeatable program demonstrably raises creative ambition or artistic quality.",
+      "missingMarkdown": "Challenge formats, high-quality review, recognition and reliable feedback loops must become repeatable practices judged by their creative effects rather than participation metrics alone.",
+      "closureEvidenceMarkdown": "Run a bounded challenge with clear artistic intent and fair participation; document artists' goals, feedback, completed work and whether it enabled more ambitious efforts. Incorporate genuine creator assessment, including negative findings and barriers."
+    },
+    {
+      "id": "CA-002",
+      "title": "A meaningful contributor-ownership model",
+      "assessment": "open",
+      "assessmentDetail": "Open; vision-level commitment, legal and operating terms not established.",
+      "appliesTo": [
+        "pillar:shared-endeavour",
+        "principle:in-the-creators-control"
+      ],
+      "desiredMarkdown": "The people who meaningfully advance the collective have a genuine, understandable stake in the company behind it. The stated ambition is **100% ownership for contributors advancing the mission**, not merely participation rewards.",
+      "currentMarkdown": "The ownership intention has been stated by the founder. No eligibility, allocation, vesting, governance, financing or legal instrument has been established within the materials reviewed for this vision.",
+      "missingMarkdown": "A transparent and legally workable mechanism for translating meaningful contributions—creative, technical, mentoring or otherwise—into ownership and rights, including treatment of existing and future financing, has not yet been specified or implemented.",
+      "closureEvidenceMarkdown": "An explicit owner decision and qualified legal/tax review of a concrete model covering eligible contributions, grants/allocations, governance, vesting, changes over time, financing and participant protections; then evidence of its authorized implementation. A declaration alone does not close this gap."
+    },
+    {
+      "id": "CI-001",
+      "title": "Agents learn from real creative work",
+      "assessment": "open",
+      "assessmentDetail": "Open, source assessment (2026-11-06).",
+      "appliesTo": [
+        "pillar:compounding-intelligence",
+        "principle:in-the-creators-control"
+      ],
+      "desiredMarkdown": "An agent routinely uses applicable earlier lessons **before** work, captures truthfully observed success or failure **during/after** work, learns within a user-owned private knowledge scope and can propose sanitized contributions to others with explicit permission.",
+      "currentMarkdown": "Astrid Agent has executable creative tools and Runtime task/artifact records. Banodoco Hivemind has an evidence-bearing read/contribution system. The [source map](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/visions/references/compounding-intelligence/source-map.md) **does not establish a complete private/local → community → later-agent learning loop**.",
+      "missingMarkdown": "Contextual retrieval, actual run-to-knowledge capture, safe private retention, consented contributions and proven benefits to a second agent session are not yet integrated end to end.",
+      "closureEvidenceMarkdown": "Two real agent sessions: the first retrieves applicable knowledge and produces an observed, locally retained result; a subsequent session demonstrably uses that finding. Optional contribution retains provenance and only shares approved, sanitized information. Compare against raw search/no knowledge, including staleness and denial paths."
+    },
+    {
+      "id": "CI-002",
+      "title": "Independently owned, interoperable Hiveminds",
+      "assessment": "open",
+      "assessmentDetail": "Open, proposal compared with source (2026-11-06).",
+      "appliesTo": [
+        "pillar:compounding-intelligence",
+        "principle:open-by-design",
+        "principle:in-the-creators-control"
+      ],
+      "desiredMarkdown": "Independent personal, team and community knowledge datasets can preserve attribution, conditions, evidence and owner-controlled access while exchanging permitted references and learnings without merging into one central authority.",
+      "currentMarkdown": "[Banodoco Hivemind](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/visions/references/compounding-intelligence/source-map.md) documents source-custodied messages, revisioned resources, an accepted search head and editorial contribution operations. The [uploaded October 29 protocol proposal](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/visions/references/compounding-intelligence/hivemind-protocol-proposal.md) proposes dataset-scoped entries, typed links and `find`/`inspect`/`contribute`. **These are not yet identical proven contracts.**",
+      "missingMarkdown": "Versioned interoperable record/identity/reference and permission semantics, a local/private dataset implementation and one real cross-dataset boundary need a reconciled specification and evidence.",
+      "closureEvidenceMarkdown": "Two separately owned datasets can exchange a scoped, independently attributed reference or approved sanitized result, preserving revision identity, provenance and access decisions; denied, stale and revoked cases do not leak source content. Banodoco behavior is preserved or safely, explicitly migrated with evidence."
+    },
+    {
+      "id": "F-001",
+      "title": "Reliability across supported environments",
+      "assessment": "partially evidenced",
+      "assessmentDetail": "Partially evidenced (2026-11-06; source is existing plan/queue evidence, not a new qualification).",
+      "appliesTo": [
+        "principle:local-first-cloud-capable",
+        "principle:in-the-creators-control"
+      ],
+      "desiredMarkdown": "On each **declared supported** OS, device and deployment mode, people can reliably install, start, use, stop, update, roll back, repair and remove Astrid without losing work or being stranded by unexplained state. Support claims are backed by a maintained matrix of real-path evidence.",
+      "currentMarkdown": "[Plan 08](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/08-release1-install-update/plan.md) records a completed five-row hosted R1 installation/update gate, proving that *specific* paths worked on *specific* candidates. The [project queue](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/README.md) records Plan 07 as active with indicative Pinokio evidence and existing CI failures, while Plans 09/10 target broader routes and native qualification. This is **not** proof that all devices, browser variants or real engines are covered.",
+      "missingMarkdown": "Real supported-environment coverage, failure/recovery paths, launcher and engine lifecycle, update/rollback qualification and current source/version coherence need broader and ongoing verification.",
+      "closureEvidenceMarkdown": "A declared OS/browser/device/deployment matrix, including realistic new-install and update journeys, managed task/engine start and safe stop, recovery after interrupted operation, rollback/uninstall, preservation of project data, and meaningful negative controls. Exact candidate/source and platform evidence are attached. Unsupported cells remain explicit; do not claim \"all devices\" without defining the matrix."
+    }
+  ],
   "projects": []
 }

@@ -315,7 +315,9 @@
       "estimate": "TBD",
       "waitingOn": "—",
       "priorityOrder": 7,
-      "gapIds": [],
+      "gapIds": [
+        "F-002"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/04-concurrent-edits/plan.md"
     },
     {
@@ -339,7 +341,10 @@
       "estimate": "TBD",
       "waitingOn": "owner's go; a Playwright browser for the App checks",
       "priorityOrder": 9,
-      "gapIds": [],
+      "gapIds": [
+        "F-004",
+        "LS-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/06-packs/plan.md"
     },
     {
@@ -351,7 +356,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement",
       "priorityOrder": 10,
-      "gapIds": [],
+      "gapIds": [
+        "F-004"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/11-threejs-pack/plan.md"
     },
     {
@@ -363,7 +370,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement",
       "priorityOrder": 11,
-      "gapIds": [],
+      "gapIds": [
+        "F-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/12-multiple-inference-routes/plan.md"
     },
     {

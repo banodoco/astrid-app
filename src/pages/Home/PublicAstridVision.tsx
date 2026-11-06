@@ -127,7 +127,7 @@ function GapPoint({ gap, phone, openProjects }: { gap: PublicVisionGap; phone: b
 
 function ProjectRow({ project }: { project: PublicVisionProject }) {
   return (
-    <li className="astrid-vision-project-row" data-reveal>
+    <li className="astrid-vision-project-row">
       <div className="astrid-vision-project-head">
         <span className="astrid-vision-project-status" data-status={project.status}>{project.status}</span>
         <h3>{project.title}</h3>
@@ -196,7 +196,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     return () => observer.disconnect();
   }, [phone, visible, reducedMotion, content?.source.revision]);
   const gapsToShow = showAllGaps ? [...FEATURED_GAPS, ...OTHER_GAPS] : FEATURED_GAPS;
-  const projectsToShow = showAllProjects ? OPEN_PROJECTS : OPEN_PROJECTS.slice(0, 12);
+  const projectsToShow = showAllProjects ? OPEN_PROJECTS : OPEN_PROJECTS.slice(0, 8);
   return (
     <main className="astrid-vision" ref={pageRef} tabIndex={-1} data-astrid-visual-active={visible} data-dusk style={{
       '--astrid-paper': palette.paper,
@@ -225,18 +225,66 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
             <p className="astrid-vision-eyebrow">Vision &amp; Issues</p>
-            <h1 id="astrid-vision-title">{content?.vision.title ?? 'Astrid’s vision'}</h1>
             {content
-              ? <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
-              : <p className="astrid-vision-lead" role={error ? 'alert' : 'status'}>
-                  {error ? 'The live vision is temporarily unavailable.' : 'Loading the latest vision…'}
-                  {error && <> <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/visions/vision.md'} target="_blank" rel="noreferrer">Read on GitHub</a></>}
-                </p>}
+              ? <>
+                  <h1 id="astrid-vision-title">{content.vision.title}</h1>
+                  <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
+                </>
+              : error
+                ? <>
+                    <h1 id="astrid-vision-title">Astrid’s vision</h1>
+                    <p className="astrid-vision-lead" role="alert">
+                      The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/visions/vision.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
+                    </p>
+                  </>
+                : <div className="astrid-vision-skeleton-hero" role="status" aria-label="Loading Astrid's vision">
+                    <div className="astrid-vision-skeleton-line" />
+                    <div className="astrid-vision-skeleton-line" />
+                    <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+                  </div>}
           </div>
           <Juggler />
         </div>
       </section>
 
+      {!content && !error && (
+        <div className="astrid-vision-loading-sections" aria-hidden="true">
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            <div className="astrid-vision-loading-pillars">
+              {Array.from({ length: 4 }, (_, i) => <div key={i} className="astrid-vision-loading-pillar">
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-label" />
+                <div className="astrid-vision-skeleton-line" />
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+              </div>)}
+            </div>
+          </section>
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            <div className="astrid-vision-loading-principles">
+              {Array.from({ length: 4 }, (_, i) => <div key={i} className="astrid-vision-loading-principle">
+                <div className="astrid-vision-skeleton-line" />
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+              </div>)}
+            </div>
+          </section>
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            {Array.from({ length: 3 }, (_, i) => <div key={i} className="astrid-vision-loading-row">
+              <div className="astrid-vision-skeleton-line" />
+            </div>)}
+          </section>
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            <div className="astrid-vision-loading-projects">
+              {Array.from({ length: 9 }, (_, i) => <div key={i} className="astrid-vision-loading-project">
+                <div className="astrid-vision-skeleton-line" />
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+              </div>)}
+            </div>
+          </section>
+        </div>
+      )}
       {content && (<>
       <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
@@ -303,12 +351,21 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           </div>
           <p>These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A project being listed doesn't mean someone has already started it.</p>
         </div>
-        <ul className="astrid-vision-issues-list astrid-vision-project-list">
+        <ul className="astrid-vision-issues-list astrid-vision-project-list" id="astrid-vision-project-list">
           {projectsToShow.map(project => <ProjectRow key={project.id} project={project} />)}
+          {!showAllProjects && OPEN_PROJECTS.length > 8 && (
+            <li className="astrid-vision-project-more">
+              <button type="button" aria-expanded="false" aria-controls="astrid-vision-project-list" onClick={() => setShowAllProjects(true)}>
+                <span className="astrid-vision-project-more-label">Explore the work</span>
+                <strong>View all {OPEN_PROJECTS.length} open projects</strong>
+                <span aria-hidden="true">↗</span>
+              </button>
+            </li>
+          )}
         </ul>
-        {!showAllProjects && OPEN_PROJECTS.length > 12 && (
-          <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllProjects(true)}>
-            Show all {OPEN_PROJECTS.length} open projects
+        {showAllProjects && OPEN_PROJECTS.length > 8 && (
+          <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllProjects(false)}>
+            Show fewer projects
           </button>
         )}
         <p className="astrid-vision-issues-more" data-reveal>

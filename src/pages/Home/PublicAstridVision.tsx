@@ -89,7 +89,7 @@ function ToolsShift() {
 }
 
 
-function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined) {
+function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined, allGapsVisible: boolean) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const targets = [...(ref.current?.querySelectorAll<HTMLElement>('[data-reveal]') ?? [])];
@@ -105,7 +105,7 @@ function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevisio
     }, { rootMargin: '0px 0px -8% 0px' });
     targets.forEach((target) => observer.observe(target));
     return () => observer.disconnect();
-  }, [active, reducedMotion, contentRevision]);
+  }, [active, reducedMotion, contentRevision, allGapsVisible]);
   return ref;
 }
 
@@ -178,7 +178,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const skySession = usePublicAstridSkySession(suppliedSkySession, environment);
   const skyControls = usePublicAstridSkyControls(skySession, visible);
   const palette = skyControls.palette;
-  const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision);
+  const [showAllGaps, setShowAllGaps] = useState(false);
+  const [showAllProjects, setShowAllProjects] = useState(false);
+  // New rows are mounted after the initial fetch. Reobserve when the list grows.
+  const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision, showAllGaps);
   useLayoutEffect(() => {
     if (!visible) return undefined;
     return skySession.registerPaletteTarget(pageRef.current, 'vision');
@@ -216,8 +219,6 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     cards.forEach((card) => observer.observe(card));
     return () => observer.disconnect();
   }, [phone, visible, reducedMotion, content?.source.revision]);
-  const [showAllGaps, setShowAllGaps] = useState(false);
-  const [showAllProjects, setShowAllProjects] = useState(false);
   const gapsToShow = showAllGaps ? [...FEATURED_GAPS, ...OTHER_GAPS] : FEATURED_GAPS;
   const projectsToShow = showAllProjects ? OPEN_PROJECTS : OPEN_PROJECTS.slice(0, 12);
   return (
@@ -264,7 +265,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">The vision</p>
-          <h2 id="astrid-vision-north-star-title">What we're building together</h2>
+          <h2 id="astrid-vision-north-star-title">What we're building</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -272,6 +273,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               data-play={playing === index || centred === index || undefined}
               style={{ '--reveal-delay': (index % 2) * 90 + 'ms' } as CSSProperties}
               onClick={() => play(index)}>
+              <span className="astrid-vision-pillar-number" aria-hidden="true">{index + 1}.</span>
               <h3>{pillar.title}</h3>
               <p>{pillar.descriptor}</p>
               <NorthStarMink art={pillar.art} />
@@ -306,10 +308,13 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           </div>
           <p>The vision is ambitious. These are the outcomes we haven't fully demonstrated yet, and the evidence we're using to assess progress.</p>
         </div>
-        <ol>{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} phone={phone} openProjects={OPEN_PROJECTS} />)}</ol>
-        {!showAllGaps && OTHER_GAPS.length > 0 && (
-          <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllGaps(true)}>
-            Show all {content.gaps.length} gaps
+        <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} phone={phone} openProjects={OPEN_PROJECTS} />)}</ol>
+        {OTHER_GAPS.length > 0 && (
+          <button className="astrid-vision-more-button" type="button"
+            aria-expanded={showAllGaps}
+            aria-controls="astrid-vision-gap-list"
+            onClick={() => setShowAllGaps(value => !value)}>
+            {showAllGaps ? 'Show featured gaps only' : 'Show all ' + content.gaps.length + ' gaps'}
           </button>
         )}
       </section>
@@ -338,6 +343,15 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <div className="astrid-vision-mobile-juggler" aria-hidden="true"><Juggler /></div>
       </>)}
       <ToolsShift />
+      {content?.vision.contributeMarkdown && (
+        <section className="astrid-vision-contribute" aria-labelledby="astrid-vision-contribute-title" data-reveal>
+          <p className="astrid-vision-eyebrow">Get involved</p>
+          <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
+          <MarkdownText value={content.vision.contributeMarkdown} />
+          <a href={PUBLIC_VISION_REPO_URL + '/blob/' + content.source.revision + '/plans/index.md'}
+            target="_blank" rel="noreferrer">Explore projects on GitHub</a>
+        </section>
+      )}
       <footer className="astrid-vision-footer">
         {error && content && <p className="astrid-vision-content-source" role="status">Showing the last loaded vision; the latest update could not be checked. <button type="button" onClick={retry}>Retry</button></p>}
         <p className="astrid-vision-content-source">Vision, gaps and projects generated from <a href={SOURCE_URL} target="_blank" rel="noreferrer">Astrid Dev</a>. The source records explain what has and hasn't been demonstrated.</p>

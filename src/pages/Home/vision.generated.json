@@ -1,0 +1,55 @@
+{
+  "source": {
+    "repository": "banodoco/astrid-dev",
+    "revision": "62bf308a959042b3f9119520315a46da65dcfc45"
+  },
+  "vision": {
+    "title": "Make Extraordinary Art Possible, Together",
+    "introMarkdown": "Astrid helps people pursue work beyond what they thought possible: **powerful creative tools**, **software that adapts with the work**, **agents that build on accumulated knowledge**, and **a collective that inspires, challenges and gives contributors a stake in pushing further**."
+  },
+  "pillars": [
+    {
+      "id": "artistic-ambition",
+      "title": "A Tool for Artistic Ambition",
+      "descriptor": "The creative depth and control to make exceptional work, not merely quick outputs.",
+      "bodyMarkdown": "**Give people the creative power and control to make work beyond what they previously thought possible.**\n\nAstrid must support serious, sustained artistic practice—not just quick generations. The artist can refine, direct and understand the work, from early experiment through a demanding project to a finished piece. We judge success by **quality, originality and artistic agency**, not throughput alone.\n\n**What it requires:** meaningful creative control; continuity and iteration across complex projects; agents that extend rather than replace human judgment; real finished work that demonstrates an increased ceiling of possibility."
+    },
+    {
+      "id": "liquid-software",
+      "title": "Agent-Powered Liquid Software",
+      "descriptor": "Tools that people and agents reshape as their ideas evolve.",
+      "bodyMarkdown": "**Tools should adapt to the work as people and agents create, rather than force creative work into fixed interfaces.**\n\nExcellent, opinionated tools should be assembled from reusable components and capabilities. Users and agents can arrange, bind, extend and reconfigure those tools while working—physically (dock, float, nest, spatially place) and functionally (share timelines, resources and context). Packs can contribute both agent actions and human-facing interfaces, with consistent underlying operations.\n\nThe aim is a **responsive creative environment** that can change from a conventional editor to more spatial ways of working, not a generic blank canvas or an excuse to rebuild existing foundations."
+    },
+    {
+      "id": "compounding-intelligence",
+      "title": "Intelligence That Compounds",
+      "descriptor": "What artists and agents learn helps others go further, and future agents build on it.",
+      "bodyMarkdown": "**Every creative agent should benefit from what it and others have learned—and help make that knowledge more useful over time.**\n\nAgents consult relevant local and permitted community experience, apply it in context, observe outcomes, and retain honest, evidence-backed lessons. Useful discoveries can flow back with the user's approval. Public and private knowledge datasets keep their own identity, authority and permissions.\n\nThe [Hivemind protocol proposal](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/visions/references/compounding-intelligence/hivemind-protocol-proposal.md) explores interoperable knowledge records; [Banodoco Hivemind](https://github.com/banodoco/hivemind) is a proving ground, **not** the entire vision or a claim that federation is already implemented."
+    },
+    {
+      "id": "shared-endeavour",
+      "title": "Shared Creative Endeavour",
+      "descriptor": "Challenges, critique, collaboration and meaningful ownership give people reasons to aim higher.",
+      "bodyMarkdown": "**Give people a reason, encouragement and a genuine stake in attempting more ambitious creative work.**\n\nA creative collective raises aspirations through challenges, competitions, collaboration, mentorship, thoughtful critique and recognition of exceptional work. It measures success in artistic growth and the work people make—not simply engagement.\n\nThe stated aim is **100% ownership in the company behind the collective for the people who advance its mission**. That is part of the incentive to contribute, not just a competition prize. Eligibility, allocation, governance, financing and legal implementation remain unresolved; no equity is granted by this document."
+    }
+  ],
+  "principles": [
+    {
+      "id": "local-first-cloud-capable",
+      "title": "Local-first, cloud-capable",
+      "bodyMarkdown": "People should be able to work on their own machines, including offline for supported workflows with available models. **Local-first is not local-only**: when the work exceeds local hardware or people prefer hosted services, cloud computation and hosted workspaces should be optional choices. Keep where the interface runs, where project data lives, and where tasks execute distinct; don't silently move work or incur costs. This is a target, not a claim that every deployment combination ships today."
+    },
+    {
+      "id": "open-by-design",
+      "title": "Open by design",
+      "bodyMarkdown": "The tools, extension mechanisms and the thinking behind them should be inspectable, modifiable, forkable and shareable. Build on open-source software and the open-model ecosystem; enable others to contribute tools and knowledge without tying the shared foundation to one proprietary provider. Optional hosted services may extend choice, but not become an unavoidable gate."
+    },
+    {
+      "id": "in-the-creators-control",
+      "title": "In the creator's control",
+      "bodyMarkdown": "Creative decisions, project data, agent permissions, installed tools, execution location and spending remain under the person's authority. Agents should make consequential proposals legible and reversible where possible. Private knowledge stays private unless its owner chooses to share it. This principle requires concrete safety and reliability evidence, not just good intentions."
+    }
+  ],
+  "gaps": [],
+  "projects": []
+}

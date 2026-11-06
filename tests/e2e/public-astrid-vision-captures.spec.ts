@@ -8,6 +8,19 @@ async function capture(page: import('@playwright/test').Page, selector: string, 
   const target = page.locator(selector);
   await target.scrollIntoViewIfNeeded();
   await expect(target).toBeVisible();
+  // Reveal every scroll-triggered child before taking a full-section screenshot.
+  // The live page animates each item as a visitor scrolls, so a single instant
+  // element screenshot would otherwise capture content still hidden off-screen.
+  const metrics = await target.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return { top: window.scrollY + rect.top, height: rect.height, viewport: window.innerHeight };
+  });
+  const step = Math.max(160, Math.floor(metrics.viewport * 0.55));
+  for (let y = metrics.top; y <= metrics.top + metrics.height; y += step) {
+    await page.evaluate(top => window.scrollTo(0, top), y);
+    await page.waitForTimeout(100);
+  }
+  await page.evaluate(top => window.scrollTo(0, top), metrics.top);
   await page.waitForTimeout(450); // let entrance animation settle
   await target.screenshot({ path: join(folder, name), animations: 'disabled' });
 }

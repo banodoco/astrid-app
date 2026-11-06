@@ -25,9 +25,11 @@ test('show all gaps reveals previously unseen rows, and can show fewer', async (
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const firstSix = page.locator('.astrid-vision-part');
   await expect(firstSix).toHaveCount(6);
-  const all = page.getByRole('button', { name: 'Show all 12 gaps' });
+  const all = page.getByRole('button', { name: /Show all \d+ gaps/ });
+  const total = Number((await all.textContent())?.match(/\d+/)?.[0]);
+  expect(total).toBeGreaterThan(6);
   await all.click();
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(12);
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(total);
   const added = page.locator('#gap-ls-003');
   await added.scrollIntoViewIfNeeded();
   await expect(added).toBeVisible();

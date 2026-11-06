@@ -8,28 +8,17 @@ import { usePublicAstridSkySession } from './usePublicAstridSkySession';
 import { followInPage } from './publicAstridLinks';
 import { NORTH_STAR_ART, NorthStarMink, type NorthStarArt } from './PublicAstridNorthStarArt.tsx';
 import { usePublicAstridEnvironment, type PublicAstridEnvironment } from './publicAstridLifecycle';
-import visionContent from './vision.generated.json';
+import { usePublicVisionContent, PUBLIC_VISION_REPO_URL, type PublicVisionGap, type PublicVisionProject } from './publicVisionContent';
 import './PublicAstridVision.css';
 
-type Gap = (typeof visionContent.gaps)[number];
-type Project = (typeof visionContent.projects)[number];
-
-const SOURCE_URL = 'https://github.com/' + visionContent.source.repository + '/tree/' + visionContent.source.revision;
 const PILLAR_ART: readonly NorthStarArt[] = [
   NORTH_STAR_ART.art,
   NORTH_STAR_ART.adapt,
   NORTH_STAR_ART.knowledge,
   NORTH_STAR_ART.community,
 ];
-const PILLARS = visionContent.pillars.map((pillar, i) => ({ ...pillar, art: PILLAR_ART[i] }));
 // Only the selection/order belongs to the website; the titles and statements remain in Astrid Dev.
 const FEATURED_GAP_IDS = ['AA-001', 'LS-001', 'CI-001', 'F-003', 'CA-001', 'CA-002'];
-const FEATURED_GAPS = FEATURED_GAP_IDS.map(id => visionContent.gaps.find(gap => gap.id === id))
-  .filter((gap): gap is Gap => gap !== undefined);
-const OTHER_GAPS = visionContent.gaps.filter(gap => !FEATURED_GAP_IDS.includes(gap.id));
-const OPEN_PROJECTS = visionContent.projects
-  .filter(project => project.status !== 'done' && project.status !== 'cancelled')
-  .sort((a, b) => a.priorityOrder - b.priorityOrder);
 
 function MarkdownText({ value, className }: { value: string; className?: string }) {
   return <div className={className ? 'astrid-vision-markdown ' + className : 'astrid-vision-markdown'}>
@@ -100,7 +89,7 @@ function ToolsShift() {
 }
 
 
-function useScrollReveal(active: boolean, reducedMotion: boolean) {
+function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const targets = [...(ref.current?.querySelectorAll<HTMLElement>('[data-reveal]') ?? [])];
@@ -116,17 +105,17 @@ function useScrollReveal(active: boolean, reducedMotion: boolean) {
     }, { rootMargin: '0px 0px -8% 0px' });
     targets.forEach((target) => observer.observe(target));
     return () => observer.disconnect();
-  }, [active, reducedMotion]);
+  }, [active, reducedMotion, contentRevision]);
   return ref;
 }
 
 
 
-function GapPoint({ gap, phone }: { gap: Gap; phone: boolean }) {
+function GapPoint({ gap, phone, openProjects }: { gap: PublicVisionGap; phone: boolean; openProjects: PublicVisionProject[] }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
   const expanded = !phone || open;
-  const plans = OPEN_PROJECTS.filter(project => project.gapIds.includes(gap.id)).slice(0, 3);
+  const plans = openProjects.filter(project => project.gapIds.includes(gap.id)).slice(0, 3);
   return (
     <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={expanded || undefined}>
       <span className="astrid-vision-part-number" aria-hidden="true">{gap.id}</span>
@@ -160,7 +149,7 @@ function GapPoint({ gap, phone }: { gap: Gap; phone: boolean }) {
   );
 }
 
-function ProjectRow({ project }: { project: Project }) {
+function ProjectRow({ project }: { project: PublicVisionProject }) {
   return (
     <li className="astrid-vision-project-row" data-reveal>
       <div className="astrid-vision-project-head">
@@ -177,12 +166,19 @@ function ProjectRow({ project }: { project: Project }) {
 const VISION_QUIET_TEXT = '.astrid-vision-hero-copy, .astrid-vision-section-head, .astrid-vision-standards, .astrid-vision-parts-head, .astrid-vision-part h3, .astrid-vision-part-vision, .astrid-vision-issues-head, .astrid-vision-project-list, .astrid-vision-shift';
 
 export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment, skySession: suppliedSkySession }: { onGoHome?: () => void; environment?: PublicAstridEnvironment; skySession?: PublicAstridSkySession } = {}) {
+  const { content, error, retry } = usePublicVisionContent();
+  const SOURCE_URL = content ? PUBLIC_VISION_REPO_URL + '/tree/' + content.source.revision : PUBLIC_VISION_REPO_URL;
+  const PILLARS = content?.pillars.map((pillar, i) => ({ ...pillar, art: PILLAR_ART[i] })) ?? [];
+  const FEATURED_GAPS = FEATURED_GAP_IDS.map(id => content?.gaps.find(gap => gap.id === id))
+    .filter((gap): gap is PublicVisionGap => gap !== undefined);
+  const OTHER_GAPS = content?.gaps.filter(gap => !FEATURED_GAP_IDS.includes(gap.id)) ?? [];
+  const OPEN_PROJECTS = content?.projects.filter(project => project.status !== 'done' && project.status !== 'cancelled') ?? [];
   const environment = usePublicAstridEnvironment(suppliedEnvironment);
   const { visible, reducedMotion, phone } = environment;
   const skySession = usePublicAstridSkySession(suppliedSkySession, environment);
   const skyControls = usePublicAstridSkyControls(skySession, visible);
   const palette = skyControls.palette;
-  const pageRef = useScrollReveal(visible, reducedMotion);
+  const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision);
   useLayoutEffect(() => {
     if (!visible) return undefined;
     return skySession.registerPaletteTarget(pageRef.current, 'vision');
@@ -219,7 +215,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     }, { rootMargin: '-45% 0px -45% 0px' });
     cards.forEach((card) => observer.observe(card));
     return () => observer.disconnect();
-  }, [phone, visible, reducedMotion]);
+  }, [phone, visible, reducedMotion, content?.source.revision]);
   const [showAllGaps, setShowAllGaps] = useState(false);
   const [showAllProjects, setShowAllProjects] = useState(false);
   const gapsToShow = showAllGaps ? [...FEATURED_GAPS, ...OTHER_GAPS] : FEATURED_GAPS;
@@ -252,13 +248,19 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
             <p className="astrid-vision-eyebrow">Vision &amp; Issues</p>
-            <h1 id="astrid-vision-title">{visionContent.vision.title}</h1>
-            <MarkdownText className="astrid-vision-lead" value={visionContent.vision.introMarkdown} />
+            <h1 id="astrid-vision-title">{content?.vision.title ?? 'Astrid’s vision'}</h1>
+            {content
+              ? <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
+              : <p className="astrid-vision-lead" role={error ? 'alert' : 'status'}>
+                  {error ? 'The live vision is temporarily unavailable.' : 'Loading the latest vision…'}
+                  {error && <> <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/visions/vision.md'} target="_blank" rel="noreferrer">Read on GitHub</a></>}
+                </p>}
           </div>
           <Juggler />
         </div>
       </section>
 
+      {content && (<>
       <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">The vision</p>
@@ -284,7 +286,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <h2 id="astrid-vision-standards-title">How we build it</h2>
         </div>
         <ol className="astrid-vision-standards-list">
-          {visionContent.principles.map((principle, index) => (
+          {content.principles.map((principle, index) => (
             <li key={principle.id} data-reveal>
               <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
               <div>
@@ -304,10 +306,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           </div>
           <p>The vision is ambitious. These are the outcomes we haven't fully demonstrated yet, and the evidence we're using to assess progress.</p>
         </div>
-        <ol>{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} phone={phone} />)}</ol>
+        <ol>{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} phone={phone} openProjects={OPEN_PROJECTS} />)}</ol>
         {!showAllGaps && OTHER_GAPS.length > 0 && (
           <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllGaps(true)}>
-            Show all {visionContent.gaps.length} gaps
+            Show all {content.gaps.length} gaps
           </button>
         )}
       </section>
@@ -334,8 +336,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </section>
 
       <div className="astrid-vision-mobile-juggler" aria-hidden="true"><Juggler /></div>
+      </>)}
       <ToolsShift />
       <footer className="astrid-vision-footer">
+        {error && content && <p className="astrid-vision-content-source" role="status">Showing the last loaded vision; the latest update could not be checked. <button type="button" onClick={retry}>Retry</button></p>}
         <p className="astrid-vision-content-source">Vision, gaps and projects generated from <a href={SOURCE_URL} target="_blank" rel="noreferrer">Astrid Dev</a>. The source records explain what has and hasn't been demonstrated.</p>
         <div className="astrid-vision-end" />
         <PublicAstridSocialLinks className="astrid-vision-social" />

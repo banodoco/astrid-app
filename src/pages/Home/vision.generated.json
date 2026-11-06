@@ -488,7 +488,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement; Hivemind source review",
       "priorityOrder": 20,
-      "gapIds": [],
+      "gapIds": [
+        "CI-002"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/22-hivemind-protocol/plan.md"
     },
     {
@@ -500,7 +502,10 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement; approved knowledge API",
       "priorityOrder": 21,
-      "gapIds": [],
+      "gapIds": [
+        "CI-001",
+        "CI-002"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/23-agent-learning-integration/plan.md"
     },
     {
@@ -512,7 +517,11 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement; relevant editing/pack foundations",
       "priorityOrder": 22,
-      "gapIds": [],
+      "gapIds": [
+        "LS-001",
+        "LS-002",
+        "LS-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/24-liquid-workspace/plan.md"
     },
     {
@@ -524,7 +533,9 @@
       "estimate": "0",
       "waitingOn": "—",
       "priorityOrder": 23,
-      "gapIds": [],
+      "gapIds": [
+        "F-001"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/08-release1-install-update/plan.md"
     }
   ]

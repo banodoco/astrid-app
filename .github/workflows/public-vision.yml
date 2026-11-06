@@ -38,6 +38,11 @@ jobs:
         run: |
           node --test scripts/vision/public-vision-content.test.mjs
           node scripts/vision/sync-astrid-dev.mjs --check
+      - name: Regenerate canonical snapshot for review
+        if: always()
+        env:
+          ASTRID_DEV_CHECKOUT: ${{ github.workspace }}/astrid-dev
+        run: node scripts/vision/sync-astrid-dev.mjs
       - name: Upload canonical snapshot for diagnostics
         if: always()
         uses: actions/upload-artifact@v4

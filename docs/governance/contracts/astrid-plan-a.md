@@ -132,8 +132,11 @@ remain unresolved. No personal RunPod example becomes a default. EW must prove
 the selected engine profile is enforced; availability alone does not prove it.
 
 The machine/source Hivemind declaration supersedes the stale older planning pin.
-All nineteen shipped non-local packs remain available, with experimental labels
-retained for `comfy_wrap`, `stream_content` and `wan2gp`. C1 explicitly selects
+The nineteen moving packs are maintained externally. The bundled `local` and
+`comfy_wrap` packs and the managed Linux ComfyUI recipe are retired; user-owned
+personal content and attached ComfyUI remain supported. C1 and C2 preserve their
+published historical records, including references to the former `comfy_wrap` pack.
+C1 explicitly selects
 the existing core, Hivemind, VibeComfy and stable timeline skill views for initial
 setup. This reconciles a gap between discovery and legacy skill-default logic;
 it does not claim today's setup already makes that selection. Compatibility and

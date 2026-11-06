@@ -51,4 +51,12 @@ jobs:
       - name: Install Chromium for focused browser validation
         run: npx playwright install --with-deps chromium
       - name: Verify vision content on desktop and phone
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts --project=chromium-desktop
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts --project=chromium-desktop
+
+      - name: Upload actual Vision screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: astrid-vision-screenshots
+          path: test-results/vision-captures/*.png
+          if-no-files-found: warn

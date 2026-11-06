@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
-import content from '../../src/pages/Home/vision.generated.json';
+import { readFileSync } from 'node:fs';
+
+const content = JSON.parse(readFileSync(new URL('../../src/pages/Home/vision.generated.json', import.meta.url), 'utf8')) as {
+  vision: { title: string };
+  pillars: { title: string }[];
+  principles: { title: string }[];
+  gaps: { id: string; title: string; assessment: string; githubUrl: string }[];
+  projects: { title: string; status: string; githubUrl: string }[];
+};
 
 test('vision displays the GitHub-authored pillars and operating principles', async ({ page }) => {
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });

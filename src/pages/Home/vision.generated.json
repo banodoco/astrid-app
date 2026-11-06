@@ -408,7 +408,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement",
       "priorityOrder": 14,
-      "gapIds": [],
+      "gapIds": [
+        "F-002"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/15-openshell-safe-execution/plan.md"
     },
     {
@@ -420,7 +422,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement",
       "priorityOrder": 15,
-      "gapIds": [],
+      "gapIds": [
+        "F-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/16-streamlined-agent-experience/plan.md"
     },
     {
@@ -432,7 +436,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement",
       "priorityOrder": 16,
-      "gapIds": [],
+      "gapIds": [
+        "LS-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/17-vibecomfy-extensibility/plan.md"
     },
     {
@@ -444,7 +450,9 @@
       "estimate": "TBD",
       "waitingOn": "scope agreement",
       "priorityOrder": 17,
-      "gapIds": [],
+      "gapIds": [
+        "LS-003"
+      ],
       "githubUrl": "https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/18-timeline-editing/plan.md"
     },
     {

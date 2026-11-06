@@ -10,6 +10,7 @@ on:
       - "src/pages/Home/publicAstridShare.ts"
       - "tests/e2e/public-astrid-vision-content.spec.ts"
       - "tests/e2e/public-astrid-vision-captures.spec.ts"
+      - "tests/e2e/public-astrid-vision-mobile-feedback.spec.ts"
       - "package.json"
       - ".github/workflows/public-vision.yml"
   workflow_dispatch:
@@ -38,7 +39,7 @@ jobs:
       - name: Install Chromium for focused browser validation
         run: npx playwright install --with-deps chromium
       - name: Verify vision content on desktop and phone
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts --project=chromium-desktop
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts --project=chromium-desktop
 
       - name: Upload actual Vision screenshots
         if: always()

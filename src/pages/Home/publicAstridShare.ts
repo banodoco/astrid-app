@@ -2,7 +2,7 @@
  * How each public page reads when someone shares its link (Discord, X, Slack, iMessage, WhatsApp, LinkedIn…)
  * and in the browser tab. Crawlers never run the app, so the Vite share-meta plugin
  * (config/vite/shareMeta.ts) writes these into the HTML itself; the site sets the tab title as it moves
- * between pages. Kept free of imports: the Vite config loads this file in the production image as well.
+ * between pages. It imports only the pinned, generated public vision snapshot so the Vite build gets the same copy.
  */
 import visionContent from './vision.generated.json';
 

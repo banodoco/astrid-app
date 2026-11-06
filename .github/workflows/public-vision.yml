@@ -38,25 +38,6 @@ jobs:
         run: |
           node --test scripts/vision/public-vision-content.test.mjs
           node scripts/vision/sync-astrid-dev.mjs --check
-      - name: Regenerate canonical snapshot for review
-        if: always()
-        env:
-          ASTRID_DEV_CHECKOUT: ${{ github.workspace }}/astrid-dev
-        run: node scripts/vision/sync-astrid-dev.mjs
-      - name: Temporary canonical snapshot sync diagnostic
-        if: always()
-        run: |
-          python3 - <<'PY'
-          import json
-          with open('src/pages/Home/vision.generated.json', encoding='utf8') as src:
-              print('ASTRID_VISION_CANONICAL=' + json.dumps(json.load(src), ensure_ascii=False, separators=(',', ':')))
-          PY
-      - name: Upload canonical snapshot for diagnostics
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vision-source-snapshot
-          path: src/pages/Home/vision.generated.json
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
@@ -67,3 +48,7 @@ jobs:
         run: npx eslint src/pages/Home/PublicAstridVision.tsx src/pages/Home/publicAstridShare.ts --max-warnings 0
       - name: Preserve public page lifecycle and share metadata
         run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts
+      - name: Install Chromium for focused browser validation
+        run: npx playwright install --with-deps chromium
+      - name: Verify vision content on desktop and phone
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts --project=chromium-desktop

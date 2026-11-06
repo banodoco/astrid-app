@@ -4,6 +4,8 @@
  * (config/vite/shareMeta.ts) writes these into the HTML itself; the site sets the tab title as it moves
  * between pages. Kept free of imports: the Vite config loads this file in the production image as well.
  */
+import visionContent from './vision.generated.json';
+
 export interface PublicAstridSharePage {
   path: string;
   /** Browser tab title. */
@@ -29,7 +31,7 @@ export const PUBLIC_ASTRID_SHARE_PAGES = {
     path: '/vision',
     title: 'Vision & Issues · Astrid',
     shareTitle: 'Astrid: Vision & Issues',
-    description: 'We want to help everyone use local models and agents to realise their most ambitious creative ideas, and to push the whole open-source movement forward together.',
+    description: visionContent.vision.title + ' — our creative pillars, operating principles, gaps and open projects.',
     image: '/astrid-share-vision.png',
     imageAlt: 'Astrid, the pixel mink, looks up at the moon beside the words “A local-first tool + agent to unlock open-source’s artistic potential.”',
   },

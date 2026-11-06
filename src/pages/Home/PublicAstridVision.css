@@ -775,7 +775,10 @@
   border-radius: 8px;
   background: transparent;
   color: var(--astrid-ink);
-  font: 600 14px/1.3 inherit;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
   cursor: pointer;
 }
 .astrid-vision-more-button:hover { border-color: var(--astrid-accent); }

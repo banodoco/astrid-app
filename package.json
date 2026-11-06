@@ -16,7 +16,7 @@
     "dev:local": "node scripts/dev-local-workspace.mjs",
     "update": "node scripts/local-update.mjs",
     "dev:custom-shell-demo": "vite --config examples/embed-demo/vite.config.ts",
-    "build": "vite build --config config/vite/vite.config.ts",
+    "build": "vite build --config config/vite/vite.config.ts && node scripts/installer/pack-build-artifact.mjs",
     "build:hosted": "node scripts/build-hosted.mjs && node scripts/quality/check-no-remote-hosts.mjs dist",
     "build:custom-shell-demo": "vite build --config examples/embed-demo/vite.config.ts",
     "build:dev": "vite build --mode development --config config/vite/vite.config.ts",

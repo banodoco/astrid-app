@@ -134,6 +134,90 @@
       "currentMarkdown": "[Plan 08](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/08-release1-install-update/plan.md) records a completed five-row hosted R1 installation/update gate, proving that *specific* paths worked on *specific* candidates. The [project queue](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/README.md) records Plan 07 as active with indicative Pinokio evidence and existing CI failures, while Plans 09/10 target broader routes and native qualification. This is **not** proof that all devices, browser variants or real engines are covered.",
       "missingMarkdown": "Real supported-environment coverage, failure/recovery paths, launcher and engine lifecycle, update/rollback qualification and current source/version coherence need broader and ongoing verification.",
       "closureEvidenceMarkdown": "A declared OS/browser/device/deployment matrix, including realistic new-install and update journeys, managed task/engine start and safe stop, recovery after interrupted operation, rollback/uninstall, preservation of project data, and meaningful negative controls. Exact candidate/source and platform evidence are attached. Unsupported cells remain explicit; do not claim \"all devices\" without defining the matrix."
+    },
+    {
+      "id": "F-002",
+      "title": "Trustworthy user control and operation",
+      "assessment": "open",
+      "assessmentDetail": "Open / partly implemented foundations (2026-11-06).",
+      "appliesTo": [
+        "principle:in-the-creators-control",
+        "pillar:liquid-software"
+      ],
+      "desiredMarkdown": "Human and agent actions are transparent, permissioned and recoverable. Creative state is not silently overwritten, external effects and resource use follow declared consent, untrusted execution has explicit safety boundaries, and stopping work does not destroy project data.",
+      "currentMarkdown": "Astrid Runtime has versioned project/task authority and the App/Agent have meaningful editing and conflict primitives. [Plan 01](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/01-installer-consent/plan.md) is for installer choice; [Plan 04](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/04-concurrent-edits/plan.md) addresses concurrent edits; [Plan 15](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/15-openshell-safe-execution/plan.md) proposes qualified sandbox boundaries. These are different safeguards; together they **have not yet established this general outcome**.",
+      "missingMarkdown": "Unifying the user-facing expectations of consent, recoverability, isolation, safe resource use and simultaneous editing requires real integrated evidence, especially around agent actions and failure/refusal cases.",
+      "closureEvidenceMarkdown": "Focused real-path tests of affirmative/denied consent, scoped permissions, concurrent user/agent writes and conflicts, preservation of unsaved work, safe cancellation/cleanup and honest sandbox limits. No claim of unrestricted security or isolation beyond verified environments."
+    },
+    {
+      "id": "F-003",
+      "title": "Dependable end-to-end creative execution",
+      "assessment": "open",
+      "assessmentDetail": "Open / foundations exist (2026-11-06).",
+      "appliesTo": [
+        "pillar:artistic-ambition",
+        "principle:local-first-cloud-capable"
+      ],
+      "desiredMarkdown": "From a declared supported starting environment, a person and their agent can choose a suitable creative capability, connect or install what is needed with clear consent, execute real inference or processing, and receive a correct, editable result in the intended workspace—with understandable failures, cleanup and recovery.",
+      "currentMarkdown": "Astrid has Runtime execution/task primitives, packs, generation integrations and the video editor. [Plan 02](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/02-consistent-generation/plan.md) aims to establish consistent defaults and pinned stack on fixtures and a fresh Linux CPU setup, **explicitly not real inference**. [Plan 12](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/12-multiple-inference-routes/plan.md) targets real multiple inference routes. [Plan 20](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/20-zero-to-first-image/plan.md) targets a real first generated image on a timeline; [Plan 16](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/16-streamlined-agent-experience/plan.md) improves agent readiness.",
+      "missingMarkdown": "Reliably going from intent through correct model/provider readiness and task execution to usable creative output has not yet been demonstrated across chosen supported routes and recovery cases.",
+      "closureEvidenceMarkdown": "A bounded, explicitly scoped real model execution on an approved environment, with setup/defaults, input/output identity, resource lifecycle, failure/retry/stop and a verified creative result in Astrid. Extend route/platform support only as qualified; realistic user effort and recoverability are measured."
+    },
+    {
+      "id": "F-004",
+      "title": "Dependable pack and extension lifecycle",
+      "assessment": "open",
+      "assessmentDetail": "Open / partial current mechanisms (2026-11-06).",
+      "appliesTo": [
+        "pillar:liquid-software",
+        "principle:open-by-design"
+      ],
+      "desiredMarkdown": "Artists and agents can discover, install, enable, use, update, disable and safely roll back supported creative packs and their frontend/backend contributions. Compatibility, source identity, trust, ownership and project reference continuity remain understandable and reliable.",
+      "currentMarkdown": "Agent has manifest-defined packs with actions, skills, UI and rendering contributions. App has trusted bundled extension lifecycle and editor SDK mechanisms. [Plan 06](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/06-packs/plan.md) explicitly targets pack extraction and reliable installation, trust, transaction, rendering and editor integration. [Plan 11](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/plans/11-threejs-pack/plan.md) is a case of converting a first-party feature into a pack, but is not a generic workspace engine.",
+      "missingMarkdown": "The practical lifecycle of reusable packs across Agent, Runtime and App still needs integrated, version-pinned proof of installation, runtime availability, use, safe upgrade/rollback, and handling of missing/broken contributions.",
+      "closureEvidenceMarkdown": "Install a supported pack, discover its declared actions/UI, use it on project data, update and roll back safely with exact pinned source identity; show missing dependencies, rejected/untrusted cases, recovery and no loss of project references. Do not claim arbitrary dynamically generated third-party code can run safely without independent isolation evidence."
+    },
+    {
+      "id": "LS-001",
+      "title": "Portable creative components",
+      "assessment": "open",
+      "assessmentDetail": "Open, source inspection (2026-11-06).",
+      "appliesTo": [
+        "pillar:liquid-software",
+        "principle:open-by-design"
+      ],
+      "desiredMarkdown": "Real creative components (timeline, player, inspector, gallery and others) can move, dock, resize, float and nest within a declarative workspace without losing their state, supported behavior or resource bindings.",
+      "currentMarkdown": "The [App source map](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/visions/references/liquid-software/source-map.md) identifies actual reusable editor views and a custom two-pane assembly. The standard editor shell still includes host-specific layout, gesture and context responsibilities. **This does not establish a general-purpose portable workspace host.**",
+      "missingMarkdown": "Component definitions, instances, presentation/lifecycle and positioning are not yet proven independently composable across workspace layouts and domains.",
+      "closureEvidenceMarkdown": "Rearrange the **real** player, inspector and timeline; retain playback, editing, selection and recovery state; save/restore the layout. Then host a genuinely different domain component using the same contract, without modifying the main editor shell."
+    },
+    {
+      "id": "LS-002",
+      "title": "Agent-accessible workspace composition",
+      "assessment": "open",
+      "assessmentDetail": "Open, source inspection (2026-11-06).",
+      "appliesTo": [
+        "pillar:liquid-software",
+        "principle:in-the-creators-control"
+      ],
+      "desiredMarkdown": "An agent and a person use the same supported workspace operations to open, place, attach, bind, focus and restore component instances. Changes are inspectable, scoped, reversible and compatible with live creative work.",
+      "currentMarkdown": "Astrid Agent has pack/skill/action discovery. Astrid App has extensions, commands and scoped editing contexts. The [source review](https://github.com/banodoco/astrid-dev/blob/62bf308a959042b3f9119520315a46da65dcfc45/visions/references/liquid-software/source-map.md) has **not** established a public, domain-neutral workspace manipulation API.",
+      "missingMarkdown": "Spatial **placement/attachment** and functional **resource binding** need explicit, validated operations; proximity alone must not silently connect data. Agents should compose existing software without generating frontend code for ordinary layout changes.",
+      "closureEvidenceMarkdown": "An agent arranges the same real components as a user, binds the correct timeline/selection/clock, offers reversible operations, does not clobber user edits, and restores a prior workspace from a saved representation."
+    },
+    {
+      "id": "LS-003",
+      "title": "Composable frontend and backend contributions",
+      "assessment": "open",
+      "assessmentDetail": "Open, source inspection (2026-11-06).",
+      "appliesTo": [
+        "pillar:liquid-software",
+        "principle:open-by-design"
+      ],
+      "desiredMarkdown": "A creator or agent can discover and use one pack's creative capability, its typed results and its appropriate frontend components together—extending opinionated tools without bespoke, duplicate integrations.",
+      "currentMarkdown": "Astrid Agent pack manifests can declare actions, UI, renderers and skills. Astrid App has a video-editor extension SDK, typed data lanes, proposals and rendering hooks. Current pack UI hosting is still tied to supported host entries; **general component-owned extension points and unified live composition are unproven**.",
+      "missingMarkdown": "Common identity and discovery across pack contributions, semantic resource/result bindings, component-defined extension hosts and safe activation need proving beyond the default video editor.",
+      "closureEvidenceMarkdown": "An installed/trusted music capability yields a typed beat-grid result used in a real timeline view and music control surface. The interface can be rearranged, results correctly track source-to-timeline coordinates, and updates follow existing authoritative domain editing/undo. A second distinct extension domain validates generality."
     }
   ],
   "projects": []

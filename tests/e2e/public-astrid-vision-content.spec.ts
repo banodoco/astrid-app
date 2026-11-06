@@ -1,15 +1,23 @@
 import { expect, test } from '@playwright/test';
-import { readFileSync } from 'node:fs';
 
-const content = JSON.parse(readFileSync(new URL('../../src/pages/Home/vision.generated.json', import.meta.url), 'utf8')) as {
-  vision: { title: string };
-  pillars: { title: string }[];
-  principles: { title: string }[];
-  gaps: { id: string; title: string; assessment: string; githubUrl: string }[];
-  projects: { title: string; status: string; githubUrl: string }[];
-};
+const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
-test('vision displays the GitHub-authored pillars and operating principles', async ({ page }) => {
+async function feed(request: import('@playwright/test').APIRequestContext) {
+  const response = await request.get(FEED);
+  expect(response.ok(), 'public GitHub feed must be accessible').toBeTruthy();
+  const data = await response.json();
+  expect(data.schemaVersion).toBe(1);
+  return data as {
+    vision: { title: string };
+    pillars: { title: string }[];
+    principles: { title: string }[];
+    gaps: { id: string; title: string; assessment: string; githubUrl: string }[];
+    projects: { title: string; status: string; githubUrl: string }[];
+  };
+}
+
+test('vision displays the GitHub-published pillars and operating principles', async ({ page, request }) => {
+  const content = await feed(request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main.astrid-vision')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(content.vision.title);
@@ -21,22 +29,23 @@ test('vision displays the GitHub-authored pillars and operating principles', asy
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
 });
 
-test('vision shows source-linked prioritized projects without mislabeling queued work', async ({ page }) => {
+test('published projects retain their status and link directly to GitHub', async ({ page, request }) => {
+  const content = await feed(request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const open = content.projects.filter(project => !['done', 'cancelled'].includes(project.status));
   const initial = open.slice(0, 12);
-  const projectRows = page.locator('.astrid-vision-project-row');
-  await expect(projectRows).toHaveCount(initial.length);
-  await expect(projectRows.first().locator('h3')).toHaveText(initial[0].title);
-  await expect(projectRows.first().locator('.astrid-vision-project-status')).toHaveText(initial[0].status);
-  await expect(projectRows.first().getByRole('link', { name: 'Project details on GitHub' }))
+  const rows = page.locator('.astrid-vision-project-row');
+  await expect(rows).toHaveCount(initial.length);
+  await expect(rows.first().locator('h3')).toHaveText(initial[0].title);
+  await expect(rows.first().locator('.astrid-vision-project-status')).toHaveText(initial[0].status);
+  await expect(rows.first().getByRole('link', { name: 'Project details on GitHub' }))
     .toHaveAttribute('href', initial[0].githubUrl);
-  await expect(projectRows.nth(1).locator('.astrid-vision-project-status')).toHaveText('queued');
   await page.getByRole('button', { name: 'Show all ' + open.length + ' open projects' }).click();
-  await expect(projectRows).toHaveCount(open.length);
+  await expect(rows).toHaveCount(open.length);
 });
 
-test('phone disclosures expose real gap status and GitHub evidence links', async ({ page }) => {
+test('phone gap disclosures show live assessments and source links', async ({ page, request }) => {
+  const content = await feed(request);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const first = content.gaps.find(g => g.id === 'AA-001')!;
@@ -48,4 +57,26 @@ test('phone disclosures expose real gap status and GitHub evidence links', async
     .toHaveAttribute('href', first.githubUrl);
   await page.getByRole('button', { name: 'Show all ' + content.gaps.length + ' gaps' }).click();
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.length);
+});
+
+test('different valid feed content renders without rebuilding the app', async ({ page, request }) => {
+  const content = await feed(request);
+  const changed = {
+    ...content,
+    vision: { ...content.vision, title: 'Dynamic vision heading from published data' },
+  };
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json', body: JSON.stringify(changed),
+    headers: { 'access-control-allow-origin': '*' },
+  }));
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(changed.vision.title);
+});
+
+test('feed errors are explained and offer a retry', async ({ page }) => {
+  await page.route(FEED, route => route.fulfill({ status: 503, body: 'temporarily unavailable' }));
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await expect(page.getByRole('alert')).toContainText('temporarily unavailable');
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Read on GitHub' })).toBeVisible();
 });

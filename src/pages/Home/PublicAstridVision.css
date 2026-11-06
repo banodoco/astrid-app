@@ -838,3 +838,15 @@
   .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1; grid-row: auto; }
   .astrid-vision-project-row > a { grid-column: 1; grid-row: auto; }
 }
+
+/* The public feed may be temporarily unavailable; never imply cached claims are current. */
+.astrid-vision-lead button, .astrid-vision-content-source button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.astrid-vision-lead a { color: inherit; text-decoration: underline; }

@@ -9,8 +9,7 @@
   "scripts": {
     "preflight": "docker build .",
     "dev": "vite --config config/vite/vite.config.ts",
-    "vision:sync": "node scripts/vision/sync-astrid-dev.mjs",
-    "vision:check": "node --test scripts/vision/public-vision-content.test.mjs",
+    "vision:check": "vitest run --config config/testing/vitest.config.ts src/pages/Home/publicVisionContent.test.ts",
     "tour:screenshots": "node scripts/tour-screenshots.mjs",
     "test:tour-screenshots": "node --test scripts/tour-screenshots.test.mjs",
     "dev:agent-setup": "node scripts/dev-agent-setup.mjs",

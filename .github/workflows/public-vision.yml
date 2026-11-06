@@ -5,10 +5,11 @@ on:
     paths:
       - "src/pages/Home/PublicAstridVision.tsx"
       - "src/pages/Home/PublicAstridVision.css"
-      - "src/pages/Home/vision.generated.json"
+      - "src/pages/Home/publicVisionContent.ts"
+      - "src/pages/Home/publicVisionContent.test.ts"
       - "src/pages/Home/publicAstridShare.ts"
-      - "scripts/vision/**"
       - "tests/e2e/public-astrid-vision-content.spec.ts"
+      - "tests/e2e/public-astrid-vision-captures.spec.ts"
       - "package.json"
       - ".github/workflows/public-vision.yml"
   workflow_dispatch:
@@ -22,30 +23,16 @@ jobs:
     steps:
       - name: Checkout Astrid App
         uses: actions/checkout@v4
-      - name: Read pinned Astrid Dev revision
-        id: source
-        run: |
-          echo "sha=$(node -p "require('./src/pages/Home/vision.generated.json').source.revision")" >> "$GITHUB_OUTPUT"
-      - name: Checkout pinned Astrid Dev
-        uses: actions/checkout@v4
-        with:
-          repository: banodoco/astrid-dev
-          ref: ${{ steps.source.outputs.sha }}
-          path: astrid-dev
-      - name: Validate exact generated content
-        env:
-          ASTRID_DEV_CHECKOUT: ${{ github.workspace }}/astrid-dev
-        run: |
-          node --test scripts/vision/public-vision-content.test.mjs
-          node scripts/vision/sync-astrid-dev.mjs --check
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
           cache: npm
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
+      - name: Validate live-feed parsing contract
+        run: npm run vision:check
       - name: Check changed vision code
-        run: npx eslint src/pages/Home/PublicAstridVision.tsx src/pages/Home/publicAstridShare.ts --max-warnings 0
+        run: npx eslint src/pages/Home/PublicAstridVision.tsx src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
       - name: Preserve public page lifecycle and share metadata
         run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts
       - name: Install Chromium for focused browser validation

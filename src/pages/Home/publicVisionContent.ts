@@ -44,7 +44,7 @@ export interface PublicVisionProject {
 export interface PublicVisionContent {
   schemaVersion: 1;
   source: { repository: string; revision: string };
-  vision: { title: string; introMarkdown: string };
+  vision: { title: string; introMarkdown: string; contributeMarkdown?: string };
   pillars: PublicVisionPillar[];
   principles: PublicVisionPrinciple[];
   gaps: PublicVisionGap[];
@@ -65,7 +65,8 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
       value.source.repository !== 'banodoco/astrid-dev' ||
       !nonempty(value.source.revision) || !/^[0-9a-f]{40}$/.test(value.source.revision) ||
       !isRecord(value.vision) || !nonempty(value.vision.title) ||
-      !nonempty(value.vision.introMarkdown)) {
+      !nonempty(value.vision.introMarkdown) ||
+      (value.vision.contributeMarkdown !== undefined && !nonempty(value.vision.contributeMarkdown))) {
     throw new Error('Unsupported or malformed public vision feed');
   }
   const revision = value.source.revision;

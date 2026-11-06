@@ -850,3 +850,63 @@
   cursor: pointer;
 }
 .astrid-vision-lead a { color: inherit; text-decoration: underline; }
+
+
+/* Vision feedback: explicit card indices (1–4), not generated Roman counters. */
+.astrid-vision-principles li::before { display: none; content: none; }
+.astrid-vision-principles .astrid-vision-pillar-number {
+  display: block;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin-bottom: 18px;
+  color: var(--tone-ink);
+  font-family: var(--astrid-vision-serif);
+  font-size: 22px;
+  font-style: italic;
+  line-height: 1.2;
+}
+.astrid-vision[data-dusk] .astrid-vision-principles .astrid-vision-pillar-number {
+  color: color-mix(in oklab, color-mix(in oklab, var(--tone-ink), var(--tone-ink-night) calc(var(--astrid-dusk-ink) * 100%)), var(--astrid-ink) calc(var(--astrid-dusk-firm) * 100%));
+}
+.astrid-vision-principles h3 {
+  grid-row: 2;
+  max-width: 16ch;
+  text-wrap: balance;
+}
+
+/* The author-level grid/display rules must never override the hidden attribute. */
+.astrid-vision .astrid-vision-part-body[hidden] { display: none; }
+
+/* Contribution invitation is authored in Astrid Dev, not duplicated here. */
+.astrid-vision-contribute {
+  max-width: 880px;
+  margin-top: clamp(90px, 12vw, 150px);
+  padding-top: clamp(28px, 4vw, 52px);
+  border-top: 1px solid var(--astrid-line);
+}
+.astrid-vision-contribute h2 {
+  max-width: 18ch;
+  margin: 0 0 20px;
+  color: var(--astrid-ink);
+  font-family: var(--astrid-vision-serif);
+  font-size: clamp(34px, 4.5vw, 54px);
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -.035em;
+}
+.astrid-vision-contribute .astrid-vision-markdown {
+  max-width: 68ch;
+  color: var(--astrid-muted);
+  font-size: clamp(16px, 1.7vw, 19px);
+  line-height: 1.65;
+}
+.astrid-vision-contribute > a {
+  display: inline-block;
+  margin-top: 24px;
+  color: var(--astrid-ink);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.astrid-vision-contribute > a:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 4px; }

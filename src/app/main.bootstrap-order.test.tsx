@@ -40,6 +40,8 @@ describe('main entry bootstrap order', () => {
   beforeEach(() => {
     vi.resetModules();
     localStorage.clear();
+    // Finished welcome: these tests cover boot order, not the consent route.
+    localStorage.setItem('astrid:welcome-v1', 'complete');
     bootstrapMocks.initializeVideoEditorExtensionRuntime.mockReset();
     bootstrapMocks.initializeWorkspaceRuntimeIdentity.mockReset();
     bootstrapMocks.migrateAstridBrowserStorage.mockReset();

@@ -24,7 +24,7 @@ describe('ChatUpdateNeeded', () => {
     expect(screen.getByText(copy.chatNeedsUpdate)).toBeInTheDocument();
     expect(screen.getByText(copy.updateNeeded.title)).toBeInTheDocument();
     expect(screen.getByText(withCommandShell(copy.updateNeeded.sentence))).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: copy.agent.copy })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.agent.commandCopy })).toBeInTheDocument();
     expect(screen.getByText(installCommand('update', RECOMMENDED_SETUP_CHOICES), { exact: true })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();

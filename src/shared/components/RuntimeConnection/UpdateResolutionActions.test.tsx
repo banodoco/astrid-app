@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
-import { installCommand } from './copy.ts';
+import { installCommand, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
 import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 
@@ -13,21 +13,32 @@ const installerResolutions = [
   ['Update', resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: true })],
 ] as const;
 
+beforeEach(() => localStorage.clear());
+
 function installerOperation(start = vi.fn(async () => undefined)): InstallerUpdateView {
   return { available: true, pending: false, start } as unknown as InstallerUpdateView;
 }
 
-function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>) {
+function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>, installType?: 'pinokio' | 'source' | 'fully-local' | 'installer') {
   const onOpen = vi.fn();
   function Capture() {
     useAppEventListener('openSettings', onOpen);
-    return <UpdateResolutionActions resolution={resolution} />;
+    return <UpdateResolutionActions resolution={resolution} installType={installType} />;
   }
   render(<Capture />);
   return onOpen;
 }
 
 describe('update resolution Settings actions', () => {
+  it('shows a runnable setup command with Customize when Update Now is refused for autostart off', () => {
+    const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
+    render(<UpdateResolutionActions resolution={resolution} />);
+    expect(screen.getByText('Run this command to start Astrid and apply the update:')).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(installCommand('update', { autostart: true, command: true, skills: true, skillCopies: false }));
+    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+  });
+
   it('routes a soft update nudge to the expanded Updates destination and preserves the URL hash', () => {
     window.history.replaceState({}, '', '/tools/video-editor?project=film#edit');
     const onOpen = mountWithEventCapture(resolveUpdate({ installedRelease: 1, servedRelease: 2, releaseBehind: true }));
@@ -55,7 +66,7 @@ describe('update resolution Settings actions', () => {
   });
 
   it('shows the install update command for fully-local installs', () => {
-    mountWithEventCapture(resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'fully-local' }));
+    mountWithEventCapture(resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'fully-local' }), 'fully-local');
     expect(screen.getByRole('code')).toHaveTextContent(installCommand('update'));
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
   });
@@ -64,9 +75,24 @@ describe('update resolution Settings actions', () => {
     const events: string[] = [];
     const flush = vi.fn(async () => { events.push('flush'); });
     const start = vi.fn(async () => { events.push('start'); });
+    const clipboard = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } });
     const unregister = registerDraftSafeReloadGuard({ label: 'editor draft', flush });
     try {
       render(<UpdateResolutionActions resolution={resolution} operation={installerOperation(start)} />);
+        expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+        if (label === 'Update now') {
+          fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+          fireEvent.click(screen.getByRole('checkbox', { name: 'Install skills for coding agents' }));
+          const choices = { ...RECOMMENDED_SETUP_CHOICES, skills: false };
+          const command = installCommand('update', choices);
+          expect(screen.getByText(command, { exact: true })).toBeInTheDocument();
+          fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
+          await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
+          expect(clipboard.mock.calls[0][0]).toContain(command);
+          expect(clipboard.mock.calls[0][0]).toContain('May I update Astrid with these setup choices?');
+          expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
+        }
       fireEvent.click(screen.getByRole('button', { name: label }));
       await waitFor(() => expect(start).toHaveBeenCalledOnce());
       expect(events).toEqual(['flush', 'start']);

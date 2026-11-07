@@ -8,7 +8,8 @@ import { SetupStatusLine } from '@/shared/components/RuntimeConnection/SetupStat
 import { describeFailure, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { connectionStatus } from './ConnectionSection.tsx';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
-import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
+import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { ASTRID_STATUS_COPY as COPY, connectionStatusCopy } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
 
@@ -93,6 +94,9 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
     };
   }, [isOpen, connected]);
 
+  // The install type comes from the same identity-based rule as the Settings Updates section and the header notice.
+  const installerUpdate = useInstallerUpdate(connection);
+  const { installType } = installerUpdate;
   const summary = connectionStatus(connection);
   const status = connection.state.status;
   const rawServices = details?.health.services;
@@ -110,6 +114,10 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
   const getHelp = <a className="text-muted-foreground underline underline-offset-4" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>;
   return (
     <SettingsSection title={COPY.title}>
+      {installType === 'installer' && installerUpdate.health?.identity?.managed_by === null && <div className="mb-4 rounded-lg border p-4">
+        <h2 className="mb-3 text-base font-semibold">Setup</h2>
+        <SetupBlock initiallySetUp={connection.connectedBefore} explicitChoices services={services.filter((service) => service.state === 'failed' || service.reason || service.last_exit !== null)} />
+      </div>}
       <SettingsRow
         label={<span className="flex items-center gap-2">
           {statusIcon(summary.outOfDate ? 'update_needed' : connected ? needsRepair ? 'degraded' : 'connected' : status)}
@@ -121,13 +129,7 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
       >
         {summary.checks && <SetupStatusLine checks={summary.checks} mink={false} announce={false} className="items-start" />}
         {connected && details && needsRepair && (
-          <>
-            <CopyInstallCommand
-              mode="install"
-              services={services.filter((service) => service.state === 'failed' || service.reason || service.last_exit !== null)}
-            />
-            <p>{getHelp}</p>
-          </>
+          <p>{getHelp}</p>
         )}
         {(loadFailed || !connected && status !== 'connecting' && status !== 'needs_permission') && <p>{getHelp}</p>}
       </SettingsRow>

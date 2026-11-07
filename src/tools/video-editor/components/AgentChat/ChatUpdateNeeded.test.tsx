@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { render, screen, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
-import { installCommand, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
+import { ASTRID_COMMANDS, installCommand, RECOMMENDED_SETUP_CHOICES, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
 import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data/bridgeContract.ts';
 
 const { connectionRef } = vi.hoisted(() => ({ connectionRef: { current: null as { managedByPinokio: boolean } | null } }));
@@ -11,6 +11,8 @@ vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({ useRunt
 import { ChatUpdateCommand, ChatUpdateNeeded, isChatUpdateError } from './ChatUpdateNeeded.tsx';
 
 afterEach(() => { connectionRef.current = null; });
+
+beforeEach(() => localStorage.clear());
 
 describe('ChatUpdateNeeded', () => {
   it('renders the update copy, update command affordances, and raw details', () => {
@@ -22,9 +24,11 @@ describe('ChatUpdateNeeded', () => {
     expect(screen.getByText(copy.chatNeedsUpdate)).toBeInTheDocument();
     expect(screen.getByText(copy.updateNeeded.title)).toBeInTheDocument();
     expect(screen.getByText(withCommandShell(copy.updateNeeded.sentence))).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: copy.agent.copy })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('update'), { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(ASTRID_COMMANDS.macLinuxUpdate, { exact: true, selector: 'code' })).toBeInTheDocument();
+    expect(installCommand('update', RECOMMENDED_SETUP_CHOICES)).toBe(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
 
     const details = screen.getByText('Details').closest('details');
     expect(details).not.toBeNull();

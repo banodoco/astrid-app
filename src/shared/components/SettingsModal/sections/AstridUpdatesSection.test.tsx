@@ -302,7 +302,7 @@ describe('Updates for an Astrid older than this page', () => {
 
     expect(await within(section).findByText(new RegExp(RUNTIME_CONNECTION_COPY.chatNeedsUpdate))).toBeInTheDocument();
     expect(within(section).getByRole('status')).toHaveTextContent('Update Astrid');
-    expect(within(section).getByRole('code')).toHaveTextContent(installCommand('update'));
+    expect(within(section).getByRole('code')).toHaveTextContent('curl -fsSL https://astrid.haus/install | sh -s -- --update');
   });
 
   it('keeps the update card when the release check cannot answer', async () => {

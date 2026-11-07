@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { consumeAutoConnectQuery } from '@/integrations/runtime/autoConnectRequest.ts';
 import { CONNECTED_MIN_MS, LEAVE_MS, RuntimeConnectionPanel, SETTLED_QUIET_MS } from './RuntimeConnectionPanel.tsx';
@@ -13,6 +13,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
 });
+beforeEach(() => localStorage.clear());
 
 function panel(connection: RuntimeConnectionValue) {
   return render(<RuntimeConnectionPanel connection={connection} />);
@@ -57,7 +58,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     fireEvent.click(installDisclosure);
     expect(installDisclosure).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     expect(connect).toHaveBeenCalledOnce();
@@ -77,7 +78,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(pinokioLink).toHaveAttribute('href', PINOKIO_INSTALL_COPY.installUrl);
     expect(pinokioLink).toHaveClass('underline', 'underline-offset-4', 'hover:text-foreground');
     expect(pinokioLink.parentElement).toHaveClass('text-sm', 'text-muted-foreground');
-    expect(pinokioLink.compareDocumentPosition(screen.getByRole('code')) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(pinokioLink.compareDocumentPosition(screen.getByText(installCommand('install'), { exact: true })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Get Pinokio' })).not.toBeInTheDocument();
   });
 
@@ -104,7 +105,10 @@ describe('RuntimeConnectionPanel', () => {
   it.each(ALL_SCREENS)('%s: speaks of Astrid and never names a Runtime, workspace, port or command', (_name, connection) => {
     panel(connection());
     expect(shownText()).toContain('Astrid');
-    expect(shownText()).not.toMatch(ENGINEER_WORDS);
+    if (_name === 'not running') {
+      expect(shownText()).toContain('npm run dev:local');
+      expect(shownText()).toContain(installCommand('install'));
+    } else expect(shownText()).not.toMatch(ENGINEER_WORDS);
     expect(shownText()).not.toMatch(/\bport\b|\borigin\b/i);
   });
 
@@ -313,7 +317,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
     expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
     // The card says what the instructions are for; no line repeats it, and none explains how to open a terminal.
     expect(shownText()).not.toContain('Paste these instructions');
@@ -335,7 +339,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
     expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
     expect(shownText()).not.toMatch(/reload/i);
     expect(screen.queryByText('Set up Astrid on this computer')).not.toBeInTheDocument();
   });
@@ -353,7 +357,7 @@ describe('RuntimeConnectionPanel', () => {
     const retry = screen.getByRole('button', { name: COPY.notRunning.retry });
     expect(retry).toBeInTheDocument();
     if (showsInstaller) {
-      expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+      expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
     } else {
       expect(screen.queryByRole('code')).not.toBeInTheDocument();
@@ -361,6 +365,26 @@ describe('RuntimeConnectionPanel', () => {
     }
     fireEvent.click(retry);
     expect(connect).toHaveBeenCalledOnce();
+  });
+
+  it('keeps the checked path authoritative at the real Not-running panel caller', async () => {
+    const clipboard = vi.fn(async () => undefined);
+    stubClipboard(clipboard);
+    panel(connectionFor({ status: 'not_running' }, { connectedBefore: true }));
+    const checkbox = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
+    expect(checkbox).toBeChecked();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+    const command = screen.getByText(installCommand('install'), { exact: true }).textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
+    expect(clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
+    clipboard.mockClear();
+    fireEvent.click(checkbox);
+    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(command);
+    fireEvent.click(screen.getByRole('button', { name: COPY.agent.copied }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
+    expect(clipboard.mock.calls[0][0]).toContain('May I install Astrid with these setup choices?');
   });
 
   it('Pinokio update guidance points to Pinokio without installer steps', () => {
@@ -514,7 +538,7 @@ describe('RuntimeConnectionPanel', () => {
       stubClipboard(writeText);
       panel(connection());
       const command = mode === 'update' ? installCommand('update') : installCommand('install');
-      expect(screen.getByRole('code')).toHaveTextContent(command);
+      expect(screen.getByText(command, { exact: true })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: COPY.agent.commandCopy }));
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(command));
     });
@@ -531,8 +555,9 @@ describe('RuntimeConnectionPanel', () => {
       panel(connectionFor({ status }));
       const primary = screen.getByRole('button', { name: COPY_FOR_AGENT_ACTION });
       const commandCopy = screen.getByRole('button', { name: 'Copy command' });
-      expect(screen.getAllByRole('button')[0]).toBe(primary);
-      expect(commandCopy.parentElement).toContainElement(screen.getByRole('code'));
+      expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+      expect(primary.compareDocumentPosition(commandCopy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(commandCopy.parentElement).toContainElement(screen.getByText(installCommand('install'), { exact: true }));
       fireEvent.click(primary);
       await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
       const brief = writeText.mock.calls[0][0];

@@ -260,58 +260,6 @@
 }
 .astrid-vision-principles p { max-width: 46ch; margin: 0; color: #4d4a43; font-size: 16px; line-height: 1.6; }
 
-/* The old saying is struck through once it has risen into place; the idean Astrid is built on rises in
-   beneath with the page's shared reveal, like every other section. */
-.astrid-vision-shift { margin: clamp(96px, 12vw, 152px) auto 0; }
-.astrid-vision-shift-old { margin: 0; }
-.astrid-vision-shift-old p {
-  margin: 0;
-  color: var(--astrid-ink);
-  font-family: var(--astrid-vision-serif);
-  font-size: clamp(26px, 3.2vw, 40px);
-  font-style: italic;
-  font-weight: 400;
-  line-height: 1.3;
-  letter-spacing: -0.015em;
-  transition: color 500ms ease 450ms;
-}
-/* The strike is a line drawn across the words (it continues onto the next line when they wrap). */
-.astrid-vision-shift-old span {
-  background: linear-gradient(var(--astrid-accent), var(--astrid-accent)) 0 58% / 0 2px no-repeat;
-  transition: background-size 600ms cubic-bezier(.65, 0, .35, 1) 450ms;
-}
-.astrid-vision-shift-new {
-  max-width: 22ch;
-  margin: clamp(18px, 2.4vw, 28px) 0 0;
-  font-family: var(--astrid-vision-serif);
-  font-size: clamp(36px, 5.2vw, 64px);
-  font-weight: 400;
-  line-height: 1.04;
-  letter-spacing: -0.035em;
-}
-.astrid-vision-shift-support {
-  max-width: 40ch;
-  margin: 22px 0 0;
-  color: var(--astrid-muted);
-  font-size: clamp(17px, 1.7vw, 20px);
-  line-height: 1.5;
-}
-.astrid-vision-shift-old[data-shown] p { color: var(--astrid-muted); }
-.astrid-vision-shift-old[data-shown] span { background-size: 100% 2px; }
-/*
- * The new idea sits beside the tinkering mink, which arrives with the supporting line. The text follows
- * straight on from the struck quote; the taller mink hangs down beside it, and the last row takes up
- * whatever height he adds.
- */
-.astrid-vision-shift-grow {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto 1fr;
-  column-gap: clamp(24px, 4vw, 56px);
-}
-.astrid-vision-shift-new { grid-column: 1; grid-row: 1; }
-.astrid-vision-shift-support { grid-column: 1; grid-row: 2; }
-.astrid-vision-tinkerer { grid-column: 2; grid-row: 1 / -1; align-self: end; }
 .astrid-vision-tinkerer {
   --px: 3px;
   position: relative;
@@ -338,9 +286,6 @@
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-juggled, .astrid-vision-juggler-mink { animation: none; }
   .astrid-vision-sparks { display: none; }
-  .astrid-vision-shift *, .astrid-vision-shift *::before { transition: none !important; }
-  .astrid-vision-shift .astrid-vision-shift-old p { color: var(--astrid-muted); }
-  .astrid-vision-shift .astrid-vision-shift-old span { background-size: 100% 2px; }
 }
 
 /* The vision, part by part, against the issues today */
@@ -503,13 +448,11 @@
    * On a phone the mink is drawn large and floats right, and the supporting line wraps around his
    * outline: into the open space beside his head and body, above the bench.
    */
-  .astrid-vision-shift-grow { display: flow-root; }
-  .astrid-vision-tinkerer {
-    --px: 2.5px;
-    float: right;
-    margin: 14px 0 0 0;
-    shape-outside: polygon(36% 0, 100% 0, 100% 100%, 0 100%, 0 64%, 22% 60%, 34% 40%, 36% 28%);
-    shape-margin: 10px;
+  .astrid-vision-contribute .astrid-vision-tinkerer {
+    --px: 2.4px;
+    justify-self: center;
+    float: none;
+    margin: 12px 0 0;
   }
 }
 @media (max-width: 375px) {
@@ -681,10 +624,401 @@
   .astrid-vision-issues-list details[open] .astrid-vision-issues-detail { animation: none; }
 }
 
-/* The hero's juggling mink becomes a small section break on narrow screens. */
-.astrid-vision-mobile-juggler { display: none; }
+
+
+
+/* GitHub-sourced vision content. Layout stays in App; wording stays in Astrid Dev. */
+.astrid-vision-markdown > :first-child { margin-top: 0; }
+.astrid-vision-markdown > :last-child { margin-bottom: 0; }
+.astrid-vision-markdown p, .astrid-vision-markdown li {
+  line-height: 1.58;
+}
+.astrid-vision-markdown p + p, .astrid-vision-markdown p + ul { margin-top: 9px; }
+.astrid-vision-markdown a { text-decoration: underline; text-underline-offset: 3px; }
+.astrid-vision-markdown ul { margin: 10px 0; padding-left: 19px; }
+
+.astrid-vision-lead p {
+  margin: 0;
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+.astrid-vision-lead strong { color: var(--astrid-ink); font-weight: 550; }
+/* The repository attribution is supporting copy, not a second manifesto statement. */
+.astrid-vision-lead p + p {
+  margin-top: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.astrid-vision-lead p + p a {
+  color: var(--astrid-ink);
+  text-underline-offset: 3px;
+}
+
+.astrid-vision-standards { margin-top: clamp(80px, 10vw, 128px); }
+.astrid-vision-standards-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: clamp(18px, 3vw, 40px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.astrid-vision-standards-list li {
+  border-top: 1px solid var(--astrid-line);
+  padding-top: 16px;
+}
+.astrid-vision-standards-list li > span {
+  color: var(--astrid-accent);
+  font: 12px "Departure Mono", ui-monospace, monospace;
+}
+.astrid-vision-standards-list h3 {
+  margin: 12px 0;
+  color: var(--astrid-ink);
+  font: 400 clamp(23px, 2vw, 30px)/1.2 var(--astrid-vision-serif);
+}
+.astrid-vision-standards-list .astrid-vision-markdown {
+  max-width: 46ch;
+  font-size: 15.5px;
+  color: var(--astrid-muted);
+}
+
+.astrid-vision-part .astrid-vision-part-number {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  white-space: nowrap;
+  margin-top: 3px;
+  font: 500 clamp(18px, 2.2vw, 26px)/1.2 "Departure Mono", ui-monospace, monospace;
+  color: var(--astrid-accent);
+  letter-spacing: -.02em;
+  scale: none;
+}
+.astrid-vision-gap-state {
+  display: inline-block;
+  margin-bottom: 12px;
+  font: 500 11px/1.4 "Departure Mono", ui-monospace, monospace;
+  color: var(--astrid-accent);
+  text-transform: capitalize;
+}
+.astrid-vision-gap-missing-label { margin-top: 18px !important; }
+.astrid-vision-gap-plans {
+  display: grid;
+  gap: 4px;
+  margin-top: 17px;
+}
+.astrid-vision-gap-plans .astrid-vision-label { margin-bottom: 3px !important; }
+.astrid-vision-gap-plans a, .astrid-vision-source-link { font-size: 13.5px; line-height: 1.5; }
+.astrid-vision-source-link { display: inline-block; margin-top: 17px; }
+.astrid-vision-part-issue .astrid-vision-markdown { color: var(--astrid-ink); }
+.astrid-vision-part-issue .astrid-vision-markdown p:not(.astrid-vision-label) { color: inherit; }
+.astrid-vision-part-issue .astrid-vision-markdown ul { list-style: disc; padding-left: 20px; }
+.astrid-vision-part-issue .astrid-vision-markdown li { padding-left: 0; }
+.astrid-vision-part-issue .astrid-vision-markdown li::before { display: none; }
+.astrid-vision-part-issue .astrid-vision-markdown a { word-break: break-word; }
+
+.astrid-vision-more-button {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 20px;
+  padding: 11px 16px;
+  border: 1px solid var(--astrid-line);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--astrid-ink);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+}
+.astrid-vision-more-button:hover { border-color: var(--astrid-accent); }
+.astrid-vision-more-button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+
+.astrid-vision-project-list .astrid-vision-project-row {
+  display: grid;
+  grid-template-columns: minmax(185px, .8fr) minmax(0, 1.3fr) auto;
+  align-items: baseline;
+  gap: 16px 24px;
+  padding: 22px 4px;
+}
+.astrid-vision-project-head h3 {
+  margin: 7px 0 0;
+  font-size: 17px;
+  line-height: 1.35;
+  font-weight: 600;
+  color: var(--astrid-ink);
+}
+.astrid-vision-project-status {
+  color: var(--astrid-accent);
+  font: 500 11px/1.35 "Departure Mono", ui-monospace, monospace;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.astrid-vision-project-status[data-status="active"] { color: #598342; }
+.astrid-vision-project-list .astrid-vision-markdown { color: var(--astrid-muted); font-size: 14px; }
+.astrid-vision-project-row > a {
+  color: var(--astrid-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  white-space: nowrap;
+}
+.astrid-vision-content-source {
+  max-width: 70ch;
+  margin: 0 auto 12px;
+  color: var(--astrid-muted);
+  font-size: 13px;
+  line-height: 1.5;
+  text-align: center;
+}
+.astrid-vision-content-source a { color: var(--astrid-ink); text-decoration: underline; }
+
+@media (max-width: 900px) {
+  .astrid-vision-project-list .astrid-vision-project-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1 / -1; grid-row: 2; }
+  .astrid-vision-project-row > a { grid-column: 2; grid-row: 1; }
+}
 @media (max-width: 760px) {
-  .astrid-vision-mobile-juggler { display: grid; justify-items: center; margin-block: 32px 0; }
-  .astrid-vision-mobile-juggler .astrid-vision-juggler { display: block; --px: 2px; }
-  .astrid-vision-mobile-juggler + .astrid-vision-issues { margin-top: 32px; }
+  .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 22px; }
+  .astrid-vision-standards-list li { padding-top: 14px; }
+  .astrid-vision-project-list .astrid-vision-project-row { grid-template-columns: 1fr; gap: 10px; }
+  .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1; grid-row: auto; }
+  .astrid-vision-project-row > a { grid-column: 1; grid-row: auto; }
+}
+
+/* The public feed may be temporarily unavailable; never imply cached claims are current. */
+.astrid-vision-lead button, .astrid-vision-content-source button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.astrid-vision-lead a { color: inherit; text-decoration: underline; }
+
+
+/* Vision feedback: explicit card indices (1–4), not generated Roman counters. */
+.astrid-vision-principles li::before { display: none; content: none; }
+.astrid-vision-principles .astrid-vision-pillar-number {
+  display: block;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  margin-bottom: 18px;
+  color: var(--tone-ink);
+  font-family: var(--astrid-vision-serif);
+  font-size: 22px;
+  font-style: italic;
+  line-height: 1.2;
+}
+.astrid-vision[data-dusk] .astrid-vision-principles .astrid-vision-pillar-number {
+  color: color-mix(in oklab, color-mix(in oklab, var(--tone-ink), var(--tone-ink-night) calc(var(--astrid-dusk-ink) * 100%)), var(--astrid-ink) calc(var(--astrid-dusk-firm) * 100%));
+}
+.astrid-vision-principles h3 {
+  grid-row: 2;
+  max-width: 16ch;
+  text-wrap: balance;
+}
+
+/* The author-level grid/display rules must never override the hidden attribute. */
+.astrid-vision .astrid-vision-part-body[hidden] { display: none; }
+
+/* Contribution invitation is authored in Astrid Dev, not duplicated here. */
+.astrid-vision-contribute {
+  max-width: 880px;
+  margin-top: clamp(90px, 12vw, 150px);
+  padding-top: clamp(28px, 4vw, 52px);
+  border-top: 1px solid var(--astrid-line);
+}
+.astrid-vision-contribute h2 {
+  max-width: 18ch;
+  margin: 0 0 20px;
+  color: var(--astrid-ink);
+  font-family: var(--astrid-vision-serif);
+  font-size: clamp(34px, 4.5vw, 54px);
+  font-weight: 400;
+  line-height: 1.12;
+  letter-spacing: -.035em;
+}
+.astrid-vision-contribute .astrid-vision-markdown {
+  max-width: 68ch;
+  color: var(--astrid-muted);
+  font-size: clamp(16px, 1.7vw, 19px);
+  line-height: 1.65;
+}
+.astrid-vision-contribute .astrid-vision-markdown a {
+  color: var(--astrid-ink);
+  font-weight: 600;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
+}
+.astrid-vision-contribute .astrid-vision-markdown a:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 4px; }
+
+
+/* Four creator-first operating principles, one row on wide screens. */
+@media (min-width: 1101px) {
+  .astrid-vision-standards-list { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+@media (min-width: 761px) and (max-width: 1100px) {
+  .astrid-vision-standards-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+/* A real loading surface so the page never flashes as an empty manifesto. */
+.astrid-vision-skeleton-line {
+  width: 100%;
+  height: 15px;
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--astrid-ink) 10%, var(--astrid-paper));
+  animation: astrid-vision-skeleton-pulse 2.2s ease-in-out infinite;
+}
+.astrid-vision-skeleton-line-short { width: 62%; }
+.astrid-vision-skeleton-label { width: 25%; height: 12px; }
+.astrid-vision-skeleton-section-title { width: min(45%, 440px); height: 35px; margin-bottom: 24px; }
+.astrid-vision-skeleton-hero { display: grid; gap: 18px; max-width: 720px; }
+.astrid-vision-skeleton-hero .astrid-vision-skeleton-line { height: clamp(35px, 4vw, 62px); }
+.astrid-vision-skeleton-hero .astrid-vision-skeleton-line:last-child { height: 20px; margin-top: 8px; }
+.astrid-vision-loading-group { margin-top: clamp(70px, 10vw, 124px); }
+.astrid-vision-loading-pillars, .astrid-vision-loading-projects, .astrid-vision-loading-principles {
+  display: grid; gap: 16px;
+}
+.astrid-vision-loading-pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.astrid-vision-loading-principles, .astrid-vision-loading-projects { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.astrid-vision-loading-pillar, .astrid-vision-loading-project, .astrid-vision-loading-principle {
+  display: grid; align-content: start; gap: 18px;
+  min-height: 140px; padding: 24px;
+  border-radius: 13px;
+  background: color-mix(in oklab, var(--astrid-ink) 4%, var(--astrid-paper));
+}
+.astrid-vision-loading-pillar { min-height: 220px; }
+.astrid-vision-loading-row { padding: 20px 0; border-top: 1px solid var(--astrid-line); }
+.astrid-vision-loading-row .astrid-vision-skeleton-line { width: 50%; height: 26px; }
+@keyframes astrid-vision-skeleton-pulse {
+  0%, 100% { opacity: .62; }
+  50% { opacity: 1; }
+}
+
+/* Expanded gaps use the whole content width, including below the ID column. */
+.astrid-vision .astrid-vision-part-body {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
+  gap: clamp(16px, 3vw, 38px);
+}
+.astrid-vision .astrid-vision-part-body[hidden] { display: none; }
+.astrid-vision .astrid-vision-part-vision { grid-column: 1; }
+.astrid-vision .astrid-vision-part-issue { grid-column: 2; }
+
+/* Eight real project cards plus an equally weighted ninth discovery tile. */
+.astrid-vision .astrid-vision-project-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 22px;
+}
+.astrid-vision .astrid-vision-project-list .astrid-vision-project-row,
+.astrid-vision .astrid-vision-project-list .astrid-vision-project-more {
+  display: flex;
+  flex-direction: column;
+  min-height: 224px;
+  gap: 16px;
+  padding: clamp(19px, 2vw, 27px);
+  border: 1px solid var(--astrid-line);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--astrid-panel) 92%, transparent);
+}
+.astrid-vision .astrid-vision-project-list .astrid-vision-project-row .astrid-vision-markdown {
+  grid-column: auto;
+  grid-row: auto;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.astrid-vision .astrid-vision-project-list .astrid-vision-project-row > a {
+  grid-column: auto;
+  grid-row: auto;
+  margin-top: auto;
+  color: var(--astrid-ink);
+  white-space: normal;
+  font-size: 13px;
+}
+.astrid-vision-project-more {
+  background: color-mix(in oklab, var(--astrid-accent) 7%, var(--astrid-panel)) !important;
+}
+.astrid-vision-project-more button {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  width: 100%;
+  height: 100%;
+  min-height: 170px;
+  gap: 16px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--astrid-ink);
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.astrid-vision-project-more button strong {
+  font-family: var(--astrid-vision-serif);
+  font-size: clamp(25px, 2.2vw, 33px);
+  line-height: 1.12;
+  font-weight: 400;
+}
+.astrid-vision-project-more-label {
+  font-family: "Departure Mono", ui-monospace, monospace;
+  font-size: 11px;
+  color: var(--astrid-accent);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+.astrid-vision-project-more button > span:last-child {
+  font-size: 24px;
+  align-self: flex-end;
+}
+.astrid-vision-project-more button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 4px; }
+
+/* One closing invitation, supported by the existing animated workbench mink. */
+.astrid-vision .astrid-vision-contribute {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: clamp(22px, 5vw, 80px);
+  max-width: 950px;
+}
+.astrid-vision .astrid-vision-contribute .astrid-vision-tinkerer {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  justify-self: center;
+  float: none;
+}
+@media (max-width: 1000px) {
+  .astrid-vision .astrid-vision-project-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 760px) {
+  .astrid-vision .astrid-vision-part-body { grid-column: 1 / -1; grid-template-columns: minmax(0, 1fr); }
+  .astrid-vision .astrid-vision-part-vision,
+  .astrid-vision .astrid-vision-part-issue { grid-column: 1; }
+  .astrid-vision .astrid-vision-contribute { grid-template-columns: minmax(0, 1fr); }
+  .astrid-vision .astrid-vision-contribute .astrid-vision-tinkerer { grid-column: 1; grid-row: 2; }
+}
+@media (max-width: 640px) {
+  .astrid-vision-loading-pillars,
+  .astrid-vision-loading-principles,
+  .astrid-vision-loading-projects,
+  .astrid-vision .astrid-vision-project-list { grid-template-columns: minmax(0, 1fr); }
+  .astrid-vision .astrid-vision-part-body { padding-inline: 0; }
+  .astrid-vision .astrid-vision-project-list .astrid-vision-project-row,
+  .astrid-vision .astrid-vision-project-list .astrid-vision-project-more { min-height: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-skeleton-line { animation: none; }
 }

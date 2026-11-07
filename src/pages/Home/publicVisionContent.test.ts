@@ -7,7 +7,7 @@ const blob = 'https://github.com/banodoco/astrid-dev/blob/' + sha + '/';
 const fixture = () => ({
   schemaVersion: 1,
   source: { repository: 'banodoco/astrid-dev', revision: sha },
-  vision: { title: 'A purpose', introMarkdown: 'Creative tools for people' },
+  vision: { title: 'A purpose', introMarkdown: 'Creative tools for people', agentPrompt: 'Exact prompt from the root README' },
   pillars: ['art', 'tools', 'learning', 'community'].map(id => ({
     id, title: 'Pillar ' + id, descriptor: 'A meaningful descriptor', bodyMarkdown: 'Details',
   })),
@@ -31,6 +31,14 @@ describe('public vision live data contract', () => {
   it('accepts an approved versioned feed', () => {
     expect(parsePublicVisionContent(fixture()).projects).toHaveLength(1);
   });
+  it('accepts the exact optional root README agent prompt, and rejects a malformed one', () => {
+    const withPrompt = fixture();
+    expect(parsePublicVisionContent(withPrompt).vision.agentPrompt).toBe('Exact prompt from the root README');
+    const oldFeed = { ...withPrompt, vision: { title: withPrompt.vision.title, introMarkdown: withPrompt.vision.introMarkdown } };
+    expect(parsePublicVisionContent(oldFeed).vision.agentPrompt).toBeUndefined();
+    expect(() => parsePublicVisionContent({ ...withPrompt, vision: { ...withPrompt.vision, agentPrompt: '' } })).toThrow();
+  });
+
   it('accepts the published paths after visions/ was renamed to vision/', () => {
     expect(parsePublicVisionContent(fixture()).gaps[0].githubUrl)
       .toBe(blob + 'vision/gaps/AA-001-creative.md');

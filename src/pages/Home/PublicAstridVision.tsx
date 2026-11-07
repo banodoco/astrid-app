@@ -166,6 +166,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [gapFilter, setGapFilter] = useState<GapFilter>('current');
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const contributionIntro = content?.vision.contributeMarkdown
+    ?.replace(/\n\n\[Give these instructions to your agent\]\([^)]+\)\s*$/, '') ?? '';
+  const copyAgentInstructions = () => {
+    const prompt = content?.vision.agentPrompt;
+    if (!prompt || !navigator.clipboard?.writeText) { setAgentCopyState('failed'); return; }
+    void navigator.clipboard.writeText(prompt)
+      .then(() => setAgentCopyState('copied'))
+      .catch(() => setAgentCopyState('failed'));
+  };
+  useEffect(() => { setAgentCopyState('idle'); }, [content?.source.revision]);
   // Newly filtered rows must still receive reveal observation.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
     gapFilter + ':' + projectFilter + ':' + showAllProjects);
@@ -247,7 +258,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href="#astrid-vision-contribute">Help us build it</a>.
                   </p>
                 </>
               : error
@@ -409,11 +420,25 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       </>)}
       {content?.vision.contributeMarkdown && (
-        <section className="astrid-vision-contribute" aria-labelledby="astrid-vision-contribute-title" data-reveal>
+        <section className="astrid-vision-contribute" id="astrid-vision-contribute"
+          aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
             <p className="astrid-vision-eyebrow">Get involved</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
-            <MarkdownText value={content.vision.contributeMarkdown} />
+            <MarkdownText value={contributionIntro} />
+            {content.vision.agentPrompt ? (
+              <button className="astrid-vision-copy-agent-button" type="button" onClick={copyAgentInstructions}>
+                Copy instructions for agents
+              </button>
+            ) : (
+              <a className="astrid-vision-copy-agent-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
+                target="_blank" rel="noreferrer">See agent instructions on GitHub</a>
+            )}
+            <p className="astrid-vision-copy-agent-status" role="status" aria-live="polite">
+              {agentCopyState === 'copied' ? 'Instructions copied — give them to your agent.'
+                : agentCopyState === 'failed' ? <>Couldn’t copy. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
+                    target="_blank" rel="noreferrer">Open instructions on GitHub</a>.</> : ''}
+            </p>
           </div>
           <Tinkerer />
         </section>

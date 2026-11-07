@@ -99,14 +99,15 @@ test('only the new contribution section and workbench mink remain after the proj
     contentType: 'application/json',
     headers: {'access-control-allow-origin': '*'},
     body: JSON.stringify({...raw, vision: {...raw.vision,
-      contributeMarkdown: 'You and your agents can help build Astrid. [Give your agent these instructions](https://github.com/banodoco/astrid-dev#people).'
+      contributeMarkdown: 'You and your agents can help build Astrid.\\n\\n[Give these instructions to your agent](https://github.com/banodoco/astrid-dev#people)'
     }})
   }));
   await page.goto('/vision', {waitUntil: 'domcontentloaded'});
   const section = page.locator('.astrid-vision-contribute');
   await expect(section).toContainText('You and your agents');
   await expect(section.locator('.astrid-vision-tinkerer')).toHaveCount(1);
-  await expect(section.getByRole('link', {name: 'Give your agent these instructions'})).toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev#people');
+  await expect(section.getByRole('link', {name: 'Give these instructions to your agent'})).toHaveCount(0);
+  await expect(section.getByRole('button', {name: 'Copy instructions for agents'})).toBeVisible();
   await expect(page.locator('.astrid-vision-shift')).toHaveCount(0);
   await expect(page.locator('.astrid-vision-mobile-juggler')).toHaveCount(0);
   await expect(page.locator('.astrid-vision-content-source')).toHaveCount(0);

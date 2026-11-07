@@ -5,8 +5,7 @@
  * `tsconfig.app.json` is a "solution-style" project reference — the repo's own
  * `build`/`test` scripts never run `tsc -p tsconfig.app.json --noEmit`, so its
  * ~861 pre-existing errors are silently tolerated today. This script does not
- * try to fix that backlog; it stops it from growing, per the codebase's own
- * allowlist doctrine ("allowlists shrink, never grow" — CLAUDE.md).
+ * try to fix that backlog; it stops it from growing, per the repository's existing shrinking-baseline policy.
  *
  * It runs the app project's typecheck, counts `error TS` lines, and compares
  * the count against the committed baseline in `config/ts-error-baseline.json`:

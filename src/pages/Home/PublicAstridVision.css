@@ -935,7 +935,10 @@
   border-radius: 8px;
   background: var(--astrid-ink);
   color: var(--astrid-paper);
-  font: 600 14px/1.4 inherit;
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
   cursor: pointer;
 }
 .astrid-vision-copy-instructions:hover { background: var(--astrid-accent); border-color: var(--astrid-accent); }

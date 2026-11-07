@@ -69,8 +69,9 @@ test('hero keeps the vision narrative separate from website source attribution',
 
 test('top contribution link scrolls to a real copy action using the published README prompt', async ({ page, request, context }) => {
   const content = await pinnedFeed(page, request);
-  expect(typeof (content.vision as {agentPrompt?: string}).agentPrompt).toBe('string');
-  const prompt = (content.vision as {agentPrompt: string}).agentPrompt;
+  const prompt = (content.vision as {title: string; agentPrompt?: string}).agentPrompt;
+  expect(typeof prompt).toBe('string');
+  if (!prompt) throw new Error('The published vision feed must contain the README agent prompt');
   await context.grantPermissions(['clipboard-read', 'clipboard-write']);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await page.getByRole('link', { name: 'Help us build it' }).click();

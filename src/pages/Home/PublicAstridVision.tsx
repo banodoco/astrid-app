@@ -394,8 +394,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               : <a className="astrid-vision-copy-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Get instructions for agents on GitHub</a>}
             <p className="astrid-vision-copy-status" role="status" aria-live="polite">
               {copyStatus === 'copied' ? 'Instructions copied — give them to your agent.'
-                : copyStatus === 'error' ? "Couldn't copy. Open the instructions on GitHub instead." : ''}
+                : copyStatus === 'error' ? "Couldn't copy the instructions." : ''}
             </p>
+            {copyStatus === 'error' && <a className="astrid-vision-copy-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Read instructions on GitHub</a>}
           </div>
           <Tinkerer />
         </section>

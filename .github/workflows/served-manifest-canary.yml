@@ -14,6 +14,26 @@ permissions:
   contents: read
 
 jobs:
+  vision-page-canary:
+    # Production smoke check: valid JSON alone does not prove /vision renders.
+    if: ${{ github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Reigh / production') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'deployment_status' && github.event.deployment.sha || 'main' }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+      - name: Install browser test dependencies
+        run: npm ci --legacy-peer-deps
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Check live Astrid vision page and feed
+        run: node scripts/quality/check-public-vision-production.mjs
+
   canary:
     if: ${{ github.event_name != 'deployment_status' || (github.event.deployment_status.state == 'success' && github.event.deployment.environment == 'Reigh / production') }}
     runs-on: ubuntu-latest

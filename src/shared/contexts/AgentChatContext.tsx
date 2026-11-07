@@ -243,7 +243,7 @@ export function useAgentChatRegistry(): AgentChatRegistryValue {
 
 // Returns null until AgentChatPanel mounts and publishes initial state. The one
 // optional bridge surface — TasksPane reads this to decide whether to render the
-// composer button. CLAUDE.md generally requires throwing on missing context, but the
+// composer button. Required contexts generally throw when missing, but the
 // timing of panel mount vs. TasksPane mount makes a brief null window unavoidable.
 export function useAgentChatActions(): AgentChatActionsValue | null {
   return useContext(AgentChatActionsContext);

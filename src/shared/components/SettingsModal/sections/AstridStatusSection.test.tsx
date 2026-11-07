@@ -4,6 +4,7 @@ import { AstridStatusSection } from './AstridStatusSection.tsx';
 import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY, installCommand } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
+import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 
 const mocks = vi.hoisted(() => ({
   readStatus: vi.fn(),
@@ -42,6 +43,17 @@ vi.mock('@/shared/contexts/AuthContext.tsx', async (importOriginal) => ({
 vi.mock('@/shared/lib/browser/clipboard.ts', () => ({
   writeClipboardTextSafe: mocks.clipboard,
 }));
+
+/** The status section names an old Astrid; Settings → Updates is the one place with the actions for it. */
+function expectNoUpdateActions() {
+  const text = document.body.textContent ?? '';
+  expect(screen.queryByRole('code')).not.toBeInTheDocument();
+  for (const name of ['Copy for your agent', 'Copy instructions for your agent', 'Copy command', 'See updates', 'Update now']) {
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  }
+  for (const words of ['update your checkouts', 'Update in Pinokio', 'Run it yourself', 'npm run update']) expect(text).not.toContain(words);
+  expect(text).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
+}
 
 async function openDetails() {
   fireEvent.click(await screen.findByRole('button', { name: 'Details' }));
@@ -89,17 +101,7 @@ describe('AstridStatusSection', () => {
     expect(screen.queryByRole('heading', { name: 'Connection' })).not.toBeInTheDocument();
   });
 
-  it('uses the shared resolver action in Settings for a source checkout schema mismatch', () => {
-    mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
-    render(<AstridStatusSection isOpen />);
-
-    expect(screen.getByText(/This page needs a newer Astrid/)).toBeInTheDocument();
-    expect(screen.getByText('update your checkouts')).toBeInTheDocument();
-    expect(screen.queryByRole('code')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: CONNECTION_COPY.agent.commandCopy })).not.toBeInTheDocument();
-  });
-
-  it('keeps the Settings hard mismatch action and routes its Details button to Updates', () => {
+  it('names an old Astrid without its own update actions or a Details link to Updates', () => {
     const onOpen = vi.fn();
     function Capture() {
       useAppEventListener('openSettings', onOpen);
@@ -108,11 +110,13 @@ describe('AstridStatusSection', () => {
     mocks.readStatus.mockReturnValue(new Promise(() => undefined));
     mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
     render(<Capture />);
-    expect(screen.getByText('update your checkouts')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Details' }));
-    expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
-    expect(window.location.search).toContain('settings=updates');
-    window.history.replaceState({}, '', '/');
+
+    expect(screen.getByRole('status')).toHaveTextContent('Needs an update');
+    expect(screen.getByText(ASTRID_STATUS_COPY.outOfDateDetail.runtime)).toBeInTheDocument();
+    expectNoUpdateActions();
+    // Details is only the disclosure of what's running, which waits for the Runtime's details.
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it('offers the browser permission action before checking Runtime details', () => {
@@ -253,7 +257,7 @@ describe('AstridStatusSection', () => {
     expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
   });
 
-  it('shows Needs an update with the update command when Astrid on this computer is older than this page', async () => {
+  it('names an old chat service and leaves its update to the Updates section', async () => {
     mocks.connection.localServiceOutOfDate = true;
     mocks.readStatus.mockResolvedValue({
       health: {
@@ -267,13 +271,10 @@ describe('AstridStatusSection', () => {
     render(<AstridStatusSection isOpen />);
 
     expect(await screen.findByText('Connected. Chat needs an update')).toBeInTheDocument();
-    expect(screen.getByText(/Chat on this computer is older than this page/)).toBeInTheDocument();
-    expect(screen.getByText(/If you run Astrid from source checkouts/)).toBeInTheDocument();
-    expect(screen.queryByText(/This page needs a newer Astrid/)).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
-
-    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledWith(installCommand('update')));
-    expect(mocks.clipboard).not.toHaveBeenCalledWith(installCommand('install'));
+    expect(screen.getByText(ASTRID_STATUS_COPY.outOfDateDetail.chat)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'false');
+    expectNoUpdateActions();
+    expect(mocks.clipboard).not.toHaveBeenCalled();
   });
 
   it('does not show the update status while the local service is up to date', async () => {
@@ -358,13 +359,13 @@ describe('AstridStatusSection', () => {
     expect(short).toHaveAttribute('title', `sha256:${'a'.repeat(64)}`);
   });
 
-  it('keeps the update command outside Details when an update is needed', async () => {
+  it('keeps the update status outside Details when an update is needed', async () => {
     mocks.connection.localServiceOutOfDate = true;
+    mocks.readStatus.mockReturnValue(new Promise(() => undefined));
     render(<AstridStatusSection isOpen />);
 
     expect(screen.getByRole('status')).toHaveTextContent('Chat needs an update');
-    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Details' })).toHaveAttribute('aria-expanded', 'false');
+    expectNoUpdateActions();
   });
 });
 
@@ -378,23 +379,18 @@ describe('AstridStatusSection schema mismatch install type', () => {
     vi.unstubAllEnvs();
   });
 
-  it('does not give a hosted source checkout the installer command for a schema mismatch', async () => {
-    mocks.origin = 'https://astrid.test';
-    mocks.readInstallerUpdateHealth.mockResolvedValue({ status: 'ok', release: 0, runtime_instance_id: 'runtime-1', identity: { managed_by: 'source', release: 0 } });
+  it.each([
+    ['a hosted source checkout', () => { mocks.origin = 'https://astrid.test'; mocks.readInstallerUpdateHealth.mockResolvedValue({ status: 'ok', release: 0, runtime_instance_id: 'runtime-1', identity: { managed_by: 'source', release: 0 } }); }],
+    ['a fully local page', () => { vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1'); }],
+    ['a Pinokio Astrid', () => { mocks.connection.managedByPinokio = true; }],
+    ['an installer Astrid', () => { mocks.origin = 'https://astrid.test'; }],
+  ])('names the update for %s and leaves the one update path to the Updates section', async (_name, configure) => {
+    configure();
     render(<AstridStatusSection isOpen />);
 
-    expect(await screen.findByText('update your checkouts')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copy for your agent' })).not.toBeInTheDocument();
-    expect(screen.queryByText('Run it yourself')).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
-  });
-
-  it('gives a fully local page the npm update command, not the installer command', async () => {
-    vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
-    render(<AstridStatusSection isOpen />);
-
-    expect(await screen.findByText('npm run update')).toBeInTheDocument();
-    expect(screen.queryByText('update your checkouts')).not.toBeInTheDocument();
-    expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
+    expect(await screen.findByText('Needs an update')).toBeInTheDocument();
+    expect(screen.getByText(ASTRID_STATUS_COPY.outOfDateDetail.runtime)).toBeInTheDocument();
+    expectNoUpdateActions();
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
   });
 });

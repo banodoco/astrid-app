@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { parsePublicVisionContent } from './publicVisionContent';
 
@@ -16,7 +17,7 @@ const fixture = () => ({
     assessmentDetail: 'Open (evidence under review)',
     appliesTo: ['pillar:art'], desiredMarkdown: 'The target', currentMarkdown: 'Current reality',
     missingMarkdown: 'What is missing', closureEvidenceMarkdown: 'Proof',
-    githubUrl: blob + 'visions/gaps/AA-001-creative.md',
+    githubUrl: blob + 'vision/gaps/AA-001-creative.md',
   }],
   projects: [{
     id: '01-example', title: 'An open project', goalMarkdown: 'A bounded improvement',
@@ -30,6 +31,28 @@ describe('public vision live data contract', () => {
   it('accepts an approved versioned feed', () => {
     expect(parsePublicVisionContent(fixture()).projects).toHaveLength(1);
   });
+  it('accepts the published paths after visions/ was renamed to vision/', () => {
+    expect(parsePublicVisionContent(fixture()).gaps[0].githubUrl)
+      .toBe(blob + 'vision/gaps/AA-001-creative.md');
+    const legacy = fixture();
+    legacy.gaps[0].githubUrl = blob + 'visions/gaps/AA-001-creative.md';
+    expect(parsePublicVisionContent(legacy).gaps).toHaveLength(1);
+    const unrelated = fixture();
+    unrelated.gaps[0].githubUrl = blob + 'unrelated/gaps/AA-001-creative.md';
+    expect(() => parsePublicVisionContent(unrelated)).toThrow();
+  });
+
+  it('accepts the exact Astrid Dev exporter candidate when supplied by cross-repo CI', () => {
+    const file = process.env.PUBLIC_VISION_FEED_FILE;
+    if (!file) return; // Ordinary App unit tests use the local fixture.
+    const candidate = JSON.parse(readFileSync(file, 'utf8'));
+    const result = parsePublicVisionContent(candidate);
+    expect(result.source.repository).toBe('banodoco/astrid-dev');
+    expect(result.pillars).toHaveLength(4);
+    expect(result.principles).toHaveLength(4);
+    expect(result.gaps.length).toBeGreaterThan(0);
+  });
+
   it('allows legitimate project additions and completion without reauthoring the app', () => {
     const value = fixture();
     value.projects[0].status = 'done';

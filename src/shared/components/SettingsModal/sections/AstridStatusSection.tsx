@@ -5,12 +5,10 @@ import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionPr
 import type { Health, Realm, ServiceStatus } from '@/integrations/runtime/generated.ts';
 import { Button } from '@/shared/components/ui/button';
 import { SetupStatusLine } from '@/shared/components/RuntimeConnection/SetupStatusLine.tsx';
-import { describeFailure, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
+import { describeFailure, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { connectionStatus } from './ConnectionSection.tsx';
-import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
-import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
 import { ASTRID_STATUS_COPY as COPY, connectionStatusCopy } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
 
@@ -95,9 +93,7 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
     };
   }, [isOpen, connected]);
 
-  // The install type comes from the same identity-based rule as the Settings Updates section and the header notice.
-  const { installType } = useInstallerUpdate(connection);
-  const summary = connectionStatus(connection, installType);
+  const summary = connectionStatus(connection);
   const status = connection.state.status;
   const rawServices = details?.health.services;
   const hasServiceDetails = Array.isArray(rawServices) && rawServices.every(isRuntimeService);
@@ -119,12 +115,11 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
           {statusIcon(summary.outOfDate ? 'update_needed' : connected ? needsRepair ? 'degraded' : 'connected' : status)}
           <span role="status" aria-live="polite">{statusText}</span>
         </span>}
-        description={(!connected || summary.outOfDate) && summary.detail ? (summary.outOfDate ? withCommandShell(summary.detail) : summary.detail) : undefined}
+        // An old Astrid is only named here: Settings → Updates is the one place to update it, with the path for this install.
+        description={summary.outOfDate ? COPY.outOfDateDetail[summary.outOfDate] : !connected ? summary.detail : undefined}
         action={summary.connect && <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => connection.connect()}>{RUNTIME_CONNECTION_COPY.permission.connect}</Button>}
       >
         {summary.checks && <SetupStatusLine checks={summary.checks} mink={false} announce={false} className="items-start" />}
-        {summary.outOfDate === 'runtime' && summary.updateResolution && <UpdateResolutionActions resolution={summary.updateResolution} />}
-        {summary.outOfDate === 'chat' && <CopyInstallCommand mode="update" />}
         {connected && details && needsRepair && (
           <>
             <CopyInstallCommand

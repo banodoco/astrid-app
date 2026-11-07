@@ -8,7 +8,7 @@
  * file stay module-private.
  *
  * Keeping these parsers is what makes the cross-repo assumptions checkable
- * (CLAUDE.md's "typed contracts at service boundaries" policy).
+ * (the typed-boundary contract).
  *
  * Two rules the parsers below exist to enforce:
  *

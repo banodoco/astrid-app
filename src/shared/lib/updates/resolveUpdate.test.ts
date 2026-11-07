@@ -78,18 +78,42 @@ describe('resolveUpdate', () => {
     expect(resolveUpdate({ ...status, installType: 'pinokio' }, 'settings').primary).toEqual({ label: 'Update in Pinokio' });
   });
 
-  it('uses the install command for fully-local guidance and preserves Pinokio routing', () => {
-    const schema = { compatibility: { kind: 'schema' as const, detail: 'old' } };
-    expect(resolveUpdate({ ...schema, installType: 'fully-local' }, 'settings')).toMatchObject({
+  it('gives a fully local install the same actions as every other direct install, with no command of its own', () => {
+    const inputs = [
+      { compatibility: { kind: 'schema' as const, detail: 'old' } },
+      { installedRelease: 3, requiredRelease: 4, requiredReason: 'security fix' },
+      { releaseBehind: true },
+      { midSessionSchemaMismatch: true },
+    ];
+    for (const input of inputs) {
+      for (const context of ['page', 'settings'] as const) {
+        const local = resolveUpdate({ ...input, installType: 'fully-local', updateNowAvailable: false }, context);
+        expect(local).toEqual(resolveUpdate({ ...input, installType: 'installer', updateNowAvailable: false }, context));
+        for (const action of [local.primary, local.secondary]) expect(action ?? {}).not.toHaveProperty('command');
+      }
+    }
+    // A soft release on the page routes to Settings, as it does for an installer install.
+    expect(resolveUpdate({ releaseBehind: true, installType: 'fully-local' }).primary).toEqual({ label: 'See updates', destination: 'settings-updates' });
+    expect(resolveUpdate({ compatibility: { kind: 'schema', detail: 'old' }, installType: 'fully-local' }, 'settings')).toMatchObject({
       primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' },
     });
-    expect(resolveUpdate({ ...schema, installType: 'fully-local' }, 'settings').secondary).not.toHaveProperty('command');
-    expect(resolveUpdate({ releaseBehind: true, installType: 'fully-local' })).toMatchObject({
-      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' },
-    });
-    expect(resolveUpdate({ ...schema, installType: 'pinokio' }, 'settings')).toMatchObject({
-      primary: { label: 'Update in Pinokio' }, secondary: null,
-    });
+  });
+
+  it('gives Pinokio only its own Update, on every card and in both contexts', () => {
+    const inputs = [
+      { compatibility: { kind: 'schema' as const, detail: 'old' } },
+      { installedRelease: 3, requiredRelease: 4, requiredReason: 'security fix' },
+      { releaseBehind: true },
+      { midSessionSchemaMismatch: true },
+      // An installer refusal or recovery reason never turns a Pinokio Astrid into an installer one.
+      { releaseBehind: true, updateReason: 'recovery-needed' as const, updateNowAvailable: true },
+      { releaseBehind: true, updateReason: 'busy' as const },
+    ];
+    for (const input of inputs) {
+      for (const context of ['page', 'settings'] as const) {
+        expect(resolveUpdate({ ...input, installType: 'pinokio' }, context)).toMatchObject({ primary: { label: 'Update in Pinokio' }, secondary: null });
+      }
+    }
   });
 
   it('uses the hard Reload action for a stale page ahead of update states', () => {

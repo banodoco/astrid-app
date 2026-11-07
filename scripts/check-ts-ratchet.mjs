@@ -3,10 +3,8 @@
  * TypeScript error-count ratchet for the app project.
  *
  * `tsconfig.app.json` is a "solution-style" project reference — the repo's own
- * `build`/`test` scripts never run `tsc -p tsconfig.app.json --noEmit`, so its
- * ~861 pre-existing errors are silently tolerated today. This script does not
- * try to fix that backlog; it stops it from growing, per the codebase's own
- * allowlist doctrine ("allowlists shrink, never grow" — CLAUDE.md).
+ * The full app typecheck is not always run by build/test scripts; this gate
+ * enforces the committed error baseline (currently zero), preventing regressions.
  *
  * It runs the app project's typecheck, counts `error TS` lines, and compares
  * the count against the committed baseline in `config/ts-error-baseline.json`:
@@ -16,10 +14,9 @@
  *     so this script never writes it).
  *   - count === baseline -> pass, silently.
  *
- * `tsc --noEmit` exits non-zero whenever there are any errors at all — which is
- * every run, since the baseline is never 0 today — so a nonzero exit code from
- * `tsc` is expected and is NOT treated as this script failing. Only the
- * baseline comparison decides this script's exit code.
+ * TypeScript exits nonzero when it reports errors. We inspect its diagnostics
+ * rather than treating that exit code alone as the ratchet verdict; only the
+ * baseline comparison decides whether this gate fails.
  */
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -59,7 +56,7 @@ function readBaseline() {
 
 function countTsErrors() {
   // `tsc --noEmit` exits 1/2 whenever it reports any error — that is the
-  // expected, steady-state outcome here (the baseline is never 0 today), so we
+  // possible when the compiler reports errors, so we
   // read stdout/stderr regardless of the exit code rather than treating a
   // nonzero status as a script failure.
   const invocation = packageManagerInvocation('npx', ['tsc', '-p', tsconfigPath, '--noEmit']);

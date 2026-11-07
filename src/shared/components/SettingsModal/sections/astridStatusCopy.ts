@@ -13,6 +13,11 @@ export const ASTRID_STATUS_COPY = {
   refused: 'Running, but refused this page',
   updateNeeded: 'Needs an update',
   chatUpdateNeeded: 'Connected. Chat needs an update',
+  /** The line under an old Astrid's status: what is old, and where to update it. No actions of its own. */
+  outOfDateDetail: {
+    runtime: 'This page needs a newer Astrid. Update it under Updates.',
+    chat: 'Chat on this computer is older than this page. Update Astrid under Updates.',
+  },
   blocked: "Blocked by your browser's settings",
   detailsToggle: 'Details',
   workspace: 'Workspace',

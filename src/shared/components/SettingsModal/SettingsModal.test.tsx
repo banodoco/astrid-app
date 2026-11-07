@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SCHEMA_DIGEST } from '@/integrations/runtime/generated-contract-metadata.ts';
 import { RUNTIME_CONNECTION_COPY as COPY, withBrowser } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_STATUS_COPY as STATUS_COPY } from './sections/astridStatusCopy.ts';
+import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
 
 const { connectionMock, readStatusMock, readHealthMock } = vi.hoisted(() => ({
   connectionMock: { value: null as unknown },
@@ -92,14 +93,23 @@ describe('SettingsModal Astrid status', () => {
     expect(within(section).queryByText(COPY.updateNeeded.title)).toBeNull();
   });
 
-  it('leads with the update when Astrid on this computer speaks another schema', () => {
+  it('names an Astrid with another schema and leaves the update itself to the Updates section', async () => {
     connectionMock.value = connection('update_needed');
     const section = renderSettings();
 
     expect(within(section).getByRole('status')).toHaveTextContent(STATUS_COPY.updateNeeded);
-    expect(within(section).getByText(COPY.updateNeeded.sentence)).toBeTruthy();
+    expect(within(section).getByText(STATUS_COPY.outOfDateDetail.runtime)).toBeTruthy();
     expect(within(section).queryByText(STATUS_COPY.connected)).toBeNull();
+    // No second set of update actions, and no Details button pointing at the section above.
+    expect(within(section).queryByRole('code')).toBeNull();
+    expect(within(section).queryByRole('button', { name: 'Details' })).toBeNull();
+    expect(within(section).queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
     expect(readStatusMock).not.toHaveBeenCalled();
+    // The Updates section is the one place to act on it, even without a release reading.
+    const updates = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(updates).findByText(COPY.updateNeeded.sentence)).toBeTruthy();
+    // This test page has no separate Runtime origin, so its one path is a source checkout's.
+    expect(within(updates).getByText(SOURCE_SCHEMA_MISMATCH_ACTION)).toBeTruthy();
   });
 
   it('says Astrid is running but refused this page, while the marks keep looking', () => {

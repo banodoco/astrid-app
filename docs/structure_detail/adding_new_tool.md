@@ -175,4 +175,4 @@ There is no cloud backend in this repo (the Supabase `supabase/` directory and E
 ---
 
 **Related Docs:**
-[Back to Structure](../../structure.md) | [Settings System](./settings_system.md) | [Design Guidelines](./design_motion_guidelines.md)
+[Contributor entry point](../../AGENTS.md) | [Settings System](./settings_system.md) | [Design Guidelines](./design_motion_guidelines.md)

@@ -232,12 +232,15 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               ? <>
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
+                  <p className="astrid-vision-source-attribution">
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
+                  </p>
                 </>
               : error
                 ? <>
                     <h1 id="astrid-vision-title">Astrid’s vision</h1>
                     <p className="astrid-vision-lead" role="alert">
-                      The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/visions/vision.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
+                      The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
                     </p>
                   </>
                 : <div className="astrid-vision-skeleton-hero" role="status" aria-label="Loading Astrid's vision">

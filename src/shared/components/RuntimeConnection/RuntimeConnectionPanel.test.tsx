@@ -370,6 +370,11 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: COPY.agent.commandCopy })).not.toBeInTheDocument();
     expect(screen.getByText('Update in Pinokio')).toBeInTheDocument();
+    // One path: no agent brief and no terminal fallback beside Pinokio's Update.
+    expect(screen.queryByRole('button', { name: COPY_FOR_AGENT_ACTION })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: COPY.agent.copy })).not.toBeInTheDocument();
+    expect(shownText()).not.toContain('Run it yourself');
+    expect(shownText()).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
   });
 
   it('source update guidance points to updating checkouts and never shows an installer command', () => {
@@ -408,6 +413,18 @@ describe('RuntimeConnectionPanel', () => {
       expect(text).not.toMatch(/set up or restart Astrid/);
       fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
       expect(connect).toHaveBeenCalledOnce();
+    });
+
+    it('tells the agent to update a Pinokio Astrid with Pinokio\u2019s Update, never the installer', async () => {
+      const writeText = vi.fn(async (_text: string) => undefined);
+      stubClipboard(writeText);
+      panel(connectionFor({ status: 'refused' }, { managedByPinokio: true }));
+      fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
+      await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
+      const text = writeText.mock.calls[0]![0];
+      expect(text).toContain('open Pinokio and use the Update button for Astrid');
+      expect(text).not.toContain(installCommand('update'));
+      expect(text).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
     });
   });
 

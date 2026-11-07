@@ -3,13 +3,12 @@ import { Blocks, Check, ChevronDown, ChevronRight, Copy, Plus } from 'lucide-rea
 import { Command, CommandGroup, CommandItem, CommandList, CommandSeparator } from '@/shared/components/ui/command.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/shared/components/ui/popover.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn';
-import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
 import { RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import type { LocalAgentChoice, LocalAgentId } from '@/integrations/astrid/localAgents.ts';
 import { AGENT_CHAT_COPY as copy, AGENT_INTEGRATION_PROMPT } from '@/integrations/astrid/chatCopy.ts';
 import { CopyFallback, useCopyAction } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
 import { PICKER_GROUP, PICKER_PANEL, PickerSearch, ROW_BUTTON, matches } from '@/shared/components/ui/picker-menu.tsx';
-import { isChatUpdateError } from './ChatUpdateNeeded.tsx';
+import { ChatUpdateCommand, isChatUpdateError } from './ChatUpdateNeeded.tsx';
 import { AGENT_IDS, AgentIcon, agentAvailability, agentNames } from './agentIdentity.tsx';
 import { readModelThoughtSelections, readNewChatChoice, rememberModelThoughtSelection, rememberNewChatChoice, type NewChatChoice } from './newChatThinkingSelection.ts';
 import { NewChatModels, type NewChatAgentModels } from './NewChatModels.tsx';
@@ -25,7 +24,7 @@ function NewChatUpdateNeeded({ detail }: { readonly detail: string }) {
   return (
     <div className="space-y-2 text-left text-foreground">
       <p className="font-medium">{RUNTIME_CONNECTION_COPY.chatNeedsUpdate}</p>
-      <CopyInstallCommand mode="update" />
+      <ChatUpdateCommand />
       <details className="text-[11px] text-muted-foreground">
         <summary className="cursor-pointer">Details</summary>
         <p className="mt-1 break-words">{detail}</p>

@@ -11,7 +11,7 @@ import { CopyFallback, CopyInstallCommand, useCopyAction } from './CopyInstallCo
 import { CardDisclosure, EditorCard, EditorCardFoot } from './EditorCard.tsx';
 import { EditorCardLayer } from './EditorCardLayer.tsx';
 import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
-import { PINOKIO_INSTALL_COPY, pinokioReconnectInstructions, RUNTIME_CONNECTION_COPY as COPY, withBrowser, withOrigin } from './copy.ts';
+import { PINOKIO_INSTALL_COPY, pinokioReconnectInstructions, RUNTIME_CONNECTION_COPY as COPY, updateNeededSentence, withBrowser, withOrigin } from './copy.ts';
 import { detectInstallScenario } from '@/pages/Home/installScenario.ts';
 import { linkForSupportedBrowser } from '@/integrations/runtime/autoConnectRequest.ts';
 import { COPY_FOR_AGENT_ACTION, resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
@@ -345,7 +345,7 @@ function NotRunningCard({ connection, onBack }: { readonly connection: RuntimeCo
 function RefusedCard({ connection, onBack }: { readonly connection: RuntimeConnectionValue; readonly onBack?: () => void }) {
   const { refused } = COPY;
   return <Card title={refused.title} sentence={withOrigin(refused.sentence, window.location.origin)} onBack={onBack} status={COPY.waiting} help={<HelpLink />} action={<div className="space-y-2">
-    <CopyRefusedInstructions />
+    <CopyRefusedInstructions pinokio={connection.managedByPinokio === true} />
     <Button type="button" variant="outline" className="w-full" onClick={connection.connect}>{refused.retry}</Button>
   </div>} />;
 }
@@ -354,8 +354,8 @@ function UpdateNeededCard({ connection, onBack }: { readonly connection: Runtime
   const pageStale = usePageStale();
   const operation = useInstallerUpdate(connection);
   const { updateNeeded } = COPY;
-  const pinokioManaged = connection.managedByPinokio === true;
-  const resolution = resolveUpdate({ ...operation.releaseStatus?.resolution, pageStale, compatibility: { kind: 'schema', detail: pinokioManaged ? updateNeeded.pinokioSentence : updateNeeded.sentence }, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason });
+  // The sentence follows the same install type as the actions, so a Pinokio Astrid is never told to hand over instructions.
+  const resolution = resolveUpdate({ ...operation.releaseStatus?.resolution, pageStale, compatibility: { kind: 'schema', detail: updateNeededSentence(operation.installType === 'pinokio') }, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason });
   return <Card title={resolution.card === 'newer' ? 'Astrid on this computer is newer' : resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} operation={operation} />} status={COPY.waiting} help={<HelpLink />} />;
 }
 

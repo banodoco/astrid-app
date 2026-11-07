@@ -264,24 +264,10 @@ export function agentInstructions(mode: CommandMode, pageOrigin: string, localBu
 }
 
 /**
- * The handoff for a fully local Astrid: its own checkout updates itself with `npm run update`, and the installer is
- * never part of it. A refusal the command names is resolved without discarding edits.
- */
-export function localUpdateInstructions(command: string, pageOrigin: string): string {
-  return [
-    `Please update my fully local Astrid so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
-    `Run \`${command}\` in the running Astrid checkout, the clone this page is served from.`,
-    'If it refuses, resolve the refusal it names (for example uncommitted edits, local commits that block a fast-forward, or an update already running) without discarding my edits. Keep my uncommitted changes and commits; do not reset, clean or overwrite them.',
-    'Do not reinstall Astrid or replace my workspace, projects, media, credentials or agent instructions.',
-    'When it finishes, confirm the page shows Connected. If anything did not finish, tell me the actual result.',
-  ].join('\n\n');
-}
-
-/**
  * The handoff for a running Astrid that refuses this page's origin: no install, no reset, a check the agent can run,
  * and the one fix there is (update) when the page is astrid.haus.
  */
-export function refusedAgentInstructions(pageOrigin: string, apiBase: string): string {
+export function refusedAgentInstructions(pageOrigin: string, apiBase: string, pinokio = false): string {
   const platform = detectPlatform();
   const windows = platform === 'windows';
   return [
@@ -289,10 +275,21 @@ export function refusedAgentInstructions(pageOrigin: string, apiBase: string): s
     `Check it: \`${healthCheckCommand(apiBase, pageOrigin, platform)}\`. A refusal answers 403 with no Access-Control-Allow-Origin header. Compare with \`${healthCheckCommand(apiBase, 'https://astrid.haus', platform)}\`, which should answer with health JSON.`,
     `Service logs are named service-<name>.log under ${runtimeLogDirectory(platform)}.`,
     'Astrid is installed and running: do not reinstall it, and do not reset, delete or replace my workspace, projects, media, credentials or agent instructions.',
-    `If the page is https://astrid.haus, this Astrid is probably out of date. Update it with the official installer's update command; read the script before running it. ${windows ? `In PowerShell: ${ASTRID_COMMANDS.windowsUpdate}\nFrom Git Bash or another shell: ${ASTRID_COMMANDS.windowsAgentUpdate}\nUpdate from Windows, not inside WSL.` : `The command: ${ASTRID_COMMANDS.macLinuxUpdate}`} If you run Astrid from source checkouts instead, update those checkouts to their main branches and restart Astrid; don't run the installer over them.`,
+    pinokio
+      ? `If the page is https://astrid.haus, this Astrid is probably out of date. It was installed with Pinokio, so update it there: open Pinokio and use the Update button for Astrid. Don't run the Astrid installer or its update command over a Pinokio install.`
+      : `If the page is https://astrid.haus, this Astrid is probably out of date. Update it with the official installer's update command; read the script before running it. ${windows ? `In PowerShell: ${ASTRID_COMMANDS.windowsUpdate}\nFrom Git Bash or another shell: ${ASTRID_COMMANDS.windowsAgentUpdate}\nUpdate from Windows, not inside WSL.` : `The command: ${ASTRID_COMMANDS.macLinuxUpdate}`} If you run Astrid from source checkouts instead, update those checkouts to their main branches and restart Astrid; don't run the installer over them.`,
     `If the page is not https://astrid.haus, ${pageOrigin} isn't an address this Astrid serves. Tell me to open https://astrid.haus instead; don't change Astrid's allowed origins unless I ask.`,
     'My tab connects by itself once Astrid accepts the page; if it shows a Connect button, click it.',
   ].join('\n\n');
+}
+
+/**
+ * The update screen's sentence. Pinokio has one way to update, its own Update button, so its sentence never mentions
+ * instructions or a command; every other install hands its coding agent the update brief.
+ */
+export function updateNeededSentence(pinokio: boolean, chatOnly = false): string {
+  const sentence = pinokio ? RUNTIME_CONNECTION_COPY.updateNeeded.pinokioSentence : withCommandShell(RUNTIME_CONNECTION_COPY.updateNeeded.sentence);
+  return chatOnly ? `${RUNTIME_CONNECTION_COPY.chatNeedsUpdate} ${sentence}` : sentence;
 }
 
 /** `{origin}` in a card's text filled with the page's origin. */
@@ -370,8 +367,6 @@ export interface RuntimeConnectionCopy {
     readonly terminalAlternative: string;
     /** Update only, where the installer is one of two routes. */
     readonly terminalAlternativeUpdate: string;
-    /** Update of a fully local Astrid: the command runs in its checkout. */
-    readonly terminalAlternativeLocal: string;
   };
   /** Next to the compose controls the hosted build disables. */
   readonly composeDisabled: string;
@@ -517,7 +512,6 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
     commandCopied: 'Command copied',
     terminalAlternative: 'Or run this yourself in a terminal:',
     terminalAlternativeUpdate: 'No coding agent? Run this in a terminal:',
-    terminalAlternativeLocal: 'No coding agent? Run this in a terminal in the Astrid checkout:',
   },
 
   composeDisabled: "Making new images isn't on this page yet.",

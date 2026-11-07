@@ -644,14 +644,18 @@
   line-height: inherit;
 }
 .astrid-vision-lead strong { color: var(--astrid-ink); font-weight: 550; }
-/* The repository attribution is supporting copy, not a second manifesto statement. */
-.astrid-vision-lead p + p {
-  margin-top: 16px;
+/* Source attribution belongs to the public page, not to the source vision prose. */
+.astrid-vision-lead p + p { margin-top: 16px; }
+.astrid-vision-source-attribution {
+  margin: 16px 0 0;
+  max-width: 48ch;
+  color: var(--astrid-muted);
   font-size: 14px;
   line-height: 1.6;
 }
-.astrid-vision-lead p + p a {
+.astrid-vision-source-attribution a {
   color: var(--astrid-ink);
+  text-decoration: underline;
   text-underline-offset: 3px;
 }
 

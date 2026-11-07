@@ -54,6 +54,27 @@ async function readAgentRuntime(agentSha) {
   return lock.source_commit;
 }
 
+async function readAgentSources(agentSha) {
+  const pins = JSON.parse((await readRaw(agentRepo, agentSha, 'astrid/packs/runpod/pins.json')).toString('utf8'));
+  const sources = pins?.sources ?? {};
+  const vibecomfy = sources.vibecomfy;
+  const lifecycle = sources.lifecycle;
+  if (!/^[0-9a-f]{40}$/.test(vibecomfy?.revision ?? '')) {
+    throw new Error(`Agent ${agentSha} pins.json needs a full vibecomfy revision`);
+  }
+  if (!/^[0-9a-f]{40}$/.test(lifecycle?.revision ?? '') || typeof lifecycle.repository !== 'string') {
+    throw new Error(`Agent ${agentSha} pins.json needs a full lifecycle revision and repository`);
+  }
+  // The pins schema rejects extra keys, so the lifecycle version is a constant in the Agent installer.
+  const tools = (await readRaw(agentRepo, agentSha, 'astrid/installer/tools.py')).toString('utf8');
+  const match = /^LIFECYCLE_VERSION\s*=\s*["']([^"']+)["']/m.exec(tools);
+  if (!match) throw new Error(`Agent ${agentSha} astrid/installer/tools.py needs LIFECYCLE_VERSION`);
+  return {
+    vibecomfy: { sha: vibecomfy.revision },
+    lifecycle: { repo: lifecycle.repository, sha: lifecycle.revision, version: match[1] },
+  };
+}
+
 export function applyReleasePin(manifest, reason) {
   const previousRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
   if (!Number.isSafeInteger(previousRelease) || previousRelease < 0) {
@@ -86,6 +107,10 @@ async function pin(agentSha, reason) {
   manifest.agent.sha = agentSha;
   manifest.runtime.sha = runtimeSha;
   manifest.runtime.schema_digest = schemaDigest;
+  const sources = await readAgentSources(agentSha);
+  manifest.vibecomfy = sources.vibecomfy;
+  manifest.lifecycle = sources.lifecycle;
+  delete manifest.runpod;
   applyReleasePin(manifest, reason);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
@@ -96,6 +121,18 @@ export async function checkManifest(manifest) {
   const runtimeSha = await readAgentRuntime(agentSha);
   if (manifest.runtime?.sha !== runtimeSha) {
     throw new Error(`install-manifest.json runtime.sha ${manifest.runtime?.sha ?? '(missing)'} does not match agent ${agentSha} runtime.lock.json source_commit ${runtimeSha}`);
+  }
+  if (manifest.runpod !== undefined) {
+    throw new Error('install-manifest.json must not carry a runpod block; lifecycle is the single RunPod source');
+  }
+  const sources = await readAgentSources(agentSha);
+  for (const name of ['vibecomfy', 'lifecycle']) {
+    if (manifest[name] === undefined) {
+      throw new Error(`install-manifest.json is missing the ${name} block; run pin.mjs ${agentSha}`);
+    }
+    if (JSON.stringify(manifest[name]) !== JSON.stringify(sources[name])) {
+      throw new Error(`install-manifest.json ${name} does not match Agent ${agentSha} pins; run pin.mjs ${agentSha}`);
+    }
   }
   const schemaDigest = await runtimeSchemaDigest(runtimeSha);
   if (manifest.runtime?.schema_digest !== schemaDigest) {

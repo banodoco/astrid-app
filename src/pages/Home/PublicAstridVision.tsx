@@ -232,6 +232,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               ? <>
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
+                  <p className="astrid-vision-source-attribution">
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
+                  </p>
                 </>
               : error
                 ? <>

@@ -42,6 +42,24 @@ test('expanded mobile gap details occupy the entire row, including the ID column
   expect(Math.abs(rect.right)).toBeLessThan(3);
 });
 
+test('gap IDs consistently stack the letter-dash prefix above the digits at phone and desktop widths', async ({page}) => {
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({width, height: 900});
+    await page.goto('/vision', {waitUntil: 'domcontentloaded'});
+    for (const [id, prefix, digits] of [['aa-001', 'AA-', '001'], ['f-003', 'F-', '003']] as const) {
+      const label = page.locator('#gap-' + id + ' .astrid-vision-part-number');
+      const lines = label.locator('span');
+      await expect(lines).toHaveText([prefix, digits]);
+      const geometry = await lines.evaluateAll(elements => elements.map(element => {
+        const rect = element.getBoundingClientRect();
+        return {x: rect.x, y: rect.y};
+      }));
+      expect(geometry[1].y).toBeGreaterThan(geometry[0].y + 3);
+      expect(Math.abs(geometry[1].x - geometry[0].x)).toBeLessThan(3);
+    }
+  }
+});
+
 test('first visit paints stable text skeletons until GitHub content becomes available', async ({page, request}) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();

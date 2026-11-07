@@ -90,11 +90,14 @@ function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevisio
 function GapPoint({ gap, phone, openProjects }: { gap: PublicVisionGap; phone: boolean; openProjects: PublicVisionProject[] }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
+  const idParts = /^([A-Z]+-)(\d+)$/.exec(gap.id);
   const expanded = !phone || open;
   const plans = openProjects.filter(project => project.gapIds.includes(gap.id)).slice(0, 3);
   return (
     <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={expanded || undefined}>
-      <span className="astrid-vision-part-number" aria-hidden="true">{gap.id}</span>
+      <span className="astrid-vision-part-number" aria-hidden="true">
+        {idParts ? <><span>{idParts[1]}</span><span>{idParts[2]}</span></> : gap.id}
+      </span>
       <h3>{phone ? (
         <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(value => !value)}>
           <span>{gap.title}</span>

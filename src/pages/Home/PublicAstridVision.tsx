@@ -383,16 +383,18 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <p className="astrid-vision-eyebrow">The gaps</p>
           <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
         </div>
-        <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
-        <div className="astrid-vision-filter-bar">
-          <label htmlFor="astrid-vision-gap-filter">Status</label>
-          <select id="astrid-vision-gap-filter" aria-label="Filter gaps by status" value={gapFilter}
-            onChange={event => setGapFilter(event.target.value as GapFilter)}>
-            {GAP_FILTERS.map(option => <option key={option.value} value={option.value}>
-              {option.label} ({option.value === 'current' ? CURRENT_GAPS.length : option.value === 'all'
-                ? content.gaps.length : content.gaps.filter(gap => gap.assessment === option.value).length})
-            </option>)}
-          </select>
+        <div className="astrid-vision-context-row">
+          <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
+          <div className="astrid-vision-filter-bar">
+            <label htmlFor="astrid-vision-gap-filter">Status</label>
+            <select id="astrid-vision-gap-filter" aria-label="Filter gaps by status" value={gapFilter}
+              onChange={event => setGapFilter(event.target.value as GapFilter)}>
+              {GAP_FILTERS.map(option => <option key={option.value} value={option.value}>
+                {option.label} ({option.value === 'current' ? CURRENT_GAPS.length : option.value === 'all'
+                  ? content.gaps.length : content.gaps.filter(gap => gap.assessment === option.value).length})
+              </option>)}
+            </select>
+          </div>
         </div>
         <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} openProjects={CURRENT_PROJECTS} />)}</ol>
         {gapsToShow.length === 0 && <p className="astrid-vision-filter-empty" role="status">No gaps with this status yet.</p>}
@@ -403,16 +405,18 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <p className="astrid-vision-eyebrow">Project catalog</p>
           <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
         </div>
-        <p className="astrid-vision-section-context">These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A listing doesn't mean someone has already started work.</p>
-        <div className="astrid-vision-filter-bar">
-          <label htmlFor="astrid-vision-project-filter">Status</label>
-          <select id="astrid-vision-project-filter" aria-label="Filter projects by status" value={projectFilter}
-            onChange={event => { setProjectFilter(event.target.value as ProjectFilter); setShowAllProjects(false); }}>
-            {PROJECT_FILTERS.map(option => <option key={option.value} value={option.value}>
-              {option.label} ({option.value === 'current' ? CURRENT_PROJECTS.length : option.value === 'all'
-                ? content.projects.length : content.projects.filter(project => project.status === option.value).length})
-            </option>)}
-          </select>
+        <div className="astrid-vision-context-row">
+          <p className="astrid-vision-section-context">These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A listing doesn't mean someone has already started work.</p>
+          <div className="astrid-vision-filter-bar">
+            <label htmlFor="astrid-vision-project-filter">Status</label>
+            <select id="astrid-vision-project-filter" aria-label="Filter projects by status" value={projectFilter}
+              onChange={event => { setProjectFilter(event.target.value as ProjectFilter); setShowAllProjects(false); }}>
+              {PROJECT_FILTERS.map(option => <option key={option.value} value={option.value}>
+                {option.label} ({option.value === 'current' ? CURRENT_PROJECTS.length : option.value === 'all'
+                  ? content.projects.length : content.projects.filter(project => project.status === option.value).length})
+              </option>)}
+            </select>
+          </div>
         </div>
         <ul className="astrid-vision-issues-list astrid-vision-project-list" id="astrid-vision-project-list">
           {projectsToShow.map(project => <ProjectRow key={project.id} project={project} />)}

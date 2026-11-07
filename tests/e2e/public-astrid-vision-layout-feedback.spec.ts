@@ -99,7 +99,7 @@ test('only the new contribution section and workbench mink remain after the proj
     contentType: 'application/json',
     headers: {'access-control-allow-origin': '*'},
     body: JSON.stringify({...raw, vision: {...raw.vision,
-      contributeMarkdown: 'You and your agents can help build Astrid.\\n\\n[Give these instructions to your agent](https://github.com/banodoco/astrid-dev#people)'
+      contributeMarkdown: 'You and your agents can help build Astrid.\n\n[Give these instructions to your agent](https://github.com/banodoco/astrid-dev#people)'
     }})
   }));
   await page.goto('/vision', {waitUntil: 'domcontentloaded'});

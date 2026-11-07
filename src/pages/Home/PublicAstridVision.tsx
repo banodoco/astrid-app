@@ -87,24 +87,20 @@ function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevisio
 
 
 
-function GapPoint({ gap, phone, openProjects }: { gap: PublicVisionGap; phone: boolean; openProjects: PublicVisionProject[] }) {
+function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: PublicVisionProject[] }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const idParts = /^([A-Z]+-)(\d+)$/.exec(gap.id);
-  const expanded = !phone || open;
   const plans = openProjects.filter(project => project.gapIds.includes(gap.id)).slice(0, 3);
   return (
-    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={expanded || undefined}>
-      <span className="astrid-vision-part-number" aria-hidden="true">
-        {idParts ? <><span>{idParts[1]}</span><span>{idParts[2]}</span></> : gap.id}
-      </span>
-      <h3>{phone ? (
+    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={open || undefined}>
+      <h3>
         <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(value => !value)}>
-          <span>{gap.title}</span>
-          <ChevronDown aria-hidden="true" size={18} strokeWidth={1.75} />
+          <span className="astrid-vision-part-number" aria-hidden="true">{gap.id}</span>
+          <span className="astrid-vision-part-title">{gap.title}</span>
+          <ChevronDown aria-hidden="true" size={20} strokeWidth={1.75} />
         </button>
-      ) : gap.title}</h3>
-      <div className="astrid-vision-part-body" id={bodyId} hidden={!expanded || undefined}>
+      </h3>
+      <div className="astrid-vision-part-body" id={bodyId} hidden={!open}>
         <div className="astrid-vision-part-vision">
           <p className="astrid-vision-label">What we're working toward</p>
           <MarkdownText value={gap.desiredMarkdown} />
@@ -233,7 +229,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
                   </p>
                 </>
               : error
@@ -295,7 +291,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">The vision</p>
-          <h2 id="astrid-vision-north-star-title">What we're building</h2>
+          <h2 id="astrid-vision-north-star-title">What we're building towards</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -336,9 +332,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             <p className="astrid-vision-eyebrow">The gaps</p>
             <h2 id="astrid-vision-parts-title">What's still missing</h2>
           </div>
-          <p>The vision is ambitious. These are the outcomes we haven't fully demonstrated yet, and the evidence we're using to assess progress.</p>
+          <p>These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
         </div>
-        <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} phone={phone} openProjects={OPEN_PROJECTS} />)}</ol>
+        <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} openProjects={OPEN_PROJECTS} />)}</ol>
         {OTHER_GAPS.length > 0 && (
           <button className="astrid-vision-more-button" type="button"
             aria-expanded={showAllGaps}

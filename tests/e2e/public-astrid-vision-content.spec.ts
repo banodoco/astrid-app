@@ -31,13 +31,11 @@ test('vision displays the GitHub-published pillars and operating principles', as
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
 });
 
-test('hero shows unlinked source attribution and a linked contribution guide', async ({ page, request }) => {
+test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
   const content = await feed(request);
-  const contributionGuide = 'https://github.com/banodoco/astrid-dev#want-to-contribute-give-this-to-your-agent';
-  const intro = [
-    'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.',
-    'The information on this page is pulled from the Astrid Dev repository. If you\'d like to contribute, visit [the contribution guide](' + contributionGuide + ').',
-  ].join('\n\n');
+  const source = 'https://github.com/banodoco/astrid-dev/blob/main/vision/README.md';
+  const contribute = 'https://github.com/banodoco/astrid-dev#want-to-contribute-give-this-to-your-agent';
+  const intro = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
   await page.route(FEED, route => route.fulfill({
     status: 200,
     contentType: 'application/json',
@@ -46,13 +44,13 @@ test('hero shows unlinked source attribution and a linked contribution guide', a
   }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const paragraphs = page.locator('.astrid-vision-lead p');
-  await expect(paragraphs).toHaveCount(2);
-  await expect(paragraphs.nth(1)).toContainText('Astrid Dev repository');
-  await expect(paragraphs.nth(1).locator('a')).toHaveCount(1);
-  await expect(paragraphs.nth(1).getByRole('link', { name: 'the contribution guide' }))
-    .toHaveAttribute('href', contributionGuide);
-  await expect.poll(() => paragraphs.nth(1).evaluate(element => getComputedStyle(element).fontSize))
-    .toBe('14px');
+  await expect(paragraphs).toHaveCount(1);
+  await expect(paragraphs.first()).toHaveText(intro);
+  const attribution = page.locator('.astrid-vision-source-attribution');
+  await expect(attribution).toContainText('Astrid Dev repository');
+  await expect(attribution.getByRole('link', { name: 'Astrid Dev repository' })).toHaveAttribute('href', source);
+  await expect(attribution.getByRole('link', { name: 'Help us build it' })).toHaveAttribute('href', contribute);
+  await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
 });
 
 test('published projects retain their status and link directly to GitHub', async ({ page, request }) => {

@@ -1,13 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AstridStatusSection } from './AstridStatusSection.tsx';
-import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY, installCommand } from '@/shared/components/RuntimeConnection/copy.ts';
+import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY, installCommand, RECOMMENDED_SETUP_CHOICES } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
 import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
 import { UPDATE_IN_PINOKIO_ACTION } from '@/shared/lib/updates/resolveUpdate.ts';
+
+const settingsInstallCommand = () => installCommand('install', RECOMMENDED_SETUP_CHOICES, true);
 
 const mocks = vi.hoisted(() => ({
   readStatus: vi.fn(),
@@ -18,7 +20,8 @@ const mocks = vi.hoisted(() => ({
   connection: {
     state: { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } },
     isChecking: false, isConnected: true, managedByPinokio: false, schemaDigest: null, localServiceOutOfDate: false, connect: () => {},
-  } as { state: { status: string; realm?: { realm_id: string; display_name: string } }; isChecking: boolean; isConnected: boolean; managedByPinokio: boolean; schemaDigest: string | null; localServiceOutOfDate: boolean; connect: () => void },
+    connectedBefore: true,
+  } as { state: { status: string; realm?: { realm_id: string; display_name: string } }; isChecking: boolean; isConnected: boolean; managedByPinokio: boolean; schemaDigest: string | null; localServiceOutOfDate: boolean; connectedBefore: boolean; connect: () => void },
 }));
 
 vi.mock('@/integrations/runtime/client.ts', () => ({
@@ -47,15 +50,17 @@ vi.mock('@/shared/lib/browser/clipboard.ts', () => ({
   writeClipboardTextSafe: mocks.clipboard,
 }));
 
-/** The status section names an old Astrid; Settings → Updates is the one place with the actions for it. */
+/**
+ * The status section names an old Astrid; Settings → Updates is the one place with the actions for it. The install Setup
+ * block (installer consent) may still be present, so this checks for update actions and the update command, not for any command.
+ */
 function expectNoUpdateActions() {
   const text = document.body.textContent ?? '';
-  expect(screen.queryByRole('code')).not.toBeInTheDocument();
-  for (const name of ['Copy for your agent', 'Copy instructions for your agent', 'Copy command', 'See updates', 'Update now']) {
+  for (const name of ['See updates', 'Update now']) {
     expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
   }
-  for (const words of ['update your checkouts', 'Update in Pinokio', 'Run it yourself', 'npm run update']) expect(text).not.toContain(words);
-  expect(text).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
+  for (const code of screen.queryAllByRole('code')) expect(code.textContent).not.toMatch(/--(autostart|command|skills|skill-copies)/);
+  for (const words of ['update your checkouts', 'Update in Pinokio', 'npm run update']) expect(text).not.toContain(words);
 }
 
 async function openDetails() {
@@ -64,13 +69,14 @@ async function openDetails() {
 
 /** Each describe starts from a connected direct install with one failed service. */
 function resetMocks() {
+  localStorage.clear();
   mocks.connection.state = { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } };
   mocks.connection.isChecking = false;
   mocks.connection.schemaDigest = null;
   mocks.connection.localServiceOutOfDate = false;
   mocks.connection.isConnected = true;
   mocks.connection.managedByPinokio = false;
-  mocks.origin = '';
+  mocks.origin = 'http://127.0.0.1:17340';
   mocks.readInstallerUpdateHealth.mockReset().mockResolvedValue({ status: 'ok', release: 0, runtime_instance_id: 'runtime-1', identity: { managed_by: null, release: 0 } });
   mocks.connection.connect = mocks.connect.mockReset();
   mocks.clipboard.mockReset().mockResolvedValue(true);
@@ -164,7 +170,7 @@ describe('AstridStatusSection', () => {
     expect(screen.getByText(/Last exit code: 2/)).toBeInTheDocument();
     expect(screen.getByText(/service-chat\.log/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-    expect(screen.getByText('curl -fsSL https://astrid.haus/install | sh')).toBeInTheDocument();
+    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
   });
 
   it('shows historical service failures without treating a running service as unhealthy', async () => {
@@ -190,15 +196,15 @@ describe('AstridStatusSection', () => {
     expect(retryingWorker).toHaveTextContent('Last exit code: 1');
     expect(retryingWorker).toHaveTextContent(/service-retrying-worker\.log/);
     expect(retryingWorker).toHaveTextContent('Running');
-    expect(screen.queryByRole('button', { name: 'Copy command' })).not.toBeInTheDocument();
-    expect(screen.queryByText('curl -fsSL https://astrid.haus/install | sh')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
     expect(screen.queryByText(/Restarts:/)).not.toBeInTheDocument();
   });
 
   it('copies service reason, exit and log details into the agent brief', async () => {
     render(<AstridStatusSection isOpen />);
     await openDetails();
-    fireEvent.click(await screen.findByRole('button', { name: CONNECTION_COPY.agent.copy }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy instructions for your agent' }));
 
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
     const brief = String(mocks.clipboard.mock.calls[0][0]);
@@ -223,7 +229,7 @@ describe('AstridStatusSection', () => {
 
     expect(await screen.findByRole('status')).toHaveTextContent("Part of Astrid isn't working. Give these instructions to your coding agent to restart it.");
     expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-    expect(screen.getByText('curl -fsSL https://astrid.haus/install | sh')).toBeInTheDocument();
+    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
   });
 
   it('labels the Runtime repair surface as beta on Windows only', async () => {
@@ -232,13 +238,13 @@ describe('AstridStatusSection', () => {
     const view = render(<AstridStatusSection isOpen />);
 
     expect(await screen.findByText(CONNECTION_COPY.windowsBeta)).toBeInTheDocument();
-    expect(screen.getByText('irm https://astrid.haus/install.ps1 | iex')).toBeInTheDocument();
+    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
 
     platform.mockReturnValue('MacIntel');
     userAgent.mockReturnValue('Macintosh');
     view.rerender(<AstridStatusSection isOpen />);
     expect(screen.queryByText(CONNECTION_COPY.windowsBeta)).not.toBeInTheDocument();
-    expect(screen.getByText('curl -fsSL https://astrid.haus/install | sh')).toBeInTheDocument();
+    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
   });
 
   it('copies the same install command shown in the repair control', async () => {
@@ -247,20 +253,39 @@ describe('AstridStatusSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
 
-    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledWith(installCommand('install')));
+    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledWith(settingsInstallCommand()));
     expect(await screen.findByRole('button', { name: 'Command copied' })).toBeInTheDocument();
   });
 
   it('copies a complete agent brief separately from the repair command', async () => {
     render(<AstridStatusSection isOpen />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy for your agent' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy instructions for your agent' }));
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
     const brief = mocks.clipboard.mock.calls[0][0];
     expect(brief).toContain('selected workspace and data root');
     expect(brief).toContain('The installer adopts an existing workspace itself');
-    expect(brief).toContain(installCommand('install'));
-    expect(brief).not.toBe(installCommand('install'));
+    expect(brief).toContain(settingsInstallCommand());
+    expect(brief).not.toBe(settingsInstallCommand());
     expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
+  });
+
+  it('lets the Settings checkbox control Customize and consent wording without changing command bytes', async () => {
+    render(<AstridStatusSection isOpen />);
+    const checkbox = await screen.findByRole('checkbox', { name: "I've already set up Astrid" });
+    expect(checkbox).toBeChecked();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+    const command = screen.getByRole('code').textContent;
+    fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
+    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
+    expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
+
+    fireEvent.click(checkbox);
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+    expect(screen.getByRole('code').textContent).toBe(command);
+    mocks.clipboard.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: 'Copied. Paste them into your agent.' }));
+    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
+    expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
   });
 
   it('names an old chat service and leaves its update to the Updates section', async () => {
@@ -420,15 +445,14 @@ describe('AstridStatusSection repair follows the install type', () => {
     expect(screen.getByText(UPDATE_IN_PINOKIO_ACTION)).toBeInTheDocument();
   });
 
-  it('keeps the install command and agent brief for a direct install', async () => {
+  it("keeps the Setup block, with its install command and agent brief, as a direct install's repair", async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
     await pageUpdateOperation(runtimeApiBase()).refresh();
     render(<AstridStatusSection isOpen />);
 
     expect(await screen.findByText(ASTRID_STATUS_COPY.degraded)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: CONNECTION_COPY.agent.copy })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('install'));
+    expect(await screen.findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
     expect(screen.queryByText(UPDATE_IN_PINOKIO_ACTION)).not.toBeInTheDocument();
   });
 

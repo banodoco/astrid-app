@@ -196,6 +196,31 @@
   letter-spacing: -0.035em;
 }
 
+/* Context and status filter share a line on desktop; section header geometry stays unchanged. */
+.astrid-vision-context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(16px, 3vw, 32px);
+  margin: -8px 0 24px;
+}
+.astrid-vision-section-context {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 70ch;
+  margin: 0;
+  color: var(--astrid-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+.astrid-vision-section-context a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.astrid-vision-section-context a:hover { text-decoration-color: var(--astrid-accent); }
+
 /* The North Star: four goals, each on its own quiet tint with a mink acting it out. */
 .astrid-vision-principles {
   display: grid;
@@ -321,7 +346,7 @@
   gap: clamp(12px, 2vw, 22px);
   width: 100%;
   margin: 0;
-  padding: 16px 2px;
+  padding: 16px 16px 16px 2px;
   border: 0;
   background: none;
   color: inherit;
@@ -606,9 +631,10 @@
   padding: 0;
   list-style: none;
 }
-.astrid-vision-standards-list li {
-  border-top: 1px solid var(--astrid-line);
-  padding-top: 16px;
+/* The section divider is enough; suppress inherited list-item rules as well. */
+.astrid-vision .astrid-vision-standards-list > li {
+  border-top: none;
+  padding-top: 0;
 }
 .astrid-vision-standards-list li > span {
   color: var(--astrid-accent);
@@ -654,10 +680,10 @@
 /* Both catalogs share one quiet, native status selector. Counts come from the feed. */
 .astrid-vision-filter-bar {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  padding: 14px 2px;
 }
 .astrid-vision-filter-bar label {
   color: var(--astrid-muted);
@@ -668,10 +694,11 @@
 .astrid-vision-filter-bar select {
   min-width: 154px;
   max-width: min(100%, 260px);
-  padding: 8px 12px;
+  appearance: none;
+  padding: 8px 38px 8px 12px;
   border: 1px solid var(--astrid-line);
   border-radius: 8px;
-  background: var(--astrid-panel);
+  background: var(--astrid-panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23615e55' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center / 16px 16px;
   color: var(--astrid-ink);
   font-family: inherit;
   font-size: 13px;
@@ -682,6 +709,27 @@
 .astrid-vision-filter-bar select:focus-visible {
   outline: 2px solid var(--astrid-accent);
   outline-offset: 3px;
+}
+@media (max-width: 760px) {
+  .astrid-vision-context-row { display: block; }
+  .astrid-vision-context-row .astrid-vision-section-context { margin-bottom: 12px; }
+  /* Label + control together never exceed half the phone viewport. */
+  .astrid-vision-context-row .astrid-vision-filter-bar {
+    width: min(50vw, 210px);
+    max-width: 100%;
+    margin-left: auto;
+    gap: 8px;
+  }
+  .astrid-vision-context-row .astrid-vision-filter-bar label { flex: 0 0 auto; }
+  .astrid-vision-context-row .astrid-vision-filter-bar select {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    padding: 8px 27px 8px 8px;
+    background-position: right 8px center;
+    background-size: 14px 14px;
+    font-size: 12px;
+  }
 }
 .astrid-vision-filter-empty {
   padding: 18px 2px 28px;
@@ -792,7 +840,6 @@
 }
 @media (max-width: 760px) {
   .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 22px; }
-  .astrid-vision-standards-list li { padding-top: 14px; }
   .astrid-vision-project-list .astrid-vision-project-row { grid-template-columns: 1fr; gap: 10px; }
   .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1; grid-row: auto; }
   .astrid-vision-project-row > a { grid-column: 1; grid-row: auto; }
@@ -890,6 +937,12 @@
   text-decoration: none;
   cursor: pointer;
 }
+.astrid-vision-copy-agent-button {
+  display: inline-grid;
+  justify-items: center;
+}
+.astrid-vision-copy-agent-button > span { grid-area: 1 / 1; white-space: nowrap; }
+.astrid-vision-copy-agent-measure { visibility: hidden; }
 .astrid-vision-copy-agent-button:hover,
 .astrid-vision-copy-agent-fallback:hover { background: var(--astrid-accent); border-color: var(--astrid-accent); color: #fff; }
 .astrid-vision-copy-agent-button:focus-visible,
@@ -900,7 +953,6 @@
   font-size: 13px;
   line-height: 1.5;
 }
-.astrid-vision-copy-agent-status:empty { display: none; }
 .astrid-vision-copy-agent-status a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 
 /* Four creator-first operating principles, one row on wide screens. */

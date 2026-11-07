@@ -217,7 +217,7 @@ function createInitialDataSlice(): TimelineEditorDataContextValue {
  *
  * `useTimelineState` seeds the store during render, before descendants mount, so
  * no mounted consumer can reach these. A caller that does reach one is rendering
- * outside the editor — a missing provider, which CLAUDE.md's context-hook rule
+ * outside the editor — a missing provider, which required-context contract
  * requires to crash loudly rather than hide behind a no-op setter.
  */
 const opsUnavailable = (method: string): (() => never) => () => {
@@ -667,7 +667,7 @@ export function useTimelineStoreLifecycle() {
 // return `null` when there is no provider *or* the editor is not mounted; use
 // them only for consumers that legitimately run with no editor open (e.g. an
 // "add to editor" affordance elsewhere in the app) and handle the `null`. Per
-// CLAUDE.md's context-hook rule, a missing provider is a crash, not a no-op.
+// required-context contract, a missing provider is a crash, not a no-op.
 
 /** Read the whole `data` slice: resolved config, clips, refs, zoom, device class, interaction mode. */
 export function useTimelineEditorData(): TimelineEditorDataContextValue {

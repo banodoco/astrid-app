@@ -1,4 +1,4 @@
 {
   "maxErrors": 0,
-  "updated": "Lowered from 836 to 0 on 2026-08-24 after the final application, shared-state, and video-editor type contracts were reconciled. Only lower this number in the same PR that fixes the errors that brought the count down. Run `npx tsc -p tsconfig.app.json --noEmit | grep -c \"error TS\"` to re-measure, then edit maxErrors to match. Never raise it without an explicit exception note in the PR (see CLAUDE.md: 'allowlists shrink, never grow')."
+  "updated": "Lowered from 836 to 0 on 2026-08-24 after the final application, shared-state, and video-editor type contracts were reconciled. Only lower this number in the same PR that fixes the errors that brought the count down. Run `npx tsc -p tsconfig.app.json --noEmit | grep -c \"error TS\"` to re-measure, then edit maxErrors to match. Never raise it without an explicit exception note in the PR."
 }

@@ -62,7 +62,7 @@ Paths below are relative to `src/tools/video-editor/`.
 
 **Safe vs non-Safe.** Non-`Safe` hooks throw when no `TimelineStoreProvider` is above them — use them **inside the mounted editor subtree**. `Safe` variants return `null` when there is no provider *or* the editor is not mounted — use them only for consumers that legitimately run with no editor open (e.g. "add to editor" affordances elsewhere in the app), and handle the `null`.
 
-**Pre-sync ops throw.** Every function in the store's *initial* ops slice (`createInitialOpsSlice` in `timelineStore.ts`) throws, not just `commands.validate/dryRun/apply`. `useTimelineState` seeds the store during render, before descendants mount, so the mounted path never reaches them — a call that does means the consumer is rendering outside the editor and should be on a `Safe` hook. Per CLAUDE.md's "Context hooks" rule, that is a crash, not a silent no-op.
+**Pre-sync ops throw.** Every function in the store's *initial* ops slice (`createInitialOpsSlice` in `timelineStore.ts`) throws, not just `commands.validate/dryRun/apply`. `useTimelineState` seeds the store during render, before descendants mount, so the mounted path never reaches them — a call that does means the consumer is rendering outside the editor and should be on a `Safe` hook. That is a missing-provider error, not a silent no-op.
 
 ---
 

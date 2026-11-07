@@ -103,4 +103,4 @@ Shot selection syncs via URL hash (`#shotId`). Three sources stay in sync:
 
 ---
 
-[Back to Structure](../../structure.md)
+[Contributor entry point](../../AGENTS.md)

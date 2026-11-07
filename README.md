@@ -59,12 +59,12 @@ Use `--source-manifest <path>` to select an explicit Runtime source manifest. Th
 
 ## Project documentation
 
-- [Architecture overview](structure.md)
+- [Frontend architecture](docs/structure_detail/frontend_architecture.md)
 - [Compatibility and migration contracts](docs/governance/contracts/compatibility-shims.md)
 - [Astrid public boundary](docs/governance/contracts/astrid-plan-a.md)
 - [Video editor SDK](docs/video-editor-sdk/README.md)
 - [Code quality guide](docs/code_quality_audit.md)
-- [Agent instructions](CLAUDE.md)
+- [Contributing with an agent](AGENTS.md)
 - [Fully local updates and canary](docs/fully-local-update.md)
 
 ## Gate-to-Surface Map

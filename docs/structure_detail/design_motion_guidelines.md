@@ -103,4 +103,4 @@ Used by: SettingsModal, PromptEditorModal, and other custom-layout modals.
 
 ---
 
-[Back to Structure](../../structure.md)
+[Contributor entry point](../../AGENTS.md)

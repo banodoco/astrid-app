@@ -337,7 +337,7 @@
   gap: clamp(12px, 2vw, 22px);
   width: 100%;
   margin: 0;
-  padding: 16px 2px;
+  padding: 16px 16px 16px 2px;
   border: 0;
   background: none;
   color: inherit;
@@ -684,10 +684,11 @@
 .astrid-vision-filter-bar select {
   min-width: 154px;
   max-width: min(100%, 260px);
-  padding: 8px 12px;
+  appearance: none;
+  padding: 8px 38px 8px 12px;
   border: 1px solid var(--astrid-line);
   border-radius: 8px;
-  background: var(--astrid-panel);
+  background: var(--astrid-panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23615e55' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center / 16px 16px;
   color: var(--astrid-ink);
   font-family: inherit;
   font-size: 13px;

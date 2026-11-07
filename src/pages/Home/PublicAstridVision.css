@@ -644,14 +644,22 @@
   line-height: inherit;
 }
 .astrid-vision-lead strong { color: var(--astrid-ink); font-weight: 550; }
-/* The repository attribution is supporting copy, not a second manifesto statement. */
+/* The second editorial paragraph remains part of the vision, not an attribution. */
 .astrid-vision-lead p + p {
-  margin-top: 16px;
+  margin-top: 14px;
+  font-size: clamp(16px, 1.7vw, 19px);
+  line-height: 1.55;
+}
+.astrid-vision-attribution {
+  max-width: 62ch;
+  margin: 16px 0 0;
+  color: var(--astrid-muted);
   font-size: 14px;
   line-height: 1.6;
 }
-.astrid-vision-lead p + p a {
+.astrid-vision-attribution a {
   color: var(--astrid-ink);
+  text-decoration: underline;
   text-underline-offset: 3px;
 }
 

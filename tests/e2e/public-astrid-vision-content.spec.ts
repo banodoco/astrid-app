@@ -31,12 +31,12 @@ test('vision displays the GitHub-published pillars and operating principles', as
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
 });
 
-test('hero shows unlinked source attribution and a linked contribution guide', async ({ page, request }) => {
+test('source attribution is website copy, separate from editorial vision', async ({ page, request }) => {
   const content = await feed(request);
   const contributionGuide = 'https://github.com/banodoco/astrid-dev#want-to-contribute-give-this-to-your-agent';
   const intro = [
     'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.',
-    'The information on this page is pulled from the Astrid Dev repository. If you\'d like to contribute, visit [the contribution guide](' + contributionGuide + ').',
+    'The collective inspires ambitious work; adaptable tools and shared knowledge help realize it.',
   ].join('\n\n');
   await page.route(FEED, route => route.fulfill({
     status: 200,
@@ -47,12 +47,16 @@ test('hero shows unlinked source attribution and a linked contribution guide', a
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const paragraphs = page.locator('.astrid-vision-lead p');
   await expect(paragraphs).toHaveCount(2);
-  await expect(paragraphs.nth(1)).toContainText('Astrid Dev repository');
-  await expect(paragraphs.nth(1).locator('a')).toHaveCount(1);
-  await expect(paragraphs.nth(1).getByRole('link', { name: 'the contribution guide' }))
+  await expect(paragraphs.nth(1)).toContainText('The collective inspires ambitious work');
+  await expect(paragraphs).not.toContainText('published from the Astrid Dev repository');
+
+  const attribution = page.locator('.astrid-vision-attribution');
+  await expect(attribution).toContainText('This vision is published from the');
+  await expect(attribution.getByRole('link', { name: 'Astrid Dev repository' }))
+    .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev/blob/' + content.source.revision + '/vision/README.md');
+  await expect(attribution.getByRole('link', { name: 'Contribute with your agent' }))
     .toHaveAttribute('href', contributionGuide);
-  await expect.poll(() => paragraphs.nth(1).evaluate(element => getComputedStyle(element).fontSize))
-    .toBe('14px');
+  await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
 });
 
 test('published projects retain their status and link directly to GitHub', async ({ page, request }) => {

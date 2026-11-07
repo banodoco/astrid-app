@@ -65,13 +65,12 @@ async function readAgentSources(agentSha) {
   if (!/^[0-9a-f]{40}$/.test(lifecycle?.revision ?? '') || typeof lifecycle.repository !== 'string') {
     throw new Error(`Agent ${agentSha} pins.json needs a full lifecycle revision and repository`);
   }
-  // The pins schema rejects extra keys, so the lifecycle version is a constant in the Agent installer.
-  const tools = (await readRaw(agentRepo, agentSha, 'astrid/installer/tools.py')).toString('utf8');
-  const match = /^LIFECYCLE_VERSION\s*=\s*["']([^"']+)["']/m.exec(tools);
-  if (!match) throw new Error(`Agent ${agentSha} astrid/installer/tools.py needs LIFECYCLE_VERSION`);
+  if (typeof lifecycle.version !== 'string' || !lifecycle.version.trim()) {
+    throw new Error(`Agent ${agentSha} pins.json needs a lifecycle version`);
+  }
   return {
     vibecomfy: { sha: vibecomfy.revision },
-    lifecycle: { repo: lifecycle.repository, sha: lifecycle.revision, version: match[1] },
+    lifecycle: { repo: lifecycle.repository, sha: lifecycle.revision, version: lifecycle.version },
   };
 }
 
@@ -110,7 +109,6 @@ async function pin(agentSha, reason) {
   const sources = await readAgentSources(agentSha);
   manifest.vibecomfy = sources.vibecomfy;
   manifest.lifecycle = sources.lifecycle;
-  delete manifest.runpod;
   applyReleasePin(manifest, reason);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }

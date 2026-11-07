@@ -684,6 +684,10 @@
 }
 
 .astrid-vision-part .astrid-vision-part-number {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  white-space: nowrap;
   margin-top: 3px;
   font: 500 clamp(18px, 2.2vw, 26px)/1.2 "Departure Mono", ui-monospace, monospace;
   color: var(--astrid-accent);

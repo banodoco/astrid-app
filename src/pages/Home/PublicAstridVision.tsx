@@ -308,8 +308,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       <section className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Operating principles</p>
-          <h2 id="astrid-vision-standards-title">How we build it</h2>
+          <p className="astrid-vision-eyebrow">Our aspirations</p>
+          <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
         </div>
         <ol className="astrid-vision-standards-list">
           {content.principles.map((principle, index) => (

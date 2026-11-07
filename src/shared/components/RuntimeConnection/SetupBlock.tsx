@@ -69,7 +69,7 @@ export function SetupBlock({ initiallySetUp, initialChoices, mode = 'install', s
     <div className="space-y-2">
       {detectPlatform() === 'windows' && <p className="text-xs text-muted-foreground">{RUNTIME_CONNECTION_COPY.windowsBeta}</p>}
       <Button type="button" className="h-11 w-full justify-between rounded-xl px-4 text-sm" onClick={() => void agentCopy.copy()}>
-        <span aria-live="polite">{agentCopy.status === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : RUNTIME_CONNECTION_COPY.agent.copy}</span>
+        <span aria-live="polite">{agentCopy.status === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : 'Copy instructions for your agent'}</span>
         {agentCopy.status === 'copied' ? <Check aria-hidden="true" className="h-4 w-4" /> : <Copy aria-hidden="true" className="h-4 w-4" />}
       </Button>
       {agentCopy.status === 'failed' && <CopyFallback text={instructions} label={RUNTIME_CONNECTION_COPY.agent.copyFailed} />}

@@ -375,7 +375,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(checkbox).toBeChecked();
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
     const command = screen.getByText(installCommand('install'), { exact: true }).textContent;
-    fireEvent.click(screen.getByRole('button', { name: COPY.agent.copy }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
     expect(clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
     clipboard.mockClear();

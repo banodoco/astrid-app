@@ -53,7 +53,7 @@ describe('done2', () => {
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
         expect(mocks.clipboard).toHaveBeenLastCalledWith(surface.command);
         mocks.clipboard.mockClear();
-        fireEvent.click(setup.getByRole('button', { name: new RegExp(`^(${COPY.agent.copy}|${COPY.agent.copied.replace('.', '\\.')})$`) }));
+        fireEvent.click(setup.getByRole('button', { name: new RegExp(`^(Copy instructions for your agent|${COPY.agent.copied.replace('.', '\\.')})$`) }));
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
         const instructions = mocks.clipboard.mock.calls[0][0] as string;
         expect(instructions.split('\n')).toContain(surface.command);

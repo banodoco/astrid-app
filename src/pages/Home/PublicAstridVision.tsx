@@ -363,6 +363,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           </select>
         </div>
         <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} openProjects={CURRENT_PROJECTS} />)}</ol>
+        {gapsToShow.length === 0 && <p className="astrid-vision-filter-empty" role="status">No gaps with this status yet.</p>}
       </section>
 
       <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
@@ -395,6 +396,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             </li>
           )}
         </ul>
+        {selectedProjects.length === 0 && <p className="astrid-vision-filter-empty" role="status">No projects with this status yet.</p>}
         {projectFilter === 'current' && showAllProjects && CURRENT_PROJECTS.length > 8 && (
           <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllProjects(false)}>
             Show fewer projects

@@ -757,7 +757,7 @@ describe('NewChatMenu with an out-of-date local Astrid', () => {
     openMenu({ agentsError: error });
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent(RUNTIME_CONNECTION_COPY.chatNeedsUpdate);
-    expect(alert).toHaveTextContent('Copy for your agent');
+    expect(alert).toHaveTextContent('Copy instructions for your agent');
     expect(alert).toHaveTextContent('Run it yourself');
     expect(alert).toHaveTextContent('If you run Astrid from source checkouts');
     expect(alert).not.toHaveTextContent('This page needs a newer Astrid');

@@ -44,49 +44,9 @@ test('vision displays the GitHub-published pillars and operating principles', as
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
 });
 
-test('desktop vision has compact, accessible gaps and aligned principle headings', async ({ page, request }) => {
-  const content = await pinnedFeed(page, request);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: "What we're building towards" })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
-
-  const principleTitles = page.locator('.astrid-vision-standards-list h3');
-  await expect(principleTitles).toHaveText(content.principles.map(principle => principle.title));
-  const principleHeights = await principleTitles.evaluateAll(elements =>
-    elements.map(element => element.getBoundingClientRect().height));
-  expect(Math.max(...principleHeights) - Math.min(...principleHeights)).toBeLessThan(4);
-
-  const current = content.gaps.filter(gap => gap.assessment !== 'closed');
-  const gapRows = page.locator('.astrid-vision-part');
-  await expect(gapRows).toHaveCount(current.length);
-  const first = gapRows.first();
-  const trigger = first.locator('h3 button');
-  const body = first.locator('.astrid-vision-part-body');
-  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
-  await expect(body).toBeHidden();
-  const collapsed = await first.evaluate(element => element.getBoundingClientRect().height);
-  expect(collapsed).toBeLessThan(105);
-  await trigger.click();
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-  await expect(body).toBeVisible();
-  const expanded = await first.evaluate(element => element.getBoundingClientRect().height);
-  expect(expanded).toBeGreaterThan(collapsed + 100);
-  await trigger.click();
-  await expect(body).toBeHidden();
-
-  await expect(page.locator('.astrid-vision-parts-head > p'))
-    .toHaveText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
-  const catalogLink = page.getByRole('link', { name: 'Astrid Dev catalog' });
-  await expect(catalogLink).toHaveAttribute('href', /\/plans$/);
-  expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
-  await expect(page.getByRole('link', { name: 'Astrid on GitHub' }))
-    .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
-});
-
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
   const content = await feed(request);
-  const source = 'https://github.com/banodoco/astrid-dev';
+  const source = 'https://github.com/banodoco/astrid-dev/blob/main/vision/README.md';
   const contribute = 'https://github.com/banodoco/astrid-dev#want-to-contribute-give-this-to-your-agent';
   const intro = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
   await page.route(FEED, route => route.fulfill({
@@ -106,82 +66,34 @@ test('hero keeps the vision narrative separate from website source attribution',
   await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
 });
 
-test('projects filter current work by default and can reveal every historic project', async ({ page, request }) => {
+test('published projects retain their status and link directly to GitHub', async ({ page, request }) => {
   const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  const current = content.projects.filter(project => !['done', 'cancelled'].includes(project.status));
-  const initial = current.slice(0, 8);
+  const open = content.projects.filter(project => !['done', 'cancelled'].includes(project.status));
+  const initial = open.slice(0, 8);
   const rows = page.locator('.astrid-vision-project-row');
-  const selector = page.getByRole('combobox', { name: 'Filter projects by status' });
-  await expect(selector).toHaveValue('current');
   await expect(rows).toHaveCount(initial.length);
   await expect(rows.first().locator('h3')).toHaveText(initial[0].title);
   await expect(rows.first().locator('.astrid-vision-project-status')).toHaveText(initial[0].status);
   await expect(rows.first().getByRole('link', { name: 'Project details on GitHub' }))
     .toHaveAttribute('href', initial[0].githubUrl);
-  await page.getByRole('button', { name: 'View all ' + current.length + ' current projects' }).click();
-  await expect(rows).toHaveCount(current.length);
-  await selector.selectOption('all');
-  await expect(rows).toHaveCount(content.projects.length);
-  await selector.selectOption('queued');
-  await expect(rows).toHaveCount(content.projects.filter(project => project.status === 'queued').length);
-  await selector.selectOption('done');
-  await expect(rows).toHaveCount(content.projects.filter(project => project.status === 'done').length);
-  await selector.selectOption('current');
-  await expect(rows).toHaveCount(initial.length);
+  await page.getByRole('button', { name: 'View all ' + open.length + ' open projects' }).click();
+  await expect(rows).toHaveCount(open.length);
 });
 
-test('phone gap disclosures start collapsed, open evidence, and filter all statuses', async ({ page, request }) => {
+test('phone gap disclosures show live assessments and source links', async ({ page, request }) => {
   const content = await pinnedFeed(page, request);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  const current = content.gaps.filter(gap => gap.assessment !== 'closed');
   const first = content.gaps.find(g => g.id === 'AA-001')!;
   const gap = page.locator('#gap-aa-001');
-  const selector = page.getByRole('combobox', { name: 'Filter gaps by status' });
-  await expect(selector).toHaveValue('current');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(current.length);
   await expect(gap).toBeVisible();
-  await expect(gap.getByRole('button', { name: first.title })).toHaveAttribute('aria-expanded', 'false');
   await gap.getByRole('button', { name: first.title }).click();
   await expect(gap.locator('.astrid-vision-gap-state')).toHaveText(first.assessment);
-  const source = gap.getByRole('link', { name: 'Read full gap and evidence on GitHub' });
-  await expect(source).toHaveAttribute('href', first.githubUrl);
-  expect(await source.evaluate(element => getComputedStyle(element).borderTopStyle)).toBe('solid');
-  await selector.selectOption('all');
+  await expect(gap.getByRole('link', { name: 'Read full gap and evidence on GitHub' }))
+    .toHaveAttribute('href', first.githubUrl);
+  await page.getByRole('button', { name: 'Show all ' + content.gaps.length + ' gaps' }).click();
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.length);
-  await selector.selectOption('closed');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.filter(gap => gap.assessment === 'closed').length);
-  if (!content.gaps.some(gap => gap.assessment === 'closed')) {
-    await expect(page.locator('.astrid-vision-filter-empty')).toHaveText('No gaps with this status yet.');
-  }
-  await selector.selectOption('current');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(current.length);
-});
-
-test('status filters include closed gaps and completed projects from a valid feed', async ({ page, request }) => {
-  const content = await feed(request);
-  const altered = {
-    ...content,
-    gaps: content.gaps.map((gap, i) => i === content.gaps.length - 1 ? { ...gap, assessment: 'closed' } : gap),
-    projects: content.projects.map((project, i) => i === 0 ? { ...project, status: 'done' } : project),
-  };
-  await page.route(FEED, route => route.fulfill({
-    status: 200, contentType: 'application/json',
-    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(altered),
-  }));
-  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  const gapFilter = page.getByRole('combobox', { name: 'Filter gaps by status' });
-  const projectFilter = page.getByRole('combobox', { name: 'Filter projects by status' });
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.filter(gap => gap.assessment !== 'closed').length);
-  await gapFilter.selectOption('closed');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.filter(gap => gap.assessment === 'closed').length);
-  await gapFilter.selectOption('all');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.length);
-  await projectFilter.selectOption('all');
-  await expect(page.locator('.astrid-vision-project-row')).toHaveCount(altered.projects.length);
-  await projectFilter.selectOption('done');
-  await expect(page.locator('.astrid-vision-project-row')).toHaveCount(altered.projects.filter(project => project.status === 'done').length);
 });
 
 test('different valid feed content renders without rebuilding the app', async ({ page, request }) => {

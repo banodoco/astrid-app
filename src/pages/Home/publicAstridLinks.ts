@@ -1,6 +1,7 @@
 import type { MouseEvent as ReactMouseEvent } from 'react';
 
 export const GITHUB_URL = 'https://github.com/banodoco/astrid-dev';
+export const REPOSITORY_URL = 'https://github.com/banodoco/astrid-app';
 export const DISCORD_URL = 'https://discord.gg/D5K2c6kfhy';
 export const X_URL = 'https://x.com/astrid_ivi';
 

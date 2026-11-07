@@ -33,14 +33,14 @@ test('published projects retain their status and link directly to GitHub', async
   const content = await feed(request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const open = content.projects.filter(project => !['done', 'cancelled'].includes(project.status));
-  const initial = open.slice(0, 12);
+  const initial = open.slice(0, 8);
   const rows = page.locator('.astrid-vision-project-row');
   await expect(rows).toHaveCount(initial.length);
   await expect(rows.first().locator('h3')).toHaveText(initial[0].title);
   await expect(rows.first().locator('.astrid-vision-project-status')).toHaveText(initial[0].status);
   await expect(rows.first().getByRole('link', { name: 'Project details on GitHub' }))
     .toHaveAttribute('href', initial[0].githubUrl);
-  await page.getByRole('button', { name: 'Show all ' + open.length + ' open projects' }).click();
+  await page.getByRole('button', { name: 'View all ' + open.length + ' open projects' }).click();
   await expect(rows).toHaveCount(open.length);
 });
 

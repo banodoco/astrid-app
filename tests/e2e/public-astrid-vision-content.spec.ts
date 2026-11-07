@@ -83,9 +83,9 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
 
   await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(1);
   await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(1);
-  await expect(page.locator('.astrid-vision-parts > .astrid-vision-section-context'))
+  await expect(page.locator('.astrid-vision-parts .astrid-vision-context-row > .astrid-vision-section-context'))
     .toHaveText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
-  const catalogLink = page.locator('.astrid-vision-projects > .astrid-vision-section-context a');
+  const catalogLink = page.locator('.astrid-vision-projects .astrid-vision-context-row > .astrid-vision-section-context a');
   await expect(catalogLink).toHaveText('Astrid Dev catalog');
   await expect(catalogLink).toHaveAttribute('href', /github\.com\/banodoco\/astrid-dev\/tree\/[0-9a-f]{40}\/plans$/);
   expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
@@ -93,6 +93,16 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
     .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
   const gapFilter = page.getByRole('combobox', { name: 'Filter gaps by status' });
   const projectFilter = page.getByRole('combobox', { name: 'Filter projects by status' });
+  for (const section of ['.astrid-vision-parts', '.astrid-vision-projects']) {
+    const row = page.locator(section + ' .astrid-vision-context-row');
+    const description = await row.locator('.astrid-vision-section-context').boundingBox();
+    const filter = await row.locator('.astrid-vision-filter-bar').boundingBox();
+    expect(description).not.toBeNull();
+    expect(filter).not.toBeNull();
+    expect(description!.x + description!.width).toBeLessThan(filter!.x);
+    expect(Math.abs(description!.y + description!.height / 2 -
+      (filter!.y + filter!.height / 2))).toBeLessThan(2);
+  }
   for (const select of [gapFilter, projectFilter]) {
     const style = await select.evaluate(element => {
       const css = getComputedStyle(element);
@@ -101,6 +111,28 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
     expect(style.appearance).toBe('none');
     expect(style.paddingRight).toBeGreaterThanOrEqual(36);
     expect(style.image).toContain('data:image/svg+xml');
+  }
+});
+
+test('phone status controls stay right-aligned under descriptions and within half the viewport', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  for (const width of [320, 390, 760]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    for (const section of ['.astrid-vision-parts', '.astrid-vision-projects']) {
+      const row = page.locator(section + ' .astrid-vision-context-row');
+      const description = await row.locator('.astrid-vision-section-context').boundingBox();
+      const filter = await row.locator('.astrid-vision-filter-bar').boundingBox();
+      const select = await row.locator('select').boundingBox();
+      expect(description).not.toBeNull();
+      expect(filter).not.toBeNull();
+      expect(select).not.toBeNull();
+      expect(filter!.y).toBeGreaterThanOrEqual(description!.y + description!.height);
+      expect(filter!.width).toBeLessThanOrEqual(width / 2 + 1);
+      expect(filter!.x + filter!.width).toBeLessThanOrEqual(width + 1);
+      expect(Math.abs(filter!.x + filter!.width - (description!.x + description!.width))).toBeLessThan(2);
+      expect(select!.x + select!.width).toBeLessThanOrEqual(filter!.x + filter!.width + 1);
+    }
   }
 });
 

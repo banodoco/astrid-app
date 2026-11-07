@@ -42,6 +42,9 @@ test('vision displays the GitHub-published pillars and operating principles', as
   await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Our aspirations');
   await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
+  const individualBorders = await page.locator('.astrid-vision-standards-list li')
+    .evaluateAll(elements => elements.map(element => getComputedStyle(element).borderTopStyle));
+  expect(individualBorders).toEqual(['none', 'none', 'none', 'none']);
 });
 
 test('desktop vision has compact, accessible gaps and aligned principle headings', async ({ page, request }) => {
@@ -83,8 +86,11 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
 
   await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(1);
   await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(1);
-  await expect(page.locator('.astrid-vision-parts .astrid-vision-context-row > .astrid-vision-section-context'))
-    .toHaveText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
+  const gapContext = page.locator('.astrid-vision-parts .astrid-vision-context-row > .astrid-vision-section-context');
+  await expect(gapContext).toContainText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
+  const gapDefinition = gapContext.getByRole('link', { name: 'What makes a gap?' });
+  await expect(gapDefinition).toHaveAttribute('href',
+    'https://github.com/banodoco/astrid-dev/blob/main/docs/contribution-workflow.md#define-or-reassess-a-vision-gap');
   const catalogLink = page.locator('.astrid-vision-projects .astrid-vision-context-row > .astrid-vision-section-context a');
   await expect(catalogLink).toHaveText('Astrid Dev catalog');
   await expect(catalogLink).toHaveAttribute('href', /github\.com\/banodoco\/astrid-dev\/tree\/[0-9a-f]{40}\/plans$/);
@@ -165,7 +171,6 @@ test('all editorial section headers share a consistent divider and title system'
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
   const content = await feed(request);
   const source = 'https://github.com/banodoco/astrid-dev';
-  const contribute = '#astrid-vision-contribute';
   const intro = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
   await page.route(FEED, route => route.fulfill({
     status: 200,
@@ -180,22 +185,14 @@ test('hero keeps the vision narrative separate from website source attribution',
   const attribution = page.locator('.astrid-vision-source-attribution');
   await expect(attribution).toContainText('Astrid Dev repository');
   await expect(attribution.getByRole('link', { name: 'Astrid Dev repository' })).toHaveAttribute('href', source);
-  await expect(attribution.getByRole('link', { name: 'Help us build it' })).toHaveAttribute('href', contribute);
+  await expect(attribution.getByRole('link', { name: 'Help us build it' })).toHaveCount(0);
   await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
 });
 
-test('the top help link scrolls to the canonical GitHub prompt copy action', async ({ page, request }) => {
+test('the copy button confirms in place, preserves its dimensions, and resets', async ({ page, request }) => {
   const content = await pinnedFeed(page, request);
   expect(content.vision.agentPrompt).toBeTruthy();
   await page.addInitScript(() => {
-    const nativeScrollIntoView = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function(options?: boolean | ScrollIntoViewOptions) {
-      if (this.id === 'astrid-vision-contribute') {
-        (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior =
-          typeof options === 'object' ? options.behavior : undefined;
-      }
-      nativeScrollIntoView.call(this, options);
-    };
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
@@ -206,40 +203,45 @@ test('the top help link scrolls to the canonical GitHub prompt copy action', asy
       },
     });
   });
-  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  const introLink = page.getByRole('link', { name: 'Help us build it' });
-  await expect(introLink).toHaveAttribute('href', '#astrid-vision-contribute');
-  await introLink.click();
-  const contribution = page.locator('#astrid-vision-contribute');
-  await expect(contribution).toBeInViewport();
-  expect(await page.evaluate(() => (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior)).toBe('smooth');
-  await expect(page).toHaveURL(/#astrid-vision-contribute$/);
-  await expect(contribution.getByRole('link', { name: 'Give these instructions to your agent' })).toHaveCount(0);
-  await contribution.getByRole('button', { name: 'Copy instructions for agents' }).click();
-  await expect(contribution.getByRole('status')).toHaveText('Instructions copied — give them to your agent.');
-  await expect(contribution.locator('.astrid-vision-copy-agent-status')).toBeEmpty({ timeout: 6500 });
-  await expect(contribution.getByRole('button', { name: 'Copy instructions for agents' })).toBeVisible();
-  const copied = await page.evaluate(() => (window as typeof window & { __copiedAgentPrompt?: string }).__copiedAgentPrompt);
-  expect(copied).toBe(content.vision.agentPrompt);
+
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('link', { name: 'Help us build it' })).toHaveCount(0);
+    const contribution = page.locator('#astrid-vision-contribute');
+    await expect(contribution.getByRole('link', { name: 'Give these instructions to your agent' })).toHaveCount(0);
+    const button = contribution.getByRole('button', { name: 'Copy instructions for agents' });
+    await button.scrollIntoViewIfNeeded();
+    const before = await button.boundingBox();
+    expect(before).not.toBeNull();
+    await button.click();
+    const successButton = contribution.getByRole('button', { name: 'Instructions copied for your agent' });
+    await expect(successButton).toBeVisible();
+    const after = await successButton.boundingBox();
+    expect(after).not.toBeNull();
+    expect(Math.abs(after!.width - before!.width)).toBeLessThan(1);
+    expect(Math.abs(after!.height - before!.height)).toBeLessThan(1);
+    await expect(contribution.locator('.astrid-vision-copy-agent-status')).toHaveCount(0);
+    const copied = await page.evaluate(() => (window as typeof window & { __copiedAgentPrompt?: string }).__copiedAgentPrompt);
+    expect(copied).toBe(content.vision.agentPrompt);
+    await expect(contribution.getByRole('button', { name: 'Copy instructions for agents' })).toBeVisible({ timeout: 6000 });
+  }
 });
 
-test('contribution scroll respects reduced-motion preferences', async ({ page, request }) => {
+test('failed copy shows an honest GitHub fallback', async ({ page, request }) => {
   await pinnedFeed(page, request);
-  await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.addInitScript(() => {
-    const nativeScrollIntoView = Element.prototype.scrollIntoView;
-    Element.prototype.scrollIntoView = function(options?: boolean | ScrollIntoViewOptions) {
-      if (this.id === 'astrid-vision-contribute') {
-        (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior =
-          typeof options === 'object' ? options.behavior : undefined;
-      }
-      nativeScrollIntoView.call(this, options);
-    };
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('Clipboard denied')) },
+    });
   });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await page.getByRole('link', { name: 'Help us build it' }).click();
-  expect(await page.evaluate(() => (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior)).toBe('auto');
-  await expect(page.locator('#astrid-vision-contribute')).toBeInViewport();
+  const contribution = page.locator('#astrid-vision-contribute');
+  await contribution.getByRole('button', { name: 'Copy instructions for agents' }).click();
+  await expect(contribution.getByRole('alert')).toContainText('Couldn’t copy.');
+  await expect(contribution.getByRole('link', { name: 'Open instructions on GitHub' })).toBeVisible();
+  await expect(contribution.getByRole('button', { name: 'Copy instructions for agents' })).toBeVisible();
 });
 
 test('projects filter current work by default and can reveal every historic project', async ({ page, request }) => {

@@ -631,9 +631,10 @@
   padding: 0;
   list-style: none;
 }
-.astrid-vision-standards-list li {
-  border-top: 1px solid var(--astrid-line);
-  padding-top: 16px;
+/* The section divider is enough; suppress inherited list-item rules as well. */
+.astrid-vision .astrid-vision-standards-list > li {
+  border-top: none;
+  padding-top: 0;
 }
 .astrid-vision-standards-list li > span {
   color: var(--astrid-accent);
@@ -839,7 +840,6 @@
 }
 @media (max-width: 760px) {
   .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 22px; }
-  .astrid-vision-standards-list li { padding-top: 14px; }
   .astrid-vision-project-list .astrid-vision-project-row { grid-template-columns: 1fr; gap: 10px; }
   .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1; grid-row: auto; }
   .astrid-vision-project-row > a { grid-column: 1; grid-row: auto; }
@@ -937,6 +937,12 @@
   text-decoration: none;
   cursor: pointer;
 }
+.astrid-vision-copy-agent-button {
+  display: inline-grid;
+  justify-items: center;
+}
+.astrid-vision-copy-agent-button > span { grid-area: 1 / 1; white-space: nowrap; }
+.astrid-vision-copy-agent-measure { visibility: hidden; }
 .astrid-vision-copy-agent-button:hover,
 .astrid-vision-copy-agent-fallback:hover { background: var(--astrid-accent); border-color: var(--astrid-accent); color: #fff; }
 .astrid-vision-copy-agent-button:focus-visible,
@@ -947,7 +953,6 @@
   font-size: 13px;
   line-height: 1.5;
 }
-.astrid-vision-copy-agent-status:empty { display: none; }
 .astrid-vision-copy-agent-status a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 
 /* Four creator-first operating principles, one row on wide screens. */

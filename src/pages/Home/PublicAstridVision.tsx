@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown } from 'lucide-react';
 import { PublicAstridSocialLinks } from './PublicAstridSocialLinks.tsx';
@@ -175,7 +175,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     setAgentCopyState(state);
     // Success is temporary; a failed copy keeps its GitHub fallback visible.
     if (state === 'copied') {
-      agentCopyTimer.current = window.setTimeout(() => setAgentCopyState('idle'), 3500);
+      agentCopyTimer.current = window.setTimeout(() => setAgentCopyState('idle'), 3000);
     }
   };
   const copyAgentInstructions = () => {
@@ -190,16 +190,6 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     window.clearTimeout(agentCopyTimer.current);
     return () => window.clearTimeout(agentCopyTimer.current);
   }, [content?.source.revision]);
-  const scrollToContribution = (event: ReactMouseEvent<HTMLAnchorElement>) => {
-    // Preserve new-tab and other modified-link behavior.
-    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    const target = document.getElementById('astrid-vision-contribute');
-    if (!target) return;
-    event.preventDefault();
-    // Keep a shareable anchor without adding a history entry that would disrupt Home navigation.
-    window.history.replaceState(window.history.state, '', '#astrid-vision-contribute');
-    target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
-  };
   // Newly filtered rows must still receive reveal observation.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
     gapFilter + ':' + projectFilter + ':' + showAllProjects);
@@ -281,7 +271,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href="#astrid-vision-contribute" onClick={scrollToContribution}>Help us build it</a>.
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
                   </p>
                 </>
               : error
@@ -384,7 +374,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
         </div>
         <div className="astrid-vision-context-row">
-          <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
+          <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress. <a href={PUBLIC_VISION_REPO_URL + '/blob/main/docs/contribution-workflow.md#define-or-reassess-a-vision-gap'} target="_blank" rel="noreferrer">What makes a gap?</a></p>
           <div className="astrid-vision-filter-bar">
             <label htmlFor="astrid-vision-gap-filter">Status</label>
             <select id="astrid-vision-gap-filter" aria-label="Filter gaps by status" value={gapFilter}
@@ -450,18 +440,20 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
             <MarkdownText value={contributionIntro} />
             {content.vision.agentPrompt ? (
-              <button className="astrid-vision-copy-agent-button" type="button" onClick={copyAgentInstructions}>
-                Copy instructions for agents
+              <button className="astrid-vision-copy-agent-button" type="button" onClick={copyAgentInstructions} aria-live="polite">
+                <span className="astrid-vision-copy-agent-measure" aria-hidden="true">Instructions copied for your agent</span>
+                <span>{agentCopyState === 'copied' ? 'Instructions copied for your agent' : 'Copy instructions for agents'}</span>
               </button>
             ) : (
               <a className="astrid-vision-copy-agent-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
                 target="_blank" rel="noreferrer">See agent instructions on GitHub</a>
             )}
-            <p className="astrid-vision-copy-agent-status" role="status" aria-live="polite">
-              {agentCopyState === 'copied' ? 'Instructions copied — give them to your agent.'
-                : agentCopyState === 'failed' ? <>Couldn’t copy. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
-                    target="_blank" rel="noreferrer">Open instructions on GitHub</a>.</> : ''}
-            </p>
+            {agentCopyState === 'failed' && (
+              <p className="astrid-vision-copy-agent-status" role="alert">
+                Couldn’t copy. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
+                  target="_blank" rel="noreferrer">Open instructions on GitHub</a>.
+              </p>
+            )}
           </div>
           <Tinkerer />
         </section>

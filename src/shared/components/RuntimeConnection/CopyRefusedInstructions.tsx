@@ -4,9 +4,12 @@ import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
 import { CopyFallback, useCopyAction } from './CopyInstallCommand.tsx';
 import { RUNTIME_CONNECTION_COPY as COPY, refusedAgentInstructions } from './copy.ts';
 
-/** The one action of a refusal: hand a coding agent the check and the fix. Never an install, because Astrid is running. */
-export function CopyRefusedInstructions() {
-  const instructions = refusedAgentInstructions(window.location.origin, runtimeApiBase());
+/**
+ * The one action of a refusal: hand a coding agent the check and the fix. Never an install, because Astrid is running;
+ * a Pinokio Astrid's fix is Pinokio's own Update.
+ */
+export function CopyRefusedInstructions({ pinokio = false }: { readonly pinokio?: boolean }) {
+  const instructions = refusedAgentInstructions(window.location.origin, runtimeApiBase(), pinokio);
   const copy = useCopyAction(instructions);
   const copied = copy.status === 'copied';
   return (

@@ -5,14 +5,12 @@ import { writeClipboardTextSafe } from '@/shared/lib/browser/clipboard.ts';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import type { ServiceStatus } from '@/integrations/runtime/generated.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
-import { agentInstructions, installCommand, localUpdateInstructions, RUNTIME_CONNECTION_COPY, UPDATE_ROUTES, withCommandShell, type CommandMode } from './copy.ts';
+import { agentInstructions, installCommand, RUNTIME_CONNECTION_COPY, UPDATE_ROUTES, withCommandShell, type CommandMode } from './copy.ts';
 
 export interface CopyInstallCommandProps {
   /** `install` for setup/repair and `update` for an incompatible Astrid. */
   readonly mode?: CommandMode;
   readonly services?: readonly ServiceStatus[];
-  /** A fully local install updates its checkout with this command instead of the installer. */
-  readonly localCommand?: string;
   /** The primary action's label where a resolver card names it; the default is the install brief's label. */
   readonly agentLabel?: string;
 }
@@ -76,12 +74,11 @@ export function CopyCommandRow({ command, label, copiedLabel = label }: { readon
  * Agent handoff first, as the one primary action; the manual command is the quiet alternative under it, with its own
  * copy action. Nothing else: the card around it says what the instructions are for.
  */
-export function CopyInstallCommand({ mode = 'install', services, localCommand, agentLabel }: CopyInstallCommandProps) {
+export function CopyInstallCommand({ mode = 'install', services, agentLabel }: CopyInstallCommandProps) {
   const copy = RUNTIME_CONNECTION_COPY.agent;
   const localBuild = runtimeOrigin() === '';
-  const fullyLocal = localCommand !== undefined;
-  const instructions = fullyLocal ? localUpdateInstructions(localCommand, window.location.origin) : agentInstructions(mode, window.location.origin, localBuild, services);
-  const command = fullyLocal ? localCommand : installCommand(mode);
+  const instructions = agentInstructions(mode, window.location.origin, localBuild, services);
+  const command = installCommand(mode);
   const agentCopy = useCopyAction(instructions);
   const agentCopied = agentCopy.status === 'copied';
 
@@ -97,9 +94,9 @@ export function CopyInstallCommand({ mode = 'install', services, localCommand, a
       </div>
       <div className="space-y-1.5 text-left">
         <p className="text-xs font-medium text-foreground">Run it yourself</p>
-        <p className="text-xs text-muted-foreground">{withCommandShell(fullyLocal ? copy.terminalAlternativeLocal : mode === 'update' ? copy.terminalAlternativeUpdate : copy.terminalAlternative)}</p>
+        <p className="text-xs text-muted-foreground">{withCommandShell(mode === 'update' ? copy.terminalAlternativeUpdate : copy.terminalAlternative)}</p>
         <CopyCommandRow command={command} label={copy.commandCopy} copiedLabel={copy.commandCopied} />
-        {mode === 'update' && localBuild && !fullyLocal && <p className="pt-1 text-xs text-muted-foreground">{UPDATE_ROUTES.source}</p>}
+        {mode === 'update' && localBuild && <p className="pt-1 text-xs text-muted-foreground">{UPDATE_ROUTES.source}</p>}
       </div>
     </div>
   );

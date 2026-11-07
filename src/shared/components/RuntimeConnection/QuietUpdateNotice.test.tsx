@@ -36,4 +36,26 @@ describe('quiet Update available notice', () => {
     await act(async () => { view.rerender(<Capture id="remounted" />); });
     expect(readStatusMock).toHaveBeenCalledOnce();
   });
+
+  it('offers a Pinokio Astrid only Pinokio\u2019s Update in the bottom-left notice', async () => {
+    readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 3, identity: { managed_by: 'pinokio', release: 3 } } });
+    hostedCheckMock.mockResolvedValue({
+      release: 3, app: 'app-a', servedRelease: 5, servedApp: 'app-b', behind: true, managedBy: 'pinokio',
+      resolution: { installedRelease: 3, servedRelease: 5, requiredRelease: 4, requiredReason: 'security fix', releaseBehind: true },
+    });
+    // The status is read once per page load, so this page load starts from a fresh module.
+    vi.resetModules();
+    const { QuietUpdateNotice: PinokioPageNotice } = await import('./QuietUpdateNotice.tsx');
+    render(<PinokioPageNotice connection={{ isConnected: true, managedByPinokio: true } as never} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const notice = await screen.findByTestId('quiet-update-notice');
+
+    expect(notice).toHaveTextContent('This update is required: security fix');
+    expect(notice).toHaveTextContent('Update in Pinokio');
+    expect(notice.querySelector('code')).toBeNull();
+    for (const name of ['Copy instructions for your agent', 'Copy for your agent', 'Copy command', 'See updates', 'Update now']) {
+      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+    }
+    expect(notice.textContent).not.toContain('Run it yourself');
+  });
 });

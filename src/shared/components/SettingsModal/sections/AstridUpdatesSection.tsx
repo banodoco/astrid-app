@@ -12,6 +12,8 @@ import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
+import { updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
+import { astridOutOfDate } from './ConnectionSection.tsx';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
 
 type CheckState = 'checking' | 'ready' | 'error';
@@ -60,6 +62,12 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   };
 
   const installType = operation.installType;
+  // An Astrid older than this page is an update even when its release is current (a source checkout, or only chat is
+  // old): this section is the one place to act on it, so it becomes the update card with this install's one path.
+  const outOfDate = astridOutOfDate(connection);
+  const compatibilityFor = (type: typeof installType) => outOfDate
+    ? { kind: 'schema' as const, detail: updateNeededSentence(type === 'pinokio', outOfDate === 'chat') }
+    : undefined;
 
   const check = async () => {
     setState('checking');
@@ -81,10 +89,17 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         next = await checkHostedUpdate(health);
       }
       setStatus(next);
-      setResolution(resolveUpdate({ ...next.resolution, installType, updateNowAvailable: false, updateReason: operation.updateReason }, 'settings'));
+      setResolution(resolveUpdate({ ...next.resolution, compatibility: compatibilityFor(installType), installType, updateNowAvailable: false, updateReason: operation.updateReason }, 'settings'));
       setState('ready');
     } catch {
       setStatus(null);
+      // Without a release reading, an Astrid known to be older than this page still gets its update card.
+      const compatibility = compatibilityFor(installType);
+      if (compatibility) {
+        setResolution(resolveUpdate({ compatibility, installType, updateNowAvailable: false }, 'settings'));
+        setState('ready');
+        return;
+      }
       setResolution(null);
       setError(!connection.isConnected && connection.state?.status !== 'update_needed'
         ? 'Connect to Astrid before checking its release.'
@@ -109,7 +124,8 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const currentStatus = operation.releaseStatus ?? status;
   // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
-  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, installType: statusInstallType, updateNowAvailable: operation.available, updateReason: operation.updateReason }, 'settings') : resolution;
+  const compatibility = compatibilityFor(statusInstallType);
+  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available, updateReason: operation.updateReason }, 'settings') : resolution;
   const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
   const resultLabels: Record<string, string> = {
     updated: 'Astrid updated.',
@@ -123,12 +139,15 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const lastResult = operation.pending ? 'Update in progress. Checking its result…' : operation.error ? operation.error : operationResult ?? reportLabel;
   const operationMessage = operation.status && !operation.pending ? installerUpdateStatusMessage(operation.status) || null : null;
   const updateCard = currentResolution?.card === 'notice' || currentResolution?.card === 'update';
-  const updateAvailable = Boolean(currentStatus) && updateCard;
+  const updateAvailable = (Boolean(currentStatus) || Boolean(compatibility)) && updateCard;
+  // An old Astrid with no newer release to name (a source checkout has none) is titled by its card instead.
+  const releaseLine = currentStatus && (!compatibility || statusInstallType !== 'source' && currentStatus.servedRelease > currentStatus.release);
   const statusLine = operationMessage
     || (state === 'checking' ? 'Checking for updates…'
       : state === 'error' ? error
         : currentResolution?.card === 'newer' ? currentResolution.body
-          : updateAvailable && currentStatus ? `Update available: Release ${currentStatus.servedRelease}`
+          : updateAvailable && currentStatus && releaseLine ? `Update available: Release ${currentStatus.servedRelease}`
+            : updateAvailable && currentResolution?.title ? currentResolution.title
             : currentStatus ? `Astrid is up to date (Release ${currentStatus.release})` : 'Astrid is up to date');
   // A plain release notice only restates the status line; a required or schema reason, or a Runtime's update reason, is the detail.
   const releaseNotice = currentResolution?.card === 'notice' && !currentResolution.updateReason;

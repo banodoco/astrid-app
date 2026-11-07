@@ -4,7 +4,6 @@ import { SOURCE_SCHEMA_MISMATCH_ACTION } from '../../../integrations/runtime/run
 export type UpdateAction = {
   readonly label: string;
   readonly destination?: 'settings-updates';
-  readonly command?: string;
   readonly execute?: 'installer-update';
 };
 
@@ -32,7 +31,6 @@ export interface UpdateResolutionInput {
   readonly midSessionSchemaMismatch?: boolean;
   readonly updateNowAvailable?: boolean;
   readonly installType?: InstallType;
-  readonly command?: string;
   readonly realError?: string;
   readonly updateReason?: InstallerUpdateReason;
 }
@@ -55,24 +53,21 @@ export const RELOAD_ACTION = 'Reload';
 
 const settingsAction: UpdateAction = { label: 'See updates', destination: 'settings-updates' };
 const COPY_FOR_AGENT: UpdateAction = { label: COPY_FOR_AGENT_ACTION };
-const commandActions = (input: UpdateResolutionInput): Pick<UpdateResolution, 'primary' | 'secondary'> => ({
-  primary: COPY_FOR_AGENT,
-  secondary: { label: RUN_IT_YOURSELF_ACTION, ...(input.command ? { command: input.command } : {}) },
-});
+/** The direct-install update: the agent brief and the install line's update command. Every direct install, fully local included, uses it. */
+const COMMAND_ACTIONS: Pick<UpdateResolution, 'primary' | 'secondary'> = { primary: COPY_FOR_AGENT, secondary: { label: RUN_IT_YOURSELF_ACTION } };
 
 type ActionContext = 'page' | 'settings';
 
+/** Pinokio and source checkouts each have one way to update; every other install shares the direct-install actions. */
 function updateActions(input: UpdateResolutionInput, context: ActionContext, softRelease = false): Pick<UpdateResolution, 'primary' | 'secondary'> {
   if (input.installType === 'pinokio') return { primary: { label: UPDATE_IN_PINOKIO_ACTION }, secondary: null };
   if (input.installType === 'source') return { primary: { label: SOURCE_SCHEMA_MISMATCH_ACTION }, secondary: null };
   if (input.updateReason === 'recovery-needed' && input.installType === 'installer' && input.updateNowAvailable) {
     return { primary: { label: 'Update', execute: 'installer-update' }, secondary: null };
   }
-  // The editor does not perform updates for a fully local install; give the same install command guidance as other local users.
-  if (input.installType === 'fully-local') return commandActions(input);
   if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: COPY_FOR_AGENT };
   if (softRelease && context === 'page') return { primary: settingsAction, secondary: null };
-  return commandActions(input);
+  return COMMAND_ACTIONS;
 }
 
 /** The sole update decision point. Conditions are intentionally ordered to match CONTRACTS K6. */

@@ -10,7 +10,7 @@ vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: host
 
 import { AstridUpdatesSection } from './AstridUpdatesSection.tsx';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
-import { installCommand } from '@/shared/components/RuntimeConnection/copy.ts';
+import { installCommand, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -241,5 +241,78 @@ describe('Astrid Updates Settings section', () => {
     fireEvent.click(within(section).getByRole('button', { name: 'Download diagnostics' }));
     expect(await within(section).findByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Diagnostics' })).toHaveAttribute('aria-expanded', 'false');
+  });
+});
+
+describe('Updates for an Astrid older than this page', () => {
+  const INSTALL_LINE = /install\s*\|\s*sh|install\.ps1/;
+  const oldRuntime = (managedByPinokio = false) => {
+    connectionMock.value = { isConnected: false, isAuthenticated: true, managedByPinokio, state: { status: 'update_needed' } };
+  };
+  const status = (release: number, servedRelease: number, managedBy: string | null = null) => ({
+    release, app: 'current', servedRelease, servedApp: 'served', behind: release < servedRelease, managedBy,
+    resolution: { installedRelease: release, servedRelease, releaseBehind: release < servedRelease },
+  });
+
+  it('gives a source checkout its one update path, though it has no release to name', async () => {
+    oldRuntime();
+    hostedCheckMock.mockResolvedValue(status(0, 12, 'source'));
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByRole('status')).toHaveTextContent('Update Astrid');
+    expect(within(section).getByText('update your checkouts')).toBeInTheDocument();
+    expect(within(section).queryByRole('code')).toBeNull();
+    expect(section.textContent).not.toMatch(INSTALL_LINE);
+  });
+
+  it('gives a Pinokio Astrid only Pinokio’s Update: no install command and no agent brief', async () => {
+    oldRuntime(true);
+    hostedCheckMock.mockResolvedValue(status(3, 4));
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByText('Update in Pinokio')).toBeInTheDocument();
+    expect(within(section).getByText(RUNTIME_CONNECTION_COPY.updateNeeded.pinokioSentence)).toBeInTheDocument();
+    expect(within(section).queryByRole('code')).toBeNull();
+    for (const name of ['Copy instructions for your agent', 'Copy for your agent', 'Copy command', 'Update now']) expect(within(section).queryByRole('button', { name })).toBeNull();
+    expect(section.textContent).not.toContain('Run it yourself');
+    expect(section.textContent).not.toMatch(INSTALL_LINE);
+  });
+
+  it('gives a fully local Astrid the same update command as every direct install', async () => {
+    oldRuntime();
+    originMock.value = '';
+    vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
+    localCheckMock.mockResolvedValue(status(3, 4));
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(within(section).getByRole('code')).toHaveTextContent(installCommand('update'));
+    expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(section.textContent).not.toContain('npm run update');
+  });
+
+  it('turns an old chat service into the update card, with the direct-install update command', async () => {
+    connectionMock.value = { isConnected: true, managedByPinokio: false, state: { status: 'connected' }, schemaDigest: null, localServiceOutOfDate: true };
+    hostedCheckMock.mockResolvedValue(status(4, 4));
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByText(new RegExp(RUNTIME_CONNECTION_COPY.chatNeedsUpdate))).toBeInTheDocument();
+    expect(within(section).getByRole('status')).toHaveTextContent('Update Astrid');
+    expect(within(section).getByRole('code')).toHaveTextContent(installCommand('update'));
+  });
+
+  it('keeps the update card when the release check cannot answer', async () => {
+    oldRuntime(true);
+    hostedCheckMock.mockRejectedValue(new Error('offline'));
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByText('Update in Pinokio')).toBeInTheDocument();
+    expect(within(section).getByRole('status')).toHaveTextContent('Update Astrid');
+    expect(within(section).queryByRole('code')).toBeNull();
   });
 });

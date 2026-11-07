@@ -29,7 +29,6 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   const installSpecific = actions.find((action) => action.label === UPDATE_IN_PINOKIO_ACTION || action.label === SOURCE_SCHEMA_MISMATCH_ACTION);
   const reload = actions.find((action) => action.label === RELOAD_ACTION);
   const execute = actions.find((action) => action.execute === 'installer-update');
-  const localCommand = actions.find((action) => action.label === RUN_IT_YOURSELF_ACTION)?.command;
   // Details opens Settings Updates; a card whose action already goes there (See updates) does not repeat it.
   const details = context === 'page' && !route && (resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason;
   const startUpdate = async () => {
@@ -43,7 +42,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
     {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
-    {commandOptions && <CopyInstallCommand mode="update" localCommand={localCommand} agentLabel={COPY_FOR_AGENT_ACTION} />}
+    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}

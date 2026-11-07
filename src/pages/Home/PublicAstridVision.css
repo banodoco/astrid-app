@@ -631,7 +631,11 @@
   padding: 0;
   list-style: none;
 }
-/* The section divider is enough; individual principle cards need no extra rules. */
+/* The section divider is enough; suppress inherited list-item rules as well. */
+.astrid-vision .astrid-vision-standards-list > li {
+  border-top: none;
+  padding-top: 0;
+}
 .astrid-vision-standards-list li > span {
   color: var(--astrid-accent);
   font: 12px "Departure Mono", ui-monospace, monospace;

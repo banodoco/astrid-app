@@ -152,6 +152,9 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.length);
   await selector.selectOption('closed');
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.filter(gap => gap.assessment === 'closed').length);
+  if (!content.gaps.some(gap => gap.assessment === 'closed')) {
+    await expect(page.locator('.astrid-vision-filter-empty')).toHaveText('No gaps with this status yet.');
+  }
   await selector.selectOption('current');
   await expect(page.locator('.astrid-vision-part')).toHaveCount(current.length);
 });

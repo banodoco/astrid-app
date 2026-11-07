@@ -644,6 +644,16 @@
   line-height: inherit;
 }
 .astrid-vision-lead strong { color: var(--astrid-ink); font-weight: 550; }
+/* The repository attribution is supporting copy, not a second manifesto statement. */
+.astrid-vision-lead p + p {
+  margin-top: 16px;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.astrid-vision-lead p + p a {
+  color: var(--astrid-ink);
+  text-underline-offset: 3px;
+}
 
 .astrid-vision-standards { margin-top: clamp(80px, 10vw, 128px); }
 .astrid-vision-standards-list {

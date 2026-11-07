@@ -2,7 +2,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
-import { installCommand, RECOMMENDED_SETUP_CHOICES, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
+import { ASTRID_COMMANDS, installCommand, RECOMMENDED_SETUP_CHOICES, RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
 import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data/bridgeContract.ts';
 
 const { connectionRef } = vi.hoisted(() => ({ connectionRef: { current: null as { managedByPinokio: boolean } | null } }));
@@ -26,7 +26,8 @@ describe('ChatUpdateNeeded', () => {
     expect(screen.getByText(withCommandShell(copy.updateNeeded.sentence))).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: copy.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('update', RECOMMENDED_SETUP_CHOICES), { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(ASTRID_COMMANDS.macLinuxUpdate, { exact: true, selector: 'code' })).toBeInTheDocument();
+    expect(installCommand('update', RECOMMENDED_SETUP_CHOICES)).toBe(ASTRID_COMMANDS.macLinuxUpdate);
     expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
 
     const details = screen.getByText('Details').closest('details');

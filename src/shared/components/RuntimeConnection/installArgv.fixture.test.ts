@@ -136,3 +136,17 @@ describe('shared installer argv fixture', () => {
   });
 
 });
+
+describe('existing-install surfaces send the exact no-flag update command', () => {
+  it('Settings Setup, the update setup block, and the Settings update copy command', () => {
+    cleanup();
+    render(createElement(SetupBlock, { explicitChoices: true }));
+    expect(screen.getByRole('code').textContent).toBe(ASTRID_COMMANDS.macLinuxUpdate);
+    cleanup();
+    render(createElement(SetupBlock, { mode: 'update' }));
+    expect(screen.getByRole('code').textContent).toBe(ASTRID_COMMANDS.macLinuxUpdate);
+    cleanup();
+    render(createElement(CopyInstallCommand, { mode: 'update' }));
+    expect(displayedArgv()).toEqual(['--update']);
+  });
+});

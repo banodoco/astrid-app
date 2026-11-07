@@ -48,7 +48,7 @@ test('source attribution is website copy, separate from editorial vision', async
   const paragraphs = page.locator('.astrid-vision-lead p');
   await expect(paragraphs).toHaveCount(2);
   await expect(paragraphs.nth(1)).toContainText('The collective inspires ambitious work');
-  await expect(paragraphs).not.toContainText('published from the Astrid Dev repository');
+  await expect(page.locator('.astrid-vision-lead')).not.toContainText('published from the Astrid Dev repository');
 
   const attribution = page.locator('.astrid-vision-attribution');
   await expect(attribution).toContainText('This vision is published from the');

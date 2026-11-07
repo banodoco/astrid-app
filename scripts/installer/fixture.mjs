@@ -29,7 +29,16 @@ if args[:2] == ['python', 'install']:
         print('o' * size)
         print('e' * size, file=sys.stderr)
     sys.exit(int(os.environ.get('MOCK_PYTHON_EXIT', '0')))
-if args[:1] == ['venv'] or args[:2] == ['pip', 'install']:
+if args[:1] == ['venv']:
+    # Like uv 0.11: refuse to replace an existing environment without --clear.
+    target = pathlib.Path(args[1])
+    if target.exists() and '--clear' not in args:
+        print('error: Failed to create virtual environment', file=sys.stderr)
+        print(f'  Caused by: A virtual environment already exists at: {target}', file=sys.stderr)
+        sys.exit(2)
+    target.mkdir(parents=True, exist_ok=True)
+    sys.exit(0)
+if args[:2] == ['pip', 'install']:
     sys.exit(0)
 if '-c' in args:
     start = args.index('-c')

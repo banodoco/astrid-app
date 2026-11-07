@@ -77,7 +77,7 @@ import json, os, re, subprocess, sys
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib.request import url2pathname
-manifest, *flags = sys.argv[1:]
+venv, manifest, *flags = sys.argv[1:]
 with open(manifest, encoding="utf-8") as stream: pins = json.load(stream)
 if pins["tools"]["uv"]["version"] != "0.11.32" or pins["tools"]["python"]["version"] != "3.11.13":
     raise SystemExit("The bootstrap and manifest tool pins disagree.")
@@ -102,7 +102,9 @@ def git_requirement(name):
     return "git+" + path.as_uri() + "@" + sha
 uv = os.environ["ASTRID_INSTALL_UV"]
 agent_requirement = git_requirement("agent")
-venv = Path(manifest).with_name("bootstrap-venv")
+# Each run builds its environment in its own temporary directory, which the
+# shell removes on exit, never beside a supplied manifest that may be reused.
+venv = Path(venv)
 subprocess.run([uv, "venv", str(venv), "--python", pins["tools"]["python"]["version"]], check=True)
 python = venv / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
 runtime = git_requirement("runtime")
@@ -113,7 +115,7 @@ args = [uv, "run", "--no-project", "--python", str(python), "python", "-u", "-I"
 if not has_manifest: args.extend(["--manifest", manifest])
 args.extend(flags)
 os.execv(args[0], args)
-' "$manifest" "$@" <&3 >"$tmp/progress" 2>>"$log"; then status=0; else status=$?; fi
+' "$tmp/bootstrap-venv" "$manifest" "$@" <&3 >"$tmp/progress" 2>>"$log"; then status=0; else status=$?; fi
 wait "$progress_pid"
 if [ "$status" -ne 0 ]; then
     if ! grep -Fq "Astrid couldn't finish. Your work is kept." "$tmp/core.out"; then

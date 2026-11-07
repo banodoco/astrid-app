@@ -89,7 +89,6 @@ describe('update resolution Settings actions', () => {
           await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
           expect(clipboard.mock.calls[0][0]).toContain(command);
           expect(clipboard.mock.calls[0][0]).not.toContain('May I update Astrid');
-          expect(clipboard.mock.calls[0][0]).not.toContain('May I update Astrid');
           expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
         }
       fireEvent.click(screen.getByRole('button', { name: label }));

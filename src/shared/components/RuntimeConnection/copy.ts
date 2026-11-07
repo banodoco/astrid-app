@@ -302,7 +302,7 @@ export function agentInstructions(
   const existing = mode === 'update' || (setup.explicitChoices ?? false);
   return [
     `Please ${mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
-    !alreadySetup && !existing ? `Before you run the command, ask me once: “May I ${mode === 'update' ? 'update Astrid' : 'install Astrid'} with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
+    !alreadySetup && !existing ? `Before you run the command, ask me once: “May I install Astrid with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
     !alreadySetup && !existing ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
     'First inspect the existing installation, running services, profile, selected workspace and data root. Preserve my projects, media, credentials and agent instructions. Do not reset or delete my workspace, or replace it with an empty one.',
     "Use the current official Astrid installer; read it before running it. The installer adopts an existing workspace itself; don't run workspace or migration commands by hand. Do not bypass ownership guards or overwrite a directory just because the installer refuses it.",

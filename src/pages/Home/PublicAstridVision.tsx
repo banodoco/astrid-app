@@ -155,6 +155,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const palette = skyControls.palette;
   const [showAllGaps, setShowAllGaps] = useState(false);
   const [showAllProjects, setShowAllProjects] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const copyAgentInstructions = async () => {
+    const prompt = content?.vision.agentPrompt;
+    if (!prompt || !navigator.clipboard?.writeText) { setCopyStatus('error'); return; }
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('error');
+    }
+  };
   // New rows are mounted after the initial fetch. Reobserve when the list grows.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision, showAllGaps);
   useLayoutEffect(() => {
@@ -229,7 +240,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href="#astrid-vision-contribute-title">Help us build it</a>.
                   </p>
                 </>
               : error
@@ -375,7 +386,16 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <div className="astrid-vision-contribute-copy">
             <p className="astrid-vision-eyebrow">Get involved</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
-            <MarkdownText value={content.vision.contributeMarkdown} />
+            <MarkdownText value={content.vision.contributeMarkdown.replace(/\n\n\[Give these instructions to your agent\]\([^)]+\)\s*$/, '')} />
+            {content.vision.agentPrompt
+              ? <button type="button" className="astrid-vision-copy-instructions" onClick={() => { void copyAgentInstructions(); }}>
+                  Copy instructions for agents
+                </button>
+              : <a className="astrid-vision-copy-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Get instructions for agents on GitHub</a>}
+            <p className="astrid-vision-copy-status" role="status" aria-live="polite">
+              {copyStatus === 'copied' ? 'Instructions copied — give them to your agent.'
+                : copyStatus === 'error' ? "Couldn't copy. Open the instructions on GitHub instead." : ''}
+            </p>
           </div>
           <Tinkerer />
         </section>

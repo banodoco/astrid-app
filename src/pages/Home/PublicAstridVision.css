@@ -924,6 +924,24 @@
   gap: clamp(22px, 5vw, 80px);
   max-width: 950px;
 }
+/* A real clipboard action, never a link that only pretends to copy. */
+.astrid-vision-copy-instructions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 18px;
+  padding: 12px 18px;
+  border: 1px solid var(--astrid-ink);
+  border-radius: 8px;
+  background: var(--astrid-ink);
+  color: var(--astrid-paper);
+  font: 600 14px/1.4 inherit;
+  cursor: pointer;
+}
+.astrid-vision-copy-instructions:hover { background: var(--astrid-accent); border-color: var(--astrid-accent); }
+.astrid-vision-copy-instructions:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+.astrid-vision-copy-fallback { display: inline-block; margin-top: 16px; color: var(--astrid-ink); text-decoration: underline; }
+.astrid-vision-copy-status { min-height: 1.5em; margin: 9px 0 0; font-size: 13px; color: var(--astrid-muted); }
 .astrid-vision .astrid-vision-contribute .astrid-vision-tinkerer {
   grid-column: 2;
   grid-row: 1;

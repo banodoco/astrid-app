@@ -67,6 +67,21 @@ test('hero keeps the vision narrative separate from website source attribution',
   await expect(page.getByRole('link', { name: 'Astrid on GitHub' })).toHaveAttribute('href', source);
 });
 
+test('top contribution link scrolls to a real copy action using the published README prompt', async ({ page, request, context }) => {
+  const content = await pinnedFeed(page, request);
+  expect(typeof (content.vision as {agentPrompt?: string}).agentPrompt).toBe('string');
+  const prompt = (content.vision as {agentPrompt: string}).agentPrompt;
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('link', { name: 'Help us build it' }).click();
+  await expect(page).toHaveURL(/#astrid-vision-contribute-title$/);
+  await expect(page.getByRole('heading', { name: 'Want to help build Astrid?' })).toBeInViewport();
+  await page.getByRole('button', { name: 'Copy instructions for agents' }).click();
+  await expect(page.getByRole('status')).toContainText('Instructions copied');
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(prompt);
+  await expect(page.locator('.astrid-vision-contribute-copy a')).toHaveCount(0);
+});
+
 test('published projects retain their status and link directly to GitHub', async ({ page, request }) => {
   const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });

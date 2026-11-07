@@ -28,6 +28,14 @@ const fixture = () => ({
 });
 
 describe('public vision live data contract', () => {
+  it('accepts the canonical agent prompt and rejects malformed copy data', () => {
+    const current = fixture();
+    const withPrompt = { ...current, vision: { ...current.vision, agentPrompt: 'Give this exact README prompt to your agent.' } };
+    expect(parsePublicVisionContent(withPrompt).vision.agentPrompt).toBe(withPrompt.vision.agentPrompt);
+    expect(() => parsePublicVisionContent({ ...current, vision: { ...current.vision, agentPrompt: '' } })).toThrow();
+    expect(() => parsePublicVisionContent({ ...current, vision: { ...current.vision, agentPrompt: 123 } })).toThrow();
+  });
+
   it('accepts an approved versioned feed', () => {
     expect(parsePublicVisionContent(fixture()).projects).toHaveLength(1);
   });

@@ -38,8 +38,11 @@ export function astridOutOfDate(connection: Pick<RuntimeConnectionValue, 'state'
   return connection.localServiceOutOfDate ? 'chat' : null;
 }
 
-/** Each gate state's title and one line: the connection screens' own words, without their buttons and guides. */
-export function connectionStatus(connection: RuntimeConnectionValue): ConnectionStatus {
+/**
+ * Each gate state's title and one line: the connection screens' own words, without their buttons and guides. A Pinokio
+ * Astrid gets the Pinokio line where the screen has one, so it is never told to have an agent install it.
+ */
+export function connectionStatus(connection: RuntimeConnectionValue, pinokio = false): ConnectionStatus {
   const { state } = connection;
   const outOfDate = astridOutOfDate(connection);
   switch (state.status) {
@@ -75,6 +78,6 @@ export function connectionStatus(connection: RuntimeConnectionValue): Connection
     case 'refused':
       return { title: COPY.refused.title, detail: withOrigin(COPY.refused.sentence, window.location.origin), checks: LOOKING };
     case 'not_running':
-      return { title: COPY.notRunning.title, detail: COPY.notRunning.sentence, checks: LOOKING };
+      return { title: COPY.notRunning.title, detail: pinokio ? COPY.notRunning.pinokioHint : COPY.notRunning.sentence, checks: LOOKING };
   }
 }

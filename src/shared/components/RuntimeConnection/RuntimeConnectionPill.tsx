@@ -1,8 +1,9 @@
 import { useLayoutEffect } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { setRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
-import { CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { SetupBlock } from './SetupBlock.tsx';
 import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers.ts';
 import { RUNTIME_CONNECTION_COPY as COPY, withCommandShell, withOrigin } from './copy.ts';
@@ -84,7 +85,7 @@ export function RuntimeConnectionPill({
     return (
       <div data-testid="runtime-connection-status" data-state="stopped" role="alert" className={CARD_CLASS} style={CARD_STYLE}>
         <CardText title={COPY.stopped.title} sentence={pinokioManaged ? COPY.stopped.pinokioSentence : withCommandShell(COPY.stopped.sentence)} />
-        {!pinokioManaged && <CopyInstallCommand mode="install" />}
+        {!pinokioManaged && <SetupBlock initiallySetUp={connection.connectedBefore} localBuild={runtimeOrigin() === ''} />}
       </div>
     );
   }

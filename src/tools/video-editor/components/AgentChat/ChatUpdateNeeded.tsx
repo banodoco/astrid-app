@@ -1,8 +1,9 @@
 import { useRuntimeConnectionSafe } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
-import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
 import { RUNTIME_CONNECTION_COPY, updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
 import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data/bridgeContract.ts';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 
 /** A chat reply from this computer's Astrid that no longer matches what this page expects: an out-of-date service. */
 export function isChatUpdateError(error: unknown): error is BridgeRouteError {
@@ -20,7 +21,7 @@ export function ChatUpdateCommand({ withSentence = false }: { readonly withSente
   if (pinokio) return <p>{updateNeededSentence(true)}</p>;
   return <>
     {withSentence && <p>{updateNeededSentence(false)}</p>}
-    <CopyInstallCommand mode="update" />
+    <SetupBlock mode="update" localBuild={runtimeOrigin() === ''} />
   </>;
 }
 

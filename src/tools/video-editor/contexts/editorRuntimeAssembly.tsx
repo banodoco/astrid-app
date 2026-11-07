@@ -1,3 +1,4 @@
+import { onExtensionContextCommit } from '../runtime/extensionActivationTransaction';
 /**
  * Shared runtime assembly for the video editor's two host providers:
  * `VideoEditorProvider` (Astrid App shell) and `EditorRuntimeProvider`
@@ -820,29 +821,29 @@ export function useEditorRuntimeSync({
       (ext) => {
         const extId = ext.manifest.id as string;
 
-        // Lifecycle synchronization disposes an old instance (and removes all
-        // of its registry entries) before it calls this factory for the
-        // replacement. Ingest this manifest here, after that cleanup and
-        // immediately before activation, so the replacement's handlers always
-        // have matching declarative command/tool entries to bind to.
-        if (registry) {
-          for (const contrib of ext.manifest.contributions ?? []) {
-            switch (contrib.kind) {
-              case 'command':
-                registry.ingestCommandContribution(extId, contrib as CommandContribution);
-                break;
-              case 'keybinding':
-                registry.ingestKeybindingContribution(extId, contrib as KeybindingContribution);
-                break;
-              case 'contextMenuItem':
-                registry.ingestContextMenuItemContribution(extId, contrib as ContextMenuItemContribution);
-                break;
-              case 'agentTool':
-                agentToolRegistryRef.current?.ingestAgentToolContribution(extId, contrib as AgentToolContribution);
-                break;
+        // Declarations are part of the registration commit. Failed staged
+        // activation leaves the old revision's declarations and handlers intact.
+        const ingestContributions = () => {
+          if (registry) {
+            for (const contrib of ext.manifest.contributions ?? []) {
+              switch (contrib.kind) {
+                case 'command':
+                  registry.ingestCommandContribution(extId, contrib as CommandContribution);
+                  break;
+                case 'keybinding':
+                  registry.ingestKeybindingContribution(extId, contrib as KeybindingContribution);
+                  break;
+                case 'contextMenuItem':
+                  registry.ingestContextMenuItemContribution(extId, contrib as ContextMenuItemContribution);
+                  break;
+                case 'agentTool':
+                  agentToolRegistryRef.current?.ingestAgentToolContribution(extId, contrib as AgentToolContribution);
+                  break;
+              }
             }
           }
-        }
+
+        };
 
         const effectRegistry = effectRegistryRef.current;
         const transitionRegistry = transitionRegistryRef.current;
@@ -978,10 +979,12 @@ export function useEditorRuntimeSync({
         // Manager-visible reload notifications are published from the
         // post-persist success callback above.
         const notifyReg = settingsNotificationRegistryRef?.current;
-        if (notifyReg && !notifyReg.isDisposed) {
-          notifyReg.registerService(extId, ctx.services.settings);
-        }
-
+        onExtensionContextCommit(ctx, () => {
+          ingestContributions();
+          if (notifyReg && !notifyReg.isDisposed) {
+            notifyReg.registerService(extId, ctx.services.settings);
+          }
+        });
         return ctx;
       },
     );

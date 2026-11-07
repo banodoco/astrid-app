@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "release": 1,
+  "release": 3,
   "agent": {
-    "sha": "fdeac6a5910b3d2a9f3329ad2d9067380c5cc17e"
+    "sha": "e18f0d681871a3a72513e2b7a76c9951280c861e"
   },
   "runtime": {
-    "sha": "9fc53b771134940aaac901e4cfc5d03c1db1a20a",
+    "sha": "2d07f8aff64a67d92210247b74a0ad0d40b66037",
     "schema_digest": "sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c"
   },
   "tools": {

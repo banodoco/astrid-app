@@ -748,8 +748,8 @@ describe('NewChatMenu with an out-of-date local Astrid', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
-    ['MacIntel', 'Macintosh', ASTRID_COMMANDS.macLinuxUpdate],
-    ['Win32', 'Windows', ASTRID_COMMANDS.windowsUpdate],
+    ['MacIntel', 'Macintosh', 'curl -fsSL https://astrid.haus/install | sh -s -- --yes --update'],
+    ['Win32', 'Windows', '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --yes --update'],
   ])('shows the update prompt and %s update command instead of the raw error', (platform, os, command) => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(os);
@@ -757,7 +757,7 @@ describe('NewChatMenu with an out-of-date local Astrid', () => {
     openMenu({ agentsError: error });
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent(RUNTIME_CONNECTION_COPY.chatNeedsUpdate);
-    expect(alert).toHaveTextContent('Copy for your agent');
+    expect(alert).toHaveTextContent('Copy instructions for your agent');
     expect(alert).toHaveTextContent('Run it yourself');
     expect(alert).toHaveTextContent('If you run Astrid from source checkouts');
     expect(alert).not.toHaveTextContent('This page needs a newer Astrid');

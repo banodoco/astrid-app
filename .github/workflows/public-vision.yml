@@ -35,6 +35,8 @@ jobs:
         run: npm ci --legacy-peer-deps
       - name: Validate live-feed parsing contract
         run: npm run vision:check
+      - name: Check production vision canary syntax
+        run: node --check scripts/quality/check-public-vision-production.mjs
       - name: Check changed vision code
         run: npx eslint src/pages/Home/PublicAstridVision.tsx src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
       - name: Preserve public page lifecycle and share metadata

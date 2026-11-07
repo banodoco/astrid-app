@@ -718,6 +718,13 @@
   outline: 2px solid var(--astrid-accent);
   outline-offset: 3px;
 }
+.astrid-vision-filter-empty {
+  padding: 18px 2px 28px;
+  margin: 0;
+  color: var(--astrid-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
 
 /* A gentle action surface distinguishes source evidence from text links. */
 .astrid-vision-part-issue .astrid-vision-source-link {

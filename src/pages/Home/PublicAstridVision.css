@@ -903,6 +903,41 @@
 .astrid-vision-contribute .astrid-vision-markdown a:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 4px; }
 
 
+/* The GitHub-authored prompt is a real copy action, not another outbound document link. */
+.astrid-vision-contribute { scroll-margin-top: 28px; }
+.astrid-vision-copy-agent-button,
+.astrid-vision-copy-agent-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: fit-content;
+  min-height: 44px;
+  margin-top: 22px;
+  padding: 11px 17px;
+  border: 1px solid var(--astrid-ink);
+  border-radius: 9px;
+  background: var(--astrid-ink);
+  color: var(--astrid-paper);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-decoration: none;
+  cursor: pointer;
+}
+.astrid-vision-copy-agent-button:hover,
+.astrid-vision-copy-agent-fallback:hover { background: var(--astrid-accent); border-color: var(--astrid-accent); color: #fff; }
+.astrid-vision-copy-agent-button:focus-visible,
+.astrid-vision-copy-agent-fallback:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 4px; }
+.astrid-vision-copy-agent-status {
+  margin: 10px 0 0;
+  color: var(--astrid-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.astrid-vision-copy-agent-status:empty { display: none; }
+.astrid-vision-copy-agent-status a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+
 /* Four creator-first operating principles, one row on wide screens. */
 @media (min-width: 1101px) {
   .astrid-vision-standards-list { grid-template-columns: repeat(4, minmax(0, 1fr)); }

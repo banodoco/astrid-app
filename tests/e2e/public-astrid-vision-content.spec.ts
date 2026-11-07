@@ -8,7 +8,7 @@ async function feed(request: import('@playwright/test').APIRequestContext) {
   const data = await response.json();
   expect(data.schemaVersion).toBe(1);
   return data as {
-    vision: { title: string };
+    vision: { title: string; agentPrompt?: string; contributeMarkdown?: string };
     pillars: { title: string }[];
     principles: { title: string }[];
     gaps: { id: string; title: string; assessment: string; githubUrl: string }[];
@@ -87,7 +87,7 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
   const content = await feed(request);
   const source = 'https://github.com/banodoco/astrid-dev';
-  const contribute = 'https://github.com/banodoco/astrid-dev#want-to-contribute-give-this-to-your-agent';
+  const contribute = '#astrid-vision-contribute';
   const intro = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
   await page.route(FEED, route => route.fulfill({
     status: 200,
@@ -104,6 +104,33 @@ test('hero keeps the vision narrative separate from website source attribution',
   await expect(attribution.getByRole('link', { name: 'Astrid Dev repository' })).toHaveAttribute('href', source);
   await expect(attribution.getByRole('link', { name: 'Help us build it' })).toHaveAttribute('href', contribute);
   await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
+});
+
+test('the top help link scrolls to the canonical GitHub prompt copy action', async ({ page, request }) => {
+  const content = await pinnedFeed(page, request);
+  expect(content.vision.agentPrompt).toBeTruthy();
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: (value: string) => {
+          (window as typeof window & { __copiedAgentPrompt?: string }).__copiedAgentPrompt = value;
+          return Promise.resolve();
+        },
+      },
+    });
+  });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const introLink = page.getByRole('link', { name: 'Help us build it' });
+  await expect(introLink).toHaveAttribute('href', '#astrid-vision-contribute');
+  await introLink.click();
+  const contribution = page.locator('#astrid-vision-contribute');
+  await expect(contribution).toBeInViewport();
+  await expect(contribution.getByRole('link', { name: 'Give these instructions to your agent' })).toHaveCount(0);
+  await contribution.getByRole('button', { name: 'Copy instructions for agents' }).click();
+  await expect(contribution.getByRole('status')).toHaveText('Instructions copied — give them to your agent.');
+  const copied = await page.evaluate(() => (window as typeof window & { __copiedAgentPrompt?: string }).__copiedAgentPrompt);
+  expect(copied).toBe(content.vision.agentPrompt);
 });
 
 test('projects filter current work by default and can reveal every historic project', async ({ page, request }) => {

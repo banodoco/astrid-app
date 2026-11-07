@@ -360,6 +360,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <p className="astrid-vision-eyebrow">The gaps</p>
           <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
         </div>
+        <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
         <div className="astrid-vision-filter-bar">
           <label htmlFor="astrid-vision-gap-filter">Status</label>
           <select id="astrid-vision-gap-filter" aria-label="Filter gaps by status" value={gapFilter}
@@ -379,6 +380,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <p className="astrid-vision-eyebrow">Project catalog</p>
           <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
         </div>
+        <p className="astrid-vision-section-context">These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A listing doesn't mean someone has already started work.</p>
         <div className="astrid-vision-filter-bar">
           <label htmlFor="astrid-vision-project-filter">Status</label>
           <select id="astrid-vision-project-filter" aria-label="Filter projects by status" value={projectFilter}

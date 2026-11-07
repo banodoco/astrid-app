@@ -101,7 +101,7 @@ it('renders a real M1-installed effect in the open editor and retains the workin
     const required = (key: string) => { const value = process.env[key]; if (!value) throw new Error(`Set explicit ${key} for the frozen integration tuple`); return value; };
     child = spawn(required('M4_TEST_PYTHON'), ['-B', '-S', path.join(app, 'src/tools/video-editor/runtime/fixtures/runtime_pack_journey.py'), root,
       required('M4_TEST_AGENT_ROOT'), required('M4_TEST_RUNTIME_ROOT'), required('M4_TEST_PYTHON_SITE'),
-      process.execPath, required('M4_TEST_ESBUILD'), path.join(dist, 'extension-shared-modules.json')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+      process.execPath, path.join(app, 'node_modules/esbuild/bin/esbuild'), path.join(dist, 'extension-shared-modules.json')], { env, stdio: ['pipe', 'pipe', 'pipe'] });
     const lines = createInterface({ input: child.stdout! })[Symbol.asyncIterator]();
     let stderr = '';
     child.stderr!.on('data', data => { stderr += data.toString(); });

@@ -198,7 +198,7 @@ describe('AstridStatusSection', () => {
   it('copies service reason, exit and log details into the agent brief', async () => {
     render(<AstridStatusSection isOpen />);
     await openDetails();
-    fireEvent.click(await screen.findByRole('button', { name: CONNECTION_COPY.agent.copy }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy instructions for your agent' }));
 
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
     const brief = String(mocks.clipboard.mock.calls[0][0]);
@@ -253,7 +253,7 @@ describe('AstridStatusSection', () => {
 
   it('copies a complete agent brief separately from the repair command', async () => {
     render(<AstridStatusSection isOpen />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy for your agent' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Copy instructions for your agent' }));
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
     const brief = mocks.clipboard.mock.calls[0][0];
     expect(brief).toContain('selected workspace and data root');
@@ -269,7 +269,7 @@ describe('AstridStatusSection', () => {
     expect(checkbox).toBeChecked();
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
     const command = screen.getByRole('code').textContent;
-    fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
     expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
 

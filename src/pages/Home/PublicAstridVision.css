@@ -196,6 +196,22 @@
   letter-spacing: -0.035em;
 }
 
+/* Supporting context sits below the matching section headings, without changing their geometry. */
+.astrid-vision-section-context {
+  max-width: 70ch;
+  margin: -8px 0 24px;
+  color: var(--astrid-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+.astrid-vision-section-context a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.astrid-vision-section-context a:hover { text-decoration-color: var(--astrid-accent); }
+
 /* The North Star: four goals, each on its own quiet tint with a mink acting it out. */
 .astrid-vision-principles {
   display: grid;

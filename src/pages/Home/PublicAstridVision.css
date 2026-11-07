@@ -175,11 +175,18 @@
   .astrid-vision-principles li:hover .astrid-vision-principle-art { opacity: 1; filter: none; }
 }
 
-/* Section heads: a small eyebrow over a serif heading. */
+/* All four editorial sections use one eyebrow, title and subtle dark divider. */
 .astrid-vision-north-star { margin-top: 0; }
-.astrid-vision-section-head { margin-bottom: clamp(24px, 3vw, 36px); }
-.astrid-vision-section-head .astrid-vision-eyebrow,
-.astrid-vision-parts-head .astrid-vision-eyebrow { margin-bottom: 12px; color: var(--astrid-accent); font-size: 13px; }
+.astrid-vision-section-head {
+  margin-bottom: clamp(24px, 3vw, 36px);
+  padding-bottom: clamp(20px, 2.5vw, 28px);
+  border-bottom: 1px solid color-mix(in oklab, var(--astrid-ink) 75%, var(--astrid-line));
+}
+.astrid-vision-section-head .astrid-vision-eyebrow {
+  margin-bottom: 12px;
+  color: var(--astrid-accent);
+  font-size: 13px;
+}
 .astrid-vision-section-head h2 {
   margin: 0;
   font-family: var(--astrid-vision-serif);
@@ -188,6 +195,31 @@
   line-height: 1.05;
   letter-spacing: -0.035em;
 }
+
+/* Context and status filter share a line on desktop; section header geometry stays unchanged. */
+.astrid-vision-context-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(16px, 3vw, 32px);
+  margin: -8px 0 24px;
+}
+.astrid-vision-section-context {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 70ch;
+  margin: 0;
+  color: var(--astrid-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+.astrid-vision-section-context a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.astrid-vision-section-context a:hover { text-decoration-color: var(--astrid-accent); }
 
 /* The North Star: four goals, each on its own quiet tint with a mink acting it out. */
 .astrid-vision-principles {
@@ -290,24 +322,6 @@
 
 /* The vision, part by part, against the issues today */
 .astrid-vision-parts { margin-top: clamp(88px, 11vw, 136px); }
-.astrid-vision-parts-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 24px clamp(28px, 5vw, 64px);
-  align-items: end;
-  padding-bottom: 28px;
-  border-bottom: 1px solid var(--astrid-ink);
-}
-.astrid-vision-parts-head h2 {
-  max-width: 16ch;
-  margin: 0;
-  font-family: var(--astrid-vision-serif);
-  font-size: clamp(32px, 4vw, 48px);
-  font-weight: 400;
-  line-height: 1.05;
-  letter-spacing: -0.035em;
-}
-.astrid-vision-parts-head p { max-width: 40ch; margin: 0; color: var(--astrid-muted); font-size: 16.5px; line-height: 1.55; }
 .astrid-vision-parts > ol { margin: 0; padding: 0; list-style: none; }
 /* Gaps read as a compact, keyboard-accessible list; details open in place on every screen. */
 .astrid-vision-part {
@@ -332,7 +346,7 @@
   gap: clamp(12px, 2vw, 22px);
   width: 100%;
   margin: 0;
-  padding: 16px 2px;
+  padding: 16px 16px 16px 2px;
   border: 0;
   background: none;
   color: inherit;
@@ -409,7 +423,6 @@
   .astrid-vision-juggler { --px: 3px; }
 }
 @media (max-width: 900px) {
-  .astrid-vision-parts-head { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
   .astrid-vision-hero { grid-template-columns: minmax(0, 1fr); }
@@ -445,8 +458,7 @@
   .astrid-vision-part .astrid-vision-part-number { font-size: 13px; }
   .astrid-vision-part-body { animation: astrid-vision-unfold 260ms cubic-bezier(.22, .61, .36, 1); }
   /* On a phone the heading and disclosure already communicate the gap's goal. */
-  .astrid-vision-part-vision .astrid-vision-label,
-  .astrid-vision-parts-head > p { display: none; }
+  .astrid-vision-part-vision .astrid-vision-label { display: none; }
 }
 
 @keyframes astrid-vision-unfold {
@@ -518,27 +530,6 @@
    essay. One line per issue in the site's pixel "system" type for the area and plain sans for the title,
    each opening in place; collapsed, the list stays short however long it grows. */
 .astrid-vision-issues { margin-top: clamp(80px, 10vw, 128px); }
-.astrid-vision-issues-head {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 12px clamp(28px, 5vw, 64px);
-  align-items: end;
-  padding-bottom: 20px;
-  border-bottom: 1px solid var(--astrid-ink);
-}
-.astrid-vision-issues-head .astrid-vision-eyebrow { margin-bottom: 10px; }
-.astrid-vision-issues-head h2 {
-  margin: 0;
-  font-family: var(--astrid-vision-serif);
-  font-size: clamp(26px, 2.8vw, 34px);
-  font-weight: 400;
-  letter-spacing: -0.02em;
-  line-height: 1.15;
-  text-wrap: balance;
-}
-.astrid-vision-issues-head > p { max-width: 40ch; margin: 0; color: var(--astrid-muted); font-size: 15.5px; line-height: 1.55; }
-.astrid-vision-issues-head > p a { color: inherit; text-decoration: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; }
-.astrid-vision-issues-head > p a:hover { text-decoration-color: var(--astrid-accent); }
 .astrid-vision-issues-list { margin: 0; padding: 0; list-style: none; }
 .astrid-vision-issues-list li { border-bottom: 1px dashed color-mix(in oklab, var(--astrid-ink) 22%, transparent); }
 .astrid-vision-issues-list summary {
@@ -586,7 +577,6 @@
 }
 .astrid-vision-issues-more a:hover { text-decoration-color: var(--astrid-accent); }
 @media (max-width: 760px) {
-  .astrid-vision-issues-head { grid-template-columns: minmax(0, 1fr); }
   .astrid-vision-issues-list summary { grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; }
   .astrid-vision-issues-area { grid-column: 1; }
   .astrid-vision-issues-title { grid-column: 1; }
@@ -689,10 +679,10 @@
 /* Both catalogs share one quiet, native status selector. Counts come from the feed. */
 .astrid-vision-filter-bar {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   justify-content: flex-end;
   gap: 12px;
-  padding: 14px 2px;
 }
 .astrid-vision-filter-bar label {
   color: var(--astrid-muted);
@@ -703,10 +693,11 @@
 .astrid-vision-filter-bar select {
   min-width: 154px;
   max-width: min(100%, 260px);
-  padding: 8px 12px;
+  appearance: none;
+  padding: 8px 38px 8px 12px;
   border: 1px solid var(--astrid-line);
   border-radius: 8px;
-  background: var(--astrid-panel);
+  background: var(--astrid-panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23615e55' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") no-repeat right 12px center / 16px 16px;
   color: var(--astrid-ink);
   font-family: inherit;
   font-size: 13px;
@@ -717,6 +708,27 @@
 .astrid-vision-filter-bar select:focus-visible {
   outline: 2px solid var(--astrid-accent);
   outline-offset: 3px;
+}
+@media (max-width: 760px) {
+  .astrid-vision-context-row { display: block; }
+  .astrid-vision-context-row .astrid-vision-section-context { margin-bottom: 12px; }
+  /* Label + control together never exceed half the phone viewport. */
+  .astrid-vision-context-row .astrid-vision-filter-bar {
+    width: min(50vw, 210px);
+    max-width: 100%;
+    margin-left: auto;
+    gap: 8px;
+  }
+  .astrid-vision-context-row .astrid-vision-filter-bar label { flex: 0 0 auto; }
+  .astrid-vision-context-row .astrid-vision-filter-bar select {
+    flex: 1 1 0;
+    width: 0;
+    min-width: 0;
+    padding: 8px 27px 8px 8px;
+    background-position: right 8px center;
+    background-size: 14px 14px;
+    font-size: 12px;
+  }
 }
 .astrid-vision-filter-empty {
   padding: 18px 2px 28px;

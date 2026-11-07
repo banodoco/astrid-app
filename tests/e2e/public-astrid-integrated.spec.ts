@@ -156,9 +156,11 @@ test('A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion'
     expect(dimensions[0].height).toBe(Math.ceil((size.height + 48) / 6) + bleedRows);
     await shot(page, info, `resize-${size.width}`);
   }
-  const issue = page.locator('.astrid-vision-issues summary').first();
+  const issue = page.locator('.astrid-vision-part h3 button').first();
+  await expect(issue).toHaveAttribute('aria-expanded', 'false');
   await issue.click();
-  await expect(issue.locator('..')).toHaveAttribute('open', '');
+  await expect(issue).toHaveAttribute('aria-expanded', 'true');
+  await expect(page.locator('.astrid-vision-part-body').first()).toBeVisible();
   await shot(page, info, 'disclosure');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 });

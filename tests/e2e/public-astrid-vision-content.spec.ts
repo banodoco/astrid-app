@@ -67,6 +67,12 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   await expect(body).toBeHidden();
   const collapsed = await first.evaluate(element => element.getBoundingClientRect().height);
   expect(collapsed).toBeLessThan(105);
+  const gapChevronInset = await first.evaluate(element => {
+    const button = element.querySelector('h3 button')!;
+    const chevron = button.querySelector('svg')!;
+    return button.getBoundingClientRect().right - chevron.getBoundingClientRect().right;
+  });
+  expect(gapChevronInset).toBeGreaterThanOrEqual(12);
   await trigger.click();
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   await expect(body).toBeVisible();
@@ -75,13 +81,85 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   await trigger.click();
   await expect(body).toBeHidden();
 
-  await expect(page.locator('.astrid-vision-parts-head > p'))
+  await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(1);
+  await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(1);
+  await expect(page.locator('.astrid-vision-parts .astrid-vision-context-row > .astrid-vision-section-context'))
     .toHaveText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
-  const catalogLink = page.getByRole('link', { name: 'Astrid Dev catalog' });
-  await expect(catalogLink).toHaveAttribute('href', /\/plans$/);
+  const catalogLink = page.locator('.astrid-vision-projects .astrid-vision-context-row > .astrid-vision-section-context a');
+  await expect(catalogLink).toHaveText('Astrid Dev catalog');
+  await expect(catalogLink).toHaveAttribute('href', /github\.com\/banodoco\/astrid-dev\/tree\/[0-9a-f]{40}\/plans$/);
   expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
   await expect(page.getByRole('link', { name: 'Astrid on GitHub' }))
     .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
+  const gapFilter = page.getByRole('combobox', { name: 'Filter gaps by status' });
+  const projectFilter = page.getByRole('combobox', { name: 'Filter projects by status' });
+  for (const section of ['.astrid-vision-parts', '.astrid-vision-projects']) {
+    const row = page.locator(section + ' .astrid-vision-context-row');
+    const description = await row.locator('.astrid-vision-section-context').boundingBox();
+    const filter = await row.locator('.astrid-vision-filter-bar').boundingBox();
+    expect(description).not.toBeNull();
+    expect(filter).not.toBeNull();
+    expect(description!.x + description!.width).toBeLessThan(filter!.x);
+    expect(Math.abs(description!.y + description!.height / 2 -
+      (filter!.y + filter!.height / 2))).toBeLessThan(2);
+  }
+  for (const select of [gapFilter, projectFilter]) {
+    const style = await select.evaluate(element => {
+      const css = getComputedStyle(element);
+      return { appearance: css.appearance, paddingRight: Number.parseFloat(css.paddingRight), image: css.backgroundImage };
+    });
+    expect(style.appearance).toBe('none');
+    expect(style.paddingRight).toBeGreaterThanOrEqual(36);
+    expect(style.image).toContain('data:image/svg+xml');
+  }
+});
+
+test('phone status controls stay right-aligned under descriptions and within half the viewport', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  for (const width of [320, 390, 760]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    for (const section of ['.astrid-vision-parts', '.astrid-vision-projects']) {
+      const row = page.locator(section + ' .astrid-vision-context-row');
+      const description = await row.locator('.astrid-vision-section-context').boundingBox();
+      const filter = await row.locator('.astrid-vision-filter-bar').boundingBox();
+      const select = await row.locator('select').boundingBox();
+      expect(description).not.toBeNull();
+      expect(filter).not.toBeNull();
+      expect(select).not.toBeNull();
+      expect(filter!.y).toBeGreaterThanOrEqual(description!.y + description!.height);
+      expect(filter!.width).toBeLessThanOrEqual(width / 2 + 1);
+      expect(filter!.x + filter!.width).toBeLessThanOrEqual(width + 1);
+      expect(Math.abs(filter!.x + filter!.width - (description!.x + description!.width))).toBeLessThan(2);
+      expect(select!.x + select!.width).toBeLessThanOrEqual(filter!.x + filter!.width + 1);
+    }
+  }
+});
+
+test('all editorial section headers share a consistent divider and title system', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const sections = page.locator('.astrid-vision-north-star, .astrid-vision-standards, .astrid-vision-parts, .astrid-vision-projects');
+  await expect(sections).toHaveCount(4);
+  const headers = sections.locator('.astrid-vision-section-head');
+  await expect(headers).toHaveCount(4);
+  const styles = await headers.evaluateAll(elements => elements.map(element => {
+    const css = getComputedStyle(element);
+    return {
+      borderStyle: css.borderBottomStyle,
+      borderWidth: css.borderBottomWidth,
+      borderColor: css.borderBottomColor,
+      padding: css.paddingBottom,
+      headingSize: getComputedStyle(element.querySelector('h2')!).fontSize,
+      childParagraphs: element.querySelectorAll(':scope > p').length,
+      x: element.getBoundingClientRect().left,
+    };
+  }));
+  expect(styles.every(s => s.borderStyle === 'solid' && s.borderWidth === '1px' && s.childParagraphs === 1)).toBeTruthy();
+  expect(new Set(styles.map(s => s.borderColor)).size).toBe(1);
+  expect(new Set(styles.map(s => s.padding)).size).toBe(1);
+  expect(new Set(styles.map(s => s.headingSize)).size).toBe(1);
+  expect(Math.max(...styles.map(s => s.x)) - Math.min(...styles.map(s => s.x))).toBeLessThan(2);
 });
 
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
@@ -110,6 +188,14 @@ test('the top help link scrolls to the canonical GitHub prompt copy action', asy
   const content = await pinnedFeed(page, request);
   expect(content.vision.agentPrompt).toBeTruthy();
   await page.addInitScript(() => {
+    const nativeScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function(options?: boolean | ScrollIntoViewOptions) {
+      if (this.id === 'astrid-vision-contribute') {
+        (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior =
+          typeof options === 'object' ? options.behavior : undefined;
+      }
+      nativeScrollIntoView.call(this, options);
+    };
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
       value: {
@@ -126,11 +212,34 @@ test('the top help link scrolls to the canonical GitHub prompt copy action', asy
   await introLink.click();
   const contribution = page.locator('#astrid-vision-contribute');
   await expect(contribution).toBeInViewport();
+  expect(await page.evaluate(() => (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior)).toBe('smooth');
+  await expect(page).toHaveURL(/#astrid-vision-contribute$/);
   await expect(contribution.getByRole('link', { name: 'Give these instructions to your agent' })).toHaveCount(0);
   await contribution.getByRole('button', { name: 'Copy instructions for agents' }).click();
   await expect(contribution.getByRole('status')).toHaveText('Instructions copied — give them to your agent.');
+  await expect(contribution.locator('.astrid-vision-copy-agent-status')).toBeEmpty({ timeout: 6500 });
+  await expect(contribution.getByRole('button', { name: 'Copy instructions for agents' })).toBeVisible();
   const copied = await page.evaluate(() => (window as typeof window & { __copiedAgentPrompt?: string }).__copiedAgentPrompt);
   expect(copied).toBe(content.vision.agentPrompt);
+});
+
+test('contribution scroll respects reduced-motion preferences', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.addInitScript(() => {
+    const nativeScrollIntoView = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function(options?: boolean | ScrollIntoViewOptions) {
+      if (this.id === 'astrid-vision-contribute') {
+        (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior =
+          typeof options === 'object' ? options.behavior : undefined;
+      }
+      nativeScrollIntoView.call(this, options);
+    };
+  });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('link', { name: 'Help us build it' }).click();
+  expect(await page.evaluate(() => (window as typeof window & { __visionScrollBehavior?: ScrollBehavior }).__visionScrollBehavior)).toBe('auto');
+  await expect(page.locator('#astrid-vision-contribute')).toBeInViewport();
 });
 
 test('projects filter current work by default and can reveal every historic project', async ({ page, request }) => {

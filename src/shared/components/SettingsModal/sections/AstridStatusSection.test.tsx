@@ -274,12 +274,12 @@ describe('AstridStatusSection', () => {
     expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
 
     fireEvent.click(checkbox);
-    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
     expect(screen.getByRole('code').textContent).toBe(command);
     mocks.clipboard.mockClear();
     fireEvent.click(screen.getByRole('button', { name: 'Copied. Paste them into your agent.' }));
     await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
-    expect(mocks.clipboard.mock.calls[0][0]).toContain('May I install Astrid with these setup choices?');
+    expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
   });
 
   it('names an old chat service and leaves its update to the Updates section', async () => {

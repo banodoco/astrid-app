@@ -94,10 +94,6 @@ export function setupChoiceFlags(choices: SetupChoices = RECOMMENDED_SETUP_CHOIC
     ? [] : [flag, choices[key] ? 'on' : 'off']);
 }
 
-/** Settings cannot read saved Runtime choices yet, so its visible selections are applied explicitly. */
-export function explicitSetupChoiceFlags(choices: SetupChoices): string[] {
-  return SETUP_FLAGS.flatMap(([key, flag]) => [flag, choices[key] ? 'on' : 'off']);
-}
 
 /** One owner for G1's offline diagnostics fallback, shared by Settings and recovery surfaces. */
 export const DIAGNOSTICS_FALLBACK_COPY = {
@@ -275,7 +271,7 @@ export function installCommand(mode: CommandMode, choices?: SetupChoices, explic
   // An existing install never gets choice flags: the Agent applies its saved policy, and --yes would replace legacy choices.
   if (mode === 'update' || explicitChoices) return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
   const selected = choices ?? RECOMMENDED_SETUP_CHOICES;
-  const args = ['--yes', ...(mode === 'update' ? ['--update'] : []), ...(explicitChoices ? explicitSetupChoiceFlags(selected) : setupChoiceFlags(selected))].join(' ');
+  const args = ['--yes', ...setupChoiceFlags(selected)].join(' ');
   return windows
     ? `& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) ${args}`
     : `${ASTRID_COMMANDS.macLinux} -s -- ${args}`;
@@ -302,10 +298,12 @@ export function agentInstructions(
   const choices = setup.choices ?? RECOMMENDED_SETUP_CHOICES;
   const alreadySetup = setup.alreadySetup ?? false;
   const command = installCommand(mode, choices, setup.explicitChoices ?? false);
+  // Existing installs keep their saved choices: no consent question and no choice summary.
+  const existing = mode === 'update' || (setup.explicitChoices ?? false);
   return [
     `Please ${mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
-    !alreadySetup ? `Before you run the command, ask me once: “May I ${mode === 'update' ? 'update Astrid' : 'install Astrid'} with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
-    !alreadySetup ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
+    !alreadySetup && !existing ? `Before you run the command, ask me once: “May I ${mode === 'update' ? 'update Astrid' : 'install Astrid'} with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
+    !alreadySetup && !existing ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
     'First inspect the existing installation, running services, profile, selected workspace and data root. Preserve my projects, media, credentials and agent instructions. Do not reset or delete my workspace, or replace it with an empty one.',
     "Use the current official Astrid installer; read it before running it. The installer adopts an existing workspace itself; don't run workspace or migration commands by hand. Do not bypass ownership guards or overwrite a directory just because the installer refuses it.",
     windows && mode === 'install'

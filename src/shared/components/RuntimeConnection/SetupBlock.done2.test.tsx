@@ -57,7 +57,9 @@ describe('done2', () => {
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
         const instructions = mocks.clipboard.mock.calls[0][0] as string;
         expect(instructions.split('\n')).toContain(surface.command);
-        if (alreadySetUp) expect(instructions).not.toContain('May I install Astrid with these setup choices?');
+        // Existing-install surfaces (update, Settings) keep saved choices: no consent question for them.
+        const existingSurface = surface.command.endsWith('--update');
+        if (alreadySetUp || existingSurface) expect(instructions).not.toContain('May I install Astrid');
         else expect(instructions).toContain('May I install Astrid with these setup choices?');
       }
       view.unmount();

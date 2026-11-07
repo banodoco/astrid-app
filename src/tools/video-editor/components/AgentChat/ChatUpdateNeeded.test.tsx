@@ -28,7 +28,7 @@ describe('ChatUpdateNeeded', () => {
     expect(screen.getByRole('button', { name: copy.agent.commandCopy })).toBeInTheDocument();
     expect(screen.getByText(ASTRID_COMMANDS.macLinuxUpdate, { exact: true, selector: 'code' })).toBeInTheDocument();
     expect(installCommand('update', RECOMMENDED_SETUP_CHOICES)).toBe(ASTRID_COMMANDS.macLinuxUpdate);
-    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
 
     const details = screen.getByText('Details').closest('details');
     expect(details).not.toBeNull();

@@ -50,10 +50,9 @@ describe('shared installer argv fixture', () => {
     expect(new Set(fixture.cases.map(testCase => testCase.id)).size).toBe(fixture.cases.length);
     for (const testCase of fixture.cases) {
       expect(Object.values(testCase.choices).every(value => value === 'on' || value === 'off')).toBe(true);
-      const mode = testCase.id.startsWith('update-') ? 'update' : 'install';
-      const command = testCase.id === 'update-legacy-saved-defaults'
+      const command = testCase.id.startsWith('update-')
         ? installCommand('update')
-        : installCommand(mode, builderChoices(testCase.choices), testCase.id.startsWith('settings-'));
+        : installCommand('install', builderChoices(testCase.choices));
       expect(command).toBe([fixture.install_line, ...testCase.argv].join(' '));
     }
   });
@@ -114,9 +113,7 @@ describe('shared installer argv fixture', () => {
     const cases = fixture.cases.filter(testCase => /^combined-[01]{4}$/.test(testCase.id));
     for (const testCase of cases) {
       localStorage.clear();
-      const mode = testCase.id.startsWith('update-') ? 'update' : 'install';
-      const explicitChoices = testCase.id.startsWith('settings-');
-      const { unmount } = render(createElement(SetupBlock, { mode, explicitChoices }));
+      const { unmount } = render(createElement(SetupBlock));
       fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
       const controls = within(screen.getByRole('group', { name: 'Customize Astrid setup' })).getAllByRole('checkbox') as HTMLInputElement[];
       const desired = Object.values(testCase.choices).map(value => value === 'on');

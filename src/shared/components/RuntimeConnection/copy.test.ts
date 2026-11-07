@@ -33,7 +33,7 @@ describe('install commands', () => {
     expect(installCommand('update', choices)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --update');
     const brief = agentInstructions('update', 'https://astrid.haus', false, undefined, { choices });
     expect(brief).toContain(installCommand('update', choices));
-    expect(brief).toContain('May I update Astrid with these setup choices?');
+    expect(brief).not.toContain('May I update Astrid');
     expect(agentInstructions('update', 'https://astrid.haus', false, undefined, { choices, alreadySetup: true }))
       .not.toContain('May I update Astrid');
   });

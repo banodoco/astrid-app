@@ -37,7 +37,7 @@ test('hero shows unlinked source attribution and a linked contribution guide', a
   const intro = [
     'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.',
     'The information on this page is pulled from the Astrid Dev repository. If you\'d like to contribute, visit [the contribution guide](' + contributionGuide + ').',
-  ].join('\\n\\n');
+  ].join('\n\n');
   await page.route(FEED, route => route.fulfill({
     status: 200,
     contentType: 'application/json',

@@ -166,6 +166,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [gapFilter, setGapFilter] = useState<GapFilter>('current');
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
+  const copyAgentInstructions = async () => {
+    const prompt = content?.vision.agentPrompt;
+    if (!prompt || !navigator.clipboard?.writeText) { setCopyStatus('error'); return; }
+    try {
+      await navigator.clipboard.writeText(prompt);
+      setCopyStatus('copied');
+    } catch {
+      setCopyStatus('error');
+    }
+  };
   // Newly filtered rows must still receive reveal observation.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
     gapFilter + ':' + projectFilter + ':' + showAllProjects);
@@ -247,7 +258,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href="#astrid-vision-contribute-title">Help us build it</a>.
                   </p>
                 </>
               : error
@@ -345,12 +356,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </section>
 
       <section className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
-        <div className="astrid-vision-parts-head" data-reveal>
-          <div>
-            <p className="astrid-vision-eyebrow">The gaps</p>
-            <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
-          </div>
-          <p>These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
+        <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
+          <p className="astrid-vision-eyebrow">The gaps</p>
+          <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
         </div>
         <div className="astrid-vision-filter-bar">
           <label htmlFor="astrid-vision-gap-filter">Status</label>
@@ -367,12 +375,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </section>
 
       <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
-        <div className="astrid-vision-issues-head" data-reveal>
-          <div>
-            <p className="astrid-vision-eyebrow">Project catalog</p>
-            <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
-          </div>
-          <p>These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A project being listed doesn't mean someone has already started it.</p>
+        <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
+          <p className="astrid-vision-eyebrow">Project catalog</p>
+          <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
         </div>
         <div className="astrid-vision-filter-bar">
           <label htmlFor="astrid-vision-project-filter">Status</label>
@@ -413,7 +418,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <div className="astrid-vision-contribute-copy">
             <p className="astrid-vision-eyebrow">Get involved</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
-            <MarkdownText value={content.vision.contributeMarkdown} />
+            <MarkdownText value={content.vision.contributeMarkdown.replace(/\n\n\[Give these instructions to your agent\]\([^)]+\)\s*$/, '')} />
+            {content.vision.agentPrompt
+              ? <button type="button" className="astrid-vision-copy-instructions" onClick={() => { void copyAgentInstructions(); }}>
+                  Copy instructions for agents
+                </button>
+              : <a className="astrid-vision-copy-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Get instructions for agents on GitHub</a>}
+            <p className="astrid-vision-copy-status" role="status" aria-live="polite">
+              {copyStatus === 'copied' ? 'Instructions copied — give them to your agent.'
+                : copyStatus === 'error' ? "Couldn't copy the instructions." : ''}
+            </p>
+            {copyStatus === 'error' && <a className="astrid-vision-copy-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Read instructions on GitHub</a>}
           </div>
           <Tinkerer />
         </section>

@@ -77,6 +77,12 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
 
   await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(1);
   await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(1);
+  await expect(page.locator('.astrid-vision-parts > .astrid-vision-section-context'))
+    .toHaveText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
+  const catalogLink = page.locator('.astrid-vision-projects > .astrid-vision-section-context a');
+  await expect(catalogLink).toHaveText('Astrid Dev catalog');
+  await expect(catalogLink).toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev/plans');
+  expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
   await expect(page.getByRole('link', { name: 'Astrid on GitHub' }))
     .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
 });

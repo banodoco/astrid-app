@@ -9,6 +9,8 @@ import { describeFailure, RUNTIME_CONNECTION_COPY } from '@/shared/components/Ru
 import { connectionStatus } from './ConnectionSection.tsx';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { CopyInstallCommand } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
+import { UPDATE_IN_PINOKIO_ACTION } from '@/shared/lib/updates/resolveUpdate.ts';
+import { useUpdateInstallType } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { ASTRID_STATUS_COPY as COPY, connectionStatusCopy } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
 
@@ -51,6 +53,8 @@ function serviceMetadata(service: RuntimeService): string[] {
 
 export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
   const connection = useRuntimeConnection();
+  // The install type the Updates section's actions use, so repair and update always name the same path.
+  const pinokio = useUpdateInstallType(connection) === 'pinokio';
   const [details, setDetails] = useState<RuntimeDetails | null>(null);
   const [loadFailed, setLoadFailed] = useState(false);
   const connected = connection.state.status === 'connected';
@@ -93,18 +97,19 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
     };
   }, [isOpen, connected]);
 
-  const summary = connectionStatus(connection);
+  const summary = connectionStatus(connection, pinokio);
   const status = connection.state.status;
   const rawServices = details?.health.services;
   const hasServiceDetails = Array.isArray(rawServices) && rawServices.every(isRuntimeService);
   const services = Array.isArray(rawServices) ? rawServices.filter(isRuntimeService) : [];
   const needsRepair = details?.health.status === 'degraded' || services.some((service) => service.state === 'failed');
+  const degraded = pinokio ? COPY.degradedPinokio : COPY.degraded;
   const statusText = summary.outOfDate === 'chat'
     ? COPY.chatUpdateNeeded
     : summary.outOfDate
     ? COPY.updateNeeded
     : connected
-    ? loadFailed ? COPY.unavailable : needsRepair ? COPY.degraded : details ? COPY.connected : COPY.checking
+    ? loadFailed ? COPY.unavailable : needsRepair ? degraded : details ? COPY.connected : COPY.checking
     : connectionStatusCopy(status);
 
   const getHelp = <a className="text-muted-foreground underline underline-offset-4" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>;
@@ -122,10 +127,11 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
         {summary.checks && <SetupStatusLine checks={summary.checks} mink={false} announce={false} className="items-start" />}
         {connected && details && needsRepair && (
           <>
-            <CopyInstallCommand
+            {/* Pinokio's Update is its repair, so a Pinokio Astrid is never shown the install command or its agent brief. */}
+            {pinokio ? <p className="font-medium text-foreground">{UPDATE_IN_PINOKIO_ACTION}</p> : <CopyInstallCommand
               mode="install"
               services={services.filter((service) => service.state === 'failed' || service.reason || service.last_exit !== null)}
-            />
+            />}
             <p>{getHelp}</p>
           </>
         )}

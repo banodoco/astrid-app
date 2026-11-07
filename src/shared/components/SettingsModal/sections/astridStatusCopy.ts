@@ -7,6 +7,8 @@ export const ASTRID_STATUS_COPY = {
   connecting: 'Looking for Astrid…',
   connected: 'Connected',
   degraded: "Part of Astrid isn't working. Give these instructions to your coding agent to restart it.",
+  /** Pinokio's Update reruns Astrid's installer and restarts it: the repair the install command is for everyone else. */
+  degradedPinokio: "Part of Astrid isn't working. Update it in Pinokio to repair it.",
   checking: 'Reading details…',
   unavailable: "Astrid's details aren't available right now.",
   notRunning: "Astrid isn't answering on this computer",

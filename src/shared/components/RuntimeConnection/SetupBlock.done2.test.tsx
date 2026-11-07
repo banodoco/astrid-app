@@ -30,7 +30,7 @@ describe('done2', () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh) Chrome/131.0.0.0 Safari/537.36');
     mocks.clipboard.mockReset().mockResolvedValue(true);
     const standard = 'curl -fsSL https://astrid.haus/install | sh -s -- --yes';
-    const settings = `${standard} --autostart on --command on --skills on --skill-copies off`;
+    const settings = 'curl -fsSL https://astrid.haus/install | sh -s -- --update';
     const surfaces = [
       { render: () => render(<WelcomeFlow entry="setup" />), command: standard },
       { render: () => render(<RuntimeConnectionPanel connection={connectionFor({ status: 'not_running' })} />), command: standard },
@@ -57,7 +57,9 @@ describe('done2', () => {
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
         const instructions = mocks.clipboard.mock.calls[0][0] as string;
         expect(instructions.split('\n')).toContain(surface.command);
-        if (alreadySetUp) expect(instructions).not.toContain('May I install Astrid with these setup choices?');
+        // Existing-install surfaces (update, Settings) keep saved choices: no consent question for them.
+        const existingSurface = surface.command.endsWith('--update');
+        if (alreadySetUp || existingSurface) expect(instructions).not.toContain('May I install Astrid');
         else expect(instructions).toContain('May I install Astrid with these setup choices?');
       }
       view.unmount();

@@ -22,18 +22,18 @@ describe('install commands', () => {
     expect(installCommand(mode)).toBe(expected);
   });
 
-  it('puts only changed choices after --yes and can explicitly apply Settings choices', () => {
+  it('puts only changed choices after --yes; an existing install (Settings) gets no choice flags', () => {
     const choices = { ...RECOMMENDED_SETUP_CHOICES, autostart: false, skills: false, skillCopies: true };
     expect(installCommand('install', choices)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes --autostart off --skills off --skill-copies on');
-    expect(installCommand('install', choices, true)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes --autostart off --command on --skills off --skill-copies on');
+    expect(installCommand('install', choices, true)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --update');
   });
 
-  it('routes manual installer updates through --yes and the same changed-choice flags', () => {
+  it('sends updates as the plain command: the Agent applies the saved policy', () => {
     const choices = { ...RECOMMENDED_SETUP_CHOICES, autostart: false, skills: false, skillCopies: true };
-    expect(installCommand('update', choices)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes --update --autostart off --skills off --skill-copies on');
+    expect(installCommand('update', choices)).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --update');
     const brief = agentInstructions('update', 'https://astrid.haus', false, undefined, { choices });
     expect(brief).toContain(installCommand('update', choices));
-    expect(brief).toContain('May I update Astrid with these setup choices?');
+    expect(brief).not.toContain('May I update Astrid');
     expect(agentInstructions('update', 'https://astrid.haus', false, undefined, { choices, alreadySetup: true }))
       .not.toContain('May I update Astrid');
   });
@@ -79,7 +79,7 @@ describe('update handoff', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
     expect(ASTRID_COMMANDS.windowsAgentUpdate).toBe('powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update"');
-    expect(agentInstructions('update', 'https://astrid.haus')).toContain('--yes --update');
+    expect(agentInstructions('update', 'https://astrid.haus')).toContain(ASTRID_COMMANDS.windowsUpdate);
     expect(localSetupInstructions()).toContain(ASTRID_COMMANDS.windowsAgentUpdate);
   });
 });

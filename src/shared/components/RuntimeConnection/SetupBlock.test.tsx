@@ -28,11 +28,12 @@ it('customizes choices and shows flags in the frozen order after --yes', () => {
   expect(screen.getByRole('code')).toHaveTextContent('--yes --autostart off --skills off --skill-copies on');
 });
 
-it('Settings can turn saved off choices back on with explicit values', () => {
+it('Settings Setup on an existing install sends no choice flags', () => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
   render(<SetupBlock explicitChoices />);
-  expect(screen.getByRole('code')).toHaveTextContent('--yes --autostart on --command on --skills on --skill-copies off');
+  expect(screen.getByRole('code')).toHaveTextContent(/sh -s -- --update$/);
+  expect(screen.getByRole('code').textContent).not.toMatch(/--(autostart|command|skills|skill-copies)/);
 });
 
 it('keeps changed choices and checked state when Welcome hands off to a new setup surface', () => {
@@ -57,13 +58,10 @@ it('keeps changed choices and checked state when Welcome hands off to a new setu
   expect(screen.getByRole('code').textContent).toBe(command);
 });
 
-it('uses the same choices-aware update command and agent handoff', () => {
+it('gives an update no choice controls: the Agent keeps the saved policy', () => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
   render(<SetupBlock mode="update" />);
-  expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
-  expect(screen.getByRole('code')).toHaveTextContent('--yes --update');
-  fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-  fireEvent.click(screen.getByRole('checkbox', { name: 'Install skills for coding agents' }));
-  expect(screen.getByRole('code')).toHaveTextContent('--yes --update --skills off');
+  expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+  expect(screen.getByRole('code')).toHaveTextContent(/sh -s -- --update$/);
 });

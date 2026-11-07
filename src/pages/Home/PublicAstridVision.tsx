@@ -237,7 +237,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                 ? <>
                     <h1 id="astrid-vision-title">Astrid’s vision</h1>
                     <p className="astrid-vision-lead" role="alert">
-                      The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/visions/vision.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
+                      The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
                     </p>
                   </>
                 : <div className="astrid-vision-skeleton-hero" role="status" aria-label="Loading Astrid's vision">

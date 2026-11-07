@@ -105,4 +105,6 @@ test('feed errors are explained and offer a retry', async ({ page }) => {
   await expect(page.getByRole('alert')).toContainText('temporarily unavailable');
   await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
   await expect(page.getByRole('link', { name: 'Read on GitHub' })).toBeVisible();
+  await expect(page.getByRole('link', { name: 'Read on GitHub' }))
+    .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev/blob/main/vision/README.md');
 });

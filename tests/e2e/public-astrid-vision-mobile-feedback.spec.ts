@@ -20,22 +20,29 @@ test('mobile gaps start collapsed and can be opened and closed', async ({ page }
   await expect(body).toBeHidden();
 });
 
-test('show all gaps reveals previously unseen rows, and can show fewer', async ({ page }) => {
+test('current gaps show a compact list; status filter reveals all and closed', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const data = await response.json() as { gaps: { assessment: string }[] };
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(data),
+  }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  const firstSix = page.locator('.astrid-vision-part');
-  await expect(firstSix).toHaveCount(6);
-  const all = page.getByRole('button', { name: /Show all \d+ gaps/ });
-  const total = Number((await all.textContent())?.match(/\d+/)?.[0]);
-  expect(total).toBeGreaterThan(6);
-  await all.click();
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(total);
-  const added = page.locator('#gap-ls-003');
-  await added.scrollIntoViewIfNeeded();
-  await expect(added).toBeVisible();
-  await expect.poll(() => added.evaluate(el => getComputedStyle(el).opacity)).toBe('1');
-  await page.getByRole('button', { name: 'Show featured gaps only' }).click();
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(6);
+  const items = page.locator('.astrid-vision-part');
+  const current = data.gaps.filter(gap => gap.assessment !== 'closed').length;
+  const filter = page.getByRole('combobox', { name: 'Filter gaps by status' });
+  await expect(filter).toHaveValue('current');
+  await expect(items).toHaveCount(current);
+  await expect(items.first().locator('.astrid-vision-part-body')).toBeHidden();
+  await filter.selectOption('all');
+  await expect(items).toHaveCount(data.gaps.length);
+  await filter.selectOption('closed');
+  await expect(items).toHaveCount(data.gaps.filter(gap => gap.assessment === 'closed').length);
+  await filter.selectOption('current');
+  await expect(items).toHaveCount(current);
+  await expect(page.locator('#gap-ls-004')).toBeVisible();
 });
 
 test('pillars are numbered 1–4 and use deliberate mobile title wrapping', async ({ page }) => {

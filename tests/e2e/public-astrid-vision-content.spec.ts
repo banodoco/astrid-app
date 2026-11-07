@@ -16,8 +16,21 @@ async function feed(request: import('@playwright/test').APIRequestContext) {
   };
 }
 
+async function pinnedFeed(page: import('@playwright/test').Page, request: import('@playwright/test').APIRequestContext) {
+  const data = await feed(request);
+  // The live feed can be republished between the API request and page navigation.
+  // Render against one exact, verified response rather than two different revisions.
+  await page.route(FEED, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' },
+    body: JSON.stringify(data),
+  }));
+  return data;
+}
+
 test('vision displays the GitHub-published pillars and operating principles', async ({ page, request }) => {
-  const content = await feed(request);
+  const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main.astrid-vision')).toBeVisible();
   await expect(page.getByRole('heading', { level: 1 })).toHaveText(content.vision.title);
@@ -54,7 +67,7 @@ test('hero keeps the vision narrative separate from website source attribution',
 });
 
 test('published projects retain their status and link directly to GitHub', async ({ page, request }) => {
-  const content = await feed(request);
+  const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const open = content.projects.filter(project => !['done', 'cancelled'].includes(project.status));
   const initial = open.slice(0, 8);
@@ -69,7 +82,7 @@ test('published projects retain their status and link directly to GitHub', async
 });
 
 test('phone gap disclosures show live assessments and source links', async ({ page, request }) => {
-  const content = await feed(request);
+  const content = await pinnedFeed(page, request);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const first = content.gaps.find(g => g.id === 'AA-001')!;

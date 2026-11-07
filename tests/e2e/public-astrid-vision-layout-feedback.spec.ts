@@ -8,6 +8,13 @@ test('desktop shows eight preloaded cards plus a view-all tile, then all without
   expect(response.ok()).toBeTruthy();
   const data = await response.json() as {projects: {status: string}[]};
   const total = data.projects.filter(p => p.status !== 'done' && p.status !== 'cancelled').length;
+  // Pin the response being asserted; a live publish can happen between API and browser requests.
+  await page.route(FEED, route => route.fulfill({
+    status: 200,
+    contentType: 'application/json',
+    headers: {'access-control-allow-origin': '*'},
+    body: JSON.stringify(data),
+  }));
   await page.goto('/vision', {waitUntil: 'domcontentloaded'});
   const grid = page.locator('.astrid-vision-project-list');
   const cards = grid.locator('.astrid-vision-project-row');

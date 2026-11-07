@@ -62,7 +62,7 @@ it('uses the same choices-aware update command and agent handoff', () => {
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
   render(<SetupBlock mode="update" />);
   expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
-  expect(screen.getByRole('code')).toHaveTextContent('--yes --update');
+  expect(screen.getByRole('code')).toHaveTextContent(/sh -s -- --update$/);
   fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Install skills for coding agents' }));
   expect(screen.getByRole('code')).toHaveTextContent('--yes --update --skills off');

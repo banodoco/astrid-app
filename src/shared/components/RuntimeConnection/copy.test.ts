@@ -79,7 +79,7 @@ describe('update handoff', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
     expect(ASTRID_COMMANDS.windowsAgentUpdate).toBe('powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update"');
-    expect(agentInstructions('update', 'https://astrid.haus')).toContain('--yes --update');
+    expect(agentInstructions('update', 'https://astrid.haus')).toContain(ASTRID_COMMANDS.windowsUpdate);
     expect(localSetupInstructions()).toContain(ASTRID_COMMANDS.windowsAgentUpdate);
   });
 });

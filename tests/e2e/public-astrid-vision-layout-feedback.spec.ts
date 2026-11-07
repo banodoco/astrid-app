@@ -49,22 +49,59 @@ test('expanded mobile gap details occupy the entire row, including the ID column
   expect(Math.abs(rect.right)).toBeLessThan(3);
 });
 
-test('gap IDs consistently stack the letter-dash prefix above the digits at phone and desktop widths', async ({page}) => {
+test('gap IDs stay on one line and disclosures begin closed on phone and desktop', async ({page}) => {
   for (const width of [390, 1440]) {
     await page.setViewportSize({width, height: 900});
     await page.goto('/vision', {waitUntil: 'domcontentloaded'});
-    for (const [id, prefix, digits] of [['aa-001', 'AA-', '001'], ['f-003', 'F-', '003']] as const) {
-      const label = page.locator('#gap-' + id + ' .astrid-vision-part-number');
-      const lines = label.locator('span');
-      await expect(lines).toHaveText([prefix, digits]);
-      const geometry = await lines.evaluateAll(elements => elements.map(element => {
-        const rect = element.getBoundingClientRect();
-        return {x: rect.x, y: rect.y};
-      }));
-      expect(geometry[1].y).toBeGreaterThan(geometry[0].y + 3);
-      expect(Math.abs(geometry[1].x - geometry[0].x)).toBeLessThan(3);
-    }
+    const first = page.locator('#gap-aa-001');
+    const toggle = first.locator('h3 button');
+    const id = first.locator('.astrid-vision-part-number');
+    await expect(id).toHaveText('AA-001');
+    await expect.poll(() => id.evaluate(el => getComputedStyle(el).whiteSpace)).toBe('nowrap');
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(first.locator('.astrid-vision-part-body')).toBeHidden();
+    const compactHeight = await first.evaluate(el => el.getBoundingClientRect().height);
+    expect(compactHeight).toBeLessThan(width < 500 ? 110 : 100);
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    await expect(first.locator('.astrid-vision-part-body')).toBeVisible();
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    await expect(first.locator('.astrid-vision-part-body')).toBeHidden();
   }
+});
+
+test('four vision sections share one header system without explanatory paragraphs', async ({page}) => {
+  await page.setViewportSize({width: 1440, height: 900});
+  await page.goto('/vision', {waitUntil: 'domcontentloaded'});
+  const sections = page.locator('.astrid-vision-north-star, .astrid-vision-standards, .astrid-vision-parts, .astrid-vision-projects');
+  await expect(sections).toHaveCount(4);
+  const headers = sections.locator('.astrid-vision-section-head');
+  await expect(headers).toHaveCount(4);
+  await expect(headers.locator('h2')).toHaveText([
+    "What we're building towards", "The principles that drive us",
+    "What's still missing", "Help us build what's next",
+  ]);
+  const styles = await headers.evaluateAll(elements => elements.map(el => {
+    const css = getComputedStyle(el);
+    const title = el.querySelector('h2')!;
+    return {
+      rule: css.borderBottomStyle,
+      width: css.borderBottomWidth,
+      color: css.borderBottomColor,
+      pad: css.paddingBottom,
+      headingSize: getComputedStyle(title).fontSize,
+      eyebrowOnly: el.querySelectorAll(':scope > p').length === 1,
+      x: el.getBoundingClientRect().left,
+    };
+  }));
+  expect(styles.every(s => s.rule === 'solid' && s.width === '1px' && s.eyebrowOnly)).toBeTruthy();
+  expect(new Set(styles.map(s => s.color)).size).toBe(1);
+  expect(new Set(styles.map(s => s.pad)).size).toBe(1);
+  expect(new Set(styles.map(s => s.headingSize)).size).toBe(1);
+  expect(Math.max(...styles.map(s => s.x)) - Math.min(...styles.map(s => s.x))).toBeLessThan(2);
+  await expect(page.locator('.astrid-vision-parts-head')).not.toContainText('The vision is ambitious');
+  await expect(page.locator('.astrid-vision-issues-head')).not.toContainText('These projects come directly');
 });
 
 test('first visit paints stable text skeletons until GitHub content becomes available', async ({page, request}) => {

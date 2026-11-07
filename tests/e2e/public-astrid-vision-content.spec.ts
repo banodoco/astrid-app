@@ -46,7 +46,7 @@ test('vision displays the GitHub-published pillars and operating principles', as
 
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
   const content = await feed(request);
-  const source = 'https://github.com/banodoco/astrid-dev/blob/main/vision/README.md';
+  const source = 'https://github.com/banodoco/astrid-dev';
   const contribute = 'https://github.com/banodoco/astrid-dev#want-to-contribute-give-this-to-your-agent';
   const intro = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
   await page.route(FEED, route => route.fulfill({
@@ -64,6 +64,7 @@ test('hero keeps the vision narrative separate from website source attribution',
   await expect(attribution.getByRole('link', { name: 'Astrid Dev repository' })).toHaveAttribute('href', source);
   await expect(attribution.getByRole('link', { name: 'Help us build it' })).toHaveAttribute('href', contribute);
   await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
+  await expect(page.getByRole('link', { name: 'Astrid on GitHub' })).toHaveAttribute('href', source);
 });
 
 test('published projects retain their status and link directly to GitHub', async ({ page, request }) => {

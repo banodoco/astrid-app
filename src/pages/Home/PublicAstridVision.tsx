@@ -17,8 +17,20 @@ const PILLAR_ART: readonly NorthStarArt[] = [
   NORTH_STAR_ART.knowledge,
   NORTH_STAR_ART.community,
 ];
-// Only the selection/order belongs to the website; the titles and statements remain in Astrid Dev.
-const FEATURED_GAP_IDS = ['AA-001', 'LS-001', 'CI-001', 'F-003', 'CA-001', 'CA-002'];
+// The source feed owns every status; the page only decides how to display them.
+type GapFilter = 'current' | 'all' | 'open' | 'partially evidenced' | 'needs recheck' | 'closed';
+type ProjectFilter = 'current' | 'all' | PublicVisionProject['status'];
+const GAP_FILTERS: ReadonlyArray<{ value: GapFilter; label: string }> = [
+  { value: 'current', label: 'Current' }, { value: 'all', label: 'All' },
+  { value: 'open', label: 'Open' }, { value: 'partially evidenced', label: 'Partially evidenced' },
+  { value: 'needs recheck', label: 'Needs recheck' }, { value: 'closed', label: 'Closed' },
+];
+const PROJECT_FILTERS: ReadonlyArray<{ value: ProjectFilter; label: string }> = [
+  { value: 'current', label: 'Current' }, { value: 'all', label: 'All' },
+  { value: 'active', label: 'Active' }, { value: 'queued', label: 'Queued' },
+  { value: 'blocked', label: 'Blocked' }, { value: 'paused', label: 'Paused' },
+  { value: 'done', label: 'Done' }, { value: 'cancelled', label: 'Cancelled' },
+];
 
 function MarkdownText({ value, className }: { value: string; className?: string }) {
   return <div className={className ? 'astrid-vision-markdown ' + className : 'astrid-vision-markdown'}>
@@ -65,7 +77,7 @@ function Tinkerer() {
   );
 }
 
-function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined, allGapsVisible: boolean) {
+function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined, listKey: string) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
     const targets = [...(ref.current?.querySelectorAll<HTMLElement>('[data-reveal]') ?? [])];
@@ -81,30 +93,26 @@ function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevisio
     }, { rootMargin: '0px 0px -8% 0px' });
     targets.forEach((target) => observer.observe(target));
     return () => observer.disconnect();
-  }, [active, reducedMotion, contentRevision, allGapsVisible]);
+  }, [active, reducedMotion, contentRevision, listKey]);
   return ref;
 }
 
 
 
-function GapPoint({ gap, phone, openProjects }: { gap: PublicVisionGap; phone: boolean; openProjects: PublicVisionProject[] }) {
+function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: PublicVisionProject[] }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const idParts = /^([A-Z]+-)(\d+)$/.exec(gap.id);
-  const expanded = !phone || open;
   const plans = openProjects.filter(project => project.gapIds.includes(gap.id)).slice(0, 3);
   return (
-    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={expanded || undefined}>
-      <span className="astrid-vision-part-number" aria-hidden="true">
-        {idParts ? <><span>{idParts[1]}</span><span>{idParts[2]}</span></> : gap.id}
-      </span>
-      <h3>{phone ? (
+    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={open || undefined}>
+      <h3>
         <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(value => !value)}>
-          <span>{gap.title}</span>
-          <ChevronDown aria-hidden="true" size={18} strokeWidth={1.75} />
+          <span className="astrid-vision-part-number" aria-hidden="true">{gap.id}</span>
+          <span className="astrid-vision-part-title">{gap.title}</span>
+          <ChevronDown aria-hidden="true" size={20} strokeWidth={1.75} />
         </button>
-      ) : gap.title}</h3>
-      <div className="astrid-vision-part-body" id={bodyId} hidden={!expanded || undefined}>
+      </h3>
+      <div className="astrid-vision-part-body" id={bodyId} hidden={!open}>
         <div className="astrid-vision-part-vision">
           <p className="astrid-vision-label">What we're working toward</p>
           <MarkdownText value={gap.desiredMarkdown} />
@@ -148,19 +156,30 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const { content, error, retry } = usePublicVisionContent();
   const SOURCE_URL = content ? PUBLIC_VISION_REPO_URL + '/tree/' + content.source.revision : PUBLIC_VISION_REPO_URL;
   const PILLARS = content?.pillars.map((pillar, i) => ({ ...pillar, art: PILLAR_ART[i] })) ?? [];
-  const FEATURED_GAPS = FEATURED_GAP_IDS.map(id => content?.gaps.find(gap => gap.id === id))
-    .filter((gap): gap is PublicVisionGap => gap !== undefined);
-  const OTHER_GAPS = content?.gaps.filter(gap => !FEATURED_GAP_IDS.includes(gap.id)) ?? [];
-  const OPEN_PROJECTS = content?.projects.filter(project => project.status !== 'done' && project.status !== 'cancelled') ?? [];
+  const CURRENT_GAPS = content?.gaps.filter(gap => gap.assessment !== 'closed') ?? [];
+  const CURRENT_PROJECTS = content?.projects.filter(project => project.status !== 'done' && project.status !== 'cancelled') ?? [];
   const environment = usePublicAstridEnvironment(suppliedEnvironment);
   const { visible, reducedMotion, phone } = environment;
   const skySession = usePublicAstridSkySession(suppliedSkySession, environment);
   const skyControls = usePublicAstridSkyControls(skySession, visible);
   const palette = skyControls.palette;
-  const [showAllGaps, setShowAllGaps] = useState(false);
+  const [gapFilter, setGapFilter] = useState<GapFilter>('current');
+  const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
-  // New rows are mounted after the initial fetch. Reobserve when the list grows.
-  const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision, showAllGaps);
+  const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const contributionIntro = content?.vision.contributeMarkdown
+    ?.replace(/\n\n\[Give these instructions to your agent\]\([^)]+\)\s*$/, '') ?? '';
+  const copyAgentInstructions = () => {
+    const prompt = content?.vision.agentPrompt;
+    if (!prompt || !navigator.clipboard?.writeText) { setAgentCopyState('failed'); return; }
+    void navigator.clipboard.writeText(prompt)
+      .then(() => setAgentCopyState('copied'))
+      .catch(() => setAgentCopyState('failed'));
+  };
+  useEffect(() => { setAgentCopyState('idle'); }, [content?.source.revision]);
+  // Newly filtered rows must still receive reveal observation.
+  const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
+    gapFilter + ':' + projectFilter + ':' + showAllProjects);
   useLayoutEffect(() => {
     if (!visible) return undefined;
     return skySession.registerPaletteTarget(pageRef.current, 'vision');
@@ -198,8 +217,14 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     cards.forEach((card) => observer.observe(card));
     return () => observer.disconnect();
   }, [phone, visible, reducedMotion, content?.source.revision]);
-  const gapsToShow = showAllGaps ? [...FEATURED_GAPS, ...OTHER_GAPS] : FEATURED_GAPS;
-  const projectsToShow = showAllProjects ? OPEN_PROJECTS : OPEN_PROJECTS.slice(0, 8);
+  const gapsToShow = (content?.gaps ?? []).filter(gap =>
+    gapFilter === 'all' || (gapFilter === 'current' ? gap.assessment !== 'closed' : gap.assessment === gapFilter));
+  const selectedProjects = (content?.projects ?? []).filter(project =>
+    projectFilter === 'all' || (projectFilter === 'current'
+      ? project.status !== 'done' && project.status !== 'cancelled'
+      : project.status === projectFilter));
+  const projectsToShow = projectFilter !== 'current' || showAllProjects
+    ? selectedProjects : selectedProjects.slice(0, 8);
   return (
     <main className="astrid-vision" ref={pageRef} tabIndex={-1} data-astrid-visual-active={visible} data-dusk style={{
       '--astrid-paper': palette.paper,
@@ -233,7 +258,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'} target="_blank" rel="noreferrer">Help us build it</a>.
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href="#astrid-vision-contribute">Help us build it</a>.
                   </p>
                 </>
               : error
@@ -295,7 +320,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">The vision</p>
-          <h2 id="astrid-vision-north-star-title">What we're building</h2>
+          <h2 id="astrid-vision-north-star-title">What we're building towards</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -334,42 +359,56 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <div className="astrid-vision-parts-head" data-reveal>
           <div>
             <p className="astrid-vision-eyebrow">The gaps</p>
-            <h2 id="astrid-vision-parts-title">What's still missing</h2>
+            <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
           </div>
-          <p>The vision is ambitious. These are the outcomes we haven't fully demonstrated yet, and the evidence we're using to assess progress.</p>
+          <p>These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
         </div>
-        <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} phone={phone} openProjects={OPEN_PROJECTS} />)}</ol>
-        {OTHER_GAPS.length > 0 && (
-          <button className="astrid-vision-more-button" type="button"
-            aria-expanded={showAllGaps}
-            aria-controls="astrid-vision-gap-list"
-            onClick={() => setShowAllGaps(value => !value)}>
-            {showAllGaps ? 'Show featured gaps only' : 'Show all ' + content.gaps.length + ' gaps'}
-          </button>
-        )}
+        <div className="astrid-vision-filter-bar">
+          <label htmlFor="astrid-vision-gap-filter">Status</label>
+          <select id="astrid-vision-gap-filter" aria-label="Filter gaps by status" value={gapFilter}
+            onChange={event => setGapFilter(event.target.value as GapFilter)}>
+            {GAP_FILTERS.map(option => <option key={option.value} value={option.value}>
+              {option.label} ({option.value === 'current' ? CURRENT_GAPS.length : option.value === 'all'
+                ? content.gaps.length : content.gaps.filter(gap => gap.assessment === option.value).length})
+            </option>)}
+          </select>
+        </div>
+        <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} openProjects={CURRENT_PROJECTS} />)}</ol>
+        {gapsToShow.length === 0 && <p className="astrid-vision-filter-empty" role="status">No gaps with this status yet.</p>}
       </section>
 
       <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
         <div className="astrid-vision-issues-head" data-reveal>
           <div>
-            <p className="astrid-vision-eyebrow">Open projects</p>
+            <p className="astrid-vision-eyebrow">Project catalog</p>
             <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
           </div>
           <p>These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A project being listed doesn't mean someone has already started it.</p>
         </div>
+        <div className="astrid-vision-filter-bar">
+          <label htmlFor="astrid-vision-project-filter">Status</label>
+          <select id="astrid-vision-project-filter" aria-label="Filter projects by status" value={projectFilter}
+            onChange={event => { setProjectFilter(event.target.value as ProjectFilter); setShowAllProjects(false); }}>
+            {PROJECT_FILTERS.map(option => <option key={option.value} value={option.value}>
+              {option.label} ({option.value === 'current' ? CURRENT_PROJECTS.length : option.value === 'all'
+                ? content.projects.length : content.projects.filter(project => project.status === option.value).length})
+            </option>)}
+          </select>
+        </div>
         <ul className="astrid-vision-issues-list astrid-vision-project-list" id="astrid-vision-project-list">
           {projectsToShow.map(project => <ProjectRow key={project.id} project={project} />)}
-          {!showAllProjects && OPEN_PROJECTS.length > 8 && (
+          {projectFilter === 'current' && !showAllProjects && CURRENT_PROJECTS.length > 8 && (
             <li className="astrid-vision-project-more">
               <button type="button" aria-expanded="false" aria-controls="astrid-vision-project-list" onClick={() => setShowAllProjects(true)}>
                 <span className="astrid-vision-project-more-label">Explore the work</span>
-                <strong>View all {OPEN_PROJECTS.length} open projects</strong>
+                <strong>View all {CURRENT_PROJECTS.length} current projects</strong>
                 <span aria-hidden="true">↗</span>
               </button>
             </li>
           )}
         </ul>
-        {showAllProjects && OPEN_PROJECTS.length > 8 && (
+        {selectedProjects.length === 0 && <p className="astrid-vision-filter-empty" role="status">No projects with this status yet.</p>}
+        {projectFilter === 'current' && showAllProjects && CURRENT_PROJECTS.length > 8 && (
           <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllProjects(false)}>
             Show fewer projects
           </button>
@@ -381,11 +420,25 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       </>)}
       {content?.vision.contributeMarkdown && (
-        <section className="astrid-vision-contribute" aria-labelledby="astrid-vision-contribute-title" data-reveal>
+        <section className="astrid-vision-contribute" id="astrid-vision-contribute"
+          aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
             <p className="astrid-vision-eyebrow">Get involved</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
-            <MarkdownText value={content.vision.contributeMarkdown} />
+            <MarkdownText value={contributionIntro} />
+            {content.vision.agentPrompt ? (
+              <button className="astrid-vision-copy-agent-button" type="button" onClick={copyAgentInstructions}>
+                Copy instructions for agents
+              </button>
+            ) : (
+              <a className="astrid-vision-copy-agent-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
+                target="_blank" rel="noreferrer">See agent instructions on GitHub</a>
+            )}
+            <p className="astrid-vision-copy-agent-status" role="status" aria-live="polite">
+              {agentCopyState === 'copied' ? 'Instructions copied — give them to your agent.'
+                : agentCopyState === 'failed' ? <>Couldn’t copy. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
+                    target="_blank" rel="noreferrer">Open instructions on GitHub</a>.</> : ''}
+            </p>
           </div>
           <Tinkerer />
         </section>

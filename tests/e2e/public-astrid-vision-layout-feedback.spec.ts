@@ -21,7 +21,7 @@ test('desktop shows eight preloaded cards plus a view-all tile, then all without
   await expect(cards).toHaveCount(8);
   const columns = await grid.evaluate(e => getComputedStyle(e).gridTemplateColumns.split(' ').length);
   expect(columns).toBe(3);
-  const button = grid.getByRole('button', {name: /View all .*open projects/});
+  const button = grid.getByRole('button', {name: /View all .*current projects/});
   await button.click();
   await expect(cards).toHaveCount(total);
   const last = cards.last();
@@ -49,20 +49,23 @@ test('expanded mobile gap details occupy the entire row, including the ID column
   expect(Math.abs(rect.right)).toBeLessThan(3);
 });
 
-test('gap IDs consistently stack the letter-dash prefix above the digits at phone and desktop widths', async ({page}) => {
+test('gap IDs remain on one line alongside titles on phone and desktop', async ({page}) => {
   for (const width of [390, 1440]) {
     await page.setViewportSize({width, height: 900});
     await page.goto('/vision', {waitUntil: 'domcontentloaded'});
-    for (const [id, prefix, digits] of [['aa-001', 'AA-', '001'], ['f-003', 'F-', '003']] as const) {
-      const label = page.locator('#gap-' + id + ' .astrid-vision-part-number');
-      const lines = label.locator('span');
-      await expect(lines).toHaveText([prefix, digits]);
-      const geometry = await lines.evaluateAll(elements => elements.map(element => {
-        const rect = element.getBoundingClientRect();
-        return {x: rect.x, y: rect.y};
-      }));
-      expect(geometry[1].y).toBeGreaterThan(geometry[0].y + 3);
-      expect(Math.abs(geometry[1].x - geometry[0].x)).toBeLessThan(3);
+    for (const id of ['AA-001', 'F-003'] as const) {
+      const item = page.locator('#gap-' + id.toLowerCase());
+      const label = item.locator('.astrid-vision-part-number');
+      const title = item.locator('.astrid-vision-part-title');
+      await expect(label).toHaveText(id);
+      await expect(item.locator('h3 button')).toHaveAttribute('aria-expanded', 'false');
+      const [numberBox, titleBox] = await Promise.all([label.boundingBox(), title.boundingBox()]);
+      expect(numberBox).not.toBeNull();
+      expect(titleBox).not.toBeNull();
+      expect(numberBox!.x + numberBox!.width).toBeLessThan(titleBox!.x);
+      expect(numberBox!.height).toBeLessThan(28);
+      expect(Math.abs(numberBox!.y + numberBox!.height / 2 -
+        (titleBox!.y + titleBox!.height / 2))).toBeLessThan(14);
     }
   }
 });
@@ -96,14 +99,15 @@ test('only the new contribution section and workbench mink remain after the proj
     contentType: 'application/json',
     headers: {'access-control-allow-origin': '*'},
     body: JSON.stringify({...raw, vision: {...raw.vision,
-      contributeMarkdown: 'You and your agents can help build Astrid. [Give your agent these instructions](https://github.com/banodoco/astrid-dev#people).'
+      contributeMarkdown: 'You and your agents can help build Astrid.\n\n[Give these instructions to your agent](https://github.com/banodoco/astrid-dev#people)'
     }})
   }));
   await page.goto('/vision', {waitUntil: 'domcontentloaded'});
   const section = page.locator('.astrid-vision-contribute');
   await expect(section).toContainText('You and your agents');
   await expect(section.locator('.astrid-vision-tinkerer')).toHaveCount(1);
-  await expect(section.getByRole('link', {name: 'Give your agent these instructions'})).toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev#people');
+  await expect(section.getByRole('link', {name: 'Give these instructions to your agent'})).toHaveCount(0);
+  await expect(section.getByRole('button', {name: 'Copy instructions for agents'})).toBeVisible();
   await expect(page.locator('.astrid-vision-shift')).toHaveCount(0);
   await expect(page.locator('.astrid-vision-mobile-juggler')).toHaveCount(0);
   await expect(page.locator('.astrid-vision-content-source')).toHaveCount(0);

@@ -14,6 +14,8 @@ on:
       - "tests/e2e/public-astrid-vision-layout-feedback.spec.ts"
       - "package.json"
       - ".github/workflows/public-vision.yml"
+      - ".github/workflows/served-manifest-canary.yml"
+      - "scripts/quality/check-public-vision-production.mjs"
   workflow_dispatch:
 
 permissions:

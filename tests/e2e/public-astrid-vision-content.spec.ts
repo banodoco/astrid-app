@@ -75,13 +75,36 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   await trigger.click();
   await expect(body).toBeHidden();
 
-  await expect(page.locator('.astrid-vision-parts-head > p'))
-    .toHaveText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
-  const catalogLink = page.getByRole('link', { name: 'Astrid Dev catalog' });
-  await expect(catalogLink).toHaveAttribute('href', /\/plans$/);
-  expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
+  await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(1);
+  await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'Astrid on GitHub' }))
     .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
+});
+
+test('all editorial section headers share a consistent divider and title system', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const sections = page.locator('.astrid-vision-north-star, .astrid-vision-standards, .astrid-vision-parts, .astrid-vision-projects');
+  await expect(sections).toHaveCount(4);
+  const headers = sections.locator('.astrid-vision-section-head');
+  await expect(headers).toHaveCount(4);
+  const styles = await headers.evaluateAll(elements => elements.map(element => {
+    const css = getComputedStyle(element);
+    return {
+      borderStyle: css.borderBottomStyle,
+      borderWidth: css.borderBottomWidth,
+      borderColor: css.borderBottomColor,
+      padding: css.paddingBottom,
+      headingSize: getComputedStyle(element.querySelector('h2')!).fontSize,
+      childParagraphs: element.querySelectorAll(':scope > p').length,
+      x: element.getBoundingClientRect().left,
+    };
+  }));
+  expect(styles.every(s => s.borderStyle === 'solid' && s.borderWidth === '1px' && s.childParagraphs === 1)).toBeTruthy();
+  expect(new Set(styles.map(s => s.borderColor)).size).toBe(1);
+  expect(new Set(styles.map(s => s.padding)).size).toBe(1);
+  expect(new Set(styles.map(s => s.headingSize)).size).toBe(1);
+  expect(Math.max(...styles.map(s => s.x)) - Math.min(...styles.map(s => s.x))).toBeLessThan(2);
 });
 
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {

@@ -75,11 +75,8 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   await trigger.click();
   await expect(body).toBeHidden();
 
-  await expect(page.locator('.astrid-vision-parts-head > p'))
-    .toHaveText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
-  const catalogLink = page.getByRole('link', { name: 'Astrid Dev catalog' });
-  await expect(catalogLink).toHaveAttribute('href', /\/plans$/);
-  expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
+  await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(1);
+  await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(1);
   await expect(page.getByRole('link', { name: 'Astrid on GitHub' }))
     .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
 });
@@ -87,7 +84,7 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
   const content = await feed(request);
   const source = 'https://github.com/banodoco/astrid-dev';
-  const contribute = 'https://github.com/banodoco/astrid-dev#want-to-contribute-give-this-to-your-agent';
+  const contribute = '#astrid-vision-contribute-title';
   const intro = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
   await page.route(FEED, route => route.fulfill({
     status: 200,
@@ -104,6 +101,48 @@ test('hero keeps the vision narrative separate from website source attribution',
   await expect(attribution.getByRole('link', { name: 'Astrid Dev repository' })).toHaveAttribute('href', source);
   await expect(attribution.getByRole('link', { name: 'Help us build it' })).toHaveAttribute('href', contribute);
   await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
+});
+
+test('all four vision section headers share a single quiet divider and no descriptions', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const sections = page.locator('.astrid-vision-north-star, .astrid-vision-standards, .astrid-vision-parts, .astrid-vision-projects');
+  await expect(sections).toHaveCount(4);
+  const headers = sections.locator('.astrid-vision-section-head');
+  await expect(headers).toHaveCount(4);
+  const layouts = await headers.evaluateAll(elements => elements.map(element => {
+    const css = getComputedStyle(element);
+    return {
+      border: css.borderBottomStyle,
+      width: css.borderBottomWidth,
+      color: css.borderBottomColor,
+      padding: css.paddingBottom,
+      heading: getComputedStyle(element.querySelector('h2')!).fontSize,
+      paragraphs: element.querySelectorAll(':scope > p').length,
+      x: element.getBoundingClientRect().left,
+    };
+  }));
+  expect(layouts.every(layout => layout.border === 'solid' && layout.width === '1px' && layout.paragraphs === 1)).toBeTruthy();
+  expect(new Set(layouts.map(layout => layout.color)).size).toBe(1);
+  expect(new Set(layouts.map(layout => layout.padding)).size).toBe(1);
+  expect(new Set(layouts.map(layout => layout.heading)).size).toBe(1);
+  expect(Math.max(...layouts.map(layout => layout.x)) - Math.min(...layouts.map(layout => layout.x))).toBeLessThan(2);
+});
+
+test('top help link scrolls to bottom and copies the exact GitHub README agent instructions', async ({ page, request, context }) => {
+  const published = await pinnedFeed(page, request);
+  const prompt = (published.vision as { title: string; agentPrompt?: string }).agentPrompt;
+  expect(typeof prompt).toBe('string');
+  if (!prompt) throw new Error('Published vision lacks the canonical README agent prompt');
+  await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('link', { name: 'Help us build it' }).click();
+  await expect(page).toHaveURL(/#astrid-vision-contribute-title$/);
+  await expect(page.getByRole('heading', { name: 'Want to help build Astrid?' })).toBeInViewport();
+  await page.getByRole('button', { name: 'Copy instructions for agents' }).click();
+  await expect(page.locator('.astrid-vision-copy-status')).toContainText('Instructions copied');
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(prompt);
+  await expect(page.locator('.astrid-vision-contribute-copy a')).toHaveCount(0);
 });
 
 test('projects filter current work by default and can reveal every historic project', async ({ page, request }) => {

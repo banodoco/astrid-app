@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "release": 2,
+  "release": 3,
   "agent": {
-    "sha": "ad9db6c615f80a14aa87fd90a9483ac2d9ee76fd"
+    "sha": "5d8a8ee548215285fb06494e9b980ae72fc25b0b"
   },
   "runtime": {
     "sha": "9fc53b771134940aaac901e4cfc5d03c1db1a20a",

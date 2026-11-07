@@ -665,8 +665,8 @@ describe('AgentChatMenu with an out-of-date local Astrid', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
-    ['MacIntel', 'Macintosh', 'curl -fsSL https://astrid.haus/install | sh -s -- --yes --update'],
-    ['Win32', 'Windows', '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --yes --update'],
+    ['MacIntel', 'Macintosh', ASTRID_COMMANDS.macLinuxUpdate],
+    ['Win32', 'Windows', ASTRID_COMMANDS.windowsUpdate],
   ])('shows the update prompt and %s update command instead of the raw error', (platform, os, command) => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(os);

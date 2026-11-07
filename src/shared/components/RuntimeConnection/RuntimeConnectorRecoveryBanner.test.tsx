@@ -64,7 +64,7 @@ describe('RuntimeConnectorRecoveryBanner', () => {
     render(<Capture />);
     expect(screen.getByText('Update Astrid')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
-    expect(screen.getByText(/curl -fsSL https:\/\/astrid\.haus\/install \| sh -s -- --yes --update/)).toBeInTheDocument();
+    expect(screen.getByText(/curl -fsSL https:\/\/astrid\.haus\/install \| sh -s -- --update/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Details' }));
     expect(onOpen).toHaveBeenCalledWith({ tab: 'updates' });
     expect(window.location.search).toContain('settings=updates');

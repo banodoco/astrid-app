@@ -50,10 +50,9 @@ describe('shared installer argv fixture', () => {
     expect(new Set(fixture.cases.map(testCase => testCase.id)).size).toBe(fixture.cases.length);
     for (const testCase of fixture.cases) {
       expect(Object.values(testCase.choices).every(value => value === 'on' || value === 'off')).toBe(true);
-      const mode = testCase.id.startsWith('update-') ? 'update' : 'install';
-      const command = testCase.id === 'update-legacy-saved-defaults'
+      const command = testCase.id.startsWith('update-')
         ? installCommand('update')
-        : installCommand(mode, builderChoices(testCase.choices), testCase.id.startsWith('settings-'));
+        : installCommand('install', builderChoices(testCase.choices));
       expect(command).toBe([fixture.install_line, ...testCase.argv].join(' '));
     }
   });
@@ -92,28 +91,29 @@ describe('shared installer argv fixture', () => {
     expect(fixtureChoices(readPendingSetupState().choices)).toEqual(alreadySetUp.choices);
   });
 
-  it('covers every Settings and update choice combination and every combined setup edit', () => {
+  it('gives existing-install surfaces no choice flags, and covers every combined setup edit', () => {
     const combinations = Array.from({ length: 16 }, (_, i) => i.toString(2).padStart(4, '0'));
-    for (const prefix of ['settings-', 'update-']) {
-      const actual = fixture.cases.filter(testCase => /^([01]{4})$/.test(testCase.id.slice(prefix.length)) && testCase.id.startsWith(prefix));
-      expect(actual.map(testCase => testCase.id).sort()).toEqual(combinations.map(bits => `${prefix}${bits}`).sort());
+    expect(fixture.cases.filter(testCase => /^(settings|update)-/.test(testCase.id)).map(testCase => testCase.id))
+      .toEqual(['update-legacy-saved-defaults']);
+    for (const bits of combinations) {
+      expect(installCommand('update', builderChoices(Object.fromEntries(
+        ['autostart', 'command', 'skills', 'skill_copies'].map((name, i) => [name, bits[i] === '1' ? 'on' : 'off']))), false))
+        .toBe(ASTRID_COMMANDS.macLinuxUpdate);
     }
     const combinedBits = combinations.filter(bits => [...bits].filter((bit, i) => bit !== '1110'[i]).length >= 2);
     expect(fixture.cases.filter(testCase => testCase.id.startsWith('combined-')).map(testCase => testCase.id).sort())
       .toEqual(combinedBits.map(bits => `combined-${bits}`).sort());
-    for (const testCase of fixture.cases.filter(testCase => /^(settings|update|combined)-[01]{4}$/.test(testCase.id))) {
+    for (const testCase of fixture.cases.filter(testCase => /^combined-[01]{4}$/.test(testCase.id))) {
       const bits = testCase.id.slice(-4);
       expect(Object.values(testCase.choices)).toEqual([...bits].map(bit => bit === '1' ? 'on' : 'off'));
     }
   });
 
   it('shows and saves each combined, Settings, and update selection in SetupBlock', () => {
-    const cases = fixture.cases.filter(testCase => /^(settings|update|combined)-[01]{4}$/.test(testCase.id));
+    const cases = fixture.cases.filter(testCase => /^combined-[01]{4}$/.test(testCase.id));
     for (const testCase of cases) {
       localStorage.clear();
-      const mode = testCase.id.startsWith('update-') ? 'update' : 'install';
-      const explicitChoices = testCase.id.startsWith('settings-');
-      const { unmount } = render(createElement(SetupBlock, { mode, explicitChoices }));
+      const { unmount } = render(createElement(SetupBlock));
       fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
       const controls = within(screen.getByRole('group', { name: 'Customize Astrid setup' })).getAllByRole('checkbox') as HTMLInputElement[];
       const desired = Object.values(testCase.choices).map(value => value === 'on');
@@ -132,4 +132,18 @@ describe('shared installer argv fixture', () => {
     expect(displayedArgv()).toEqual(testCase.argv);
   });
 
+});
+
+describe('existing-install surfaces send the exact no-flag update command', () => {
+  it('Settings Setup, the update setup block, and the Settings update copy command', () => {
+    cleanup();
+    render(createElement(SetupBlock, { explicitChoices: true }));
+    expect(screen.getByRole('code').textContent).toBe(ASTRID_COMMANDS.macLinuxUpdate);
+    cleanup();
+    render(createElement(SetupBlock, { mode: 'update' }));
+    expect(screen.getByRole('code').textContent).toBe(ASTRID_COMMANDS.macLinuxUpdate);
+    cleanup();
+    render(createElement(CopyInstallCommand, { mode: 'update' }));
+    expect(displayedArgv()).toEqual(['--update']);
+  });
 });

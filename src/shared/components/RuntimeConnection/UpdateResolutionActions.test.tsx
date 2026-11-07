@@ -35,7 +35,7 @@ describe('update resolution Settings actions', () => {
     render(<UpdateResolutionActions resolution={resolution} />);
     expect(screen.getByText('Run this command to start Astrid and apply the update:')).toBeInTheDocument();
     expect(screen.getByRole('code')).toHaveTextContent(installCommand('update', { autostart: true, command: true, skills: true, skillCopies: false }));
-    expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 
@@ -82,15 +82,13 @@ describe('update resolution Settings actions', () => {
       render(<UpdateResolutionActions resolution={resolution} operation={installerOperation(start)} />);
         expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
         if (label === 'Update now') {
-          fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-          fireEvent.click(screen.getByRole('checkbox', { name: 'Install skills for coding agents' }));
-          const choices = { ...RECOMMENDED_SETUP_CHOICES, skills: false };
-          const command = installCommand('update', choices);
+          expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+          const command = installCommand('update');
           expect(screen.getByText(command, { exact: true })).toBeInTheDocument();
           fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
           await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
           expect(clipboard.mock.calls[0][0]).toContain(command);
-          expect(clipboard.mock.calls[0][0]).toContain('May I update Astrid with these setup choices?');
+          expect(clipboard.mock.calls[0][0]).not.toContain('May I update Astrid');
           expect(screen.getByRole('button', { name: label })).toBeInTheDocument();
         }
       fireEvent.click(screen.getByRole('button', { name: label }));

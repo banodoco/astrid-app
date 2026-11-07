@@ -31,6 +31,8 @@ export function SetupBlock({ initiallySetUp, initialChoices, mode = 'install', s
   const [savedSetup] = useState(readPendingSetupState);
   const [alreadySetUp, setAlreadySetUp] = useState(hasPendingSetupState() ? savedSetup.alreadySetUp : initiallySetUp ?? savedSetup.alreadySetUp);
   const [customize, setCustomize] = useState(false);
+  // Existing installs (update, Settings Setup) keep saved choices: the command carries none, so no choice controls.
+  const existing = mode === 'update' || explicitChoices;
   const [choices, setChoices] = useState<SetupChoices>(initialChoices ?? savedSetup.choices ?? RECOMMENDED_SETUP_CHOICES);
   const saveState = (nextAlreadySetUp: boolean, nextChoices: SetupChoices) => writePendingSetupState({ alreadySetUp: nextAlreadySetUp, choices: nextChoices });
   useEffect(() => { writePendingSetupState({ alreadySetUp, choices }); }, [alreadySetUp, choices]);
@@ -47,8 +49,8 @@ export function SetupBlock({ initiallySetUp, initialChoices, mode = 'install', s
     </label>}
     <div className="rounded-lg border border-border bg-background/60 p-3 text-sm">
       <p className="font-medium">{alreadySetUp ? 'Start Astrid' : 'Recommended setup'}</p>
-      <p className="mt-1 text-muted-foreground">Start at sign-in · <span className="font-mono">astrid</span> command · skills on · skill copies off</p>
-      {alreadySetUp ? null : <>
+      <p className="mt-1 text-muted-foreground">{existing ? 'Your saved setup choices are kept.' : <>Start at sign-in · <span className="font-mono">astrid</span> command · skills on · skill copies off</>}</p>
+      {alreadySetUp || existing ? null : <>
         <Button type="button" variant="link" className="mt-1 h-auto p-0 text-sm" aria-expanded={customize} onClick={() => setCustomize(open => !open)}>
           {customize ? 'Hide options' : 'Customize'}
         </Button>

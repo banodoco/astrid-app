@@ -26,6 +26,8 @@ test('vision displays the GitHub-published pillars and operating principles', as
   for (const [index, pillar] of content.pillars.entries()) {
     await expect(pillars.nth(index)).toHaveText(pillar.title);
   }
+  await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Our aspirations');
+  await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
 });
 

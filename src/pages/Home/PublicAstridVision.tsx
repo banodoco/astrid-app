@@ -327,12 +327,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </section>
 
       <section className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
-        <div className="astrid-vision-parts-head" data-reveal>
-          <div>
-            <p className="astrid-vision-eyebrow">The gaps</p>
-            <h2 id="astrid-vision-parts-title">What's still missing</h2>
-          </div>
-          <p>These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.</p>
+        <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
+          <p className="astrid-vision-eyebrow">The gaps</p>
+          <h2 id="astrid-vision-parts-title">What's still missing</h2>
         </div>
         <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} openProjects={OPEN_PROJECTS} />)}</ol>
         {OTHER_GAPS.length > 0 && (
@@ -346,12 +343,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </section>
 
       <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
-        <div className="astrid-vision-issues-head" data-reveal>
-          <div>
-            <p className="astrid-vision-eyebrow">Open projects</p>
-            <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
-          </div>
-          <p>These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A project being listed doesn't mean someone has already started it.</p>
+        <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
+          <p className="astrid-vision-eyebrow">Open projects</p>
+          <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
         </div>
         <ul className="astrid-vision-issues-list astrid-vision-project-list" id="astrid-vision-project-list">
           {projectsToShow.map(project => <ProjectRow key={project.id} project={project} />)}

@@ -82,7 +82,8 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
         assessments.has(String(g.assessment)) && nonempty(g.desiredMarkdown) &&
         nonempty(g.currentMarkdown) && nonempty(g.missingMarkdown) &&
         nonempty(g.closureEvidenceMarkdown) && nonempty(g.assessmentDetail) &&
-        validUrl(g.githubUrl, sourceBlob + 'visions/gaps/') &&
+        (validUrl(g.githubUrl, sourceBlob + 'vision/gaps/') ||
+         validUrl(g.githubUrl, sourceBlob + 'visions/gaps/')) &&
         Array.isArray(g.appliesTo) && g.appliesTo.length > 0 &&
         g.appliesTo.every(nonempty)) ||
       !Array.isArray(projects) || projects.length < 1 ||

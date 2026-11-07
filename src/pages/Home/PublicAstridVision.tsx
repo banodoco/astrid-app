@@ -1,4 +1,4 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown } from 'lucide-react';
 import { PublicAstridSocialLinks } from './PublicAstridSocialLinks.tsx';
@@ -167,16 +167,39 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
   const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const agentCopyTimer = useRef<number>();
   const contributionIntro = content?.vision.contributeMarkdown
     ?.replace(/\n\n\[Give these instructions to your agent\]\([^)]+\)\s*$/, '') ?? '';
+  const showAgentCopyStatus = (state: 'copied' | 'failed') => {
+    window.clearTimeout(agentCopyTimer.current);
+    setAgentCopyState(state);
+    // Success is temporary; a failed copy keeps its GitHub fallback visible.
+    if (state === 'copied') {
+      agentCopyTimer.current = window.setTimeout(() => setAgentCopyState('idle'), 3500);
+    }
+  };
   const copyAgentInstructions = () => {
     const prompt = content?.vision.agentPrompt;
-    if (!prompt || !navigator.clipboard?.writeText) { setAgentCopyState('failed'); return; }
+    if (!prompt || !navigator.clipboard?.writeText) { showAgentCopyStatus('failed'); return; }
     void navigator.clipboard.writeText(prompt)
-      .then(() => setAgentCopyState('copied'))
-      .catch(() => setAgentCopyState('failed'));
+      .then(() => showAgentCopyStatus('copied'))
+      .catch(() => showAgentCopyStatus('failed'));
   };
-  useEffect(() => { setAgentCopyState('idle'); }, [content?.source.revision]);
+  useEffect(() => {
+    setAgentCopyState('idle');
+    window.clearTimeout(agentCopyTimer.current);
+    return () => window.clearTimeout(agentCopyTimer.current);
+  }, [content?.source.revision]);
+  const scrollToContribution = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    // Preserve new-tab and other modified-link behavior.
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    const target = document.getElementById('astrid-vision-contribute');
+    if (!target) return;
+    event.preventDefault();
+    // Keep a shareable anchor without adding a history entry that would disrupt Home navigation.
+    window.history.replaceState(window.history.state, '', '#astrid-vision-contribute');
+    target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
+  };
   // Newly filtered rows must still receive reveal observation.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
     gapFilter + ':' + projectFilter + ':' + showAllProjects);
@@ -258,7 +281,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title">{content.vision.title}</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href="#astrid-vision-contribute">Help us build it</a>.
+                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>. <a href="#astrid-vision-contribute" onClick={scrollToContribution}>Help us build it</a>.
                   </p>
                 </>
               : error

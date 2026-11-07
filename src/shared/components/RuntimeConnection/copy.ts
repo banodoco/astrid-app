@@ -272,9 +272,8 @@ function serviceBrief(services: readonly ServiceStatus[] | undefined, platform: 
 
 export function installCommand(mode: CommandMode, choices?: SetupChoices, explicitChoices = false): string {
   const windows = detectPlatform() === 'windows';
-  // A plain update keeps the saved choices; --yes would replace legacy choices with the recommended ones.
-  const recommended = choices === undefined || SETUP_FLAGS.every(([key]) => choices[key] === RECOMMENDED_SETUP_CHOICES[key]);
-  if (mode === 'update' && !explicitChoices && recommended) return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
+  // An existing install never gets choice flags: the Agent applies its saved policy, and --yes would replace legacy choices.
+  if (mode === 'update' || explicitChoices) return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
   const selected = choices ?? RECOMMENDED_SETUP_CHOICES;
   const args = ['--yes', ...(mode === 'update' ? ['--update'] : []), ...(explicitChoices ? explicitSetupChoiceFlags(selected) : setupChoiceFlags(selected))].join(' ');
   return windows

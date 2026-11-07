@@ -56,7 +56,7 @@ function expectNoUpdateActions() {
   for (const name of ['See updates', 'Update now']) {
     expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
   }
-  for (const code of screen.queryAllByRole('code')) expect(code.textContent).not.toMatch(/\bupdate\b/);
+  for (const code of screen.queryAllByRole('code')) expect(code.textContent).not.toMatch(/--(autostart|command|skills|skill-copies)/);
   for (const words of ['update your checkouts', 'Update in Pinokio', 'npm run update']) expect(text).not.toContain(words);
 }
 

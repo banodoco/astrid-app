@@ -65,30 +65,6 @@ function Tinkerer() {
   );
 }
 
-/**
- * The old saying, struck through, and the idean Astrid is built on beneath it. Each part rises in with the
- * page's shared reveal, a beat apart as in the other sections; the strike draws across once the quote
- * is in place.
- */
-function ToolsShift() {
-  return (
-    <figure className="astrid-vision-shift">
-      <blockquote className="astrid-vision-shift-old" data-reveal>
-        <p><span>“We shape our tools, and thereafter our tools shape&nbsp;us.”</span></p>
-      </blockquote>
-      {/* The mink comes before the supporting line so, on a phone, that line can wrap around him. */}
-      <div className="astrid-vision-shift-grow">
-        <p className="astrid-vision-shift-new" data-reveal style={{ '--reveal-delay': '90ms' } as CSSProperties}>Together with our AI, we grow into our tools as we use&nbsp;them.</p>
-        <Tinkerer />
-        <p className="astrid-vision-shift-support" data-reveal style={{ '--reveal-delay': '180ms' } as CSSProperties}>
-          Every part of a tool should be shaped as you work, around the project in front of you.
-        </p>
-      </div>
-    </figure>
-  );
-}
-
-
 function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined, allGapsVisible: boolean) {
   const ref = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -151,7 +127,7 @@ function GapPoint({ gap, phone, openProjects }: { gap: PublicVisionGap; phone: b
 
 function ProjectRow({ project }: { project: PublicVisionProject }) {
   return (
-    <li className="astrid-vision-project-row" data-reveal>
+    <li className="astrid-vision-project-row">
       <div className="astrid-vision-project-head">
         <span className="astrid-vision-project-status" data-status={project.status}>{project.status}</span>
         <h3>{project.title}</h3>
@@ -163,7 +139,7 @@ function ProjectRow({ project }: { project: PublicVisionProject }) {
 }
 
 
-const VISION_QUIET_TEXT = '.astrid-vision-hero-copy, .astrid-vision-section-head, .astrid-vision-standards, .astrid-vision-parts-head, .astrid-vision-part h3, .astrid-vision-part-vision, .astrid-vision-issues-head, .astrid-vision-project-list, .astrid-vision-shift';
+const VISION_QUIET_TEXT = '.astrid-vision-hero-copy, .astrid-vision-section-head, .astrid-vision-standards, .astrid-vision-parts-head, .astrid-vision-part h3, .astrid-vision-part-vision, .astrid-vision-issues-head, .astrid-vision-project-list';
 
 export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment, skySession: suppliedSkySession }: { onGoHome?: () => void; environment?: PublicAstridEnvironment; skySession?: PublicAstridSkySession } = {}) {
   const { content, error, retry } = usePublicVisionContent();
@@ -220,7 +196,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     return () => observer.disconnect();
   }, [phone, visible, reducedMotion, content?.source.revision]);
   const gapsToShow = showAllGaps ? [...FEATURED_GAPS, ...OTHER_GAPS] : FEATURED_GAPS;
-  const projectsToShow = showAllProjects ? OPEN_PROJECTS : OPEN_PROJECTS.slice(0, 12);
+  const projectsToShow = showAllProjects ? OPEN_PROJECTS : OPEN_PROJECTS.slice(0, 8);
   return (
     <main className="astrid-vision" ref={pageRef} tabIndex={-1} data-astrid-visual-active={visible} data-dusk style={{
       '--astrid-paper': palette.paper,
@@ -249,18 +225,66 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
             <p className="astrid-vision-eyebrow">Vision &amp; Issues</p>
-            <h1 id="astrid-vision-title">{content?.vision.title ?? 'Astrid’s vision'}</h1>
             {content
-              ? <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
-              : <p className="astrid-vision-lead" role={error ? 'alert' : 'status'}>
-                  {error ? 'The live vision is temporarily unavailable.' : 'Loading the latest vision…'}
-                  {error && <> <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/visions/vision.md'} target="_blank" rel="noreferrer">Read on GitHub</a></>}
-                </p>}
+              ? <>
+                  <h1 id="astrid-vision-title">{content.vision.title}</h1>
+                  <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
+                </>
+              : error
+                ? <>
+                    <h1 id="astrid-vision-title">Astrid’s vision</h1>
+                    <p className="astrid-vision-lead" role="alert">
+                      The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/visions/vision.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
+                    </p>
+                  </>
+                : <div className="astrid-vision-skeleton-hero" role="status" aria-label="Loading Astrid's vision">
+                    <div className="astrid-vision-skeleton-line" />
+                    <div className="astrid-vision-skeleton-line" />
+                    <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+                  </div>}
           </div>
           <Juggler />
         </div>
       </section>
 
+      {!content && !error && (
+        <div className="astrid-vision-loading-sections" aria-hidden="true">
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            <div className="astrid-vision-loading-pillars">
+              {Array.from({ length: 4 }, (_, i) => <div key={i} className="astrid-vision-loading-pillar">
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-label" />
+                <div className="astrid-vision-skeleton-line" />
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+              </div>)}
+            </div>
+          </section>
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            <div className="astrid-vision-loading-principles">
+              {Array.from({ length: 4 }, (_, i) => <div key={i} className="astrid-vision-loading-principle">
+                <div className="astrid-vision-skeleton-line" />
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+              </div>)}
+            </div>
+          </section>
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            {Array.from({ length: 3 }, (_, i) => <div key={i} className="astrid-vision-loading-row">
+              <div className="astrid-vision-skeleton-line" />
+            </div>)}
+          </section>
+          <section className="astrid-vision-loading-group">
+            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
+            <div className="astrid-vision-loading-projects">
+              {Array.from({ length: 9 }, (_, i) => <div key={i} className="astrid-vision-loading-project">
+                <div className="astrid-vision-skeleton-line" />
+                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+              </div>)}
+            </div>
+          </section>
+        </div>
+      )}
       {content && (<>
       <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
@@ -327,12 +351,21 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           </div>
           <p>These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A project being listed doesn't mean someone has already started it.</p>
         </div>
-        <ul className="astrid-vision-issues-list astrid-vision-project-list">
+        <ul className="astrid-vision-issues-list astrid-vision-project-list" id="astrid-vision-project-list">
           {projectsToShow.map(project => <ProjectRow key={project.id} project={project} />)}
+          {!showAllProjects && OPEN_PROJECTS.length > 8 && (
+            <li className="astrid-vision-project-more">
+              <button type="button" aria-expanded="false" aria-controls="astrid-vision-project-list" onClick={() => setShowAllProjects(true)}>
+                <span className="astrid-vision-project-more-label">Explore the work</span>
+                <strong>View all {OPEN_PROJECTS.length} open projects</strong>
+                <span aria-hidden="true">↗</span>
+              </button>
+            </li>
+          )}
         </ul>
-        {!showAllProjects && OPEN_PROJECTS.length > 12 && (
-          <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllProjects(true)}>
-            Show all {OPEN_PROJECTS.length} open projects
+        {showAllProjects && OPEN_PROJECTS.length > 8 && (
+          <button className="astrid-vision-more-button" type="button" onClick={() => setShowAllProjects(false)}>
+            Show fewer projects
           </button>
         )}
         <p className="astrid-vision-issues-more" data-reveal>
@@ -340,21 +373,19 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </p>
       </section>
 
-      <div className="astrid-vision-mobile-juggler" aria-hidden="true"><Juggler /></div>
       </>)}
-      <ToolsShift />
       {content?.vision.contributeMarkdown && (
         <section className="astrid-vision-contribute" aria-labelledby="astrid-vision-contribute-title" data-reveal>
-          <p className="astrid-vision-eyebrow">Get involved</p>
-          <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
-          <MarkdownText value={content.vision.contributeMarkdown} />
-          <a href={PUBLIC_VISION_REPO_URL + '/blob/' + content.source.revision + '/plans/index.md'}
-            target="_blank" rel="noreferrer">Explore projects on GitHub</a>
+          <div className="astrid-vision-contribute-copy">
+            <p className="astrid-vision-eyebrow">Get involved</p>
+            <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
+            <MarkdownText value={content.vision.contributeMarkdown} />
+          </div>
+          <Tinkerer />
         </section>
       )}
       <footer className="astrid-vision-footer">
         {error && content && <p className="astrid-vision-content-source" role="status">Showing the last loaded vision; the latest update could not be checked. <button type="button" onClick={retry}>Retry</button></p>}
-        <p className="astrid-vision-content-source">Vision, gaps and projects generated from <a href={SOURCE_URL} target="_blank" rel="noreferrer">Astrid Dev</a>. The source records explain what has and hasn't been demonstrated.</p>
         <div className="astrid-vision-end" />
         <PublicAstridSocialLinks className="astrid-vision-social" />
       </footer>

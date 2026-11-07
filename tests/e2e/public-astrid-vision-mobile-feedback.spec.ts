@@ -58,18 +58,19 @@ test('contribution invitation is rendered from the same live vision feed', async
   const live = await response.json() as Record<string, unknown>;
   const vision = live.vision as Record<string, unknown>;
   const message = 'You and your agents can contribute. The ownership model is being worked out.';
+  const link = '[Give these instructions to your agent](https://github.com/banodoco/astrid-dev#instructions)';
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' },
     body: JSON.stringify({
       ...live,
-      vision: { ...vision, contributeMarkdown: message },
+      vision: { ...vision, contributeMarkdown: message + '\n\n' + link },
     }),
   }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const contribution = page.locator('.astrid-vision-contribute');
   await expect(contribution.getByRole('heading', { name: 'Want to help build Astrid?' })).toBeVisible();
   await expect(contribution).toContainText(message);
-  await expect(contribution.getByRole('link', { name: 'Explore projects on GitHub' }))
-    .toHaveAttribute('href', /\/plans\/index\.md$/);
+  await expect(contribution.getByRole('link', { name: 'Give these instructions to your agent' }))
+    .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev#instructions');
 });

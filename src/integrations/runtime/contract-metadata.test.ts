@@ -16,8 +16,8 @@ describe('Runtime compatibility metadata', () => {
     expect(RUNTIME_ACCEPTED_SCHEMA_DIGESTS).toEqual([
       SCHEMA_DIGEST,
       ...LEGACY_RUNTIME_SCHEMA_DIGESTS,
-      PUBLISHED_RUNTIME_DIGEST,
     ]);
+    expect(LEGACY_RUNTIME_SCHEMA_DIGESTS as readonly string[]).toContain(PUBLISHED_RUNTIME_DIGEST);
     expect(RUNTIME_ACCEPTED_SCHEMA_DIGESTS as readonly string[]).not.toContain(
       'sha256:7ea06a0280135541d9989d8e959382b86de31cb137811a9424fd25212b0a9fe9',
     );

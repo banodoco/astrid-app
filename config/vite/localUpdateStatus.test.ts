@@ -124,7 +124,7 @@ describe('local update status endpoint boundary', () => {
       expect(status.response.statusCode).not.toBe(501);
       expect(status.response.statusCode).toBe(200);
       expect(status.headers).toMatchObject({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      expect(JSON.parse(status.body)).toEqual({ app: localHead, release: 3, requiredRelease: 5, requiredReason: 'Security fix', servedApp: localHead, servedRelease: 5, behind: true });
+      expect(JSON.parse(status.body)).toEqual({ app: localHead, release: 3, requiredRelease: 5, requiredReason: 'Security fix', servedApp: localHead, servedRelease: 5, behind: true, self_update: false, reason: 'source' });
 
       const crossOrigin = await run(request({ origin: 'http://evil.test' }));
       expect(crossOrigin.response.statusCode).toBe(403);

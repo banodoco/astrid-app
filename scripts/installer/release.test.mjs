@@ -1,273 +1,236 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { applyReleasePin } from './pin.mjs';
-import { checkManifestRelease } from './release-check.mjs';
+import { applyRequiredPin } from './pin.mjs';
+import { checkReleaseGuard, readSnapshot } from './release-guard.mjs';
+import { servedMismatches } from './served-manifest.mjs';
 
-const manifestPath = 'public/install-manifest.json';
-const releaseCheckPath = fileURLToPath(new URL('./release-check.mjs', import.meta.url));
-const release0ManifestBytes = await readFile(new URL('../../config/qualification/release-0-public-manifest.json', import.meta.url));
+const releaseGuardPath = fileURLToPath(new URL('./release-guard.mjs', import.meta.url));
+const SHA_A = 'a'.repeat(40);
+const SHA_B = 'b'.repeat(40);
+const DIGEST = `sha256:${'c'.repeat(64)}`;
 
-async function gitRepo() {
-  const repo = await mkdtemp(path.join(os.tmpdir(), 'astrid-release-check-'));
-  await mkdir(path.join(repo, 'public'));
-  await mkdir(path.join(repo, 'config/qualification'), { recursive: true });
-  await writeFile(path.join(repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":0}\n');
-  await writeFile(path.join(repo, 'config/qualification/release-0-public-manifest.json'), release0ManifestBytes);
-  const git = (...args) => execFileSync('git', args, { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
-  git('init', '-b', 'main');
-  git('config', 'user.name', 'Release test');
-  git('config', 'user.email', 'release-test@example.invalid');
+const bootstrapDefaults = {
+  'public/install': Buffer.from('#!/bin/sh\necho install v1\n'),
+  'public/install.ps1': Buffer.from('Write-Output "install v1"\n'),
+  'public/install.sh': Buffer.from('#!/bin/sh\necho install.sh v1\n'),
+};
+
+function manifestOf(overrides = {}) {
   return {
-    repo,
-    async commit(manifest) {
-      await this.commitBytes(Buffer.from(`${JSON.stringify(manifest)}\n`));
-    },
-    async commitBytes(bytes) {
-      await writeFile(path.join(repo, manifestPath), bytes);
-      git('add', manifestPath, 'config/qualification/published-release-baseline.json');
-      git('commit', '-m', 'pin manifest');
-    },
-    branch(name) { git('branch', name); },
-    checkout(name) { git('checkout', name); },
-    manifestAt(ref) { return git('show', `${ref}:${manifestPath}`); },
-    async candidate(manifest) {
-      return Buffer.from(`${JSON.stringify(manifest)}\n`);
-    },
-    async writeCandidate(manifest) {
-      await writeFile(path.join(repo, manifestPath), `${JSON.stringify(manifest)}\n`);
-    },
-    async close() { await rm(repo, { recursive: true, force: true }); },
+    schema_version: 1,
+    release: 3,
+    agent: { sha: SHA_A },
+    runtime: { sha: SHA_B, schema_digest: DIGEST },
+    tools: { uv: { version: '0.11.32' } },
+    ...overrides,
   };
 }
 
-test('pins begin at release 1, increase on every pin, and keep required release persistent', () => {
-  const manifest = {};
-  applyReleasePin(manifest);
-  assert.equal(manifest.release, 1);
-  applyReleasePin(manifest, 'Security fix');
-  assert.equal(manifest.release, 2);
-  assert.deepEqual(manifest.required, { release: 2, reason: 'Security fix' });
-  applyReleasePin(manifest);
-  assert.equal(manifest.release, 3);
-  assert.deepEqual(manifest.required, { release: 2, reason: 'Security fix' });
-  applyReleasePin(manifest, 'Urgent data repair');
-  assert.equal(manifest.release, 4);
-  assert.deepEqual(manifest.required, { release: 4, reason: 'Urgent data repair' });
+function withoutRelease(manifest) {
+  const copy = { ...manifest };
+  delete copy.release;
+  return copy;
+}
+
+// A snapshot is what readSnapshot returns: manifest bytes plus bootstrap bytes.
+function snapshot(manifest, bootstraps = {}) {
+  return {
+    manifest: Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`),
+    bootstraps: { ...bootstrapDefaults, ...bootstraps },
+  };
+}
+
+// A served snapshot is what served-manifest reads: parsed manifest plus bootstrap bytes.
+// served-manifest keys bootstrap bytes by their public/ file name.
+function served(manifest, bootstraps = {}) {
+  const byName = Object.fromEntries(Object.entries({ ...bootstrapDefaults, ...bootstraps }).map(([file, bytes]) => [file.slice('public/'.length), bytes]));
+  return { manifest, bootstraps: byName };
+}
+
+test('an install tuple change with release +1 passes the guard', () => {
+  const base = snapshot(manifestOf());
+  const head = snapshot(manifestOf({ release: 4, agent: { sha: SHA_B } }));
+  assert.match(checkReleaseGuard({ base, head }), /install tuple changed \(manifest \(without release and required\)\); release 3 -> 4/);
 });
 
-test('unchanged manifest bytes are a no-op; a changed manifest must raise release from missing release 0', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ schema_version: 1 });
-  assert.match(await checkManifestRelease({ repo: fixture.repo, baseRef: 'main' }), /bytes match/);
-  assert.match(await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ schema_version: 1, release: 1 }) }), /release 1 exceeds previous main 0/);
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ schema_version: 2 }) }),
-    /does not exceed previous main release 0/,
-  );
-});
-
-test('successive release 2 passes after release 1; a changed manifest cannot reuse release 1', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 1, field: 'first' });
-  assert.match(await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 2, field: 'second' }) }), /release 2 exceeds previous main 1/);
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'second' }) }),
-    /does not exceed previous main release 1/,
-  );
-});
-
-test('release must exceed the highest release in all App main manifest history', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 5, field: 'high water' });
-  await fixture.commit({ release: 4, field: 'lower but current baseline' });
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 5, field: 'changed' }) }),
-    /does not exceed App main history high-water 5/,
-  );
-});
-
-test('candidate mode allows replacing an unpublished candidate at the same release above the published baseline', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 1, field: 'first unpublished candidate' });
-  assert.match(
-    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'replacement candidate' }), candidateMode: true, publishedBaselineRef: 'main' }),
-    /unpublished candidate release 1 exceeds last published release 0/,
-  );
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'replacement candidate' }) }),
-    /does not exceed previous main release 1/,
-  );
-});
-
-test('candidate mode allows the exact frozen Release-0 manifest before the first public bump', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commitBytes(release0ManifestBytes);
-  assert.match(
-    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: release0ManifestBytes, candidateMode: true, publishedBaselineRef: 'main' }),
-    /bytes match frozen Release-0 baseline/,
-  );
-});
-
-test('candidate mode rejects release-0 bytes once a later release is published', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
-  await fixture.commit({ release: 1 });
-  const release0 = await readFile(path.join(fixture.repo, 'config/qualification/release-0-public-manifest.json'));
-  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: release0, candidateMode: true, publishedBaselineRef: 'main' }), /does not exceed last published release 1/);
-});
-
-test('candidate mode rejects a changed frozen Release-0 baseline', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 1 });
-  await writeFile(path.join(fixture.repo, 'config/qualification/release-0-public-manifest.json'), '{"release":0}\n');
-  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1 }), candidateMode: true, publishedBaselineRef: 'main' }), /Frozen Release-0 manifest bytes have changed/);
-});
-
-test('candidate mode still rejects a downgrade below the frozen published release', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
-  await fixture.commit({ release: 2, field: 'unpublished candidate' });
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'downgrade' }), candidateMode: true, publishedBaselineRef: 'main' }),
-    /does not exceed last published release 1/,
-  );
-});
-
-test('legacy main without a baseline permits only the Release-0 fallback', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 0 });
-  const git = (...args) => execFileSync('git', args, { cwd: fixture.repo, stdio: 'pipe' });
-  git('rm', '--cached', 'config/qualification/published-release-baseline.json');
-  git('commit', '-m', 'legacy main');
-  assert.match(await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', publishedBaselineRef: 'main', candidateBytes: await fixture.candidate({ release: 1 }), candidateMode: true }), /last published release 0/);
-  await writeFile(path.join(fixture.repo, manifestPath), '{"release":1}\n');
-  git('add', manifestPath);
-  git('commit', '-m', 'advance without baseline');
-  await assert.rejects(checkManifestRelease({ repo: fixture.repo, baseRef: 'main', publishedBaselineRef: 'main', candidateBytes: await fixture.candidate({ release: 2 }), candidateMode: true }), /Published baseline is missing from main after Release 0/);
-});
-
-test('candidate cannot lower the published baseline from main', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
-  await fixture.commit({ release: 1, field: 'published' });
-  await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":0}\n');
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', publishedBaselineRef: 'main', candidateBytes: await fixture.candidate({ release: 1, field: 'downgrade' }), candidateMode: true }),
-    /Candidate published release baseline differs from main/,
-  );
-});
-
-test('candidate mode rejects unchanged main bytes when that release is already published', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await writeFile(path.join(fixture.repo, 'config/qualification/published-release-baseline.json'), '{"schema_version":1,"release":1}\n');
-  await fixture.commit({ release: 1, field: 'published release' });
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateMode: true, publishedBaselineRef: 'main' }),
-    /Manifest release 1 does not exceed last published release 1/,
-  );
-});
-
-test('stale branch manifests cannot remove or lower required.release when merged after main advances', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 10, required: { release: 8, reason: 'Older requirement' } });
-  fixture.branch('stale-pin');
-
-  await fixture.commit({ release: 11, required: { release: 9, reason: 'Current requirement' } });
-  fixture.checkout('stale-pin');
-  await fixture.commit({ release: 12, field: 'stale branch removed required' });
-  const removedRequirement = fixture.manifestAt('stale-pin');
-
-  fixture.checkout('main');
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: removedRequirement }),
-    /required\.release 0 is below App main history high-water 9/,
-  );
-
-  await fixture.checkout('stale-pin');
-  await fixture.commit({ release: 13, required: { release: 8, reason: 'Stale requirement' } });
-  const loweredRequirement = fixture.manifestAt('stale-pin');
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: loweredRequirement }),
-    /required\.release 8 is below App main history high-water 9/,
-  );
-});
-
-test('required.release may be preserved or increased from main history', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 10, required: { release: 9, reason: 'Required fix' } });
-
-  assert.match(
-    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 11, required: { release: 9, reason: 'Required fix' } }) }),
-    /required\.release 9 preserves or exceeds history high-water 9/,
-  );
-  assert.match(
-    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 12, required: { release: 12, reason: 'More urgent fix' } }) }),
-    /required\.release 12 preserves or exceeds history high-water 9/,
-  );
-});
-
-test('the CI checker CLI rejects a candidate that removes required.release', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 10, required: { release: 9, reason: 'Required fix' } });
-  await fixture.writeCandidate({ release: 11 });
-
+test('an install tuple change without release +1 fails the guard', () => {
+  const base = snapshot(manifestOf());
   assert.throws(
-    () => execFileSync(process.execPath, [releaseCheckPath, 'main'], { cwd: fixture.repo, stdio: ['ignore', 'pipe', 'pipe'] }),
-    (error) => error.status === 1 && /required\.release 0 is below App main history high-water 9/.test(error.stderr.toString()),
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ agent: { sha: SHA_B } })) }),
+    /install tuple changed .* a tuple change requires release 4/,
   );
-
-  await fixture.writeCandidate({ release: 11, required: { release: 9, reason: 'Required fix' } });
-  assert.match(
-    execFileSync(process.execPath, [releaseCheckPath, 'main'], { cwd: fixture.repo, encoding: 'utf8' }),
-    /required\.release 9 preserves or exceeds history high-water 9/,
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 5, agent: { sha: SHA_B } })) }),
+    /a tuple change requires release 4 \(exactly \+1 from 3\)/,
   );
 });
 
-test('required.release cannot fall below a historical high-water above the current manifest', async (t) => {
-  const fixture = await gitRepo();
-  t.after(() => fixture.close());
-  await fixture.commit({ release: 10, required: { release: 12, reason: 'Historical requirement' } });
-  await fixture.commit({ release: 11, required: { release: 9, reason: 'Lower current requirement' } });
-
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 12, required: { release: 10, reason: 'Attempted reduction' } }) }),
-    /required\.release 10 is below App main history high-water 12/,
-  );
-  await assert.rejects(
-    checkManifestRelease({ repo: fixture.repo, baseRef: 'main' }),
-    /required\.release 9 is below App main history high-water 12/,
+test('a bootstrap byte change needs release +1: refused at the same release, passes at +1', () => {
+  const base = snapshot(manifestOf());
+  const edited = { 'public/install.sh': Buffer.from('#!/bin/sh\necho install.sh v2\n') };
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf(), edited) }),
+    /install tuple changed \(public\/install\.sh\) but release is 3/,
   );
   assert.match(
-    await checkManifestRelease({ repo: fixture.repo, baseRef: 'main', candidateBytes: await fixture.candidate({ release: 13, required: { release: 12, reason: 'Preserved historical requirement' } }) }),
-    /required\.release 12 preserves or exceeds history high-water 12/,
+    checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 4 }), edited) }),
+    /install tuple changed \(public\/install\.sh\); release 3 -> 4/,
+  );
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 5 }), { 'public/install.ps1': Buffer.from('changed\n') }) }),
+    /install tuple changed \(public\/install\.ps1\) but release is 5; a tuple change requires release 4/,
   );
 });
 
-test('the pin helper preserves unrelated manifest fields including schema_digest', async () => {
-  const manifest = JSON.parse(await readFile(new URL('../../public/install-manifest.json', import.meta.url), 'utf8'));
-  const schemaDigest = manifest.runtime.schema_digest;
-  const previousRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
-  applyReleasePin(manifest, 'Required migration');
-  assert.equal(manifest.release, previousRelease + 1);
-  assert.equal(manifest.required.release, previousRelease + 1);
-  assert.equal(manifest.runtime.schema_digest, schemaDigest);
+test('a release change without a tuple change fails the guard, up or down', () => {
+  const base = snapshot(manifestOf());
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 4 })) }),
+    /release changed from 3 to 4 without an install tuple change; release must stay 3/,
+  );
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 2 })) }),
+    /release changed from 3 to 2 without an install tuple change/,
+  );
+});
+
+test('no tuple change and no release change passes, including a valid required floor', () => {
+  const base = snapshot(manifestOf({ release: 5 }));
+  assert.match(checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 5 })) }), /install tuple unchanged; release 5 unchanged/);
+  assert.match(
+    checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 5, required: { release: 5, reason: 'Security fix' } })) }),
+    /install tuple unchanged; release 5 unchanged/,
+  );
+});
+
+test('a pure reformat or key reorder of the manifest is not a tuple change', () => {
+  const base = snapshot(manifestOf());
+  const reordered = Buffer.from(JSON.stringify({ tools: { uv: { version: '0.11.32' } }, runtime: { schema_digest: DIGEST, sha: SHA_B }, agent: { sha: SHA_A }, release: 3, schema_version: 1 }));
+  assert.match(checkReleaseGuard({ base, head: { manifest: reordered, bootstraps: bootstrapDefaults } }), /install tuple unchanged/);
+});
+
+test('a base manifest without release reads as release 0', () => {
+  const base = snapshot(withoutRelease(manifestOf()));
+  assert.match(
+    checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 1, agent: { sha: SHA_B } })) }),
+    /release 0 -> 1/,
+  );
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 2, agent: { sha: SHA_B } })) }),
+    /a tuple change requires release 1 \(exactly \+1 from 0\)/,
+  );
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 1 })) }),
+    /release changed from 0 to 1 without an install tuple change/,
+  );
+});
+
+test('the head manifest must declare an integer release', () => {
+  const base = snapshot(manifestOf());
+  assert.throws(() => checkReleaseGuard({ base, head: snapshot(withoutRelease(manifestOf())) }), /must declare an integer release/);
+  assert.throws(() => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: '4' })) }), /release must be a non-negative integer/);
+});
+
+test('required must satisfy 0 <= required.release <= release and carry a non-empty reason', () => {
+  const base = snapshot(manifestOf());
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ required: { release: 4, reason: 'Ahead of release' } })) }),
+    /required\.release 4 exceeds release 3/,
+  );
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ required: { release: -1, reason: 'Negative' } })) }),
+    /required\.release must be a non-negative integer/,
+  );
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ required: { release: 3, reason: '   ' } })) }),
+    /required\.reason must be a non-empty string/,
+  );
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ required: { release: 3 } })) }),
+    /required\.reason must be a non-empty string/,
+  );
+  assert.match(
+    checkReleaseGuard({ base, head: snapshot(manifestOf({ required: { release: 0, reason: 'No floor yet' } })) }),
+    /install tuple unchanged/,
+  );
+});
+
+test('pin --require records the floor for the next release and never writes release', () => {
+  const manifest = manifestOf();
+  applyRequiredPin(manifest, 'Security fix');
+  assert.equal(manifest.release, 3);
+  assert.deepEqual(manifest.required, { release: 4, reason: 'Security fix' });
+  applyRequiredPin(manifest, 'Later fix');
+  assert.equal(manifest.release, 3);
+  assert.deepEqual(manifest.required, { release: 4, reason: 'Later fix' });
+  assert.throws(() => applyRequiredPin(manifest, '  '), /non-empty reason/);
+});
+
+test('the CLI compares committed base and head refs and exits non-zero on refusal', async (t) => {
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'release-guard-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+  const commitState = async ({ manifest, bootstraps = {} }) => {
+    for (const [file, bytes] of Object.entries({ 'public/install-manifest.json': Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`), ...bootstrapDefaults, ...bootstraps })) {
+      await mkdir(path.dirname(path.join(repo, file)), { recursive: true });
+      await writeFile(path.join(repo, file), bytes);
+    }
+    git('add', '.');
+    git('-c', 'user.name=Release guard test', '-c', 'user.email=release-guard-test@example.invalid', 'commit', '-q', '-m', 'state');
+    return git('rev-parse', 'HEAD');
+  };
+  const run = (ref) => spawnSync(process.execPath, [releaseGuardPath, ref, 'HEAD'], { cwd: repo, encoding: 'utf8' });
+
+  git('init', '-q', '-b', 'main');
+  const base = await commitState({ manifest: manifestOf() });
+  // Each scenario is a separate commit on top of the same base, so a passing
+  // scenario cannot make a later refusal pass.
+  const scenario = async (state) => {
+    git('reset', '-q', '--hard', base);
+    await commitState(state);
+    return run(base);
+  };
+
+  const passing = await scenario({ manifest: manifestOf({ release: 4, agent: { sha: SHA_B } }) });
+  assert.equal(passing.status, 0, passing.stderr);
+  assert.match(passing.stdout, /release 3 -> 4/);
+
+  const bootstrapRefused = await scenario({ manifest: manifestOf(), bootstraps: { 'public/install.sh': Buffer.from('#!/bin/sh\nchanged\n') } });
+  assert.equal(bootstrapRefused.status, 1);
+  assert.match(bootstrapRefused.stderr, /release guard refused: install tuple changed \(public\/install\.sh\) but release is 3/);
+
+  const tupleSkippedRelease = await scenario({ manifest: manifestOf({ release: 5, agent: { sha: SHA_B } }) });
+  assert.equal(tupleSkippedRelease.status, 1);
+  assert.match(tupleSkippedRelease.stderr, /a tuple change requires release 4 \(exactly \+1 from 3\)/);
+
+  const releaseOnly = await scenario({ manifest: manifestOf({ release: 4 }) });
+  assert.equal(releaseOnly.status, 1);
+  assert.match(releaseOnly.stderr, /release guard refused: release changed from 3 to 4 without an install tuple change/);
+});
+
+test('readSnapshot rejects a ref that is not a commit', () => {
+  assert.throws(() => readSnapshot(process.cwd(), '0'.repeat(40)), /is not a commit in this checkout/);
+});
+
+test('the served canary reports release and bootstrap-byte mismatches and accepts a matching deployment', () => {
+  const expected = served(manifestOf({ release: 4 }));
+  const deployed = 'd'.repeat(40);
+  assert.deepEqual(servedMismatches(expected, served(manifestOf({ release: 4 })), deployed), []);
+  assert.deepEqual(
+    servedMismatches(expected, served(manifestOf({ release: 3 })), deployed),
+    [`release: deployed ${deployed} public value 4, served value 3`],
+  );
+  assert.deepEqual(
+    servedMismatches(expected, served(manifestOf({ release: 4 }), { 'public/install': Buffer.from('old bytes\n') }), deployed),
+    [`install: served bytes differ from deployed ${deployed} public/install`],
+  );
+  assert.deepEqual(
+    servedMismatches(expected, served(manifestOf({ release: 4 }), { 'public/install.ps1': Buffer.from('old\n') }), deployed),
+    [`install.ps1: served bytes differ from deployed ${deployed} public/install.ps1`],
+  );
 });

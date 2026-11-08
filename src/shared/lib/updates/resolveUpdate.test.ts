@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { installTypeOf, resolveUpdate } from './resolveUpdate.ts';
+import { installTypeOf, resolveUpdate, type InstallType, type UpdateResolution, type UpdateResolutionInput } from './resolveUpdate.ts';
 
 describe('installTypeOf', () => {
   it('takes source from the Runtime identity, after the Pinokio and fully-local modes', () => {
@@ -35,10 +35,10 @@ describe('resolveUpdate', () => {
     });
   });
 
-  it('keeps Update now, disabled by its reason, when a busy Astrid can update itself', () => {
+  it('suppresses Update now for a busy refusal even when self_update is true, failing safe to the reason line and the command', () => {
     expect(resolveUpdate({ installType: 'installer', updateReason: 'busy', updateNowAvailable: true })).toMatchObject({
       card: 'notice', body: 'Astrid is busy. Wait for the current operation to finish before trying again.',
-      primary: { label: 'Update now', execute: 'installer-update' }, updateReason: 'busy',
+      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' }, updateReason: 'busy',
     });
   });
 
@@ -172,5 +172,216 @@ describe('resolveUpdate', () => {
     }
     expect(resolveUpdate({ pageStale: true, compatibility: { kind: 'schema', detail: 'old' } }).primary)
       .not.toHaveProperty('destination');
+  });
+});
+
+/** The UI copy the decision table expects, written out so the table reads as the product's contract. */
+const COPY_AGENT = 'Copy instructions for your agent';
+const RUN_YOURSELF = 'Run it yourself';
+const PINOKIO = 'Update in Pinokio';
+const CHECKOUTS = 'update your checkouts';
+const INSTALL_TYPES: readonly InstallType[] = ['installer', 'fully-local', 'pinokio', 'source'];
+
+type Situation = 'upToDate' | 'releaseBehind' | 'requiredUpdate' | 'schemaMismatch' | 'midSessionSchema' | 'newer'
+  | 'busyRefusal' | 'needsRepair' | 'recoveryNeeded' | 'autostartOffRefusal' | 'sourceRefusal' | 'unknownRefusal'
+  | 'newerBusyRefusal' | 'newerNeedsRepair' | 'runtimeDown' | 'pageStale';
+
+/** The status inputs for each situation. Releases 9 and earlier arrive with no self_update, so the table passes updateNowAvailable false. */
+const SITUATIONS: Record<Situation, UpdateResolutionInput> = {
+  upToDate: { installedRelease: 10, servedRelease: 10 },
+  releaseBehind: { installedRelease: 9, servedRelease: 10, releaseBehind: true },
+  requiredUpdate: { installedRelease: 9, servedRelease: 10, releaseBehind: true, requiredRelease: 10, requiredReason: 'security fix' },
+  schemaMismatch: { installedRelease: 10, servedRelease: 10, compatibility: { kind: 'schema', detail: 'digest mismatch' } },
+  midSessionSchema: { installedRelease: 10, servedRelease: 10, midSessionSchemaMismatch: true },
+  newer: { installedRelease: 11, servedRelease: 10 },
+  busyRefusal: { installedRelease: 10, servedRelease: 10, releaseBehind: true, updateReason: 'busy' },
+  needsRepair: { installedRelease: 10, servedRelease: 10, updateReason: 'needs-repair' },
+  recoveryNeeded: { installedRelease: 10, servedRelease: 10, updateReason: 'recovery-needed' },
+  autostartOffRefusal: { installedRelease: 10, servedRelease: 10, updateReason: 'autostart-off' },
+  sourceRefusal: { installedRelease: 10, servedRelease: 10, updateReason: 'source' },
+  unknownRefusal: { installedRelease: 10, servedRelease: 10, releaseBehind: true, updateReason: 'self-update-unavailable' },
+  // Defect cases: a release newer than served shows no action, whatever the installer reason says.
+  newerBusyRefusal: { installedRelease: 11, servedRelease: 10, updateReason: 'busy' },
+  newerNeedsRepair: { installedRelease: 11, servedRelease: 10, updateReason: 'needs-repair' },
+  runtimeDown: { runtime: 'unreachable' },
+  pageStale: { pageStale: true, releaseBehind: true },
+};
+
+/** [card, primary label, secondary label] as the surfaces read them. */
+type Cell = readonly [UpdateResolution['card'], string | null, string | null];
+type Row = { readonly page: Cell; readonly settings: Cell };
+const both = (cell: Cell): Row => ({ page: cell, settings: cell });
+const NONE: Cell = ['none', null, null];
+const NEWER: Cell = ['newer', null, null];
+const NOT_RUNNING: Cell = ['not-running', 'Start Astrid', 'Repair'];
+const RELOAD: Cell = ['reload', 'Reload', null];
+const COMMAND_UPDATE: Cell = ['update', COPY_AGENT, RUN_YOURSELF];
+const COMMAND_NOTICE: Cell = ['notice', COPY_AGENT, RUN_YOURSELF];
+/** Release behind on the page routes to Settings; Settings shows the direct-install command. */
+const SOFT: Row = { page: ['notice', 'See updates', null], settings: ['notice', COPY_AGENT, RUN_YOURSELF] };
+
+/**
+ * The decision table: each install type against each situation, on the page and in Settings, with Update now off
+ * (what a release 9 status gives). Pinokio and source never carry the installer command; "newer" never carries any action.
+ */
+const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
+  installer: {
+    upToDate: both(NONE),
+    releaseBehind: SOFT,
+    requiredUpdate: both(COMMAND_UPDATE),
+    schemaMismatch: both(COMMAND_UPDATE),
+    midSessionSchema: both(['mid-session', COPY_AGENT, RUN_YOURSELF]),
+    newer: both(NEWER),
+    busyRefusal: both(COMMAND_NOTICE),
+    needsRepair: both(COMMAND_UPDATE),
+    recoveryNeeded: both(COMMAND_UPDATE),
+    newerBusyRefusal: both(NEWER),
+    newerNeedsRepair: both(NEWER),
+    autostartOffRefusal: both(['notice', null, null]),
+    sourceRefusal: both(['notice', null, null]),
+    unknownRefusal: both(COMMAND_NOTICE),
+    runtimeDown: both(NOT_RUNNING),
+    pageStale: both(RELOAD),
+  },
+  'fully-local': {
+    upToDate: both(NONE),
+    releaseBehind: SOFT,
+    requiredUpdate: both(COMMAND_UPDATE),
+    schemaMismatch: both(COMMAND_UPDATE),
+    midSessionSchema: both(['mid-session', COPY_AGENT, RUN_YOURSELF]),
+    newer: both(NEWER),
+    // Refusal reasons come from the installer status only, so a fully local install follows its release rules.
+    busyRefusal: SOFT,
+    needsRepair: both(NONE),
+    recoveryNeeded: both(NONE),
+    newerBusyRefusal: both(NEWER),
+    newerNeedsRepair: both(NEWER),
+    autostartOffRefusal: both(NONE),
+    sourceRefusal: both(NONE),
+    unknownRefusal: SOFT,
+    runtimeDown: both(NOT_RUNNING),
+    pageStale: both(RELOAD),
+  },
+  pinokio: {
+    upToDate: both(NONE),
+    releaseBehind: both(['notice', PINOKIO, null]),
+    requiredUpdate: both(['update', PINOKIO, null]),
+    schemaMismatch: both(['update', PINOKIO, null]),
+    midSessionSchema: both(['mid-session', PINOKIO, null]),
+    newer: both(NEWER),
+    busyRefusal: both(['notice', PINOKIO, null]),
+    needsRepair: both(NONE),
+    recoveryNeeded: both(NONE),
+    newerBusyRefusal: both(NEWER),
+    newerNeedsRepair: both(NEWER),
+    autostartOffRefusal: both(NONE),
+    sourceRefusal: both(NONE),
+    unknownRefusal: both(['notice', PINOKIO, null]),
+    runtimeDown: both(NOT_RUNNING),
+    pageStale: both(RELOAD),
+  },
+  source: {
+    upToDate: both(NONE),
+    // A source checkout has no release, so the release rules never apply to it.
+    releaseBehind: both(NONE),
+    requiredUpdate: both(NONE),
+    schemaMismatch: both(['update', CHECKOUTS, null]),
+    midSessionSchema: both(['mid-session', CHECKOUTS, null]),
+    newer: both(NONE),
+    busyRefusal: both(NONE),
+    needsRepair: both(NONE),
+    recoveryNeeded: both(NONE),
+    newerBusyRefusal: both(NONE),
+    newerNeedsRepair: both(NONE),
+    autostartOffRefusal: both(NONE),
+    sourceRefusal: both(NONE),
+    unknownRefusal: both(NONE),
+    runtimeDown: both(NOT_RUNNING),
+    pageStale: both(RELOAD),
+  },
+};
+
+function cellOf(resolution: UpdateResolution): Cell {
+  return [resolution.card, resolution.primary?.label ?? null, resolution.secondary?.label ?? null];
+}
+
+describe('update decision table: install type × situation', () => {
+  it.each(INSTALL_TYPES)('resolves every situation for the %s install type to its card and actions, on the page and in Settings', (installType) => {
+    for (const situation of Object.keys(SITUATIONS) as Situation[]) {
+      for (const context of ['page', 'settings'] as const) {
+        const resolution = resolveUpdate({ ...SITUATIONS[situation], installType, updateNowAvailable: false }, context);
+        expect(cellOf(resolution), `${installType} / ${situation} / ${context}`).toEqual(DECISION_TABLE[installType][situation][context]);
+      }
+    }
+  });
+
+  it('never shows an enabled Update now for releases 9 and earlier, which have no self_update', () => {
+    for (const installType of ['installer', 'fully-local'] as const) {
+      for (const situation of Object.keys(SITUATIONS) as Situation[]) {
+        for (const context of ['page', 'settings'] as const) {
+          const resolution = resolveUpdate({ ...SITUATIONS[situation], installType, updateNowAvailable: false }, context);
+          expect(resolution.primary?.execute, `${installType} / ${situation} / ${context}`).toBeUndefined();
+          expect(JSON.stringify(resolution), `${installType} / ${situation} / ${context}`).not.toContain('Update now');
+        }
+      }
+    }
+  });
+
+  it('enables Update now only when the status reports self_update, on the Settings path, for each install that can update itself', () => {
+    const expectedExecute = { installer: 'installer-update', 'fully-local': 'local-update' } as const;
+    for (const installType of ['installer', 'fully-local'] as const) {
+      for (const situation of ['releaseBehind', 'requiredUpdate', 'schemaMismatch', 'midSessionSchema'] as const) {
+        const resolution = resolveUpdate({ ...SITUATIONS[situation], installType, updateNowAvailable: true }, 'settings');
+        expect(resolution.primary, `${installType} / ${situation}`).toEqual({ label: 'Update now', execute: expectedExecute[installType] });
+        expect(resolution.secondary, `${installType} / ${situation}`).toEqual({ label: COPY_AGENT });
+      }
+    }
+  });
+
+  it('gives Pinokio and source no enabled update action, whatever the status reports, and Pinokio never the installer command', () => {
+    for (const installType of ['pinokio', 'source'] as const) {
+      for (const situation of Object.keys(SITUATIONS) as Situation[]) {
+        for (const updateNowAvailable of [false, true]) {
+          for (const context of ['page', 'settings'] as const) {
+            const resolution = resolveUpdate({ ...SITUATIONS[situation], installType, updateNowAvailable }, context);
+            const labels = [resolution.primary?.label, resolution.secondary?.label];
+            const where = `${installType} / ${situation} / ${context} / now=${updateNowAvailable}`;
+            expect(resolution.primary?.execute, where).toBeUndefined();
+            expect(labels, where).not.toContain('Update now');
+            if (installType === 'pinokio') {
+              expect(labels, where).not.toContain(COPY_AGENT);
+              expect(labels, where).not.toContain(RUN_YOURSELF);
+            }
+          }
+        }
+      }
+    }
+  });
+
+  it('shows no action at all for a version newer than astrid.haus, on every direct or Pinokio install', () => {
+    for (const installType of ['installer', 'fully-local', 'pinokio'] as const) {
+      for (const updateNowAvailable of [false, true]) {
+        for (const context of ['page', 'settings'] as const) {
+          const resolution = resolveUpdate({ ...SITUATIONS.newer, installType, updateNowAvailable }, context);
+          expect(resolution, `${installType} / now=${updateNowAvailable} / ${context}`).toMatchObject({ card: 'newer', primary: null, secondary: null });
+        }
+      }
+    }
+    // A source checkout has no release, so its newer-than-served state is never a card.
+    expect(resolveUpdate({ ...SITUATIONS.newer, installType: 'source' }, 'page')).toMatchObject({ card: 'none', primary: null, secondary: null });
+  });
+
+  it('suppresses Update now for every installer refusal even when self_update is true, and only recovery-needed starts the update', () => {
+    const refusals = ['busyRefusal', 'needsRepair', 'autostartOffRefusal', 'sourceRefusal', 'unknownRefusal', 'newerBusyRefusal', 'newerNeedsRepair'] as const;
+    for (const situation of refusals) {
+      for (const context of ['page', 'settings'] as const) {
+        const resolution = resolveUpdate({ ...SITUATIONS[situation], installType: 'installer', updateNowAvailable: true }, context);
+        expect(cellOf(resolution), `${situation} / ${context}`).toEqual(DECISION_TABLE.installer[situation][context]);
+        expect(resolution.primary?.execute, `${situation} / ${context}`).toBeUndefined();
+        expect(JSON.stringify(resolution), `${situation} / ${context}`).not.toContain('Update now');
+      }
+    }
+    expect(resolveUpdate({ ...SITUATIONS.recoveryNeeded, installType: 'installer', updateNowAvailable: true }, 'settings').primary)
+      .toEqual({ label: 'Update', execute: 'installer-update' });
   });
 });

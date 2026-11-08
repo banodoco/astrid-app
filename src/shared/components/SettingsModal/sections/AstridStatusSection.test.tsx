@@ -136,6 +136,19 @@ describe('AstridStatusSection', () => {
     expect(onOpen).not.toHaveBeenCalled();
   });
 
+  it('names a Pinokio Astrid that is out of date as status only, with no action and no installer command', () => {
+    mocks.connection.managedByPinokio = true;
+    mocks.readStatus.mockReturnValue(new Promise(() => undefined));
+    mocks.connection.schemaDigest = `sha256:${'f'.repeat(64)}`;
+    render(<AstridStatusSection isOpen />);
+
+    expect(screen.getByRole('status')).toHaveTextContent('Needs an update');
+    expect(screen.getByText(ASTRID_STATUS_COPY.outOfDateDetail.runtime)).toBeInTheDocument();
+    expectNoUpdateActions();
+    expectNoTerminalRepair();
+    expect(screen.queryByRole('button', { name: 'Details' })).not.toBeInTheDocument();
+  });
+
   it('offers the browser permission action before checking Runtime details', () => {
     mocks.connection.state = { status: 'needs_permission' };
     render(<AstridStatusSection isOpen />);

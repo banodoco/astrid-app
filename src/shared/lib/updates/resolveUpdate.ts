@@ -77,13 +77,22 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   if (input.runtime) return { card: 'not-running', title: 'Astrid isn’t running', body: input.failure ?? 'Start Astrid Runtime to continue.', primary: { label: 'Start Astrid' }, secondary: { label: 'Repair' } };
   if (input.pageStale) return { card: 'reload', title: 'Editor updated', body: 'Reload this page to use the latest editor.', primary: { label: 'Reload' }, secondary: null };
   if (input.compatibility?.kind === 'identity') return { card: 'identity', title: 'Restart Astrid', body: 'An older Astrid is still running. Restart the selected Runtime, then reconnect.', primary: null, secondary: null };
+  // A source checkout has no release: its startup identity is fixed at 0, so the release rules (newer, required, behind) never apply.
+  const releaseRules = input.installType !== 'source';
+  // An installed release newer than served shows no action, whatever the installer reason says.
+  if (releaseRules && input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {
+    return { card: 'newer', title: null, body: 'Astrid on this computer is newer than astrid.haus; a fix is on its way.', primary: null, secondary: null };
+  }
   if (input.updateReason && input.installType === 'installer') {
     // A recovery or repair is an update card. Without an in-app update the reason is the one line and the command is the path;
     // autostart-off has its own setup command, and a source checkout has its own update route, not the installer command.
     const card = input.updateReason === 'recovery-needed' || input.updateReason === 'needs-repair';
     const noAction = input.updateReason === 'autostart-off' || input.updateReason === 'source';
-    const actions = card || input.updateNowAvailable ? updateActions(input, context)
-      : noAction ? { primary: null, secondary: null } : COMMAND_ACTIONS;
+    // Only recovery-needed still starts the update. Every other reason is a refusal, so Update now is not offered with it even when
+    // self_update is true: the reason's line and the command are the path.
+    const actions = noAction ? { primary: null, secondary: null }
+      : input.updateReason === 'recovery-needed' && input.updateNowAvailable ? updateActions(input, context)
+      : COMMAND_ACTIONS;
     return {
       card: card ? 'update' : 'notice',
       title: card ? 'Update Astrid' : 'Update unavailable',
@@ -91,11 +100,6 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
       ...actions,
       updateReason: input.updateReason,
     };
-  }
-  // A source checkout has no release: its startup identity is fixed at 0, so the release rules (newer, required, behind) never apply.
-  const releaseRules = input.installType !== 'source';
-  if (releaseRules && input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {
-    return { card: 'newer', title: null, body: 'Astrid on this computer is newer than astrid.haus; a fix is on its way.', primary: null, secondary: null };
   }
   if (input.compatibility?.kind === 'schema') {
     return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, ...updateActions(input, context) };

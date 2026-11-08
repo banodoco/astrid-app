@@ -41,13 +41,10 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   const reload = actions.find((action) => action.label === RELOAD_ACTION);
   const execute = actions.find((action) => action.execute === 'installer-update');
   const executeLocal = actions.find((action) => action.execute === 'local-update');
-  // A refusal reason (busy, for one) shows Update now disabled; recovery is the one reason that still starts the update.
-  const blocked = operation?.updateReason !== undefined && operation.updateReason !== 'recovery-needed';
   // Details opens Settings Updates; a card whose action already goes there (See updates) does not repeat it.
   const details = context === 'page' && !route && (resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason;
   const installerPath = (operation?.installType ?? installType ?? (operation ? 'installer' : undefined)) === 'installer';
   const startUpdate = async () => {
-    if (blocked) return;
     const validate = await guarded.flush();
     if (validate) await operation?.start(validate);
   };
@@ -61,7 +58,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
 
   return <div className="space-y-2">
     {reload && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{reload.label}</Button>}
-    {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={blocked || operation.pending || guarded.pending} onClick={() => void startUpdate()}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
+    {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={operation.pending || guarded.pending} onClick={() => void startUpdate()}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
     {executeLocal && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={localState.phase === 'running' || guarded.pending} onClick={() => void updateLocally()}>{localState.phase === 'running' ? 'Updating Astrid…' : executeLocal.label}</Button>}
     {localState.phase === 'running' && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {localState.phase === 'done' && <p role="status">{localState.message}</p>}

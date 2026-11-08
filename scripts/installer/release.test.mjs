@@ -160,14 +160,14 @@ test('required must satisfy 0 <= required.release <= release and carry a non-emp
   );
 });
 
-test('pin --require records the floor for the next release and never writes release', () => {
+test('pin --require sets required.release to the manifest own release and never writes release', () => {
   const manifest = manifestOf();
   applyRequiredPin(manifest, 'Security fix');
   assert.equal(manifest.release, 3);
-  assert.deepEqual(manifest.required, { release: 4, reason: 'Security fix' });
+  assert.deepEqual(manifest.required, { release: 3, reason: 'Security fix' });
   applyRequiredPin(manifest, 'Later fix');
   assert.equal(manifest.release, 3);
-  assert.deepEqual(manifest.required, { release: 4, reason: 'Later fix' });
+  assert.deepEqual(manifest.required, { release: 3, reason: 'Later fix' });
   assert.throws(() => applyRequiredPin(manifest, '  '), /non-empty reason/);
 });
 

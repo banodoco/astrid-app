@@ -5,6 +5,7 @@ on:
   push:
     branches: [main, release-1, "int/**"]
   pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:

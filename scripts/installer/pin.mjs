@@ -56,22 +56,15 @@ async function readAgentRuntime(agentSha) {
 
 // pin.mjs never writes `release`. A change to the install tuple must raise
 // `release` by exactly 1 in the same change; release-guard enforces that.
-// `--require` records the floor that the release carrying this pin will reach.
+// `--require` sets the floor to the manifest's own release (the one being published).
 export function applyRequiredPin(manifest, reason) {
   if (typeof reason !== 'string' || !reason.trim()) throw new Error('--require needs a non-empty reason');
   const currentRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
   if (!Number.isSafeInteger(currentRelease) || currentRelease < 0) {
     throw new Error('install-manifest.json release must be a non-negative integer');
   }
-  const pinRelease = currentRelease + 1;
-  const currentRequiredRelease = manifest.required == null
-    ? 0
-    : Object.hasOwn(manifest.required, 'release') ? manifest.required.release : 0;
-  if (!Number.isSafeInteger(currentRequiredRelease) || currentRequiredRelease < 0) {
-    throw new Error('install-manifest.json required.release must be a non-negative integer');
-  }
   manifest.required = {
-    release: Math.max(pinRelease, currentRequiredRelease),
+    release: currentRelease,
     reason: reason.trim(),
   };
   return manifest;

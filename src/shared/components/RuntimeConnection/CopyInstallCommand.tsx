@@ -79,7 +79,7 @@ export function CopyCommandRow({ command, label, copiedLabel = label }: { readon
 export function CopyInstallCommand({ mode = 'install', services, agentLabel, plain = false }: CopyInstallCommandProps) {
   const copy = RUNTIME_CONNECTION_COPY.agent;
   const localBuild = runtimeOrigin() === '';
-  const instructions = agentInstructions(mode, window.location.origin, localBuild, services);
+  const instructions = agentInstructions(mode, window.location.origin, localBuild, services, plain ? { repair: true } : {});
   const command = plain ? (detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux) : installCommand(mode);
   const agentCopy = useCopyAction(instructions);
   const agentCopied = agentCopy.status === 'copied';

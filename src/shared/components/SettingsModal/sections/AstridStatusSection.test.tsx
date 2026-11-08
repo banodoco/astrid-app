@@ -1,15 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AstridStatusSection } from './AstridStatusSection.tsx';
-import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY, installCommand, RECOMMENDED_SETUP_CHOICES } from '@/shared/components/RuntimeConnection/copy.ts';
+import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
 import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
 import { UPDATE_IN_PINOKIO_ACTION } from '@/shared/lib/updates/resolveUpdate.ts';
-
-const settingsInstallCommand = () => installCommand('install', RECOMMENDED_SETUP_CHOICES, true);
 
 const mocks = vi.hoisted(() => ({
   readStatus: vi.fn(),
@@ -51,8 +49,8 @@ vi.mock('@/shared/lib/browser/clipboard.ts', () => ({
 }));
 
 /**
- * The status section names an old Astrid; Settings → Updates is the one place with the actions for it. The install Setup
- * block (installer consent) may still be present, so this checks for update actions and the update command, not for any command.
+ * The status section names an old Astrid; Settings → Updates is the one place with the actions for it. This checks for
+ * update actions and the update command, not for any command.
  */
 function expectNoUpdateActions() {
   const text = document.body.textContent ?? '';
@@ -61,6 +59,13 @@ function expectNoUpdateActions() {
   }
   for (const code of screen.queryAllByRole('code')) expect(code.textContent).not.toMatch(/--(autostart|command|skills|skill-copies)/);
   for (const words of ['update your checkouts', 'Update in Pinokio', 'npm run update']) expect(text).not.toContain(words);
+}
+
+/** The status section has no Setup block: no heading, no install command and no agent brief. A direct install's repair is under Updates. */
+function expectNoSetupBlock() {
+  expect(screen.queryByRole('heading', { name: 'Setup' })).not.toBeInTheDocument();
+  expect(screen.queryByRole('code')).not.toBeInTheDocument();
+  for (const name of ['Copy command', 'Copy instructions for your agent']) expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
 }
 
 async function openDetails() {
@@ -161,7 +166,7 @@ describe('AstridStatusSection', () => {
     expect(screen.getByText('Starting…')).toBeInTheDocument();
     expect(screen.getByText('Running')).toBeInTheDocument();
     expect(screen.getByText('Failed')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent("Part of Astrid isn't working. Give these instructions to your coding agent to restart it.");
+    expect(screen.getByRole('status')).toHaveTextContent("Part of Astrid isn't working. Repair it under Updates.");
     expect(screen.getByRole('link', { name: 'Get help' })).toHaveAttribute('href', ASTRID_HELP_URL);
     expect(document.querySelector('svg.lucide-circle-alert')).not.toBeNull();
     expect(screen.getByText(/Restarts: 3/)).toBeInTheDocument();
@@ -169,8 +174,7 @@ describe('AstridStatusSection', () => {
     expect(screen.getByText(/Reason: startup_failed/)).toBeInTheDocument();
     expect(screen.getByText(/Last exit code: 2/)).toBeInTheDocument();
     expect(screen.getByText(/service-chat\.log/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
+    expectNoSetupBlock();
   });
 
   it('shows historical service failures without treating a running service as unhealthy', async () => {
@@ -196,26 +200,22 @@ describe('AstridStatusSection', () => {
     expect(retryingWorker).toHaveTextContent('Last exit code: 1');
     expect(retryingWorker).toHaveTextContent(/service-retrying-worker\.log/);
     expect(retryingWorker).toHaveTextContent('Running');
-    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
+    expectNoSetupBlock();
     expect(screen.queryByText(/Restarts:/)).not.toBeInTheDocument();
   });
 
-  it('copies service reason, exit and log details into the agent brief', async () => {
+  it('shows service reason, exit and log details without a repair brief or install command', async () => {
     render(<AstridStatusSection isOpen />);
     await openDetails();
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy instructions for your agent' }));
 
-    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
-    const brief = String(mocks.clipboard.mock.calls[0][0]);
-    expect(brief).toContain('chat: failed');
-    expect(brief).toContain('Reason: startup_failed');
-    expect(brief).toContain('Last exit code: 2');
-    expect(brief).toContain('service-chat.log');
-    expect(brief).toContain('curl -s');
+    expect(await screen.findByText(/Reason: startup_failed/)).toBeInTheDocument();
+    expect(screen.getByText(/Last exit code: 2/)).toBeInTheDocument();
+    expect(screen.getByText(/service-chat\.log/)).toBeInTheDocument();
+    expectNoSetupBlock();
+    expect(mocks.clipboard).not.toHaveBeenCalled();
   });
 
-  it('shows the shared repair command for degraded health even without a failed service', async () => {
+  it('points a degraded health state to Updates even without a failed service', async () => {
     mocks.readStatus.mockResolvedValue({
       health: {
         status: 'degraded',
@@ -227,65 +227,15 @@ describe('AstridStatusSection', () => {
     });
     render(<AstridStatusSection isOpen />);
 
-    expect(await screen.findByRole('status')).toHaveTextContent("Part of Astrid isn't working. Give these instructions to your coding agent to restart it.");
-    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
+    expect(await screen.findByText(ASTRID_STATUS_COPY.degraded)).toBeInTheDocument();
+    expectNoSetupBlock();
   });
 
-  it('labels the Runtime repair surface as beta on Windows only', async () => {
-    const platform = vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
-    const userAgent = vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
-    const view = render(<AstridStatusSection isOpen />);
-
-    expect(await screen.findByText(CONNECTION_COPY.windowsBeta)).toBeInTheDocument();
-    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
-
-    platform.mockReturnValue('MacIntel');
-    userAgent.mockReturnValue('Macintosh');
-    view.rerender(<AstridStatusSection isOpen />);
-    expect(screen.queryByText(CONNECTION_COPY.windowsBeta)).not.toBeInTheDocument();
-    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
-  });
-
-  it('copies the same install command shown in the repair control', async () => {
+  it('shows no Setup block for a healthy direct install', async () => {
     render(<AstridStatusSection isOpen />);
-    expect(await screen.findByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Copy command' }));
-
-    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledWith(settingsInstallCommand()));
-    expect(await screen.findByRole('button', { name: 'Command copied' })).toBeInTheDocument();
-  });
-
-  it('copies a complete agent brief separately from the repair command', async () => {
-    render(<AstridStatusSection isOpen />);
-    fireEvent.click(await screen.findByRole('button', { name: 'Copy instructions for your agent' }));
-    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
-    const brief = mocks.clipboard.mock.calls[0][0];
-    expect(brief).toContain('selected workspace and data root');
-    expect(brief).toContain('The installer adopts an existing workspace itself');
-    expect(brief).toContain(settingsInstallCommand());
-    expect(brief).not.toBe(settingsInstallCommand());
-    expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
-  });
-
-  it('lets the Settings checkbox control Customize and consent wording without changing command bytes', async () => {
-    render(<AstridStatusSection isOpen />);
-    const checkbox = await screen.findByRole('checkbox', { name: "I've already set up Astrid" });
-    expect(checkbox).toBeChecked();
-    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    const command = screen.getByRole('code').textContent;
-    fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
-    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
-    expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
-
-    fireEvent.click(checkbox);
-    expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    expect(screen.getByRole('code').textContent).toBe(command);
-    mocks.clipboard.mockClear();
-    fireEvent.click(screen.getByRole('button', { name: 'Copied. Paste them into your agent.' }));
-    await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledOnce());
-    expect(mocks.clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
+    await openDetails();
+    expect(await screen.findByText('Studio')).toBeInTheDocument();
+    expectNoSetupBlock();
   });
 
   it('names an old chat service and leaves its update to the Updates section', async () => {
@@ -363,7 +313,7 @@ describe('AstridStatusSection', () => {
     view.rerender(<AstridStatusSection isOpen />);
 
     await openDetails();
-    expect(await screen.findByText("Part of Astrid isn't working. Give these instructions to your coding agent to restart it.")).toBeInTheDocument();
+    expect(await screen.findByText(ASTRID_STATUS_COPY.degraded)).toBeInTheDocument();
     expect(await screen.findByText('Failed')).toBeInTheDocument();
     expect(mocks.readStatus).toHaveBeenCalledTimes(2);
   });
@@ -445,14 +395,13 @@ describe('AstridStatusSection repair follows the install type', () => {
     expect(screen.getByText(UPDATE_IN_PINOKIO_ACTION)).toBeInTheDocument();
   });
 
-  it("keeps the Setup block, with its install command and agent brief, as a direct install's repair", async () => {
+  it("sends a direct install's repair to Updates, with no install command or Setup block here", async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
     await pageUpdateOperation(runtimeApiBase()).refresh();
     render(<AstridStatusSection isOpen />);
 
     expect(await screen.findByText(ASTRID_STATUS_COPY.degraded)).toBeInTheDocument();
-    expect(await screen.findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
-    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
+    expectNoSetupBlock();
     expect(screen.queryByText(UPDATE_IN_PINOKIO_ACTION)).not.toBeInTheDocument();
   });
 

@@ -3,8 +3,11 @@ import { Button } from '@/shared/components/ui/button.tsx';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
+import { CopyCommandRow } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
 import { DiagnosticsFallback } from '@/shared/components/RuntimeConnection/DownloadDiagnosticsButton.tsx';
 import { fetchDiagnosticsReport, saveDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
+import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY, updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
+import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpdateStatus.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
@@ -12,8 +15,8 @@ import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
-import { updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
 import { astridOutOfDate } from './ConnectionSection.tsx';
+import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
 
 type CheckState = 'checking' | 'ready' | 'error';
@@ -140,6 +143,11 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const operationMessage = operation.status && !operation.pending ? installerUpdateStatusMessage(operation.status) || null : null;
   const updateCard = currentResolution?.card === 'notice' || currentResolution?.card === 'update';
   const updateAvailable = (Boolean(currentStatus) || Boolean(compatibility)) && updateCard;
+  // A degraded direct install repairs with the plain install line, which has no --update. A source checkout has no such line here.
+  const services = operation.health?.services ?? [];
+  // An available update already offers Update now and its command, so the repair row waits until none is offered.
+  const repairNeeded = installType === 'installer' && !updateAvailable && (operation.health?.status === 'degraded' || services.some((service) => service.state === 'failed'));
+  const repairCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   // An old Astrid with no newer release to name (a source checkout has none) is titled by its card instead.
   const releaseLine = currentStatus && (!compatibility || statusInstallType !== 'source' && currentStatus.servedRelease > currentStatus.release);
   const statusLine = operationMessage
@@ -176,6 +184,12 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
       {actionsFor && <UpdateResolutionActions resolution={actionsFor} operation={operation} context="settings" />}
       {lastResult && lastResult !== statusLine && <p className="text-muted-foreground">Last result: {lastResult}</p>}
     </SettingsRow>
+    {repairNeeded && <SettingsRow
+      label={<p className="font-medium text-foreground">{ASTRID_STATUS_COPY.repairTitle}</p>}
+      description={ASTRID_STATUS_COPY.repairDescription}
+    >
+      <CopyCommandRow command={repairCommand} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+    </SettingsRow>}
     <SettingsDisclosureRow
       label="Diagnostics"
       description="The app build and update log, and a report to share if something goes wrong."

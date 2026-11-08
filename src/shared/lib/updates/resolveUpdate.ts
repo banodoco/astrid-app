@@ -83,7 +83,10 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   if (releaseRules && input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {
     return { card: 'newer', title: null, body: 'Astrid on this computer is newer than astrid.haus; a fix is on its way.', primary: null, secondary: null };
   }
-  if (input.updateReason && input.installType === 'installer') {
+  // A setup refusal on an install that is already current has no update to offer: it shows no card and no command.
+  const current = input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease >= input.servedRelease;
+  const silentWhenCurrent = current && (input.updateReason === 'autostart-off' || input.updateReason === 'unsupported-service-manager');
+  if (input.updateReason && input.installType === 'installer' && !silentWhenCurrent) {
     // A recovery or repair is an update card. Without an in-app update the reason is the one line and the command is the path;
     // autostart-off has its own setup command, and a source checkout has its own update route, not the installer command.
     const card = input.updateReason === 'recovery-needed' || input.updateReason === 'needs-repair';

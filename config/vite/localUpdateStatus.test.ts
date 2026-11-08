@@ -84,6 +84,59 @@ describe('local update status endpoint boundary', () => {
     }
   });
 
+  it('answers the status under vite preview with the same request checks, never 501', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'astrid-local-update-preview-'));
+    tempDirs.push(dir);
+    const checkout = path.join(dir, 'checkout');
+    await mkdir(checkout);
+    execFileSync('git', ['init', '-q', '-b', 'main', checkout]);
+    execFileSync('git', ['-C', checkout, 'config', 'user.name', 'Update test']);
+    execFileSync('git', ['-C', checkout, 'config', 'user.email', 'update-test@example.test']);
+    await writeFile(path.join(checkout, 'tracked.txt'), 'local checkout');
+    execFileSync('git', ['-C', checkout, 'add', 'tracked.txt']);
+    execFileSync('git', ['-C', checkout, 'commit', '-qm', 'fixture']);
+    const localHead = execFileSync('git', ['-C', checkout, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+    const manifestPath = path.join(dir, 'install-manifest.json');
+    await writeFile(manifestPath, JSON.stringify({ release: 3 }));
+    const originalFlag = process.env.ASTRID_LOCAL_UPDATE_STATUS;
+    process.env.ASTRID_LOCAL_UPDATE_STATUS = '1';
+    const plugin = createLocalUpdateStatusPlugin({ manifestPath });
+    let middleware!: (request: unknown, response: unknown, next: () => void) => Promise<void>;
+    // A preview server exposes its own resolved preview port; the status must check the Host against it.
+    const server = { config: { root: checkout, server: { port: 5173 }, preview: { port: 4317 } }, middlewares: { use: (handler: typeof middleware) => { middleware = handler; } } };
+    plugin.configurePreviewServer?.(server as never);
+    const request = (overrides: Record<string, string> = {}) => ({ method: 'POST', url: '/__astrid/local-update-status', headers: {
+      host: '127.0.0.1:4317', origin: 'http://127.0.0.1:4317', 'sec-fetch-site': 'same-origin', 'content-length': '0', 'content-type': 'application/json', accept: 'application/json', ...overrides,
+    } });
+    const run = async (req: ReturnType<typeof request>) => {
+      const headers: Record<string, string | number> = {};
+      const response = { statusCode: 0, setHeader: (name: string, value: string | number) => { headers[name.toLowerCase()] = value; }, end: (body: string) => { (response as { body?: string }).body = body; }, body: '' };
+      await middleware(req, response, () => { throw new Error('Unexpected middleware pass-through'); });
+      return { response, headers, body: response.body };
+    };
+    try {
+      vi.stubGlobal('fetch', vi.fn(async (input: unknown) => new Response(JSON.stringify(
+        String(input) === 'https://astrid.haus/build.json'
+          ? { app: localHead, release: 5 }
+          : { release: 5, required: { release: 5, reason: 'Security fix' } },
+      ), { status: 200 })));
+      const status = await run(request());
+      expect(status.response.statusCode).not.toBe(501);
+      expect(status.response.statusCode).toBe(200);
+      expect(status.headers).toMatchObject({ 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      expect(JSON.parse(status.body)).toEqual({ app: localHead, release: 3, requiredRelease: 5, requiredReason: 'Security fix', servedApp: localHead, servedRelease: 5, behind: true });
+
+      const crossOrigin = await run(request({ origin: 'http://evil.test' }));
+      expect(crossOrigin.response.statusCode).toBe(403);
+      expect(crossOrigin.body).toBe(JSON.stringify({ error: 'request_refused' }));
+      const wrongPort = await run(request({ host: '127.0.0.1:5173', origin: 'http://127.0.0.1:5173' }));
+      expect(wrongPort.response.statusCode).toBe(403);
+    } finally {
+      if (originalFlag === undefined) delete process.env.ASTRID_LOCAL_UPDATE_STATUS;
+      else process.env.ASTRID_LOCAL_UPDATE_STATUS = originalFlag;
+    }
+  });
+
   it('degrades safely with a stable diagnostic stage for each status lookup failure', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'astrid-local-update-failure-'));
     tempDirs.push(dir);

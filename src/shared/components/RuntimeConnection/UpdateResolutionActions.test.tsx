@@ -120,13 +120,15 @@ describe('update resolution Settings actions', () => {
 });
 
 describe('update resolution in-app availability', () => {
-  it('hides Update now while a busy Astrid refuses the start, and offers the command instead', () => {
+  it('shows Update now disabled while a busy Astrid refuses the start, with no command', () => {
     const start = vi.fn(async () => undefined);
     const operation = { available: true, pending: false, start, updateReason: 'busy' } as unknown as InstallerUpdateView;
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'busy', updateNowAvailable: true });
     render(<UpdateResolutionActions resolution={resolution} operation={operation} />);
-    expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    const button = screen.getByRole('button', { name: 'Update now' });
+    expect(button).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run it yourself' })).not.toBeInTheDocument();
     expect(start).not.toHaveBeenCalled();
   });
 

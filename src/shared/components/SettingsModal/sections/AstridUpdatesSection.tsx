@@ -145,7 +145,8 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const updateAvailable = (Boolean(currentStatus) || Boolean(compatibility)) && updateCard;
   // A degraded direct install repairs with the plain install line, which has no --update. A source checkout has no such line here.
   const services = operation.health?.services ?? [];
-  const repairNeeded = installType === 'installer' && (operation.health?.status === 'degraded' || services.some((service) => service.state === 'failed'));
+  // An available update already offers Update now and its command, so the repair row waits until none is offered.
+  const repairNeeded = installType === 'installer' && !updateAvailable && (operation.health?.status === 'degraded' || services.some((service) => service.state === 'failed'));
   const repairCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   // An old Astrid with no newer release to name (a source checkout has none) is titled by its card instead.
   const releaseLine = currentStatus && (!compatibility || statusInstallType !== 'source' && currentStatus.servedRelease > currentStatus.release);

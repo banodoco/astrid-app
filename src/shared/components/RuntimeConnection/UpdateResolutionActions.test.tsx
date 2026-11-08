@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
-import { installCommand, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
+import { ASTRID_COMMANDS, installCommand } from './copy.ts';
 import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/client.ts';
@@ -31,13 +31,14 @@ function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>, ins
 }
 
 describe('update resolution Settings actions', () => {
-  it('shows a runnable setup command with Customize when Update Now is refused for autostart off', () => {
+  it('shows the plain install line, not --update, when Update Now is refused for autostart off', () => {
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
     render(<UpdateResolutionActions resolution={resolution} />);
-    expect(screen.getByText('Run this command to start Astrid and apply the update:')).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('update', { autostart: true, command: true, skills: true, skillCopies: false }));
+    expect(screen.getByText('Run this command, then start Astrid:')).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
+    expect(screen.getByRole('code').textContent).not.toContain('--update');
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
   });
 
   it('routes a soft update nudge to the expanded Updates destination and preserves the URL hash', () => {

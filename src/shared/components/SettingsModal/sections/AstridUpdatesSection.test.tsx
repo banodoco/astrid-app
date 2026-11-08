@@ -342,6 +342,17 @@ describe('Updates repair entry for a direct install', () => {
     expect(within(section).getByRole('code').textContent).not.toContain('--update');
   });
 
+  it('leaves the repair row out while an update is offered, which is then the only path', async () => {
+    await loadHealth({ status: 'degraded', release: 3, runtime_instance_id: 'runtime-behind', identity: directIdentity, services: [{ name: 'chat', state: 'failed', last_exit: 2, restart_count: 1 }] });
+    hostedCheckMock.mockResolvedValue({ ...current, servedRelease: 4, behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByText(/^Update available/)).toBeInTheDocument();
+    expect(within(section).queryByText(ASTRID_STATUS_COPY.repairTitle)).toBeNull();
+    expect(section.textContent).not.toContain(ASTRID_STATUS_COPY.repairDescription);
+  });
+
   it('shows no repair entry while the direct install is healthy', async () => {
     await loadHealth({ status: 'ok', release: 3, runtime_instance_id: 'runtime-ok', identity: directIdentity, services: [] });
     hostedCheckMock.mockResolvedValue(current);

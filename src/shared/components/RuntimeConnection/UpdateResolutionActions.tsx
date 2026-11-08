@@ -1,7 +1,9 @@
 import { Button } from '@/shared/components/ui/button.tsx';
 import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN_PINOKIO_ACTION, type InstallType, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
-import { CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { CopyCommandRow, CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY } from './copy.ts';
+import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
@@ -55,8 +57,9 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {commandOptions && installerPath && !execute && !resolution.updateReason && <p className="text-sm">{IN_APP_UPDATE_UNAVAILABLE}</p>}
     {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} />}
     {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
-      <p className="text-sm">Run this command to start Astrid and apply the update:</p>
-      <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} />
+      <p className="text-sm">Run this command, then start Astrid:</p>
+      {/* The plain install line, not --update: it respects autostart off, so the saved choice is kept. */}
+      <CopyCommandRow command={detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
     </div>}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}

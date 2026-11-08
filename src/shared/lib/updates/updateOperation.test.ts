@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AstridRuntimeClient, type InstallerUpdateHealth, type InstallerUpdateStatus } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import { canStartInstallerUpdate, installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
+import { canStartInstallerUpdate, installerUpdateReasonOf, installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
 
 vi.mock('./updateStatus.ts', () => ({ checkHostedUpdate: vi.fn(async () => null) }));
@@ -42,6 +42,30 @@ describe('canStartInstallerUpdate', () => {
     expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'none', reason: 'busy' })).toBe(false);
     expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed' })).toBe(true);
     expect(canStartInstallerUpdate(null)).toBe(false);
+  });
+});
+
+describe('installerUpdateReasonOf', () => {
+  // Every status reason the Runtime can send: the reasons of GET /v1/update/status (astrid_runtime/update.py
+  // _STATUS_REASONS and _REPORTED_REASONS, plus "none"). A new Runtime reason must be added here with its
+  // App mapping, so the App never reads an unmapped reason as a refusal by accident.
+  const RUNTIME_REASON_MAPPING: ReadonlyArray<readonly [string, ReturnType<typeof installerUpdateReasonOf>]> = [
+    ['none', null],
+    ['busy', 'busy'],
+    ['autostart-off', 'autostart-off'],
+    ['unsupported-service-manager', 'unsupported-service-manager'],
+    ['source', 'source'],
+    ['needs-repair', 'self-update-unavailable'],
+    ['managed-elsewhere', 'self-update-unavailable'],
+  ];
+
+  it.each(RUNTIME_REASON_MAPPING)('maps the Runtime reason %s', (reason, expected) => {
+    const status = { available: true, self_update: true, state: 'none', reason } as InstallerUpdateStatus;
+    expect(installerUpdateReasonOf(status)).toBe(expected);
+  });
+
+  it('lets Update now start when the Runtime reports reason none', () => {
+    expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'none', reason: 'none' } as InstallerUpdateStatus)).toBe(true);
   });
 });
 

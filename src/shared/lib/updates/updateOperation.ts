@@ -34,7 +34,9 @@ export function installerUpdateReasonOf(status: InstallerUpdateStatus | null | u
   if (!status) return null;
   // Without self_update this Astrid cannot run the recovery Update, so the recovery reads as a repair.
   if (status.state === 'recovery-needed') return status.self_update === true ? 'recovery-needed' : 'needs-repair';
-  return status.reason ? installerReasonOf(status.reason) : null;
+  // 'none' is the Runtime saying it can update: no refusal to explain.
+  if (!status.reason || status.reason === 'none') return null;
+  return installerReasonOf(status.reason);
 }
 
 /** Only a Runtime that reports self_update can run an in-app update; a refusal reason keeps it from starting. */

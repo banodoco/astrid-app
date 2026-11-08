@@ -5,7 +5,7 @@ import { writeClipboardTextSafe } from '@/shared/lib/browser/clipboard.ts';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import type { ServiceStatus } from '@/integrations/runtime/generated.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
-import { agentInstructions, installCommand, RUNTIME_CONNECTION_COPY, UPDATE_ROUTES, withCommandShell, type CommandMode } from './copy.ts';
+import { agentInstructions, ASTRID_COMMANDS, installCommand, RUNTIME_CONNECTION_COPY, UPDATE_ROUTES, withCommandShell, type CommandMode } from './copy.ts';
 
 export interface CopyInstallCommandProps {
   /** `install` for setup/repair and `update` for an incompatible Astrid. */
@@ -13,6 +13,8 @@ export interface CopyInstallCommandProps {
   readonly services?: readonly ServiceStatus[];
   /** The primary action's label where a resolver card names it; the default is the install brief's label. */
   readonly agentLabel?: string;
+  /** A repair of an install that cannot update itself: the manual command is the plain install line, never --update. */
+  readonly plain?: boolean;
 }
 
 type CopyStatus = 'idle' | 'copied' | 'failed';
@@ -74,11 +76,11 @@ export function CopyCommandRow({ command, label, copiedLabel = label }: { readon
  * Agent handoff first, as the one primary action; the manual command is the quiet alternative under it, with its own
  * copy action. Nothing else: the card around it says what the instructions are for.
  */
-export function CopyInstallCommand({ mode = 'install', services, agentLabel }: CopyInstallCommandProps) {
+export function CopyInstallCommand({ mode = 'install', services, agentLabel, plain = false }: CopyInstallCommandProps) {
   const copy = RUNTIME_CONNECTION_COPY.agent;
   const localBuild = runtimeOrigin() === '';
-  const instructions = agentInstructions(mode, window.location.origin, localBuild, services);
-  const command = installCommand(mode);
+  const instructions = agentInstructions(mode, window.location.origin, localBuild, services, plain ? { repair: true } : {});
+  const command = plain ? (detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux) : installCommand(mode);
   const agentCopy = useCopyAction(instructions);
   const agentCopied = agentCopy.status === 'copied';
 

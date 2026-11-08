@@ -5,7 +5,7 @@ import { createRef, type ComponentProps } from 'react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AGENT_CHAT_COPY, AGENT_INTEGRATION_PROMPT } from '@/integrations/astrid/chatCopy.ts';
 import { LOCAL_AGENT_IDS, LOCAL_AGENT_TABLE, PERSONAL_AGENT_DIRECTORIES, type LocalAgentChoice } from '@/integrations/astrid/localAgents.ts';
-import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
 import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE, BridgeContractError } from '@/tools/video-editor/data/bridgeContract.ts';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
 import { NewChatMenu, type NewChatMenuHandle, type NewChatAgentModels } from './NewChatMenu.tsx';
@@ -748,20 +748,22 @@ describe('NewChatMenu with an out-of-date local Astrid', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
-    ['MacIntel', 'Macintosh', 'curl -fsSL https://astrid.haus/install | sh -s -- --update'],
-    ['Win32', 'Windows', '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update'],
-  ])('shows the update prompt and %s update command instead of the raw error', (platform, os, command) => {
+    ['MacIntel', 'Macintosh'],
+    ['Win32', 'Windows'],
+  ])('shows one update card with See updates instead of the raw error on %s', (platform, os) => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(os);
     const error = new BridgeRouteError('List local agents', 409, { error: BRIDGE_CONTRACT_VERSION_MISMATCH_CODE });
     openMenu({ agentsError: error });
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent(RUNTIME_CONNECTION_COPY.chatNeedsUpdate);
-    expect(alert).toHaveTextContent('Copy instructions for your agent');
-    expect(alert).toHaveTextContent('Run it yourself');
-    expect(alert).toHaveTextContent('If you run Astrid from source checkouts');
-    expect(alert).not.toHaveTextContent('This page needs a newer Astrid');
-    expect(screen.getByText(command, { selector: 'code' })).toBeInTheDocument();
+    expect(alert).toHaveTextContent(RUNTIME_CONNECTION_COPY.updateNeeded.title);
+    expect(alert).toHaveTextContent(withCommandShell(RUNTIME_CONNECTION_COPY.updateNeeded.sentence));
+    expect(within(alert).getByRole('button', { name: 'See updates' })).toBeInTheDocument();
+    expect(alert).not.toHaveTextContent('Copy instructions for your agent');
+    expect(alert).not.toHaveTextContent('Run it yourself');
+    expect(screen.queryByText(/curl -fsSL|irm https:\/\/astrid\.haus/, { selector: 'code' })).toBeNull();
     expect(screen.getByText('Details')).toBeInTheDocument();
     expect(screen.getByText(error.message)).toBeInTheDocument();
     expect(screen.queryByText(/Could not load agents/)).toBeNull();

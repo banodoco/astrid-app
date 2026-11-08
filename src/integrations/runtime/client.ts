@@ -196,7 +196,8 @@ export type RuntimeConnectorError = RuntimeAuthenticationError | RuntimeUnavaila
 
 export type InstallerUpdateStatusState = 'none' | 'active' | 'terminal' | 'recovery-needed';
 export type InstallerUpdateOutcome = 'updated' | 'rolled_back' | 'failed';
-export type InstallerUpdateReason = 'busy' | 'autostart-off' | 'unsupported-service-manager' | 'recovery-needed';
+/** Editor-owned reason keys. Runtime refusal codes map to their own key; any other code reads as self-update-unavailable. */
+export type InstallerUpdateReason = 'busy' | 'autostart-off' | 'unsupported-service-manager' | 'source' | 'recovery-needed' | 'needs-repair' | 'self-update-unavailable';
 
 /** Exact editor-owned explanations for the Runtime's allowlisted refusal states. */
 export const INSTALLER_UPDATE_REASON_MESSAGES: Readonly<Record<InstallerUpdateReason, string>> = Object.freeze({
@@ -204,11 +205,17 @@ export const INSTALLER_UPDATE_REASON_MESSAGES: Readonly<Record<InstallerUpdateRe
   'autostart-off': 'Automatic startup is off. Turn it on before updating Astrid here.',
   'unsupported-service-manager': 'In-app updates require user systemd 254 or newer on Linux.',
   'recovery-needed': 'Astrid needs recovery. Select Update to check the previous operation before continuing.',
+  'needs-repair': 'Astrid needs repair before it can update.',
+  source: 'This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.',
+  'self-update-unavailable': "Astrid can't update itself on this computer. Run the command below to update it.",
 });
 
 /** Raw, read-only installer status returned by the Runtime producer. */
 export interface InstallerUpdateStatus {
+  /** Launcher presence only. It is true on platforms where the helper fails, so it never gates an in-app update. */
   available: boolean;
+  /** True only when this Runtime can run the in-app update. A missing field reads as false. */
+  self_update?: boolean;
   state: InstallerUpdateStatusState;
   operation_id?: string;
   result?: string;
@@ -256,6 +263,7 @@ function validateInstallerUpdateStatus(value: unknown): InstallerUpdateStatus {
   if (value.accepted_at !== undefined && typeof value.accepted_at !== 'string' && typeof value.accepted_at !== 'number') throw new Error('invalid installer update acceptance time');
   if (value.log_path !== undefined && typeof value.log_path !== 'string') throw new Error('invalid installer update log path');
   if (value.reason !== undefined && (typeof value.reason !== 'string' || !value.reason)) throw new Error('invalid installer update reason');
+  if (value.self_update !== undefined && typeof value.self_update !== 'boolean') throw new Error('invalid installer update self-update flag');
   return value as unknown as InstallerUpdateStatus;
 }
 

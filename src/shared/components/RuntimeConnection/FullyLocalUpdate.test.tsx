@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectionFor } from './connectionFixture.ts';
 import { installCommand } from './copy.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
+import { pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
 
 const { connectionMock, localCheckMock, originMock } = vi.hoisted(() => ({
   connectionMock: { value: null as unknown },
@@ -31,6 +32,7 @@ function stubFetch() {
 }
 
 beforeEach(() => {
+  pageLocalUpdate().reset();
   vi.unstubAllEnvs();
   vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
   originMock.value = '';
@@ -75,5 +77,68 @@ describe('fully-local update guidance', () => {
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(screen.getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
     expect(document.body.textContent ?? '').not.toContain('npm run update');
+  });
+
+  describe('when the status reports self_update', () => {
+    const TARGET = { url: 'http://127.0.0.1:5000/page-update', token: 'cd'.repeat(32) };
+    const behind = { release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, selfUpdate: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } };
+    function stubLauncher(launcher: () => Response) {
+      const fetchMock = vi.fn((input: string | URL | Request) => {
+        const url = String(input);
+        if (url === '/__astrid/local-update-page') return Promise.resolve(json(200, TARGET));
+        if (url === TARGET.url) return Promise.resolve(launcher());
+        return Promise.resolve(json(200, { report: 'Astrid diagnostics' }));
+      });
+      vi.stubGlobal('fetch', fetchMock);
+      return fetchMock;
+    }
+
+    it('offers Update now with the install command as the secondary, and no npm route', async () => {
+      localCheckMock.mockResolvedValue(behind);
+      stubFetch();
+      render(<AstridUpdatesSection isOpen />);
+      const section = screen.getByRole('region', { name: 'Updates' });
+
+      expect(await within(section).findByRole('button', { name: 'Update now' })).toBeInTheDocument();
+      expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
+      expect(section.textContent).not.toContain('npm run update');
+    });
+
+    it('offers no Update now when the status does not report self_update', async () => {
+      localCheckMock.mockResolvedValue({ ...behind, selfUpdate: false });
+      stubFetch();
+      render(<AstridUpdatesSection isOpen />);
+      const section = screen.getByRole('region', { name: 'Updates' });
+
+      expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
+      expect(within(section).queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
+      expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
+    });
+
+    it('updates through the launcher once per click and offers Reload', async () => {
+      localCheckMock.mockResolvedValue(behind);
+      const fetchMock = stubLauncher(() => json(200, { result: { status: 'updated', message: 'Astrid is updated and running.' } }));
+      vi.spyOn(console, 'error').mockImplementation(() => undefined);
+      render(<AstridUpdatesSection isOpen />);
+      const section = screen.getByRole('region', { name: 'Updates' });
+
+      fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
+      expect(await within(section).findByText('Astrid updated.')).toBeInTheDocument();
+      expect(fetchMock.mock.calls.filter(([url]) => String(url) === TARGET.url)).toHaveLength(1);
+      const post = fetchMock.mock.calls.find(([url]) => String(url) === TARGET.url)![1] as RequestInit;
+      expect((post.headers as Record<string, string>).Authorization).toBe(`Bearer ${TARGET.token}`);
+      expect(within(section).getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    });
+
+    it('shows a refusal and keeps the install command', async () => {
+      localCheckMock.mockResolvedValue(behind);
+      stubLauncher(() => json(409, { error: 'refused', code: 'local_edits_conflict', refusal: 'dirty' }));
+      render(<AstridUpdatesSection isOpen />);
+      const section = screen.getByRole('region', { name: 'Updates' });
+
+      fireEvent.click(await within(section).findByRole('button', { name: 'Update now' }));
+      expect(await within(section).findByRole('alert')).toHaveTextContent(/local edits overlap/);
+      expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
+    });
   });
 });

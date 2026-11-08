@@ -71,12 +71,6 @@ const ENGINE_CHANGED = pinokioManaged
   ? 'Astrid changed on this computer. Stop and start Astrid in Pinokio.'
   : `Astrid changed on this computer. Restart its engine: ${runtimeUpCommand}`;
 const CANT_START = "Astrid can't start with the setup on this computer.";
-// The browser client accepts this published additive workspace.v1 contract as
-// well as the generated schema and the legacy transition list below. Keep the
-// plain-Node local launcher on the same compatibility policy.
-const PAGE_COMPATIBLE_RUNTIME_SCHEMA_DIGESTS = [
-  'sha256:a36913ece941dce500344487aec682ce692411a4922c0382afc380b6caa959e0',
-];
 
 /**
  * One friendly line, then one `Details:` line with the technical message. Returns null so callers can `return fail(...)`.
@@ -453,8 +447,7 @@ async function verifyRuntime(endpoint, token, expectedIdentity, allowStart = fal
     if (health?.runtime_instance_id !== expectedIdentity.runtimeInstanceId) {
       return fail(ENGINE_CHANGED, 'Runtime health instance does not match the selected Astrid profile');
     }
-    const acceptedSchemaDigests = [expectedSchemaDigest, ...LEGACY_RUNTIME_SCHEMA_DIGESTS,
-      ...PAGE_COMPATIBLE_RUNTIME_SCHEMA_DIGESTS];
+    const acceptedSchemaDigests = [expectedSchemaDigest, ...LEGACY_RUNTIME_SCHEMA_DIGESTS];
     const digestError = schemaDigestMismatch(health?.schema_digest, acceptedSchemaDigests);
     if (digestError) return incompatible(health, 'runtime schema digest mismatch');
 
@@ -664,6 +657,14 @@ function waitForPort(portValue, timeoutMs = 3000, aborted = () => false) {
   });
 }
 
+// Update now is offered only when this launcher can run the update: the page route exists (not Pinokio) and the selected
+// Runtime is an installed backend. A source Runtime reports self_update false with reason "source" and keeps the command.
+function launcherCanSelfUpdate() {
+  if (pinokioManaged) return false;
+  try { installedBackend(resolveRuntimeCommand(runtimeSettings).command); return true; }
+  catch (error) { if (error.step === 'select-backend') return false; throw error; }
+}
+
 const env = {
   ...process.env,
   // The agent's CLI/SDK must address the same selected workspace as the editor,
@@ -673,6 +674,7 @@ const env = {
   ASTRID_WORKSPACE_DISCOVERY: discoveryPath,
   ASTRID_LOCAL_UPDATE_STATUS: '1',
   VITE_ASTRID_LOCAL_UPDATE_STATUS: '1',
+  ASTRID_LOCAL_SELF_UPDATE: launcherCanSelfUpdate() ? '1' : '0',
   ...(astridCheckout ? { ASTRID_CHECKOUT: astridCheckout } : {}),
   ...(configuredAstridPublicCheckout ? { ASTRID_PUBLIC_CHECKOUT: configuredAstridPublicCheckout } : {}),
   PORT: port,

@@ -68,7 +68,7 @@ it.each([
         ? { code: 'unauthorized', message: 'Update status access denied.' }
         : statusCode === 404
           ? { code: 'not_found', message: 'Installer status route is not available.' }
-          : { available: capability, state: 'none' };
+          : { available: capability, self_update: capability, state: 'none' };
       status = statusCode;
     } else if (url.endsWith('/v1/update') && method === 'POST') {
       status = 202;

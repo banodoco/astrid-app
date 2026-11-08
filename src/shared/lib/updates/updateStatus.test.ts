@@ -58,4 +58,14 @@ describe('update status queries', () => {
     expect(result.resolution.updateNowAvailable).toBeUndefined();
     await expect(checkLocalUpdate(vi.fn<typeof fetch>().mockResolvedValue(response({ error: 'unavailable' }, 503)))).rejects.toThrow('HTTP 503');
   });
+
+  it('reads the launcher self_update report, false unless it is exactly true', async () => {
+    const base = { app: 'local-head', servedApp: 'served-head', release: 3, servedRelease: 4, behind: true };
+    const read = (extra: object) => checkLocalUpdate(vi.fn<typeof fetch>().mockResolvedValueOnce(response({ ...base, ...extra })));
+    expect((await read({ self_update: true })).selfUpdate).toBe(true);
+    expect((await read({ self_update: false, reason: 'source' })).selfUpdate).toBe(false);
+    expect((await read({ self_update: false, reason: 'source' })).resolution.updateReason).toBe('source');
+    expect((await read({ self_update: true })).resolution.updateReason).toBeUndefined();
+    expect((await read({})).selfUpdate).toBe(false);
+  });
 });

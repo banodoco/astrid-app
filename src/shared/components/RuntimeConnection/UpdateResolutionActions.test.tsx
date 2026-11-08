@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
-import { installCommand, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
+import { ASTRID_COMMANDS, installCommand } from './copy.ts';
 import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/client.ts';
 
 const installerResolutions = [
   ['Update now', resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'installer', updateNowAvailable: true })],
@@ -29,14 +30,43 @@ function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>, ins
   return onOpen;
 }
 
+describe('update resolution after an in-app update ends', () => {
+  const finished = (outcome: 'failed' | 'updated') => ({
+    available: true, pending: false, fresh: true, error: null, installType: 'installer',
+    status: { available: true, self_update: true, state: 'terminal', outcome, operation_id: 'op-1', result: 'Update finished.' },
+    start: vi.fn(async () => undefined),
+  }) as unknown as InstallerUpdateView;
+
+  it('offers the plain install line as the next action after a failed update, not --update', () => {
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={finished('failed')} />);
+    expect(screen.getByText('The update did not complete. Check diagnostics before trying again.')).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
+    expect(screen.getByRole('code').textContent).not.toContain('--update');
+  });
+
+  it('does not offer the install line after an update that finished', () => {
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={finished('updated')} />);
+    expect(screen.queryByRole('code')).toBeNull();
+  });
+});
+
 describe('update resolution Settings actions', () => {
-  it('shows a runnable setup command with Customize when Update Now is refused for autostart off', () => {
+  it('shows the plain install line, not --update, when an install needs repair', () => {
+    const resolution = resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', installedRelease: 10, servedRelease: 10 });
+    render(<UpdateResolutionActions resolution={resolution} />);
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
+    expect(screen.getByRole('code').textContent).not.toContain('--update');
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+  });
+
+  it('shows the plain install line, not --update, when Update Now is refused for autostart off', () => {
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
     render(<UpdateResolutionActions resolution={resolution} />);
-    expect(screen.getByText('Run this command to start Astrid and apply the update:')).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(installCommand('update', { autostart: true, command: true, skills: true, skillCopies: false }));
+    expect(screen.getByText('Run this command, then start Astrid:')).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
+    expect(screen.getByRole('code').textContent).not.toContain('--update');
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
   });
 
   it('routes a soft update nudge to the expanded Updates destination and preserves the URL hash', () => {
@@ -114,5 +144,28 @@ describe('update resolution Settings actions', () => {
       unregister();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('update resolution in-app availability', () => {
+  it('shows Update now disabled while a busy Astrid refuses the start, with no command', () => {
+    const start = vi.fn(async () => undefined);
+    const operation = { available: true, pending: false, start, updateReason: 'busy' } as unknown as InstallerUpdateView;
+    const resolution = resolveUpdate({ installType: 'installer', updateReason: 'busy', updateNowAvailable: true });
+    render(<UpdateResolutionActions resolution={resolution} operation={operation} />);
+    const button = screen.getByRole('button', { name: 'Update now' });
+    expect(button).toBeDisabled();
+    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Run it yourself' })).not.toBeInTheDocument();
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('hides Update now and shows the one-line reason with the command when Astrid cannot update itself', () => {
+    const operation = { available: false, pending: false, start: vi.fn(), updateReason: undefined } as unknown as InstallerUpdateView;
+    const resolution = resolveUpdate({ installType: 'installer', releaseBehind: true, installedRelease: 3, servedRelease: 4 }, 'settings');
+    render(<UpdateResolutionActions resolution={resolution} operation={operation} />);
+    expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
+    expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable'])).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 });

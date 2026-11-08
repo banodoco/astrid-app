@@ -2,20 +2,24 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { connectionMock, readStatusMock, hostedCheckMock, localCheckMock, originMock } = vi.hoisted(() => ({ connectionMock: { value: null as unknown }, readStatusMock: vi.fn(), hostedCheckMock: vi.fn(), localCheckMock: vi.fn(), originMock: { value: 'https://astrid.test' } }));
+const { connectionMock, readStatusMock, statusMock, hostedCheckMock, localCheckMock, originMock } = vi.hoisted(() => ({ connectionMock: { value: null as unknown }, readStatusMock: vi.fn(), statusMock: { value: null as unknown }, hostedCheckMock: vi.fn(), localCheckMock: vi.fn(), originMock: { value: 'https://astrid.test' } }));
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({ useRuntimeConnection: () => connectionMock.value }));
-vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readInstallerUpdateHealth = async () => (await readStatusMock()).health; } }));
+vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readInstallerUpdateHealth = async () => (await readStatusMock()).health; readInstallerUpdateStatus = async () => statusMock.value; } }));
 vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => originMock.value, runtimeApiBase: () => 'http://127.0.0.1:17340/api/runtime' }));
 vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: hostedCheckMock, checkLocalUpdate: localCheckMock }));
 
 import { AstridUpdatesSection } from './AstridUpdatesSection.tsx';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
-import { installCommand, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { ASTRID_COMMANDS, installCommand, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
+import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
+import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
 
 beforeEach(() => {
   vi.unstubAllEnvs();
   connectionMock.value = { isConnected: true, managedByPinokio: false };
   readStatusMock.mockReset().mockResolvedValue({ health: { status: 'ok', release: 3 } });
+  statusMock.value = { available: false, state: 'none' };
   hostedCheckMock.mockReset();
   localCheckMock.mockReset();
   originMock.value = 'https://astrid.test';
@@ -214,6 +218,46 @@ describe('Astrid Updates Settings section', () => {
     expect(within(section).queryByRole('heading', { name: 'Update log' })).toBeNull();
   });
 
+  it.each([
+    ['the live recovery word', 'recovery-needed'],
+    ['the report recovery word', 'recovery_needed'],
+    ['an unknown word', 'partially-applied'],
+  ])('never shows a result line for %s in the report when no update has run', async (_name, result) => {
+    vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+      if (String(input) === '/build.json') return Promise.resolve(new Response(JSON.stringify({ app: 'served-app-build', release: 1 }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify({ report: `Astrid diagnostics\nLast update result: ${result}\nInstaller transaction log:\ntransaction line\nRetained back-end copies: 0 bytes` }), { status: 200 }));
+    }));
+    hostedCheckMock.mockResolvedValue({ release: 1, app: 'served-app-build', servedRelease: 1, servedApp: 'served-app-build', behind: false, resolution: { installedRelease: 1, servedRelease: 1, releaseBehind: false } });
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(section).findByText('Astrid is up to date (Release 1)')).toBeInTheDocument();
+    fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
+    // The log shows only once the report has loaded, so the missing result line is not just an early read.
+    expect(await within(section).findByText('transaction line')).toBeInTheDocument();
+    expect(within(section).queryByText(/^Last result:/)).toBeNull();
+    expect(within(section).queryByText(/An update result is available/)).toBeNull();
+  });
+
+  it('offers the plain install line after a failed update, not only the diagnostics link', async () => {
+    statusMock.value = { available: true, self_update: true, state: 'terminal', outcome: 'failed', operation_id: 'op-failed', result: 'Update failed.' };
+    // The shared operation store is read directly, as the repair tests do, so the failed status is in place before render.
+    const operation = pageUpdateOperation(runtimeApiBase());
+    try {
+      await operation.refresh();
+      hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 3, servedApp: 'served', behind: false, resolution: { installedRelease: 3, servedRelease: 3, releaseBehind: false } });
+      render(<AstridUpdatesSection isOpen />);
+      const section = screen.getByRole('region', { name: 'Updates' });
+      const command = await within(section).findByRole('code');
+      expect(command).toHaveTextContent(ASTRID_COMMANDS.macLinux);
+      expect(command.textContent).not.toContain('--update');
+      expect(within(section).getAllByRole('code')).toHaveLength(1);
+    } finally {
+      // Later tests share this store, so it returns to an idle Astrid.
+      statusMock.value = { available: false, state: 'none' };
+      await operation.refresh();
+    }
+  });
+
   it('shows the inline message and the fallback when the diagnostics download comes back empty', async () => {
     vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
       if (String(input) === '/build.json') return Promise.resolve(new Response(JSON.stringify({ app: 'a', release: 1 }), { status: 200 }));
@@ -313,6 +357,51 @@ describe('Updates for an Astrid older than this page', () => {
 
     expect(await within(section).findByText('Update in Pinokio')).toBeInTheDocument();
     expect(within(section).getByRole('status')).toHaveTextContent('Update Astrid');
+    expect(within(section).queryByRole('code')).toBeNull();
+  });
+});
+
+describe('Updates repair entry for a direct install', () => {
+  const PLAIN_INSTALL_LINE = 'curl -fsSL https://astrid.haus/install | sh';
+  const directIdentity = { managed_by: null, release: 3 };
+  const current = { release: 3, app: 'current', servedRelease: 3, servedApp: 'served', behind: false, resolution: { installedRelease: 3, servedRelease: 3, releaseBehind: false } };
+  // The section reads the shared update operation's health, so each test loads its Runtime health into that store first.
+  const loadHealth = async (health: Record<string, unknown>) => {
+    readStatusMock.mockResolvedValue({ health });
+    await pageUpdateOperation(runtimeApiBase()).refresh();
+  };
+
+  it('gives a degraded direct install the plain install line, without --update', async () => {
+    await loadHealth({ status: 'degraded', release: 3, runtime_instance_id: 'runtime-degraded', identity: directIdentity, services: [{ name: 'chat', state: 'failed', last_exit: 2, restart_count: 1 }] });
+    hostedCheckMock.mockResolvedValue(current);
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByText(ASTRID_STATUS_COPY.repairTitle)).toBeInTheDocument();
+    expect(within(section).getByText(ASTRID_STATUS_COPY.repairDescription)).toBeInTheDocument();
+    expect(within(section).getByRole('code')).toHaveTextContent(PLAIN_INSTALL_LINE);
+    expect(within(section).getByRole('code').textContent).not.toContain('--update');
+  });
+
+  it('leaves the repair row out while an update is offered, which is then the only path', async () => {
+    await loadHealth({ status: 'degraded', release: 3, runtime_instance_id: 'runtime-behind', identity: directIdentity, services: [{ name: 'chat', state: 'failed', last_exit: 2, restart_count: 1 }] });
+    hostedCheckMock.mockResolvedValue({ ...current, servedRelease: 4, behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByText(/^Update available/)).toBeInTheDocument();
+    expect(within(section).queryByText(ASTRID_STATUS_COPY.repairTitle)).toBeNull();
+    expect(section.textContent).not.toContain(ASTRID_STATUS_COPY.repairDescription);
+  });
+
+  it('shows no repair entry while the direct install is healthy', async () => {
+    await loadHealth({ status: 'ok', release: 3, runtime_instance_id: 'runtime-ok', identity: directIdentity, services: [] });
+    hostedCheckMock.mockResolvedValue(current);
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+
+    expect(await within(section).findByText(/^Astrid is up to date/)).toBeInTheDocument();
+    expect(within(section).queryByText(ASTRID_STATUS_COPY.repairTitle)).toBeNull();
     expect(within(section).queryByRole('code')).toBeNull();
   });
 });

@@ -31,6 +31,14 @@ function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>, ins
 }
 
 describe('update resolution Settings actions', () => {
+  it('shows the plain install line, not --update, when an install needs repair', () => {
+    const resolution = resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', installedRelease: 10, servedRelease: 10 });
+    render(<UpdateResolutionActions resolution={resolution} />);
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
+    expect(screen.getByRole('code').textContent).not.toContain('--update');
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+  });
+
   it('shows the plain install line, not --update, when Update Now is refused for autostart off', () => {
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
     render(<UpdateResolutionActions resolution={resolution} />);

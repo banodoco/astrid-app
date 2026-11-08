@@ -68,7 +68,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {commandOptions && installerPath && !execute && !resolution.updateReason && <p className="text-sm">{IN_APP_UPDATE_UNAVAILABLE}</p>}
-    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} />}
+    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair'} />}
     {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
       <p className="text-sm">Run this command, then start Astrid:</p>
       {/* The plain install line, not --update: it respects autostart off, so the saved choice is kept. */}

@@ -291,17 +291,19 @@ export function agentInstructions(
   pageOrigin: string,
   localBuild = false,
   services?: readonly ServiceStatus[],
-  setup: { readonly choices?: SetupChoices; readonly alreadySetup?: boolean; readonly explicitChoices?: boolean } = {},
+  setup: { readonly choices?: SetupChoices; readonly alreadySetup?: boolean; readonly explicitChoices?: boolean; readonly repair?: boolean } = {},
 ): string {
   const platform = detectPlatform();
   const windows = platform === 'windows';
   const choices = setup.choices ?? RECOMMENDED_SETUP_CHOICES;
   const alreadySetup = setup.alreadySetup ?? false;
-  const command = installCommand(mode, choices, setup.explicitChoices ?? false);
+  // A repair runs the plain install line, never --update: that line respects the saved autostart choice.
+  const repair = setup.repair ?? false;
+  const command = repair ? (windows ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux) : installCommand(mode, choices, setup.explicitChoices ?? false);
   // Existing installs keep their saved choices: no consent question and no choice summary.
-  const existing = mode === 'update' || (setup.explicitChoices ?? false);
+  const existing = mode === 'update' || repair || (setup.explicitChoices ?? false);
   return [
-    `Please ${mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
+    `Please ${repair ? 'repair my existing Astrid installation' : mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
     !alreadySetup && !existing ? `Before you run the command, ask me once: “May I install Astrid with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
     !alreadySetup && !existing ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
     'First inspect the existing installation, running services, profile, selected workspace and data root. Preserve my projects, media, credentials and agent instructions. Do not reset or delete my workspace, or replace it with an empty one.',

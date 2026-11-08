@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -252,3 +252,9 @@ test('a floor pinned before release is bumped is refused, and a floor at the pub
   assert.match(checkReleaseGuard({ base: floored, head: snapshot(manifestOf({ release: 3, required: { release: 2, reason: 'Old fix' } })) }), /release 3 unchanged/);
 });
 
+
+test('a later push to main never cancels the release guard for an earlier one', async () => {
+  const workflow = await readFile(fileURLToPath(new URL('../../.github/workflows/test.yml', import.meta.url)), 'utf8');
+  assert.match(workflow, /cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' \}\}/);
+  assert.doesNotMatch(workflow, /cancel-in-progress: true/);
+});

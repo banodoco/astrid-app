@@ -64,6 +64,8 @@ describe('update status queries', () => {
     const read = (extra: object) => checkLocalUpdate(vi.fn<typeof fetch>().mockResolvedValueOnce(response({ ...base, ...extra })));
     expect((await read({ self_update: true })).selfUpdate).toBe(true);
     expect((await read({ self_update: false, reason: 'source' })).selfUpdate).toBe(false);
+    expect((await read({ self_update: false, reason: 'source' })).resolution.updateReason).toBe('source');
+    expect((await read({ self_update: true })).resolution.updateReason).toBeUndefined();
     expect((await read({})).selfUpdate).toBe(false);
   });
 });

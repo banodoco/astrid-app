@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/client.ts';
 import { installTypeOf, resolveUpdate, type InstallType, type UpdateResolution, type UpdateResolutionInput } from './resolveUpdate.ts';
 
 describe('installTypeOf', () => {
@@ -14,7 +15,6 @@ describe('installTypeOf', () => {
 
 describe('resolveUpdate', () => {
   it.each([
-    ['busy', 'Astrid is busy. Wait for the current operation to finish before trying again.'],
     ['unsupported-service-manager', 'In-app updates require user systemd 254 or newer on Linux.'],
     ['self-update-unavailable', "Astrid can't update itself on this computer. Run the command below to update it."],
   ] as const)('maps the %s refusal reason to its exact explanation and the command when Update now is not offered', (updateReason, body) => {
@@ -35,10 +35,10 @@ describe('resolveUpdate', () => {
     });
   });
 
-  it('suppresses Update now for a busy refusal even when self_update is true, failing safe to the reason line and the command', () => {
+  it('shows Update now disabled for a busy refusal, with the busy line and no command', () => {
     expect(resolveUpdate({ installType: 'installer', updateReason: 'busy', updateNowAvailable: true })).toMatchObject({
       card: 'notice', body: 'Astrid is busy. Wait for the current operation to finish before trying again.',
-      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' }, updateReason: 'busy',
+      primary: { label: 'Update now', execute: 'installer-update', disabled: true }, secondary: null, updateReason: 'busy',
     });
   });
 
@@ -232,7 +232,7 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     schemaMismatch: both(COMMAND_UPDATE),
     midSessionSchema: both(['mid-session', COPY_AGENT, RUN_YOURSELF]),
     newer: both(NEWER),
-    busyRefusal: both(COMMAND_NOTICE),
+    busyRefusal: both(['notice', 'Update now', null]),
     needsRepair: both(COMMAND_UPDATE),
     recoveryNeeded: both(COMMAND_UPDATE),
     newerBusyRefusal: both(NEWER),
@@ -257,7 +257,7 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     newerBusyRefusal: both(NEWER),
     newerNeedsRepair: both(NEWER),
     autostartOffRefusal: both(NONE),
-    sourceRefusal: both(NONE),
+    sourceRefusal: both(['notice', null, null]),
     unknownRefusal: SOFT,
     runtimeDown: both(NOT_RUNNING),
     pageStale: both(RELOAD),
@@ -320,8 +320,9 @@ describe('update decision table: install type × situation', () => {
       for (const situation of Object.keys(SITUATIONS) as Situation[]) {
         for (const context of ['page', 'settings'] as const) {
           const resolution = resolveUpdate({ ...SITUATIONS[situation], installType, updateNowAvailable: false }, context);
-          expect(resolution.primary?.execute, `${installType} / ${situation} / ${context}`).toBeUndefined();
-          expect(JSON.stringify(resolution), `${installType} / ${situation} / ${context}`).not.toContain('Update now');
+          // A busy installer shows Update now disabled; nothing else shows an enabled one.
+          if (resolution.primary?.execute) expect(resolution.primary.disabled, `${installType} / ${situation} / ${context}`).toBe(true);
+          else expect(JSON.stringify(resolution), `${installType} / ${situation} / ${context}`).not.toContain('Update now');
         }
       }
     }
@@ -372,7 +373,8 @@ describe('update decision table: install type × situation', () => {
   });
 
   it('suppresses Update now for every installer refusal even when self_update is true, and only recovery-needed starts the update', () => {
-    const refusals = ['busyRefusal', 'needsRepair', 'autostartOffRefusal', 'sourceRefusal', 'unknownRefusal', 'newerBusyRefusal', 'newerNeedsRepair'] as const;
+    // Busy is the one refusal that keeps Update now visible, disabled; it still starts nothing.
+    const refusals = ['needsRepair', 'autostartOffRefusal', 'sourceRefusal', 'unknownRefusal', 'newerBusyRefusal', 'newerNeedsRepair'] as const;
     for (const situation of refusals) {
       for (const context of ['page', 'settings'] as const) {
         const resolution = resolveUpdate({ ...SITUATIONS[situation], installType: 'installer', updateNowAvailable: true }, context);
@@ -380,6 +382,10 @@ describe('update decision table: install type × situation', () => {
         expect(resolution.primary?.execute, `${situation} / ${context}`).toBeUndefined();
         expect(JSON.stringify(resolution), `${situation} / ${context}`).not.toContain('Update now');
       }
+    }
+    for (const context of ['page', 'settings'] as const) {
+      const busy = resolveUpdate({ ...SITUATIONS.busyRefusal, installType: 'installer', updateNowAvailable: true }, context);
+      expect(busy.primary, `busy / ${context}`).toEqual({ label: 'Update now', execute: 'installer-update', disabled: true });
     }
     expect(resolveUpdate({ ...SITUATIONS.recoveryNeeded, installType: 'installer', updateNowAvailable: true }, 'settings').primary)
       .toEqual({ label: 'Update', execute: 'installer-update' });
@@ -402,6 +408,14 @@ describe('setup refusals on a current install', () => {
   it('keeps a recovery on a current install', () => {
     expect(resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 10, updateReason: 'recovery-needed', updateNowAvailable: true })).toMatchObject({
       card: 'update', updateReason: 'recovery-needed',
+    });
+  });
+});
+
+describe('a fully local install that cannot update itself', () => {
+  it('shows the source line its launcher reports, with no command', () => {
+    expect(resolveUpdate({ installType: 'fully-local', updateReason: 'source', installedRelease: 9, servedRelease: 10, releaseBehind: true })).toMatchObject({
+      card: 'notice', body: INSTALLER_UPDATE_REASON_MESSAGES.source, primary: null, secondary: null, updateReason: 'source',
     });
   });
 });

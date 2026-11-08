@@ -5,6 +5,8 @@ export type UpdateAction = {
   readonly label: string;
   readonly destination?: 'settings-updates';
   readonly execute?: 'installer-update' | 'local-update';
+  /** Shown but not startable: a busy Astrid offers Update now disabled while its lock is held. */
+  readonly disabled?: boolean;
 };
 
 export type UpdateResolution = {
@@ -55,6 +57,8 @@ const settingsAction: UpdateAction = { label: 'See updates', destination: 'setti
 const COPY_FOR_AGENT: UpdateAction = { label: COPY_FOR_AGENT_ACTION };
 /** The direct-install update: the agent brief and the install line's update command. Every direct install, fully local included, uses it. */
 const COMMAND_ACTIONS: Pick<UpdateResolution, 'primary' | 'secondary'> = { primary: COPY_FOR_AGENT, secondary: { label: RUN_IT_YOURSELF_ACTION } };
+/** A busy Astrid keeps Update now visible but disabled, with no command: the reason line says why. */
+const BUSY_ACTIONS: Pick<UpdateResolution, 'primary' | 'secondary'> = { primary: { label: 'Update now', execute: 'installer-update', disabled: true }, secondary: null };
 
 type ActionContext = 'page' | 'settings';
 
@@ -86,7 +90,9 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   // A setup refusal on an install that is already current has no update to offer: it shows no card and no command.
   const current = input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease >= input.servedRelease;
   const silentWhenCurrent = current && (input.updateReason === 'autostart-off' || input.updateReason === 'unsupported-service-manager');
-  if (input.updateReason && input.installType === 'installer' && !silentWhenCurrent) {
+  // A fully local install shows only the source line its launcher reports; its other refusals follow the release rules.
+  const sourceLocal = input.installType === 'fully-local' && input.updateReason === 'source';
+  if (input.updateReason && (input.installType === 'installer' || sourceLocal) && !silentWhenCurrent) {
     // A recovery or repair is an update card. Without an in-app update the reason is the one line and the command is the path;
     // autostart-off has its own setup command, and a source checkout has its own update route, not the installer command.
     const card = input.updateReason === 'recovery-needed' || input.updateReason === 'needs-repair';
@@ -95,6 +101,7 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
     // self_update is true: the reason's line and the command are the path.
     const actions = noAction ? { primary: null, secondary: null }
       : input.updateReason === 'recovery-needed' && input.updateNowAvailable ? updateActions(input, context)
+      : input.updateReason === 'busy' ? BUSY_ACTIONS
       : COMMAND_ACTIONS;
     return {
       card: card ? 'update' : 'notice',

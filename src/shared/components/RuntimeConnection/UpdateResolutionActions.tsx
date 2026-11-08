@@ -58,7 +58,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
 
   return <div className="space-y-2">
     {reload && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{reload.label}</Button>}
-    {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={operation.pending || guarded.pending} onClick={() => void startUpdate()}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
+    {execute && (operation?.available || execute.disabled) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={execute.disabled === true || operation?.pending === true || guarded.pending} onClick={() => void startUpdate()}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
     {executeLocal && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={localState.phase === 'running' || guarded.pending} onClick={() => void updateLocally()}>{localState.phase === 'running' ? 'Updating Astrid…' : executeLocal.label}</Button>}
     {localState.phase === 'running' && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {localState.phase === 'done' && <p role="status">{localState.message}</p>}
@@ -68,7 +68,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {commandOptions && installerPath && !execute && !resolution.updateReason && <p className="text-sm">{IN_APP_UPDATE_UNAVAILABLE}</p>}
-    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} />}
+    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair'} />}
     {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
       <p className="text-sm">Run this command, then start Astrid:</p>
       {/* The plain install line, not --update: it respects autostart off, so the saved choice is kept. */}

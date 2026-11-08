@@ -37,6 +37,14 @@ describe('install commands', () => {
     expect(agentInstructions('update', 'https://astrid.haus', false, undefined, { choices, alreadySetup: true }))
       .not.toContain('May I update Astrid');
   });
+
+  it('briefs a repair with the plain install line, never --update', () => {
+    const brief = agentInstructions('update', 'https://astrid.haus', false, undefined, { repair: true });
+    expect(brief).toContain('repair my existing Astrid installation');
+    expect(brief).toContain(ASTRID_COMMANDS.macLinux);
+    expect(brief).not.toContain('--update');
+    expect(brief).not.toContain('May I install Astrid');
+  });
 });
 
 describe('setup consent wording', () => {

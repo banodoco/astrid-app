@@ -69,6 +69,9 @@ export async function checkLocalUpdate(fetchImpl: typeof fetch = fetch): Promise
   const servedRelease = body.servedRelease === undefined ? 0 : releaseNumber(body.servedRelease);
   const requiredRelease = body.requiredRelease === undefined ? undefined : releaseNumber(body.requiredRelease);
   const requiredReason = typeof body.requiredReason === 'string' ? body.requiredReason : undefined;
+  // The launcher says why an install cannot update itself (today only "source"); keep it so the one line can explain it.
+  const updateReason = body.reason === 'source' ? 'source' as const : undefined;
   return { release, app: body.app, servedRelease, servedApp: body.servedApp, behind: body.behind, managedBy: null, selfUpdate: body.self_update === true,
-    resolution: { installedRelease: release, servedRelease, ...(requiredRelease === undefined ? {} : { requiredRelease, requiredReason }), releaseBehind: body.behind } };
+    resolution: { installedRelease: release, servedRelease, ...(requiredRelease === undefined ? {} : { requiredRelease, requiredReason }), releaseBehind: body.behind,
+      ...(updateReason ? { updateReason } : {}) } };
 }

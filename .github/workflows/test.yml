@@ -10,7 +10,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A later push to main must never cancel the release guard for an earlier one: every push to main is checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # Install tuple (manifest minus release/required, plus public/install*) and release move together:

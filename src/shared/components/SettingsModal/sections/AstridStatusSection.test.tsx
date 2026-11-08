@@ -5,6 +5,9 @@ import { RUNTIME_CONNECTION_COPY as CONNECTION_COPY, installCommand, RECOMMENDED
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
+import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
+import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
+import { UPDATE_IN_PINOKIO_ACTION } from '@/shared/lib/updates/resolveUpdate.ts';
 
 const settingsInstallCommand = () => installCommand('install', RECOMMENDED_SETUP_CHOICES, true);
 
@@ -64,36 +67,39 @@ async function openDetails() {
   fireEvent.click(await screen.findByRole('button', { name: 'Details' }));
 }
 
-describe('AstridStatusSection', () => {
-  beforeEach(() => {
-    localStorage.clear();
-    mocks.connection.state = { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } };
-    mocks.connection.isChecking = false;
-    mocks.connection.schemaDigest = null;
-    mocks.connection.localServiceOutOfDate = false;
-    mocks.connection.isConnected = true;
-    mocks.connection.managedByPinokio = false;
-    mocks.origin = 'http://127.0.0.1:17340';
-    mocks.readInstallerUpdateHealth.mockReset().mockResolvedValue({ status: 'ok', release: 0, runtime_instance_id: 'runtime-1', identity: { managed_by: null, release: 0 } });
-    mocks.connection.connect = mocks.connect.mockReset();
-    mocks.clipboard.mockReset().mockResolvedValue(true);
-    mocks.readStatus.mockReset().mockResolvedValue({
-      health: {
-        status: 'ok',
-        protocol: 'workspace.v1',
-        schema_digest: `sha256:${'a'.repeat(64)}`,
-        runtime_epoch: 2,
-        runtime_session_id: 'session-1',
-        runtime_instance_id: 'runtime-1',
-        services: [
-          { name: 'comfyui', state: 'starting', last_exit: null, restart_count: 0 },
-          { name: 'pack-host', state: 'running', last_exit: null, restart_count: 1 },
-          { name: 'chat', state: 'failed', last_exit: 2, restart_count: 3, reason: 'startup_failed' },
-        ],
-      },
-      realm: { realm_id: 'realm-1', display_name: 'Studio', version: 4, created_at: '2026-01-01T00:00:00Z' },
-    });
+/** Each describe starts from a connected direct install with one failed service. */
+function resetMocks() {
+  localStorage.clear();
+  mocks.connection.state = { status: 'connected', realm: { realm_id: 'realm-1', display_name: 'Studio' } };
+  mocks.connection.isChecking = false;
+  mocks.connection.schemaDigest = null;
+  mocks.connection.localServiceOutOfDate = false;
+  mocks.connection.isConnected = true;
+  mocks.connection.managedByPinokio = false;
+  mocks.origin = 'http://127.0.0.1:17340';
+  mocks.readInstallerUpdateHealth.mockReset().mockResolvedValue({ status: 'ok', release: 0, runtime_instance_id: 'runtime-1', identity: { managed_by: null, release: 0 } });
+  mocks.connection.connect = mocks.connect.mockReset();
+  mocks.clipboard.mockReset().mockResolvedValue(true);
+  mocks.readStatus.mockReset().mockResolvedValue({
+    health: {
+      status: 'ok',
+      protocol: 'workspace.v1',
+      schema_digest: `sha256:${'a'.repeat(64)}`,
+      runtime_epoch: 2,
+      runtime_session_id: 'session-1',
+      runtime_instance_id: 'runtime-1',
+      services: [
+        { name: 'comfyui', state: 'starting', last_exit: null, restart_count: 0 },
+        { name: 'pack-host', state: 'running', last_exit: null, restart_count: 1 },
+        { name: 'chat', state: 'failed', last_exit: 2, restart_count: 3, reason: 'startup_failed' },
+      ],
+    },
+    realm: { realm_id: 'realm-1', display_name: 'Studio', version: 4, created_at: '2026-01-01T00:00:00Z' },
   });
+}
+
+describe('AstridStatusSection', () => {
+  beforeEach(resetMocks);
 
   it('keeps Runtime and Workspace checks in the single status section', async () => {
     render(<AstridStatusSection isOpen />);
@@ -391,6 +397,82 @@ describe('AstridStatusSection', () => {
 
     expect(screen.getByRole('status')).toHaveTextContent('Chat needs an update');
     expectNoUpdateActions();
+  });
+});
+
+/** A Pinokio Astrid is repaired from Pinokio: no install command, no agent brief for one, no copy buttons. */
+function expectNoTerminalRepair() {
+  expect(screen.queryByRole('code')).not.toBeInTheDocument();
+  for (const name of ['Copy for your agent', 'Copy instructions for your agent', 'Copy command']) {
+    expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+  }
+  const text = document.body.textContent ?? '';
+  expect(text).not.toMatch(/install\s*\|\s*sh|install\.ps1|Run it yourself|in a terminal|coding agent/);
+}
+
+describe('AstridStatusSection repair follows the install type', () => {
+  beforeEach(resetMocks);
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('names only the Pinokio repair when part of a Pinokio Astrid is not working', async () => {
+    mocks.connection.managedByPinokio = true;
+    render(<AstridStatusSection isOpen />);
+
+    // Details appears once the Runtime's health is read, with the failed service.
+    expect(await screen.findByRole('button', { name: 'Details' })).toBeInTheDocument();
+    expectNoTerminalRepair();
+    expect(screen.getByRole('status')).toHaveTextContent(ASTRID_STATUS_COPY.degradedPinokio);
+    expect(screen.getByText(UPDATE_IN_PINOKIO_ACTION)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Get help' })).toHaveAttribute('href', ASTRID_HELP_URL);
+    await openDetails();
+    expect(screen.getByText('Failed')).toBeInTheDocument();
+    expectNoTerminalRepair();
+  });
+
+  it('takes the install type from the update operation, as the Updates actions do', async () => {
+    // A fresh operation store for this test: the store is keyed by the page's fetch.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    mocks.readInstallerUpdateHealth.mockResolvedValue({ status: 'ok', release: 4, runtime_instance_id: 'runtime-1', identity: { managed_by: 'pinokio', release: 4 } });
+    await pageUpdateOperation(runtimeApiBase()).refresh();
+    render(<AstridStatusSection isOpen />);
+
+    expect(await screen.findByRole('button', { name: 'Details' })).toBeInTheDocument();
+    expectNoTerminalRepair();
+    expect(screen.getByRole('status')).toHaveTextContent(ASTRID_STATUS_COPY.degradedPinokio);
+    expect(screen.getByText(UPDATE_IN_PINOKIO_ACTION)).toBeInTheDocument();
+  });
+
+  it("keeps the Setup block, with its install command and agent brief, as a direct install's repair", async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })));
+    await pageUpdateOperation(runtimeApiBase()).refresh();
+    render(<AstridStatusSection isOpen />);
+
+    expect(await screen.findByText(ASTRID_STATUS_COPY.degraded)).toBeInTheDocument();
+    expect(await screen.findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.getByText(settingsInstallCommand())).toBeInTheDocument();
+    expect(screen.queryByText(UPDATE_IN_PINOKIO_ACTION)).not.toBeInTheDocument();
+  });
+
+  it('says to start a Pinokio Astrid that is not answering in Pinokio, not with a coding agent', () => {
+    mocks.connection.state = { status: 'not_running' };
+    mocks.connection.managedByPinokio = true;
+    render(<AstridStatusSection isOpen />);
+
+    expect(screen.getByRole('status')).toHaveTextContent(CONNECTION_COPY.notRunning.title);
+    expect(screen.getByText(CONNECTION_COPY.notRunning.pinokioHint)).toBeInTheDocument();
+    expect(screen.queryByText(CONNECTION_COPY.notRunning.sentence)).not.toBeInTheDocument();
+    expectNoTerminalRepair();
+  });
+
+  it('keeps the not-answering sentence for a direct install', () => {
+    mocks.connection.state = { status: 'not_running' };
+    render(<AstridStatusSection isOpen />);
+
+    expect(screen.getByText(CONNECTION_COPY.notRunning.sentence)).toBeInTheDocument();
+    expect(screen.queryByText(CONNECTION_COPY.notRunning.pinokioHint)).not.toBeInTheDocument();
   });
 });
 

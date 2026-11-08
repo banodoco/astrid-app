@@ -3,8 +3,24 @@ import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConne
 import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { useAuthSafe } from '@/shared/contexts/AuthContext.tsx';
 import { scheduleFocusAndInterval } from './appBuildWatch.ts';
-import { canStartInstallerUpdate, installerUpdateReasonOf, pageUpdateOperation } from './updateOperation.ts';
+import { canStartInstallerUpdate, installerUpdateReasonOf, pageUpdateOperation, type UpdateOperationSnapshot } from './updateOperation.ts';
 import { localUpdateStatus, pageInstallType } from './pageUpdateStatus.ts';
+import type { InstallType } from './resolveUpdate.ts';
+
+/** The install type the update actions follow: the operation's Runtime identity, else the connection's Pinokio provenance. */
+function operationInstallType(snapshot: UpdateOperationSnapshot, managedByPinokio: boolean | null | undefined): InstallType {
+  return pageInstallType(snapshot.health?.identity?.managed_by, managedByPinokio);
+}
+
+/**
+ * The same install type for a surface that only names a path (Settings' status repair), so its words and the update
+ * actions can't disagree. It reads the shared operation and starts no polling of its own.
+ */
+export function useUpdateInstallType(connection?: Pick<RuntimeConnectionValue, 'managedByPinokio'> | null): InstallType {
+  const operation = pageUpdateOperation(runtimeApiBase());
+  const snapshot = useSyncExternalStore(operation.subscribe, operation.getSnapshot, operation.getSnapshot);
+  return operationInstallType(snapshot, connection?.managedByPinokio);
+}
 
 export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   const { isAuthenticated, authError } = useAuthSafe();
@@ -37,7 +53,7 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
     return () => { disposed = true; unschedule(); };
   }, [monitor, operation, confirmPermission]);
   const manager = snapshot.health?.identity?.managed_by;
-  const installType = pageInstallType(manager, connection?.managedByPinokio);
+  const installType = operationInstallType(snapshot, connection?.managedByPinokio);
   // Missing identity is never evidence of an installer-owned installation. The
   // Runtime performs the full ownership/lock/busy admission on the explicit POST.
   const recovery = snapshot.status?.state === 'recovery-needed';

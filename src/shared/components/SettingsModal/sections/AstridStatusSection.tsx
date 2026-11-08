@@ -9,6 +9,7 @@ import { describeFailure, RUNTIME_CONNECTION_COPY } from '@/shared/components/Ru
 import { connectionStatus } from './ConnectionSection.tsx';
 import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx';
+import { UPDATE_IN_PINOKIO_ACTION } from '@/shared/lib/updates/resolveUpdate.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { ASTRID_STATUS_COPY as COPY, connectionStatusCopy } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
@@ -97,18 +98,20 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
   // The install type comes from the same identity-based rule as the Settings Updates section and the header notice.
   const installerUpdate = useInstallerUpdate(connection);
   const { installType } = installerUpdate;
-  const summary = connectionStatus(connection);
+  const pinokio = installType === 'pinokio';
+  const summary = connectionStatus(connection, pinokio);
   const status = connection.state.status;
   const rawServices = details?.health.services;
   const hasServiceDetails = Array.isArray(rawServices) && rawServices.every(isRuntimeService);
   const services = Array.isArray(rawServices) ? rawServices.filter(isRuntimeService) : [];
   const needsRepair = details?.health.status === 'degraded' || services.some((service) => service.state === 'failed');
+  const degraded = pinokio ? COPY.degradedPinokio : COPY.degraded;
   const statusText = summary.outOfDate === 'chat'
     ? COPY.chatUpdateNeeded
     : summary.outOfDate
     ? COPY.updateNeeded
     : connected
-    ? loadFailed ? COPY.unavailable : needsRepair ? COPY.degraded : details ? COPY.connected : COPY.checking
+    ? loadFailed ? COPY.unavailable : needsRepair ? degraded : details ? COPY.connected : COPY.checking
     : connectionStatusCopy(status);
 
   const getHelp = <a className="text-muted-foreground underline underline-offset-4" href={ASTRID_HELP_URL} target="_blank" rel="noreferrer">Get help</a>;
@@ -129,7 +132,11 @@ export function AstridStatusSection({ isOpen }: { isOpen: boolean }) {
       >
         {summary.checks && <SetupStatusLine checks={summary.checks} mink={false} announce={false} className="items-start" />}
         {connected && details && needsRepair && (
-          <p>{getHelp}</p>
+          <>
+            {/* A direct install's repair is the Setup block above; Pinokio's Update is its repair, never the install command. */}
+            {pinokio && <p className="font-medium text-foreground">{UPDATE_IN_PINOKIO_ACTION}</p>}
+            <p>{getHelp}</p>
+          </>
         )}
         {(loadFailed || !connected && status !== 'connecting' && status !== 'needs_permission') && <p>{getHelp}</p>}
       </SettingsRow>

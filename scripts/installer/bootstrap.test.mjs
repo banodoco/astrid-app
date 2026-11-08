@@ -77,6 +77,27 @@ for (const manifestFlag of ['--manifest', '--manifest=']) {
   }));
 }
 
+test('POSIX keeps its bootstrap environment private to each run, even when a supplied manifest is reused', () => scenario(async (context) => {
+  // pinokio-linux/macos run 42396098397: the venv was created beside the supplied
+  // manifest, so a second run with the same manifest (Pinokio update, then
+  // uninstall) failed in uv venv with "A virtual environment already exists".
+  const supplied = path.join(context.root, 'release', 'install-manifest.json');
+  await mkdir(path.dirname(supplied), { recursive: true });
+  await writeFile(supplied, JSON.stringify(context.manifest));
+  const temporary = path.join(context.root, 'tmp');
+  await mkdir(temporary);
+  for (const action of [['--update'], ['--uninstall']]) {
+    const result = await run(context, [...action, '--root', '/Pinokio Apps/Astrid', '--managed-by', 'pinokio', '--manifest', supplied], { TMPDIR: temporary });
+    assert.equal(result.code, 0, result.stderr);
+  }
+  const venvs = (await context.calls()).filter((args) => args[0] === 'venv').map((args) => args[1]);
+  assert.equal(venvs.length, 2);
+  assert.notEqual(venvs[0], venvs[1]);
+  for (const venv of venvs) assert.equal(path.dirname(path.dirname(venv)), temporary, venv);
+  await assert.rejects(stat(path.join(path.dirname(supplied), 'bootstrap-venv')), { code: 'ENOENT' });
+  await assert.rejects(stat(venvs[0]), { code: 'ENOENT' });
+}));
+
 test('POSIX defaults to hosted manifest and pinned source archive URLs', () => scenario(async (context) => {
   const result = await run(context, [], { ASTRID_INSTALL_MANIFEST_URL: '' });
   assert.equal(result.code, 0, result.stderr);

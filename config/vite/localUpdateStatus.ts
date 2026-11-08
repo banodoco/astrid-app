@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type { Plugin } from 'vite';
@@ -6,6 +7,9 @@ import type { Plugin } from 'vite';
 const execFileAsync = promisify(execFile);
 const STATUS_PATH = '/__astrid/local-update-status';
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
+// Vite's documented default port for `vite preview` when preview.port is unset.
+const DEFAULT_PREVIEW_PORT = 4173;
+const DEFAULT_DEV_PORT = 5173;
 
 export function validLocalStatusRequest(method: string | undefined, url: string | undefined, host: string | undefined, origin: string | undefined, fetchSite: string | undefined, contentLength: string | undefined, transferEncoding: string | undefined, contentType: string | undefined, accept: string | undefined, port: number, expectedPath = STATUS_PATH): boolean {
   if (method !== 'POST' || url !== expectedPath || !host || !origin || (fetchSite && fetchSite !== 'same-origin') || (contentLength && contentLength !== '0') || transferEncoding || contentType !== 'application/json' || accept !== 'application/json') return false;
@@ -103,84 +107,89 @@ async function isServedAppAncestor(root: string, app: string): Promise<boolean> 
 
 type LocalUpdateStatusFailureStage = 'upstream_fetch' | 'served_manifest_validation' | 'local_git_ancestry_lookup';
 
+// One handler serves the dev server and `vite preview` alike: the same request checks, the same bounded
+// upstream reads and the same local lookups. `portOf` names the port that server listens on, which the Host check
+// must match. It is read per request, because Vite resolves the bound port only after the middleware is registered.
+function localUpdateStatusMiddleware(server: { config: { root: string } }, portOf: () => number, manifestPath: string, selfUpdate: boolean) {
+  return async (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
+    if ((request.url ?? '').split('?')[0] !== STATUS_PATH) return next();
+    if (!validLocalStatusRequest(request.method, request.url, request.headers.host, request.headers.origin, request.headers['sec-fetch-site'], request.headers['content-length'], request.headers['transfer-encoding'], request.headers['content-type'], request.headers.accept, portOf())) {
+      response.statusCode = 403;
+      response.setHeader('Cache-Control', 'no-store');
+      response.end(JSON.stringify({ error: 'request_refused' }));
+      return;
+    }
+
+    const unavailable = (stage: LocalUpdateStatusFailureStage) => {
+      response.statusCode = 503;
+      response.setHeader('Content-Type', 'application/json; charset=utf-8');
+      response.setHeader('Cache-Control', 'no-store');
+      response.end(JSON.stringify({ error: 'local_update_status_unavailable', stage }));
+    };
+
+    let servedBody: string;
+    try {
+      servedBody = await boundedBody('https://astrid.haus/build.json');
+    } catch {
+      unavailable('upstream_fetch');
+      return;
+    }
+
+    let served: { app: string; release: number };
+    try {
+      served = servedBuild(JSON.parse(servedBody) as unknown);
+    } catch {
+      unavailable('served_manifest_validation');
+      return;
+    }
+
+    let installManifestBody: string;
+    try {
+      installManifestBody = await boundedBody('https://astrid.haus/install-manifest.json');
+    } catch {
+      unavailable('upstream_fetch');
+      return;
+    }
+
+    let requirement: { requiredRelease?: number; requiredReason?: string };
+    try {
+      requirement = servedRequirement(JSON.parse(installManifestBody) as unknown, served.release);
+    } catch {
+      unavailable('served_manifest_validation');
+      return;
+    }
+
+    try {
+      const release = readLocalRelease(await readFile(manifestPath, 'utf8'));
+      const { stdout: localHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: server.config.root, timeout: 2000, maxBuffer: 1024 });
+      const ancestry = await isServedAppAncestor(server.config.root, served.app);
+      const body = JSON.stringify({ app: localHead.trim(), release, ...requirement, servedApp: served.app, servedRelease: served.release, behind: localUpdateBehind(served.release, release, ancestry),
+        // UR-1's one rule: Update now only when the status reports self_update. Without an installed backend the launcher cannot update.
+        self_update: selfUpdate, ...(selfUpdate ? {} : { reason: 'source' }) });
+      response.statusCode = 200;
+      response.setHeader('Content-Type', 'application/json; charset=utf-8');
+      response.setHeader('Cache-Control', 'no-store');
+      response.setHeader('Content-Length', Buffer.byteLength(body));
+      response.end(body);
+    } catch {
+      unavailable('local_git_ancestry_lookup');
+    }
+  };
+}
+
 export function createLocalUpdateStatusPlugin({ manifestPath }: { manifestPath: string }): Plugin {
   const enabled = process.env.ASTRID_LOCAL_UPDATE_STATUS === '1';
+  // The launcher sets this only when an installed backend can run the update (see dev-local-workspace.mjs).
+  const selfUpdate = process.env.ASTRID_LOCAL_SELF_UPDATE === '1';
   return {
     name: 'astrid-local-update-status',
     configurePreviewServer(server) {
       if (!enabled) return;
-      server.middlewares.use((request, response, next) => {
-        if ((request.url ?? '').split('?')[0] !== STATUS_PATH) return next();
-        response.statusCode = 501;
-        response.setHeader('Content-Type', 'application/json; charset=utf-8');
-        response.setHeader('Cache-Control', 'no-store');
-        response.end(JSON.stringify({ error: 'local_update_status_unsupported_in_preview', message: 'Local update status is available only from npm run dev:local.' }));
-      });
+      server.middlewares.use(localUpdateStatusMiddleware(server, () => server.config.preview.port ?? DEFAULT_PREVIEW_PORT, manifestPath, selfUpdate));
     },
     configureServer(server) {
       if (!enabled) return;
-      server.middlewares.use(async (request, response, next) => {
-        if ((request.url ?? '').split('?')[0] !== STATUS_PATH) return next();
-        if (!validLocalStatusRequest(request.method, request.url, request.headers.host, request.headers.origin, request.headers['sec-fetch-site'], request.headers['content-length'], request.headers['transfer-encoding'], request.headers['content-type'], request.headers.accept, server.config.server.port ?? 5173)) {
-          response.statusCode = 403;
-          response.setHeader('Cache-Control', 'no-store');
-          response.end(JSON.stringify({ error: 'request_refused' }));
-          return;
-        }
-
-        const unavailable = (stage: LocalUpdateStatusFailureStage) => {
-          response.statusCode = 503;
-          response.setHeader('Content-Type', 'application/json; charset=utf-8');
-          response.setHeader('Cache-Control', 'no-store');
-          response.end(JSON.stringify({ error: 'local_update_status_unavailable', stage }));
-        };
-
-        let servedBody: string;
-        try {
-          servedBody = await boundedBody('https://astrid.haus/build.json');
-        } catch {
-          unavailable('upstream_fetch');
-          return;
-        }
-
-        let served: { app: string; release: number };
-        try {
-          served = servedBuild(JSON.parse(servedBody) as unknown);
-        } catch {
-          unavailable('served_manifest_validation');
-          return;
-        }
-
-        let installManifestBody: string;
-        try {
-          installManifestBody = await boundedBody('https://astrid.haus/install-manifest.json');
-        } catch {
-          unavailable('upstream_fetch');
-          return;
-        }
-
-        let requirement: { requiredRelease?: number; requiredReason?: string };
-        try {
-          requirement = servedRequirement(JSON.parse(installManifestBody) as unknown, served.release);
-        } catch {
-          unavailable('served_manifest_validation');
-          return;
-        }
-
-        try {
-          const release = readLocalRelease(await readFile(manifestPath, 'utf8'));
-          const { stdout: localHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: server.config.root, timeout: 2000, maxBuffer: 1024 });
-          const ancestry = await isServedAppAncestor(server.config.root, served.app);
-          const body = JSON.stringify({ app: localHead.trim(), release, ...requirement, servedApp: served.app, servedRelease: served.release, behind: localUpdateBehind(served.release, release, ancestry) });
-          response.statusCode = 200;
-          response.setHeader('Content-Type', 'application/json; charset=utf-8');
-          response.setHeader('Cache-Control', 'no-store');
-          response.setHeader('Content-Length', Buffer.byteLength(body));
-          response.end(body);
-        } catch {
-          unavailable('local_git_ancestry_lookup');
-        }
-      });
+      server.middlewares.use(localUpdateStatusMiddleware(server, () => server.config.server.port ?? DEFAULT_DEV_PORT, manifestPath, selfUpdate));
     },
   };
 }

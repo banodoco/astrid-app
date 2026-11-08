@@ -11,7 +11,7 @@ import { createLocalUpdateStatusPlugin } from '../config/vite/localUpdateStatus.
 const directories = [];
 after(async () => Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))));
 
-test('dev-local Vite serves bounded local status and preview mode refuses clearly', async () => {
+test('dev-local Vite and vite preview serve bounded local status', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'astrid-local-update-vite-'));
   directories.push(directory);
   execFileSync('git', ['init', '-q', '-b', 'main', directory]);
@@ -41,7 +41,7 @@ test('dev-local Vite serves bounded local status and preview mode refuses clearl
       method: 'POST', body: '', headers: { Origin: origin, Accept: 'application/json', 'Content-Type': 'application/json' },
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { app: head, release: 7, servedApp: head, servedRelease: 7, behind: false });
+    assert.deepEqual(await response.json(), { app: head, release: 7, servedApp: head, servedRelease: 7, behind: false, self_update: false, reason: 'source' });
   } finally {
     await server.close();
     globalThis.fetch = originalFetch;
@@ -54,16 +54,23 @@ test('dev-local Vite serves bounded local status and preview mode refuses clearl
   if (originalFlag === undefined) delete process.env.ASTRID_LOCAL_UPDATE_STATUS;
   else process.env.ASTRID_LOCAL_UPDATE_STATUS = originalFlag;
   let middleware;
-  previewPlugin.configurePreviewServer({ middlewares: { use: (handler) => { middleware = handler; } } });
+  previewPlugin.configurePreviewServer({ config: { root: directory, server: { port: 5173 }, preview: { port: 4317 } }, middlewares: { use: (handler) => { middleware = handler; } } });
+  const previewServed = { 'https://astrid.haus/build.json': { app: head, release: 7 }, 'https://astrid.haus/install-manifest.json': { release: 7 } };
+  globalThis.fetch = (input) => Object.hasOwn(previewServed, String(input))
+    ? Promise.resolve(new Response(JSON.stringify(previewServed[String(input)]), { status: 200 }))
+    : Promise.reject(new Error(`Unexpected fetch ${String(input)}`));
   const headers = {};
   const response = { statusCode: 0, body: '', setHeader: (name, value) => { headers[name] = value; }, end: (body) => { response.body = body; } };
-  middleware({ url: '/__astrid/local-update-status' }, response, () => assert.fail('Preview must not pass through status requests'));
-  assert.equal(response.statusCode, 501);
-  assert.deepEqual(JSON.parse(response.body), {
-    error: 'local_update_status_unsupported_in_preview',
-    message: 'Local update status is available only from npm run dev:local.',
-  });
+  try {
+    await middleware({ method: 'POST', url: '/__astrid/local-update-status', headers: {
+      host: '127.0.0.1:4317', origin: 'http://127.0.0.1:4317', 'sec-fetch-site': 'same-origin', 'content-length': '0', 'content-type': 'application/json', accept: 'application/json',
+    } }, response, () => assert.fail('Preview must not pass through status requests'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(response.statusCode, 200);
   assert.equal(headers['Cache-Control'], 'no-store');
+  assert.deepEqual(JSON.parse(response.body), { app: head, release: 7, servedApp: head, servedRelease: 7, behind: false, self_update: false, reason: 'source' });
 });
 
 test('the repository Vite config used by dev-local registers the bounded local status endpoint', async () => {
@@ -94,13 +101,52 @@ test('the repository Vite config used by dev-local registers the bounded local s
       method: 'POST', body: '', headers: { Origin: origin, Accept: 'application/json', 'Content-Type': 'application/json' },
     });
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { app: head, release: manifest.release ?? 0, servedApp: head, servedRelease: manifest.release ?? 0, behind: false });
+    assert.deepEqual(await response.json(), { app: head, release: manifest.release ?? 0, servedApp: head, servedRelease: manifest.release ?? 0, behind: false, self_update: false, reason: 'source' });
   } finally {
     await server.close();
     globalThis.fetch = originalFetch;
     for (const key of envKeys) {
       if (previous[key] === undefined) delete process.env[key];
       else process.env[key] = previous[key];
+    }
+  }
+});
+
+test('local status reports self_update only when the launcher found an installed backend', async () => {
+  const directory = await mkdtemp(path.join(tmpdir(), 'astrid-local-update-self-'));
+  directories.push(directory);
+  execFileSync('git', ['init', '-q', '-b', 'main', directory]);
+  execFileSync('git', ['-C', directory, 'config', 'user.name', 'Update test']);
+  execFileSync('git', ['-C', directory, 'config', 'user.email', 'update-test@example.test']);
+  await writeFile(path.join(directory, 'tracked.txt'), 'local');
+  execFileSync('git', ['-C', directory, 'add', 'tracked.txt']);
+  execFileSync('git', ['-C', directory, 'commit', '-qm', 'fixture']);
+  const head = execFileSync('git', ['-C', directory, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  const manifestPath = path.join(directory, 'install-manifest.json');
+  await writeFile(manifestPath, JSON.stringify({ release: 7 }));
+  const saved = { status: process.env.ASTRID_LOCAL_UPDATE_STATUS, self: process.env.ASTRID_LOCAL_SELF_UPDATE };
+  const originalFetch = globalThis.fetch;
+  process.env.ASTRID_LOCAL_UPDATE_STATUS = '1';
+  process.env.ASTRID_LOCAL_SELF_UPDATE = '1';
+  const server = await createServer({ configFile: false, root: directory, server: { host: '127.0.0.1', port: 0 }, plugins: [createLocalUpdateStatusPlugin({ manifestPath })] });
+  try {
+    await server.listen();
+    const address = server.httpServer?.address();
+    assert(address && typeof address !== 'string', 'Vite did not listen on TCP');
+    const origin = `http://127.0.0.1:${address.port}`;
+    const served = { 'https://astrid.haus/build.json': { app: head, release: 7 }, 'https://astrid.haus/install-manifest.json': { release: 7 } };
+    globalThis.fetch = (input, init) => Object.hasOwn(served, String(input))
+      ? Promise.resolve(new Response(JSON.stringify(served[String(input)]), { status: 200 }))
+      : originalFetch(input, init);
+    const response = await originalFetch(`${origin}/__astrid/local-update-status`, {
+      method: 'POST', body: '', headers: { Origin: origin, Accept: 'application/json', 'Content-Type': 'application/json' },
+    });
+    assert.deepEqual(await response.json(), { app: head, release: 7, servedApp: head, servedRelease: 7, behind: false, self_update: true });
+  } finally {
+    await server.close();
+    globalThis.fetch = originalFetch;
+    for (const [key, name] of [['status', 'ASTRID_LOCAL_UPDATE_STATUS'], ['self', 'ASTRID_LOCAL_SELF_UPDATE']]) {
+      if (saved[key] === undefined) delete process.env[name]; else process.env[name] = saved[key];
     }
   }
 });

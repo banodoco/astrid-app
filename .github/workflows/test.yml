@@ -4,19 +4,41 @@ name: Tests
 on:
   push:
     branches: [main, release-1, "int/**"]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A later push to main must never cancel the release guard for an earlier one: every push to main is checked.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  vitest:
+  # Install tuple (manifest minus release/required, plus public/install*) and release move together:
+  # a tuple change needs release +1 exactly; otherwise release is unchanged. Base is the PR base or the push's before SHA.
+  release-guard:
+    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
-          # Candidate PRs compare against the durable last-published release baseline; main pushes retain full monotonicity checks.
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+      - name: Check install tuple and release
+        env:
+          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
+        run: node scripts/installer/release-guard.mjs "$BASE_SHA" HEAD
+
+  # Pull requests run only release-guard above; the rest of this workflow runs on push as before.
+  vitest:
+    if: ${{ github.event_name != 'pull_request' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history for the git-backed checks that run on push.
           fetch-depth: 0
           filter: blob:none
       - name: Restore npm cache (C-08)
@@ -28,18 +50,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - name: Check manifest release against main history
-        if: (github.event_name == 'pull_request' && (github.base_ref == 'main' || github.base_ref == 'release-1')) || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/release-1'
-        env:
-          RELEASE_BASE_REF: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before) || 'origin/main' }}
-          RELEASE_CANDIDATE_MODE: ${{ (github.event_name == 'pull_request' && github.base_ref == 'release-1') || github.ref == 'refs/heads/release-1' }}
-        run: |
-          if [ "$RELEASE_CANDIDATE_MODE" = "true" ]; then
-            node scripts/installer/release-check.mjs "$RELEASE_BASE_REF" --candidate
-          else
-            node scripts/installer/release-check.mjs "$RELEASE_BASE_REF"
-          fi
-      - run: node --test scripts/installer/release.test.mjs scripts/qualification/check-public-updater-candidate.test.mjs
+      - run: node --test scripts/installer/release.test.mjs
       - run: npm ci --legacy-peer-deps
       - run: npm test
       - run: npm run test:sdk-boundary
@@ -55,6 +66,7 @@ jobs:
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
   release-tooling-macos:
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -65,6 +77,7 @@ jobs:
 
   # Cross-repo copies: every vendored artifact must match its selected producer commit.
   boundary:
+    if: ${{ github.event_name != 'pull_request' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

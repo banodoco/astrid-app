@@ -3,17 +3,20 @@ import { Button } from '@/shared/components/ui/button.tsx';
 import { AstridRuntimeClient } from '@/integrations/runtime/client.ts';
 import { useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/UpdateResolutionActions.tsx';
+import { CopyCommandRow } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
 import { DiagnosticsFallback } from '@/shared/components/RuntimeConnection/DownloadDiagnosticsButton.tsx';
 import { fetchDiagnosticsReport, saveDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
+import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY, updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
+import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpdateStatus.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
+import { installerOutcomeMessage, installerUpdateFailed, installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
-import { updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
 import { astridOutOfDate } from './ConnectionSection.tsx';
+import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
 
 type CheckState = 'checking' | 'ready' | 'error';
@@ -125,21 +128,22 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
   const compatibility = compatibilityFor(statusInstallType);
-  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available, updateReason: operation.updateReason }, 'settings') : resolution;
-  const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
-  const resultLabels: Record<string, string> = {
-    updated: 'Astrid updated.',
-    rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
-    failed: 'The update did not complete. Check diagnostics before trying again.',
-    recovery_needed: 'Astrid needs recovery. Select Update to check the previous operation before continuing.',
-  };
+  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available || statusInstallType === 'fully-local' && currentStatus.selfUpdate === true, updateReason: operation.updateReason }, 'settings') : resolution;
+  // Settings reads one vocabulary: the live status. The report contributes only a finished operation's outcome, and only
+  // when the live status has none. Recovery and an idle Astrid ("none") are never a result line.
+  const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1]?.trim();
   const operationResult = installerUpdateStatusMessage(operation.status);
-  // Without an in-app update there is no result to report, so the line is left out rather than saying so.
-  const reportLabel = reportResult && reportResult !== 'none' ? resultLabels[reportResult] ?? 'An update result is available in the diagnostics log.' : null;
+  const reportLabel = installerOutcomeMessage(reportResult);
   const lastResult = operation.pending ? 'Update in progress. Checking its result…' : operation.error ? operation.error : operationResult ?? reportLabel;
   const operationMessage = operation.status && !operation.pending ? installerUpdateStatusMessage(operation.status) || null : null;
   const updateCard = currentResolution?.card === 'notice' || currentResolution?.card === 'update';
   const updateAvailable = (Boolean(currentStatus) || Boolean(compatibility)) && updateCard;
+  // A degraded direct install repairs with the plain install line, which has no --update. A source checkout has no such line here.
+  const services = operation.health?.services ?? [];
+  // An available update already offers Update now and its command, so the repair row waits until none is offered.
+  // A failed update already offers the plain install line in its actions, so the repair row does not repeat it.
+  const repairNeeded = installType === 'installer' && !updateAvailable && !installerUpdateFailed(operation) && (operation.health?.status === 'degraded' || services.some((service) => service.state === 'failed'));
+  const repairCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   // An old Astrid with no newer release to name (a source checkout has none) is titled by its card instead.
   const releaseLine = currentStatus && (!compatibility || statusInstallType !== 'source' && currentStatus.servedRelease > currentStatus.release);
   const statusLine = operationMessage
@@ -151,7 +155,8 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
             : currentStatus ? `Astrid is up to date (Release ${currentStatus.release})` : 'Astrid is up to date');
   // A plain release notice only restates the status line; a required or schema reason, or a Runtime's update reason, is the detail.
   const releaseNotice = currentResolution?.card === 'notice' && !currentResolution.updateReason;
-  const detail = state === 'ready' && currentResolution?.body && currentResolution.card !== 'newer' && !releaseNotice ? currentResolution.body : null;
+  // A Runtime reason is already the status line, so its sentence is not repeated as the detail.
+  const detail = state === 'ready' && currentResolution?.body && currentResolution.card !== 'newer' && !releaseNotice && currentResolution.body !== operationMessage ? currentResolution.body : null;
   // A card other than an update (reload, restart, error) names itself above its sentence; an update is the status line.
   const heading = state === 'ready' && currentResolution?.title && !updateCard ? currentResolution.title : null;
   const actionsFor = state === 'ready' && currentResolution && (currentResolution.card !== 'none' || operation.status?.state !== 'none') ? currentResolution : null;
@@ -175,6 +180,12 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
       {actionsFor && <UpdateResolutionActions resolution={actionsFor} operation={operation} context="settings" />}
       {lastResult && lastResult !== statusLine && <p className="text-muted-foreground">Last result: {lastResult}</p>}
     </SettingsRow>
+    {repairNeeded && <SettingsRow
+      label={<p className="font-medium text-foreground">{ASTRID_STATUS_COPY.repairTitle}</p>}
+      description={ASTRID_STATUS_COPY.repairDescription}
+    >
+      <CopyCommandRow command={repairCommand} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+    </SettingsRow>}
     <SettingsDisclosureRow
       label="Diagnostics"
       description="The app build and update log, and a report to share if something goes wrong."

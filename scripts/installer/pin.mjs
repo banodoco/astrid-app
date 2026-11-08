@@ -74,27 +74,20 @@ async function readAgentSources(agentSha) {
   };
 }
 
-export function applyReleasePin(manifest, reason) {
-  const previousRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
-  if (!Number.isSafeInteger(previousRelease) || previousRelease < 0) {
+// pin.mjs never writes `release`. A change to the install tuple must raise
+// `release` by exactly 1 in the same change; release-guard enforces that.
+// `--require` sets the floor to the manifest's own release, the one being published. Bump release first:
+// release-guard refuses a floor set in the same change that is below the release it publishes.
+export function applyRequiredPin(manifest, reason) {
+  if (typeof reason !== 'string' || !reason.trim()) throw new Error('--require needs a non-empty reason');
+  const currentRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
+  if (!Number.isSafeInteger(currentRelease) || currentRelease < 0) {
     throw new Error('install-manifest.json release must be a non-negative integer');
   }
-  const release = previousRelease + 1;
-  if (!Number.isSafeInteger(release)) throw new Error('install-manifest.json release exceeds the safe integer range');
-  manifest.release = release;
-  if (reason !== undefined) {
-    if (typeof reason !== 'string' || !reason.trim()) throw new Error('--require needs a non-empty reason');
-    const currentRequiredRelease = manifest.required == null
-      ? 0
-      : Object.hasOwn(manifest.required, 'release') ? manifest.required.release : 0;
-    if (!Number.isSafeInteger(currentRequiredRelease) || currentRequiredRelease < 0) {
-      throw new Error('install-manifest.json required.release must be a non-negative integer');
-    }
-    manifest.required = {
-      release: Math.max(release, currentRequiredRelease),
-      reason: reason.trim(),
-    };
-  }
+  manifest.required = {
+    release: currentRelease,
+    reason: reason.trim(),
+  };
   return manifest;
 }
 
@@ -109,7 +102,7 @@ async function pin(agentSha, reason) {
   const sources = await readAgentSources(agentSha);
   manifest.vibecomfy = sources.vibecomfy;
   manifest.lifecycle = sources.lifecycle;
-  applyReleasePin(manifest, reason);
+  if (reason !== undefined) applyRequiredPin(manifest, reason);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 

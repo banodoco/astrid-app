@@ -665,18 +665,21 @@ describe('AgentChatMenu with an out-of-date local Astrid', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it.each([
-    ['MacIntel', 'Macintosh', ASTRID_COMMANDS.macLinuxUpdate],
-    ['Win32', 'Windows', ASTRID_COMMANDS.windowsUpdate],
-  ])('shows the update prompt and %s update command instead of the raw error', (platform, os, command) => {
+    ['MacIntel', 'Macintosh'],
+    ['Win32', 'Windows'],
+  ])('shows one update card with See updates instead of the raw error on %s', (platform, os) => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue(platform);
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue(os);
     const error = new BridgeRouteError('List local agents', 409, { error: BRIDGE_CONTRACT_VERSION_MISMATCH_CODE });
     openMenu({ agentsError: error });
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent(RUNTIME_CONNECTION_COPY.chatNeedsUpdate);
     expect(alert).toHaveTextContent(RUNTIME_CONNECTION_COPY.updateNeeded.title);
     expect(alert).toHaveTextContent(withCommandShell(RUNTIME_CONNECTION_COPY.updateNeeded.sentence));
-    expect(screen.getByText(command, { selector: 'code' })).toBeInTheDocument();
+    expect(within(alert).getByRole('button', { name: 'See updates' })).toBeInTheDocument();
+    expect(screen.queryByText(ASTRID_COMMANDS.macLinuxUpdate, { selector: 'code' })).toBeNull();
+    expect(screen.queryByText(ASTRID_COMMANDS.windowsUpdate, { selector: 'code' })).toBeNull();
     expect(screen.getByText('Details')).toBeInTheDocument();
     expect(screen.getByText(error.message)).toBeInTheDocument();
     expect(screen.queryByText(/Could not load agents/)).toBeNull();

@@ -69,7 +69,7 @@ beforeEach(() => {
       };
     } else if (url.endsWith('/v1/update/status')) {
       body = {
-        available: harness.statusAvailable, state: harness.statusState,
+        available: harness.statusAvailable, self_update: harness.statusAvailable, state: harness.statusState,
         ...(harness.operationId ? { operation_id: harness.operationId, result: harness.result } : {}),
         ...(harness.statusState === 'terminal' ? { outcome: harness.outcome } : {}),
       };
@@ -292,7 +292,7 @@ describe('installer update callers', () => {
         status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test', runtime_instance_id: harness.instance,
         runtime_session_id: 'session-a', runtime_epoch: 1, release: 5, identity: { managed_by: null, release: 5 },
       }), { status: 200 });
-      if (url.endsWith('/v1/update/status')) return new Response(JSON.stringify({ available: true, state: 'none' }), { status: 200 });
+      if (url.endsWith('/v1/update/status')) return new Response(JSON.stringify({ available: true, self_update: true, state: 'none' }), { status: 200 });
       if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 4 }), { status: 200 });
       if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 4 }), { status: 200 });
       return new Response('{}', { status: 200 });

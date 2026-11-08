@@ -4,7 +4,9 @@ import { SOURCE_SCHEMA_MISMATCH_ACTION } from '../../../integrations/runtime/run
 export type UpdateAction = {
   readonly label: string;
   readonly destination?: 'settings-updates';
-  readonly execute?: 'installer-update';
+  readonly execute?: 'installer-update' | 'local-update';
+  /** Shown but not startable: a busy Astrid offers Update now disabled while its lock is held. */
+  readonly disabled?: boolean;
 };
 
 export type UpdateResolution = {
@@ -55,6 +57,8 @@ const settingsAction: UpdateAction = { label: 'See updates', destination: 'setti
 const COPY_FOR_AGENT: UpdateAction = { label: COPY_FOR_AGENT_ACTION };
 /** The direct-install update: the agent brief and the install line's update command. Every direct install, fully local included, uses it. */
 const COMMAND_ACTIONS: Pick<UpdateResolution, 'primary' | 'secondary'> = { primary: COPY_FOR_AGENT, secondary: { label: RUN_IT_YOURSELF_ACTION } };
+/** A busy Astrid keeps Update now visible but disabled, with no command: the reason line says why. */
+const BUSY_ACTIONS: Pick<UpdateResolution, 'primary' | 'secondary'> = { primary: { label: 'Update now', execute: 'installer-update', disabled: true }, secondary: null };
 
 type ActionContext = 'page' | 'settings';
 
@@ -65,6 +69,8 @@ function updateActions(input: UpdateResolutionInput, context: ActionContext, sof
   if (input.updateReason === 'recovery-needed' && input.installType === 'installer' && input.updateNowAvailable) {
     return { primary: { label: 'Update', execute: 'installer-update' }, secondary: null };
   }
+  // A fully local install updates its own checkout through the launcher, and only when its status reports self_update.
+  if (input.installType === 'fully-local' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'local-update' }, secondary: COPY_FOR_AGENT };
   if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: COPY_FOR_AGENT };
   if (softRelease && context === 'page') return { primary: settingsAction, secondary: null };
   return COMMAND_ACTIONS;
@@ -75,19 +81,35 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   if (input.runtime) return { card: 'not-running', title: 'Astrid isn’t running', body: input.failure ?? 'Start Astrid Runtime to continue.', primary: { label: 'Start Astrid' }, secondary: { label: 'Repair' } };
   if (input.pageStale) return { card: 'reload', title: 'Editor updated', body: 'Reload this page to use the latest editor.', primary: { label: 'Reload' }, secondary: null };
   if (input.compatibility?.kind === 'identity') return { card: 'identity', title: 'Restart Astrid', body: 'An older Astrid is still running. Restart the selected Runtime, then reconnect.', primary: null, secondary: null };
-  if (input.updateReason && input.installType === 'installer') {
-    return {
-      card: input.updateReason === 'recovery-needed' ? 'update' : 'notice',
-      title: input.updateReason === 'recovery-needed' ? 'Update Astrid' : 'Update unavailable',
-      body: INSTALLER_UPDATE_REASON_MESSAGES[input.updateReason],
-      ...(input.updateReason === 'recovery-needed' ? updateActions(input, context) : { primary: null, secondary: null }),
-      updateReason: input.updateReason,
-    };
-  }
   // A source checkout has no release: its startup identity is fixed at 0, so the release rules (newer, required, behind) never apply.
   const releaseRules = input.installType !== 'source';
+  // An installed release newer than served shows no action, whatever the installer reason says.
   if (releaseRules && input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {
     return { card: 'newer', title: null, body: 'Astrid on this computer is newer than astrid.haus; a fix is on its way.', primary: null, secondary: null };
+  }
+  // A setup refusal on an install that is already current has no update to offer: it shows no card and no command.
+  const current = input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease >= input.servedRelease;
+  const silentWhenCurrent = current && (input.updateReason === 'autostart-off' || input.updateReason === 'unsupported-service-manager');
+  // A fully local install shows only the source line its launcher reports; its other refusals follow the release rules.
+  const sourceLocal = input.installType === 'fully-local' && input.updateReason === 'source';
+  if (input.updateReason && (input.installType === 'installer' || sourceLocal) && !silentWhenCurrent) {
+    // A recovery or repair is an update card. Without an in-app update the reason is the one line and the command is the path;
+    // autostart-off has its own setup command, and a source checkout has its own update route, not the installer command.
+    const card = input.updateReason === 'recovery-needed' || input.updateReason === 'needs-repair';
+    const noAction = input.updateReason === 'autostart-off' || input.updateReason === 'source';
+    // Only recovery-needed still starts the update. Every other reason is a refusal, so Update now is not offered with it even when
+    // self_update is true: the reason's line and the command are the path.
+    const actions = noAction ? { primary: null, secondary: null }
+      : input.updateReason === 'recovery-needed' && input.updateNowAvailable ? updateActions(input, context)
+      : input.updateReason === 'busy' ? BUSY_ACTIONS
+      : COMMAND_ACTIONS;
+    return {
+      card: card ? 'update' : 'notice',
+      title: card ? 'Update Astrid' : 'Update unavailable',
+      body: INSTALLER_UPDATE_REASON_MESSAGES[input.updateReason],
+      ...actions,
+      updateReason: input.updateReason,
+    };
   }
   if (input.compatibility?.kind === 'schema') {
     return { card: 'update', title: 'Update Astrid', body: input.compatibility.detail, ...updateActions(input, context) };

@@ -6,9 +6,15 @@ export const ASTRID_STATUS_COPY = {
   description: "Your workspace and what's running on this computer.",
   connecting: 'Looking for Astrid…',
   connected: 'Connected',
-  degraded: "Part of Astrid isn't working. Give these instructions to your coding agent to restart it.",
+  /** A direct install's repair is the plain install line under Updates. */
+  degraded: "Part of Astrid isn't working. Repair it under Updates.",
+  /** Only a direct install has the plain install line under Updates, so a source checkout gets no pointer there. */
+  degradedSource: "Part of Astrid isn't working.",
   /** Pinokio's Update reruns Astrid's installer and restarts it: the repair the install command is for everyone else. */
   degradedPinokio: "Part of Astrid isn't working. Update it in Pinokio to repair it.",
+  /** The Updates entry for a degraded direct install: the plain install line, which repairs and needs no --update. */
+  repairTitle: 'Repair Astrid',
+  repairDescription: 'Run this command to repair Astrid. Your workspace and saved setup choices stay as they are.',
   checking: 'Reading details…',
   unavailable: "Astrid's details aren't available right now.",
   notRunning: "Astrid isn't answering on this computer",

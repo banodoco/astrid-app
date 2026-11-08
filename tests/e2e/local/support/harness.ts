@@ -653,10 +653,10 @@ export class DirectHarness {
   /** The product credential the door acts with, as `astrid-runtime up` would provision it. */
   get credentialPath() { return path.join(this.tmp, 'product-credential.json'); }
   /**
-   * The harness's temporary installed pack collection (Plan 06 PK-14). The Runtime reads its admitted inventory from here
-   * (`--installed-pack-root`) and the journey's Agent installs into it with `--packs-root`; nothing reads a real ~/Astrid.
+   * The installed pack collection under the temporary HOME (Plan 06 PK-14): the production default `~/Astrid/packs`, where
+   * `astrid packs add` writes and the Runtime reads with no flag. Nothing reads a real ~/Astrid.
    */
-  get packsRoot() { return path.join(this.tmp, 'packs'); }
+  get packsRoot() { return path.join(this.agentHome, 'Astrid', 'packs'); }
   /** A temporary HOME for the Agent CLI the journey drives, so its defaults never resolve into the user's home. */
   get agentHome() { return path.join(this.tmp, 'agent-home'); }
   /** The App's Runtime base (`runtimeApiBase()`) under the door's origin. */
@@ -757,7 +757,8 @@ export class DirectHarness {
 
   private runtimeEnv(captureSink?: string): NodeJS.ProcessEnv {
     const agent = path.resolve(process.env.ASTRID_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-agent'));
-    const env: NodeJS.ProcessEnv = { PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', TMPDIR: this.tmp, PYTHONPATH: [RUNTIME_CHECKOUT, agent].join(path.delimiter) };
+    // HOME is the temporary Agent home, so the Runtime's default installed pack root is the one `astrid packs add` writes.
+    const env: NodeJS.ProcessEnv = { PYTHONDONTWRITEBYTECODE: '1', PYTHONUNBUFFERED: '1', TMPDIR: this.tmp, HOME: this.agentHome, PYTHONPATH: [RUNTIME_CHECKOUT, agent].join(path.delimiter) };
     if (this.verificationOnly) {
       for (const key of runtimeMeasurementEnvKeys) env[key] = undefined;
     }
@@ -825,7 +826,6 @@ export class DirectHarness {
     try {
       managed = spawnGroup(interpreter, ['-m', 'runtime_protocol.cli', 'start', '--root', this.realmDir, '--support-root', this.supportDir, '--port', String(port), '--display-name', 'Direct Journey',
       '--door-origin', this.origin, '--door-port', String(this.doorPort), '--door-credential-file', this.credentialPath, '--door-audit-log', this.auditPath,
-      '--installed-pack-root', this.packsRoot,
       ...(this.timelineAuthoring ? ['--authoring-profile', 'astrid'] : [])], { cwd: this.tmp, env: this.runtimeEnv(captureSink) });
     } catch {
       lifecycle.failure = { code: 'startup_failed', class: 'startup', stage: 'spawn' };

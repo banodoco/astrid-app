@@ -1161,7 +1161,7 @@ test.describe('pack extensions (App)', () => {
     await expect(page.getByTestId('live-effect-marker')).toHaveCount(0);
 
     // (1) Install while the editor is open: the effect is listed and renders in the preview, without a reload.
-    const added = runPacks(harness, cli, ['add', source, '--pack-id', LIVE_EFFECT_PACK_ID, '--revision', v1, '--packs-root', harness.packsRoot, '--toolchain', toolchain, '--yes']);
+    const added = runPacks(harness, cli, ['add', source, '--pack-id', LIVE_EFFECT_PACK_ID, '--revision', v1, '--toolchain', toolchain, '--yes']);
     expect(added.status, added.transcript).toBe(0);
     expect.soft(admissionState(harness), 'the install committed a Runtime admission for the pack\'s editor effect').toMatch(/admission\.json/);
     const inventory = await harness.runtimeJson('GET', '/api/runtime/packs/inventory');
@@ -1176,14 +1176,14 @@ test.describe('pack extensions (App)', () => {
     expect(await samePage(), 'no reload').toBe(true);
 
     // (2) Update to the broken revision: it fails, and the old effect still renders.
-    const updated = runPacks(harness, cli, ['update', '--source', source, '--revision', v2, '--pack', `${LIVE_EFFECT_PACK_ID}=.`, '--packs-root', harness.packsRoot, '--toolchain', toolchain], 'y\n');
+    const updated = runPacks(harness, cli, ['update', '--source', source, '--revision', v2, '--pack', `${LIVE_EFFECT_PACK_ID}=.`, '--toolchain', toolchain], 'y\n');
     expect(updated.status, `the broken revision is refused\n${updated.transcript}`).not.toBe(0);
     await page.waitForTimeout(3_000); // more than one inventory refresh (2 s)
     await expect(marker, 'the old effect still renders after the failed update').toHaveText(LIVE_EFFECT_MARKER);
     expect(await samePage(), 'no reload').toBe(true);
 
     // (3) Remove: the effect leaves the picker and the preview without a reload.
-    const removed = runPacks(harness, cli, ['remove', LIVE_EFFECT_PACK_ID, '--packs-root', harness.packsRoot, '--yes']);
+    const removed = runPacks(harness, cli, ['remove', LIVE_EFFECT_PACK_ID, '--yes']);
     expect(removed.status, removed.transcript).toBe(0);
     await expect(marker, 'the removed effect is disposed from the preview').toHaveCount(0, { timeout: 30_000 });
     const managerAfterRemove = await openExtensionManager(page);

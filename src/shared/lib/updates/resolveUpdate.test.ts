@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/client.ts';
 import { installTypeOf, resolveUpdate, type InstallType, type UpdateResolution, type UpdateResolutionInput } from './resolveUpdate.ts';
 
 describe('installTypeOf', () => {
@@ -256,7 +257,7 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     newerBusyRefusal: both(NEWER),
     newerNeedsRepair: both(NEWER),
     autostartOffRefusal: both(NONE),
-    sourceRefusal: both(NONE),
+    sourceRefusal: both(['notice', null, null]),
     unknownRefusal: SOFT,
     runtimeDown: both(NOT_RUNNING),
     pageStale: both(RELOAD),
@@ -407,6 +408,14 @@ describe('setup refusals on a current install', () => {
   it('keeps a recovery on a current install', () => {
     expect(resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 10, updateReason: 'recovery-needed', updateNowAvailable: true })).toMatchObject({
       card: 'update', updateReason: 'recovery-needed',
+    });
+  });
+});
+
+describe('a fully local install that cannot update itself', () => {
+  it('shows the source line its launcher reports, with no command', () => {
+    expect(resolveUpdate({ installType: 'fully-local', updateReason: 'source', installedRelease: 9, servedRelease: 10, releaseBehind: true })).toMatchObject({
+      card: 'notice', body: INSTALLER_UPDATE_REASON_MESSAGES.source, primary: null, secondary: null, updateReason: 'source',
     });
   });
 });

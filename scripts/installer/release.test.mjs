@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -233,4 +233,10 @@ test('the served canary reports release and bootstrap-byte mismatches and accept
     servedMismatches(expected, served(manifestOf({ release: 4 }), { 'public/install.ps1': Buffer.from('old\n') }), deployed),
     [`install.ps1: served bytes differ from deployed ${deployed} public/install.ps1`],
   );
+});
+
+test('a later push to main never cancels the release guard for an earlier one', async () => {
+  const workflow = await readFile(fileURLToPath(new URL('../../.github/workflows/test.yml', import.meta.url)), 'utf8');
+  assert.match(workflow, /cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' \}\}/);
+  assert.doesNotMatch(workflow, /cancel-in-progress: true/);
 });

@@ -57,15 +57,17 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   // Missing identity is never evidence of an installer-owned installation. The
   // Runtime performs the full ownership/lock/busy admission on the explicit POST.
   const recovery = snapshot.status?.state === 'recovery-needed';
+  // Update now is offered only when the installed Astrid reports self_update. A refusal reason (busy, for one) keeps the
+  // offer visible but disabled, and canStartInstallerUpdate gates the start itself.
   const available = enabled && installType === 'installer' && manager === null
     && typeof snapshot.health?.runtime_instance_id === 'string'
     && (recovery || snapshot.releaseStatus?.behind === true)
     && !snapshot.restartRequired
-    && snapshot.fresh && canStartInstallerUpdate(snapshot.status);
+    && snapshot.fresh && snapshot.status?.self_update === true;
   return { ...snapshot, installType, available, updateReason: installerUpdateReasonOf(snapshot.status) ?? undefined,
     refresh: async () => { if (enabled) await operation.refresh(true); },
     start: async (validateDrafts: () => boolean) => {
-      if (!available || !latest.current.enabled) return;
+      if (!available || !canStartInstallerUpdate(snapshot.status) || !latest.current.enabled) return;
       const current = latest.current.connection;
       if (current?.confirmPermission && !(await current.confirmPermission())) return;
       if (latest.current.enabled) await operation.start(validateDrafts);

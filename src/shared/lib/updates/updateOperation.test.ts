@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { AstridRuntimeClient, type InstallerUpdateHealth, type InstallerUpdateStatus } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import { installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
+import { canStartInstallerUpdate, installerUpdateStatusMessage, LocalPageUpdate, LOCAL_PAGE_REFUSAL_MESSAGES, UpdateOperation, pageLocalUpdate, pageUpdateOperation } from './updateOperation.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
 
 vi.mock('./updateStatus.ts', () => ({ checkHostedUpdate: vi.fn(async () => null) }));
@@ -12,19 +12,36 @@ const HEALTH: InstallerUpdateHealth = {
   identity: { managed_by: null, release: 12 },
 };
 
-const NONE: InstallerUpdateStatus = { available: true, state: 'none' };
+const NONE: InstallerUpdateStatus = { available: true, self_update: true, state: 'none' };
+
+const GENERIC_LINE = "Astrid can't update itself on this computer. Run the command below to update it.";
 
 describe('installerUpdateStatusMessage', () => {
   it.each([
     [{ state: 'active' }, 'Update in progress. Astrid may disconnect while it restarts.'],
     [{ state: 'terminal', outcome: 'updated', result: 'internal completed marker' }, 'Astrid updated. Reload to continue.'],
     [{ state: 'terminal', outcome: 'rolled_back', result: 'rolled_back' }, 'The update did not finish. Astrid was restored to its previous version.'],
-    [{ state: 'recovery-needed', result: 'repair_required' }, 'Astrid needs recovery. Select Update to check the previous operation before continuing.'],
+    [{ state: 'recovery-needed', self_update: true, result: 'repair_required' }, 'Astrid needs recovery. Select Update to check the previous operation before continuing.'],
+    [{ state: 'recovery-needed', result: 'repair_required' }, 'Astrid needs repair before it can update.'],
     [{ state: 'none', reason: 'busy' }, 'Astrid is busy. Wait for the current operation to finish before trying again.'],
     [{ state: 'none', reason: 'autostart-off' }, 'Automatic startup is off. Turn it on before updating Astrid here.'],
     [{ state: 'none', reason: 'unsupported-service-manager' }, 'In-app updates require user systemd 254 or newer on Linux.'],
+    [{ state: 'none', reason: 'source' }, 'This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.'],
+    [{ state: 'none', reason: 'updater-unavailable' }, GENERIC_LINE],
+    [{ state: 'none', reason: 'needs-repair' }, GENERIC_LINE],
   ] as const)('presents %j as clear user-facing status', (status, expected) => {
     expect(installerUpdateStatusMessage({ available: true, ...status } as InstallerUpdateStatus)).toBe(expected);
+  });
+});
+
+describe('canStartInstallerUpdate', () => {
+  it('starts only when the Runtime reports self_update and no refusal reason blocks it', () => {
+    expect(canStartInstallerUpdate({ available: true, state: 'none' })).toBe(false);
+    expect(canStartInstallerUpdate({ available: true, self_update: false, state: 'none' })).toBe(false);
+    expect(canStartInstallerUpdate({ available: false, self_update: true, state: 'none' })).toBe(true);
+    expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'none', reason: 'busy' })).toBe(false);
+    expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed' })).toBe(true);
+    expect(canStartInstallerUpdate(null)).toBe(false);
   });
 });
 
@@ -111,7 +128,54 @@ describe('UpdateOperation', () => {
 
     expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
     expect(operation.getSnapshot().pending).toBe(false);
-    expect(operation.getSnapshot().error).toBe('Astrid could not start the update. Check its status before trying again.');
+    // The source reason has its own line, and the refusal stays visible after the status re-read.
+    expect(operation.getSnapshot().error).toBe('This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.');
+    await operation.refresh();
+    expect(operation.getSnapshot().error).toBe('This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.');
+  });
+
+  it('shows the busy line from a POST refusal reason', async () => {
+    const busy = new ApiError(409, 'conflict', 'Busy.', 'req-busy', { reason: 'busy' });
+    const { operation, client } = makeOperation({ statuses: [NONE], start: async () => { throw busy; } });
+    await operation.refresh();
+    await operation.start(() => true);
+    expect(client.startInstallerUpdate).toHaveBeenCalledOnce();
+    expect(operation.getSnapshot().error).toBe('Astrid is busy. Wait for the current operation to finish before trying again.');
+  });
+
+  it('reads a 409 details.kind as the earlier outcome, never as a refusal reason', async () => {
+    const outcome = new ApiError(409, 'conflict', 'Already finished.', 'req-kind', { kind: 'rolled_back' });
+    const { operation } = makeOperation({ statuses: [NONE], start: async () => { throw outcome; } });
+    await operation.refresh();
+    await operation.start(() => true);
+    expect(operation.getSnapshot().error).toBe('The update did not finish. Astrid was restored to its previous version.');
+
+    const unknownKind = new ApiError(409, 'conflict', 'Reconcile.', 'req-unknown', { kind: 'reconciling' });
+    const second = makeOperation({ statuses: [NONE], start: async () => { throw unknownKind; } });
+    await second.operation.refresh();
+    await second.operation.start(() => true);
+    expect(second.operation.getSnapshot().error).toBe('Astrid could not start the update. Check its status before trying again.');
+    expect(second.operation.getSnapshot().refusalCode).toBeNull();
+  });
+
+  it('shows the generic line with the Runtime message for an unmapped refusal code and keeps the code', async () => {
+    const unmapped = new ApiError(409, 'conflict', 'Disk is full.', 'req-disk', { reason: 'disk-full' });
+    const { operation } = makeOperation({ statuses: [NONE], start: async () => { throw unmapped; } });
+    await operation.refresh();
+    await operation.start(() => true);
+    expect(operation.getSnapshot()).toMatchObject({ error: `${GENERIC_LINE} Disk is full.`, refusalCode: 'disk-full', pending: false });
+    await operation.refresh();
+    expect(operation.getSnapshot()).toMatchObject({ error: `${GENERIC_LINE} Disk is full.`, refusalCode: 'disk-full' });
+  });
+
+  it('never starts an update from a Runtime without self_update, even when its status is fresh', async () => {
+    const { operation, client } = makeOperation({ statuses: [{ available: true, state: 'none' }] });
+    await operation.refresh();
+
+    await operation.start(() => true);
+
+    expect(client.startInstallerUpdate).not.toHaveBeenCalled();
+    expect(operation.getSnapshot().pending).toBe(false);
   });
 
   it('keeps authentication failure status stale and does not retry after a denied POST', async () => {

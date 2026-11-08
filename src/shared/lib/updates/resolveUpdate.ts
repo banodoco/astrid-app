@@ -76,11 +76,17 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   if (input.pageStale) return { card: 'reload', title: 'Editor updated', body: 'Reload this page to use the latest editor.', primary: { label: 'Reload' }, secondary: null };
   if (input.compatibility?.kind === 'identity') return { card: 'identity', title: 'Restart Astrid', body: 'An older Astrid is still running. Restart the selected Runtime, then reconnect.', primary: null, secondary: null };
   if (input.updateReason && input.installType === 'installer') {
+    // A recovery or repair is an update card. Without an in-app update the reason is the one line and the command is the path;
+    // autostart-off has its own setup command, and a source checkout has its own update route, not the installer command.
+    const card = input.updateReason === 'recovery-needed' || input.updateReason === 'needs-repair';
+    const noAction = input.updateReason === 'autostart-off' || input.updateReason === 'source';
+    const actions = card || input.updateNowAvailable ? updateActions(input, context)
+      : noAction ? { primary: null, secondary: null } : COMMAND_ACTIONS;
     return {
-      card: input.updateReason === 'recovery-needed' ? 'update' : 'notice',
-      title: input.updateReason === 'recovery-needed' ? 'Update Astrid' : 'Update unavailable',
+      card: card ? 'update' : 'notice',
+      title: card ? 'Update Astrid' : 'Update unavailable',
       body: INSTALLER_UPDATE_REASON_MESSAGES[input.updateReason],
-      ...(input.updateReason === 'recovery-needed' ? updateActions(input, context) : { primary: null, secondary: null }),
+      ...actions,
       updateReason: input.updateReason,
     };
   }

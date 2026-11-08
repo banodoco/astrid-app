@@ -235,6 +235,24 @@ test('the served canary reports release and bootstrap-byte mismatches and accept
   );
 });
 
+test('a floor pinned before release is bumped is refused, and a floor at the published release passes', () => {
+  const base = snapshot(manifestOf({ release: 2 }));
+  // Pinned before the bump: the floor stays at the old release while release 3 is published.
+  assert.throws(
+    () => checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 3, agent: { sha: SHA_B }, required: { release: 2, reason: 'Security fix' } })) }),
+    /required\.release 2 is not the release being published \(3\)/,
+  );
+  // Bumped first, then pinned: the floor is the published release.
+  assert.match(
+    checkReleaseGuard({ base, head: snapshot(manifestOf({ release: 3, agent: { sha: SHA_B }, required: { release: 3, reason: 'Security fix' } })) }),
+    /install tuple changed/,
+  );
+  // A floor that is not changed is not the guard's business.
+  const floored = snapshot(manifestOf({ release: 3, required: { release: 2, reason: 'Old fix' } }));
+  assert.match(checkReleaseGuard({ base: floored, head: snapshot(manifestOf({ release: 3, required: { release: 2, reason: 'Old fix' } })) }), /release 3 unchanged/);
+});
+
+
 test('a later push to main never cancels the release guard for an earlier one', async () => {
   const workflow = await readFile(fileURLToPath(new URL('../../.github/workflows/test.yml', import.meta.url)), 'utf8');
   assert.match(workflow, /cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' \}\}/);

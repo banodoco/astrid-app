@@ -56,7 +56,8 @@ async function readAgentRuntime(agentSha) {
 
 // pin.mjs never writes `release`. A change to the install tuple must raise
 // `release` by exactly 1 in the same change; release-guard enforces that.
-// `--require` sets the floor to the manifest's own release (the one being published).
+// `--require` sets the floor to the manifest's own release, the one being published. Bump release first:
+// release-guard refuses a floor set in the same change that is below the release it publishes.
 export function applyRequiredPin(manifest, reason) {
   if (typeof reason !== 'string' || !reason.trim()) throw new Error('--require needs a non-empty reason');
   const currentRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;

@@ -30,6 +30,26 @@ function mountWithEventCapture(resolution: ReturnType<typeof resolveUpdate>, ins
   return onOpen;
 }
 
+describe('update resolution after an in-app update ends', () => {
+  const finished = (outcome: 'failed' | 'updated') => ({
+    available: true, pending: false, fresh: true, error: null, installType: 'installer',
+    status: { available: true, self_update: true, state: 'terminal', outcome, operation_id: 'op-1', result: 'Update finished.' },
+    start: vi.fn(async () => undefined),
+  }) as unknown as InstallerUpdateView;
+
+  it('offers the plain install line as the next action after a failed update, not --update', () => {
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={finished('failed')} />);
+    expect(screen.getByText('The update did not complete. Check diagnostics before trying again.')).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
+    expect(screen.getByRole('code').textContent).not.toContain('--update');
+  });
+
+  it('does not offer the install line after an update that finished', () => {
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={finished('updated')} />);
+    expect(screen.queryByRole('code')).toBeNull();
+  });
+});
+
 describe('update resolution Settings actions', () => {
   it('shows the plain install line, not --update, when an install needs repair', () => {
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', installedRelease: 10, servedRelease: 10 });

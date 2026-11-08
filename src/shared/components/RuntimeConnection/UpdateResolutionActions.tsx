@@ -8,7 +8,8 @@ import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
-import { installerUpdateStatusMessage, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
+import { installerUpdateFailed, installerUpdateStatusMessage, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
+import { ASTRID_STATUS_COPY } from '@/shared/components/SettingsModal/sections/astridStatusCopy.ts';
 
 /**
  * Shown with the command when this Astrid cannot update itself and no refusal reason explains why. It mirrors the
@@ -33,7 +34,10 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   const localUpdate = pageLocalUpdate();
   const localState = useSyncExternalStore(localUpdate.subscribe, localUpdate.getSnapshot, localUpdate.getSnapshot);
   const actions = [resolution.primary, resolution.secondary].filter((action) => action !== null);
-  if (actions.length === 0 && localState.phase === 'idle' && resolution.updateReason !== 'autostart-off' && !operation?.pending && !operation?.status?.result && !operation?.error) return null;
+  const installerPath = (operation?.installType ?? installType ?? (operation ? 'installer' : undefined)) === 'installer';
+  // A failed in-app update's next action is the plain install line, the same repair line a degraded install shows.
+  const failedInstall = installerPath && installerUpdateFailed(operation);
+  if (actions.length === 0 && localState.phase === 'idle' && resolution.updateReason !== 'autostart-off' && !operation?.pending && !operation?.status?.result && !operation?.error && !failedInstall) return null;
 
   const commandOptions = actions.some((action) => action.label === COPY_FOR_AGENT_ACTION || action.label === RUN_IT_YOURSELF_ACTION);
   const route = actions.find((action) => action.destination === 'settings-updates');
@@ -43,7 +47,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   const executeLocal = actions.find((action) => action.execute === 'local-update');
   // Details opens Settings Updates; a card whose action already goes there (See updates) does not repeat it.
   const details = context === 'page' && !route && (resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason;
-  const installerPath = (operation?.installType ?? installType ?? (operation ? 'installer' : undefined)) === 'installer';
+  const plainInstallCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   const startUpdate = async () => {
     const validate = await guarded.flush();
     if (validate) await operation?.start(validate);
@@ -72,12 +76,16 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
       <p className="text-sm">Run this command, then start Astrid:</p>
       {/* The plain install line, not --update: it respects autostart off, so the saved choice is kept. */}
-      <CopyCommandRow command={detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+      <CopyCommandRow command={plainInstallCommand} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
     </div>}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
     {operation?.fresh && !operation.error && installerUpdateStatusMessage(operation.status) && !operation.pending && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
+    {failedInstall && <div className="space-y-2">
+      <p className="text-sm">{ASTRID_STATUS_COPY.repairDescription}</p>
+      <CopyCommandRow command={plainInstallCommand} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+    </div>}
     {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
     {guarded.error && <p role="alert">{guarded.error}</p>}
   </div>;

@@ -13,7 +13,7 @@ import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpd
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
+import { installerOutcomeMessage, installerUpdateFailed, installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 import { astridOutOfDate } from './ConnectionSection.tsx';
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
@@ -129,16 +129,11 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
   const compatibility = compatibilityFor(statusInstallType);
   const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available || statusInstallType === 'fully-local' && currentStatus.selfUpdate === true, updateReason: operation.updateReason }, 'settings') : resolution;
-  const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
-  const resultLabels: Record<string, string> = {
-    updated: 'Astrid updated.',
-    rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
-    failed: 'The update did not complete. Check diagnostics before trying again.',
-    recovery_needed: 'Astrid needs recovery. Select Update to check the previous operation before continuing.',
-  };
+  // Settings reads one vocabulary: the live status. The report contributes only a finished operation's outcome, and only
+  // when the live status has none. Recovery and an idle Astrid ("none") are never a result line.
+  const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1]?.trim();
   const operationResult = installerUpdateStatusMessage(operation.status);
-  // Without an in-app update there is no result to report, so the line is left out rather than saying so.
-  const reportLabel = reportResult && reportResult !== 'none' ? resultLabels[reportResult] ?? 'An update result is available in the diagnostics log.' : null;
+  const reportLabel = installerOutcomeMessage(reportResult);
   const lastResult = operation.pending ? 'Update in progress. Checking its result…' : operation.error ? operation.error : operationResult ?? reportLabel;
   const operationMessage = operation.status && !operation.pending ? installerUpdateStatusMessage(operation.status) || null : null;
   const updateCard = currentResolution?.card === 'notice' || currentResolution?.card === 'update';
@@ -146,7 +141,8 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   // A degraded direct install repairs with the plain install line, which has no --update. A source checkout has no such line here.
   const services = operation.health?.services ?? [];
   // An available update already offers Update now and its command, so the repair row waits until none is offered.
-  const repairNeeded = installType === 'installer' && !updateAvailable && (operation.health?.status === 'degraded' || services.some((service) => service.state === 'failed'));
+  // A failed update already offers the plain install line in its actions, so the repair row does not repeat it.
+  const repairNeeded = installType === 'installer' && !updateAvailable && !installerUpdateFailed(operation) && (operation.health?.status === 'degraded' || services.some((service) => service.state === 'failed'));
   const repairCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   // An old Astrid with no newer release to name (a source checkout has none) is titled by its card instead.
   const releaseLine = currentStatus && (!compatibility || statusInstallType !== 'source' && currentStatus.servedRelease > currentStatus.release);

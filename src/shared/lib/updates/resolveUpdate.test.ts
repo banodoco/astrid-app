@@ -237,7 +237,7 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     recoveryNeeded: both(COMMAND_UPDATE),
     newerBusyRefusal: both(NEWER),
     newerNeedsRepair: both(NEWER),
-    autostartOffRefusal: both(['notice', null, null]),
+    autostartOffRefusal: both(NONE),
     sourceRefusal: both(['notice', null, null]),
     unknownRefusal: both(COMMAND_NOTICE),
     runtimeDown: both(NOT_RUNNING),
@@ -383,5 +383,25 @@ describe('update decision table: install type × situation', () => {
     }
     expect(resolveUpdate({ ...SITUATIONS.recoveryNeeded, installType: 'installer', updateNowAvailable: true }, 'settings').primary)
       .toEqual({ label: 'Update', execute: 'installer-update' });
+  });
+});
+
+describe('setup refusals on a current install', () => {
+  it.each(['autostart-off', 'unsupported-service-manager'] as const)('shows no card for %s when the release is current', (updateReason) => {
+    expect(resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 10, updateReason, updateNowAvailable: false })).toMatchObject({
+      card: 'none', primary: null, secondary: null,
+    });
+  });
+
+  it('still shows the setup refusal when a release is behind', () => {
+    expect(resolveUpdate({ installType: 'installer', installedRelease: 9, servedRelease: 10, releaseBehind: true, updateReason: 'autostart-off', updateNowAvailable: false })).toMatchObject({
+      card: 'notice', updateReason: 'autostart-off',
+    });
+  });
+
+  it('keeps a recovery on a current install', () => {
+    expect(resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 10, updateReason: 'recovery-needed', updateNowAvailable: true })).toMatchObject({
+      card: 'update', updateReason: 'recovery-needed',
+    });
   });
 });

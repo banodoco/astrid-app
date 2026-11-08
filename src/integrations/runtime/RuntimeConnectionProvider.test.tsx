@@ -200,6 +200,68 @@ afterEach(() => {
   vi.resetModules();
 });
 
+const GATEWAY = 'http://127.0.0.1:17340';
+
+/**
+ * The Runtime origin is set once per module instance (`setRuntimeOrigin`), so each path loads fresh copies of the
+ * connection and provider modules. `null` is the same-origin proxy path; a gateway origin is the door path.
+ */
+async function loadProviderFor(origin: string | null) {
+  vi.resetModules();
+  const connection = await import('@/integrations/runtime/connection.ts');
+  connection.setRuntimeOrigin(origin ? { VITE_RUNTIME_ORIGIN: origin } : {});
+  return import('./RuntimeConnectionProvider.tsx');
+}
+
+describe.each([
+  ['proxy path (same origin)', null],
+  ['door path (gateway origin)', GATEWAY],
+] as const)('Pinokio identity over the %s', (_label, origin) => {
+  it('recognises a Pinokio Runtime from identity.managed_by, connects, and reads the health it was asked on that path', async () => {
+    const gateway = fakeGateway();
+    gateway.routes['/v1/health'] = () => json({ status: 'ok', protocol: 'workspace.v1', schema_digest: RUNTIME_SCHEMA_DIGEST, identity: { managed_by: 'pinokio', release: 4 } });
+    const { RuntimeConnectionProvider: Provider, useRuntimeConnection: useConnection } = await loadProviderFor(origin);
+    const values: RuntimeConnectionValue[] = [];
+    function Watch() {
+      const connection = useConnection();
+      values.push(connection);
+      return <span data-testid="status">{connection.state.status}</span>;
+    }
+    render(
+      <Provider gated requireLocalNetworkPermission fetchImpl={gateway.fetchImpl} permissions={fakePermissions('granted').permissions} pollIntervalMs={10}>
+        <Watch />
+      </Provider>,
+    );
+    await waitFor(() => expect(status()).toBe('connected'));
+    expect(values.at(-1)?.state).toMatchObject({ status: 'connected', managedByPinokio: true });
+    expect(values.at(-1)?.managedByPinokio).toBe(true);
+    expect(window.localStorage.getItem(PINOKIO_STORAGE_KEY)).toBe('1');
+    expect(gateway.calls).toEqual([`${origin ?? ''}/api/runtime/v1/health`, `${origin ?? ''}/api/runtime/v1/realm`]);
+  });
+
+  it('shows the Pinokio update sentence and no installer command for an incompatible Pinokio Runtime', async () => {
+    const gateway = fakeGateway();
+    gateway.routes['/v1/health'] = () => json({ status: 'ok', schema_digest: 'sha256:old-runtime', identity: { managed_by: 'pinokio' } });
+    const { RuntimeConnectionProvider: Provider, useRuntimeConnection: useConnection } = await loadProviderFor(origin);
+    function Watch() {
+      const connection = useConnection();
+      return <>
+        <RuntimeConnectionPanel connection={connection} />
+        <span data-testid="status">{connection.state.status}</span>
+      </>;
+    }
+    render(
+      <Provider gated requireLocalNetworkPermission fetchImpl={gateway.fetchImpl} permissions={fakePermissions('granted').permissions} pollIntervalMs={600_000}>
+        <Watch />
+      </Provider>,
+    );
+    await waitFor(() => expect(status()).toBe('update_needed'));
+    expect(await screen.findByText(CONNECTION_COPY.updateNeeded.pinokioSentence)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Copy command/ })).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('astrid.haus/install');
+  });
+});
+
 describe('granted', () => {
   it.each(RUNTIME_ACCEPTED_SCHEMA_DIGESTS)('connects to the compatible Runtime contract %s', async (digest) => {
     const gateway = fakeGateway();
@@ -226,7 +288,7 @@ describe('granted', () => {
 
   it('records Pinokio provenance from health and exposes it in the connected state', async () => {
     const gateway = fakeGateway();
-    gateway.routes['/v1/health'] = () => json({ status: 'ok', protocol: 'workspace.v1', schema_digest: RUNTIME_SCHEMA_DIGEST, install: { managed_by: 'pinokio' } });
+    gateway.routes['/v1/health'] = () => json({ status: 'ok', protocol: 'workspace.v1', schema_digest: RUNTIME_SCHEMA_DIGEST, identity: { managed_by: 'pinokio' } });
     renderProvider(gateway, fakePermissions('granted').permissions);
     await waitFor(() => expect(status()).toBe('connected'));
     expect(latest.state).toMatchObject({ status: 'connected', managedByPinokio: true });
@@ -234,8 +296,11 @@ describe('granted', () => {
   });
 
   it.each([
-    ['managed by Pinokio', { install: { managed_by: 'pinokio' } }, true],
+    ['managed by Pinokio', { identity: { managed_by: 'pinokio' } }, true],
+    ['managed by a native installer', { identity: { managed_by: null, release: 3 } }, false],
+    ['managed from source', { identity: { managed_by: 'source', release: 0 } }, false],
     ['not managed by Pinokio', {}, false],
+    ['still reporting only the retired install field', { install: { managed_by: 'pinokio' } }, false],
   ] as const)('records health evidence when Runtime is %s', async (_label, healthEvidence, expected) => {
     const gateway = fakeGateway();
     gateway.routes['/v1/health'] = () => json({ status: 'ok', schema_digest: RUNTIME_SCHEMA_DIGEST, ...healthEvidence });
@@ -247,7 +312,7 @@ describe('granted', () => {
 
   it('uses Pinokio update instructions when an incompatible Runtime reports Pinokio', async () => {
     const gateway = fakeGateway();
-    gateway.routes['/v1/health'] = () => json({ status: 'ok', schema_digest: 'sha256:old-runtime', install: { managed_by: 'pinokio' } });
+    gateway.routes['/v1/health'] = () => json({ status: 'ok', schema_digest: 'sha256:old-runtime', identity: { managed_by: 'pinokio' } });
     // Simulate a changed install: this browser last saw a non-Pinokio Runtime.
     window.localStorage.setItem(PINOKIO_STORAGE_KEY, '0');
     const values: RuntimeConnectionValue[] = [];

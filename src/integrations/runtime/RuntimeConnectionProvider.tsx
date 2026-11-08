@@ -132,8 +132,9 @@ export async function probeRuntime(
   if (typeof health.body !== 'object' || health.body === null || typeof (health.body as { status?: unknown }).status !== 'string') {
     return { kind: 'silent' };
   }
-  const install = (health.body as { install?: unknown }).install;
-  const managedBy = typeof install === 'object' && install !== null ? (install as { managed_by?: unknown }).managed_by : undefined;
+  // The Runtime's own startup identity says who manages it (`identity.managed_by`, `pinokio` for a Pinokio install).
+  const identity = (health.body as { identity?: unknown }).identity;
+  const managedBy = typeof identity === 'object' && identity !== null ? (identity as { managed_by?: unknown }).managed_by : undefined;
   const managedByPinokio = managedBy === 'pinokio';
   const schemaDigest = (health.body as { schema_digest?: unknown }).schema_digest;
   if (typeof schemaDigest !== 'string' || !RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(schemaDigest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])) {

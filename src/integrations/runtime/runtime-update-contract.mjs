@@ -1,4 +1,7 @@
-/** Older Runtime schemas that remain compatible with the current App client. */
+/**
+ * The single list of accepted Runtime schema digests besides the generated current contract.
+ * Every consumer (the browser client, the source resolver and the local launcher) imports it from here.
+ */
 export const LEGACY_RUNTIME_SCHEMA_DIGESTS = Object.freeze([
   // Public App baseline (release identity absent, interpreted as release 0) remains compatible during migration.
   'sha256:9061d4982c786e04d99e45470b8ea4f3d9c9ff9855c4a2f83d751a93408c205b',
@@ -12,6 +15,8 @@ export const LEGACY_RUNTIME_SCHEMA_DIGESTS = Object.freeze([
   'sha256:d4b3e46ab6481694810561c7aac99e45356a24a04b08545e53a7257663f007c4',
   // Before service health was added: existing Runtime responses remain compatible.
   'sha256:ec06fbc6567fe28065d22626b040cad81bb2e5318623586ae9187c713794f6b9',
+  // Runtime int/r1 3b12fface: R1 contract plus additive M operations and fields.
+  'sha256:a36913ece941dce500344487aec682ce692411a4922c0382afc380b6caa959e0',
 ]);
 
 /** A1's resolver action for a schema mismatch on a source checkout. */

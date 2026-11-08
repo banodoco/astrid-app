@@ -632,7 +632,8 @@ function AvailableAgentChatPanel({
         : idlePlaceholder;
   const optimisticTurnAlreadyMaterialized = optimisticMessage !== null
     && Boolean(activeSessionData?.turns.some((turn) => turn.role === 'user' && turn.request_id === optimisticMessage.id));
-  const promptFailure = sendMessage.localError && isAgentSetupError(sendMessage.error) ? sendMessage.error : sendMessage.localError;
+  // A failed prompt keeps its error object for the setup and out-of-date cards; any other failure shows its message.
+  const promptFailure = sendMessage.localError && (isAgentSetupError(sendMessage.error) || isChatUpdateError(sendMessage.error)) ? sendMessage.error : sendMessage.localError;
   const chatFailures = [activeSession.error, promptFailure, createSession.error, sessions.error, projectChat.error].filter(error => {
     if (!isAgentSetupError(error)) return true;
     if (!setupErrorScopes.current.has(error)) setupErrorScopes.current.set(error, { agent: chatAgent, sessionId: activeSessionId });
@@ -1627,7 +1628,7 @@ function AvailableAgentChatPanel({
           <p className="mb-2 px-1 text-xs text-muted-foreground">{CHAT_UNAVAILABLE}</p>
         )}
 
-        {!agentBroken && !showSetupCard && !showSetupOnHost && !isProcessing && !sendMessage.isPending && !isCancelled && !chatUnavailable && !isAgentSetupError(turnFailure) && (turnFailure || (activeStatus === 'error' && setupDone?.sessionId !== activeSessionId)) && (
+        {!agentBroken && !showSetupCard && !showSetupOnHost && !isProcessing && !sendMessage.isPending && !isCancelled && !chatUnavailable && !isAgentSetupError(turnFailure) && !(startFailure?.updateNeeded === true && isChatUpdateError(turnFailure)) && (turnFailure || (activeStatus === 'error' && setupDone?.sessionId !== activeSessionId)) && (
           <div role="alert" className="mb-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {isChatUpdateError(turnFailure) ? <ChatUpdateNeeded detail={turnFailure.message} /> : turnFailureMessage}
             {(sessions.error || projectChat.error) && (

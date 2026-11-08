@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { BridgeRouteError } from '@/integrations/astrid/transport.ts';
 import { RUNTIME_CONNECTION_COPY, withCommandShell } from '@/shared/components/RuntimeConnection/copy.ts';
@@ -8,14 +8,17 @@ import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE } from '@/tools/video-editor/data
 const { connectionRef } = vi.hoisted(() => ({ connectionRef: { current: null as { managedByPinokio: boolean } | null } }));
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({ useRuntimeConnectionSafe: () => connectionRef.current }));
 
-import { ChatUpdateCommand, ChatUpdateNeeded, isChatUpdateError } from './ChatUpdateNeeded.tsx';
+import { ChatUpdateNeeded, isChatUpdateError } from './ChatUpdateNeeded.tsx';
 
 afterEach(() => { connectionRef.current = null; });
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  window.history.replaceState(null, '', '/');
+});
 
 describe('ChatUpdateNeeded', () => {
-  it('renders the update copy and raw details, with no setup block or install command in chat', () => {
+  it('renders the shared update title and sentence with one See updates action and the raw details', () => {
     const detail = 'bridge reported a contract mismatch while sending chat';
     const copy = RUNTIME_CONNECTION_COPY;
 
@@ -24,6 +27,8 @@ describe('ChatUpdateNeeded', () => {
     expect(screen.getByText(copy.chatNeedsUpdate)).toBeInTheDocument();
     expect(screen.getByText(copy.updateNeeded.title)).toBeInTheDocument();
     expect(screen.getByText(withCommandShell(copy.updateNeeded.sentence))).toBeInTheDocument();
+    expect(screen.getAllByRole('button')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'See updates' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: copy.agent.commandCopy })).not.toBeInTheDocument();
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
@@ -34,18 +39,23 @@ describe('ChatUpdateNeeded', () => {
     expect(within(details as HTMLDetailsElement).getByText(detail)).toBeInTheDocument();
   });
 
-  it.each([
-    ['the chat card', () => render(<ChatUpdateNeeded detail="mismatch" />)],
-    ['the new-chat card', () => render(<ChatUpdateCommand />)],
-  ])('gives a Pinokio Astrid only Pinokio\u2019s Update in %s', (_name, mount) => {
+  it('opens Settings on Updates when See updates is pressed', () => {
+    render(<ChatUpdateNeeded detail="mismatch" />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'See updates' }));
+
+    expect(new URL(window.location.href).searchParams.get('settings')).toBe('updates');
+  });
+
+  it('gives a Pinokio Astrid Pinokio’s sentence and the same See updates action', () => {
     connectionRef.current = { managedByPinokio: true };
-    mount();
+    render(<ChatUpdateNeeded detail="mismatch" />);
 
     expect(screen.getByText(RUNTIME_CONNECTION_COPY.updateNeeded.pinokioSentence)).toBeInTheDocument();
     expect(screen.queryByText(withCommandShell(RUNTIME_CONNECTION_COPY.updateNeeded.sentence))).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'See updates' })).toBeInTheDocument();
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: RUNTIME_CONNECTION_COPY.agent.copy })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: RUNTIME_CONNECTION_COPY.agent.commandCopy })).not.toBeInTheDocument();
     expect(document.body.textContent).not.toMatch(/install\s*\|\s*sh|install\.ps1/);
   });
 });

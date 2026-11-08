@@ -10,7 +10,8 @@ import { CHAT_VOICE_ENABLED } from '@/tools/video-editor/hooks/chatVoice.ts';
 import type { LocalAgentChoice } from '@/integrations/astrid/localAgents.ts';
 import { AgentChatPanel as AgentChatPanelWithoutProvider } from './AgentChat';
 import { RuntimeConnectionProvider, useRuntimeConnection } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
-import { BridgeContractError } from '@/tools/video-editor/data/bridgeContract.ts';
+import { BRIDGE_CONTRACT_VERSION_MISMATCH_CODE, BridgeContractError } from '@/tools/video-editor/data/bridgeContract.ts';
+import { RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { flushDraftsBeforeReload } from '@/shared/lib/updates/draftSafeReload.ts';
 
 // A tiny store standing in for the bridge's pending composer prompt, so a test can click a draft button twice.
@@ -521,6 +522,22 @@ describe('AgentChat', () => {
       await waitFor(() => expect(mocks.useAgentSession).toHaveBeenLastCalledWith('codex:session-1', 'project-1'));
       expect(screen.queryByText('Old setup error')).toBeNull();
       expect(screen.getByRole('textbox')).toBeEnabled();
+    });
+    it('shows one out-of-date card with See updates for a chat reply from an old Astrid', async () => {
+      const { state } = setupState();
+      const view = renderSetupChat();
+      await getInput();
+      const error = new BridgeRouteError('Prompt', 409, { error: BRIDGE_CONTRACT_VERSION_MISMATCH_CODE, detail: 'bridge protocol version differs' });
+      state.sendMessage.localError = error.message;
+      state.sendMessage.error = error;
+      view.refresh();
+      const alerts = await screen.findAllByRole('alert');
+      expect(alerts).toHaveLength(1);
+      expect(alerts[0]).toHaveTextContent(RUNTIME_CONNECTION_COPY.chatNeedsUpdate);
+      expect(alerts[0]).toHaveTextContent(RUNTIME_CONNECTION_COPY.updateNeeded.title);
+      expect(within(alerts[0]).getByRole('button', { name: 'See updates' })).toBeInTheDocument();
+      expect(within(alerts[0]).queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
+      expect(within(alerts[0]).getByText(error.message)).toBeInTheDocument();
     });
     it('resets createSession and dismisses its setup error when setup completes', async () => {
       const { state, localAgents } = setupState();

@@ -657,6 +657,14 @@ function waitForPort(portValue, timeoutMs = 3000, aborted = () => false) {
   });
 }
 
+// Update now is offered only when this launcher can run the update: the page route exists (not Pinokio) and the selected
+// Runtime is an installed backend. A source Runtime reports self_update false with reason "source" and keeps the command.
+function launcherCanSelfUpdate() {
+  if (pinokioManaged) return false;
+  try { installedBackend(resolveRuntimeCommand(runtimeSettings).command); return true; }
+  catch (error) { if (error.step === 'select-backend') return false; throw error; }
+}
+
 const env = {
   ...process.env,
   // The agent's CLI/SDK must address the same selected workspace as the editor,
@@ -666,6 +674,7 @@ const env = {
   ASTRID_WORKSPACE_DISCOVERY: discoveryPath,
   ASTRID_LOCAL_UPDATE_STATUS: '1',
   VITE_ASTRID_LOCAL_UPDATE_STATUS: '1',
+  ASTRID_LOCAL_SELF_UPDATE: launcherCanSelfUpdate() ? '1' : '0',
   ...(astridCheckout ? { ASTRID_CHECKOUT: astridCheckout } : {}),
   ...(configuredAstridPublicCheckout ? { ASTRID_PUBLIC_CHECKOUT: configuredAstridPublicCheckout } : {}),
   PORT: port,

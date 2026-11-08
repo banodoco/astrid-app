@@ -102,7 +102,7 @@ if (args[0] === 'run' && args[1] === 'build') {
 const preview = args.includes('preview');
 const mode = preview ? 'preview' : 'dev';
 const outDir = preview ? args[args.indexOf('--outDir') + 1] : path.join(process.cwd(), 'dist');
-fs.appendFileSync(process.env.FAKE_VITE_LOG, JSON.stringify({ mode, cwd: process.cwd(), outDir, pid: process.pid }) + '\\n');
+fs.appendFileSync(process.env.FAKE_VITE_LOG, JSON.stringify({ mode, cwd: process.cwd(), outDir, pid: process.pid, selfUpdate: process.env.ASTRID_LOCAL_SELF_UPDATE }) + '\\n');
 const server = http.createServer((request, response) => {
   if (request.url === '/build.json') {
     try { response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(fs.readFileSync(path.join(outDir, 'build.json'))); }
@@ -590,6 +590,7 @@ test('the page route updates through the launcher, restarts the fake editor on t
   assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.targetSha, 2), { app: fixture.targetSha, release: 2 });
   const starts = (await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.equal(starts.length, 2);
+  assert.equal(starts[0].selfUpdate, '1', 'an installed backend lets the status report self_update');
   assert.notEqual(starts[0].pid, starts[1].pid);
   assert.throws(() => process.kill(starts[0].pid, 0), { code: 'ESRCH' }, 'the old editor was stopped before the update');
   const after = JSON.parse(await readFile(join(fixture.app, (await git(fixture.app, 'rev-parse', '--git-path', 'astrid-local-update.json')).stdout.trim()), 'utf8'));
@@ -611,5 +612,21 @@ test('the page route refuses overlapping local edits as dirty and leaves the tre
   assert.equal(await gitSha(fixture.app), fixture.oldSha);
   assert.equal(await readFile(join(fixture.app, 'public/install-manifest.json'), 'utf8'), '{"release":1,"edited":true}\n');
   assert.equal((await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').length, 1, 'the editor was not restarted');
+  await started.stop();
+});
+
+test('a Runtime that is not an installed backend starts the editor with self_update off', { timeout: 60_000 }, async (t) => {
+  const fixture = await createFixture(); t.after(fixture.close);
+  const outside = await mkdtemp(join(tmpdir(), 'astrid-source-runtime-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  const sourcePython = join(outside, 'python');
+  await copyFile(fixture.python, sourcePython);
+  await chmod(sourcePython, 0o755);
+  fixture.env.ASTRID_RUNTIME_PYTHON = sourcePython;
+  const started = launch(fixture); t.after(started.stop);
+  await started.waitFor(() => started.output.stdout.includes('Local App:'));
+  await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
+  const starts = (await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.equal(starts[0].selfUpdate, '0');
   await started.stop();
 });

@@ -2,10 +2,12 @@ import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { nextVersionStart, validateVersionStarts } from './releaseVersion.mjs';
 
 const agentRepo = 'banodoco/astrid-agent';
 const runtimeRepo = 'banodoco/astrid-runtime';
 const manifestPath = path.join(process.cwd(), 'public/install-manifest.json');
+const usage = 'Usage: node scripts/installer/pin.mjs [<agent-sha>] [--release [minor|major]] [--require "<reason>"] | --check';
 
 function rawUrl(repository, sha, file) {
   return `https://raw.githubusercontent.com/${repository}/${sha}/${file}`;
@@ -54,35 +56,62 @@ async function readAgentRuntime(agentSha) {
   return lock.source_commit;
 }
 
-// pin.mjs never writes `release`. A change to the install tuple must raise
-// `release` by exactly 1 in the same change; release-guard enforces that.
-// `--require` sets the floor to the manifest's own release (the one being published).
-export function applyRequiredPin(manifest, reason) {
-  if (typeof reason !== 'string' || !reason.trim()) throw new Error('--require needs a non-empty reason');
-  const currentRelease = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
-  if (!Number.isSafeInteger(currentRelease) || currentRelease < 0) {
+function currentRelease(manifest) {
+  const release = Object.hasOwn(manifest, 'release') ? manifest.release : 0;
+  if (!Number.isSafeInteger(release) || release < 0) {
     throw new Error('install-manifest.json release must be a non-negative integer');
   }
+  return release;
+}
+
+// Plain pinning writes the install tuple (agent, Runtime and schema digest) and nothing else.
+// It never touches `release`, `version_starts` or `required`.
+export function applyTuplePin(manifest, { agentSha, runtimeSha, schemaDigest }) {
+  manifest.agent.sha = agentSha;
+  manifest.runtime.sha = runtimeSha;
+  manifest.runtime.schema_digest = schemaDigest;
+  return manifest;
+}
+
+// `--require` sets the floor to the manifest's own release. With --release it runs after
+// applyReleasePin, so the floor is the new release. release-guard checks that the floor is not above release.
+export function applyRequiredPin(manifest, reason) {
+  if (typeof reason !== 'string' || !reason.trim()) throw new Error('--require needs a non-empty reason');
   manifest.required = {
-    release: currentRelease,
+    release: currentRelease(manifest),
     reason: reason.trim(),
   };
   return manifest;
 }
 
-async function pin(agentSha, reason) {
+// `--release` is the only writer of `release` and `version_starts`. It moves release by exactly one.
+// A minor or major kind also appends the version start for that new release; a plain release adds none.
+export function applyReleasePin(manifest, kind) {
+  if (kind !== undefined && kind !== 'minor' && kind !== 'major') throw new Error('--release kind must be minor or major');
+  const release = currentRelease(manifest) + 1;
+  const starts = manifest.version_starts ?? [];
+  validateVersionStarts(starts, currentRelease(manifest));
+  if (kind) manifest.version_starts = [...starts, nextVersionStart(release, kind, starts)];
+  manifest.release = release;
+  return manifest;
+}
+
+async function pin({ agentSha, release, kind, reason }) {
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   if (!manifest.agent || !manifest.runtime) throw new Error('install-manifest.json needs agent and runtime records');
-  const runtimeSha = await readAgentRuntime(agentSha);
+  // With --release and no sha, the release pins the agent the manifest already names.
+  const sha = agentSha ?? manifest.agent.sha;
+  if (!/^[0-9a-f]{40}$/.test(sha ?? '')) throw new Error('install-manifest.json agent.sha must be a full commit SHA');
+  const runtimeSha = await readAgentRuntime(sha);
   const schemaDigest = await runtimeSchemaDigest(runtimeSha);
-  manifest.agent.sha = agentSha;
-  manifest.runtime.sha = runtimeSha;
-  manifest.runtime.schema_digest = schemaDigest;
+  applyTuplePin(manifest, { agentSha: sha, runtimeSha, schemaDigest });
+  if (release) applyReleasePin(manifest, kind);
   if (reason !== undefined) applyRequiredPin(manifest, reason);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 export async function checkManifest(manifest) {
+  validateVersionStarts(manifest?.version_starts, currentRelease(manifest ?? {}));
   const agentSha = manifest?.agent?.sha;
   if (!/^[0-9a-f]{40}$/.test(agentSha ?? '')) throw new Error('install-manifest.json agent.sha must be a full commit SHA');
   const runtimeSha = await readAgentRuntime(agentSha);
@@ -100,24 +129,42 @@ async function check() {
   process.stdout.write(`${await checkManifest(JSON.parse(await readFile(manifestPath, 'utf8')))}\n`);
 }
 
-async function main() {
-  const args = process.argv.slice(2);
-  if (args.length === 1 && args[0] === '--check') return check();
-  let reason;
-  let agentSha;
+// Parses the command line into options. Refuses every combination that would write a field
+// outside its own writer: --require is only accepted together with --release.
+export function parseArgs(args) {
+  if (args.length === 1 && args[0] === '--check') return { check: true };
+  const options = { agentSha: undefined, release: false, kind: undefined, reason: undefined };
   for (let index = 0; index < args.length; index += 1) {
-    if (args[index] === '--require') {
-      if (reason !== undefined || !args[index + 1]) throw new Error('--require needs one non-empty reason');
-      reason = args[index + 1];
+    const arg = args[index];
+    if (arg === '--release') {
+      if (options.release) throw new Error(usage);
+      options.release = true;
+      if (args[index + 1] === 'minor' || args[index + 1] === 'major') {
+        options.kind = args[index + 1];
+        index += 1;
+      }
+    } else if (arg === '--require') {
+      const value = args[index + 1];
+      if (options.reason !== undefined || !value || value.startsWith('--')) throw new Error('--require needs one non-empty reason');
+      options.reason = value;
       index += 1;
-    } else if (!agentSha && /^[0-9a-f]{40}$/i.test(args[index])) {
-      agentSha = args[index];
+    } else if (!options.agentSha && /^[0-9a-f]{40}$/i.test(arg)) {
+      options.agentSha = arg;
     } else {
-      throw new Error('Usage: node scripts/installer/pin.mjs <agent-sha> [--require "<reason>"] | --check');
+      throw new Error(usage);
     }
   }
-  if (agentSha) return pin(agentSha, reason);
-  throw new Error('Usage: node scripts/installer/pin.mjs <agent-sha> [--require "<reason>"] | --check');
+  if (options.reason !== undefined && !options.release) {
+    throw new Error('--require needs --release: required is set only with a release');
+  }
+  if (!options.agentSha && !options.release) throw new Error(usage);
+  return options;
+}
+
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.check) return check();
+  return pin(options);
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

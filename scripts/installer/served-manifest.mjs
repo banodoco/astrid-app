@@ -8,6 +8,8 @@ const fields = [
   ['runtime.sha', (manifest) => manifest?.runtime?.sha],
   ['runtime.schema_digest', (manifest) => manifest?.runtime?.schema_digest],
   ['release', (manifest) => manifest?.release],
+  // Compared as bytes of the canonical list so an absent list and an empty one are the same name set.
+  ['version_starts', (manifest) => JSON.stringify(manifest?.version_starts ?? [])],
 ];
 // Bootstrap files are served byte-for-byte at the same name under the origin root.
 const bootstrapNames = ['install', 'install.sh', 'install.ps1'];

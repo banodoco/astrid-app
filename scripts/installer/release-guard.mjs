@@ -1,12 +1,18 @@
 #!/usr/bin/env node
 // release-guard: the install tuple and the public `release` number move together.
 //
-// The install tuple is the manifest without `release` and `required`, plus the
-// three public bootstrap files. If the tuple changes, `release` must rise by
-// exactly 1. If it does not change, `release` must stay the same. `required`
-// is validated on its own.
+// The install tuple is the manifest without `release`, `required` and `version_starts`,
+// plus the three public bootstrap files. If the tuple changes, `release` must rise by
+// exactly 1. If it does not change, `release` must stay the same. `required` is
+// validated on its own. `version_starts` is add-only, and a new start must come with
+// release +1 at its own release (see releaseVersion.mjs for the version rules).
+//
+// --integration (PRs into int/**): the tuple may move, but `release`, `required` and
+// `version_starts` must be byte-identical to the base. The number moves once, on the
+// release PR to main, which is checked against main as above.
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { validateVersionStarts } from './releaseVersion.mjs';
 
 export const MANIFEST_PATH = 'public/install-manifest.json';
 export const BOOTSTRAP_PATHS = ['public/install', 'public/install.ps1', 'public/install.sh'];
@@ -71,6 +77,7 @@ function tupleParts(snapshot) {
   const rest = { ...manifest };
   delete rest.release;
   delete rest.required;
+  delete rest.version_starts;
   const parts = { 'manifest (without release and required)': JSON.stringify(canonical(rest)) };
   for (const file of BOOTSTRAP_PATHS) {
     const bytes = snapshot.bootstraps[file];
@@ -80,28 +87,76 @@ function tupleParts(snapshot) {
   return parts;
 }
 
+// Canonical bytes of one manifest field. An absent field is its own value, not null.
+function fieldBytes(manifest, name) {
+  return Object.hasOwn(manifest, name) ? JSON.stringify(canonical(manifest[name])) : '(absent)';
+}
+
+function sameStart(left, right) {
+  return JSON.stringify(canonical(left)) === JSON.stringify(canonical(right));
+}
+
+// version_starts is add-only: the base list must be a prefix of the head list.
+// Returns the starts the head adds.
+function addedVersionStarts(baseStarts, headStarts) {
+  const prefix = baseStarts.length <= headStarts.length && baseStarts.every((start, index) => sameStart(start, headStarts[index]));
+  if (!prefix) throw new Error('version_starts is add-only; a start in the base was removed or changed');
+  return headStarts.slice(baseStarts.length);
+}
+
 // Snapshot shape: { manifest: Buffer, bootstraps: { 'public/install': Buffer, ... } }
-export function checkReleaseGuard({ base, head }) {
+export function checkReleaseGuard({ base, head, integration = false }) {
   const baseManifest = parseManifest(base.manifest, 'base install-manifest.json');
   const headManifest = parseManifest(head.manifest, 'head install-manifest.json');
   const baseRelease = releaseOf(baseManifest, 'base install-manifest.json', { required: false });
   const headRelease = releaseOf(headManifest, 'head install-manifest.json', { required: true });
   validateRequired(headManifest, headRelease, 'head install-manifest.json');
+  validateVersionStarts(baseManifest.version_starts, baseRelease, 'base version_starts');
+  validateVersionStarts(headManifest.version_starts, headRelease, 'head version_starts');
 
-  const baseParts = tupleParts(base);
-  const headParts = tupleParts(head);
-  const changed = Object.keys(baseParts).filter((key) => baseParts[key] !== headParts[key]);
+  if (integration) {
+    const pinned = ['required', 'version_starts'].filter((name) => fieldBytes(baseManifest, name) !== fieldBytes(headManifest, name));
+    if (baseRelease !== headRelease) pinned.unshift('release');
+    if (pinned.length > 0) {
+      throw new Error(`integration PR changes ${pinned.join(', ')}; on int/** release, required and version_starts must stay byte-identical to the base (release ${baseRelease}). The number moves only on the release PR to main`);
+    }
+    const tuple = changedTupleParts(base, head);
+    return tuple.length > 0
+      ? `install tuple changed (${tuple.join(', ')}) on an integration branch; release ${baseRelease} unchanged.`
+      : `install tuple unchanged; release ${headRelease} unchanged.`;
+  }
 
+  const changed = changedTupleParts(base, head);
   if (changed.length > 0) {
     if (headRelease !== baseRelease + 1) {
       throw new Error(`install tuple changed (${changed.join(', ')}) but release is ${headRelease}; a tuple change requires release ${baseRelease + 1} (exactly +1 from ${baseRelease})`);
     }
-    return `install tuple changed (${changed.join(', ')}); release ${baseRelease} -> ${headRelease}.`;
-  }
-  if (headRelease !== baseRelease) {
+  } else if (headRelease !== baseRelease) {
     throw new Error(`release changed from ${baseRelease} to ${headRelease} without an install tuple change; release must stay ${baseRelease}`);
   }
-  return `install tuple unchanged; release ${headRelease} unchanged.`;
+
+  const added = addedVersionStarts(baseManifest.version_starts ?? [], headManifest.version_starts ?? []);
+  const addedText = added.map((start) => `${start.version} at release ${start.release}`).join(', ');
+  if (added.length > 0) {
+    if (headRelease !== baseRelease + 1) {
+      throw new Error(`version_starts adds ${addedText} but release is ${headRelease}; a version start requires release ${baseRelease + 1} (exactly +1 from ${baseRelease})`);
+    }
+    const misplaced = added.find((start) => start.release !== headRelease);
+    if (misplaced) {
+      throw new Error(`version_starts adds a start at release ${misplaced.release}; a version start must be at the new release ${headRelease}`);
+    }
+  }
+
+  const tuple = changed.length > 0
+    ? `install tuple changed (${changed.join(', ')}); release ${baseRelease} -> ${headRelease}.`
+    : `install tuple unchanged; release ${headRelease} unchanged.`;
+  return added.length > 0 ? `${tuple} version_starts adds ${addedText}.` : tuple;
+}
+
+function changedTupleParts(base, head) {
+  const baseParts = tupleParts(base);
+  const headParts = tupleParts(head);
+  return Object.keys(baseParts).filter((key) => baseParts[key] !== headParts[key]);
 }
 
 function readAtRef(repo, ref, file) {
@@ -131,12 +186,13 @@ export function readSnapshot(repo, ref) {
 }
 
 async function main(argv) {
-  const [baseRef, headRef = 'HEAD', ...extra] = argv;
+  const integration = argv.includes('--integration');
+  const [baseRef, headRef = 'HEAD', ...extra] = argv.filter((arg) => arg !== '--integration');
   if (!baseRef || extra.length) {
-    throw new Error('Usage: node scripts/installer/release-guard.mjs <base-ref-or-sha> [head-ref]');
+    throw new Error('Usage: node scripts/installer/release-guard.mjs <base-ref-or-sha> [head-ref] [--integration]');
   }
   const repo = process.cwd();
-  const message = checkReleaseGuard({ base: readSnapshot(repo, baseRef), head: readSnapshot(repo, headRef) });
+  const message = checkReleaseGuard({ base: readSnapshot(repo, baseRef), head: readSnapshot(repo, headRef), integration });
   process.stdout.write(`${message}\n`);
 }
 

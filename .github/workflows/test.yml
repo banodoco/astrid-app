@@ -5,7 +5,7 @@ on:
   push:
     branches: [main, release-1, "int/**"]
   pull_request:
-    branches: [main]
+    branches: [main, "int/**"]
   workflow_dispatch:
 
 concurrency:
@@ -13,8 +13,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Install tuple (manifest minus release/required, plus public/install*) and release move together:
+  # Install tuple (manifest minus release/required/version_starts, plus public/install*) and release move together:
   # a tuple change needs release +1 exactly; otherwise release is unchanged. Base is the PR base or the push's before SHA.
+  # PRs into int/** run with --integration: release, required and version_starts stay byte-identical to the base.
   release-guard:
     if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
@@ -28,7 +29,13 @@ jobs:
       - name: Check install tuple and release
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: node scripts/installer/release-guard.mjs "$BASE_SHA" HEAD
+          BASE_REF: ${{ github.base_ref }}
+        run: |
+          if [[ "$BASE_REF" == int/* ]]; then
+            node scripts/installer/release-guard.mjs "$BASE_SHA" HEAD --integration
+          else
+            node scripts/installer/release-guard.mjs "$BASE_SHA" HEAD
+          fi
 
   # Pull requests run only release-guard above; the rest of this workflow runs on push as before.
   vitest:

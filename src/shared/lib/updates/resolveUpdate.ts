@@ -4,7 +4,7 @@ import { SOURCE_SCHEMA_MISMATCH_ACTION } from '../../../integrations/runtime/run
 export type UpdateAction = {
   readonly label: string;
   readonly destination?: 'settings-updates';
-  readonly execute?: 'installer-update';
+  readonly execute?: 'installer-update' | 'local-update';
 };
 
 export type UpdateResolution = {
@@ -65,6 +65,8 @@ function updateActions(input: UpdateResolutionInput, context: ActionContext, sof
   if (input.updateReason === 'recovery-needed' && input.installType === 'installer' && input.updateNowAvailable) {
     return { primary: { label: 'Update', execute: 'installer-update' }, secondary: null };
   }
+  // A fully local install updates its own checkout through the launcher, and only when its status reports self_update.
+  if (input.installType === 'fully-local' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'local-update' }, secondary: COPY_FOR_AGENT };
   if (input.installType === 'installer' && input.updateNowAvailable) return { primary: { label: 'Update now', execute: 'installer-update' }, secondary: COPY_FOR_AGENT };
   if (softRelease && context === 'page') return { primary: settingsAction, secondary: null };
   return COMMAND_ACTIONS;

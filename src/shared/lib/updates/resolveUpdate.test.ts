@@ -35,10 +35,10 @@ describe('resolveUpdate', () => {
     });
   });
 
-  it('keeps Update now, disabled by its reason, when a busy Astrid can update itself', () => {
+  it('suppresses Update now for a busy refusal even when self_update is true, failing safe to the reason line and the command', () => {
     expect(resolveUpdate({ installType: 'installer', updateReason: 'busy', updateNowAvailable: true })).toMatchObject({
       card: 'notice', body: 'Astrid is busy. Wait for the current operation to finish before trying again.',
-      primary: { label: 'Update now', execute: 'installer-update' }, updateReason: 'busy',
+      primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' }, updateReason: 'busy',
     });
   });
 
@@ -183,7 +183,8 @@ const CHECKOUTS = 'update your checkouts';
 const INSTALL_TYPES: readonly InstallType[] = ['installer', 'fully-local', 'pinokio', 'source'];
 
 type Situation = 'upToDate' | 'releaseBehind' | 'requiredUpdate' | 'schemaMismatch' | 'midSessionSchema' | 'newer'
-  | 'busyRefusal' | 'needsRepair' | 'autostartOffRefusal' | 'sourceRefusal' | 'unknownRefusal' | 'runtimeDown' | 'pageStale';
+  | 'busyRefusal' | 'needsRepair' | 'recoveryNeeded' | 'autostartOffRefusal' | 'sourceRefusal' | 'unknownRefusal'
+  | 'newerBusyRefusal' | 'newerNeedsRepair' | 'runtimeDown' | 'pageStale';
 
 /** The status inputs for each situation. Releases 9 and earlier arrive with no self_update, so the table passes updateNowAvailable false. */
 const SITUATIONS: Record<Situation, UpdateResolutionInput> = {
@@ -195,9 +196,13 @@ const SITUATIONS: Record<Situation, UpdateResolutionInput> = {
   newer: { installedRelease: 11, servedRelease: 10 },
   busyRefusal: { installedRelease: 10, servedRelease: 10, releaseBehind: true, updateReason: 'busy' },
   needsRepair: { installedRelease: 10, servedRelease: 10, updateReason: 'needs-repair' },
+  recoveryNeeded: { installedRelease: 10, servedRelease: 10, updateReason: 'recovery-needed' },
   autostartOffRefusal: { installedRelease: 10, servedRelease: 10, updateReason: 'autostart-off' },
   sourceRefusal: { installedRelease: 10, servedRelease: 10, updateReason: 'source' },
   unknownRefusal: { installedRelease: 10, servedRelease: 10, releaseBehind: true, updateReason: 'self-update-unavailable' },
+  // Defect cases: a release newer than served shows no action, whatever the installer reason says.
+  newerBusyRefusal: { installedRelease: 11, servedRelease: 10, updateReason: 'busy' },
+  newerNeedsRepair: { installedRelease: 11, servedRelease: 10, updateReason: 'needs-repair' },
   runtimeDown: { runtime: 'unreachable' },
   pageStale: { pageStale: true, releaseBehind: true },
 };
@@ -229,6 +234,9 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     newer: both(NEWER),
     busyRefusal: both(COMMAND_NOTICE),
     needsRepair: both(COMMAND_UPDATE),
+    recoveryNeeded: both(COMMAND_UPDATE),
+    newerBusyRefusal: both(NEWER),
+    newerNeedsRepair: both(NEWER),
     autostartOffRefusal: both(['notice', null, null]),
     sourceRefusal: both(['notice', null, null]),
     unknownRefusal: both(COMMAND_NOTICE),
@@ -245,6 +253,9 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     // Refusal reasons come from the installer status only, so a fully local install follows its release rules.
     busyRefusal: SOFT,
     needsRepair: both(NONE),
+    recoveryNeeded: both(NONE),
+    newerBusyRefusal: both(NEWER),
+    newerNeedsRepair: both(NEWER),
     autostartOffRefusal: both(NONE),
     sourceRefusal: both(NONE),
     unknownRefusal: SOFT,
@@ -260,6 +271,9 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     newer: both(NEWER),
     busyRefusal: both(['notice', PINOKIO, null]),
     needsRepair: both(NONE),
+    recoveryNeeded: both(NONE),
+    newerBusyRefusal: both(NEWER),
+    newerNeedsRepair: both(NEWER),
     autostartOffRefusal: both(NONE),
     sourceRefusal: both(NONE),
     unknownRefusal: both(['notice', PINOKIO, null]),
@@ -276,6 +290,9 @@ const DECISION_TABLE: Record<InstallType, Record<Situation, Row>> = {
     newer: both(NONE),
     busyRefusal: both(NONE),
     needsRepair: both(NONE),
+    recoveryNeeded: both(NONE),
+    newerBusyRefusal: both(NONE),
+    newerNeedsRepair: both(NONE),
     autostartOffRefusal: both(NONE),
     sourceRefusal: both(NONE),
     unknownRefusal: both(NONE),
@@ -352,5 +369,19 @@ describe('update decision table: install type × situation', () => {
     }
     // A source checkout has no release, so its newer-than-served state is never a card.
     expect(resolveUpdate({ ...SITUATIONS.newer, installType: 'source' }, 'page')).toMatchObject({ card: 'none', primary: null, secondary: null });
+  });
+
+  it('suppresses Update now for every installer refusal even when self_update is true, and only recovery-needed starts the update', () => {
+    const refusals = ['busyRefusal', 'needsRepair', 'autostartOffRefusal', 'sourceRefusal', 'unknownRefusal', 'newerBusyRefusal', 'newerNeedsRepair'] as const;
+    for (const situation of refusals) {
+      for (const context of ['page', 'settings'] as const) {
+        const resolution = resolveUpdate({ ...SITUATIONS[situation], installType: 'installer', updateNowAvailable: true }, context);
+        expect(cellOf(resolution), `${situation} / ${context}`).toEqual(DECISION_TABLE.installer[situation][context]);
+        expect(resolution.primary?.execute, `${situation} / ${context}`).toBeUndefined();
+        expect(JSON.stringify(resolution), `${situation} / ${context}`).not.toContain('Update now');
+      }
+    }
+    expect(resolveUpdate({ ...SITUATIONS.recoveryNeeded, installType: 'installer', updateNowAvailable: true }, 'settings').primary)
+      .toEqual({ label: 'Update', execute: 'installer-update' });
   });
 });

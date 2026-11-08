@@ -11,6 +11,8 @@ export interface UpdateStatus {
   readonly behind: boolean;
   /** The Runtime's startup identity `managed_by` (`source`, `pinokio`, or null for a native install); null for the local launcher. */
   readonly managedBy: string | null;
+  /** The fully local launcher's report: true only when an installed backend can run the update. Absent for the hosted check. */
+  readonly selfUpdate?: boolean;
   readonly resolution: UpdateResolutionInput;
 }
 
@@ -67,6 +69,6 @@ export async function checkLocalUpdate(fetchImpl: typeof fetch = fetch): Promise
   const servedRelease = body.servedRelease === undefined ? 0 : releaseNumber(body.servedRelease);
   const requiredRelease = body.requiredRelease === undefined ? undefined : releaseNumber(body.requiredRelease);
   const requiredReason = typeof body.requiredReason === 'string' ? body.requiredReason : undefined;
-  return { release, app: body.app, servedRelease, servedApp: body.servedApp, behind: body.behind, managedBy: null,
+  return { release, app: body.app, servedRelease, servedApp: body.servedApp, behind: body.behind, managedBy: null, selfUpdate: body.self_update === true,
     resolution: { installedRelease: release, servedRelease, ...(requiredRelease === undefined ? {} : { requiredRelease, requiredReason }), releaseBehind: body.behind } };
 }

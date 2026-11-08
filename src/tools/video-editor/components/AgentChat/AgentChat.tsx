@@ -337,9 +337,12 @@ function AvailableAgentChatPanel({
   const newChatMenuRef = useRef<NewChatMenuHandle>(null);
   // The action pane stays shown while any header popover is open.
   const headerOverlaysRef = useRef({ menu: false, model: false, newChat: false });
+  // Whether a chat or new-chat menu is open: its popover shows an out-of-date agents list as its own card.
+  const [headerMenuOpen, setHeaderMenuOpen] = useState(false);
   const setHeaderOverlayOpen = useCallback((overlay: 'menu' | 'model' | 'newChat', open: boolean) => {
     headerOverlaysRef.current[overlay] = open;
     const overlays = headerOverlaysRef.current;
+    setHeaderMenuOpen(overlays.menu || overlays.newChat);
     onSessionSelectorOpenChange?.(overlays.menu || overlays.model || overlays.newChat);
   }, [onSessionSelectorOpenChange]);
   const agentCanBrowse = useMemo(() => ({ hermes: Boolean(localAgents.data?.agents.find(agent => agent.id === 'hermes')?.models.length) }), [localAgents.data]);
@@ -719,6 +722,9 @@ function AvailableAgentChatPanel({
   }, [turnFailure, writableChat, chatAgent, activeSessionId, refetchLocalAgents]);
   // One update flow: a reply from the local chat service this page can't read also puts Settings on Update Astrid
   // (it never gates the app). The next chat read that comes back readable clears it.
+  // One out-of-date card per error: while a header menu is open with the out-of-date agents list, that menu shows the card
+  // and the chat's own update cards wait until it closes.
+  const menuShowsUpdate = headerMenuOpen && isChatUpdateError(localAgents.error);
   const chatServiceOutOfDate = startFailure?.updateNeeded === true
     || [localAgents.error, ...chatFailures].some(isChatUpdateError);
   const chatReadSucceeded = localAgents.isSuccess || sessions.isSuccess;
@@ -1313,7 +1319,7 @@ function AvailableAgentChatPanel({
           {isProcessing && <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" aria-hidden="true" />}
         </div>
       </div>
-      {startFailure && !showSetupCard && !isAgentSetupError(startFailure.error) && (
+      {startFailure && !showSetupCard && !isAgentSetupError(startFailure.error) && !(startFailure.updateNeeded && menuShowsUpdate) && (
         <div role="alert" className="border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
           {startFailure.updateNeeded
             ? <ChatUpdateNeeded detail={startFailure.details} />
@@ -1628,7 +1634,7 @@ function AvailableAgentChatPanel({
           <p className="mb-2 px-1 text-xs text-muted-foreground">{CHAT_UNAVAILABLE}</p>
         )}
 
-        {!agentBroken && !showSetupCard && !showSetupOnHost && !isProcessing && !sendMessage.isPending && !isCancelled && !chatUnavailable && !isAgentSetupError(turnFailure) && !(startFailure?.updateNeeded === true && isChatUpdateError(turnFailure)) && (turnFailure || (activeStatus === 'error' && setupDone?.sessionId !== activeSessionId)) && (
+        {!agentBroken && !showSetupCard && !showSetupOnHost && !isProcessing && !sendMessage.isPending && !isCancelled && !chatUnavailable && !isAgentSetupError(turnFailure) && !(isChatUpdateError(turnFailure) && (menuShowsUpdate || startFailure?.updateNeeded === true)) && (turnFailure || (activeStatus === 'error' && setupDone?.sessionId !== activeSessionId)) && (
           <div role="alert" className="mb-2 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
             {isChatUpdateError(turnFailure) ? <ChatUpdateNeeded detail={turnFailure.message} /> : turnFailureMessage}
             {(sessions.error || projectChat.error) && (

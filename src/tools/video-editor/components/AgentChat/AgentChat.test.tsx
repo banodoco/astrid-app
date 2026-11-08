@@ -539,6 +539,28 @@ describe('AgentChat', () => {
       expect(within(alerts[0]).queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
       expect(within(alerts[0]).getByText(error.message)).toBeInTheDocument();
     });
+    it.each([
+      ['chat menu', /^Chat: /],
+      ['new-chat menu', 'Choose the agent and model for new chats'],
+    ] as const)('shows one out-of-date card when the %s and a chat reply report the same old Astrid', async (_menu, trigger) => {
+      const { state, localAgents } = setupState();
+      const view = renderSetupChat();
+      await getInput();
+      localAgents.error = new BridgeRouteError('List local agents', 409, { error: BRIDGE_CONTRACT_VERSION_MISMATCH_CODE, detail: 'bridge protocol version differs' });
+      const sendError = new BridgeRouteError('Prompt', 409, { error: BRIDGE_CONTRACT_VERSION_MISMATCH_CODE, detail: 'bridge protocol version differs' });
+      state.sendMessage.localError = sendError.message;
+      state.sendMessage.error = sendError;
+      view.refresh();
+      expect(screen.getAllByRole('button', { name: 'See updates' })).toHaveLength(1);
+
+      await userEvent.setup().click(screen.getByRole('button', { name: trigger }));
+      await screen.findByRole('dialog');
+      expect(screen.getAllByRole('button', { name: 'See updates', hidden: true })).toHaveLength(1);
+
+      await userEvent.setup().keyboard('{Escape}');
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      expect(screen.getAllByRole('button', { name: 'See updates' })).toHaveLength(1);
+    });
     it('resets createSession and dismisses its setup error when setup completes', async () => {
       const { state, localAgents } = setupState();
       const view = renderSetupChat();

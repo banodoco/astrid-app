@@ -500,7 +500,7 @@ export const RUNTIME_CONNECTION_COPY: RuntimeConnectionCopy = {
 
   updateNeeded: {
     title: 'Update Astrid',
-    sentence: 'This page needs a newer Astrid. Give these instructions to your coding agent to update it.',
+    sentence: 'This page needs a newer Astrid.',
     pinokioSentence: 'This page needs a newer Astrid. Update in Pinokio.',
   },
 

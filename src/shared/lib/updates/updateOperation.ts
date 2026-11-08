@@ -1,4 +1,4 @@
-import { AstridRuntimeClient, INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
+import { AstridRuntimeClient, INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateOutcome, type InstallerUpdateReason, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
@@ -12,18 +12,62 @@ export interface UpdateOperationSnapshot {
   readonly error: string | null;
   readonly fresh: boolean;
   readonly restartRequired: boolean;
+  /** The Runtime's refusal code from the last definite POST refusal, kept for diagnostics. */
+  readonly refusalCode: string | null;
+}
+
+/** Runtime refusal codes with a line of their own. Any other code reads as self-update-unavailable. */
+const RUNTIME_REFUSAL_REASONS: ReadonlySet<string> = new Set(['busy', 'autostart-off', 'unsupported-service-manager', 'source']);
+/** A 409's details.kind reports how an earlier update ended. It is an outcome, never a refusal reason. */
+const CONFLICT_OUTCOMES: ReadonlySet<string> = new Set(['updated', 'rolled_back', 'failed']);
+const OUTCOME_MESSAGES: Readonly<Record<InstallerUpdateOutcome, string>> = {
+  updated: 'Astrid updated. Reload to continue.',
+  rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
+  failed: 'The update did not complete. Check diagnostics before trying again.',
+};
+
+function installerReasonOf(code: string): InstallerUpdateReason {
+  return RUNTIME_REFUSAL_REASONS.has(code) ? code as InstallerUpdateReason : 'self-update-unavailable';
 }
 
 export function installerUpdateReasonOf(status: InstallerUpdateStatus | null | undefined): InstallerUpdateReason | null {
   if (!status) return null;
-  if (status.state === 'recovery-needed') return 'recovery-needed';
-  if (status.reason === 'busy' || status.reason === 'autostart-off' || status.reason === 'unsupported-service-manager') return status.reason;
-  return null;
+  // Without self_update this Astrid cannot run the recovery Update, so the recovery reads as a repair.
+  if (status.state === 'recovery-needed') return status.self_update === true ? 'recovery-needed' : 'needs-repair';
+  return status.reason ? installerReasonOf(status.reason) : null;
 }
 
+/** Only a Runtime that reports self_update can run an in-app update; a refusal reason keeps it from starting. */
 export function canStartInstallerUpdate(status: InstallerUpdateStatus | null | undefined): boolean {
-  const refusal = installerUpdateReasonOf(status);
-  return Boolean(status && (status.state === 'recovery-needed' || (status.available && !refusal)));
+  if (!status || status.self_update !== true) return false;
+  return status.state === 'recovery-needed' || installerUpdateReasonOf(status) === null;
+}
+
+/** The Runtime's refusal code: details.reason only. */
+function refusalCodeOf(cause: unknown): string | null {
+  if (!(cause instanceof ApiError)) return null;
+  const value = cause.details?.reason;
+  return typeof value === 'string' && value ? value : null;
+}
+
+/** The Runtime's own message, without the code ApiError prefixes to it. */
+function runtimeMessageOf(cause: ApiError): string {
+  const prefix = `${cause.code}: `;
+  const message = cause.message.startsWith(prefix) ? cause.message.slice(prefix.length) : cause.message;
+  return /^HTTP \d+$/.test(message) ? '' : message;
+}
+
+/** A reason with its own line shows that line. A code with no line shows the generic line and the Runtime's message. A 409 shows the earlier outcome. */
+function refusalMessageOf(cause: unknown, code: string | null): string {
+  if (!(cause instanceof ApiError)) return UPDATE_START_UNAVAILABLE;
+  if (code) {
+    const reason = installerReasonOf(code);
+    if (reason !== 'self-update-unavailable') return INSTALLER_UPDATE_REASON_MESSAGES[reason];
+    return [INSTALLER_UPDATE_REASON_MESSAGES[reason], runtimeMessageOf(cause)].filter(Boolean).join(' ');
+  }
+  const kind = cause.details?.kind;
+  if (cause.status === 409 && typeof kind === 'string' && CONFLICT_OUTCOMES.has(kind)) return OUTCOME_MESSAGES[kind as InstallerUpdateOutcome];
+  return UPDATE_START_UNAVAILABLE;
 }
 
 /** Translate the Runtime's transaction vocabulary into a status a person can act on. */
@@ -32,12 +76,7 @@ export function installerUpdateStatusMessage(status: InstallerUpdateStatus | nul
   const reason = installerUpdateReasonOf(status);
   if (reason) return INSTALLER_UPDATE_REASON_MESSAGES[reason];
   if (status.state === 'active') return 'Update in progress. Astrid may disconnect while it restarts.';
-  if (status.state === 'terminal') {
-    if (status.outcome === 'updated') return 'Astrid updated. Reload to continue.';
-    if (status.outcome === 'rolled_back') return 'The update did not finish. Astrid was restored to its previous version.';
-    if (status.outcome === 'failed') return 'The update did not complete. Check diagnostics before trying again.';
-    return 'The update finished. Check diagnostics for details.';
-  }
+  if (status.state === 'terminal') return (status.outcome ? OUTCOME_MESSAGES[status.outcome] : undefined) ?? 'The update finished. Check diagnostics for details.';
   return null;
 }
 
@@ -46,7 +85,7 @@ const UPDATE_START_UNAVAILABLE = 'Astrid could not start the update. Check its s
 
 /** Page-owned operation, independent of any mounted notice or Settings panel. */
 export class UpdateOperation {
-  private snapshot: UpdateOperationSnapshot = { health: null, status: null, releaseStatus: null, pending: false, error: null, fresh: false, restartRequired: false };
+  private snapshot: UpdateOperationSnapshot = { health: null, status: null, releaseStatus: null, pending: false, error: null, fresh: false, restartRequired: false, refusalCode: null };
   private listeners = new Set<() => void>();
   private reading: Promise<void> | null = null;
   private posting = false;
@@ -114,7 +153,7 @@ export class UpdateOperation {
   start = async (validateDrafts: () => boolean): Promise<void> => {
     if (this.posting || this.snapshot.pending || !this.snapshot.fresh || !canStartInstallerUpdate(this.snapshot.status)) return;
     this.posting = true;
-    this.publish({ pending: true, error: null });
+    this.publish({ pending: true, error: null, refusalCode: null });
     // Publishing can invoke subscribers synchronously. Recheck after it and
     // directly before dispatch; a local refusal is not an uncertain POST.
     let admitted = false;
@@ -130,15 +169,16 @@ export class UpdateOperation {
     try {
       const accepted = await this.client.startInstallerUpdate();
       this.operationId = accepted.operation_id;
-      this.publish({ status: { available: true, state: 'active', operation_id: accepted.operation_id, result: accepted.message } });
+      this.publish({ status: { available: true, self_update: true, state: 'active', operation_id: accepted.operation_id, result: accepted.message } });
     } catch (cause) {
       // Never retry a POST, even when its acknowledgement never arrived.
+      const code = refusalCodeOf(cause);
       const definiteRefusal = cause instanceof ApiError && cause.status >= 400 && cause.status < 500
-        && !String(cause.details?.reason).includes('acknowledgement-unknown');
+        && !String(code).includes('acknowledgement-unknown');
       this.uncertain = !definiteRefusal;
-      const error = UPDATE_START_UNAVAILABLE;
+      const error = definiteRefusal ? refusalMessageOf(cause, code) : UPDATE_START_UNAVAILABLE;
       if (definiteRefusal) this.refusal = error;
-      this.publish({ pending: !definiteRefusal, fresh: false, error });
+      this.publish({ pending: !definiteRefusal, fresh: false, error, refusalCode: definiteRefusal ? code : null });
     } finally {
       this.posting = false;
       await this.refresh();

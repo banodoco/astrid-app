@@ -7,6 +7,7 @@ import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 import { installCommand, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
 import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/client.ts';
 
 const installerResolutions = [
   ['Update now', resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'installer', updateNowAvailable: true })],
@@ -114,5 +115,27 @@ describe('update resolution Settings actions', () => {
       unregister();
       vi.unstubAllGlobals();
     }
+  });
+});
+
+describe('update resolution in-app availability', () => {
+  it('shows Update now disabled, and does not start it, while a busy Astrid refuses the start', () => {
+    const start = vi.fn(async () => undefined);
+    const operation = { available: true, pending: false, start, updateReason: 'busy' } as unknown as InstallerUpdateView;
+    const resolution = resolveUpdate({ installType: 'installer', updateReason: 'busy', updateNowAvailable: true });
+    render(<UpdateResolutionActions resolution={resolution} operation={operation} />);
+    const button = screen.getByRole('button', { name: 'Update now' });
+    expect(button).toBeDisabled();
+    fireEvent.click(button);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('hides Update now and shows the one-line reason with the command when Astrid cannot update itself', () => {
+    const operation = { available: false, pending: false, start: vi.fn(), updateReason: undefined } as unknown as InstallerUpdateView;
+    const resolution = resolveUpdate({ installType: 'installer', releaseBehind: true, installedRelease: 3, servedRelease: 4 }, 'settings');
+    render(<UpdateResolutionActions resolution={resolution} operation={operation} />);
+    expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
+    expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable'])).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 });

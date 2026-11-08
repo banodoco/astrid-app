@@ -151,7 +151,8 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
             : currentStatus ? `Astrid is up to date (Release ${currentStatus.release})` : 'Astrid is up to date');
   // A plain release notice only restates the status line; a required or schema reason, or a Runtime's update reason, is the detail.
   const releaseNotice = currentResolution?.card === 'notice' && !currentResolution.updateReason;
-  const detail = state === 'ready' && currentResolution?.body && currentResolution.card !== 'newer' && !releaseNotice ? currentResolution.body : null;
+  // A Runtime reason is already the status line, so its sentence is not repeated as the detail.
+  const detail = state === 'ready' && currentResolution?.body && currentResolution.card !== 'newer' && !releaseNotice && currentResolution.body !== operationMessage ? currentResolution.body : null;
   // A card other than an update (reload, restart, error) names itself above its sentence; an update is the status line.
   const heading = state === 'ready' && currentResolution?.title && !updateCard ? currentResolution.title : null;
   const actionsFor = state === 'ready' && currentResolution && (currentResolution.card !== 'none' || operation.status?.state !== 'none') ? currentResolution : null;

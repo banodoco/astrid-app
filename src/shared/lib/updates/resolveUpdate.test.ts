@@ -15,11 +15,42 @@ describe('installTypeOf', () => {
 describe('resolveUpdate', () => {
   it.each([
     ['busy', 'Astrid is busy. Wait for the current operation to finish before trying again.'],
-    ['autostart-off', 'Automatic startup is off. Turn it on before updating Astrid here.'],
     ['unsupported-service-manager', 'In-app updates require user systemd 254 or newer on Linux.'],
-  ] as const)('maps the %s refusal reason to its exact explanation without an action', (updateReason, body) => {
+    ['self-update-unavailable', "Astrid can't update itself on this computer. Run the command below to update it."],
+  ] as const)('maps the %s refusal reason to its exact explanation and the command when Update now is not offered', (updateReason, body) => {
     expect(resolveUpdate({ installType: 'installer', updateReason, releaseBehind: true, updateNowAvailable: false })).toMatchObject({
-      card: 'notice', body, primary: null, secondary: null, updateReason,
+      card: 'notice', body, primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' }, updateReason,
+    });
+  });
+
+  it('shows a needs-repair recovery as an update card with the command and no in-app Update', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', updateNowAvailable: false })).toMatchObject({
+      card: 'update', body: 'Astrid needs repair before it can update.', primary: { label: 'Copy instructions for your agent' }, updateReason: 'needs-repair',
+    });
+  });
+
+  it('gives a source refusal its own line and no installer command', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'source', updateNowAvailable: false })).toMatchObject({
+      card: 'notice', body: 'This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.', primary: null, secondary: null, updateReason: 'source',
+    });
+  });
+
+  it('keeps Update now, disabled by its reason, when a busy Astrid can update itself', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'busy', updateNowAvailable: true })).toMatchObject({
+      card: 'notice', body: 'Astrid is busy. Wait for the current operation to finish before trying again.',
+      primary: { label: 'Update now', execute: 'installer-update' }, updateReason: 'busy',
+    });
+  });
+
+  it('keeps autostart-off without an action, since its setup command is shown on its own', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'autostart-off', updateNowAvailable: false })).toMatchObject({
+      card: 'notice', primary: null, secondary: null, updateReason: 'autostart-off',
+    });
+  });
+
+  it('offers the command for recovery-needed when Astrid cannot update itself', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: false })).toMatchObject({
+      card: 'update', primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' },
     });
   });
 

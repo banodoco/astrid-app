@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN_PINOKIO_ACTION, type InstallType, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
@@ -7,7 +8,7 @@ import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
-import { installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
+import { installerUpdateStatusMessage, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
 
 /**
  * Shown with the command when this Astrid cannot update itself and no refusal reason explains why. It mirrors the
@@ -29,14 +30,17 @@ export function openUpdatesSettings() {
  */
 export function UpdateResolutionActions({ resolution, operation, context = 'page', installType }: { readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView; readonly context?: 'page' | 'settings'; readonly installType?: InstallType }) {
   const guarded = useGuardedReload();
+  const localUpdate = pageLocalUpdate();
+  const localState = useSyncExternalStore(localUpdate.subscribe, localUpdate.getSnapshot, localUpdate.getSnapshot);
   const actions = [resolution.primary, resolution.secondary].filter((action) => action !== null);
-  if (actions.length === 0 && resolution.updateReason !== 'autostart-off' && !operation?.pending && !operation?.status?.result && !operation?.error) return null;
+  if (actions.length === 0 && localState.phase === 'idle' && resolution.updateReason !== 'autostart-off' && !operation?.pending && !operation?.status?.result && !operation?.error) return null;
 
   const commandOptions = actions.some((action) => action.label === COPY_FOR_AGENT_ACTION || action.label === RUN_IT_YOURSELF_ACTION);
   const route = actions.find((action) => action.destination === 'settings-updates');
   const installSpecific = actions.find((action) => action.label === UPDATE_IN_PINOKIO_ACTION || action.label === SOURCE_SCHEMA_MISMATCH_ACTION);
   const reload = actions.find((action) => action.label === RELOAD_ACTION);
   const execute = actions.find((action) => action.execute === 'installer-update');
+  const executeLocal = actions.find((action) => action.execute === 'local-update');
   // A refusal reason (busy, for one) shows Update now disabled; recovery is the one reason that still starts the update.
   const blocked = operation?.updateReason !== undefined && operation.updateReason !== 'recovery-needed';
   // Details opens Settings Updates; a card whose action already goes there (See updates) does not repeat it.
@@ -48,9 +52,21 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     if (validate) await operation?.start(validate);
   };
 
+  // A fully local install updates through its launcher. Drafts are saved first; a rolled-back editor is replaced too, so both outcomes reload.
+  const updateLocally = async () => {
+    if (!await guarded.flush()) return;
+    const outcome = await localUpdate.start();
+    if (outcome.phase === 'done' && outcome.status !== 'up-to-date') await guarded.reload();
+  };
+
   return <div className="space-y-2">
     {reload && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{reload.label}</Button>}
     {execute && operation?.available && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={blocked || operation.pending || guarded.pending} onClick={() => void startUpdate()}>{operation.pending ? 'Updating Astrid…' : execute.label}</Button>}
+    {executeLocal && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={localState.phase === 'running' || guarded.pending} onClick={() => void updateLocally()}>{localState.phase === 'running' ? 'Updating Astrid…' : executeLocal.label}</Button>}
+    {localState.phase === 'running' && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
+    {localState.phase === 'done' && <p role="status">{localState.message}</p>}
+    {localState.phase === 'done' && localState.status !== 'up-to-date' && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
+    {(localState.phase === 'failed' || localState.phase === 'refused') && <p role="alert">{localState.message}</p>}
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
     {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}

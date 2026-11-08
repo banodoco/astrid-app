@@ -130,6 +130,18 @@ describe('resolveUpdate', () => {
     });
   });
 
+  it('offers a fully local install Update now only when its status reports self_update, with the command as the secondary', () => {
+    for (const context of ['page', 'settings'] as const) {
+      const on = resolveUpdate({ releaseBehind: true, installType: 'fully-local', updateNowAvailable: true }, context);
+      expect(on.primary).toEqual({ label: 'Update now', execute: 'local-update' });
+      expect(on.secondary).toEqual({ label: 'Copy instructions for your agent' });
+      const required = resolveUpdate({ installedRelease: 3, requiredRelease: 4, requiredReason: 'fix', installType: 'fully-local', updateNowAvailable: true }, context);
+      expect(required.primary).toEqual({ label: 'Update now', execute: 'local-update' });
+      const off = resolveUpdate({ releaseBehind: true, installType: 'fully-local', updateNowAvailable: false }, context);
+      expect(JSON.stringify(off)).not.toContain('local-update');
+    }
+  });
+
   it('gives Pinokio only its own Update, on every card and in both contexts', () => {
     const inputs = [
       { compatibility: { kind: 'schema' as const, detail: 'old' } },

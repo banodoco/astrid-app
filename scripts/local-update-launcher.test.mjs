@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
+import { LocalPageUpdate } from '../src/shared/lib/updates/updateOperation.ts';
+import { createLocalUpdatePagePlugin } from '../config/vite/localUpdatePage.ts';
 import { readGeneratedSchemaDigest } from './runtime-schema-guard.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -102,7 +104,7 @@ if (args[0] === 'run' && args[1] === 'build') {
 const preview = args.includes('preview');
 const mode = preview ? 'preview' : 'dev';
 const outDir = preview ? args[args.indexOf('--outDir') + 1] : path.join(process.cwd(), 'dist');
-fs.appendFileSync(process.env.FAKE_VITE_LOG, JSON.stringify({ mode, cwd: process.cwd(), outDir, pid: process.pid }) + '\\n');
+fs.appendFileSync(process.env.FAKE_VITE_LOG, JSON.stringify({ mode, cwd: process.cwd(), outDir, pid: process.pid, selfUpdate: process.env.ASTRID_LOCAL_SELF_UPDATE }) + '\\n');
 const server = http.createServer((request, response) => {
   if (request.url === '/build.json') {
     try { response.writeHead(200, { 'Content-Type': 'application/json' }); response.end(fs.readFileSync(path.join(outDir, 'build.json'))); }
@@ -590,6 +592,7 @@ test('the page route updates through the launcher, restarts the fake editor on t
   assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.targetSha, 2), { app: fixture.targetSha, release: 2 });
   const starts = (await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.equal(starts.length, 2);
+  assert.equal(starts[0].selfUpdate, '1', 'an installed backend lets the status report self_update');
   assert.notEqual(starts[0].pid, starts[1].pid);
   assert.throws(() => process.kill(starts[0].pid, 0), { code: 'ESRCH' }, 'the old editor was stopped before the update');
   const after = JSON.parse(await readFile(join(fixture.app, (await git(fixture.app, 'rev-parse', '--git-path', 'astrid-local-update.json')).stdout.trim()), 'utf8'));
@@ -611,5 +614,52 @@ test('the page route refuses overlapping local edits as dirty and leaves the tre
   assert.equal(await gitSha(fixture.app), fixture.oldSha);
   assert.equal(await readFile(join(fixture.app, 'public/install-manifest.json'), 'utf8'), '{"release":1,"edited":true}\n');
   assert.equal((await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').length, 1, 'the editor was not restarted');
+  await started.stop();
+});
+
+test('a Runtime that is not an installed backend starts the editor with self_update off', { timeout: 60_000 }, async (t) => {
+  const fixture = await createFixture(); t.after(fixture.close);
+  const outside = await mkdtemp(join(tmpdir(), 'astrid-source-runtime-'));
+  t.after(() => rm(outside, { recursive: true, force: true }));
+  const sourcePython = join(outside, 'python');
+  await copyFile(fixture.python, sourcePython);
+  await chmod(sourcePython, 0o755);
+  fixture.env.ASTRID_RUNTIME_PYTHON = sourcePython;
+  const started = launch(fixture); t.after(started.stop);
+  await started.waitFor(() => started.output.stdout.includes('Local App:'));
+  await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
+  const starts = (await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
+  assert.equal(starts[0].selfUpdate, '0');
+  await started.stop();
+});
+
+test('Update now: the page client updates through the Vite page endpoint and the dev:local launcher', { timeout: 60_000 }, async (t) => {
+  const fixture = await createFixture(); t.after(fixture.close);
+  const started = launch(fixture); t.after(started.stop);
+  await started.waitFor(() => started.output.stdout.includes('Local App:'));
+  await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
+  const origin = `http://127.0.0.1:${fixture.env.PORT}`;
+  const flag = process.env.ASTRID_LOCAL_UPDATE_STATUS;
+  process.env.ASTRID_LOCAL_UPDATE_STATUS = '1';
+  let middleware;
+  createLocalUpdatePagePlugin().configureServer({ config: { root: fixture.app, server: { port: Number(fixture.env.PORT) } }, middlewares: { use: (handler) => { middleware = handler; } } });
+  if (flag === undefined) delete process.env.ASTRID_LOCAL_UPDATE_STATUS; else process.env.ASTRID_LOCAL_UPDATE_STATUS = flag;
+  // The page's own client code. Its same-origin endpoint is the real Vite middleware; the launcher url is called as a browser would, with the page origin.
+  const pageFetch = async (input, init = {}) => {
+    if (input !== '/__astrid/local-update-page') return fetch(input, { ...init, headers: { ...init.headers, Origin: origin } });
+    const request = { method: init.method, url: input, headers: { host: `127.0.0.1:${fixture.env.PORT}`, origin, 'sec-fetch-site': 'same-origin', 'content-length': '0', 'content-type': 'application/json', accept: 'application/json' } };
+    return new Promise((resolveResponse, reject) => {
+      const headers = {};
+      const response = { statusCode: 200, setHeader: (name, value) => { headers[name] = value; }, end: (body) => resolveResponse(new Response(body, { status: response.statusCode })) };
+      Promise.resolve(middleware(request, response, () => reject(new Error('page endpoint did not answer')))).catch(reject);
+    });
+  };
+  const page = new LocalPageUpdate(pageFetch);
+  const outcome = await page.start();
+  assert.equal(outcome.phase, 'done', JSON.stringify(outcome));
+  assert.equal(outcome.status, 'updated');
+  assert.equal(outcome.message, 'Astrid updated.');
+  assert.equal(await gitSha(fixture.app), fixture.targetSha);
+  assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.targetSha, 2), { app: fixture.targetSha, release: 2 });
   await started.stop();
 });

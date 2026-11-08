@@ -128,7 +128,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
   const compatibility = compatibilityFor(statusInstallType);
-  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available, updateReason: operation.updateReason }, 'settings') : resolution;
+  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available || statusInstallType === 'fully-local' && currentStatus.selfUpdate === true, updateReason: operation.updateReason }, 'settings') : resolution;
   const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1];
   const resultLabels: Record<string, string> = {
     updated: 'Astrid updated.',

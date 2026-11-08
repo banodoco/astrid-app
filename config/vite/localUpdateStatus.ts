@@ -110,7 +110,7 @@ type LocalUpdateStatusFailureStage = 'upstream_fetch' | 'served_manifest_validat
 // One handler serves the dev server and `vite preview` alike: the same request checks, the same bounded
 // upstream reads and the same local lookups. `portOf` names the port that server listens on, which the Host check
 // must match. It is read per request, because Vite resolves the bound port only after the middleware is registered.
-function localUpdateStatusMiddleware(server: { config: { root: string } }, portOf: () => number, manifestPath: string) {
+function localUpdateStatusMiddleware(server: { config: { root: string } }, portOf: () => number, manifestPath: string, selfUpdate: boolean) {
   return async (request: IncomingMessage, response: ServerResponse, next: () => void): Promise<void> => {
     if ((request.url ?? '').split('?')[0] !== STATUS_PATH) return next();
     if (!validLocalStatusRequest(request.method, request.url, request.headers.host, request.headers.origin, request.headers['sec-fetch-site'], request.headers['content-length'], request.headers['transfer-encoding'], request.headers['content-type'], request.headers.accept, portOf())) {
@@ -163,7 +163,9 @@ function localUpdateStatusMiddleware(server: { config: { root: string } }, portO
       const release = readLocalRelease(await readFile(manifestPath, 'utf8'));
       const { stdout: localHead } = await execFileAsync('git', ['rev-parse', 'HEAD'], { cwd: server.config.root, timeout: 2000, maxBuffer: 1024 });
       const ancestry = await isServedAppAncestor(server.config.root, served.app);
-      const body = JSON.stringify({ app: localHead.trim(), release, ...requirement, servedApp: served.app, servedRelease: served.release, behind: localUpdateBehind(served.release, release, ancestry) });
+      const body = JSON.stringify({ app: localHead.trim(), release, ...requirement, servedApp: served.app, servedRelease: served.release, behind: localUpdateBehind(served.release, release, ancestry),
+        // UR-1's one rule: Update now only when the status reports self_update. Without an installed backend the launcher cannot update.
+        self_update: selfUpdate, ...(selfUpdate ? {} : { reason: 'source' }) });
       response.statusCode = 200;
       response.setHeader('Content-Type', 'application/json; charset=utf-8');
       response.setHeader('Cache-Control', 'no-store');
@@ -177,15 +179,17 @@ function localUpdateStatusMiddleware(server: { config: { root: string } }, portO
 
 export function createLocalUpdateStatusPlugin({ manifestPath }: { manifestPath: string }): Plugin {
   const enabled = process.env.ASTRID_LOCAL_UPDATE_STATUS === '1';
+  // The launcher sets this only when an installed backend can run the update (see dev-local-workspace.mjs).
+  const selfUpdate = process.env.ASTRID_LOCAL_SELF_UPDATE === '1';
   return {
     name: 'astrid-local-update-status',
     configurePreviewServer(server) {
       if (!enabled) return;
-      server.middlewares.use(localUpdateStatusMiddleware(server, () => server.config.preview.port ?? DEFAULT_PREVIEW_PORT, manifestPath));
+      server.middlewares.use(localUpdateStatusMiddleware(server, () => server.config.preview.port ?? DEFAULT_PREVIEW_PORT, manifestPath, selfUpdate));
     },
     configureServer(server) {
       if (!enabled) return;
-      server.middlewares.use(localUpdateStatusMiddleware(server, () => server.config.server.port ?? DEFAULT_DEV_PORT, manifestPath));
+      server.middlewares.use(localUpdateStatusMiddleware(server, () => server.config.server.port ?? DEFAULT_DEV_PORT, manifestPath, selfUpdate));
     },
   };
 }

@@ -3,6 +3,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-li
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WelcomeFlow } from '@/app/onboarding/WelcomeFlow.tsx';
 import { AstridStatusSection } from '@/shared/components/SettingsModal/sections/AstridStatusSection.tsx';
+import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
+import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { connectionFor } from './connectionFixture.ts';
 import { RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
@@ -25,16 +27,16 @@ afterEach(() => {
 });
 
 describe('done2', () => {
-  it('the Setup block preserves consent and surface-specific choices', async () => {
+  it('the Setup block preserves consent and surface-specific choices, and update surfaces render none', async () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (Macintosh) Chrome/131.0.0.0 Safari/537.36');
     mocks.clipboard.mockReset().mockResolvedValue(true);
     const standard = 'curl -fsSL https://astrid.haus/install | sh -s -- --yes';
     const settings = 'curl -fsSL https://astrid.haus/install | sh -s -- --update';
+    // Install surfaces keep the Setup block. Settings' status section and the update cards no longer render one (UR-3).
     const surfaces = [
       { render: () => render(<WelcomeFlow entry="setup" />), command: standard },
       { render: () => render(<RuntimeConnectionPanel connection={connectionFor({ status: 'not_running' })} />), command: standard },
-      { render: () => render(<AstridStatusSection isOpen />), command: settings },
     ];
 
     for (const surface of surfaces) {
@@ -62,6 +64,22 @@ describe('done2', () => {
         if (alreadySetUp || existingSurface) expect(instructions).not.toContain('May I install Astrid');
         else expect(instructions).toContain('May I install Astrid with these setup choices?');
       }
+      view.unmount();
+    }
+
+    // Update surfaces: no Setup region, checkbox or --update command. The update card's plain install line has its own copy button.
+    const updateSurfaces = [
+      { name: 'the Settings status section', render: () => render(<AstridStatusSection isOpen />), ready: () => screen.findByRole('status') },
+      { name: 'the update card', render: () => render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />), ready: () => screen.findByRole('code') },
+    ];
+    for (const surface of updateSurfaces) {
+      localStorage.clear();
+      sessionStorage.clear();
+      const view = surface.render();
+      await surface.ready();
+      expect(screen.queryByRole('region', { name: 'Astrid setup' }), surface.name).toBeNull();
+      expect(screen.queryByRole('checkbox', { name: "I've already set up Astrid" }), surface.name).toBeNull();
+      expect(screen.queryByText(settings, { selector: 'pre code' }), surface.name).toBeNull();
       view.unmount();
     }
   });

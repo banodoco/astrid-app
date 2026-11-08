@@ -11,7 +11,7 @@ import { createLocalUpdateStatusPlugin } from '../config/vite/localUpdateStatus.
 const directories = [];
 after(async () => Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true }))));
 
-test('dev-local Vite serves bounded local status and preview mode refuses clearly', async () => {
+test('dev-local Vite and vite preview serve bounded local status', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'astrid-local-update-vite-'));
   directories.push(directory);
   execFileSync('git', ['init', '-q', '-b', 'main', directory]);
@@ -54,16 +54,23 @@ test('dev-local Vite serves bounded local status and preview mode refuses clearl
   if (originalFlag === undefined) delete process.env.ASTRID_LOCAL_UPDATE_STATUS;
   else process.env.ASTRID_LOCAL_UPDATE_STATUS = originalFlag;
   let middleware;
-  previewPlugin.configurePreviewServer({ middlewares: { use: (handler) => { middleware = handler; } } });
+  previewPlugin.configurePreviewServer({ config: { root: directory, server: { port: 5173 }, preview: { port: 4317 } }, middlewares: { use: (handler) => { middleware = handler; } } });
+  const previewServed = { 'https://astrid.haus/build.json': { app: head, release: 7 }, 'https://astrid.haus/install-manifest.json': { release: 7 } };
+  globalThis.fetch = (input) => Object.hasOwn(previewServed, String(input))
+    ? Promise.resolve(new Response(JSON.stringify(previewServed[String(input)]), { status: 200 }))
+    : Promise.reject(new Error(`Unexpected fetch ${String(input)}`));
   const headers = {};
   const response = { statusCode: 0, body: '', setHeader: (name, value) => { headers[name] = value; }, end: (body) => { response.body = body; } };
-  middleware({ url: '/__astrid/local-update-status' }, response, () => assert.fail('Preview must not pass through status requests'));
-  assert.equal(response.statusCode, 501);
-  assert.deepEqual(JSON.parse(response.body), {
-    error: 'local_update_status_unsupported_in_preview',
-    message: 'Local update status is available only from npm run dev:local.',
-  });
+  try {
+    await middleware({ method: 'POST', url: '/__astrid/local-update-status', headers: {
+      host: '127.0.0.1:4317', origin: 'http://127.0.0.1:4317', 'sec-fetch-site': 'same-origin', 'content-length': '0', 'content-type': 'application/json', accept: 'application/json',
+    } }, response, () => assert.fail('Preview must not pass through status requests'));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(response.statusCode, 200);
   assert.equal(headers['Cache-Control'], 'no-store');
+  assert.deepEqual(JSON.parse(response.body), { app: head, release: 7, servedApp: head, servedRelease: 7, behind: false });
 });
 
 test('the repository Vite config used by dev-local registers the bounded local status endpoint', async () => {

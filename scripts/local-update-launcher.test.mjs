@@ -9,6 +9,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 
+import { LocalPageUpdate } from '../src/shared/lib/updates/updateOperation.ts';
+import { createLocalUpdatePagePlugin } from '../config/vite/localUpdatePage.ts';
 import { readGeneratedSchemaDigest } from './runtime-schema-guard.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -628,5 +630,36 @@ test('a Runtime that is not an installed backend starts the editor with self_upd
   await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
   const starts = (await readFile(fixture.env.FAKE_VITE_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.equal(starts[0].selfUpdate, '0');
+  await started.stop();
+});
+
+test('Update now: the page client updates through the Vite page endpoint and the dev:local launcher', { timeout: 60_000 }, async (t) => {
+  const fixture = await createFixture(); t.after(fixture.close);
+  const started = launch(fixture); t.after(started.stop);
+  await started.waitFor(() => started.output.stdout.includes('Local App:'));
+  await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
+  const origin = `http://127.0.0.1:${fixture.env.PORT}`;
+  const flag = process.env.ASTRID_LOCAL_UPDATE_STATUS;
+  process.env.ASTRID_LOCAL_UPDATE_STATUS = '1';
+  let middleware;
+  createLocalUpdatePagePlugin().configureServer({ config: { root: fixture.app, server: { port: Number(fixture.env.PORT) } }, middlewares: { use: (handler) => { middleware = handler; } } });
+  if (flag === undefined) delete process.env.ASTRID_LOCAL_UPDATE_STATUS; else process.env.ASTRID_LOCAL_UPDATE_STATUS = flag;
+  // The page's own client code. Its same-origin endpoint is the real Vite middleware; the launcher url is called as a browser would, with the page origin.
+  const pageFetch = async (input, init = {}) => {
+    if (input !== '/__astrid/local-update-page') return fetch(input, { ...init, headers: { ...init.headers, Origin: origin } });
+    const request = { method: init.method, url: input, headers: { host: `127.0.0.1:${fixture.env.PORT}`, origin, 'sec-fetch-site': 'same-origin', 'content-length': '0', 'content-type': 'application/json', accept: 'application/json' } };
+    return new Promise((resolveResponse, reject) => {
+      const headers = {};
+      const response = { statusCode: 200, setHeader: (name, value) => { headers[name] = value; }, end: (body) => resolveResponse(new Response(body, { status: response.statusCode })) };
+      Promise.resolve(middleware(request, response, () => reject(new Error('page endpoint did not answer')))).catch(reject);
+    });
+  };
+  const page = new LocalPageUpdate(pageFetch);
+  const outcome = await page.start();
+  assert.equal(outcome.phase, 'done', JSON.stringify(outcome));
+  assert.equal(outcome.status, 'updated');
+  assert.equal(outcome.message, 'Astrid updated.');
+  assert.equal(await gitSha(fixture.app), fixture.targetSha);
+  assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.targetSha, 2), { app: fixture.targetSha, release: 2 });
   await started.stop();
 });

@@ -72,14 +72,24 @@ function refusalMessageOf(cause: unknown, code: string | null): string {
   return UPDATE_START_UNAVAILABLE;
 }
 
+/** The one line for a finished operation's outcome. Only the three outcomes have one; anything else is not a result. */
+export function installerOutcomeMessage(outcome: string | null | undefined): string | null {
+  return outcome && Object.prototype.hasOwnProperty.call(OUTCOME_MESSAGES, outcome) ? OUTCOME_MESSAGES[outcome as InstallerUpdateOutcome] : null;
+}
+
 /** Translate the Runtime's transaction vocabulary into a status a person can act on. */
 export function installerUpdateStatusMessage(status: InstallerUpdateStatus | null | undefined): string | null {
   if (!status) return null;
   const reason = installerUpdateReasonOf(status);
   if (reason) return INSTALLER_UPDATE_REASON_MESSAGES[reason];
   if (status.state === 'active') return 'Update in progress. Astrid may disconnect while it restarts.';
-  if (status.state === 'terminal') return (status.outcome ? OUTCOME_MESSAGES[status.outcome] : undefined) ?? 'The update finished. Check diagnostics for details.';
+  if (status.state === 'terminal') return installerOutcomeMessage(status.outcome) ?? 'The update finished. Check diagnostics for details.';
   return null;
+}
+
+/** A finished in-app update that did not complete: the one state whose next action is the plain install line. */
+export function installerUpdateFailed(snapshot: Pick<UpdateOperationSnapshot, 'fresh' | 'pending' | 'error' | 'status'> | null | undefined): boolean {
+  return !!snapshot && snapshot.fresh && !snapshot.pending && !snapshot.error && snapshot.status?.state === 'terminal' && snapshot.status.outcome === 'failed';
 }
 
 const UPDATE_STATUS_UNAVAILABLE = 'Could not check Astrid update status. Check your connection and try again.';

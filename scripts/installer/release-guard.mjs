@@ -87,6 +87,12 @@ export function checkReleaseGuard({ base, head }) {
   const baseRelease = releaseOf(baseManifest, 'base install-manifest.json', { required: false });
   const headRelease = releaseOf(headManifest, 'head install-manifest.json', { required: true });
   validateRequired(headManifest, headRelease, 'head install-manifest.json');
+  // A floor this change sets must be the release it publishes. A floor pinned before the release is bumped
+  // would sit one release behind, so the guard refuses it. Release 0 is "no floor yet"; an unchanged floor is not checked.
+  const requiredChanged = JSON.stringify(baseManifest.required ?? null) !== JSON.stringify(headManifest.required ?? null);
+  if (requiredChanged && headManifest.required && headManifest.required.release !== 0 && headManifest.required.release !== headRelease) {
+    throw new Error(`required.release ${headManifest.required.release} is not the release being published (${headRelease}); bump release, then pin --require`);
+  }
 
   const baseParts = tupleParts(base);
   const headParts = tupleParts(head);

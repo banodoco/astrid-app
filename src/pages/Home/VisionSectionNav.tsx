@@ -49,16 +49,21 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
       schedule();
     };
     finishJumpRef.current = finishJump;
+    const onPageScrollEnd = (event: Event) => {
+      // The nested nav also scrolls horizontally; its scrollend must not
+      // release our lock on a still-running *document* smooth-scroll.
+      if (event.target === document || event.target === window) finishJump();
+    };
     schedule();
     window.addEventListener('scroll', schedule, { passive: true });
-    window.addEventListener('scrollend', finishJump);
+    window.addEventListener('scrollend', onPageScrollEnd);
     window.addEventListener('resize', schedule);
     // A real user interruption should immediately restore scroll tracking.
     window.addEventListener('wheel', finishJump, { passive: true });
     window.addEventListener('touchstart', finishJump, { passive: true });
     return () => {
       window.removeEventListener('scroll', schedule);
-      window.removeEventListener('scrollend', finishJump);
+      window.removeEventListener('scrollend', onPageScrollEnd);
       window.removeEventListener('resize', schedule);
       window.removeEventListener('wheel', finishJump);
       window.removeEventListener('touchstart', finishJump);

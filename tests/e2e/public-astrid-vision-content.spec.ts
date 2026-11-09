@@ -33,13 +33,13 @@ test('vision displays the GitHub-published pillars and operating principles', as
   const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main.astrid-vision')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(content.vision.title);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Vision');
   const pillars = page.locator('.astrid-vision-principles h3');
   await expect(pillars).toHaveCount(content.pillars.length);
   for (const [index, pillar] of content.pillars.entries()) {
     await expect(pillars.nth(index)).toHaveText(pillar.title);
   }
-  await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Our aspirations');
+  await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Principles');
   await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
   const principleCards = page.locator('.astrid-vision-standards-list > li');
@@ -56,7 +56,7 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   const content = await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'The four pillars of our vision' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The pillars of our vision' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
 
   const principleTitles = page.locator('.astrid-vision-standards-list h3');
@@ -337,14 +337,15 @@ test('different valid feed content renders without rebuilding the app', async ({
   const content = await feed(request);
   const changed = {
     ...content,
-    vision: { ...content.vision, title: 'Dynamic vision heading from published data' },
+    vision: { ...content.vision, title: 'Dynamic source title', introMarkdown: 'A new published ambition, without rebuilding the app.' },
   };
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify(changed),
     headers: { 'access-control-allow-origin': '*' },
   }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(changed.vision.title);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Vision');
+  await expect(page.locator('.astrid-vision-lead')).toContainText('A new published ambition');
 });
 
 test('feed errors are explained and offer a retry', async ({ page }) => {

@@ -58,7 +58,6 @@ test('each principle animates a different part of its sigil on hover and respect
     ['.astrid-vision-sigil-orbit', 'astrid-vision-sigil-orbit'],
     ['.astrid-vision-sigil-open-ring', 'astrid-vision-sigil-ring'],
     ['.astrid-vision-sigil-spark', 'astrid-vision-sigil-spark-rise'],
-    ['.astrid-vision-sigil-clear-path', 'astrid-vision-sigil-clear'],
   ] as const;
   for (let i = 0; i < motions.length; i++) {
     await cards.nth(i).hover();
@@ -67,6 +66,88 @@ test('each principle animates a different part of its sigil on hover and respect
   await page.emulateMedia({ reducedMotion: 'reduce' });
   for (let i = 0; i < motions.length; i++) {
     await expect(cards.nth(i).locator(motions[i][0])).toHaveCSS('animation-name', 'none');
+  }
+});
+
+test('technical wrangling dissolves its knot into a clean arrow in five seconds', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.setViewportSize({ width: 1720, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const card = page.locator('.astrid-vision-standards-list > li').last();
+  const knot = card.locator('.astrid-vision-sigil-knot');
+  const fragments = card.locator('.astrid-vision-sigil-knot-fragments');
+  const arrow = card.locator('.astrid-vision-sigil-clear-path');
+  await expect(card).toBeVisible();
+  await expect(knot).toHaveCSS('opacity', '1');
+  await expect(fragments).toHaveCSS('opacity', '1');
+  await expect(arrow).toHaveCSS('opacity', '0');
+  for (const part of [knot, fragments, arrow]) {
+    await expect(part).toHaveCSS('transition-duration', '5s');
+    await expect(part).toHaveCSS('animation-name', 'none');
+  }
+  await card.hover();
+  await page.waitForTimeout(500);
+  const halfway = await card.evaluate(el => {
+    const opacity = (selector: string) => Number(getComputedStyle(el.querySelector(selector)!).opacity);
+    return {
+      knot: opacity('.astrid-vision-sigil-knot'),
+      fragments: opacity('.astrid-vision-sigil-knot-fragments'),
+      arrow: opacity('.astrid-vision-sigil-clear-path'),
+    };
+  });
+  for (const value of Object.values(halfway)) {
+    expect(value).toBeGreaterThan(0);
+    expect(value).toBeLessThan(1);
+  }
+  await expect(knot).toHaveCSS('opacity', '0', { timeout: 7500 });
+  await expect(fragments).toHaveCSS('opacity', '0', { timeout: 7500 });
+  await expect(arrow).toHaveCSS('opacity', '1', { timeout: 7500 });
+
+  await page.mouse.move(0, 3);
+  await page.waitForTimeout(450);
+  const reversing = Number(await arrow.evaluate(el => getComputedStyle(el).opacity));
+  expect(reversing).toBeGreaterThan(0);
+  expect(reversing).toBeLessThan(1);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(arrow).toHaveCSS('transition-duration', '0s');
+  await expect(knot).toHaveCSS('transition-duration', '0s');
+});
+
+
+test('mobile hero gets breathing room and the editorial arrows and pillar numbers use pixel geometry', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const hero = page.locator('#astrid-vision-manifesto');
+    const heroPadding = await hero.evaluate(el => Number.parseFloat(getComputedStyle(el).paddingTop));
+    if (width === 390) expect(heroPadding).toBeGreaterThanOrEqual(34);
+    else expect(heroPadding).toBeLessThan(20);
+    const pixelNumbers = page.locator('.astrid-vision-pillar-number');
+    await expect(pixelNumbers).toHaveCount(4);
+    await expect(pixelNumbers.first()).toHaveCSS('font-family', /Departure Mono/);
+    const arrows = page.locator('.astrid-vision-standards-list > li .astrid-vision-principle-corner');
+    await expect(arrows).toHaveCount(4);
+    for (let index = 0; index < 4; index++) {
+      const corner = arrows.nth(index);
+      const mark = corner.locator('.astrid-vision-card-arrow');
+      await expect(mark.locator('svg[viewBox="0 0 18 18"]')).toHaveCount(1);
+      const positions = await corner.evaluate(el => {
+        const outer = el.getBoundingClientRect();
+        const inner = el.querySelector('svg')!.getBoundingClientRect();
+        return {
+          dx: inner.x + inner.width / 2 - (outer.x + outer.width / 2),
+          dy: inner.y + inner.height / 2 - (outer.y + outer.height / 2),
+        };
+      });
+      expect(Math.abs(positions.dx)).toBeLessThan(1);
+      expect(Math.abs(positions.dy)).toBeLessThan(1);
+      await expect(corner).toHaveCSS('border-radius', '3px');
+    }
+    await expect(page.locator('.astrid-vision-principles .astrid-vision-pillar-details svg[viewBox="0 0 18 18"]')).toHaveCount(4);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
   }
 });
 
@@ -102,7 +183,7 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
     ['Principles', 'astrid-vision-standards'],
     ['Gaps', 'astrid-vision-parts'],
     ['Projects', 'astrid-vision-projects'],
-    ['Help us build', 'astrid-vision-contribute'],
+    ['Help us', 'astrid-vision-contribute'],
   ]) {
     const link = nav.getByRole('link', { name: new RegExp(label + '$') });
     await link.click();
@@ -165,14 +246,31 @@ test('principle sigils use softer faded page colors while retaining delicate hov
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const cards = page.locator('.astrid-vision-standards-list > li');
   const marks = cards.locator('.astrid-vision-principle-sigil');
+  const cornerArrows = cards.locator('.astrid-vision-principle-corner');
   for (let index = 0; index < 4; index++) {
     await expect(marks.nth(index)).toHaveCSS('opacity', '0.58');
+    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '0.58');
     await expect(marks.nth(index)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(cornerArrows.nth(index)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect.poll(() => cards.nth(index).evaluate(card => {
+      const mark = card.querySelector('.astrid-vision-principle-sigil')!;
+      const arrow = card.querySelector('.astrid-vision-principle-corner')!;
+      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
+    })).toBe(true);
   }
   const colors = await marks.evaluateAll(elements => elements.map(element => getComputedStyle(element).color));
   expect(new Set(colors).size).toBe(4);
+  for (let index = 0; index < 4; index++) {
+    await cards.nth(index).hover();
+    await expect(marks.nth(index)).toHaveCSS('opacity', '0.82');
+    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '0.82');
+    await expect.poll(() => cards.nth(index).evaluate(card => {
+      const mark = card.querySelector('.astrid-vision-principle-sigil')!;
+      const arrow = card.querySelector('.astrid-vision-principle-corner')!;
+      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
+    })).toBe(true);
+  }
   await cards.nth(0).hover();
-  await expect(marks.nth(0)).toHaveCSS('opacity', '0.82');
   await expect(cards.nth(0).locator('.astrid-vision-sigil-orbit'))
     .toHaveCSS('animation-name', 'astrid-vision-sigil-orbit');
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -201,7 +299,7 @@ test('the enlarged header spans the viewport while navigation stays aligned in o
     await expect(pillars).toHaveAttribute('href', '#astrid-vision-pillars');
     await pillars.click();
     await expect(pillars).toHaveAttribute('aria-current', 'location');
-    await expect(page.getByRole('heading', { name: 'The four pillars of our vision' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'The pillars of our vision' })).toBeVisible();
     await expect(page).toHaveURL(/#astrid-vision-pillars$/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
   }
@@ -244,7 +342,7 @@ test('phone scroll activates each principle sigil through the middle of the view
     ['.astrid-vision-sigil-orbit', 'astrid-vision-sigil-orbit'],
     ['.astrid-vision-sigil-open-ring', 'astrid-vision-sigil-ring'],
     ['.astrid-vision-sigil-spark', 'astrid-vision-sigil-spark-rise'],
-    ['.astrid-vision-sigil-clear-path', 'astrid-vision-sigil-clear'],
+    ['.astrid-vision-sigil-clear-path', 'none'],
   ] as const;
   for (let index = 0; index < motions.length; index++) {
     const card = cards.nth(index);
@@ -254,7 +352,17 @@ test('phone scroll activates each principle sigil through the middle of the view
     });
     await expect(card).toHaveAttribute('data-sigil-active', 'true');
     await expect(card.locator(motions[index][0])).toHaveCSS('animation-name', motions[index][1]);
+    if (index === 3) {
+      await expect(card.locator('.astrid-vision-sigil-knot')).toHaveCSS('transition-duration', '5s');
+      await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '5s');
+    }
     await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
+    await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '0.82');
+    await expect.poll(() => card.evaluate(el => {
+      const mark = el.querySelector('.astrid-vision-principle-sigil')!;
+      const arrow = el.querySelector('.astrid-vision-principle-corner')!;
+      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
+    })).toBe(true);
     if (index > 0) await expect(cards.nth(index - 1)).not.toHaveAttribute('data-sigil-active', 'true');
   }
   await page.emulateMedia({ reducedMotion: 'reduce' });

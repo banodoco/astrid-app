@@ -42,6 +42,17 @@ function MarkdownText({ value, className }: { value: string; className?: string 
   </div>;
 }
 
+/** One little crisp pixel arrow shared by the pillar and principle cards. */
+function PixelArrow() {
+  return (
+    <svg viewBox="0 0 18 18" width="18" height="18" fill="none"
+      stroke="currentColor" strokeWidth="2" shapeRendering="crispEdges"
+      aria-hidden="true" focusable="false">
+      <path d="M4 14L13 5M8 5h5v5" />
+    </svg>
+  );
+}
+
 const JUGGLED_ITEMS = [
   { name: 'reel', x: 20, y: 1 },
   { name: 'chip', x: 1, y: 20 },
@@ -333,10 +344,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section id="astrid-vision-manifesto" className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
-            <p className="astrid-vision-eyebrow">Vision &amp; Issues</p>
+            <p className="astrid-vision-eyebrow">Vision</p>
             {content
               ? <>
-                  <h1 id="astrid-vision-title">{content.vision.title}</h1>
+                  <h1 id="astrid-vision-title">Vision</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
                     This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
@@ -344,7 +355,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                 </>
               : error
                 ? <>
-                    <h1 id="astrid-vision-title">Astrid’s vision</h1>
+                    <h1 id="astrid-vision-title">Vision</h1>
                     <p className="astrid-vision-lead" role="alert">
                       The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
                     </p>
@@ -400,8 +411,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       {content && (<>
       <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
-          <p className="astrid-vision-eyebrow">The vision</p>
-          <h2 id="astrid-vision-north-star-title">The four pillars of our vision</h2>
+          <p className="astrid-vision-eyebrow">Pillars</p>
+          <h2 id="astrid-vision-north-star-title">The pillars of our vision</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -414,7 +425,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <p>{pillar.descriptor}</p>
               <NorthStarMink art={pillar.art} />
               <span className="astrid-vision-pillar-details" aria-hidden="true">
-                Details <span className="astrid-vision-card-arrow">↗</span>
+                Details <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + pillar.title + ': gaps and projects'}
@@ -426,7 +437,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       <section id="astrid-vision-standards" className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Our aspirations</p>
+          <p className="astrid-vision-eyebrow">Principles</p>
           <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
         </div>
         <ol className="astrid-vision-standards-list" ref={sigilsRef}>
@@ -441,7 +452,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   : <MarkdownText value={principle.bodyMarkdown} />}
               </div>
               <span className="astrid-vision-principle-corner" aria-hidden="true">
-                <span className="astrid-vision-card-arrow">↗</span>
+                <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}
@@ -453,8 +464,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       <section id="astrid-vision-parts" className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
         <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
-          <p className="astrid-vision-eyebrow">The gaps</p>
-          <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
+          <p className="astrid-vision-eyebrow">Gaps</p>
+          <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : 'How we currently fall short'}</h2>
         </div>
         <div className="astrid-vision-context-row">
           <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress. <a href={PUBLIC_VISION_REPO_URL + '/blob/main/docs/contribution-workflow.md#define-or-reassess-a-vision-gap'} target="_blank" rel="noreferrer">What makes a gap?</a></p>
@@ -482,8 +493,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       <section id="astrid-vision-projects" className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
         <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Project catalog</p>
-          <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
+          <p className="astrid-vision-eyebrow">Projects</p>
+          <h2 id="astrid-vision-projects-title">How we plan to reach our aspirations</h2>
         </div>
         <div className="astrid-vision-context-row">
           <p className="astrid-vision-section-context">These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A listing doesn't mean someone has already started work.</p>
@@ -530,7 +541,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"
           aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
-            <p className="astrid-vision-eyebrow">Get involved</p>
+            <p className="astrid-vision-eyebrow">Help us</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
             <MarkdownText value={contributionIntro} />
             {content.vision.agentPrompt ? (

@@ -12,7 +12,7 @@ test('keeps one coherent sky and palette across Home ↔ Vision', async ({ page 
   await expect(page.locator('.astrid-sky canvas')).toHaveCount(4);
   const homePaper = await page.locator('html').evaluate((element) => getComputedStyle(element).getPropertyValue('--astrid-root-paper'));
 
-  await page.getByRole('link', { name: 'Vision & Issues' }).click();
+  await page.getByRole('link', { name: 'Vision' }).click();
   await expect(page).toHaveURL(/\/vision$/);
   await waitForPublicSurface(page);
   await expect(page.locator('main.astrid-vision')).toBeVisible();

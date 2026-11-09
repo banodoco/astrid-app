@@ -72,7 +72,7 @@ export function VisionPrincipleSigil({ principleId }: { principleId: string }) {
               <path d="M6 20h9v-4h9v4h10" />
               <path d="M30 16l4 4-4 4" />
             </g>
-            <g fill="currentColor">
+            <g className="astrid-vision-sigil-knot-fragments" fill="currentColor">
               <rect x="32" y="7" width="2" height="2" opacity=".55" />
               <rect x="7" y="35" width="2" height="2" opacity=".55" />
             </g>

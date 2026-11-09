@@ -1,6 +1,6 @@
 import { useLayoutEffect, useId, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { ExternalLink, X } from 'lucide-react';
+import { ChevronDown, ExternalLink, X } from 'lucide-react';
 import type { PublicVisionContent } from './publicVisionContent';
 import { currentGapsForSubject, type VisionSubject } from './visionHierarchy';
 
@@ -100,9 +100,37 @@ export function VisionDetailDialog({
           </button>
         </header>
         <div className="astrid-vision-details-scroll">
-          <div className="astrid-vision-details-description">
-            <ReactMarkdown>{entry.bodyMarkdown}</ReactMarkdown>
-          </div>
+          {entry.statement && entry.explanationMarkdown && entry.characteristics ? (
+            <>
+              <div className="astrid-vision-details-description">
+                <p className="astrid-vision-details-statement">{entry.statement}</p>
+                <ReactMarkdown>{entry.explanationMarkdown}</ReactMarkdown>
+              </div>
+              <section className="astrid-vision-details-characteristics" aria-label="Characteristics">
+                <h3>What defines this</h3>
+                <div className="astrid-vision-details-characteristic-list">
+                  {entry.characteristics.map(characteristic => (
+                    <details className="astrid-vision-details-characteristic" key={characteristic.id}>
+                      <summary>
+                        <span className="astrid-vision-details-characteristic-copy">
+                          <strong>{characteristic.title}</strong>
+                          <span>{characteristic.summary}</span>
+                        </span>
+                        <ChevronDown size={18} strokeWidth={1.75} aria-hidden="true" />
+                      </summary>
+                      <div className="astrid-vision-details-characteristic-body">
+                        <ReactMarkdown>{characteristic.detailsMarkdown}</ReactMarkdown>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              </section>
+            </>
+          ) : (
+            <div className="astrid-vision-details-description">
+              <ReactMarkdown>{entry.bodyMarkdown}</ReactMarkdown>
+            </div>
+          )}
           <section className="astrid-vision-details-gaps" aria-label="Current gaps and projects">
           <h3>Gaps preventing this</h3>
           {gaps.length === 0 ? (

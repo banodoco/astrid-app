@@ -61,6 +61,32 @@ describe('public vision live data contract', () => {
     expect(result.gaps.length).toBeGreaterThan(0);
   });
 
+  it('accepts a consistent characteristic hierarchy on both pillars and principles', () => {
+    const value = fixture();
+    const addStructure = <T extends { id: string; title: string }>(subject: T) => ({
+      ...subject,
+      statement: 'An opening statement.',
+      explanationMarkdown: 'A short explanation of the underlying commitment.',
+      characteristics: [
+        { id: 'agency', title: 'Artistic agency', summary: 'Creators direct their work.', detailsMarkdown: 'People can inspect and adjust their tools.' },
+        { id: 'continuity', title: 'Continuity', summary: 'Work stays editable.', detailsMarkdown: 'Projects retain their history across sessions.' },
+      ],
+    });
+    const candidate = {
+      ...value,
+      pillars: value.pillars.map(addStructure),
+      principles: value.principles.map(addStructure),
+    };
+    expect(parsePublicVisionContent(candidate).pillars[0].characteristics).toHaveLength(2);
+    expect(() => parsePublicVisionContent({
+      ...candidate, principles: [value.principles[0]],
+    })).toThrow(/structured/);
+    expect(() => parsePublicVisionContent({
+      ...candidate,
+      pillars: [{ ...candidate.pillars[0], characteristics: [{ id: 'x', title: 'Only one', summary: 'One sentence.', detailsMarkdown: 'More.' }] }, ...candidate.pillars.slice(1)],
+    })).toThrow(/structured/);
+  });
+
   it('allows legitimate project additions and completion without reauthoring the app', () => {
     const value = fixture();
     value.projects[0].status = 'done';

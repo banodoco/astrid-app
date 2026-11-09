@@ -5,8 +5,13 @@ import { connectionFor } from './connectionFixture.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/installerUpdateReasons.ts';
 
-vi.mock('@/shared/components/RuntimeConnection/AppBuildProvider.tsx', () => ({ usePageStale: () => false }));
-vi.mock('@/shared/lib/updates/useInstallerUpdate.ts', () => ({
+// Only the two hooks are replaced; every other export of these modules stays real.
+vi.mock('@/shared/components/RuntimeConnection/AppBuildProvider.tsx', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/components/RuntimeConnection/AppBuildProvider.tsx')>()),
+  usePageStale: () => false,
+}));
+vi.mock('@/shared/lib/updates/useInstallerUpdate.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/shared/lib/updates/useInstallerUpdate.ts')>()),
   useInstallerUpdate: () => ({ installType: 'installer', available: true, updateReason: 'autostart-off', health: { identity: { managed_by: null } } }),
 }));
 

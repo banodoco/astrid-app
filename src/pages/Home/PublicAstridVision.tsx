@@ -10,6 +10,8 @@ import { NORTH_STAR_ART, NorthStarMink, type NorthStarArt } from './PublicAstrid
 import { usePublicAstridEnvironment, type PublicAstridEnvironment } from './publicAstridLifecycle';
 import { usePublicVisionContent, PUBLIC_VISION_REPO_URL, type PublicVisionGap, type PublicVisionProject } from './publicVisionContent';
 import { VisionDetailDialog } from './VisionDetailDialog';
+import { VisionPrincipleSigil } from './VisionPrincipleSigil';
+import { VisionSectionNav } from './VisionSectionNav';
 import type { VisionSubject } from './visionHierarchy';
 import './PublicAstridVision.css';
 
@@ -281,8 +283,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <span>Astrid</span>
         </a>
       </header>
+      {content && <VisionSectionNav reducedMotion={reducedMotion}
+        includeHelp={Boolean(content.vision.contributeMarkdown)} />}
 
-      <section className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
+      <section id="astrid-vision-manifesto" className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
             <p className="astrid-vision-eyebrow">Vision &amp; Issues</p>
@@ -376,7 +380,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </ol>
       </section>
 
-      <section className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
+      <section id="astrid-vision-standards" className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">Our aspirations</p>
           <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
@@ -384,8 +388,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <ol className="astrid-vision-standards-list">
           {content.principles.map(principle => (
             <li key={principle.id} data-reveal data-principle={principle.id}>
-              {/* The colored mark remains a placeholder until custom artwork is ready. */}
-              <span className="astrid-vision-principle-sigil" aria-hidden="true" />
+              <VisionPrincipleSigil principleId={principle.id} />
               <div>
                 <h3>{principle.title}</h3>
                 <MarkdownText value={principle.bodyMarkdown} />
@@ -401,7 +404,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </ol>
       </section>
 
-      <section className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
+      <section id="astrid-vision-parts" className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
         <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
           <p className="astrid-vision-eyebrow">The gaps</p>
           <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
@@ -430,7 +433,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         )}
       </section>
 
-      <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
+      <section id="astrid-vision-projects" className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
         <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
           <p className="astrid-vision-eyebrow">Project catalog</p>
           <h2 id="astrid-vision-projects-title">Help us build what's next</h2>

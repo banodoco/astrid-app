@@ -53,7 +53,7 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
             const target = document.getElementById(id);
             if (!target) return;
             event.preventDefault();
-            target.scrollIntoView({ behavior: reducedMotion ? 'instant' : 'smooth', block: 'start' });
+            target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
             window.history.replaceState(window.history.state, '', '#' + id);
             setActiveId(id);
           }}>

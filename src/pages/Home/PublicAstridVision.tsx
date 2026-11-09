@@ -185,7 +185,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   // Restore keyboard focus after a dialog, but don't leave touch users with
   // a persistent WebKit focus rectangle around the whole card.
   const lastInteractionWasPointer = useRef(false);
+  const detailOpenedByPointer = useRef(false);
   const openSubject = (subject: VisionSubject, trigger: HTMLButtonElement) => {
+    detailOpenedByPointer.current = lastInteractionWasPointer.current;
     detailTrigger.current = trigger;
     detailScrollY.current = window.scrollY;
     setSelectedSubject(subject);
@@ -194,7 +196,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     const trigger = detailTrigger.current;
     const previousScrollY = detailScrollY.current;
     setSelectedSubject(null);
-    const pointerClose = lastInteractionWasPointer.current;
+    const pointerClose = detailOpenedByPointer.current;
     // Keyboard users get focus back. Touch users don't inherit the large
     // outline caused by Safari restoring focus to a full-card button.
     if (pointerClose) trigger?.blur();

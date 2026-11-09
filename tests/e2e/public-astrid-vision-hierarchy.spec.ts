@@ -115,3 +115,131 @@ test('mobile principle action sits beneath its description, modal stays on scree
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(before + 4);
   await expect(trigger).toBeFocused();
 });
+
+
+test('principle cards use four reserved sigil colors, transparent panels and border-only hover feedback', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const cards = page.locator('.astrid-vision-standards-list > li');
+  await expect(cards).toHaveCount(4);
+  const marks = cards.locator('.astrid-vision-principle-sigil');
+  await expect(marks).toHaveCount(4);
+  const colors = await marks.evaluateAll(elements =>
+    elements.map(el => getComputedStyle(el).borderColor));
+  expect(new Set(colors).size).toBe(4);
+  expect(await cards.first().evaluate(el => getComputedStyle(el).backgroundColor))
+    .toBe('rgba(0, 0, 0, 0)');
+  const first = cards.first();
+  const before = await first.evaluate(el => getComputedStyle(el).borderColor);
+  await first.hover();
+  const after = await first.evaluate(el => getComputedStyle(el).borderColor);
+  expect(after).not.toBe(before);
+  await expect(first.locator('h3')).toHaveCSS('text-decoration-line', 'none');
+  await expect(first.locator('.astrid-vision-principle-open')).toHaveCSS('font-weight', '700');
+});
+
+test('mobile modal keeps the X fixed, scrolls within the panel and closes from top and bottom backdrop', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  // This principle has many related gaps/projects, ensuring the dialog must scroll.
+  const trigger = page.getByRole('button', {
+    name: 'Explore ' + content.principles.find((item: { id: string }) => item.id === 'in-the-creators-control').title + ': gaps and projects',
+  });
+  await trigger.click();
+  const dialog = page.getByRole('dialog');
+  const close = dialog.getByRole('button', { name: 'Close details' });
+  const scroll = dialog.locator('.astrid-vision-details-scroll');
+  await expect(dialog).toBeVisible();
+  await expect(scroll).toHaveCSS('overflow-y', 'auto');
+  const rect = await dialog.boundingBox();
+  expect(rect).not.toBeNull();
+  expect(rect!.x).toBeGreaterThanOrEqual(18);
+  expect(rect!.y).toBeGreaterThanOrEqual(35);
+  expect(rect!.y + rect!.height).toBeLessThanOrEqual(745);
+  const initial = await close.boundingBox();
+  expect(initial).not.toBeNull();
+  await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
+  expect(await scroll.evaluate(el => el.scrollTop)).toBeGreaterThan(100);
+  const scrolled = await close.boundingBox();
+  expect(scrolled).not.toBeNull();
+  expect(Math.abs(scrolled!.y - initial!.y)).toBeLessThan(2);
+  expect(Math.abs(scrolled!.x - initial!.x)).toBeLessThan(2);
+
+  await page.mouse.click(rect!.x + rect!.width / 2, rect!.y - 14);
+  await expect(dialog).toHaveCount(0);
+
+  await trigger.click();
+  await expect(dialog).toBeVisible();
+  const again = await dialog.boundingBox();
+  expect(again).not.toBeNull();
+  await page.mouse.click(again!.x + again!.width / 2, again!.y + again!.height + 14);
+  await expect(dialog).toHaveCount(0);
+});
+
+
+test('first touch outside the dialog only dismisses it and cannot click through to cards', async ({ browser, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json() as { principles: { id: string; title: string }[] };
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 780 },
+    isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+  });
+  const page = await context.newPage();
+  try {
+    await page.route(FEED, route => route.fulfill({
+      status: 200, contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+    }));
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const title = content.principles.find(p => p.id === 'in-the-creators-control')?.title
+      ?? content.principles[0].title;
+    const opener = page.getByRole('button', { name: 'Explore ' + title + ': gaps and projects' });
+    await opener.tap();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    await page.evaluate(() => {
+      const marker = window as typeof window & { __visionCardClicks?: number };
+      marker.__visionCardClicks = 0;
+      document.addEventListener('click', event => {
+        if (event.target instanceof Element &&
+            event.target.closest('.astrid-vision-principle-open, .astrid-vision-card-open')) {
+          marker.__visionCardClicks = (marker.__visionCardClicks ?? 0) + 1;
+        }
+      }, true);
+    });
+
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.touchscreen.tap(bounds!.x + bounds!.width / 2, bounds!.y - 14);
+    await expect(dialog).toHaveCount(0);
+    // A delayed synthetic click from the same touch must not reach the card below.
+    await page.waitForTimeout(350);
+    expect(await page.evaluate(() =>
+      (window as typeof window & { __visionCardClicks?: number }).__visionCardClicks)).toBe(0);
+
+    // A *new* deliberate tap still opens the card, rather than the first tap
+    // being allowed to operate both the backdrop and the underlying UI.
+    await opener.tap();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close details' }).tap();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});

@@ -377,9 +377,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
         </div>
         <ol className="astrid-vision-standards-list">
-          {content.principles.map((principle, index) => (
-            <li key={principle.id} data-reveal>
-              <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+          {content.principles.map(principle => (
+            <li key={principle.id} data-reveal data-principle={principle.id}>
+              {/* Reserve a color-coded mark for future custom sigil artwork. */}
+              <span className="astrid-vision-principle-sigil" aria-hidden="true" />
               <div>
                 <h3>{principle.title}</h3>
                 <MarkdownText value={principle.bodyMarkdown} />

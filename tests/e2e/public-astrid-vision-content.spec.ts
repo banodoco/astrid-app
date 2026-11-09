@@ -42,9 +42,14 @@ test('vision displays the GitHub-published pillars and operating principles', as
   await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Our aspirations');
   await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
-  const individualBorders = await page.locator('.astrid-vision-standards-list li')
-    .evaluateAll(elements => elements.map(element => getComputedStyle(element).borderTopStyle));
-  expect(individualBorders).toEqual(['none', 'none', 'none', 'none']);
+  const principleCards = page.locator('.astrid-vision-standards-list > li');
+  const cardSurfaces = await principleCards.evaluateAll(elements => elements.map(element => {
+    const style = getComputedStyle(element);
+    return { border: style.borderTopStyle, background: style.backgroundColor };
+  }));
+  expect(cardSurfaces).toHaveLength(4);
+  expect(cardSurfaces.every(card => card.border === 'solid' && card.background === 'rgba(0, 0, 0, 0)')).toBeTruthy();
+  await expect(principleCards.locator('.astrid-vision-principle-sigil')).toHaveCount(4);
 });
 
 test('desktop vision has compact, accessible gaps and aligned principle headings', async ({ page, request }) => {

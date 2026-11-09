@@ -1338,13 +1338,33 @@
   margin: 0 0 18px;
   font: 400 24px/1.25 var(--astrid-vision-serif);
 }
-.astrid-vision-details-gap-list,
+/* Small, repeatable color families connect each gap heading to the work below.
+   The palette is editorial, not a progress/status indicator. */
+.astrid-vision-details-gap-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .astrid-vision-details-projects ul { margin: 0; padding: 0; list-style: none; }
 .astrid-vision-details-gap {
-  padding: 18px 0;
-  border-top: 1px solid var(--astrid-line);
+  --gap-accent: #985d46;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--gap-accent) 40%, var(--astrid-line));
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--gap-accent) 5%, var(--astrid-panel));
 }
-.astrid-vision-details-gap:first-child { padding-top: 0; border-top: 0; }
+.astrid-vision-details-gap[data-tone="ochre"] { --gap-accent: #90702e; }
+.astrid-vision-details-gap[data-tone="sage"] { --gap-accent: #55765e; }
+.astrid-vision-details-gap[data-tone="teal"] { --gap-accent: #367a83; }
+.astrid-vision-details-gap[data-tone="blue"] { --gap-accent: #5b6e98; }
+.astrid-vision-details-gap[data-tone="plum"] { --gap-accent: #806185; }
+.astrid-vision-details-gap-heading {
+  padding: 16px 18px;
+  border-bottom: 1px solid color-mix(in oklab, var(--gap-accent) 30%, var(--astrid-line));
+  background: color-mix(in oklab, var(--gap-accent) 17%, var(--astrid-panel));
+}
 .astrid-vision-details-gap h4 {
   margin: 0;
   font: 500 17px/1.4 var(--astrid-vision-serif);
@@ -1360,19 +1380,23 @@
 }
 .astrid-vision-details-gap a:hover { text-decoration-color: currentColor; }
 .astrid-vision-details-gap a svg { flex: 0 0 auto; }
+/* The lighter project area visually belongs to its darker gap header. */
 .astrid-vision-details-projects {
-  margin: 14px 0 0 14px;
-  padding-left: 16px;
-  border-left: 2px solid var(--astrid-line);
+  padding: 14px 18px 16px;
+  background: color-mix(in oklab, var(--gap-accent) 6%, var(--astrid-panel));
 }
 .astrid-vision-details-projects > p {
-  margin: 0 0 10px;
-  color: var(--astrid-muted);
+  margin: 0 0 8px;
+  color: color-mix(in oklab, var(--gap-accent) 65%, var(--astrid-ink));
   font-size: 12px;
   font-weight: 600;
   letter-spacing: .035em;
 }
-.astrid-vision-details-projects li { padding: 10px 0; }
+.astrid-vision-details-projects li {
+  padding: 10px 0;
+  border-top: 1px solid color-mix(in oklab, var(--gap-accent) 20%, transparent);
+}
+.astrid-vision-details-projects li:first-child { border-top: 0; }
 .astrid-vision-details-project-heading {
   display: flex;
   align-items: baseline;
@@ -1399,6 +1423,11 @@
   font-size: 14px;
   line-height: 1.5;
 }
+.astrid-vision-details-gap > .astrid-vision-details-empty {
+  margin: 0;
+  padding: 13px 18px 16px;
+  background: color-mix(in oklab, var(--gap-accent) 6%, var(--astrid-panel));
+}
 @media (max-width: 560px) {
   /* Leave a real hit target around every side, especially the top and bottom. */
   .astrid-vision-details {
@@ -1412,7 +1441,9 @@
   .astrid-vision-details-header { gap: 10px; padding: 20px 18px 16px; }
   .astrid-vision-details-scroll { padding: 18px 18px 22px; }
   .astrid-vision-details-close { width: 38px; height: 38px; }
-  .astrid-vision-details-projects { margin-left: 5px; padding-left: 12px; }
+  .astrid-vision-details-gap-heading { padding: 14px; }
+  .astrid-vision-details-projects { padding: 12px 14px 14px; }
+  .astrid-vision-details-gap > .astrid-vision-details-empty { padding: 12px 14px; }
   .astrid-vision-details-project-heading { flex-wrap: wrap; gap: 3px 10px; }
 }
 

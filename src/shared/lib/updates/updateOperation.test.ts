@@ -266,7 +266,7 @@ describe('LocalPageUpdate', () => {
 
   it('treats a replay 409 and other 4xx/422 as failures, not refusals', async () => {
     expect((await make(() => json(409, { error: 'used', code: 'replay' })).update.start()).phase).toBe('failed');
-    expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
+    expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'The update did not complete. Download diagnostics to see why.' });
   });
 
   it('reports recovered (rollback) as a completed outcome', async () => {

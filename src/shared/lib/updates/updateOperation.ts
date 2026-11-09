@@ -27,7 +27,7 @@ const CONFLICT_OUTCOMES: ReadonlySet<string> = new Set(['updated', 'rolled_back'
 const OUTCOME_MESSAGES: Readonly<Record<InstallerUpdateOutcome, string>> = {
   updated: 'Astrid updated. Reload to continue.',
   rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
-  failed: 'The update did not complete. Check diagnostics before trying again.',
+  failed: 'The update did not complete. Download diagnostics to see why.',
 };
 
 function installerReasonOf(code: string): InstallerUpdateReason {
@@ -299,7 +299,7 @@ export class LocalPageUpdate {
       if (response.ok && result && (result.status === 'updated' || result.status === 'up-to-date' || result.status === 'recovered')) {
         return this.set({ phase: 'done', status: result.status, message: result.status === 'updated' ? 'Astrid updated.' : result.status === 'up-to-date' ? 'Astrid is up to date.' : 'The update did not finish. Astrid was restored to its previous version.' });
       }
-      return this.set({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
+      return this.set({ phase: 'failed', message: 'The update did not complete. Download diagnostics to see why.' });
     } catch {
       return this.set({ phase: 'failed', message: 'The update result could not be confirmed. Check for updates before trying again.' });
     }

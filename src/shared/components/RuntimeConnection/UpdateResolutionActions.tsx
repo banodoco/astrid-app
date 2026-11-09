@@ -3,6 +3,7 @@ import { Button } from '@/shared/components/ui/button.tsx';
 import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN_PINOKIO_ACTION, type InstallType, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
 import { CopyCommandRow, CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { DownloadDiagnosticsButton } from './DownloadDiagnosticsButton.tsx';
 import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY } from './copy.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
@@ -70,7 +71,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {/* The generic line only when no reason explains why this Astrid can't update itself. */}
     {commandOptions && installerPath && !execute && !resolution.updateReason && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']}</p>}
-    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair'} />}
+    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair' || failedInstall} />}
     {commandOptions && resolution.updateReason === 'self-update-too-old' && <p className="text-sm">{SELF_UPDATE_TOO_OLD_STEPS}</p>}
     {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
       <p className="text-sm">Run this command, then start Astrid:</p>
@@ -82,9 +83,13 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
     {operation?.fresh && !operation.error && statusLine && !operation.pending && <p role="status">{statusLine}</p>}
     {failedInstall && <div className="space-y-2">
+      {operation?.status?.log_path && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Details: {operation.status.log_path}</p>}
       <p className="text-sm">{ASTRID_STATUS_COPY.repairDescription}</p>
-      <CopyCommandRow command={plainInstallCommand} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+      {/* Both ways to repair: the agent's brief and the plain line. A card that already offers them makes them the repair. */}
+      {!commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain />}
     </div>}
+    {/* Settings has its own Diagnostics row; a card on the page points to the full story here. */}
+    {context === 'page' && (failedInstall || localState.phase === 'failed') && <DownloadDiagnosticsButton />}
     {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
     {guarded.error && <p role="alert">{guarded.error}</p>}
   </div>;

@@ -334,6 +334,10 @@ describe('public Site lifecycle and navigation ownership', () => {
     expect(document.querySelector('dialog')).toBeNull();
     expect(document.activeElement).toHaveClass('astrid-vision');
     expect(document.querySelector('.astrid-brand-mink-button')).toHaveAttribute('data-pose', 'profile');
+    // Vision's new section tracker schedules one initial measurement/alignment
+    // frame on mount; drain those before checking for any continuing Home replay.
+    await paint();
+    await paint();
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(frames.size).toBe(0);
     historyAt('/home');

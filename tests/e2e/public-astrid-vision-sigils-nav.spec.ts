@@ -231,3 +231,144 @@ test('the joined principle panels and corner arrows never gain light fills, even
   await cards.last().hover();
   await checkTransparent();
 });
+
+
+test('phone scroll activates each principle sigil through the middle of the viewport', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const cards = page.locator('.astrid-vision-standards-list > li');
+  await expect(cards).toHaveCount(4);
+  const motions = [
+    ['.astrid-vision-sigil-orbit', 'astrid-vision-sigil-orbit'],
+    ['.astrid-vision-sigil-open-ring', 'astrid-vision-sigil-ring'],
+    ['.astrid-vision-sigil-spark', 'astrid-vision-sigil-spark-rise'],
+    ['.astrid-vision-sigil-clear-path', 'astrid-vision-sigil-clear'],
+  ] as const;
+  for (let index = 0; index < motions.length; index++) {
+    const card = cards.nth(index);
+    await card.evaluate(el => {
+      const rect = el.getBoundingClientRect();
+      window.scrollBy(0, rect.top + rect.height / 2 - window.innerHeight / 2);
+    });
+    await expect(card).toHaveAttribute('data-sigil-active', 'true');
+    await expect(card.locator(motions[index][0])).toHaveCSS('animation-name', motions[index][1]);
+    await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
+    if (index > 0) await expect(cards.nth(index - 1)).not.toHaveAttribute('data-sigil-active', 'true');
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(cards.last()).not.toHaveAttribute('data-sigil-active', 'true');
+  await expect(cards.last().locator('.astrid-vision-sigil-clear-path')).toHaveCSS('animation-name', 'none');
+});
+
+test('touch modal never starts with an X outline and dismissal clears card focus; keyboard still restores focus', async ({ browser, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 780 },
+    isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+  });
+  const page = await context.newPage();
+  try {
+    await page.route(FEED, route => route.fulfill({
+      status: 200, contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+    }));
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const card = page.locator('.astrid-vision-standards-list > li').nth(1);
+    const trigger = card.getByRole('button', { name: /Explore .*: gaps and projects/ });
+    await trigger.tap();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('heading', { level: 2 })).toBeFocused();
+    await expect(dialog.getByRole('button', { name: 'Close details' })).not.toBeFocused();
+
+    await dialog.getByRole('button', { name: 'Close details' }).tap();
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).not.toBeFocused();
+    await expect.poll(() => trigger.evaluate(el => el.matches(':focus-visible'))).toBe(false);
+    await expect.poll(() => card.evaluate(el => getComputedStyle(el, '::after').opacity)).toBe('0');
+
+    // Restoring focus is correct when the opening action used a keyboard.
+    await trigger.focus();
+    await page.keyboard.press('Enter');
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('heading', { level: 2 })).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+    await expect(trigger).toBeFocused();
+  } finally {
+    await context.close();
+  }
+});
+
+test('phone header centers the active section when horizontal scroll bounds permit', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.setViewportSize({ width: 320, height: 740 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const nav = page.getByRole('navigation', { name: 'Vision page sections' });
+  await expect(nav).toBeVisible();
+
+  let centered = 0;
+  for (const label of ['Pillars', 'Principles', 'Gaps', 'Projects']) {
+    const active = nav.getByRole('link', { name: new RegExp(label + '$') });
+    await active.click();
+    await expect(active).toHaveAttribute('aria-current', 'location');
+    const state = await nav.evaluate(el => {
+      const selected = el.querySelector('a[aria-current="location"]')!;
+      const a = selected.getBoundingClientRect();
+      const n = el.getBoundingClientRect();
+      return {
+        offset: a.left + a.width / 2 - (n.left + n.width / 2),
+        scrollLeft: el.scrollLeft,
+        maxScroll: el.scrollWidth - el.clientWidth,
+      };
+    });
+    if (state.scrollLeft > 2 && state.scrollLeft < state.maxScroll - 2) {
+      centered++;
+      expect(Math.abs(state.offset)).toBeLessThan(10);
+    }
+  }
+  expect(centered).toBeGreaterThan(0);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(321);
+});
+
+
+test('desktop section clicks keep the chosen highlight throughout smooth page scrolling', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.setViewportSize({ width: 1720, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const nav = page.getByRole('navigation', { name: 'Vision page sections' });
+  await expect(nav.getByRole('link', { name: /Vision$/ })).toHaveAttribute('aria-current', 'location');
+
+  await page.evaluate(() => {
+    const monitor = window as typeof window & { __astridNavSelections?: string[] };
+    monitor.__astridNavSelections = [];
+    const nav = document.querySelector('.astrid-vision-section-nav')!;
+    new MutationObserver(() => {
+      const selected = nav.querySelector('a[aria-current="location"]');
+      if (selected) monitor.__astridNavSelections?.push(selected.getAttribute('href') ?? '');
+    }).observe(nav, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+  });
+
+  const destination = nav.getByRole('link', { name: /Projects$/ });
+  await destination.click();
+  await expect(destination).toHaveAttribute('aria-current', 'location');
+  await expect.poll(() => page.evaluate(() =>
+    document.getElementById('astrid-vision-projects')?.getBoundingClientRect().top ?? 9999))
+    .toBeLessThan(230);
+  await page.waitForTimeout(200);
+  const selections = await page.evaluate(() =>
+    (window as typeof window & { __astridNavSelections?: string[] }).__astridNavSelections ?? []);
+  expect(selections.length).toBeGreaterThan(0);
+  expect(selections.every(id => id === '#astrid-vision-projects'), selections.join(' → ')).toBe(true);
+
+  // After the smooth jump completes, ordinary user scrolling can update the
+  // active section again; the clicked item must not remain locked.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(nav.getByRole('link', { name: /Vision$/ })).toHaveAttribute('aria-current', 'location');
+});

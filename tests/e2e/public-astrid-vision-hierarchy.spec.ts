@@ -114,7 +114,9 @@ test('mobile principle card has no redundant footer CTA, fills the touch target 
   await expect(modal).toHaveCount(0);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before - 4);
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(before + 4);
-  await expect(trigger).toBeFocused();
+  // Pointer-driven dismissal should not leave WebKit's huge full-card outline.
+  await expect(trigger).not.toBeFocused();
+  await expect.poll(() => trigger.evaluate(el => el.matches(':focus-visible'))).toBe(false);
 });
 
 

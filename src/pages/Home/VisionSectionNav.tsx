@@ -17,12 +17,18 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
 }) {
   const [activeId, setActiveId] = useState<string>(SECTIONS[0].id);
   const navRef = useRef<HTMLElement>(null);
+  const pendingJumpRef = useRef<string | null>(null);
+  const finishJumpRef = useRef<() => void>(() => {});
+  const jumpFallbackRef = useRef<number | undefined>(undefined);
   const sections = useMemo(() => SECTIONS.filter(section => includeHelp || section.id !== 'astrid-vision-contribute'), [includeHelp]);
 
   useEffect(() => {
     let frame = 0;
     const measure = () => {
       frame = 0;
+      // A programmatic smooth jump passes through several sections. Do not
+      // light up each intermediate link before arriving at the clicked one.
+      if (pendingJumpRef.current) return;
       const targets = sections.map(({ id }) => document.getElementById(id)).filter(
         (element): element is HTMLElement => element !== null);
       if (!targets.length) return;
@@ -36,30 +42,58 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
       setActiveId(previous => previous === current ? previous : current);
     };
     const schedule = () => { if (!frame) frame = window.requestAnimationFrame(measure); };
-    schedule();
+    const finishJump = () => {
+      if (!pendingJumpRef.current) return;
+      pendingJumpRef.current = null;
+      window.clearTimeout(jumpFallbackRef.current);
+      schedule();
+    };
+    finishJumpRef.current = finishJump;
+    const onPageScrollEnd = (event: Event) => {
+      // The nested nav also scrolls horizontally; its scrollend must not
+      // release our lock on a still-running *document* smooth-scroll.
+      if (event.target === document || event.target === window) finishJump();
+    };
+    measure();
     window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('scrollend', onPageScrollEnd);
     window.addEventListener('resize', schedule);
+    // A real user interruption should immediately restore scroll tracking.
+    window.addEventListener('wheel', finishJump, { passive: true });
+    window.addEventListener('touchstart', finishJump, { passive: true });
     return () => {
       window.removeEventListener('scroll', schedule);
+      window.removeEventListener('scrollend', onPageScrollEnd);
       window.removeEventListener('resize', schedule);
+      window.removeEventListener('wheel', finishJump);
+      window.removeEventListener('touchstart', finishJump);
+      window.clearTimeout(jumpFallbackRef.current);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, [sections]);
 
-  // Keep the highlighted destination in view within the narrow header,
-  // without invoking scrollIntoView (which would also move the document).
+  // On phones, position the active section in the middle as far as the
+  // horizontal scroll bounds allow. The first/last links naturally clamp.
+  // Recenter as the Astrid wordmark folds and the nav gains more width.
   useEffect(() => {
     const nav = navRef.current;
-    const active = nav?.querySelector<HTMLAnchorElement>('a[aria-current="location"]');
-    if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
-    const navBounds = nav.getBoundingClientRect();
-    const linkBounds = active.getBoundingClientRect();
-    if (linkBounds.left < navBounds.left + 6) {
-      nav.scrollLeft += linkBounds.left - navBounds.left - 6;
-    } else if (linkBounds.right > navBounds.right - 6) {
-      nav.scrollLeft += linkBounds.right - navBounds.right + 6;
-    }
-  }, [activeId]);
+    if (!nav) return;
+    const alignActive = (behavior: ScrollBehavior) => {
+      const active = nav.querySelector<HTMLAnchorElement>('a[aria-current="location"]');
+      if (!active || nav.scrollWidth <= nav.clientWidth) return;
+      const navBox = nav.getBoundingClientRect();
+      const linkBox = active.getBoundingClientRect();
+      const desired = nav.scrollLeft + linkBox.left - navBox.left +
+        linkBox.width / 2 - nav.clientWidth / 2;
+      const bounded = Math.max(0, Math.min(nav.scrollWidth - nav.clientWidth, desired));
+      nav.scrollTo({ left: bounded, behavior });
+    };
+    alignActive(reducedMotion ? 'auto' : 'smooth');
+    const resize = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => alignActive('auto')) : null;
+    resize?.observe(nav);
+    return () => resize?.disconnect();
+  }, [activeId, reducedMotion]);
 
   return (
     <nav ref={navRef} className="astrid-vision-section-nav" aria-label="Vision page sections">
@@ -70,9 +104,24 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
             const target = document.getElementById(id);
             if (!target) return;
             event.preventDefault();
+            pendingJumpRef.current = id;
+            // Update the highlight synchronously, then let the browser scroll.
+            // While the jump runs, the scroll spy intentionally stays quiet.
+            setActiveId(id);
             target.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });
             window.history.replaceState(window.history.state, '', '#' + id);
-            setActiveId(id);
+            window.clearTimeout(jumpFallbackRef.current);
+            if (reducedMotion) {
+              window.requestAnimationFrame(() => {
+                if (pendingJumpRef.current === id) finishJumpRef.current();
+              });
+            } else {
+              // Scrollend is widely supported, but a finite fallback protects
+              // older WebKit and jumps that end without dispatching an event.
+              jumpFallbackRef.current = window.setTimeout(() => {
+                if (pendingJumpRef.current === id) finishJumpRef.current();
+              }, 2500);
+            }
           }}>
           <span className="astrid-vision-section-nav-index" aria-hidden="true">
             {String(index + 1).padStart(2, '0')}

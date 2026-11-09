@@ -6,17 +6,27 @@ export const PUBLIC_VISION_URL =
   'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 export const PUBLIC_VISION_REPO_URL = 'https://github.com/banodoco/astrid-dev';
 
-export interface PublicVisionPillar {
+/** One shared editorial format for pillars and guiding principles.
+ * Fields are optional while legacy schema-v1 snapshots remain cached.
+ * When present, all three must be present on all eight subjects. */
+export interface PublicVisionCharacteristic {
   id: string;
   title: string;
+  summary: string;
+  detailsMarkdown: string;
+}
+export interface PublicVisionSubject {
+  id: string;
+  title: string;
+  bodyMarkdown: string;
+  statement?: string;
+  explanationMarkdown?: string;
+  characteristics?: PublicVisionCharacteristic[];
+}
+export interface PublicVisionPillar extends PublicVisionSubject {
   descriptor: string;
-  bodyMarkdown: string;
 }
-export interface PublicVisionPrinciple {
-  id: string;
-  title: string;
-  bodyMarkdown: string;
-}
+export type PublicVisionPrinciple = PublicVisionSubject;
 export interface PublicVisionGap {
   id: string;
   title: string;
@@ -94,6 +104,19 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
         validUrl(p.githubUrl, sourceBlob + 'plans/' + p.id + '/plan.md') &&
         Array.isArray(p.gapIds) && p.gapIds.every(nonempty))) {
     throw new Error('Invalid public vision feed content');
+  }
+  const subjectsAll = [...pillars, ...principles];
+  const anyStructured = subjectsAll.some(p =>
+    'statement' in p || 'explanationMarkdown' in p || 'characteristics' in p);
+  if (anyStructured && !subjectsAll.every(p =>
+    nonempty(p.statement) && nonempty(p.explanationMarkdown) &&
+    Array.isArray(p.characteristics) && p.characteristics.length >= 2 &&
+    p.characteristics.length <= 6 &&
+    p.characteristics.every((c: unknown) => isRecord(c) &&
+      typeof c.id === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(c.id) &&
+      nonempty(c.title) && nonempty(c.summary) && nonempty(c.detailsMarkdown)) &&
+    new Set(p.characteristics.map((c: { id: string }) => c.id)).size === p.characteristics.length)) {
+    throw new Error('Incomplete or malformed structured vision characteristics');
   }
   const unique = (items: Array<{ id: string }>) => new Set(items.map(item => item.id)).size === items.length;
   const ids = new Set(gaps.map(gap => gap.id));

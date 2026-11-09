@@ -96,7 +96,7 @@ test('A01/A02/A03/A10/A13 production entries and repeated retained-state history
   const editor = page.locator('.astrid-editor-stage');
   await editor.evaluate((element) => element.setAttribute('data-f08-identity', 'retained'));
   for (let trip = 0; trip < 3; trip += 1) {
-    await page.getByRole('link', { name: 'Vision & Issues' }).click();
+    await page.getByRole('link', { name: 'Vision' }).click();
     await surface(page, 'vision');
     await expect(page.locator('main.astrid-public-site')).toHaveAttribute('data-astrid-lifecycle', 'retained');
     await expect(page.locator('[data-astrid-page-away]')).toHaveAttribute('inert');
@@ -172,7 +172,7 @@ test('A03/A08/A11/A12 Get Started entry, route focus and transition fallback', a
   await page.goto('/home?experience=app');
   await surface(page, 'home');
   await expect(page.locator('main.astrid-public-site')).toHaveAttribute('data-audience', 'app');
-  await page.getByRole('link', { name: 'Vision & Issues' }).click();
+  await page.getByRole('link', { name: 'Vision' }).click();
   await surface(page, 'vision');
   await page.getByRole('link', { name: 'Astrid home' }).click();
   await surface(page, 'home');

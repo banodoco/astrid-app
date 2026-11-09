@@ -183,7 +183,7 @@ describe('public Site lifecycle and navigation ownership', () => {
     vi.spyOn(window, 'scrollY', 'get').mockReturnValue(427);
     const back = vi.spyOn(window.history, 'back').mockImplementation(() => {});
     for (let trip = 0; trip < 3; trip += 1) {
-      fireEvent.click(screen.getByRole('link', { name: 'Vision & Issues' }));
+      fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
       expect(window.location.pathname).toBe('/vision');
       expect(home).toHaveAttribute('data-astrid-lifecycle', 'retained');
       expect(home.parentElement).toHaveAttribute('inert');
@@ -223,11 +223,11 @@ describe('public Site lifecycle and navigation ownership', () => {
     deferTransitions();
     fireEvent.click(screen.getByRole('button', { name: 'Agent' }));
     const audience = transitions[0];
-    fireEvent.click(screen.getByRole('link', { name: 'Vision & Issues' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
     const oldVision = transitions[1];
     historyAt('/home?experience=app');
     const home = transitions[2];
-    fireEvent.click(screen.getByRole('link', { name: 'Vision & Issues' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
     const currentVision = transitions[3];
     await update(audience);
     await update(oldVision);
@@ -261,7 +261,7 @@ describe('public Site lifecycle and navigation ownership', () => {
     const view = await mountedHome();
     deferTransitions();
     const push = vi.spyOn(window.history, 'pushState');
-    const visionLink = screen.getByRole('link', { name: 'Vision & Issues' });
+    const visionLink = screen.getByRole('link', { name: 'Vision' });
     fireEvent.click(visionLink);
     fireEvent.click(visionLink);
     expect(push).toHaveBeenCalledTimes(1);
@@ -279,7 +279,7 @@ describe('public Site lifecycle and navigation ownership', () => {
   it('uses live motion/visibility inputs and settles pending navigation without hidden work', async () => {
     await mountedHome();
     deferTransitions();
-    fireEvent.click(screen.getByRole('link', { name: 'Vision & Issues' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
     changeMotion(true);
     expect(document.querySelector('.astrid-vision')).not.toBeNull();
     expect(screen.getByTestId('sky')).toHaveAttribute('data-reduced', 'true');
@@ -330,10 +330,14 @@ describe('public Site lifecycle and navigation ownership', () => {
     await mountedHome();
     fireEvent.click(screen.getByRole('button', { name: 'Watch a day go by' }));
     expect(document.querySelector('.astrid-brand-mink-button')).toHaveAttribute('data-pose', 'facing');
-    fireEvent.click(screen.getByRole('link', { name: 'Vision & Issues' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
     expect(document.querySelector('dialog')).toBeNull();
     expect(document.activeElement).toHaveClass('astrid-vision');
     expect(document.querySelector('.astrid-brand-mink-button')).toHaveAttribute('data-pose', 'profile');
+    // Vision's new section tracker schedules one initial measurement/alignment
+    // frame on mount; drain those before checking for any continuing Home replay.
+    await paint();
+    await paint();
     await act(async () => { await vi.advanceTimersByTimeAsync(20_000); });
     expect(frames.size).toBe(0);
     historyAt('/home');
@@ -343,7 +347,7 @@ describe('public Site lifecycle and navigation ownership', () => {
   it.each(['ctrlKey', 'metaKey', 'shiftKey', 'altKey'] as const)('preserves %s link handling', async (modifier) => {
     await mountedHome();
     const push = vi.spyOn(window.history, 'pushState');
-    fireEvent.click(screen.getByRole('link', { name: 'Vision & Issues' }), { [modifier]: true });
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }), { [modifier]: true });
     expect(push).not.toHaveBeenCalled();
     expect(window.location.pathname).toBe('/home');
   });

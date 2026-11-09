@@ -9,6 +9,10 @@ import { followInPage } from './publicAstridLinks';
 import { NORTH_STAR_ART, NorthStarMink, type NorthStarArt } from './PublicAstridNorthStarArt.tsx';
 import { usePublicAstridEnvironment, type PublicAstridEnvironment } from './publicAstridLifecycle';
 import { usePublicVisionContent, PUBLIC_VISION_REPO_URL, type PublicVisionGap, type PublicVisionProject } from './publicVisionContent';
+import { VisionDetailDialog } from './VisionDetailDialog';
+import { VisionPrincipleSigil } from './VisionPrincipleSigil';
+import { VisionSectionNav } from './VisionSectionNav';
+import type { VisionSubject } from './visionHierarchy';
 import './PublicAstridVision.css';
 
 const PILLAR_ART: readonly NorthStarArt[] = [
@@ -36,6 +40,17 @@ function MarkdownText({ value, className }: { value: string; className?: string 
   return <div className={className ? 'astrid-vision-markdown ' + className : 'astrid-vision-markdown'}>
     <ReactMarkdown>{value}</ReactMarkdown>
   </div>;
+}
+
+/** One little crisp pixel arrow shared by the pillar and principle cards. */
+function PixelArrow() {
+  return (
+    <svg viewBox="0 0 18 18" width="18" height="18" fill="none"
+      stroke="currentColor" strokeWidth="2" shapeRendering="crispEdges"
+      aria-hidden="true" focusable="false">
+      <path d="M4 14L13 5M8 5h5v5" />
+    </svg>
+  );
 }
 
 const JUGGLED_ITEMS = [
@@ -166,6 +181,42 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [gapFilter, setGapFilter] = useState<GapFilter>('current');
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  const [showAllGaps, setShowAllGaps] = useState(false);
+  const [headerCondensed, setHeaderCondensed] = useState(false);
+  const [selectedSubject, setSelectedSubject] = useState<VisionSubject | null>(null);
+  useEffect(() => {
+    if (!visible) return;
+    const update = () => setHeaderCondensed(window.scrollY > 72);
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
+  }, [visible]);
+  const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const detailScrollY = useRef(0);
+  // Restore keyboard focus after a dialog, but don't leave touch users with
+  // a persistent WebKit focus rectangle around the whole card.
+  const lastInteractionWasPointer = useRef(false);
+  const detailOpenedByPointer = useRef(false);
+  const openSubject = (subject: VisionSubject, trigger: HTMLButtonElement) => {
+    detailOpenedByPointer.current = lastInteractionWasPointer.current;
+    detailTrigger.current = trigger;
+    detailScrollY.current = window.scrollY;
+    setSelectedSubject(subject);
+  };
+  const closeSubject = () => {
+    const trigger = detailTrigger.current;
+    const previousScrollY = detailScrollY.current;
+    setSelectedSubject(null);
+    const pointerClose = detailOpenedByPointer.current;
+    // Keyboard users get focus back. Touch users don't inherit the large
+    // outline caused by Safari restoring focus to a full-card button.
+    if (pointerClose) trigger?.blur();
+    else trigger?.focus({ preventScroll: true });
+    window.requestAnimationFrame(() => {
+      if (pointerClose && document.activeElement === trigger) trigger?.blur();
+      window.scrollTo(0, previousScrollY);
+    });
+  };
   const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const agentCopyTimer = useRef<number>();
   const contributionIntro = content?.vision.contributeMarkdown
@@ -192,7 +243,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   }, [content?.source.revision]);
   // Newly filtered rows must still receive reveal observation.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
-    gapFilter + ':' + projectFilter + ':' + showAllProjects);
+    gapFilter + ':' + showAllGaps + ':' + projectFilter + ':' + showAllProjects);
   useLayoutEffect(() => {
     if (!visible) return undefined;
     return skySession.registerPaletteTarget(pageRef.current, 'vision');
@@ -230,8 +281,31 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     cards.forEach((card) => observer.observe(card));
     return () => observer.disconnect();
   }, [phone, visible, reducedMotion, content?.source.revision]);
-  const gapsToShow = (content?.gaps ?? []).filter(gap =>
+  // Mirror the pillar minks: each principle's pixel sigil animates as its
+  // card crosses the center of the phone viewport, without requiring hover.
+  const sigilsRef = useRef<HTMLOListElement>(null);
+  const [centeredSigil, setCenteredSigil] = useState<string | null>(null);
+  useEffect(() => {
+    const list = sigilsRef.current;
+    if (!visible || reducedMotion || !phone || !list || typeof IntersectionObserver !== 'function') {
+      setCenteredSigil(null);
+      return undefined;
+    }
+    const cards = [...list.querySelectorAll<HTMLElement>('[data-principle]')];
+    const observer = new IntersectionObserver(() => {
+      const middle = window.innerHeight / 2;
+      const match = cards.find(card => {
+        const bounds = card.getBoundingClientRect();
+        return bounds.top <= middle && bounds.bottom >= middle;
+      });
+      setCenteredSigil(match?.dataset.principle ?? null);
+    }, { rootMargin: '-45% 0px -45% 0px' });
+    cards.forEach(card => observer.observe(card));
+    return () => observer.disconnect();
+  }, [phone, visible, reducedMotion, content?.source.revision]);
+  const filteredGaps = (content?.gaps ?? []).filter(gap =>
     gapFilter === 'all' || (gapFilter === 'current' ? gap.assessment !== 'closed' : gap.assessment === gapFilter));
+  const gapsToShow = showAllGaps ? filteredGaps : filteredGaps.slice(0, 10);
   const selectedProjects = (content?.projects ?? []).filter(project =>
     projectFilter === 'all' || (projectFilter === 'current'
       ? project.status !== 'done' && project.status !== 'cancelled'
@@ -239,7 +313,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const projectsToShow = projectFilter !== 'current' || showAllProjects
     ? selectedProjects : selectedProjects.slice(0, 8);
   return (
-    <main className="astrid-vision" ref={pageRef} tabIndex={-1} data-astrid-visual-active={visible} data-dusk style={{
+    <main className="astrid-vision" ref={pageRef} tabIndex={-1}
+      onPointerDownCapture={() => { lastInteractionWasPointer.current = true; }}
+      onKeyDownCapture={() => { lastInteractionWasPointer.current = false; }}
+      data-astrid-visual-active={visible} data-dusk style={{
       '--astrid-paper': palette.paper,
       '--astrid-dusk': palette.dusk,
       '--astrid-dusk-ink': palette.ink,
@@ -255,20 +332,22 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         reducedMotion={reducedMotion}
         quietBehind={VISION_QUIET_TEXT}
       />}
-      <header className="astrid-vision-bar">
+      <header className="astrid-vision-bar" data-condensed={headerCondensed || undefined}>
         <a className="astrid-vision-brand" href="/home" aria-label="Astrid home" onClick={(event) => followInPage(event, onGoHome)}>
           <img src="/astrid-mink-provisional.webp" alt="" />
-          <span>Astrid</span>
+          <span className="astrid-vision-brand-name">Astrid</span>
         </a>
+        {content && <VisionSectionNav reducedMotion={reducedMotion}
+          includeHelp={Boolean(content.vision.contributeMarkdown)} />}
       </header>
 
-      <section className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
+      <section id="astrid-vision-manifesto" className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
-            <p className="astrid-vision-eyebrow">Vision &amp; Issues</p>
+            <p className="astrid-vision-eyebrow">Vision</p>
             {content
               ? <>
-                  <h1 id="astrid-vision-title">{content.vision.title}</h1>
+                  <h1 id="astrid-vision-title">Vision</h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
                     This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
@@ -276,7 +355,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                 </>
               : error
                 ? <>
-                    <h1 id="astrid-vision-title">Astrid’s vision</h1>
+                    <h1 id="astrid-vision-title">Vision</h1>
                     <p className="astrid-vision-lead" role="alert">
                       The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
                     </p>
@@ -330,10 +409,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </div>
       )}
       {content && (<>
-      <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
+      <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
-          <p className="astrid-vision-eyebrow">The vision</p>
-          <h2 id="astrid-vision-north-star-title">What we're building towards</h2>
+          <p className="astrid-vision-eyebrow">Pillars</p>
+          <h2 id="astrid-vision-north-star-title">The pillars of our vision</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -345,40 +424,55 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <h3>{pillar.title}</h3>
               <p>{pillar.descriptor}</p>
               <NorthStarMink art={pillar.art} />
+              <span className="astrid-vision-pillar-details" aria-hidden="true">
+                Details <span className="astrid-vision-card-arrow"><PixelArrow /></span>
+              </span>
+              <button type="button" className="astrid-vision-card-open"
+                aria-label={'Explore ' + pillar.title + ': gaps and projects'}
+                onClick={event => openSubject({ kind: 'pillar', id: pillar.id }, event.currentTarget)} />
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
+      <section id="astrid-vision-standards" className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Our aspirations</p>
+          <p className="astrid-vision-eyebrow">Principles</p>
           <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
         </div>
-        <ol className="astrid-vision-standards-list">
-          {content.principles.map((principle, index) => (
-            <li key={principle.id} data-reveal>
-              <span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+        <ol className="astrid-vision-standards-list" ref={sigilsRef}>
+          {content.principles.map(principle => (
+            <li key={principle.id} data-reveal data-principle={principle.id}
+              data-sigil-active={centeredSigil === principle.id || undefined}>
+              <VisionPrincipleSigil principleId={principle.id} />
               <div>
                 <h3>{principle.title}</h3>
-                <MarkdownText value={principle.bodyMarkdown} />
+                {principle.statement
+                  ? <p className="astrid-vision-principle-statement">{principle.statement}</p>
+                  : <MarkdownText value={principle.bodyMarkdown} />}
               </div>
+              <span className="astrid-vision-principle-corner" aria-hidden="true">
+                <span className="astrid-vision-card-arrow"><PixelArrow /></span>
+              </span>
+              <button type="button" className="astrid-vision-card-open"
+                aria-label={'Explore ' + principle.title + ': gaps and projects'}
+                onClick={event => openSubject({ kind: 'principle', id: principle.id }, event.currentTarget)} />
             </li>
           ))}
         </ol>
       </section>
 
-      <section className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
+      <section id="astrid-vision-parts" className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
         <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
-          <p className="astrid-vision-eyebrow">The gaps</p>
-          <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
+          <p className="astrid-vision-eyebrow">Gaps</p>
+          <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : 'How we currently fall short'}</h2>
         </div>
         <div className="astrid-vision-context-row">
           <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress. <a href={PUBLIC_VISION_REPO_URL + '/blob/main/docs/contribution-workflow.md#define-or-reassess-a-vision-gap'} target="_blank" rel="noreferrer">What makes a gap?</a></p>
           <div className="astrid-vision-filter-bar">
             <label htmlFor="astrid-vision-gap-filter">Status</label>
             <select id="astrid-vision-gap-filter" aria-label="Filter gaps by status" value={gapFilter}
-              onChange={event => setGapFilter(event.target.value as GapFilter)}>
+              onChange={event => { setGapFilter(event.target.value as GapFilter); setShowAllGaps(false); }}>
               {GAP_FILTERS.map(option => <option key={option.value} value={option.value}>
                 {option.label} ({option.value === 'current' ? CURRENT_GAPS.length : option.value === 'all'
                   ? content.gaps.length : content.gaps.filter(gap => gap.assessment === option.value).length})
@@ -387,13 +481,20 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           </div>
         </div>
         <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} openProjects={CURRENT_PROJECTS} />)}</ol>
-        {gapsToShow.length === 0 && <p className="astrid-vision-filter-empty" role="status">No gaps with this status yet.</p>}
+        {filteredGaps.length === 0 && <p className="astrid-vision-filter-empty" role="status">No gaps with this status yet.</p>}
+        {filteredGaps.length > 10 && (
+          <button className="astrid-vision-more-button astrid-vision-gaps-more" type="button"
+            aria-expanded={showAllGaps} aria-controls="astrid-vision-gap-list"
+            onClick={() => setShowAllGaps(value => !value)}>
+            {showAllGaps ? 'Show fewer gaps' : 'Show all gaps'}
+          </button>
+        )}
       </section>
 
-      <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
+      <section id="astrid-vision-projects" className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
         <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Project catalog</p>
-          <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
+          <p className="astrid-vision-eyebrow">Projects</p>
+          <h2 id="astrid-vision-projects-title">How we plan to reach our aspirations</h2>
         </div>
         <div className="astrid-vision-context-row">
           <p className="astrid-vision-section-context">These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A listing doesn't mean someone has already started work.</p>
@@ -432,11 +533,15 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </section>
 
       </>)}
+      {content && selectedSubject && (
+        <VisionDetailDialog key={selectedSubject.kind + ':' + selectedSubject.id}
+          content={content} subject={selectedSubject} onClose={closeSubject} />
+      )}
       {content?.vision.contributeMarkdown && (
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"
           aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
-            <p className="astrid-vision-eyebrow">Get involved</p>
+            <p className="astrid-vision-eyebrow">Help us</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
             <MarkdownText value={contributionIntro} />
             {content.vision.agentPrompt ? (

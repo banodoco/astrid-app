@@ -33,36 +33,47 @@ test('vision displays the GitHub-published pillars and operating principles', as
   const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main.astrid-vision')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(content.vision.title);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Vision');
   const pillars = page.locator('.astrid-vision-principles h3');
   await expect(pillars).toHaveCount(content.pillars.length);
   for (const [index, pillar] of content.pillars.entries()) {
     await expect(pillars.nth(index)).toHaveText(pillar.title);
   }
-  await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Our aspirations');
+  await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Principles');
   await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
-  const individualBorders = await page.locator('.astrid-vision-standards-list li')
-    .evaluateAll(elements => elements.map(element => getComputedStyle(element).borderTopStyle));
-  expect(individualBorders).toEqual(['none', 'none', 'none', 'none']);
+  const principleCards = page.locator('.astrid-vision-standards-list > li');
+  const cardSurfaces = await principleCards.evaluateAll(elements => elements.map(element => {
+    const style = getComputedStyle(element);
+    return { border: style.borderTopStyle, background: style.backgroundColor };
+  }));
+  expect(cardSurfaces).toHaveLength(4);
+  expect(cardSurfaces.every(card => card.border === 'solid' && card.background === 'rgba(0, 0, 0, 0)')).toBeTruthy();
+  await expect(principleCards.locator('.astrid-vision-principle-sigil')).toHaveCount(4);
 });
 
 test('desktop vision has compact, accessible gaps and aligned principle headings', async ({ page, request }) => {
   const content = await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: "What we're building towards" })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'The pillars of our vision' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'The principles that drive us' })).toBeVisible();
 
   const principleTitles = page.locator('.astrid-vision-standards-list h3');
   await expect(principleTitles).toHaveText(content.principles.map(principle => principle.title));
-  const principleHeights = await principleTitles.evaluateAll(elements =>
-    elements.map(element => element.getBoundingClientRect().height));
-  expect(Math.max(...principleHeights) - Math.min(...principleHeights)).toBeLessThan(4);
+  // Independent compact cards allow titles to wrap naturally. The copy
+  // must remain underneath rather than collide with the right-hand sigil.
+  const titleLayouts = await principleTitles.evaluateAll(elements => elements.map(title => {
+    const card = title.closest('li')!;
+    const copy = card.querySelector('.astrid-vision-principle-statement, .astrid-vision-markdown')!;
+    return { title: title.getBoundingClientRect().toJSON(), copy: copy.getBoundingClientRect().toJSON() };
+  }));
+  expect(titleLayouts.every(({ title, copy }) => copy.y >= title.y + title.height - 2)).toBe(true);
 
   const current = content.gaps.filter(gap => gap.assessment !== 'closed');
   const gapRows = page.locator('.astrid-vision-part');
-  await expect(gapRows).toHaveCount(current.length);
+  await expect(gapRows).toHaveCount(Math.min(10, current.length));
+  await expect(page.getByRole('button', { name: 'Show all gaps' })).toBeVisible();
   const first = gapRows.first();
   const trigger = first.locator('h3 button');
   const body = first.locator('.astrid-vision-part-body');
@@ -278,7 +289,7 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
   const gap = page.locator('#gap-aa-001');
   const selector = page.getByRole('combobox', { name: 'Filter gaps by status' });
   await expect(selector).toHaveValue('current');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(current.length);
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, current.length));
   await expect(gap).toBeVisible();
   await expect(gap.getByRole('button', { name: first.title })).toHaveAttribute('aria-expanded', 'false');
   await gap.getByRole('button', { name: first.title }).click();
@@ -287,6 +298,8 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
   await expect(source).toHaveAttribute('href', first.githubUrl);
   expect(await source.evaluate(element => getComputedStyle(element).borderTopStyle)).toBe('solid');
   await selector.selectOption('all');
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, content.gaps.length));
+  await page.getByRole('button', { name: 'Show all gaps' }).click();
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.length);
   await selector.selectOption('closed');
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.filter(gap => gap.assessment === 'closed').length);
@@ -294,7 +307,7 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
     await expect(page.locator('.astrid-vision-filter-empty')).toHaveText('No gaps with this status yet.');
   }
   await selector.selectOption('current');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(current.length);
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, current.length));
 });
 
 test('status filters include closed gaps and completed projects from a valid feed', async ({ page, request }) => {
@@ -311,10 +324,13 @@ test('status filters include closed gaps and completed projects from a valid fee
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const gapFilter = page.getByRole('combobox', { name: 'Filter gaps by status' });
   const projectFilter = page.getByRole('combobox', { name: 'Filter projects by status' });
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.filter(gap => gap.assessment !== 'closed').length);
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(
+    Math.min(10, altered.gaps.filter(gap => gap.assessment !== 'closed').length));
   await gapFilter.selectOption('closed');
   await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.filter(gap => gap.assessment === 'closed').length);
   await gapFilter.selectOption('all');
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, altered.gaps.length));
+  await page.getByRole('button', { name: 'Show all gaps' }).click();
   await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.length);
   await projectFilter.selectOption('all');
   await expect(page.locator('.astrid-vision-project-row')).toHaveCount(altered.projects.length);
@@ -326,14 +342,15 @@ test('different valid feed content renders without rebuilding the app', async ({
   const content = await feed(request);
   const changed = {
     ...content,
-    vision: { ...content.vision, title: 'Dynamic vision heading from published data' },
+    vision: { ...content.vision, title: 'Dynamic source title', introMarkdown: 'A new published ambition, without rebuilding the app.' },
   };
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify(changed),
     headers: { 'access-control-allow-origin': '*' },
   }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(changed.vision.title);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Vision');
+  await expect(page.locator('.astrid-vision-lead')).toContainText('A new published ambition');
 });
 
 test('feed errors are explained and offer a retry', async ({ page }) => {

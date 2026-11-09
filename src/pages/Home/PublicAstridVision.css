@@ -7,9 +7,10 @@
   --astrid-line: #d5d0c5;
   --astrid-accent: #a94714;
   --astrid-vision-serif: Georgia, "Times New Roman", serif;
+  --astrid-vision-gutter: clamp(20px, 6vw, 72px);
   box-sizing: border-box;
   min-height: 100vh;
-  padding: 0 clamp(20px, 6vw, 72px) 64px;
+  padding: 0 var(--astrid-vision-gutter) 64px;
   background: var(--astrid-paper);
   color: var(--astrid-ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -224,8 +225,8 @@
 /* The North Star: four goals, each on its own quiet tint with a mink acting it out. */
 .astrid-vision-principles {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: clamp(14px, 1.6vw, 20px);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: clamp(12px, 1.4vw, 18px);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -237,40 +238,16 @@
   --tone-night: #3b2b23;
   --tone-ink-night: #f28a4e;
   padding: clamp(22px, 2.6vw, 32px);
+  border: 1px solid color-mix(in oklab, var(--tone-ink) 28%, transparent);
   border-radius: 16px;
   background: var(--tone);
+  transition: border-color 170ms ease, box-shadow 170ms ease;
   counter-increment: astrid-principle;
   container-type: inline-size;
 }
-.astrid-vision-principles li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto 1fr;
-  column-gap: clamp(12px, 2vw, 24px);
-}
-.astrid-vision-principles li::before { grid-column: 1 / -1; }
-/* Titles run the card's full width, above the mink, and settle over balanced lines. */
-.astrid-vision-principles h3 { grid-column: 1 / -1; text-wrap: balance; }
-.astrid-vision-principles li > p { grid-column: 1; grid-row: 3; }
-/* Narrow cards reserve an illustration row below the copy. Match the base selector's specificity:
-   a weaker art selector left it in row 3 on top of the full-width paragraph. */
-@container (max-width: 380px) {
-  .astrid-vision-principles li > p { grid-column: 1 / -1; max-width: none; }
-  .astrid-vision-principles .astrid-vision-principle-art {
-    --px: 1px;
-    grid-column: 1 / -1; grid-row: 4;
-    justify-self: end; margin-top: 24px;
-  }
-}
-@media (max-width: 640px) {
-  .astrid-vision-principles li > p { grid-column: 1 / -1; max-width: none; }
-  .astrid-vision-principles .astrid-vision-principle-art {
-    --px: 1px;
-    grid-column: 1 / -1; grid-row: 4;
-    justify-self: end; margin-top: 24px;
-  }
-}
-.astrid-vision-principles li:nth-child(2) { --tone: #f3ead6; --tone-ink: #8a6420; --tone-night: #362f22; --tone-ink-night: #d9b26a; }
+/* The responsive card composition is collected below so desktop and phone
+   geometry cannot fight obsolete container-query artwork rows. */
+.astrid-vision-principles h3 { text-wrap: balance; }.astrid-vision-principles li:nth-child(2) { --tone: #f3ead6; --tone-ink: #8a6420; --tone-night: #362f22; --tone-ink-night: #d9b26a; }
 .astrid-vision-principles li:nth-child(3) { --tone: #e6eddf; --tone-ink: #4f6a3c; --tone-night: #2a3324; --tone-ink-night: #a3c48c; }
 .astrid-vision-principles li:nth-child(4) { --tone: #e2e8ee; --tone-ink: #41607a; --tone-night: #262e36; --tone-ink-night: #9bb8d0; }
 .astrid-vision-principles li::before {
@@ -427,7 +404,8 @@
 @media (max-width: 760px) {
   .astrid-vision-hero { grid-template-columns: minmax(0, 1fr); }
   /* The hero illustration sits below, so fit this opening to its copy instead of a screen. */
-  .astrid-vision-manifesto { min-height: 0; align-content: start; padding: 12px 0 36px; }
+  /* The mobile hero needs space to breathe below the sticky navigation. */
+  .astrid-vision-manifesto { min-height: 0; align-content: start; padding: clamp(34px, 6vw, 48px) 0 36px; }
   .astrid-vision-bar { padding-block: 16px; }
   .astrid-vision-hero-copy > .astrid-vision-eyebrow { margin-bottom: 14px; }
   .astrid-vision-lead { margin-top: 16px; }
@@ -496,7 +474,7 @@
 /* The home page's sky sits behind Vision too, and the page follows it through twilight with the same
    dusk values (set inline from the sky; see the dusk rules in PublicAstridShell.css). */
 .astrid-vision > .astrid-sky { width: auto; margin: 0; }
-.astrid-vision > :not(.astrid-sky) { position: relative; z-index: 1; }
+.astrid-vision > :not(.astrid-sky):not(.astrid-vision-details):not(.astrid-vision-bar) { position: relative; z-index: 1; }
 .astrid-vision[data-dusk] {
   --astrid-panel: color-mix(in oklab, #fffefa, #221f1a calc(var(--astrid-dusk) * 100%));
   --astrid-ink: color-mix(in oklab, #25241f, #f3eee4 calc(var(--astrid-dusk-ink) * 100%));
@@ -623,30 +601,175 @@
 }
 
 .astrid-vision-standards { margin-top: clamp(80px, 10vw, 128px); }
+/* This connected group earns more horizontal room than the text sections.
+   The edge-to-edge dividers are intentional: the principles work together. */
+.astrid-vision > .astrid-vision-standards { width: min(100%, 1360px); }
+/* Keep editorial headings in the original 1120px reading column even though
+   the four connected cards themselves extend further toward the edges. */
+.astrid-vision-standards > .astrid-vision-section-head {
+  max-width: 1120px;
+  margin-inline: auto;
+}
 .astrid-vision-standards-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(18px, 3vw, 40px);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(12px, 1.6vw, 18px);
   margin: 0;
   padding: 0;
   list-style: none;
 }
-/* The section divider is enough; suppress inherited list-item rules as well. */
+/* Principles use the same card structure with a quiet transparent surface.
+   Accent color belongs to the future sigil, not a whole-card tint. */
 .astrid-vision .astrid-vision-standards-list > li {
-  border-top: none;
-  padding-top: 0;
+  --sigil-ink: #a94714;
+  --sigil-bg: #f2dcca;
+  /* Both the pixel mark and the corner arrow read the same muted ink and
+     presence so they stay visually paired before and after interaction. */
+  --sigil-display-ink: color-mix(in oklab, var(--sigil-ink) 52%, var(--astrid-muted));
+  --sigil-display-opacity: .58;
+  padding: clamp(16px, 1.4vw, 22px);
+  border: 1px solid color-mix(in oklab, var(--astrid-ink) 22%, transparent);
+  border-radius: 14px;
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 170ms ease, box-shadow 170ms ease;
 }
-.astrid-vision-standards-list li > span {
-  color: var(--astrid-accent);
-  font: 12px "Departure Mono", ui-monospace, monospace;
+.astrid-vision .astrid-vision-standards-list > li[data-principle="open-by-design"] {
+  --sigil-ink: #916a30;
+  --sigil-bg: #f1e6cf;
+}
+.astrid-vision .astrid-vision-standards-list > li[data-principle="in-the-creators-control"] {
+  --sigil-ink: #50744e;
+  --sigil-bg: #dbe9d9;
+}
+.astrid-vision .astrid-vision-standards-list > li[data-principle="eliminate-needless-technical-wrangling"] {
+  --sigil-ink: #50738b;
+  --sigil-bg: #dde8ef;
+}
+/* Crisp custom pixel sigils: no asset background or decorative placeholder frame.
+   The established warm per-principle accent colors flow into the SVG directly. */
+.astrid-vision-principle-sigil {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 66px;
+  height: 66px;
+  margin-bottom: 12px;
+  background: transparent;
+  /* The mark and its arrow are two expressions of one shared accent. */
+  color: var(--sigil-display-ink);
+  opacity: var(--sigil-display-opacity);
+  transition: opacity 280ms ease, color 280ms ease;
+}
+.astrid-vision-sigil-art {
+  display: block;
+  width: 62px;
+  height: 62px;
+  overflow: visible;
+}
+@media (hover: hover) and (pointer: fine) {
+  .astrid-vision .astrid-vision-standards-list > li:hover {
+    --sigil-display-ink: color-mix(in oklab, var(--sigil-ink) 62%, var(--astrid-muted));
+    --sigil-display-opacity: .82;
+  }
+}
+.astrid-vision .astrid-vision-standards-list > li:focus-within {
+  --sigil-display-opacity: .82;
+}
+.astrid-vision-sigil-orbit,
+.astrid-vision-sigil-nodes,
+.astrid-vision-sigil-open-ring,
+.astrid-vision-sigil-open-sparks,
+.astrid-vision-sigil-spark,
+.astrid-vision-sigil-knot,
+.astrid-vision-sigil-clear-path {
+  transform-box: view-box;
+  transform-origin: 20px 20px;
+}
+/* The knot dissolves slowly when activated, but returns promptly when
+   hover or the phone's center-screen trigger ends. The inactive value owns
+   the exit duration, active rules below own the 3s entrance. */
+.astrid-vision-sigil-knot,
+.astrid-vision-sigil-knot-fragments,
+.astrid-vision-sigil-clear-path {
+  transition: opacity 1s ease-in-out;
+}
+/* Both forms are faintly present at rest. The arrow strengthens as the
+   tangle recedes; on the return the weighting reverses. */
+.astrid-vision-sigil-clear-path { opacity: .26; }
+@keyframes astrid-vision-sigil-orbit { to { transform: rotate(16deg); } }
+@keyframes astrid-vision-sigil-ring { 50% { transform: scale(1.07); opacity: .75; } }
+@keyframes astrid-vision-sigil-spark-rise { 50% { transform: translateY(-3px); } }
+@keyframes astrid-vision-sigil-spark-orbit { to { transform: rotate(24deg); } }
+@media (hover: hover) and (pointer: fine) {
+  .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-orbit {
+    animation: astrid-vision-sigil-orbit 1.25s ease-in-out infinite alternate;
+  }
+  .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-open-ring {
+    animation: astrid-vision-sigil-ring 1.4s ease-in-out infinite;
+  }
+  .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-open-sparks {
+    animation: astrid-vision-sigil-spark-orbit 1.7s ease-in-out infinite alternate;
+  }
+  .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-spark {
+    animation: astrid-vision-sigil-spark-rise 1.35s ease-in-out infinite;
+  }
+  .astrid-vision-standards-list > li:is(:hover, :focus-within) :is(.astrid-vision-sigil-knot, .astrid-vision-sigil-knot-fragments) {
+    opacity: .16;
+    transition-duration: 3s;
+  }
+  .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-clear-path {
+    opacity: 1;
+    transition-duration: 3s;
+  }
+}
+/* A phone has no hover. Give each principle the same center-of-screen
+   moment as the pillar minks, then settle as it leaves that viewing band. */
+@media (max-width: 640px) {
+  .astrid-vision .astrid-vision-standards-list > li[data-sigil-active="true"] {
+    --sigil-display-ink: color-mix(in oklab, var(--sigil-ink) 62%, var(--astrid-muted));
+    --sigil-display-opacity: .82;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-orbit {
+    animation: astrid-vision-sigil-orbit 1.25s ease-in-out infinite alternate;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-open-ring {
+    animation: astrid-vision-sigil-ring 1.4s ease-in-out infinite;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-open-sparks {
+    animation: astrid-vision-sigil-spark-orbit 1.7s ease-in-out infinite alternate;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-spark {
+    animation: astrid-vision-sigil-spark-rise 1.35s ease-in-out infinite;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] :is(.astrid-vision-sigil-knot, .astrid-vision-sigil-knot-fragments) {
+    opacity: .16;
+    transition-duration: 3s;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-clear-path {
+    opacity: 1;
+    transition-duration: 3s;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-sigil-art g { animation: none !important; transform: none !important; }
+  .astrid-vision-sigil-knot,
+  .astrid-vision-sigil-knot-fragments,
+  .astrid-vision-sigil-clear-path { transition: none !important; }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] :is(.astrid-vision-principle-sigil, .astrid-vision-principle-corner) {
+    opacity: .58;
+  }
 }
 .astrid-vision-standards-list h3 {
-  margin: 12px 0;
+  margin: 0 0 11px;
+  min-height: 2.34em;
   color: var(--astrid-ink);
-  font: 400 clamp(23px, 2vw, 30px)/1.2 var(--astrid-vision-serif);
+  font: 400 clamp(18px, 1.6vw, 24px)/1.17 var(--astrid-vision-serif);
+  letter-spacing: -.035em;
+  text-wrap: balance;
 }
-@media (min-width: 1101px) {
-  .astrid-vision-standards-list h3 { min-height: 2.4em; }
+@media (max-width: 760px) {
+  .astrid-vision-standards-list h3 { min-height: 0; font-size: clamp(22px, 5vw, 26px); }
 }
 .astrid-vision-standards-list .astrid-vision-markdown {
   max-width: 46ch;
@@ -790,6 +913,7 @@
 }
 .astrid-vision-more-button:hover { border-color: var(--astrid-accent); }
 .astrid-vision-more-button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+.astrid-vision-gaps-more { display: flex; width: fit-content; margin: 24px auto 0; }
 
 .astrid-vision-project-list .astrid-vision-project-row {
   display: grid;
@@ -839,7 +963,7 @@
   .astrid-vision-project-row > a { grid-column: 2; grid-row: 1; }
 }
 @media (max-width: 760px) {
-  .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 22px; }
+  .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 0; }
   .astrid-vision-project-list .astrid-vision-project-row { grid-template-columns: 1fr; gap: 10px; }
   .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1; grid-row: auto; }
   .astrid-vision-project-row > a { grid-column: 1; grid-row: auto; }
@@ -866,10 +990,11 @@
   grid-row: 1;
   margin-bottom: 18px;
   color: var(--tone-ink);
-  font-family: var(--astrid-vision-serif);
-  font-size: 22px;
-  font-style: italic;
-  line-height: 1.2;
+  font-family: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 17px;
+  font-style: normal;
+  letter-spacing: .04em;
+  line-height: 1.35;
 }
 .astrid-vision[data-dusk] .astrid-vision-principles .astrid-vision-pillar-number {
   color: color-mix(in oklab, color-mix(in oklab, var(--tone-ink), var(--tone-ink-night) calc(var(--astrid-dusk-ink) * 100%)), var(--astrid-ink) calc(var(--astrid-dusk-firm) * 100%));
@@ -955,13 +1080,8 @@
 }
 .astrid-vision-copy-agent-status a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 
-/* Four creator-first operating principles, one row on wide screens. */
-@media (min-width: 1101px) {
-  .astrid-vision-standards-list { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-}
-@media (min-width: 761px) and (max-width: 1100px) {
-  .astrid-vision-standards-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-}
+/* Independent, quietly outlined principle cards instead of the former
+   joined strip: a balanced two-column counterpart to the pillars. */
 
 /* A real loading surface so the page never flashes as an empty manifesto. */
 .astrid-vision-skeleton-line {
@@ -1117,4 +1237,741 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-skeleton-line { animation: none; }
+}
+
+
+/* Both editorial card types share one accessible, full-card disclosure target. */
+.astrid-vision-principles > li,
+.astrid-vision-standards-list > li { position: relative; }
+.astrid-vision-card-open {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.astrid-vision-card-open:focus-visible {
+  outline: 3px solid var(--astrid-accent);
+  outline-offset: 4px;
+}
+/* Touch WebKit retains :hover/:focus-within after closing a dialog; neither may
+   leave the title permanently underlined. Buttons have their own focus rings. */
+/* Draw a complete inner outline independently of the joined cards' shared
+   borders: the middle cards have no actual left border by design. */
+.astrid-vision-standards-list > li::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: 1px solid color-mix(in oklab, var(--astrid-ink) 70%, transparent);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 170ms ease;
+}
+@media (hover: hover) and (pointer: fine) {
+  .astrid-vision-principles > li:hover {
+    border-color: color-mix(in oklab, var(--tone-ink) 82%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) 24%, transparent);
+  }
+  .astrid-vision-standards-list > li:hover {
+    z-index: 1;
+    border-color: color-mix(in oklab, var(--astrid-ink) 65%, transparent);
+  }
+  .astrid-vision-standards-list > li:hover::after { opacity: 1; }
+  .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
+    border-color: color-mix(in oklab, currentColor 78%, transparent);
+    background: transparent;
+  }
+  .astrid-vision-principles > li:hover .astrid-vision-pillar-details {
+    color: var(--astrid-ink);
+    font-weight: 800;
+  }
+  .astrid-vision :is(.astrid-vision-principles, .astrid-vision-standards-list) > li:hover .astrid-vision-card-arrow {
+    animation: astrid-vision-arrow-nudge 1s ease-in-out infinite;
+  }
+}
+/* Preserve a visible keyboard focus treatment without a sticky touch hover. */
+.astrid-vision-standards-list > li:has(> .astrid-vision-card-open:focus-visible)::after { opacity: 1; }
+
+/* A dialog in the top layer must be viewport-positioned, not treated as a page section.
+   In particular, never let the broad .astrid-vision > * section rule make it relative. */
+.astrid-vision > .astrid-vision-details {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
+/* Native dialog supplies Escape, focus containment and a real modal backdrop. */
+.astrid-vision-details {
+  width: min(740px, calc(100vw - 48px));
+  max-width: none;
+  max-height: min(86dvh, 900px);
+  margin: auto;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--astrid-line);
+  border-radius: 16px;
+  background: var(--astrid-paper);
+  color: var(--astrid-ink);
+  box-shadow: 0 22px 88px rgba(20, 20, 18, .28);
+}
+.astrid-vision-details::backdrop {
+  background: rgba(22, 20, 18, .58);
+  backdrop-filter: blur(3px);
+}
+/* Header stays put; only the content well scrolls. In particular, the close
+   button must belong to the panel frame, not disappearing content. */
+.astrid-vision-details-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(86dvh, 900px);
+}
+.astrid-vision-details-header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: clamp(22px, 4vw, 36px);
+  padding-bottom: clamp(16px, 2.5vw, 22px);
+  border-bottom: 1px solid var(--astrid-line);
+}
+.astrid-vision-details-header-copy { flex: 1 1 auto; min-width: 0; }
+.astrid-vision-details-scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: clamp(20px, 3.2vw, 32px) clamp(22px, 4vw, 36px);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--astrid-ink) 36%, transparent) transparent;
+}
+.astrid-vision-details-scroll::-webkit-scrollbar { width: 9px; }
+.astrid-vision-details-scroll::-webkit-scrollbar-track { background: transparent; }
+.astrid-vision-details-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--astrid-ink) 36%, transparent);
+  border: 2px solid var(--astrid-paper);
+  border-radius: 999px;
+}
+.astrid-vision-details-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--astrid-ink) 55%, transparent);
+}
+.astrid-vision-details-eyebrow {
+  margin: 0 0 12px;
+  color: var(--astrid-accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+}
+.astrid-vision-details-header h2 {
+  margin: 0;
+  font: 400 clamp(28px, 4vw, 40px)/1.15 var(--astrid-vision-serif);
+  letter-spacing: -.03em;
+}
+/* A programmatically focused dialog title shouldn't have a control-style
+   ring. Keyboard users still see focus when they tab to the X or links. */
+.astrid-vision-details-header h2:focus { outline: none; }
+.astrid-vision-details-close {
+  position: static;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--astrid-line);
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.astrid-vision-details-close:hover { background: var(--astrid-panel); }
+.astrid-vision-details-close:focus-visible,
+.astrid-vision-details a:focus-visible {
+  outline: 2px solid var(--astrid-accent);
+  outline-offset: 3px;
+}
+.astrid-vision-details-description {
+  margin-top: 0;
+  color: var(--astrid-muted);
+  font-size: 16px;
+  line-height: 1.65;
+}
+.astrid-vision-details-description p { margin: 0 0 12px; }
+.astrid-vision-details-description a { color: inherit; text-underline-offset: 3px; }
+/* Shared, glanceable characteristic hierarchy for both pillars and principles.
+   Only the summary sentence shows by default; native details keep this
+   keyboard-accessible with no extra modal, JavaScript or duplicated prose. */
+.astrid-vision-principle-statement {
+  margin: 0;
+  color: var(--astrid-muted);
+  font-size: 15.5px;
+  line-height: 1.6;
+}
+.astrid-vision-details-statement {
+  color: var(--astrid-ink);
+  font-size: 18px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+.astrid-vision-details-characteristics {
+  margin-top: 28px;
+}
+.astrid-vision-details-characteristics > h3 {
+  margin: 0 0 14px;
+  font: 400 24px/1.25 var(--astrid-vision-serif);
+}
+.astrid-vision-details-characteristic-list {
+  border-top: 1px solid var(--astrid-line);
+}
+.astrid-vision-details-characteristic {
+  border-bottom: 1px solid var(--astrid-line);
+}
+/* The gaps section supplies the single divider beneath the last
+   characteristic; don't show two adjacent rules. */
+.astrid-vision-details-characteristic:last-child { border-bottom: 0; }
+.astrid-vision-details-characteristic > summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 2px;
+  cursor: pointer;
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.astrid-vision-details-characteristic > summary::-webkit-details-marker { display: none; }
+.astrid-vision-details-characteristic-copy {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  min-width: 0;
+}
+.astrid-vision-details-characteristic-copy strong {
+  color: var(--astrid-ink);
+  font: 600 14px/1.35 Inter, ui-sans-serif, system-ui, sans-serif;
+}
+.astrid-vision-details-characteristic-copy > span {
+  color: var(--astrid-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.astrid-vision-details-characteristic > summary > svg {
+  flex: none;
+  color: var(--astrid-accent);
+  transition: transform 160ms ease;
+}
+.astrid-vision-details-characteristic[open] > summary > svg { transform: rotate(180deg); }
+.astrid-vision-details-characteristic > summary:hover strong { color: var(--astrid-accent); }
+.astrid-vision-details-characteristic > summary:focus-visible {
+  outline: 2px solid var(--astrid-accent);
+  outline-offset: -2px;
+  border-radius: 5px;
+}
+.astrid-vision-details-characteristic-body {
+  padding: 0 30px 18px 2px;
+  color: var(--astrid-muted);
+  font-size: 14px;
+  line-height: 1.65;
+}
+.astrid-vision-details-characteristic-body p { margin: 0 0 10px; }
+.astrid-vision-details-characteristic-body p:last-child { margin-bottom: 0; }
+.astrid-vision-details-characteristic-body a { color: inherit; text-underline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-details-characteristic > summary > svg { transition: none; }
+}
+.astrid-vision-details-gaps {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--astrid-line);
+}
+.astrid-vision-details-gaps > h3 {
+  margin: 0 0 18px;
+  font: 400 24px/1.25 var(--astrid-vision-serif);
+}
+/* Small, repeatable color families connect each gap heading to the work below.
+   The palette is editorial, not a progress/status indicator. */
+.astrid-vision-details-gap-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.astrid-vision-details-projects ul { margin: 0; padding: 0; list-style: none; }
+.astrid-vision-details-gap {
+  --gap-accent: #985d46;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--gap-accent) 40%, var(--astrid-line));
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--gap-accent) 5%, var(--astrid-panel));
+}
+.astrid-vision-details-gap[data-tone="ochre"] { --gap-accent: #90702e; }
+.astrid-vision-details-gap[data-tone="sage"] { --gap-accent: #55765e; }
+.astrid-vision-details-gap[data-tone="teal"] { --gap-accent: #367a83; }
+.astrid-vision-details-gap[data-tone="blue"] { --gap-accent: #5b6e98; }
+.astrid-vision-details-gap[data-tone="plum"] { --gap-accent: #806185; }
+.astrid-vision-details-gap-heading {
+  padding: 16px 18px;
+  border-bottom: 1px solid color-mix(in oklab, var(--gap-accent) 30%, var(--astrid-line));
+  background: color-mix(in oklab, var(--gap-accent) 17%, var(--astrid-panel));
+}
+.astrid-vision-details-gap h4 {
+  margin: 0;
+  font: 500 17px/1.4 var(--astrid-vision-serif);
+}
+.astrid-vision-details-gap h4 a,
+.astrid-vision-details-project-heading a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--astrid-ink);
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+.astrid-vision-details-gap a:hover { text-decoration-color: currentColor; }
+.astrid-vision-details-gap a svg { flex: 0 0 auto; }
+/* The lighter project area visually belongs to its darker gap header. */
+.astrid-vision-details-projects {
+  padding: 14px 18px 16px;
+  background: color-mix(in oklab, var(--gap-accent) 6%, var(--astrid-panel));
+}
+.astrid-vision-details-projects > p {
+  margin: 0 0 8px;
+  color: color-mix(in oklab, var(--gap-accent) 65%, var(--astrid-ink));
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .035em;
+}
+.astrid-vision-details-projects li {
+  padding: 10px 0;
+  border-top: 1px solid color-mix(in oklab, var(--gap-accent) 20%, transparent);
+}
+.astrid-vision-details-projects li:first-child { border-top: 0; }
+.astrid-vision-details-project-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.astrid-vision-details-project-heading a { font-size: 14px; font-weight: 600; }
+.astrid-vision-details-project-heading span {
+  flex-shrink: 0;
+  color: var(--astrid-muted);
+  font: 11px/1.4 ui-monospace, monospace;
+  text-transform: capitalize;
+}
+.astrid-vision-details-project-goal {
+  margin-top: 5px;
+  color: var(--astrid-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.astrid-vision-details-project-goal p { margin: 0; }
+.astrid-vision-details-empty {
+  margin: 10px 0 0;
+  color: var(--astrid-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.astrid-vision-details-gap > .astrid-vision-details-empty {
+  margin: 0;
+  padding: 13px 18px 16px;
+  background: color-mix(in oklab, var(--gap-accent) 6%, var(--astrid-panel));
+}
+@media (max-width: 560px) {
+  /* Leave a real hit target around every side, especially the top and bottom. */
+  .astrid-vision-details {
+    width: calc(100vw - 44px);
+    max-height: min(82dvh, calc(100dvh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    border-radius: 14px;
+  }
+  .astrid-vision-details-shell {
+    max-height: min(82dvh, calc(100dvh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  }
+  .astrid-vision-details-header { gap: 10px; padding: 20px 18px 16px; }
+  .astrid-vision-details-scroll { padding: 18px 18px 22px; }
+  .astrid-vision-details-close { width: 38px; height: 38px; }
+  .astrid-vision-details-gap-heading { padding: 14px; }
+  .astrid-vision-details-projects { padding: 12px 14px 14px; }
+  .astrid-vision-details-gap > .astrid-vision-details-empty { padding: 12px 14px; }
+  .astrid-vision-details-project-heading { flex-wrap: wrap; gap: 3px 10px; }
+}
+
+/* A quiet affordance, with a separately animated arrow for each kind of card. */
+.astrid-vision-pillar-details,
+.astrid-vision-principle-corner {
+  position: absolute;
+  z-index: 1;
+  top: clamp(22px, 2.6vw, 32px);
+  right: clamp(22px, 2.6vw, 32px);
+  pointer-events: none;
+  color: var(--tone-ink);
+  font: 600 11px/1.4 ui-monospace, monospace;
+}
+/* Bottom-right corner control belongs to the content flow so it never
+   overlaps wrapped copy, and stays aligned across all joined cards. */
+.astrid-vision-principle-corner {
+  position: relative;
+  top: auto;
+  right: auto;
+  flex: none;
+  align-self: flex-end;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 16px;
+  border: 1px solid color-mix(in oklab, currentColor 55%, transparent);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--sigil-display-ink);
+  opacity: var(--sigil-display-opacity);
+  transition: color 280ms ease, opacity 280ms ease, border-color 170ms ease;
+}
+/* A crisp, centered pixel arrow instead of a font glyph that sits low.
+   Both pillar and principle arrow controls share this exact geometry. */
+.astrid-vision-card-arrow {
+  display: inline-grid;
+  place-items: center;
+  vertical-align: middle;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+}
+.astrid-vision-card-arrow svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  shape-rendering: crispEdges;
+}
+.astrid-vision-pillar-details .astrid-vision-card-arrow { margin-left: 4px; }
+.astrid-vision .astrid-vision-standards-list > li {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.astrid-vision-standards-list > li > div { flex: 1 1 auto; }
+@keyframes astrid-vision-arrow-nudge {
+  0%, 100% { transform: translate(-1px, 1px); }
+  50% { transform: translate(2px, -2px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-card-arrow { animation: none !important; transform: none !important; }
+}
+
+/* Navigation lives inside one sticky, paper-backed header. The original
+   editorial column width stays intact; no left rail or extra mobile strip. */
+.astrid-vision > .astrid-vision-bar {
+  position: sticky;
+  top: 0;
+  z-index: 12;
+  /* Bleed the header to the viewport edges while leaving the editorial
+     content below within its existing reading column. */
+  width: calc(100% + var(--astrid-vision-gutter) + var(--astrid-vision-gutter));
+  max-width: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: clamp(14px, 2vw, 30px);
+  min-height: 86px;
+  margin-left: calc(-1 * var(--astrid-vision-gutter));
+  margin-right: calc(-1 * var(--astrid-vision-gutter));
+  padding: 15px clamp(24px, 4vw, 68px);
+  border-bottom: 1px solid var(--astrid-line);
+  background: color-mix(in oklab, var(--astrid-paper) 94%, transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.astrid-vision-bar .astrid-vision-brand {
+  flex: none;
+  gap: 12px;
+  font-size: 26px;
+  transition: gap 300ms cubic-bezier(.22, .61, .36, 1);
+}
+.astrid-vision-bar .astrid-vision-brand img {
+  width: 34px;
+  height: 34px;
+}
+.astrid-vision-brand-name {
+  display: inline-block;
+  max-width: 100px;
+  overflow: hidden;
+  white-space: nowrap;
+  opacity: 1;
+  transition: max-width 300ms cubic-bezier(.22, .61, .36, 1), opacity 220ms ease;
+}
+.astrid-vision-bar[data-condensed] .astrid-vision-brand { gap: 0; }
+.astrid-vision-bar[data-condensed] .astrid-vision-brand-name {
+  max-width: 0;
+  opacity: 0;
+}
+.astrid-vision-section-nav {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  width: auto;
+  max-width: none;
+  justify-content: flex-end;
+  align-items: center;
+  gap: clamp(2px, .5vw, 8px);
+  margin-left: auto;
+  padding: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+.astrid-vision-section-nav::-webkit-scrollbar { display: none; }
+.astrid-vision-section-nav a {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 7px;
+  color: var(--astrid-muted);
+  font-size: 14px;
+  line-height: 1.3;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: background-color 180ms ease, color 180ms ease;
+}
+.astrid-vision-section-nav-index {
+  color: var(--astrid-accent);
+  font: 11px/1.3 "Departure Mono", ui-monospace, monospace;
+  opacity: .55;
+}
+.astrid-vision-section-nav a:hover {
+  background: color-mix(in oklab, var(--astrid-ink) 6%, transparent);
+  color: var(--astrid-ink);
+}
+.astrid-vision-section-nav a[aria-current="location"] {
+  background: color-mix(in oklab, var(--astrid-accent) 7%, transparent);
+  color: var(--astrid-ink);
+  font-weight: 650;
+}
+.astrid-vision-section-nav a[aria-current="location"] .astrid-vision-section-nav-index { opacity: 1; }
+.astrid-vision-section-nav a:focus-visible {
+  outline: 2px solid var(--astrid-accent);
+  outline-offset: -2px;
+}
+.astrid-vision :is(#astrid-vision-manifesto, #astrid-vision-pillars, #astrid-vision-standards,
+  #astrid-vision-parts, #astrid-vision-projects, #astrid-vision-contribute) {
+  scroll-margin-top: 102px;
+}
+@media (max-width: 760px) {
+  .astrid-vision > .astrid-vision-bar {
+    min-height: 68px;
+    gap: 10px;
+    padding: 10px 14px;
+  }
+  .astrid-vision-bar .astrid-vision-brand { font-size: 23px; }
+  .astrid-vision-bar .astrid-vision-brand img { width: 30px; height: 30px; }
+  .astrid-vision-section-nav {
+    justify-content: flex-start;
+    gap: 2px;
+  }
+  .astrid-vision-section-nav a {
+    font-size: 12px;
+    padding: 9px 11px;
+  }
+  .astrid-vision-section-nav-index { display: none; }
+  .astrid-vision :is(#astrid-vision-manifesto, #astrid-vision-pillars, #astrid-vision-standards,
+    #astrid-vision-parts, #astrid-vision-projects, #astrid-vision-contribute) {
+    scroll-margin-top: 82px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-brand-name,
+  .astrid-vision-bar .astrid-vision-brand,
+  .astrid-vision-principle-sigil,
+  .astrid-vision-section-nav a { transition: none !important; }
+}
+
+/* The page's dusk transition changes ink and lines, never the transparent
+   surfaces of the joined principles or their little corner controls. */
+.astrid-vision[data-dusk] .astrid-vision-standards-list > li,
+.astrid-vision[data-dusk] .astrid-vision-principle-corner,
+.astrid-vision[data-dusk] .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
+  background: transparent;
+}
+
+/* Pillars form a deliberate four-up portrait sequence on wide screens:
+   number → ambition → short claim → animated illustration → small detail cue.
+   The art shares a baseline across cards, rather than creating random gaps. */
+.astrid-vision .astrid-vision-principles > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(16px, 1fr) auto auto;
+  align-content: start;
+  min-width: 0;
+  min-height: 438px;
+  padding: clamp(17px, 1.65vw, 23px);
+}
+.astrid-vision .astrid-vision-principles .astrid-vision-pillar-number {
+  grid-column: 1;
+  grid-row: 1;
+  margin-bottom: 13px;
+}
+.astrid-vision .astrid-vision-principles h3 {
+  grid-column: 1;
+  grid-row: 2;
+  max-width: none;
+  margin-bottom: 12px;
+  font-size: clamp(22px, 1.9vw, 26px);
+  line-height: 1.16;
+}
+.astrid-vision .astrid-vision-principles li > p {
+  grid-column: 1;
+  grid-row: 3;
+  min-width: 0;
+  max-width: none;
+  font-size: 15px;
+  line-height: 1.52;
+}
+.astrid-vision .astrid-vision-principles .astrid-vision-principle-art {
+  --px: 1.45px;
+  grid-column: 1;
+  grid-row: 5;
+  align-self: end;
+  justify-self: center;
+  margin: 0;
+}
+.astrid-vision .astrid-vision-principles .astrid-vision-pillar-details {
+  position: relative;
+  top: auto;
+  right: auto;
+  grid-column: 1;
+  grid-row: 6;
+  align-self: end;
+  justify-self: end;
+  margin-top: 12px;
+}
+
+/* A tablet benefits from two calmer, shallow cards per row. On a phone
+   the same composition remains one column, with art beside the copy. */
+@media (max-width: 1179px) {
+  .astrid-vision-principles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .astrid-vision .astrid-vision-principles > li {
+    grid-template-columns: minmax(0, 1fr) max-content;
+    grid-template-rows: auto auto auto auto;
+    column-gap: 14px;
+    min-height: 0;
+    padding: 19px;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-number {
+    grid-column: 1;
+    grid-row: 1;
+    margin-bottom: 9px;
+  }
+  .astrid-vision .astrid-vision-principles h3 {
+    grid-column: 1;
+    grid-row: 2;
+    margin-bottom: 9px;
+  }
+  .astrid-vision .astrid-vision-principles li > p {
+    grid-column: 1;
+    grid-row: 3;
+    font-size: 15px;
+    line-height: 1.48;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art {
+    --px: 1.15px;
+    grid-column: 2;
+    grid-row: 1 / span 3;
+    align-self: center;
+    justify-self: end;
+    margin: 0;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-details {
+    grid-column: 1 / -1;
+    grid-row: 4;
+    margin-top: 11px;
+  }
+}
+@media (max-width: 760px) {
+  /* Portrait tablets get readable lines rather than two squeezed columns. */
+  .astrid-vision-principles { grid-template-columns: minmax(0, 1fr); }
+  .astrid-vision .astrid-vision-principles > li {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: 1.1px; }
+}
+@media (max-width: 640px) {
+  .astrid-vision .astrid-vision-principles > li {
+    grid-template-columns: minmax(0, 1fr) 75px;
+    column-gap: 10px;
+    padding: 16px;
+  }
+  .astrid-vision .astrid-vision-principles h3 { font-size: clamp(21px, 5.8vw, 25px); }
+  .astrid-vision .astrid-vision-principles li > p { font-size: 14px; line-height: 1.48; }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: .88px; }
+}
+
+/* Principles use the pillars' former compact grammar: text on the left,
+   quiet sigil on the right, small directional control below it. */
+.astrid-vision .astrid-vision-standards-list > li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 66px;
+  grid-template-rows: minmax(0, 1fr) auto;
+  align-items: start;
+  min-width: 0;
+  min-height: 190px;
+  column-gap: clamp(12px, 2vw, 20px);
+  row-gap: 8px;
+  padding: clamp(18px, 2vw, 24px);
+  border-radius: 14px;
+}
+.astrid-vision .astrid-vision-standards-list > li > div {
+  grid-column: 1;
+  grid-row: 1;
+  flex: initial;
+  min-width: 0;
+}
+.astrid-vision .astrid-vision-standards-list > li h3 {
+  min-height: 0;
+  margin-bottom: 11px;
+  font-size: clamp(21px, 2vw, 26px);
+  line-height: 1.16;
+}
+.astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-sigil {
+  grid-column: 2;
+  grid-row: 1;
+  justify-self: end;
+  align-self: start;
+  margin: 0;
+}
+.astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner {
+  grid-column: 2;
+  grid-row: 2;
+  align-self: end;
+  justify-self: end;
+  margin: 0;
+}
+@media (max-width: 760px) {
+  .astrid-vision .astrid-vision-standards-list > li {
+    grid-template-columns: minmax(0, 1fr) 54px;
+    column-gap: 12px;
+    min-height: 0;
+    padding: 18px;
+  }
+  .astrid-vision .astrid-vision-standards-list > li h3 { font-size: clamp(21px, 5.5vw, 25px); }
+  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-sigil {
+    width: 54px;
+    height: 54px;
+  }
+  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-sigil-art {
+    width: 52px;
+    height: 52px;
+  }
 }

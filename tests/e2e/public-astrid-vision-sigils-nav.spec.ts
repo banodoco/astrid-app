@@ -83,7 +83,10 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
   await expect(header.locator('nav')).toHaveCount(1);
   await expect(nav).toHaveCSS('position', 'relative');
   await expect(wordmark).toHaveCSS('max-width', '100px');
-  await expect(nav.getByRole('link')).toHaveCount(5);
+  await expect(nav.getByRole('link')).toHaveCount(6);
+  await expect(nav.getByRole('link').allTextContents()).resolves.toEqual([
+    '01Vision', '02Pillars', '03Principles', '04Gaps', '05Projects', '06Help us build',
+  ]);
   const brand = header.locator('.astrid-vision-brand');
   const brandRect = await brand.boundingBox();
   const navRect = await nav.boundingBox();
@@ -93,6 +96,7 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
   await expect(nav.getByRole('link', { name: /Vision$/ })).toHaveAttribute('aria-current', 'location');
 
   for (const [label, id] of [
+    ['Pillars', 'astrid-vision-pillars'],
     ['Principles', 'astrid-vision-standards'],
     ['Gaps', 'astrid-vision-parts'],
     ['Projects', 'astrid-vision-projects'],
@@ -171,4 +175,56 @@ test('principle sigils use softer faded page colors while retaining delicate hov
     .toHaveCSS('animation-name', 'astrid-vision-sigil-orbit');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(cards.nth(0).locator('.astrid-vision-sigil-orbit')).toHaveCSS('animation-name', 'none');
+});
+
+
+test('the enlarged header spans the viewport while navigation stays aligned in one bar', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [390, 760, 1200, 1720]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const header = page.locator('.astrid-vision > header.astrid-vision-bar');
+    const nav = header.getByRole('navigation', { name: 'Vision page sections' });
+    const bounds = await header.boundingBox();
+    expect(bounds).not.toBeNull();
+    expect(bounds!.x).toBeGreaterThanOrEqual(-1);
+    expect(bounds!.x).toBeLessThanOrEqual(1);
+    expect(bounds!.x + bounds!.width).toBeGreaterThanOrEqual(width - 1);
+    expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+    expect(bounds!.height).toBeGreaterThanOrEqual(width <= 760 ? 68 : 86);
+    await expect(header).toHaveCSS('position', 'sticky');
+    await expect(nav.getByRole('link')).toHaveCount(6);
+    const pillars = nav.getByRole('link', { name: /Pillars$/ });
+    await expect(pillars).toHaveAttribute('href', '#astrid-vision-pillars');
+    await pillars.click();
+    await expect(pillars).toHaveAttribute('aria-current', 'location');
+    await expect(page.getByRole('heading', { name: 'The four pillars of our vision' })).toBeVisible();
+    await expect(page).toHaveURL(/#astrid-vision-pillars$/);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+  }
+});
+
+test('the joined principle panels and corner arrows never gain light fills, even on hover in dusk', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const cards = page.locator('.astrid-vision-standards-list > li');
+  const checkTransparent = async () => {
+    const surfaces = await cards.evaluateAll(elements => elements.map(el => ({
+      card: getComputedStyle(el).backgroundColor,
+      arrow: getComputedStyle(el.querySelector('.astrid-vision-principle-corner')!).backgroundColor,
+    })));
+    expect(surfaces).toEqual(Array.from({ length: 4 }, () =>
+      ({ card: 'rgba(0, 0, 0, 0)', arrow: 'rgba(0, 0, 0, 0)' })));
+  };
+  await checkTransparent();
+  await page.locator('main.astrid-vision').evaluate(element => {
+    element.style.setProperty('--astrid-dusk', '1');
+    element.style.setProperty('--astrid-dusk-ink', '1');
+    element.style.setProperty('--astrid-dusk-firm', '1');
+  });
+  await checkTransparent();
+  await cards.last().hover();
+  await checkTransparent();
 });

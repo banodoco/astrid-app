@@ -51,7 +51,7 @@ import {
   getSnapshot as getBuiltInDisabledSnapshot,
   subscribe as subscribeBuiltInDisabled,
 } from "@/tools/video-editor/runtime/builtInExtensionEnablement.ts";
-import { useRuntimePackExtensions } from "@/tools/video-editor/runtime/useRuntimePackExtensions";
+import { runtimePackKey, useRuntimePackExtensions } from "@/tools/video-editor/runtime/useRuntimePackExtensions";
 import { useRuntimeConnectionSafe } from "@/integrations/runtime/RuntimeConnectionProvider.tsx";
 import { AstridVideoEditorShell } from "@/tools/video-editor/components/AstridVideoEditorShell.tsx";
 import {
@@ -248,7 +248,7 @@ export default function VideoEditorPage() {
     packageStateEntries,
     repository: extensionStateRepository,
     triggerExtensionRefresh,
-  } = useRuntimePackExtensions(smokeDirectExtensions, 2000, [runtimeConnection?.isConnected, runtimeConnection?.realmName, runtimeConnection?.schemaDigest].map(String).join('|'));
+  } = useRuntimePackExtensions(smokeDirectExtensions, 2000, runtimePackKey(runtimeConnection));
   useEffect(() => {
     publishLocalTestExtensionDiagnostics("loader", loaderDiagnostics);
   }, [loaderDiagnostics]);

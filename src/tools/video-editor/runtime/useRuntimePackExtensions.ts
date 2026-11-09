@@ -7,9 +7,23 @@ import { useExtensionLoaderWiring } from './useExtensionLoaderWiring';
 import { runtimeApiBase } from '@/integrations/runtime/connection';
 import { setRuntimePacksUnsupported } from './runtimePackSupport';
 
+/** The connection fields that name the Runtime for the pack re-poll key. */
+export interface RuntimePackKeySource {
+  readonly isConnected?: boolean;
+  readonly realmName?: string | null;
+  readonly schemaDigest?: string | null;
+  /** The installed release. Releases can share a schema digest, so an update to a new release must change the key. */
+  readonly runtimeRelease?: number | null;
+}
+
+/** The identity the pack re-poll waits on: connection, realm, schema digest, and release. */
+export function runtimePackKey(connection?: RuntimePackKeySource): string {
+  return [connection?.isConnected, connection?.realmName, connection?.schemaDigest, connection?.runtimeRelease].map(String).join('|');
+}
+
 /** Runtime owns installed presence and canonical manifests; IndexedDB is a carrier. */
 // `runtimeKey` names the connected Runtime's identity. A Runtime that answers 404 on the inventory route has no packs yet:
-// polling stops and resumes only when this key changes (a reconnect or another Runtime).
+// polling stops and resumes only when this key changes (a reconnect, another Runtime, or a new release of it).
 export function useRuntimePackExtensions(directExtensions: readonly AstridExtension[] | undefined, refreshIntervalMs: number, runtimeKey = '') {
   const [repository, setRepository] = useState<ReturnType<typeof createIndexedDBExtensionStateRepository> | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);

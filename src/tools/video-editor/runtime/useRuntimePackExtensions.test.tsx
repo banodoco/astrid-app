@@ -2,6 +2,7 @@
 import { act, cleanup, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useRuntimePackExtensions } from './useRuntimePackExtensions';
+import * as packs from './useRuntimePackExtensions';
 
 const repo = vi.hoisted(() => ({
   initialize: vi.fn(async () => {}),
@@ -61,5 +62,22 @@ describe('useRuntimePackExtensions against a Runtime without packs (404 from the
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
     await act(settle);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('runtimePackKey', () => {
+  const schemaDigest = `sha256:${'a'.repeat(64)}`;
+  const release11 = { isConnected: true, realmName: 'Astrid', schemaDigest, runtimeRelease: 11 };
+
+  it('changes when the Runtime release changes, even though releases 11 and 12 share a schema digest', () => {
+    expect(packs.runtimePackKey(release11)).not.toBe(packs.runtimePackKey({ ...release11, runtimeRelease: 12 }));
+  });
+
+  it('is the same for the same connection, so an unchanged Runtime does not re-poll', () => {
+    expect(packs.runtimePackKey({ ...release11 })).toBe(packs.runtimePackKey(release11));
+  });
+
+  it('changes when the connection drops', () => {
+    expect(packs.runtimePackKey({ ...release11, isConnected: false })).not.toBe(packs.runtimePackKey(release11));
   });
 });

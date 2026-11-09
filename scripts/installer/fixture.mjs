@@ -66,6 +66,12 @@ if os.environ.get('MOCK_STAGE_RELEASE'):
         print(${JSON.stringify(failure)})
         print('Details: ' + os.environ['MOCK_LOG'])
         sys.exit(19)
+if os.environ.get('MOCK_CORE_RECEIPT'):
+    # A settled run that did not reach its target: the receipt, ending with Next and Details.
+    print('Astrid did NOT update. It is still Release 1; Release 2 is available.')
+    print('Why: Astrid or another installer is busy; try again when it finishes.')
+    print('Details: ' + os.environ['MOCK_LOG'])
+    sys.exit(int(os.environ['MOCK_CORE_RECEIPT']))
 if os.environ.get('MOCK_CORE_RAW_EXIT'):
     print('raw core diagnostic', file=sys.stderr)
     sys.exit(int(os.environ['MOCK_CORE_RAW_EXIT']))
@@ -108,7 +114,7 @@ export async function fixture() {
     MOCK_CALLS: path.join(root, 'calls.jsonl'),
     MOCK_LOG: installLog,
   };
-  for (const key of ['MOCK_PYTHON_EXIT', 'MOCK_CORE_EXIT', 'MOCK_REMOVE_BOOTSTRAP', 'MOCK_FETCH_EXIT', 'MOCK_VOLUME_BYTES', 'MOCK_UV_VERSION', 'MOCK_STAGE_RELEASE', 'MOCK_INTERRUPTED', 'MOCK_CORE_RAW_EXIT', 'MOCK_CORE_APPEND_LOG', 'MOCK_REQUIRE_TTY', 'MOCK_CORE_DISK_FAILURE', 'MOCK_UNICODE_OUTPUT', 'MOCK_ACL_FAILURE', 'MOCK_PYTHON_RELEASE']) delete env[key];
+  for (const key of ['MOCK_PYTHON_EXIT', 'MOCK_CORE_EXIT', 'MOCK_REMOVE_BOOTSTRAP', 'MOCK_FETCH_EXIT', 'MOCK_VOLUME_BYTES', 'MOCK_UV_VERSION', 'MOCK_STAGE_RELEASE', 'MOCK_INTERRUPTED', 'MOCK_CORE_RAW_EXIT', 'MOCK_CORE_APPEND_LOG', 'MOCK_REQUIRE_TTY', 'MOCK_CORE_DISK_FAILURE', 'MOCK_UNICODE_OUTPUT', 'MOCK_ACL_FAILURE', 'MOCK_PYTHON_RELEASE', 'MOCK_CORE_RECEIPT']) delete env[key];
   await writeFile(path.join(bootstrap, 'uv'), mockUv, { mode: 0o755 });
   await writeFile(path.join(bin, 'curl'), `#!/usr/bin/env python3
 import os, pathlib, shutil, sys

@@ -279,7 +279,7 @@ test('aspiration cards join edge-to-edge, fit the long title in two lines, and o
     expect(lines, 'the fourth principle title must fit within two lines').toBeLessThanOrEqual(2);
     const titleToCopy = await cards.last().evaluate(el => {
       const heading = el.querySelector('h3')!.getBoundingClientRect();
-      const copy = el.querySelector('.astrid-vision-markdown')!.getBoundingClientRect();
+      const copy = el.querySelector('.astrid-vision-principle-statement, .astrid-vision-markdown')!.getBoundingClientRect();
       return copy.top - heading.bottom;
     });
     expect(titleToCopy).toBeLessThan(16);

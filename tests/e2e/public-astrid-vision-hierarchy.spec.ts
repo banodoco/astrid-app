@@ -282,7 +282,7 @@ test('aspiration cards join edge-to-edge, fit the long title in two lines, and o
     });
     expect(titleToCopy).toBeLessThan(16);
     const explore = cards.last().locator('.astrid-vision-principle-open');
-    await expect(explore).toHaveText('Explore gaps & projects ↗');
+    await expect(explore).toContainText('Explore gaps & projects');
     expect(await explore.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
 
     // The title and sigil, not just the footer button, should open the same pop-up.

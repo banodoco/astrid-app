@@ -61,9 +61,14 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
 
   const principleTitles = page.locator('.astrid-vision-standards-list h3');
   await expect(principleTitles).toHaveText(content.principles.map(principle => principle.title));
-  const principleHeights = await principleTitles.evaluateAll(elements =>
-    elements.map(element => element.getBoundingClientRect().height));
-  expect(Math.max(...principleHeights) - Math.min(...principleHeights)).toBeLessThan(4);
+  // Independent compact cards allow titles to wrap naturally. The copy
+  // must remain underneath rather than collide with the right-hand sigil.
+  const titleLayouts = await principleTitles.evaluateAll(elements => elements.map(title => {
+    const card = title.closest('li')!;
+    const copy = card.querySelector('.astrid-vision-principle-statement, .astrid-vision-markdown')!;
+    return { title: title.getBoundingClientRect().toJSON(), copy: copy.getBoundingClientRect().toJSON() };
+  }));
+  expect(titleLayouts.every(({ title, copy }) => copy.y >= title.y + title.height - 2)).toBe(true);
 
   const current = content.gaps.filter(gap => gap.assessment !== 'closed');
   const gapRows = page.locator('.astrid-vision-part');

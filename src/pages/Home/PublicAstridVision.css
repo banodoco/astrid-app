@@ -840,6 +840,7 @@
 }
 .astrid-vision-more-button:hover { border-color: var(--astrid-accent); }
 .astrid-vision-more-button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+.astrid-vision-gaps-more { display: flex; width: fit-content; margin: 24px auto 0; }
 
 .astrid-vision-project-list .astrid-vision-project-row {
   display: grid;

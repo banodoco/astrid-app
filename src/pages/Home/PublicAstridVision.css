@@ -1284,3 +1284,20 @@
   .astrid-vision-details-projects { margin-left: 5px; padding-left: 12px; }
   .astrid-vision-details-project-heading { flex-wrap: wrap; gap: 3px 10px; }
 }
+
+/* A visible, quiet affordance also works on touch screens without hover. */
+.astrid-vision-principles > li::after,
+.astrid-vision-standards-list > li::after {
+  content: 'Details ↗';
+  position: absolute;
+  right: 0;
+  top: 0;
+  pointer-events: none;
+  color: var(--astrid-accent);
+  font: 600 11px/1.4 ui-monospace, monospace;
+}
+.astrid-vision-principles > li::after {
+  top: clamp(22px, 2.6vw, 32px);
+  right: clamp(22px, 2.6vw, 32px);
+  color: var(--tone-ink);
+}

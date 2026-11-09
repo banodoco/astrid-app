@@ -162,7 +162,7 @@ test('mobile hero gets breathing room and the editorial arrows and pillar number
 test('pillars read as a four-up portrait composition on desktop and compact cards below', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  for (const width of [390, 800, 1179, 1280, 1440]) {
+  for (const width of [390, 760, 800, 1179, 1280, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
     const cards = page.locator('.astrid-vision-principles > li');
@@ -178,7 +178,7 @@ test('pillars read as a four-up portrait composition on desktop and compact card
         detail: box('.astrid-vision-pillar-details'),
       };
     }));
-    const columns = width >= 1180 ? 4 : width > 640 ? 2 : 1;
+    const columns = width >= 1180 ? 4 : width > 760 ? 2 : 1;
     const rowCount = 4 / columns;
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -206,7 +206,7 @@ test('pillars read as a four-up portrait composition on desktop and compact card
         expect(items[i].card.y).toBeGreaterThan(items[i - columns].card.y + items[i - columns].card.height - 1);
       }
     }
-    expect(rowCount).toBe(width >= 1180 ? 1 : width > 640 ? 2 : 4);
+    expect(rowCount).toBe(width >= 1180 ? 1 : width > 760 ? 2 : 4);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
     await cards.first().getByRole('button', { name: /Explore .*: gaps and projects/ }).click();
     await expect(page.getByRole('dialog')).toBeVisible();

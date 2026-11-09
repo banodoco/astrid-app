@@ -81,7 +81,7 @@ test('technical wrangling takes three seconds to resolve and one second to retur
   await expect(card).toBeVisible();
   await expect(knot).toHaveCSS('opacity', '1');
   await expect(fragments).toHaveCSS('opacity', '1');
-  await expect(arrow).toHaveCSS('opacity', '0');
+  await expect(arrow).toHaveCSS('opacity', '0.26');
   for (const part of [knot, fragments, arrow]) {
     await expect(part).toHaveCSS('transition-duration', '1s');
     await expect(part).toHaveCSS('animation-name', 'none');
@@ -103,8 +103,8 @@ test('technical wrangling takes three seconds to resolve and one second to retur
     expect(value).toBeGreaterThan(0);
     expect(value).toBeLessThan(1);
   }
-  await expect(knot).toHaveCSS('opacity', '0', { timeout: 4500 });
-  await expect(fragments).toHaveCSS('opacity', '0', { timeout: 4500 });
+  await expect(knot).toHaveCSS('opacity', '0.16', { timeout: 4500 });
+  await expect(fragments).toHaveCSS('opacity', '0.16', { timeout: 4500 });
   await expect(arrow).toHaveCSS('opacity', '1', { timeout: 4500 });
 
   await page.mouse.move(0, 3);
@@ -115,7 +115,7 @@ test('technical wrangling takes three seconds to resolve and one second to retur
   const reversing = Number(await arrow.evaluate(el => getComputedStyle(el).opacity));
   expect(reversing).toBeGreaterThan(0);
   expect(reversing).toBeLessThan(1);
-  await expect(arrow).toHaveCSS('opacity', '0', { timeout: 1800 });
+  await expect(arrow).toHaveCSS('opacity', '0.26', { timeout: 1800 });
   await expect(knot).toHaveCSS('opacity', '1', { timeout: 1800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(arrow).toHaveCSS('transition-duration', '0s');
@@ -159,42 +159,100 @@ test('mobile hero gets breathing room and the editorial arrows and pillar number
   }
 });
 
-test('pillar art sits beside its copy and the disclosure sits below in compact desktop and phone cards', async ({ page, request }) => {
+test('pillars read as a four-up portrait composition on desktop and compact cards below', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  for (const width of [390, 800, 1440]) {
+  for (const width of [390, 800, 1179, 1280, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
     const cards = page.locator('.astrid-vision-principles > li');
     await expect(cards).toHaveCount(4);
-    const layouts = await cards.evaluateAll(elements => elements.map(card => {
-      const bounds = (selector: string) => card.querySelector(selector)!.getBoundingClientRect();
+    const items = await cards.evaluateAll(elements => elements.map(card => {
+      const box = (selector: string) => card.querySelector(selector)!.getBoundingClientRect().toJSON();
       return {
         card: card.getBoundingClientRect().toJSON(),
-        heading: bounds('h3').toJSON(),
-        text: bounds('li > p, p').toJSON(),
-        art: bounds('.astrid-vision-principle-art').toJSON(),
-        detail: bounds('.astrid-vision-pillar-details').toJSON(),
-        number: bounds('.astrid-vision-pillar-number').toJSON(),
-        px: getComputedStyle(card.querySelector('.astrid-vision-principle-art')!).getPropertyValue('--px').trim(),
+        number: box('.astrid-vision-pillar-number'),
+        heading: box('h3'),
+        copy: box('p'),
+        art: box('.astrid-vision-principle-art'),
+        detail: box('.astrid-vision-pillar-details'),
       };
     }));
-    for (const item of layouts) {
-      expect(item.art.left).toBeGreaterThanOrEqual(item.heading.right - 2);
-      expect(item.art.left).toBeGreaterThanOrEqual(item.text.right - 2);
-      expect(item.detail.top).toBeGreaterThanOrEqual(Math.max(item.text.bottom, item.art.bottom) - 2);
-      expect(item.detail.right).toBeLessThanOrEqual(item.card.right - 6);
-      expect(Math.abs(item.heading.left - item.text.left)).toBeLessThan(2);
-      expect(item.art.right).toBeLessThanOrEqual(item.card.right - 6);
-      // Former cards added a whole extra illustration row: these stay
-      // shallow even with the artwork and details affordance retained.
-      expect(item.card.height).toBeLessThan(width === 390 ? 345 : width === 800 ? 370 : 275);
+    const columns = width >= 1180 ? 4 : width > 640 ? 2 : 1;
+    const rowCount = 4 / columns;
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      expect(Math.abs(item.number.x - item.heading.x)).toBeLessThan(2);
+      expect(Math.abs(item.heading.x - item.copy.x)).toBeLessThan(2);
+      expect(item.detail.y).toBeGreaterThanOrEqual(Math.max(item.art.y + item.art.height, item.copy.y + item.copy.height) - 2);
+      expect(item.detail.x + item.detail.width).toBeLessThanOrEqual(item.card.x + item.card.width - 6);
+      expect(item.art.x + item.art.width).toBeLessThanOrEqual(item.card.x + item.card.width - 6);
+      if (width >= 1180) {
+        expect(item.card.height).toBeGreaterThanOrEqual(435);
+        expect(item.card.height).toBeLessThan(560);
+        expect(item.art.y).toBeGreaterThanOrEqual(item.copy.y + item.copy.height - 2);
+        expect(Math.abs(item.art.x + item.art.width / 2 - (item.card.x + item.card.width / 2))).toBeLessThan(12);
+      } else {
+        expect(item.card.height).toBeLessThan(width <= 640 ? 350 : 430);
+        expect(item.art.x).toBeGreaterThanOrEqual(item.heading.x + item.heading.width - 2);
+        expect(item.art.x).toBeGreaterThanOrEqual(item.copy.x + item.copy.width - 2);
+      }
     }
-    const columns = await page.locator('.astrid-vision-principles').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length);
-    expect(columns).toBe(width === 390 ? 1 : 2);
+    for (let i = 0; i < items.length; i++) {
+      if (i % columns !== 0) {
+        expect(items[i].card.x).toBeGreaterThan(items[i - 1].card.x + items[i - 1].card.width - 1);
+        expect(Math.abs(items[i].card.y - items[i - 1].card.y)).toBeLessThan(2);
+      } else if (i > 0) {
+        expect(items[i].card.y).toBeGreaterThan(items[i - columns].card.y + items[i - columns].card.height - 1);
+      }
+    }
+    expect(rowCount).toBe(width >= 1180 ? 1 : width > 640 ? 2 : 4);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
-    // The whole card remains an accessible target after the layout change.
     await cards.first().getByRole('button', { name: /Explore .*: gaps and projects/ }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+  }
+});
+
+test('principles borrow the former pillar composition: two compact columns with sigils beside text', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [390, 800, 1280, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const cards = page.locator('.astrid-vision-standards-list > li');
+    await expect(cards).toHaveCount(4);
+    const boxes = await cards.evaluateAll(elements => elements.map(card => {
+      const rect = (selector: string) => card.querySelector(selector)!.getBoundingClientRect().toJSON();
+      return {
+        card: card.getBoundingClientRect().toJSON(),
+        text: rect('div'),
+        sigil: rect('.astrid-vision-principle-sigil'),
+        arrow: rect('.astrid-vision-principle-corner'),
+        radius: getComputedStyle(card).borderTopLeftRadius,
+        border: getComputedStyle(card).borderLeftWidth,
+      };
+    }));
+    for (const box of boxes) {
+      expect(box.card.height).toBeLessThan(width <= 760 ? 310 : 285);
+      expect(box.sigil.x).toBeGreaterThanOrEqual(box.text.x + box.text.width - 2);
+      expect(box.arrow.y).toBeGreaterThanOrEqual(box.text.y + box.text.height - 2);
+      expect(box.arrow.x).toBeGreaterThanOrEqual(box.sigil.x - 2);
+      expect(box.sigil.x + box.sigil.width).toBeLessThanOrEqual(box.card.x + box.card.width - 6);
+      expect(box.radius).toBe('14px');
+      expect(box.border).toBe('1px');
+    }
+    const first = boxes[0].card, second = boxes[1].card, third = boxes[2].card;
+    if (width > 760) {
+      expect(second.x).toBeGreaterThan(first.x + first.width);
+      expect(Math.abs(second.y - first.y)).toBeLessThan(2);
+      expect(third.y).toBeGreaterThan(first.y + first.height - 1);
+    } else {
+      expect(Math.abs(second.x - first.x)).toBeLessThan(2);
+      expect(second.y).toBeGreaterThan(first.y + first.height - 1);
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    await cards.last().getByRole('button', { name: /Explore .*: gaps and projects/ }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.keyboard.press('Escape');
   }

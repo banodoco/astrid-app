@@ -285,4 +285,18 @@ describe('windows-upgrade-unsupported', () => {
     expect(screen.getByText(ASTRID_COMMANDS.windowsUpdate, { exact: true })).toBeInTheDocument();
     expect(document.body.textContent).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
   });
+
+  it('the recovery-card fallback for an already-set-up install shows no --yes, only the update line or the plain line', () => {
+    runtime.origin = HOSTED_ORIGIN;
+    // A recovery offers the command options (Copy instructions / Run it yourself) with the update line.
+    const recovery = resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: false });
+    const { unmount } = render(<UpdateResolutionActions resolution={recovery} />);
+    expect(document.body.textContent).not.toContain('--yes');
+    expect(screen.getByText(ASTRID_COMMANDS.macLinuxUpdate, { exact: true })).toBeInTheDocument();
+    unmount();
+    // A repair of an install that cannot update itself gets the plain line, which for an already set-up install has no --yes.
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', updateNowAvailable: false })} />);
+    expect(document.body.textContent).not.toContain('--yes');
+    expect(screen.getByText(ASTRID_COMMANDS.macLinux, { exact: true })).toBeInTheDocument();
+  });
 });

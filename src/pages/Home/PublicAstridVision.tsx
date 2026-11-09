@@ -436,7 +436,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <VisionPrincipleSigil principleId={principle.id} />
               <div>
                 <h3>{principle.title}</h3>
-                <MarkdownText value={principle.bodyMarkdown} />
+                {principle.statement
+                  ? <p className="astrid-vision-principle-statement">{principle.statement}</p>
+                  : <MarkdownText value={principle.bodyMarkdown} />}
               </div>
               <span className="astrid-vision-principle-corner" aria-hidden="true">
                 <span className="astrid-vision-card-arrow">↗</span>

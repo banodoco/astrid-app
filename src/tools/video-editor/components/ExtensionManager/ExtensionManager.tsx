@@ -33,6 +33,7 @@ import {
   setBuiltInExtensionEnabled,
   subscribe as subscribeBuiltInEnablement,
 } from '@/tools/video-editor/runtime/builtInExtensionEnablement';
+import { PACKS_NEED_NEWER_ASTRID, usePacksUnsupported } from '@/tools/video-editor/runtime/runtimePackSupport';
 
 export type { ContributionSummary } from './contributionSummary';
 export type { PackageDiagnosticSummary } from './PackageDiagnostics';
@@ -218,6 +219,7 @@ function BuiltInExtensionsSection({
 // ---------------------------------------------------------------------------
 
 export function ExtensionManager() {
+  const packsUnsupported = usePacksUnsupported();
   const { extensionRuntime, extensionStateRepository, triggerExtensionRefresh, diagnosticCollection, settingsNotificationRegistry } = useVideoEditorRuntime();
   const packageStateInventory = extensionRuntime?.packageStateInventory ?? EMPTY_PACKAGE_STATE_INVENTORY;
 
@@ -316,6 +318,7 @@ export function ExtensionManager() {
       }}
       data-video-editor-extension-manager="true"
     >
+      {packsUnsupported && <div role="status" className="px-1 text-xs text-muted-foreground/70">{PACKS_NEED_NEWER_ASTRID}</div>}
       {hasBuiltIns && (
         <BuiltInExtensionsSection
           extensions={builtInExtensions}

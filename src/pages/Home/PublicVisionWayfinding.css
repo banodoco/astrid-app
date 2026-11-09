@@ -66,8 +66,10 @@
   .astrid-vision [data-sigil] * { animation: none !important; }
 }
 
-/* A slim rail fits the existing page margin instead of narrowing the cards. */
-.astrid-vision > nav.astrid-vision-section-nav {
+/* A slim rail fits the existing page margin instead of narrowing the cards.
+   The root attribute deliberately outranks the generic three-class page-child
+   rule which otherwise changes this fixed navigation back to position:relative. */
+.astrid-vision[data-astrid-visual-active] > nav.astrid-vision-section-nav {
   position: fixed;
   z-index: 20;
   top: 50%;
@@ -128,12 +130,12 @@
 .astrid-vision .astrid-vision-section-nav a:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 2px; }
 .astrid-vision section[data-vision-section] { scroll-margin-top: 28px; }
 @media (min-width: 1680px) {
-  .astrid-vision > nav.astrid-vision-section-nav { left: max(16px, calc(50vw - 840px)); width: 128px; }
+  .astrid-vision[data-astrid-visual-active] > nav.astrid-vision-section-nav { left: max(16px, calc(50vw - 840px)); width: 128px; }
   .astrid-vision-section-nav a { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 12px; font-size: 12px; }
 }
 @media (max-width: 1199px) {
   .astrid-vision { padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
-  .astrid-vision > nav.astrid-vision-section-nav {
+  .astrid-vision[data-astrid-visual-active] > nav.astrid-vision-section-nav {
     top: auto;
     bottom: calc(12px + env(safe-area-inset-bottom));
     left: 50%;

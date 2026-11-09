@@ -22,6 +22,14 @@ export function VisionDetailDialog({
     if (dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal();
   }, []);
 
+  const closeIfOutside = (clientX: number, clientY: number) => {
+    const dialog = dialogRef.current;
+    if (!dialog || !dialog.open) return;
+    const bounds = dialog.getBoundingClientRect();
+    if (clientX < bounds.left || clientX > bounds.right ||
+        clientY < bounds.top || clientY > bounds.bottom) dialog.close();
+  };
+
   if (!entry) return null;
   return (
     <dialog
@@ -29,15 +37,23 @@ export function VisionDetailDialog({
       className="astrid-vision-details"
       aria-labelledby={titleId}
       onClose={onClose}
+      // Backdrop events are dispatched to the dialog itself in native dialogs.
+      // Coordinates work even when mobile Safari retargets a backdrop tap.
+      onPointerDown={event => closeIfOutside(event.clientX, event.clientY)}
       onClick={event => {
-        if (event.target === event.currentTarget) dialogRef.current?.close();
+        if (event.target === event.currentTarget) {
+          closeIfOutside(event.clientX, event.clientY);
+        }
       }}
     >
       <div className="astrid-vision-details-shell">
         <header className="astrid-vision-details-header">
-          <p className="astrid-vision-details-eyebrow">
-            {subject.kind === 'pillar' ? 'What we’re building towards' : 'The principles that drive us'}
-          </p>
+          <div className="astrid-vision-details-header-copy">
+            <p className="astrid-vision-details-eyebrow">
+              {subject.kind === 'pillar' ? 'What we’re building towards' : 'The principles that drive us'}
+            </p>
+            <h2 id={titleId}>{entry.title}</h2>
+          </div>
           <button
             type="button"
             className="astrid-vision-details-close"
@@ -46,12 +62,12 @@ export function VisionDetailDialog({
           >
             <X size={20} aria-hidden="true" />
           </button>
-          <h2 id={titleId}>{entry.title}</h2>
         </header>
-        <div className="astrid-vision-details-description">
-          <ReactMarkdown>{entry.bodyMarkdown}</ReactMarkdown>
-        </div>
-        <section className="astrid-vision-details-gaps" aria-label="Current gaps and projects">
+        <div className="astrid-vision-details-scroll">
+          <div className="astrid-vision-details-description">
+            <ReactMarkdown>{entry.bodyMarkdown}</ReactMarkdown>
+          </div>
+          <section className="astrid-vision-details-gaps" aria-label="Current gaps and projects">
           <h3>Gaps preventing this</h3>
           {gaps.length === 0 ? (
             <p className="astrid-vision-details-empty">No current gaps are linked to this {subject.kind}.</p>
@@ -92,7 +108,8 @@ export function VisionDetailDialog({
               ))}
             </ul>
           )}
-        </section>
+          </section>
+        </div>
       </div>
     </dialog>
   );

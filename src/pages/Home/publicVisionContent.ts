@@ -26,7 +26,7 @@ export interface PublicVisionSubject {
 export interface PublicVisionPillar extends PublicVisionSubject {
   descriptor: string;
 }
-export interface PublicVisionPrinciple extends PublicVisionSubject {}
+export type PublicVisionPrinciple = PublicVisionSubject;
 export interface PublicVisionGap {
   id: string;
   title: string;

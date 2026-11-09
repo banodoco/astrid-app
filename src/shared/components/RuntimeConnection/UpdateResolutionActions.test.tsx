@@ -162,7 +162,7 @@ describe('update resolution in-app availability', () => {
 
   it('hides Update now and shows the one-line reason with the command when Astrid cannot update itself', () => {
     const operation = { available: false, pending: false, start: vi.fn(), updateReason: undefined } as unknown as InstallerUpdateView;
-    const resolution = resolveUpdate({ installType: 'installer', releaseBehind: true, installedRelease: 3, servedRelease: 4 }, 'settings');
+    const resolution = resolveUpdate({ installType: 'installer', releaseBehind: true, installedRelease: 10, servedRelease: 11 }, 'settings');
     render(<UpdateResolutionActions resolution={resolution} operation={operation} />);
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable'])).toBeInTheDocument();

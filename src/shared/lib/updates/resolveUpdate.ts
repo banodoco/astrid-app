@@ -1,4 +1,5 @@
-import { INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason, type RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
+import type { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
+import { FIRST_SELF_UPDATE_RELEASE, INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason } from '@/integrations/runtime/installerUpdateReasons.ts';
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '../../../integrations/runtime/runtime-update-contract.mjs';
 
 export type UpdateAction = {
@@ -32,6 +33,8 @@ export interface UpdateResolutionInput {
   readonly releaseBehind?: boolean;
   readonly midSessionSchemaMismatch?: boolean;
   readonly updateNowAvailable?: boolean;
+  /** The Runtime's `self_update`. Missing reads as not able to update itself. */
+  readonly selfUpdate?: boolean;
   readonly installType?: InstallType;
   readonly realError?: string;
   readonly updateReason?: InstallerUpdateReason;
@@ -76,6 +79,14 @@ function updateActions(input: UpdateResolutionInput, context: ActionContext, sof
   return COMMAND_ACTIONS;
 }
 
+/** An installer install older than the first self-updating release, behind the served release, with no reason of its own. */
+function selfUpdateTooOld(input: UpdateResolutionInput): boolean {
+  return input.installType === 'installer' && input.selfUpdate !== true && input.updateNowAvailable !== true
+    && (input.updateReason === undefined || input.updateReason === 'self-update-unavailable' || input.updateReason === 'self-update-too-old')
+    && input.installedRelease !== undefined && input.servedRelease !== undefined
+    && input.installedRelease < FIRST_SELF_UPDATE_RELEASE && input.installedRelease < input.servedRelease;
+}
+
 /** The sole update decision point. Conditions are intentionally ordered to match CONTRACTS K6. */
 export function resolveUpdate(input: UpdateResolutionInput, context: ActionContext = 'page'): UpdateResolution {
   if (input.runtime) return { card: 'not-running', title: 'Astrid isn’t running', body: input.failure ?? 'Start Astrid Runtime to continue.', primary: { label: 'Start Astrid' }, secondary: { label: 'Repair' } };
@@ -86,6 +97,20 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   // An installed release newer than served shows no action, whatever the installer reason says.
   if (releaseRules && input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease > input.servedRelease) {
     return { card: 'newer', title: null, body: 'Astrid on this computer is newer than astrid.haus; a fix is on its way.', primary: null, secondary: null };
+  }
+  // A release before the first self-updating one cannot report why it can't update itself; its release says why.
+  // A reason the Runtime did report wins; only the generic fallback is replaced.
+  // A required update keeps its precedence (an update card with the command, its reason first); otherwise the page
+  // routes to Settings like any release notice, and Settings shows the command.
+  if (selfUpdateTooOld(input)) {
+    const required = input.requiredRelease !== undefined && input.installedRelease! < input.requiredRelease;
+    return {
+      card: required ? 'update' : 'notice',
+      title: `Release ${input.servedRelease} is ready`,
+      body: `${required ? `This update is required: ${input.requiredReason ?? 'A required update is available.'} ` : ''}You have Release ${input.installedRelease}. ${INSTALLER_UPDATE_REASON_MESSAGES['self-update-too-old']}`,
+      ...(required ? COMMAND_ACTIONS : updateActions(input, context, true)),
+      updateReason: 'self-update-too-old',
+    };
   }
   // A setup refusal on an install that is already current has no update to offer: it shows no card and no command.
   const current = input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease >= input.servedRelease;

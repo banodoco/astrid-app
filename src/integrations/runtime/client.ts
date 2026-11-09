@@ -196,19 +196,7 @@ export type RuntimeConnectorError = RuntimeAuthenticationError | RuntimeUnavaila
 
 export type InstallerUpdateStatusState = 'none' | 'active' | 'terminal' | 'recovery-needed';
 export type InstallerUpdateOutcome = 'updated' | 'rolled_back' | 'failed';
-/** Editor-owned reason keys. Runtime refusal codes map to their own key; any other code reads as self-update-unavailable. */
-export type InstallerUpdateReason = 'busy' | 'autostart-off' | 'unsupported-service-manager' | 'source' | 'recovery-needed' | 'needs-repair' | 'self-update-unavailable';
-
-/** Exact editor-owned explanations for the Runtime's allowlisted refusal states. */
-export const INSTALLER_UPDATE_REASON_MESSAGES: Readonly<Record<InstallerUpdateReason, string>> = Object.freeze({
-  busy: 'Astrid is busy. Wait for the current operation to finish before trying again.',
-  'autostart-off': 'Automatic startup is off. Turn it on before updating Astrid here.',
-  'unsupported-service-manager': 'In-app updates require user systemd 254 or newer on Linux.',
-  'recovery-needed': 'Astrid needs recovery. Select Update to check the previous operation before continuing.',
-  'needs-repair': 'Astrid needs repair before it can update.',
-  source: 'This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.',
-  'self-update-unavailable': "Astrid can't update itself on this computer. Run the command below to update it.",
-});
+export { INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason } from './installerUpdateReasons.ts';
 
 /** Raw, read-only installer status returned by the Runtime producer. */
 export interface InstallerUpdateStatus {

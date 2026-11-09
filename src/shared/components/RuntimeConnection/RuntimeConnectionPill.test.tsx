@@ -243,7 +243,7 @@ describe('RuntimeConnectionPill', () => {
       expect(diagnosticsCall?.[1]).toEqual(expect.objectContaining({ cache: 'no-store' }));
       expect(createObjectURL).toHaveBeenCalledOnce();
       const report = await (createObjectURL.mock.calls[0][0] as Blob).text();
-      expect(report).toContain('App build: served-app-build\nApp release: 42');
+      expect(report).toContain('App release: 42\nApp build: served-app-build');
       expect(report.match(/^App build:/gm)).toHaveLength(1);
       expect(report.match(/^App release:/gm)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });

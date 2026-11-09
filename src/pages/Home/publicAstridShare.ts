@@ -27,8 +27,8 @@ export const PUBLIC_ASTRID_SHARE_PAGES = {
   },
   vision: {
     path: '/vision',
-    title: 'Vision & Issues · Astrid',
-    shareTitle: 'Astrid: Vision & Issues',
+    title: 'Vision · Astrid',
+    shareTitle: 'Astrid: Vision',
     description: 'Explore Astrid’s vision, operating principles, progress and open creative projects.',
     image: '/astrid-share-vision.png',
     imageAlt: 'Astrid, the pixel mink, looks up at the moon beside the words “A local-first tool + agent to unlock open-source’s artistic potential.”',

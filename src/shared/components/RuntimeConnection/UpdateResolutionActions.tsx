@@ -4,7 +4,7 @@ import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
 import { CopyCommandRow, CopyInstallCommand, useCopyAction } from './CopyInstallCommand.tsx';
 import { DownloadDiagnosticsButton } from './DownloadDiagnosticsButton.tsx';
-import { autostartOffAgentBrief, installCommand, RUNTIME_CONNECTION_COPY } from './copy.ts';
+import { autostartOffAgentBrief, installCommand, PINOKIO_UPDATE_INSTRUCTION, RUNTIME_CONNECTION_COPY } from './copy.ts';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
@@ -39,6 +39,8 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   const localState = useSyncExternalStore(localUpdate.subscribe, localUpdate.getSnapshot, localUpdate.getSnapshot);
   const actions = [resolution.primary, resolution.secondary].filter((action) => action !== null);
   const installerPath = (operation?.installType ?? installType ?? (operation ? 'installer' : undefined)) === 'installer';
+  // A Pinokio install updates in Pinokio: every command surface below shows the Pinokio instruction instead of a shell line.
+  const pinokioInstall = (operation?.installType ?? installType) === 'pinokio';
   // A failed in-app update's next action is the plain install line, the same repair line a degraded install shows.
   const failedInstall = installerPath && installerUpdateFailed(operation);
   // A reason with no command of its own still offers the diagnostics its line points to.
@@ -79,9 +81,9 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {/* The generic line only when no reason explains why this Astrid can't update itself. */}
     {commandOptions && installerPath && !execute && !resolution.updateReason && !reasonShown && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']}</p>}
-    {commandOptions && resolution.updateReason !== 'autostart-off' && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair' || failedInstall} />}
+    {commandOptions && resolution.updateReason !== 'autostart-off' && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair' || failedInstall} pinokio={pinokioInstall} />}
     {commandOptions && resolution.updateReason === 'self-update-too-old' && <p className="text-sm">{SELF_UPDATE_TOO_OLD_STEPS}</p>}
-    {resolution.updateReason === 'autostart-off' && <AutostartOffUpdate sentenceShown={reasonLineShown} />}
+    {resolution.updateReason === 'autostart-off' && <AutostartOffUpdate sentenceShown={reasonLineShown} pinokio={pinokioInstall} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
@@ -90,7 +92,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
       {operation?.status?.log_path && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Details: {operation.status.log_path}</p>}
       <p className="text-sm">{ASTRID_STATUS_COPY.repairDescription}</p>
       {/* Both ways to repair: the agent's brief and the plain line. A card that already offers them makes them the repair. */}
-      {!commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain />}
+      {!commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain pinokio={pinokioInstall} />}
     </div>}
     {/* Settings has its own Diagnostics row; a card on the page points to the full story here. */}
     {context === 'page' && (failedInstall || localState.phase === 'failed' || diagnosticsOnly) && <DownloadDiagnosticsButton />}
@@ -100,11 +102,12 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
 }
 
 /** Start at sign-in is off: update from a terminal with the strict update line (no choice flags), or hand the agent the brief. */
-function AutostartOffUpdate({ sentenceShown }: { readonly sentenceShown: boolean }) {
+function AutostartOffUpdate({ sentenceShown, pinokio }: { readonly sentenceShown: boolean; readonly pinokio: boolean }) {
   const windows = detectPlatform() === 'windows';
   // Same rule as CopyInstallCommand and every other update surface: a locally served App runs `npm run update`.
   const localBuild = runtimeOrigin() === '';
   const agent = useCopyAction(autostartOffAgentBrief(windows, localBuild));
+  if (pinokio) return <p className="text-sm">{PINOKIO_UPDATE_INSTRUCTION}</p>;
   return <div className="space-y-2">
     {!sentenceShown && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']}</p>}
     <Button type="button" className="h-11 w-full justify-between rounded-xl px-4 text-sm" onClick={() => void agent.copy()}>

@@ -112,6 +112,9 @@ export function autostartOffAgentBrief(windows: boolean, localBuild = false): st
   return `Please update my Astrid installation on this computer. Start at sign-in is off, so update from a terminal and keep that choice off. Run exactly this command: ${command}. It succeeds when it ends with "Astrid updated" or "already up to date". If it fails, run this diagnostics command: ${doctor}, and give me the file path it reports. Don't try other fixes. Don't change or delete my Astrid workspace.`;
 }
 
+/** A Pinokio install (the Runtime reports identity.managed_by pinokio) updates in Pinokio, never with a shell command. */
+export const PINOKIO_UPDATE_INSTRUCTION = 'Open Pinokio and choose Update.';
+
 export const ASTRID_REPO_URL = 'https://github.com/banodoco/astrid-app';
 const LOCAL_SETUP_DIRECTORY = 'astrid-app';
 

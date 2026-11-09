@@ -5,7 +5,7 @@ import { writeClipboardTextSafe } from '@/shared/lib/browser/clipboard.ts';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import type { ServiceStatus } from '@/integrations/runtime/generated.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
-import { agentInstructions, ASTRID_COMMANDS, installCommand, RUNTIME_CONNECTION_COPY, UPDATE_ROUTES, withCommandShell, type CommandMode } from './copy.ts';
+import { agentInstructions, ASTRID_COMMANDS, installCommand, PINOKIO_UPDATE_INSTRUCTION, RUNTIME_CONNECTION_COPY, UPDATE_ROUTES, withCommandShell, type CommandMode } from './copy.ts';
 
 export interface CopyInstallCommandProps {
   /** `install` for setup/repair and `update` for an incompatible Astrid. */
@@ -15,6 +15,8 @@ export interface CopyInstallCommandProps {
   readonly agentLabel?: string;
   /** A repair of an install that cannot update itself: the manual command is the plain install line, never --update. */
   readonly plain?: boolean;
+  /** The install is managed by Pinokio (installType 'pinokio'): it updates in Pinokio, so no shell command is shown. */
+  readonly pinokio?: boolean;
 }
 
 type CopyStatus = 'idle' | 'copied' | 'failed';
@@ -76,13 +78,15 @@ export function CopyCommandRow({ command, label, copiedLabel = label }: { readon
  * Agent handoff first, as the one primary action; the manual command is the quiet alternative under it, with its own
  * copy action. Nothing else: the card around it says what the instructions are for.
  */
-export function CopyInstallCommand({ mode = 'install', services, agentLabel, plain = false }: CopyInstallCommandProps) {
+export function CopyInstallCommand({ mode = 'install', services, agentLabel, plain = false, pinokio = false }: CopyInstallCommandProps) {
   const copy = RUNTIME_CONNECTION_COPY.agent;
+  // A Pinokio install is checked first: it updates in Pinokio, even when its App is served same-origin (fully local).
   const localBuild = runtimeOrigin() === '';
   const instructions = agentInstructions(mode, window.location.origin, localBuild, services, plain ? { repair: true } : {});
   const command = plain ? (detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux) : installCommand(mode, undefined, false, localBuild);
   const agentCopy = useCopyAction(instructions);
   const agentCopied = agentCopy.status === 'copied';
+  if (pinokio) return <p className="text-sm">{PINOKIO_UPDATE_INSTRUCTION}</p>;
 
   return (
     <div className="w-full space-y-4">

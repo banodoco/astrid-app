@@ -209,7 +209,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
     >
       <div className="space-y-2">
         <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void downloadDiagnostics()}>Download diagnostics</Button>
-        {lastRun.command === 'update' && <CopyCommandRow command={installCommand('update', undefined, false, runtimeOrigin() === '')} label="Copy command (try again)" copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />}
+        {lastRun.command === 'update' && statusInstallType !== 'pinokio' && <CopyCommandRow command={installCommand('update', undefined, false, runtimeOrigin() === '')} label="Copy command (try again)" copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />}
         {lastRun.command === 'repair' && <CopyCommandRow command={repairCommand} label="Copy repair command" copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />}
       </div>
     </SettingsRow>}

@@ -648,6 +648,10 @@
 .astrid-vision .astrid-vision-standards-list > li {
   --sigil-ink: #a94714;
   --sigil-bg: #f2dcca;
+  /* Both the pixel mark and the corner arrow read the same muted ink and
+     presence so they stay visually paired before and after interaction. */
+  --sigil-display-ink: color-mix(in oklab, var(--sigil-ink) 52%, var(--astrid-muted));
+  --sigil-display-opacity: .58;
   padding: clamp(16px, 1.4vw, 22px);
   border: 1px solid color-mix(in oklab, var(--astrid-ink) 22%, transparent);
   border-radius: 0;
@@ -677,9 +681,9 @@
   height: 66px;
   margin-bottom: 12px;
   background: transparent;
-  /* A small wash of accent rather than a saturated emblem. */
-  color: color-mix(in oklab, var(--sigil-ink) 52%, var(--astrid-muted));
-  opacity: .58;
+  /* The mark and its arrow are two expressions of one shared accent. */
+  color: var(--sigil-display-ink);
+  opacity: var(--sigil-display-opacity);
   transition: opacity 280ms ease, color 280ms ease;
 }
 .astrid-vision-sigil-art {
@@ -689,12 +693,14 @@
   overflow: visible;
 }
 @media (hover: hover) and (pointer: fine) {
-  .astrid-vision-standards-list > li:hover .astrid-vision-principle-sigil {
-    opacity: .82;
-    color: color-mix(in oklab, var(--sigil-ink) 62%, var(--astrid-muted));
+  .astrid-vision .astrid-vision-standards-list > li:hover {
+    --sigil-display-ink: color-mix(in oklab, var(--sigil-ink) 62%, var(--astrid-muted));
+    --sigil-display-opacity: .82;
   }
 }
-.astrid-vision-standards-list > li:focus-within .astrid-vision-principle-sigil { opacity: .82; }
+.astrid-vision .astrid-vision-standards-list > li:focus-within {
+  --sigil-display-opacity: .82;
+}
 .astrid-vision-sigil-orbit,
 .astrid-vision-sigil-nodes,
 .astrid-vision-sigil-open-ring,
@@ -741,9 +747,9 @@
 /* A phone has no hover. Give each principle the same center-of-screen
    moment as the pillar minks, then settle as it leaves that viewing band. */
 @media (max-width: 640px) {
-  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-principle-sigil {
-    opacity: .82;
-    color: color-mix(in oklab, var(--sigil-ink) 62%, var(--astrid-muted));
+  .astrid-vision .astrid-vision-standards-list > li[data-sigil-active="true"] {
+    --sigil-display-ink: color-mix(in oklab, var(--sigil-ink) 62%, var(--astrid-muted));
+    --sigil-display-opacity: .82;
   }
   .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-orbit {
     animation: astrid-vision-sigil-orbit 1.25s ease-in-out infinite alternate;
@@ -769,7 +775,7 @@
   .astrid-vision-sigil-knot,
   .astrid-vision-sigil-knot-fragments,
   .astrid-vision-sigil-clear-path { transition: none !important; }
-  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-principle-sigil {
+  .astrid-vision-standards-list > li[data-sigil-active="true"] :is(.astrid-vision-principle-sigil, .astrid-vision-principle-corner) {
     opacity: .58;
   }
 }
@@ -1316,7 +1322,7 @@
   }
   .astrid-vision-standards-list > li:hover::after { opacity: 1; }
   .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
-    border-color: color-mix(in oklab, var(--sigil-ink) 80%, var(--astrid-ink));
+    border-color: color-mix(in oklab, currentColor 78%, transparent);
     background: transparent;
   }
   .astrid-vision-principles > li:hover .astrid-vision-pillar-details {
@@ -1659,12 +1665,13 @@
   width: 36px;
   height: 36px;
   margin-top: 16px;
-  border: 1px solid color-mix(in oklab, var(--sigil-ink) 45%, var(--astrid-line));
+  border: 1px solid color-mix(in oklab, currentColor 55%, transparent);
   border-radius: 9px;
   background: transparent;
-  color: var(--sigil-ink);
+  color: var(--sigil-display-ink);
+  opacity: var(--sigil-display-opacity);
   font-size: 17px;
-  transition: border-color 170ms ease, background-color 170ms ease;
+  transition: color 280ms ease, opacity 280ms ease, border-color 170ms ease;
 }
 .astrid-vision-card-arrow { display: inline-block; }
 .astrid-vision .astrid-vision-standards-list > li {

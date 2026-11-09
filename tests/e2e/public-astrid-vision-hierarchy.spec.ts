@@ -77,7 +77,7 @@ test('a dialog can be dismissed via its close button and returns focus to the ca
 });
 
 
-test('mobile principle action sits beneath its description, modal stays on screen and scroll survives dismissal', async ({ page, request }) => {
+test('mobile principle card has no redundant footer CTA, fills the touch target and keeps scroll on close', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json();
@@ -90,12 +90,13 @@ test('mobile principle action sits beneath its description, modal stays on scree
 
   const principle = page.locator('.astrid-vision-standards-list > li').last();
   const trigger = principle.getByRole('button', { name: /Explore .*: gaps and projects/ });
-  await expect(trigger).toContainText('Explore gaps & projects');
-  const copyBounds = await principle.locator(':scope > div').boundingBox();
+  await expect(principle.locator('.astrid-vision-principle-open')).toHaveCount(0);
+  const cardBounds = await principle.boundingBox();
   const triggerBounds = await trigger.boundingBox();
-  expect(copyBounds).not.toBeNull();
+  expect(cardBounds).not.toBeNull();
   expect(triggerBounds).not.toBeNull();
-  expect(triggerBounds!.y).toBeGreaterThanOrEqual(copyBounds!.y + copyBounds!.height);
+  expect(Math.abs(triggerBounds!.y - cardBounds!.y)).toBeLessThan(2);
+  expect(Math.abs(triggerBounds!.height - cardBounds!.height)).toBeLessThan(2);
 
   await trigger.scrollIntoViewIfNeeded();
   const before = await page.evaluate(() => window.scrollY);
@@ -142,7 +143,9 @@ test('principle cards use four reserved sigil colors, transparent panels and bor
   const after = await first.evaluate(el => getComputedStyle(el).borderColor);
   expect(after).not.toBe(before);
   await expect(first.locator('h3')).toHaveCSS('text-decoration-line', 'none');
-  await expect(first.locator('.astrid-vision-principle-open')).toHaveCSS('font-weight', '700');
+  await expect.poll(() => first.evaluate(el => getComputedStyle(el, '::after').opacity)).toBe('1');
+  const border = await first.evaluate(el => getComputedStyle(el, '::after').borderLeftWidth);
+  expect(border).toBe('2px');
 });
 
 test('mobile modal keeps the X fixed, scrolls within the panel and closes from top and bottom backdrop', async ({ page, request }) => {
@@ -218,7 +221,7 @@ test('first touch outside the dialog only dismisses it and cannot click through 
       marker.__visionCardClicks = 0;
       document.addEventListener('click', event => {
         if (event.target instanceof Element &&
-            event.target.closest('.astrid-vision-principle-open, .astrid-vision-card-open')) {
+            event.target.closest('.astrid-vision-card-open')) {
           marker.__visionCardClicks = (marker.__visionCardClicks ?? 0) + 1;
         }
       }, true);
@@ -281,15 +284,24 @@ test('aspiration cards join edge-to-edge, fit the long title in two lines, and o
       return copy.top - heading.bottom;
     });
     expect(titleToCopy).toBeLessThan(16);
-    const explore = cards.last().locator('.astrid-vision-principle-open');
-    await expect(explore).toContainText('Explore gaps & projects');
-    expect(await explore.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+    await expect(cards.last().locator('.astrid-vision-principle-open')).toHaveCount(0);
+    const hitarea = cards.last().getByRole('button', { name: /Explore .*: gaps and projects/ });
+    const areaRect = await hitarea.boundingBox();
+    const cardRect = await cards.last().boundingBox();
+    expect(areaRect).not.toBeNull();
+    expect(cardRect).not.toBeNull();
+    expect(Math.abs(areaRect!.width - cardRect!.width)).toBeLessThan(2);
+    expect(Math.abs(areaRect!.height - cardRect!.height)).toBeLessThan(2);
 
-    // The title and sigil, not just the footer button, should open the same pop-up.
-    await fourthTitle.click();
+    // The entire surface, including where the title and sigil are drawn, opens the dialog.
+    const titleRect = await fourthTitle.boundingBox();
+    expect(titleRect).not.toBeNull();
+    await page.mouse.click(titleRect!.x + 10, titleRect!.y + titleRect!.height / 2);
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('dialog').getByRole('button', { name: 'Close details' }).click();
-    await cards.last().locator('.astrid-vision-principle-sigil').click();
+    const sigilRect = await cards.last().locator('.astrid-vision-principle-sigil').boundingBox();
+    expect(sigilRect).not.toBeNull();
+    await page.mouse.click(sigilRect!.x + 8, sigilRect!.y + 8);
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -310,10 +322,14 @@ test('aspiration hover animates only its arrow without underlining the title', a
   const card = page.locator('.astrid-vision-standards-list > li').first();
   await card.hover();
   await expect(card.locator('h3')).toHaveCSS('text-decoration-line', 'none');
-  await expect(card.locator('.astrid-vision-principle-arrow'))
+  await expect(card.locator('.astrid-vision-card-arrow'))
+    .toHaveCSS('animation-name', 'astrid-vision-arrow-nudge');
+  const pillar = page.locator('.astrid-vision-principles > li').first();
+  await pillar.hover();
+  await expect(pillar.locator('.astrid-vision-card-arrow'))
     .toHaveCSS('animation-name', 'astrid-vision-arrow-nudge');
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect(card.locator('.astrid-vision-principle-arrow')).toHaveCSS('animation-name', 'none');
+  await expect(pillar.locator('.astrid-vision-card-arrow')).toHaveCSS('animation-name', 'none');
 });
 
 
@@ -357,4 +373,29 @@ test('gap headers and their projects share distinct stable color families', asyn
   const sameGap = page.getByRole('dialog').locator('.astrid-vision-details-gap')
     .filter({ hasText: "Artists can't yet sustain ambitious work end to end" });
   await expect(sameGap).toHaveAttribute('data-tone', firstTone!);
+});
+
+
+test('every joined principle, including interior cards without physical left borders, gains a full hover box', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const cards = page.locator('.astrid-vision-standards-list > li');
+  for (let i = 0; i < 4; i++) {
+    const card = cards.nth(i);
+    await card.hover();
+    await expect.poll(() => card.evaluate(el => getComputedStyle(el, '::after').opacity)).toBe('1');
+    const outline = await card.evaluate(el => {
+      const css = getComputedStyle(el, '::after');
+      return [css.borderTopWidth, css.borderRightWidth, css.borderBottomWidth, css.borderLeftWidth];
+    });
+    expect(outline).toEqual(['2px', '2px', '2px', '2px']);
+    await expect(card.locator('h3')).toHaveCSS('text-decoration-line', 'none');
+  }
 });

@@ -140,10 +140,12 @@ describe('RuntimeConnectionPill', () => {
     const checkedSetup = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
     expect(checkedSetup).toBeChecked();
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    const setupCommand = screen.getByText(installCommand('install'), { exact: true }).textContent;
+    const setupCommand = screen.getByText(installCommand('install', undefined, false, false, true), { exact: true }).textContent;
     fireEvent.click(checkedSetup);
     expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(setupCommand);
+    // Unchecked: a fresh install, which keeps --yes. It intentionally differs from the set-up line captured above.
+    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(installCommand('install'));
+    expect(installCommand('install')).not.toBe(setupCommand);
     expect(screen.getByText('Give these instructions to your coding agent to start Astrid again. Your changes are kept.')).toBeInTheDocument();
     expect(status()).toHaveAttribute('data-state', 'stopped');
     expect(status()).not.toHaveTextContent('Connected');
@@ -332,7 +334,7 @@ describe('RuntimeConnectionPill', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
     expect(status()).toHaveAttribute('data-state', 'stopped');
     expect(isRecoveryCardShowing()).toBe(true);
-    expect(document.body.textContent).toContain(installCommand('install'));
+    expect(document.body.textContent).toContain(installCommand('install', undefined, false, false, true));
 
     route.answer = healthy('instance-1');
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
@@ -373,10 +375,10 @@ describe('RuntimeConnectionPill', () => {
     await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
     route.answer = unreachable;
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
-    expect(document.body.textContent).toContain(installCommand('install'));
+    expect(document.body.textContent).toContain(installCommand('install', undefined, false, false, true));
     route.answer = healthy('instance-2');
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid restarted' })).toBeInTheDocument());
-    expect(document.body.textContent).not.toContain(installCommand('install'));
+    expect(document.body.textContent).not.toContain(installCommand('install', undefined, false, false, true));
   });
 
   it.each(['not_running', 'refused'] as const)('renders nothing while %s, and asks Astrid nothing', (status) => {

@@ -94,7 +94,7 @@ describe('shared installer argv fixture', () => {
     fireEvent.click(screen.getByRole('checkbox', { name: "I've already set up Astrid" }));
     expect(screen.getByText('Start Astrid')).toBeInTheDocument();
     // Set up already: the plain install line, no choice flags, so a stale saved choice cannot flip the Agent's policy.
-    expect(screen.getByRole('code').textContent).toBe(fixture.install_line);
+    expect(screen.getByRole('code').textContent).toBe(ASTRID_COMMANDS.macLinux);
     expect(fixtureChoices(readPendingSetupState().choices)).toEqual(alreadySetUp.choices);
   });
 

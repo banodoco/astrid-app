@@ -17,7 +17,6 @@ export function VisionDetailDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
-  const titleRef = useRef<HTMLHeadingElement>(null);
   const titleId = useId();
   const entry = subject.kind === 'pillar'
     ? content.pillars.find(pillar => pillar.id === subject.id)

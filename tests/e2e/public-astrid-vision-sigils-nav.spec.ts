@@ -159,6 +159,47 @@ test('mobile hero gets breathing room and the editorial arrows and pillar number
   }
 });
 
+test('pillar art sits beside its copy and the disclosure sits below in compact desktop and phone cards', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [390, 800, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const cards = page.locator('.astrid-vision-principles > li');
+    await expect(cards).toHaveCount(4);
+    const layouts = await cards.evaluateAll(elements => elements.map(card => {
+      const bounds = (selector: string) => card.querySelector(selector)!.getBoundingClientRect();
+      return {
+        card: card.getBoundingClientRect().toJSON(),
+        heading: bounds('h3').toJSON(),
+        text: bounds('li > p, p').toJSON(),
+        art: bounds('.astrid-vision-principle-art').toJSON(),
+        detail: bounds('.astrid-vision-pillar-details').toJSON(),
+        number: bounds('.astrid-vision-pillar-number').toJSON(),
+        px: getComputedStyle(card.querySelector('.astrid-vision-principle-art')!).getPropertyValue('--px').trim(),
+      };
+    }));
+    for (const item of layouts) {
+      expect(item.art.left).toBeGreaterThanOrEqual(item.heading.right - 2);
+      expect(item.art.left).toBeGreaterThanOrEqual(item.text.right - 2);
+      expect(item.detail.top).toBeGreaterThanOrEqual(Math.max(item.text.bottom, item.art.bottom) - 2);
+      expect(item.detail.right).toBeLessThanOrEqual(item.card.right - 6);
+      expect(Math.abs(item.heading.left - item.text.left)).toBeLessThan(2);
+      expect(item.art.right).toBeLessThanOrEqual(item.card.right - 6);
+      // Former cards added a whole extra illustration row: these stay
+      // shallow even with the artwork and details affordance retained.
+      expect(item.card.height).toBeLessThan(width === 390 ? 345 : width === 800 ? 370 : 275);
+    }
+    const columns = await page.locator('.astrid-vision-principles').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+    expect(columns).toBe(width === 390 ? 1 : 2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    // The whole card remains an accessible target after the layout change.
+    await cards.first().getByRole('button', { name: /Explore .*: gaps and projects/ }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+  }
+});
+
 test('sticky header navigation tracks sections and folds the wordmark to its icon', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1720, height: 900 });

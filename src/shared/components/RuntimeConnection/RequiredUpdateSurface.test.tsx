@@ -6,7 +6,7 @@ import { connectionFor, CONNECTED_REALM } from './connectionFixture.ts';
 const { connectionRef } = vi.hoisted(() => ({ connectionRef: { current: null as unknown } }));
 vi.mock('@/integrations/runtime/client.ts', () => ({
   AstridRuntimeClient: class {
-    readInstallerUpdateHealth = async () => ({ status: 'ok', release: 3, identity: { release: 3, managed_by: null } });
+    readInstallerUpdateHealth = async () => ({ status: 'ok', release: 10, identity: { release: 10, managed_by: null } });
   },
 }));
 vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => 'https://astrid.test', runtimeApiBase: () => 'https://astrid.test/api/runtime' }));
@@ -30,8 +30,8 @@ describe('required update on the connected page', () => {
   it('shows the Update Astrid card and the header dot without opening Settings', async () => {
     connectionRef.current = connectionFor({ status: 'connected', realm: CONNECTED_REALM }, { managedByPinokio: false });
     vi.stubGlobal('fetch', vi.fn(async (input: string) => {
-      if (input === '/build.json') return json({ app: 'app-a', release: 5 })();
-      if (input === '/install-manifest.json') return json({ release: 5, required: { release: 5, reason: 'security fix' } })();
+      if (input === '/build.json') return json({ app: 'app-a', release: 11 })();
+      if (input === '/install-manifest.json') return json({ release: 11, required: { release: 11, reason: 'security fix' } })();
       throw new Error(`unexpected fetch ${input}`);
     }));
     const healthFetch = vi.fn(async (_input: string, _init?: RequestInit) => json({ status: 'ok', runtime_instance_id: 'instance-1' })());

@@ -1,4 +1,5 @@
-import { AstridRuntimeClient, INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateOutcome, type InstallerUpdateReason, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
+import { AstridRuntimeClient, type InstallerUpdateOutcome, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason } from '@/integrations/runtime/installerUpdateReasons.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
@@ -85,6 +86,15 @@ export function installerUpdateStatusMessage(status: InstallerUpdateStatus | nul
   if (status.state === 'active') return 'Update in progress. Astrid may disconnect while it restarts.';
   if (status.state === 'terminal') return installerOutcomeMessage(status.outcome) ?? 'The update finished. Check diagnostics for details.';
   return null;
+}
+
+/**
+ * The operation's line for a surface that already resolved a reason. The generic self-update-unavailable line never
+ * stands in for a real reason: when the resolution has one, the generic line is dropped and the resolution speaks.
+ */
+export function installerUpdateLine(status: InstallerUpdateStatus | null | undefined, resolvedReason?: InstallerUpdateReason): string | null {
+  if (resolvedReason && resolvedReason !== 'self-update-unavailable' && installerUpdateReasonOf(status) === 'self-update-unavailable') return null;
+  return installerUpdateStatusMessage(status);
 }
 
 /** A finished in-app update that did not complete: the one state whose next action is the plain install line. */

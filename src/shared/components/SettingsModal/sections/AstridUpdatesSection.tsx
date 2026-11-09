@@ -6,14 +6,15 @@ import { UpdateResolutionActions } from '@/shared/components/RuntimeConnection/U
 import { CopyCommandRow } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
 import { DiagnosticsFallback } from '@/shared/components/RuntimeConnection/DownloadDiagnosticsButton.tsx';
 import { fetchDiagnosticsReport, saveDiagnosticsReport } from '@/shared/components/RuntimeConnection/diagnosticsDownload.ts';
-import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY, updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
+import { ASTRID_COMMANDS, installCommand, RUNTIME_CONNECTION_COPY, updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpdateStatus.ts';
 import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
-import { installerOutcomeMessage, installerUpdateFailed, installerUpdateStatusMessage } from '@/shared/lib/updates/updateOperation.ts';
+import { installerOutcomeMessage, installerUpdateFailed, installerUpdateLine } from '@/shared/lib/updates/updateOperation.ts';
+import { lastRunFromReport, lastUpdateDidNothing } from '@/shared/lib/updates/lastRun.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 import { astridOutOfDate } from './ConnectionSection.tsx';
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
@@ -92,7 +93,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         next = await checkHostedUpdate(health);
       }
       setStatus(next);
-      setResolution(resolveUpdate({ ...next.resolution, compatibility: compatibilityFor(installType), installType, updateNowAvailable: false, updateReason: operation.updateReason }, 'settings'));
+      setResolution(resolveUpdate({ ...next.resolution, compatibility: compatibilityFor(installType), installType, updateNowAvailable: false, selfUpdate: operation.status?.self_update ?? next.selfUpdate, updateReason: operation.updateReason }, 'settings'));
       setState('ready');
     } catch {
       setStatus(null);
@@ -128,14 +129,15 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
   const compatibility = compatibilityFor(statusInstallType);
-  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available || statusInstallType === 'fully-local' && currentStatus.selfUpdate === true, updateReason: operation.updateReason }, 'settings') : resolution;
+  const currentResolution = currentStatus ? resolveUpdate({ ...currentStatus.resolution, pageStale, compatibility, installType: statusInstallType, updateNowAvailable: operation.available || statusInstallType === 'fully-local' && currentStatus.selfUpdate === true, selfUpdate: operation.status?.self_update ?? currentStatus.selfUpdate, updateReason: operation.updateReason }, 'settings') : resolution;
   // Settings reads one vocabulary: the live status. The report contributes only a finished operation's outcome, and only
   // when the live status has none. Recovery and an idle Astrid ("none") are never a result line.
   const reportResult = diagnostics.match(/^Last update result: (.*)$/m)?.[1]?.trim();
-  const operationResult = installerUpdateStatusMessage(operation.status);
+  // A resolved reason (self-update-too-old) replaces the generic line the status would otherwise give.
+  const operationResult = installerUpdateLine(operation.status, currentResolution?.updateReason);
   const reportLabel = installerOutcomeMessage(reportResult);
   const lastResult = operation.pending ? 'Update in progress. Checking its result…' : operation.error ? operation.error : operationResult ?? reportLabel;
-  const operationMessage = operation.status && !operation.pending ? installerUpdateStatusMessage(operation.status) || null : null;
+  const operationMessage = operation.status && !operation.pending ? operationResult || null : null;
   const updateCard = currentResolution?.card === 'notice' || currentResolution?.card === 'update';
   const updateAvailable = (Boolean(currentStatus) || Boolean(compatibility)) && updateCard;
   // A degraded direct install repairs with the plain install line, which has no --update. A source checkout has no such line here.
@@ -150,6 +152,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
     || (state === 'checking' ? 'Checking for updates…'
       : state === 'error' ? error
         : currentResolution?.card === 'newer' ? currentResolution.body
+          : updateAvailable && currentResolution?.updateReason === 'self-update-too-old' && currentResolution.title ? currentResolution.title
           : updateAvailable && currentStatus && releaseLine ? `Update available: Release ${currentStatus.servedRelease}`
             : updateAvailable && currentResolution?.title ? currentResolution.title
             : currentStatus ? `Astrid is up to date (Release ${currentStatus.release})` : 'Astrid is up to date');
@@ -164,7 +167,10 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const diagnosticsFallback = diagnosticsError && (diagnosticsOpen || downloadTried);
   const logText = operation.status?.result && reportResult !== operation.status.result
     ? 'The latest log is not available in diagnostics yet. Check again.'
-    : diagnostics.match(/Installer transaction log:\n([\s\S]*?)\nRetained back-end copies:/)?.[1]?.trim() ?? '';
+    // Current Runtimes label the log "Installer log (<file>, last 80 lines)"; older ones "Installer transaction log".
+    : diagnostics.match(/(?:Installer transaction log|Installer log \([^)\n]*\)):\n([\s\S]*?)\n(?:Retained back-end copies|Program versions on disk):/)?.[1]?.trim() ?? '';
+  // The installer's receipt says the last update installed nothing while Astrid is still behind.
+  const didNothing = state === 'ready' ? lastUpdateDidNothing(lastRunFromReport(diagnostics), currentStatus?.release, currentStatus?.servedRelease) : null;
 
   const appBuild = currentStatus?.app || APP_BUILD;
 
@@ -180,6 +186,15 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
       {actionsFor && <UpdateResolutionActions resolution={actionsFor} operation={operation} context="settings" />}
       {lastResult && lastResult !== statusLine && <p className="text-muted-foreground">Last result: {lastResult}</p>}
     </SettingsRow>
+    {didNothing && <SettingsRow
+      label={<p className="font-medium text-foreground">{didNothing.title}</p>}
+      description={didNothing.body}
+    >
+      <div className="space-y-2">
+        <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void downloadDiagnostics()}>Download diagnostics</Button>
+        <CopyCommandRow command={installCommand('update')} label="Copy command (try again)" copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+      </div>
+    </SettingsRow>}
     {repairNeeded && <SettingsRow
       label={<p className="font-medium text-foreground">{ASTRID_STATUS_COPY.repairTitle}</p>}
       description={ASTRID_STATUS_COPY.repairDescription}

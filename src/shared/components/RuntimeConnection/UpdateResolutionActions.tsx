@@ -8,14 +8,10 @@ import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { useGuardedReload } from '@/shared/lib/updates/draftSafeReload.ts';
-import { installerUpdateFailed, installerUpdateStatusMessage, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
+import { installerUpdateFailed, installerUpdateLine, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES, SELF_UPDATE_TOO_OLD_STEPS } from '@/integrations/runtime/installerUpdateReasons.ts';
 import { ASTRID_STATUS_COPY } from '@/shared/components/SettingsModal/sections/astridStatusCopy.ts';
 
-/**
- * Shown with the command when this Astrid cannot update itself and no refusal reason explains why. It mirrors the
- * client's self-update-unavailable line; it is literal here because page tests mock the runtime client module.
- */
-const IN_APP_UPDATE_UNAVAILABLE = "Astrid can't update itself on this computer. Run the command below to update it.";
 
 /** Opens Settings on its Updates tab; the header and the update cards share this route. */
 export function openUpdatesSettings() {
@@ -47,6 +43,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   const executeLocal = actions.find((action) => action.execute === 'local-update');
   // Details opens Settings Updates; a card whose action already goes there (See updates) does not repeat it.
   const details = context === 'page' && !route && (resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason;
+  const statusLine = installerUpdateLine(operation?.status, resolution.updateReason);
   const plainInstallCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   const startUpdate = async () => {
     const validate = await guarded.flush();
@@ -71,8 +68,10 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
     {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
-    {commandOptions && installerPath && !execute && !resolution.updateReason && <p className="text-sm">{IN_APP_UPDATE_UNAVAILABLE}</p>}
+    {/* The generic line only when no reason explains why this Astrid can't update itself. */}
+    {commandOptions && installerPath && !execute && !resolution.updateReason && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']}</p>}
     {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair'} />}
+    {commandOptions && resolution.updateReason === 'self-update-too-old' && <p className="text-sm">{SELF_UPDATE_TOO_OLD_STEPS}</p>}
     {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
       <p className="text-sm">Run this command, then start Astrid:</p>
       {/* The plain install line, not --update: it respects autostart off, so the saved choice is kept. */}
@@ -81,7 +80,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
-    {operation?.fresh && !operation.error && installerUpdateStatusMessage(operation.status) && !operation.pending && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
+    {operation?.fresh && !operation.error && statusLine && !operation.pending && <p role="status">{statusLine}</p>}
     {failedInstall && <div className="space-y-2">
       <p className="text-sm">{ASTRID_STATUS_COPY.repairDescription}</p>
       <CopyCommandRow command={plainInstallCommand} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />

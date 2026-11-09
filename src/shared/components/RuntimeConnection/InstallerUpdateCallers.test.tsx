@@ -65,7 +65,7 @@ beforeEach(() => {
       body = {
         status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test',
         runtime_instance_id: harness.instance, runtime_session_id: 'session-a', runtime_epoch: 1,
-        release: 3, identity: { managed_by: harness.manager, release: 3 },
+        release: 10, identity: { managed_by: harness.manager, release: 10 },
       };
     } else if (url.endsWith('/v1/update/status')) {
       body = {
@@ -79,9 +79,9 @@ beforeEach(() => {
       harness.statusState = 'active';
       body = { accepted: true, state: 'accepted', operation_id: '0123456789abcdef0123456789abcdef', message: 'Update accepted.' };
     } else if (url === '/build.json') {
-      body = { app: 'served-build', release: 4 };
+      body = { app: 'served-build', release: 11 };
     } else if (url === '/install-manifest.json') {
-      body = { release: 4, ...(harness.manifestRequired ? { required: { release: 4, reason: 'Security fix' } } : {}) };
+      body = { release: 11, ...(harness.manifestRequired ? { required: { release: 11, reason: 'Security fix' } } : {}) };
     } else if (url.includes('/v1/diagnostics')) {
       body = { report: 'Last update result: none\nInstaller transaction log:\n\nRetained back-end copies: 0 bytes' };
     } else {
@@ -134,7 +134,7 @@ describe('installer update callers', () => {
       <AstridUpdatesSection isOpen />
     </>);
 
-    await screen.findAllByText('Update available: Release 4');
+    await screen.findAllByText('Update available: Release 11');
     const statusReads = calls().filter((call) => call.url.endsWith('/v1/update/status'));
     expect(statusReads.length).toBeGreaterThan(0);
     expect(statusReads.every((call) => call.method === 'GET')).toBe(true);
@@ -256,7 +256,7 @@ describe('installer update callers', () => {
       fireEvent.click(update);
       await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
     }
-    else await screen.findAllByText('Update available: Release 4');
+    else await screen.findAllByText('Update available: Release 11');
     if (!statusReadable) expect(calls().some((call) => call.url.endsWith('/v1/update/status'))).toBe(false);
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     const postCount = calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
@@ -290,11 +290,11 @@ describe('installer update callers', () => {
       const url = String(input);
       if (url.endsWith('/v1/health')) return new Response(JSON.stringify({
         status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test', runtime_instance_id: harness.instance,
-        runtime_session_id: 'session-a', runtime_epoch: 1, release: 5, identity: { managed_by: null, release: 5 },
+        runtime_session_id: 'session-a', runtime_epoch: 1, release: 12, identity: { managed_by: null, release: 12 },
       }), { status: 200 });
       if (url.endsWith('/v1/update/status')) return new Response(JSON.stringify({ available: true, self_update: true, state: 'none' }), { status: 200 });
-      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 4 }), { status: 200 });
-      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 4 }), { status: 200 });
+      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 11 }), { status: 200 });
+      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 11 }), { status: 200 });
       return new Response('{}', { status: 200 });
     }));
     render(<RuntimeConnectorRecoveryBanner error={recoveryError} onRetry={vi.fn()} />);
@@ -321,14 +321,14 @@ describe('installer update callers', () => {
       if (url.endsWith('/v1/health')) return new Response(JSON.stringify({
         status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test',
         runtime_instance_id: harness.instance, runtime_session_id: 'session-a', runtime_epoch: 1,
-        release: 3, identity: { managed_by: null, release: 3 },
+        release: 10, identity: { managed_by: null, release: 10 },
       }), { status: 200 });
-      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 4 }), { status: 200 });
-      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 4 }), { status: 200 });
+      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 11 }), { status: 200 });
+      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 11 }), { status: 200 });
       return new Response('{}', { status: 200 });
     }));
     render(<AstridUpdatesSection isOpen />);
-    await screen.findAllByText('Update available: Release 4');
+    await screen.findAllByText('Update available: Release 11');
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
   });

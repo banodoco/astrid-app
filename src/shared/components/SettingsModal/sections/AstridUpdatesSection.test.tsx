@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -76,10 +78,10 @@ describe('Astrid Updates Settings section', () => {
   });
 
   it('checks immediately when opened and shows the shared update action', async () => {
-    hostedCheckMock.mockResolvedValue({ release: 3, app: 'app-a', servedRelease: 4, servedApp: 'app-b', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
+    hostedCheckMock.mockResolvedValue({ release: 10, app: 'app-a', servedRelease: 11, servedApp: 'app-b', behind: true, resolution: { installedRelease: 10, servedRelease: 11, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 11')).toBeInTheDocument();
     expect(readStatusMock).toHaveBeenCalledOnce();
     expect(hostedCheckMock).toHaveBeenCalledOnce();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
@@ -103,10 +105,10 @@ describe('Astrid Updates Settings section', () => {
   });
 
   it('uses the resolver command actions for a soft hosted installer update', async () => {
-    hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
+    hostedCheckMock.mockResolvedValue({ release: 10, app: 'current', servedRelease: 11, servedApp: 'served', behind: true, resolution: { installedRelease: 10, servedRelease: 11, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 11')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
     expect(localCheckMock).not.toHaveBeenCalled();
@@ -179,10 +181,10 @@ describe('Astrid Updates Settings section', () => {
   });
 
   it('shows required reason and keeps required-update precedence', async () => {
-    hostedCheckMock.mockResolvedValue({ release: 3, app: 'current', servedRelease: 5, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 5, requiredRelease: 4, requiredReason: 'Security fix', releaseBehind: true } });
+    hostedCheckMock.mockResolvedValue({ release: 10, app: 'current', servedRelease: 12, servedApp: 'served', behind: true, resolution: { installedRelease: 10, servedRelease: 12, requiredRelease: 11, requiredReason: 'Security fix', releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
-    expect(await within(section).findByText('Update available: Release 5')).toBeInTheDocument();
+    expect(await within(section).findByText('Update available: Release 12')).toBeInTheDocument();
     expect(within(section).getByText('This update is required: Security fix')).toBeInTheDocument();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     // Settings is where Details leads, so the section does not link to itself.
@@ -385,7 +387,7 @@ describe('Updates repair entry for a direct install', () => {
 
   it('leaves the repair row out while an update is offered, which is then the only path', async () => {
     await loadHealth({ status: 'degraded', release: 3, runtime_instance_id: 'runtime-behind', identity: directIdentity, services: [{ name: 'chat', state: 'failed', last_exit: 2, restart_count: 1 }] });
-    hostedCheckMock.mockResolvedValue({ ...current, servedRelease: 4, behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
+    hostedCheckMock.mockResolvedValue({ ...current, release: 10, servedRelease: 11, behind: true, resolution: { installedRelease: 10, servedRelease: 11, releaseBehind: true } });
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
 
@@ -403,5 +405,55 @@ describe('Updates repair entry for a direct install', () => {
     expect(await within(section).findByText(/^Astrid is up to date/)).toBeInTheDocument();
     expect(within(section).queryByText(ASTRID_STATUS_COPY.repairTitle)).toBeNull();
     expect(within(section).queryByRole('code')).toBeNull();
+  });
+});
+
+describe("Hannah's state: Release 1 after a finished storage move, Release 10 served", () => {
+  // The Runtime's own report for this state (astrid-runtime tests/fixtures/field_states.json, rendered by diagnostics_report).
+  const fixture = (name: string) => readFileSync(path.resolve(__dirname, '../../../lib/updates/__fixtures__', `${name}.diagnostics.txt`), 'utf8');
+  const hannah = { release: 1, app: 'current', servedRelease: 10, servedApp: 'served', behind: true, resolution: { installedRelease: 1, servedRelease: 10, releaseBehind: true } };
+  const serve = (report: string) => vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => Promise.resolve(new Response(JSON.stringify(
+    String(input) === '/build.json' ? { app: 'served-app-build', release: 10 } : { report }), { status: 200, headers: { 'Content-Type': 'application/json' } }))));
+
+  it('shows Release 10 is ready with the too-old copy and the one command, never the generic line', async () => {
+    readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 1, identity: { managed_by: null, release: 1 } } });
+    statusMock.value = { available: true, state: 'none' };
+    serve(fixture('hannah-before-receipt'));
+    hostedCheckMock.mockResolvedValue(hannah);
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(section).findByText('Release 10 is ready')).toBeInTheDocument();
+    expect(within(section).getByText(/^You have Release 1\. Releases before 10 can't update from this page, so this one update needs a command\. It keeps your projects\./)).toBeInTheDocument();
+    expect(within(section).getByText(/Open Terminal, paste the command, press Return\./)).toBeInTheDocument();
+    expect(within(section).getByText(installCommand('update'))).toBeInTheDocument();
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(section.textContent).not.toContain("Astrid can't update itself on this computer");
+    // No receipt from an installer before UR-15a: nothing claims the last update did nothing.
+    expect(within(section).queryByText("The last update didn't install anything")).toBeNull();
+  });
+
+  it('says the last update did nothing and points to Download diagnostics when the receipt is not-updated', async () => {
+    readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 1, identity: { managed_by: null, release: 1 } } });
+    statusMock.value = { available: true, state: 'none' };
+    serve(fixture('hannah-not-updated'));
+    hostedCheckMock.mockResolvedValue(hannah);
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    expect(await within(section).findByText("The last update didn't install anything")).toBeInTheDocument();
+    expect(within(section).getByText(/^Astrid is still Release 1; Release 10 is available\. This is a problem in Astrid, not something you did\. Your projects are safe\./)).toBeInTheDocument();
+    expect(within(section).getAllByRole('button', { name: 'Download diagnostics' })).toHaveLength(2);
+    expect(within(section).getByRole('button', { name: 'Copy command (try again)' })).toBeInTheDocument();
+    expect(section.textContent).not.toContain("Astrid can't update itself on this computer");
+  });
+
+  it('reads the update log under the Runtime\'s new label', async () => {
+    readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 1, identity: { managed_by: null, release: 1 } } });
+    serve('Last update result: rolled_back\nInstaller log (install.log, last 80 lines):\nnew label line\nProgram versions on disk: 1 version, 0 bytes');
+    hostedCheckMock.mockResolvedValue(hannah);
+    render(<AstridUpdatesSection isOpen />);
+    const section = screen.getByRole('region', { name: 'Updates' });
+    await within(section).findByText('Release 10 is ready');
+    fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
+    expect(await within(section).findByText('new label line')).toBeInTheDocument();
   });
 });

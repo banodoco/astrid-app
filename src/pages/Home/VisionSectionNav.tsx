@@ -54,7 +54,7 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
       // release our lock on a still-running *document* smooth-scroll.
       if (event.target === document || event.target === window) finishJump();
     };
-    schedule();
+    measure();
     window.addEventListener('scroll', schedule, { passive: true });
     window.addEventListener('scrollend', onPageScrollEnd);
     window.addEventListener('resize', schedule);
@@ -88,14 +88,11 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
       const bounded = Math.max(0, Math.min(nav.scrollWidth - nav.clientWidth, desired));
       nav.scrollTo({ left: bounded, behavior });
     };
-    const frame = window.requestAnimationFrame(() => alignActive(reducedMotion ? 'auto' : 'smooth'));
+    alignActive(reducedMotion ? 'auto' : 'smooth');
     const resize = typeof ResizeObserver === 'function'
       ? new ResizeObserver(() => alignActive('auto')) : null;
     resize?.observe(nav);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      resize?.disconnect();
-    };
+    return () => resize?.disconnect();
   }, [activeId, reducedMotion]);
 
   return (

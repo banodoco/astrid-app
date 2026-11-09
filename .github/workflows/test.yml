@@ -29,7 +29,7 @@ jobs:
       - name: Check install tuple and release
         env:
           BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: node scripts/installer/release-guard.mjs "$BASE_SHA" HEAD
+        run: node scripts/installer/release-guard.mjs "$BASE_SHA" HEAD --pins
 
   # Pull requests run only release-guard above; the rest of this workflow runs on push as before.
   vitest:

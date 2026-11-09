@@ -28,11 +28,11 @@ function sourcePath(value, label) {
   return `contract/${normalized}`;
 }
 
-async function runtimeSchemaDigest(runtimeSha) {
-  const contract = JSON.parse((await readRaw(runtimeRepo, runtimeSha, 'contract/manifest.json')).toString('utf8'));
+async function runtimeSchemaDigest(runtimeSha, reader = readRaw) {
+  const contract = JSON.parse((await reader(runtimeRepo, runtimeSha, 'contract/manifest.json')).toString('utf8'));
   if (!Array.isArray(contract.schemas)) throw new Error('Runtime contract manifest needs a schemas list');
   const paths = [sourcePath(contract.openapi, 'OpenAPI'), ...contract.schemas.map((file) => sourcePath(file, 'schema'))];
-  const contents = await Promise.all(paths.map((file) => readRaw(runtimeRepo, runtimeSha, file)));
+  const contents = await Promise.all(paths.map((file) => reader(runtimeRepo, runtimeSha, file)));
   const hash = createHash('sha256');
   for (const [index, file] of paths.entries()) {
     const name = Buffer.from(file, 'utf8');
@@ -46,16 +46,17 @@ async function runtimeSchemaDigest(runtimeSha) {
   return `sha256:${hash.digest('hex')}`;
 }
 
-async function readAgentRuntime(agentSha) {
-  const lock = JSON.parse((await readRaw(agentRepo, agentSha, 'runtime.lock.json')).toString('utf8'));
+// `reader` is readRaw by default; the release guard and tests pass their own so the pin logic can run offline.
+async function readAgentRuntime(agentSha, reader = readRaw) {
+  const lock = JSON.parse((await reader(agentRepo, agentSha, 'runtime.lock.json')).toString('utf8'));
   if (!/^[0-9a-f]{40}$/.test(lock.source_commit ?? '')) {
     throw new Error(`Agent ${agentSha} runtime.lock.json needs a full source_commit`);
   }
   return lock.source_commit;
 }
 
-async function readAgentSources(agentSha) {
-  const pins = JSON.parse((await readRaw(agentRepo, agentSha, 'astrid/packs/runpod/pins.json')).toString('utf8'));
+async function readAgentSources(agentSha, reader = readRaw) {
+  const pins = JSON.parse((await reader(agentRepo, agentSha, 'astrid/packs/runpod/pins.json')).toString('utf8'));
   const sources = pins?.sources ?? {};
   const vibecomfy = sources.vibecomfy;
   const lifecycle = sources.lifecycle;
@@ -106,17 +107,17 @@ async function pin(agentSha, reason) {
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
-export async function checkManifest(manifest) {
+export async function checkManifest(manifest, reader = readRaw) {
   const agentSha = manifest?.agent?.sha;
   if (!/^[0-9a-f]{40}$/.test(agentSha ?? '')) throw new Error('install-manifest.json agent.sha must be a full commit SHA');
-  const runtimeSha = await readAgentRuntime(agentSha);
+  const runtimeSha = await readAgentRuntime(agentSha, reader);
   if (manifest.runtime?.sha !== runtimeSha) {
     throw new Error(`install-manifest.json runtime.sha ${manifest.runtime?.sha ?? '(missing)'} does not match agent ${agentSha} runtime.lock.json source_commit ${runtimeSha}`);
   }
   if (manifest.runpod !== undefined) {
     throw new Error('install-manifest.json must not carry a runpod block; lifecycle is the single RunPod source');
   }
-  const sources = await readAgentSources(agentSha);
+  const sources = await readAgentSources(agentSha, reader);
   for (const name of ['vibecomfy', 'lifecycle']) {
     if (manifest[name] === undefined) {
       throw new Error(`install-manifest.json is missing the ${name} block; run pin.mjs ${agentSha}`);
@@ -125,7 +126,7 @@ export async function checkManifest(manifest) {
       throw new Error(`install-manifest.json ${name} does not match Agent ${agentSha} pins; run pin.mjs ${agentSha}`);
     }
   }
-  const schemaDigest = await runtimeSchemaDigest(runtimeSha);
+  const schemaDigest = await runtimeSchemaDigest(runtimeSha, reader);
   if (manifest.runtime?.schema_digest !== schemaDigest) {
     throw new Error(`install-manifest.json runtime.schema_digest ${manifest.runtime?.schema_digest ?? '(missing)'} does not match Runtime ${runtimeSha} contract digest ${schemaDigest}`);
   }

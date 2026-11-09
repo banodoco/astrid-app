@@ -62,13 +62,21 @@ export async function restorePreparedResources(app) {
   }
 }
 
+/** The receipt kinds that reached their target: the only ones that exit 0. */
+const SETTLED_SUCCESS = new Set(['updated', 'already-current', 'repaired']);
+
 /**
- * A settled run whose receipt is not exit 0 (3: not updated). Its own reason
- * and the Agent's plain lines, Next and Details included, are the message.
+ * A settled run that did not reach its target: a receipt that is not exit 0
+ * (3: not updated), or whose kind is not a success whatever its code says.
+ * Its own reason and the Agent's plain lines, Next and Details included, are the message.
  */
+function settledNotUpdated(reply) {
+  return Boolean(reply?.outcome) && (reply.exitCode !== 0 || !SETTLED_SUCCESS.has(reply.outcome.kind));
+}
 function notUpdated({ outcome, lines, exitCode }) {
   const message = lines.length ? lines.join('\n') : `Astrid did NOT update: ${outcome.reason_line ?? outcome.reason ?? 'no reason was given'}`;
-  return { status: 'not-updated', reason: outcome.reason ?? null, exitCode, outcome, lines, message };
+  // A run that did not update never exits 0, even if its receipt's code says so.
+  return { status: 'not-updated', reason: outcome.reason ?? null, exitCode: exitCode || 3, outcome, lines, message };
 }
 
 /** All mutation callbacks execute under the backend's existing C2 journal. */
@@ -116,7 +124,7 @@ export function createLocalUpdater({ cwd, backend, editor, session, backendUpdat
     // `purpose: update` makes a recovery here this update's own result: not
     // updated (exit 3). The launcher's start-time recovery does not send it.
     const recovered = await backendUpdate({ backend, action: { action: 'recover', purpose: 'update' }, hook });
-    if (recovered.exitCode) return notUpdated(recovered);
+    if (settledNotUpdated(recovered)) return notUpdated(recovered);
     if (recovered.status === 'recovered') return { status: 'recovered', message: 'The interrupted update was restored and Astrid is running. Run npm run update again to check for a new release.' };
     const target = await selectTarget({ cwd });
     if (target.upToDate) return { status: 'up-to-date', message: 'Astrid is up to date.' };
@@ -138,7 +146,11 @@ export function createLocalUpdater({ cwd, backend, editor, session, backendUpdat
       const updated = await backendUpdate({ backend, action: { action: 'update', manifest: target.manifest, app }, hook });
       // Cleanup is after C2 has durably recorded completion/rollback.
       if (retained) { await session?.end(); await release({ cwd, state: app }); retained = undefined; }
-      if (updated?.exitCode) return notUpdated(updated);
+      if (settledNotUpdated(updated)) return notUpdated(updated);
+      // Already current: nothing moved, so it is not reported as updated; the Agent's line says so.
+      if (updated?.outcome?.kind === 'already-current') {
+        return { status: 'up-to-date', exitCode: 0, message: updated.lines?.length ? updated.lines.join('\n') : 'Astrid is up to date.' };
+      }
       const restart = target.launcherChanged ? ' Restart Astrid when convenient.' : '';
       return { status: 'updated', app: target.targetSha, release: target.release,
         ...(updated?.lines?.length ? { lines: updated.lines, message: `${updated.lines.join('\n')}${restart}` }
@@ -156,4 +168,19 @@ export function createLocalUpdater({ cwd, backend, editor, session, backendUpdat
       throw error;
     }
   };
+}
+
+/**
+ * The lines a failed update prints, in both windows. A settled failure carries
+ * the Agent's own lines, headline first and Next and Details last, so they are
+ * the whole message; without them the failure's own line and where it stopped.
+ */
+export function updateFailureLines(error) {
+  const lines = Array.isArray(error?.lines) ? error.lines.filter((line) => typeof line === 'string' && line) : [];
+  const headline = `Astrid did NOT update: ${error?.message || 'the update stopped.'}`;
+  const out = lines.length && /^Astrid (did|was) NOT /.test(lines[0]) ? lines : [headline, ...lines];
+  if (!out.some((line) => line.startsWith('Details:'))) {
+    out.push(`Details: it stopped at ${error?.step ?? 'connect-launcher'}. Settings > Updates > Download diagnostics has the full story.`);
+  }
+  return out;
 }

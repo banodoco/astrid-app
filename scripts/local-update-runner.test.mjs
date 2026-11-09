@@ -284,3 +284,38 @@ test('an updated run shows the Agent line; a reply with no receipt keeps the exi
   assert.equal(older.message, 'Astrid is updated and running.');
   assert.equal(older.exitCode, undefined);
 });
+
+test('an exit-0 reply whose receipt did not update is not reported as updated', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const run = async (reply) => {
+    const prepared = await createApp(t, root.cwd);
+    return createLocalUpdater({
+      cwd: root.cwd, backend: { root: root.cwd }, editor: { mode: 'local' }, session: { end: async () => {} },
+      backendUpdate: async ({ action }) => (action.action === 'recover' ? { status: 'clean' } : reply),
+      selectTarget: async () => ({ manifest, oldSha: OLD_SHA, targetSha: TARGET_SHA, release: 2, upToDate: false }),
+      preflight: async () => {}, prepare: async () => prepared, release: async () => {},
+    })();
+  };
+  const lines = ['Astrid did NOT update. It is still Release 1; Release 2 is available.', 'Why: the installer finished without installing the new release.', NEXT, DETAILS];
+  const notUpdated = await run({ status: 'complete', exitCode: 0, lines, outcome: { kind: 'not-updated', reason: 'installer-bug', exit_code: 0 } });
+  assert.equal(notUpdated.status, 'not-updated');
+  assert.equal(notUpdated.exitCode, 3);
+  assert.equal(notUpdated.message, lines.join('\n'));
+  // Already current: nothing was updated, so it is not "updated" either, and the Agent's line is the message.
+  const current = await run({ status: 'complete', exitCode: 0, lines: ['Astrid is already up to date (Release 2). Nothing was changed.'], outcome: { kind: 'already-current', exit_code: 0 } });
+  assert.equal(current.status, 'up-to-date');
+  assert.equal(current.message, 'Astrid is already up to date (Release 2). Nothing was changed.');
+});
+
+test('a recovery reply whose receipt did not update is not updated even with exit 0', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const lines = ['Astrid did NOT update. It is still Release 13; Release 14 is available.', NEXT, DETAILS];
+  const result = await createLocalUpdater({
+    cwd: root.cwd, backend: { root: root.cwd }, editor: {}, session: {},
+    backendUpdate: async () => ({ status: 'recovered', exitCode: 0, lines, outcome: { kind: 'not-updated', reason: 'recovered-previous-version', exit_code: 0 } }),
+    selectTarget: async () => { throw new Error('must not select after recovery'); },
+  })();
+  assert.equal(result.status, 'not-updated');
+  assert.equal(result.exitCode, 3);
+  assert.equal(result.message, lines.join('\n'));
+});

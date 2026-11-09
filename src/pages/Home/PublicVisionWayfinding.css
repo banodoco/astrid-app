@@ -1,0 +1,155 @@
+/* Real pixel marks replace the provisional boxed-circle placeholders. */
+.astrid-vision-principle-sigil[data-sigil] {
+  --sigil-color: color-mix(in oklab, var(--sigil-ink), var(--sigil-bg) calc(var(--astrid-dusk-ink, 0) * 72%));
+  width: 48px;
+  height: 48px;
+  color: var(--sigil-color);
+  border: 0 solid currentColor;
+  border-radius: 0;
+  background: none;
+  pointer-events: none;
+}
+.astrid-vision-principle-sigil[data-sigil]::before { content: none; display: none; }
+.astrid-vision-principle-sigil[data-sigil] svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  image-rendering: pixelated;
+}
+.vision-sigil-quiet { opacity: .35; }
+.vision-sigil-core-light { opacity: .6; }
+.vision-sigil-thread-clear, .vision-sigil-thread-signal { opacity: 0; }
+.vision-sigil-thread-signal { fill: var(--sigil-bg); }
+
+/* Motion is local to a hovered or keyboard-focused card; no decorative idle loop. */
+@media (hover: hover) and (pointer: fine) and (prefers-reduced-motion: no-preference) {
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-satellite { animation: vision-sigil-local-orbit 2.4s steps(1, end) infinite; }
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-core-light { animation: vision-sigil-breathe 1.6s steps(4, end) infinite; }
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-orbit { animation: vision-sigil-open-orbit 2.4s steps(1, end) infinite; }
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-ring-halo { animation: vision-sigil-breathe 1.6s steps(4, end) infinite; }
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-spark { animation: vision-sigil-lift 1.4s steps(2, end) infinite; }
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-thread-tangle { animation: vision-sigil-untangle 2s steps(3, end) infinite; }
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-thread-clear { animation: vision-sigil-clear 2s steps(3, end) infinite; }
+  .astrid-vision[data-astrid-visual-active="true"] .astrid-vision-standards-list > li:hover .vision-sigil-thread-signal { animation: vision-sigil-signal 2s steps(4, end) infinite; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .astrid-vision-standards-list > li:has(> .astrid-vision-card-open:focus-visible) .vision-sigil-core-light,
+  .astrid-vision-standards-list > li:has(> .astrid-vision-card-open:focus-visible) .vision-sigil-ring-halo { animation: vision-sigil-breathe 1.6s steps(4, end) infinite; }
+  .astrid-vision-standards-list > li:has(> .astrid-vision-card-open:focus-visible) .vision-sigil-spark { animation: vision-sigil-lift 1.4s steps(2, end) infinite; }
+  .astrid-vision-standards-list > li:has(> .astrid-vision-card-open:focus-visible) .vision-sigil-thread-clear { animation: vision-sigil-clear 2s steps(3, end) infinite; }
+}
+@keyframes vision-sigil-local-orbit {
+  0%, 100% { transform: translate(0, 0); }
+  25% { transform: translate(12px, 12px); }
+  50% { transform: translate(0, 24px); }
+  75% { transform: translate(-12px, 12px); }
+}
+@keyframes vision-sigil-open-orbit {
+  0%, 100% { transform: translate(0, 0); }
+  12.5% { transform: translate(2px, 8px); }
+  25% { transform: translate(-2px, 17px); }
+  37.5% { transform: translate(-12px, 20px); }
+  50% { transform: translate(-20px, 14px); }
+  62.5% { transform: translate(-21px, 4px); }
+  75% { transform: translate(-14px, -3px); }
+  87.5% { transform: translate(-5px, -4px); }
+}
+@keyframes vision-sigil-breathe { 0%, 100% { opacity: .25; } 50% { opacity: .8; } }
+@keyframes vision-sigil-lift { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-2px); } }
+@keyframes vision-sigil-untangle { 0%, 100% { opacity: 1; } 40%, 75% { opacity: .2; } }
+@keyframes vision-sigil-clear { 0%, 100% { opacity: 0; } 40%, 75% { opacity: 1; } }
+@keyframes vision-sigil-signal { 0%, 25%, 100% { opacity: 0; transform: translateX(0); } 40% { opacity: 1; } 75% { opacity: 1; transform: translateX(8px); } }
+.astrid-vision [data-sigil-motion="off"] *,
+.astrid-vision[data-astrid-visual-active="false"] [data-sigil] * { animation: none !important; }
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision [data-sigil] * { animation: none !important; }
+}
+
+/* A slim rail fits the existing page margin instead of narrowing the cards. */
+.astrid-vision > nav.astrid-vision-section-nav {
+  position: fixed;
+  z-index: 20;
+  top: 50%;
+  left: 8px;
+  right: auto;
+  bottom: auto;
+  width: 56px;
+  margin: 0;
+  transform: translateY(-50%);
+  color: var(--astrid-muted);
+}
+.astrid-vision-section-nav ol {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.astrid-vision-section-nav li { min-width: 0; }
+.astrid-vision-section-nav a {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 46px;
+  padding: 7px 2px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: inherit;
+  background: transparent;
+  font: 500 10px/1.2 Inter, ui-sans-serif, system-ui, sans-serif;
+  text-decoration: none;
+  white-space: nowrap;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+.astrid-vision-nav-mark {
+  display: block;
+  flex: none;
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  opacity: .35;
+}
+.astrid-vision-section-nav a:is(:hover, [data-section-hovered="true"]) {
+  color: var(--astrid-ink);
+  background: color-mix(in oklab, var(--astrid-accent) 7%, var(--astrid-paper));
+  border-color: var(--astrid-line);
+}
+.astrid-vision-section-nav a[aria-current="location"] {
+  color: var(--astrid-accent);
+  background: color-mix(in oklab, var(--astrid-accent) 10%, var(--astrid-paper));
+  border-color: color-mix(in oklab, var(--astrid-accent) 30%, var(--astrid-line));
+  font-weight: 650;
+}
+.astrid-vision-section-nav a[aria-current="location"] .astrid-vision-nav-mark { opacity: 1; }
+.astrid-vision .astrid-vision-section-nav a:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 2px; }
+.astrid-vision section[data-vision-section] { scroll-margin-top: 28px; }
+@media (min-width: 1680px) {
+  .astrid-vision > nav.astrid-vision-section-nav { left: max(16px, calc(50vw - 840px)); width: 128px; }
+  .astrid-vision-section-nav a { flex-direction: row; justify-content: flex-start; gap: 12px; padding: 12px; font-size: 12px; }
+}
+@media (max-width: 1199px) {
+  .astrid-vision { padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
+  .astrid-vision > nav.astrid-vision-section-nav {
+    top: auto;
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    left: 50%;
+    width: min(480px, calc(100% - 24px));
+    padding: 5px;
+    transform: translateX(-50%);
+    border: 1px solid var(--astrid-line);
+    border-radius: 13px;
+    background: color-mix(in oklab, var(--astrid-paper) 96%, transparent);
+    backdrop-filter: blur(8px);
+    box-shadow: 0 4px 18px rgb(0 0 0 / .07);
+  }
+  .astrid-vision-section-nav ol { flex-direction: row; gap: 2px; }
+  .astrid-vision-section-nav li { flex: 1 1 0; }
+  .astrid-vision-section-nav a { font-size: 10px; min-height: 44px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-section-nav a { transition: none; }
+}

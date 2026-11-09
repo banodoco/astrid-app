@@ -130,7 +130,8 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
       : COMMAND_ACTIONS;
     return {
       card: card ? 'update' : 'notice',
-      title: card ? 'Update Astrid' : 'Update unavailable',
+      // The start was sent but not confirmed: the title must not say the update is unavailable, as its body says it was started.
+      title: card ? 'Update Astrid' : input.updateReason === 'acknowledgement-unknown' ? 'Update not confirmed yet' : 'Update unavailable',
       body: INSTALLER_UPDATE_REASON_MESSAGES[input.updateReason],
       ...actions,
       updateReason: input.updateReason,

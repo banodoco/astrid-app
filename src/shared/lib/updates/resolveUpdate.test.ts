@@ -23,6 +23,15 @@ describe('resolveUpdate', () => {
     });
   });
 
+  it('titles an acknowledgement-unknown notice so the title agrees with its body', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'acknowledgement-unknown', updateNowAvailable: false })).toMatchObject({
+      card: 'notice',
+      title: 'Update not confirmed yet',
+      body: INSTALLER_UPDATE_REASON_MESSAGES['acknowledgement-unknown'],
+      updateReason: 'acknowledgement-unknown',
+    });
+  });
+
   it('shows a needs-repair recovery as an update card with the command and no in-app Update', () => {
     expect(resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', updateNowAvailable: false })).toMatchObject({
       card: 'update', body: 'Astrid needs repair before it can update.', primary: { label: 'Copy instructions for your agent' }, updateReason: 'needs-repair',

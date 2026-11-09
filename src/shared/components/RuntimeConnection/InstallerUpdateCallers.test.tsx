@@ -40,7 +40,7 @@ import { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
 import { RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { connectionFor } from './connectionFixture.ts';
-import { installCommand, LOCAL_UPDATE_COMMAND, PINOKIO_UPDATE_INSTRUCTION } from './copy.ts';
+import { ASTRID_COMMANDS, installCommand, LOCAL_UPDATE_COMMAND, PINOKIO_UPDATE_INSTRUCTION } from './copy.ts';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 
 const connection = () => ({ isConnected: true, managedByPinokio: false } as RuntimeConnectionValue);
@@ -114,9 +114,15 @@ describe('installer update callers', () => {
     ['hosted astrid.haus', 'https://astrid.test', null, { command: installCommand('update') }],
     ['installer install', 'http://127.0.0.1:17340', null, { command: installCommand('update') }],
     ['Pinokio hosted', 'https://astrid.test', 'pinokio', { pinokio: true }],
+    ['Windows, hosted astrid.haus', 'https://astrid.test', 'windows', { command: ASTRID_COMMANDS.windowsUpdate }],
   ] as const)('a recovery refused as busy, on %s: no in-app Update and the right update instruction', async (_name, origin, manager, expected) => {
+    if (manager === 'windows') {
+      vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+    }
     harness.origin = origin;
-    harness.manager = manager;
+    // A Windows row is hosted and not Pinokio: the manager stays unset, but the platform is Windows.
+    harness.manager = manager === 'windows' ? null : manager;
     harness.connection = { isConnected: true, managedByPinokio: manager === 'pinokio', state: { status: 'connected' } };
     harness.statusState = 'recovery-needed';
     harness.statusReason = 'busy';

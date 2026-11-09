@@ -22,12 +22,24 @@ export function VisionDetailDialog({
     if (dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal();
   }, []);
 
-  const closeIfOutside = (clientX: number, clientY: number) => {
+  const backdropPointerRef = useRef<number | null>(null);
+  const closeScheduledRef = useRef(false);
+  const isOutsidePanel = (clientX: number, clientY: number) => {
     const dialog = dialogRef.current;
-    if (!dialog || !dialog.open) return;
+    if (!dialog?.open) return false;
     const bounds = dialog.getBoundingClientRect();
-    if (clientX < bounds.left || clientX > bounds.right ||
-        clientY < bounds.top || clientY > bounds.bottom) dialog.close();
+    return clientX < bounds.left || clientX > bounds.right ||
+      clientY < bounds.top || clientY > bounds.bottom;
+  };
+  const closeAfterGesture = () => {
+    if (closeScheduledRef.current) return;
+    closeScheduledRef.current = true;
+    // Do not remove the modal during pointerdown: mobile Safari can retarget
+    // the subsequent synthetic click to the underlying card.
+    window.requestAnimationFrame(() => {
+      closeScheduledRef.current = false;
+      dialogRef.current?.close();
+    });
   };
 
   if (!entry) return null;
@@ -37,11 +49,27 @@ export function VisionDetailDialog({
       className="astrid-vision-details"
       aria-labelledby={titleId}
       onClose={onClose}
-      onPointerDown={event => closeIfOutside(event.clientX, event.clientY)}
-      onClick={event => {
-        if (event.target === event.currentTarget) {
-          closeIfOutside(event.clientX, event.clientY);
-        }
+      onPointerDownCapture={event => {
+        if (!isOutsidePanel(event.clientX, event.clientY)) return;
+        backdropPointerRef.current = event.pointerId;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onPointerUpCapture={event => {
+        if (backdropPointerRef.current !== event.pointerId) return;
+        backdropPointerRef.current = null;
+        event.preventDefault();
+        event.stopPropagation();
+        closeAfterGesture();
+      }}
+      onPointerCancelCapture={event => {
+        if (backdropPointerRef.current === event.pointerId) backdropPointerRef.current = null;
+      }}
+      onClickCapture={event => {
+        if (!isOutsidePanel(event.clientX, event.clientY)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        closeAfterGesture();
       }}
     >
       <div className="astrid-vision-details-shell">

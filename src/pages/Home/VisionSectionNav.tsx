@@ -6,7 +6,7 @@ const SECTIONS = [
   { id: 'astrid-vision-standards', label: 'Principles' },
   { id: 'astrid-vision-parts', label: 'Gaps' },
   { id: 'astrid-vision-projects', label: 'Projects' },
-  { id: 'astrid-vision-contribute', label: 'Help us build' },
+  { id: 'astrid-vision-contribute', label: 'Help us' },
 ] as const;
 
 /** On wide screens this is a small editorial side rail; on phones it becomes

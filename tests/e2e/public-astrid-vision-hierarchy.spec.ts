@@ -47,6 +47,10 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
       expect(bounds).not.toBeNull();
       expect(bounds!.x).toBeGreaterThanOrEqual(0);
       expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
+      // A visible backdrop with an off-screen dialog was the iOS regression.
+      expect(bounds!.y).toBeGreaterThanOrEqual(0);
+      expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(901);
+      await expect(modal).toHaveCSS('position', 'fixed');
       await page.keyboard.press('Escape');
       await expect(modal).toHaveCount(0);
     }
@@ -69,5 +73,45 @@ test('a dialog can be dismissed via its close button and returns focus to the ca
   await expect(modal).toBeVisible();
   await modal.getByRole('button', { name: 'Close details' }).click();
   await expect(modal).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+});
+
+
+test('mobile principle action sits beneath its description, modal stays on screen and scroll survives dismissal', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+
+  const principle = page.locator('.astrid-vision-standards-list > li').last();
+  const trigger = principle.getByRole('button', { name: /Explore .*: gaps and projects/ });
+  await expect(trigger).toContainText('Explore gaps and projects');
+  const copyBounds = await principle.locator(':scope > div').boundingBox();
+  const triggerBounds = await trigger.boundingBox();
+  expect(copyBounds).not.toBeNull();
+  expect(triggerBounds).not.toBeNull();
+  expect(triggerBounds!.y).toBeGreaterThanOrEqual(copyBounds!.y + copyBounds!.height);
+
+  await trigger.scrollIntoViewIfNeeded();
+  const before = await page.evaluate(() => window.scrollY);
+  expect(before).toBeGreaterThan(400);
+  await trigger.click();
+  const modal = page.getByRole('dialog');
+  await expect(modal).toBeVisible();
+  await expect(modal).toHaveCSS('position', 'fixed');
+  const bounds = await modal.boundingBox();
+  expect(bounds).not.toBeNull();
+  expect(bounds!.y).toBeGreaterThanOrEqual(0);
+  expect(bounds!.y + bounds!.height).toBeLessThanOrEqual(781);
+
+  await modal.getByRole('button', { name: 'Close details' }).click();
+  await expect(modal).toHaveCount(0);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(before - 4);
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(before + 4);
   await expect(trigger).toBeFocused();
 });

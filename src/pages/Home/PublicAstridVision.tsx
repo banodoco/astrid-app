@@ -169,6 +169,21 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState<VisionSubject | null>(null);
+  const detailTrigger = useRef<HTMLButtonElement | null>(null);
+  const detailScrollY = useRef(0);
+  const openSubject = (subject: VisionSubject, trigger: HTMLButtonElement) => {
+    detailTrigger.current = trigger;
+    detailScrollY.current = window.scrollY;
+    setSelectedSubject(subject);
+  };
+  const closeSubject = () => {
+    const trigger = detailTrigger.current;
+    const previousScrollY = detailScrollY.current;
+    setSelectedSubject(null);
+    // WebKit may scroll the document while restoring focus after a modal closes.
+    trigger?.focus({ preventScroll: true });
+    window.requestAnimationFrame(() => window.scrollTo(0, previousScrollY));
+  };
   const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const agentCopyTimer = useRef<number>();
   const contributionIntro = content?.vision.contributeMarkdown
@@ -350,7 +365,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <NorthStarMink art={pillar.art} />
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + pillar.title + ': gaps and projects'}
-                onClick={() => setSelectedSubject({ kind: 'pillar', id: pillar.id })} />
+                onClick={event => openSubject({ kind: 'pillar', id: pillar.id }, event.currentTarget)} />
             </li>
           ))}
         </ol>
@@ -369,9 +384,12 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                 <h3>{principle.title}</h3>
                 <MarkdownText value={principle.bodyMarkdown} />
               </div>
-              <button type="button" className="astrid-vision-card-open"
+              <button type="button" className="astrid-vision-principle-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}
-                onClick={() => setSelectedSubject({ kind: 'principle', id: principle.id })} />
+                onClick={event => openSubject({ kind: 'principle', id: principle.id }, event.currentTarget)}>
+                <span>Explore gaps and projects</span>
+                <span aria-hidden="true">↗</span>
+              </button>
             </li>
           ))}
         </ol>
@@ -443,7 +461,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </>)}
       {content && selectedSubject && (
         <VisionDetailDialog key={selectedSubject.kind + ':' + selectedSubject.id}
-          content={content} subject={selectedSubject} onClose={() => setSelectedSubject(null)} />
+          content={content} subject={selectedSubject} onClose={closeSubject} />
       )}
       {content?.vision.contributeMarkdown && (
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"

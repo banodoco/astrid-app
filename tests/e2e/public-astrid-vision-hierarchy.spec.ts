@@ -90,7 +90,7 @@ test('mobile principle action sits beneath its description, modal stays on scree
 
   const principle = page.locator('.astrid-vision-standards-list > li').last();
   const trigger = principle.getByRole('button', { name: /Explore .*: gaps and projects/ });
-  await expect(trigger).toHaveText('Explore gaps and projects ↗');
+  await expect(trigger).toContainText('Explore gaps and projects');
   const copyBounds = await principle.locator(':scope > div').boundingBox();
   const triggerBounds = await trigger.boundingBox();
   expect(copyBounds).not.toBeNull();

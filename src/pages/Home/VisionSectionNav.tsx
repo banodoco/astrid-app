@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 const SECTIONS = [
   { id: 'astrid-vision-manifesto', label: 'Vision' },
@@ -15,6 +15,7 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
   includeHelp: boolean;
 }) {
   const [activeId, setActiveId] = useState<string>(SECTIONS[0].id);
+  const navRef = useRef<HTMLElement>(null);
   const sections = useMemo(() => SECTIONS.filter(section => includeHelp || section.id !== 'astrid-vision-contribute'), [includeHelp]);
 
   useEffect(() => {
@@ -44,8 +45,23 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
     };
   }, [sections]);
 
+  // Keep the highlighted destination in view within the narrow header,
+  // without invoking scrollIntoView (which would also move the document).
+  useEffect(() => {
+    const nav = navRef.current;
+    const active = nav?.querySelector<HTMLAnchorElement>('a[aria-current="location"]');
+    if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
+    const navBounds = nav.getBoundingClientRect();
+    const linkBounds = active.getBoundingClientRect();
+    if (linkBounds.left < navBounds.left + 6) {
+      nav.scrollLeft += linkBounds.left - navBounds.left - 6;
+    } else if (linkBounds.right > navBounds.right - 6) {
+      nav.scrollLeft += linkBounds.right - navBounds.right + 6;
+    }
+  }, [activeId]);
+
   return (
-    <nav className="astrid-vision-section-nav" aria-label="Vision page sections">
+    <nav ref={navRef} className="astrid-vision-section-nav" aria-label="Vision page sections">
       {sections.map(({ id, label }, index) => (
         <a key={id} href={'#' + id}
           aria-current={activeId === id ? 'location' : undefined}

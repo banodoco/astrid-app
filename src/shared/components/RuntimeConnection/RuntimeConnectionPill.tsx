@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
@@ -60,6 +60,16 @@ export function RuntimeConnectionPill({
     setRecoveryCardShowing(cardShowing);
     return () => setRecoveryCardShowing(false);
   }, [cardShowing]);
+
+  // A restarted Astrid (an update finishing is the usual cause) needs the page reloaded onto it. The page does that
+  // itself, once per restart, after saving drafts; if a draft cannot be saved the card stays with its Reload button.
+  const autoReloaded = useRef(false);
+  const { reload } = guarded;
+  useEffect(() => {
+    if (restart !== 'restarted' || autoReloaded.current) return;
+    autoReloaded.current = true;
+    void reload();
+  }, [restart, reload]);
 
   if (!connection.isConnected) return null;
 

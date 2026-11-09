@@ -5,6 +5,7 @@ import { isRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { RuntimeConnectionPill } from './RuntimeConnectionPill.tsx';
 import { installCommand, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
 import { CONNECTED_REALM, connectionFor } from './connectionFixture.ts';
+import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 
 afterEach(() => {
   cleanup();
@@ -79,8 +80,41 @@ describe('RuntimeConnectionPill', () => {
     expect(screen.getByText(COPY.restarted.sentence)).toHaveClass('text-sm', 'text-muted-foreground');
     expect(isRecoveryCardShowing()).toBe(true);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    // The page reloads itself onto the restarted Astrid once; the card's Reload stays for when that cannot happen.
     await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledTimes(2));
+  });
+
+  it('restarted (an update finished): reloads itself without a click, after saving drafts, once', async () => {
+    const fetchImpl = healthRoute(healthy('instance-1'), healthy('instance-2'));
+    const onReload = vi.fn();
+    const flush = vi.fn(async () => undefined);
+    const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush, isDirty: () => false });
+    try {
+      render(<RuntimeConnectionPill connection={connected()} onReload={onReload} fetchImpl={fetchImpl} restartCheckIntervalMs={5} />);
+      await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+      expect(flush).toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(onReload).toHaveBeenCalledOnce();
+    } finally {
+      unregister();
+    }
+  });
+
+  it('restarted with a draft that cannot be saved: does not reload, and keeps the card with Reload', async () => {
+    const fetchImpl = healthRoute(healthy('instance-1'), healthy('instance-2'));
+    const onReload = vi.fn();
+    const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush: async () => { throw new Error('offline'); }, isDirty: () => true });
+    try {
+      render(<RuntimeConnectionPill connection={connected()} onReload={onReload} fetchImpl={fetchImpl} restartCheckIntervalMs={5} />);
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid restarted' })).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText(/draft: offline/)).toBeInTheDocument());
+      expect(onReload).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    } finally {
+      unregister();
+    }
   });
 
   it('another identity behind the door after connecting is the same restart card, not a second message', async () => {

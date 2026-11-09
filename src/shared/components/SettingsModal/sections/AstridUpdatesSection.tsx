@@ -15,12 +15,16 @@ import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { installerOutcomeMessage, installerUpdateFailed, installerUpdateLine } from '@/shared/lib/updates/updateOperation.ts';
 import { lastRunFromReport, lastUpdateDidNothing } from '@/shared/lib/updates/lastRun.ts';
+import { updatedLine } from '@/shared/lib/updates/liveUpdate.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 import { astridOutOfDate } from './ConnectionSection.tsx';
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 import { SettingsDetail, SettingsDisclosureRow, SettingsRow, SettingsSection, SettingsValue } from '../SettingsLayout.tsx';
 
 type CheckState = 'checking' | 'ready' | 'error';
+
+/** The diagnostics report walks the program folder, so it is re-read gently while Settings is open. */
+const DIAGNOSTICS_REFRESH_MS = 30_000;
 
 function shortBuild(build: string): string {
   return /^[0-9a-f]{8,}$/i.test(build) ? build.slice(0, 7) : build;
@@ -120,11 +124,19 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
 
   // Status and diagnostics read the same producer-owned result. Refresh the
   // report when that result changes so the update log never shows the prior run.
-  const operationKey = `${operation.status?.operation_id ?? ''}:${operation.status?.state ?? ''}:${operation.status?.result ?? ''}`;
+  // A restarted Astrid (a new instance or release) has a new receipt too, so the report is read again.
+  const operationKey = `${operation.status?.operation_id ?? ''}:${operation.status?.state ?? ''}:${operation.status?.result ?? ''}:${operation.health?.runtime_instance_id ?? ''}:${operation.releaseStatus?.release ?? ''}`;
   useEffect(() => {
-    if (isOpen && operation.status) void loadDiagnostics();
+    if (isOpen && (operation.status || operation.health)) void loadDiagnostics();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, operationKey]);
+  // An update run from a terminal that installed nothing restarts nothing; only its receipt changes. While the section
+  // is open the report is read again now and then, so "didn't install anything" appears without a click.
+  useEffect(() => {
+    if (!isOpen) return undefined;
+    const timer = window.setInterval(() => { void loadDiagnostics(); }, DIAGNOSTICS_REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [isOpen]);
   const currentStatus = operation.releaseStatus ?? status;
   // The status being shown carries the Runtime identity it was read from, so the install type does not wait for the operation's health.
   const statusInstallType = currentStatus ? pageInstallType(currentStatus.managedBy, connection.managedByPinokio) : installType;
@@ -148,7 +160,8 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const repairCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   // An old Astrid with no newer release to name (a source checkout has none) is titled by its card instead.
   const releaseLine = currentStatus && (!compatibility || statusInstallType !== 'source' && currentStatus.servedRelease > currentStatus.release);
-  const statusLine = operationMessage
+  const statusLine = (operation.updated && !operation.pending ? updatedLine(operation.updated) : null)
+    || operationMessage
     || (state === 'checking' ? 'Checking for updates…'
       : state === 'error' ? error
         : currentResolution?.card === 'newer' ? currentResolution.body

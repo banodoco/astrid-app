@@ -4,6 +4,7 @@ import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
 import { checkHostedUpdate } from './updateStatus.ts';
 import { installedReleaseOf } from './installedRelease.ts';
+import { activeTransition, noteRelease, type UpdatedTransition } from './liveUpdate.ts';
 
 export interface UpdateOperationSnapshot {
   readonly health: InstallerUpdateHealth | null;
@@ -15,6 +16,8 @@ export interface UpdateOperationSnapshot {
   readonly restartRequired: boolean;
   /** The Runtime's refusal code from the last definite POST refusal, kept for diagnostics. */
   readonly refusalCode: string | null;
+  /** Astrid was just updated under this page (a new instance on a higher release); shown briefly, then cleared. */
+  readonly updated: UpdatedTransition | null;
 }
 
 /** Runtime refusal codes with a line of their own. Any other code reads as self-update-unavailable. */
@@ -107,7 +110,8 @@ const UPDATE_START_UNAVAILABLE = 'Astrid could not start the update. Check its s
 
 /** Page-owned operation, independent of any mounted notice or Settings panel. */
 export class UpdateOperation {
-  private snapshot: UpdateOperationSnapshot = { health: null, status: null, releaseStatus: null, pending: false, error: null, fresh: false, restartRequired: false, refusalCode: null };
+  private snapshot: UpdateOperationSnapshot = { health: null, status: null, releaseStatus: null, pending: false, error: null, fresh: false, restartRequired: false, refusalCode: null, updated: null };
+  private updatedTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
   private reading: Promise<void> | null = null;
   private posting = false;
@@ -116,7 +120,16 @@ export class UpdateOperation {
   private releaseIdentity: string | null = null;
   private acknowledgementBaseline: string | undefined;
   private refusal: string | null = null;
-  constructor(private readonly client = new AstridRuntimeClient()) {}
+  constructor(private readonly client = new AstridRuntimeClient()) {
+    // A transition recorded just before this page reloaded itself onto the updated Astrid is still shown.
+    const carried = typeof window === 'undefined' ? null : activeTransition();
+    if (carried) this.showUpdated(carried);
+  }
+  private showUpdated(transition: UpdatedTransition) {
+    if (this.updatedTimer) clearTimeout(this.updatedTimer);
+    this.snapshot = { ...this.snapshot, updated: transition };
+    this.updatedTimer = setTimeout(() => { this.updatedTimer = null; this.publish({ updated: null }); }, Math.max(0, transition.until - Date.now()));
+  }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(patch: Partial<UpdateOperationSnapshot>) {
@@ -145,6 +158,9 @@ export class UpdateOperation {
         try {
           const releaseStatus = await checkHostedUpdate(health);
           this.releaseIdentity = identity;
+          // A new instance on a higher release is an update that finished, however it was run.
+          const transition = noteRelease(health.runtime_instance_id, releaseStatus.release);
+          if (transition) this.showUpdated(transition);
           this.publish({ releaseStatus });
         } catch {
           // Release checks cannot manufacture a success or an executable action.

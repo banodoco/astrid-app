@@ -330,7 +330,10 @@ export class LocalPageUpdate {
       }
       const result = body.result as { status?: unknown; message?: unknown } | undefined;
       if (response.ok && result && (result.status === 'updated' || result.status === 'up-to-date' || result.status === 'recovered')) {
-        return this.set({ phase: 'done', status: result.status, message: result.status === 'updated' ? 'Astrid updated.' : result.status === 'up-to-date' ? 'Astrid is up to date.' : 'The update did not finish. Astrid was restored to its previous version.' });
+        // A success with warnings carries the receipt's own lines (its headline, warning Next lines and Details); a plain success has one headline line.
+        const receiptLines = result.status === 'updated' ? agentLines(body.lines) ?? agentLines((result as { lines?: unknown }).lines) : undefined;
+        const updated = receiptLines && receiptLines.length > 1 ? receiptLines.join('\n') : 'Astrid updated.';
+        return this.set({ phase: 'done', status: result.status, message: result.status === 'updated' ? updated : result.status === 'up-to-date' ? 'Astrid is up to date.' : 'The update did not finish. Astrid was restored to its previous version.' });
       }
       // A settled run that did not update (or failed) carries the Agent's own
       // plain lines, its reason and the Next and Details lines included.

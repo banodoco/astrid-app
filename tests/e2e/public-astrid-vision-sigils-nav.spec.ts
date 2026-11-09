@@ -69,7 +69,7 @@ test('each principle animates a different part of its sigil on hover and respect
   }
 });
 
-test('technical wrangling dissolves its knot into a clean arrow in five seconds', async ({ page, request }) => {
+test('technical wrangling takes three seconds to resolve and one second to return', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1720, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -83,11 +83,14 @@ test('technical wrangling dissolves its knot into a clean arrow in five seconds'
   await expect(fragments).toHaveCSS('opacity', '1');
   await expect(arrow).toHaveCSS('opacity', '0');
   for (const part of [knot, fragments, arrow]) {
-    await expect(part).toHaveCSS('transition-duration', '5s');
+    await expect(part).toHaveCSS('transition-duration', '1s');
     await expect(part).toHaveCSS('animation-name', 'none');
   }
   await card.hover();
-  await page.waitForTimeout(500);
+  for (const part of [knot, fragments, arrow]) {
+    await expect(part).toHaveCSS('transition-duration', '3s');
+  }
+  await page.waitForTimeout(450);
   const halfway = await card.evaluate(el => {
     const opacity = (selector: string) => Number(getComputedStyle(el.querySelector(selector)!).opacity);
     return {
@@ -100,15 +103,20 @@ test('technical wrangling dissolves its knot into a clean arrow in five seconds'
     expect(value).toBeGreaterThan(0);
     expect(value).toBeLessThan(1);
   }
-  await expect(knot).toHaveCSS('opacity', '0', { timeout: 7500 });
-  await expect(fragments).toHaveCSS('opacity', '0', { timeout: 7500 });
-  await expect(arrow).toHaveCSS('opacity', '1', { timeout: 7500 });
+  await expect(knot).toHaveCSS('opacity', '0', { timeout: 4500 });
+  await expect(fragments).toHaveCSS('opacity', '0', { timeout: 4500 });
+  await expect(arrow).toHaveCSS('opacity', '1', { timeout: 4500 });
 
   await page.mouse.move(0, 3);
-  await page.waitForTimeout(450);
+  for (const part of [knot, fragments, arrow]) {
+    await expect(part).toHaveCSS('transition-duration', '1s');
+  }
+  await page.waitForTimeout(330);
   const reversing = Number(await arrow.evaluate(el => getComputedStyle(el).opacity));
   expect(reversing).toBeGreaterThan(0);
   expect(reversing).toBeLessThan(1);
+  await expect(arrow).toHaveCSS('opacity', '0', { timeout: 1800 });
+  await expect(knot).toHaveCSS('opacity', '1', { timeout: 1800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(arrow).toHaveCSS('transition-duration', '0s');
   await expect(knot).toHaveCSS('transition-duration', '0s');
@@ -148,6 +156,47 @@ test('mobile hero gets breathing room and the editorial arrows and pillar number
     }
     await expect(page.locator('.astrid-vision-principles .astrid-vision-pillar-details svg[viewBox="0 0 18 18"]')).toHaveCount(4);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+  }
+});
+
+test('pillar art sits beside its copy and the disclosure sits below in compact desktop and phone cards', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [390, 800, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const cards = page.locator('.astrid-vision-principles > li');
+    await expect(cards).toHaveCount(4);
+    const layouts = await cards.evaluateAll(elements => elements.map(card => {
+      const bounds = (selector: string) => card.querySelector(selector)!.getBoundingClientRect();
+      return {
+        card: card.getBoundingClientRect().toJSON(),
+        heading: bounds('h3').toJSON(),
+        text: bounds('li > p, p').toJSON(),
+        art: bounds('.astrid-vision-principle-art').toJSON(),
+        detail: bounds('.astrid-vision-pillar-details').toJSON(),
+        number: bounds('.astrid-vision-pillar-number').toJSON(),
+        px: getComputedStyle(card.querySelector('.astrid-vision-principle-art')!).getPropertyValue('--px').trim(),
+      };
+    }));
+    for (const item of layouts) {
+      expect(item.art.left).toBeGreaterThanOrEqual(item.heading.right - 2);
+      expect(item.art.left).toBeGreaterThanOrEqual(item.text.right - 2);
+      expect(item.detail.top).toBeGreaterThanOrEqual(Math.max(item.text.bottom, item.art.bottom) - 2);
+      expect(item.detail.right).toBeLessThanOrEqual(item.card.right - 6);
+      expect(Math.abs(item.heading.left - item.text.left)).toBeLessThan(2);
+      expect(item.art.right).toBeLessThanOrEqual(item.card.right - 6);
+      // Former cards added a whole extra illustration row: these stay
+      // shallow even with the artwork and details affordance retained.
+      expect(item.card.height).toBeLessThan(width === 390 ? 345 : width === 800 ? 370 : 275);
+    }
+    const columns = await page.locator('.astrid-vision-principles').evaluate(el => getComputedStyle(el).gridTemplateColumns.split(' ').length);
+    expect(columns).toBe(width === 390 ? 1 : 2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+    // The whole card remains an accessible target after the layout change.
+    await cards.first().getByRole('button', { name: /Explore .*: gaps and projects/ }).click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
   }
 });
 
@@ -353,8 +402,8 @@ test('phone scroll activates each principle sigil through the middle of the view
     await expect(card).toHaveAttribute('data-sigil-active', 'true');
     await expect(card.locator(motions[index][0])).toHaveCSS('animation-name', motions[index][1]);
     if (index === 3) {
-      await expect(card.locator('.astrid-vision-sigil-knot')).toHaveCSS('transition-duration', '5s');
-      await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '5s');
+      await expect(card.locator('.astrid-vision-sigil-knot')).toHaveCSS('transition-duration', '3s');
+      await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '3s');
     }
     await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
     await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '0.82');

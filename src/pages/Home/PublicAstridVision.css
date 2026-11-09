@@ -712,13 +712,13 @@
   transform-box: view-box;
   transform-origin: 20px 20px;
 }
-/* Give the knot time to dissolve as a clean path replaces it. Keep the
-   transition reversible so leaving hover (or the phone's center band)
-   returns gradually rather than snapping back. */
+/* The knot dissolves slowly when activated, but returns promptly when
+   hover or the phone's center-screen trigger ends. The inactive value owns
+   the exit duration, active rules below own the 3s entrance. */
 .astrid-vision-sigil-knot,
 .astrid-vision-sigil-knot-fragments,
 .astrid-vision-sigil-clear-path {
-  transition: opacity 5s ease-in-out;
+  transition: opacity 1s ease-in-out;
 }
 .astrid-vision-sigil-clear-path { opacity: 0; }
 @keyframes astrid-vision-sigil-orbit { to { transform: rotate(16deg); } }
@@ -740,9 +740,11 @@
   }
   .astrid-vision-standards-list > li:is(:hover, :focus-within) :is(.astrid-vision-sigil-knot, .astrid-vision-sigil-knot-fragments) {
     opacity: 0;
+    transition-duration: 3s;
   }
   .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-clear-path {
     opacity: 1;
+    transition-duration: 3s;
   }
 }
 /* A phone has no hover. Give each principle the same center-of-screen
@@ -766,9 +768,11 @@
   }
   .astrid-vision-standards-list > li[data-sigil-active="true"] :is(.astrid-vision-sigil-knot, .astrid-vision-sigil-knot-fragments) {
     opacity: 0;
+    transition-duration: 3s;
   }
   .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-clear-path {
     opacity: 1;
+    transition-duration: 3s;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1842,4 +1846,72 @@
 .astrid-vision[data-dusk] .astrid-vision-principle-corner,
 .astrid-vision[data-dusk] .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
   background: transparent;
+}
+
+/* Compact pillars: let the illustration sit beside the editorial copy
+   instead of creating an entire illustration row beneath it. The existing
+   full-card button, mink layer animations and phone scroll triggers remain. */
+.astrid-vision .astrid-vision-principles > li {
+  grid-template-columns: minmax(0, 1fr) max-content;
+  grid-template-rows: auto auto auto auto;
+  align-content: start;
+  column-gap: clamp(9px, 1.5vw, 18px);
+  padding: clamp(17px, 1.8vw, 23px);
+}
+.astrid-vision .astrid-vision-principles .astrid-vision-pillar-number {
+  grid-column: 1;
+  grid-row: 1;
+  margin-bottom: 9px;
+}
+.astrid-vision .astrid-vision-principles h3 {
+  grid-column: 1;
+  grid-row: 2;
+  max-width: none;
+  margin-bottom: 8px;
+  font-size: clamp(22px, 2vw, 28px);
+}
+.astrid-vision .astrid-vision-principles li > p {
+  grid-column: 1;
+  grid-row: 3;
+  max-width: 42ch;
+  font-size: 15px;
+  line-height: 1.48;
+}
+.astrid-vision .astrid-vision-principles .astrid-vision-principle-art {
+  --px: 1.25px;
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  align-self: center;
+  justify-self: end;
+  margin: 0;
+}
+.astrid-vision .astrid-vision-principles .astrid-vision-pillar-details {
+  position: relative;
+  top: auto;
+  right: auto;
+  grid-column: 1 / -1;
+  grid-row: 4;
+  align-self: end;
+  justify-self: end;
+  margin-top: 9px;
+}
+@media (max-width: 640px) {
+  .astrid-vision .astrid-vision-principles > li {
+    grid-template-columns: minmax(0, 1fr) 76px;
+    column-gap: 9px;
+    padding: 16px;
+  }
+  .astrid-vision .astrid-vision-principles h3 {
+    font-size: clamp(21px, 5.8vw, 25px);
+  }
+  .astrid-vision .astrid-vision-principles li > p {
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art {
+    --px: .9px;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-details {
+    margin-top: 8px;
+  }
 }

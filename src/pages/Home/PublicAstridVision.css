@@ -7,9 +7,10 @@
   --astrid-line: #d5d0c5;
   --astrid-accent: #a94714;
   --astrid-vision-serif: Georgia, "Times New Roman", serif;
+  --astrid-vision-gutter: clamp(20px, 6vw, 72px);
   box-sizing: border-box;
   min-height: 100vh;
-  padding: 0 clamp(20px, 6vw, 72px) 64px;
+  padding: 0 var(--astrid-vision-gutter) 64px;
   background: var(--astrid-paper);
   color: var(--astrid-ink);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -1275,7 +1276,7 @@
   .astrid-vision-standards-list > li:hover::after { opacity: 1; }
   .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
     border-color: color-mix(in oklab, var(--sigil-ink) 80%, var(--astrid-ink));
-    background: color-mix(in oklab, var(--sigil-bg) 58%, transparent);
+    background: transparent;
   }
   .astrid-vision-principles > li:hover .astrid-vision-pillar-details {
     color: var(--astrid-ink);
@@ -1536,7 +1537,7 @@
   margin-top: 16px;
   border: 1px solid color-mix(in oklab, var(--sigil-ink) 45%, var(--astrid-line));
   border-radius: 9px;
-  background: color-mix(in oklab, var(--sigil-bg) 25%, transparent);
+  background: transparent;
   color: var(--sigil-ink);
   font-size: 17px;
   transition: border-color 170ms ease, background-color 170ms ease;
@@ -1562,23 +1563,32 @@
   position: sticky;
   top: 0;
   z-index: 12;
-  width: min(100%, 1120px);
+  /* Bleed the header to the viewport edges while leaving the editorial
+     content below within its existing reading column. */
+  width: calc(100% + 2 * var(--astrid-vision-gutter));
+  max-width: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: clamp(12px, 2vw, 26px);
-  min-height: 64px;
-  margin-inline: auto;
-  padding: 11px 0;
-  border-bottom: 1px solid color-mix(in oklab, var(--astrid-line) 75%, transparent);
-  background: color-mix(in oklab, var(--astrid-paper) 95%, transparent);
+  gap: clamp(14px, 2vw, 30px);
+  min-height: 86px;
+  margin-left: calc(-1 * var(--astrid-vision-gutter));
+  margin-right: calc(-1 * var(--astrid-vision-gutter));
+  padding: 15px clamp(24px, 4vw, 68px);
+  border-bottom: 1px solid var(--astrid-line);
+  background: color-mix(in oklab, var(--astrid-paper) 94%, transparent);
   -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
 }
 .astrid-vision-bar .astrid-vision-brand {
   flex: none;
-  gap: 10px;
+  gap: 12px;
+  font-size: 26px;
   transition: gap 300ms cubic-bezier(.22, .61, .36, 1);
+}
+.astrid-vision-bar .astrid-vision-brand img {
+  width: 34px;
+  height: 34px;
 }
 .astrid-vision-brand-name {
   display: inline-block;
@@ -1616,11 +1626,11 @@
   flex: 0 0 auto;
   align-items: center;
   gap: 6px;
-  min-height: 38px;
-  padding: 7px 10px;
-  border-radius: 6px;
+  min-height: 46px;
+  padding: 10px 14px;
+  border-radius: 7px;
   color: var(--astrid-muted);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.3;
   text-decoration: none;
   white-space: nowrap;
@@ -1628,7 +1638,7 @@
 }
 .astrid-vision-section-nav-index {
   color: var(--astrid-accent);
-  font: 10px/1.3 "Departure Mono", ui-monospace, monospace;
+  font: 11px/1.3 "Departure Mono", ui-monospace, monospace;
   opacity: .55;
 }
 .astrid-vision-section-nav a:hover {
@@ -1645,28 +1655,30 @@
   outline: 2px solid var(--astrid-accent);
   outline-offset: -2px;
 }
-.astrid-vision :is(#astrid-vision-manifesto, #astrid-vision-standards, #astrid-vision-parts,
-  #astrid-vision-projects, #astrid-vision-contribute) {
-  scroll-margin-top: 82px;
+.astrid-vision :is(#astrid-vision-manifesto, #astrid-vision-pillars, #astrid-vision-standards,
+  #astrid-vision-parts, #astrid-vision-projects, #astrid-vision-contribute) {
+  scroll-margin-top: 102px;
 }
 @media (max-width: 760px) {
   .astrid-vision > .astrid-vision-bar {
-    min-height: 56px;
+    min-height: 68px;
     gap: 10px;
-    padding: 8px 0;
+    padding: 10px 14px;
   }
+  .astrid-vision-bar .astrid-vision-brand { font-size: 23px; }
+  .astrid-vision-bar .astrid-vision-brand img { width: 30px; height: 30px; }
   .astrid-vision-section-nav {
     justify-content: flex-start;
     gap: 2px;
   }
   .astrid-vision-section-nav a {
-    font-size: 11px;
-    padding: 7px 8px;
+    font-size: 12px;
+    padding: 9px 11px;
   }
   .astrid-vision-section-nav-index { display: none; }
-  .astrid-vision :is(#astrid-vision-manifesto, #astrid-vision-standards, #astrid-vision-parts,
-    #astrid-vision-projects, #astrid-vision-contribute) {
-    scroll-margin-top: 70px;
+  .astrid-vision :is(#astrid-vision-manifesto, #astrid-vision-pillars, #astrid-vision-standards,
+    #astrid-vision-parts, #astrid-vision-projects, #astrid-vision-contribute) {
+    scroll-margin-top: 82px;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -1674,4 +1686,12 @@
   .astrid-vision-bar .astrid-vision-brand,
   .astrid-vision-principle-sigil,
   .astrid-vision-section-nav a { transition: none !important; }
+}
+
+/* The page's dusk transition changes ink and lines, never the transparent
+   surfaces of the joined principles or their little corner controls. */
+.astrid-vision[data-dusk] .astrid-vision-standards-list > li,
+.astrid-vision[data-dusk] .astrid-vision-principle-corner,
+.astrid-vision[data-dusk] .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
+  background: transparent;
 }

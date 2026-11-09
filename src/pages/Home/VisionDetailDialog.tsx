@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef } from 'react';
+import { useLayoutEffect, useId, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ExternalLink, X } from 'lucide-react';
 import type { PublicVisionContent } from './publicVisionContent';
@@ -16,14 +16,20 @@ export function VisionDetailDialog({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const titleId = useId();
   const entry = subject.kind === 'pillar'
     ? content.pillars.find(pillar => pillar.id === subject.id)
     : content.principles.find(principle => principle.id === subject.id);
   const gaps = currentGapsForSubject(content, subject);
 
-  useEffect(() => {
-    if (dialogRef.current && !dialogRef.current.open) dialogRef.current.showModal();
+  useLayoutEffect(() => {
+    if (dialogRef.current && !dialogRef.current.open) {
+      dialogRef.current.showModal();
+      // Focus the descriptive heading rather than the X: Safari otherwise
+      // paints a strong focus ring on the auto-focused close button at open.
+      titleRef.current?.focus({ preventScroll: true });
+    }
   }, []);
 
   const backdropPointerRef = useRef<number | null>(null);
@@ -82,7 +88,7 @@ export function VisionDetailDialog({
             <p className="astrid-vision-details-eyebrow">
               {subject.kind === 'pillar' ? 'What we’re building towards' : 'The principles that drive us'}
             </p>
-            <h2 id={titleId}>{entry.title}</h2>
+            <h2 id={titleId} ref={titleRef} tabIndex={-1}>{entry.title}</h2>
           </div>
           <button
             type="button"

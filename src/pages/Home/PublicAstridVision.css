@@ -628,6 +628,12 @@
 /* This connected group earns more horizontal room than the text sections.
    The edge-to-edge dividers are intentional: the principles work together. */
 .astrid-vision > .astrid-vision-standards { width: min(100%, 1360px); }
+/* Keep editorial headings in the original 1120px reading column even though
+   the four connected cards themselves extend further toward the edges. */
+.astrid-vision-standards > .astrid-vision-section-head {
+  max-width: 1120px;
+  margin-inline: auto;
+}
 .astrid-vision-standards-list {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

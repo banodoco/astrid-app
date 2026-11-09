@@ -190,10 +190,17 @@ describe('windows-upgrade-unsupported (reported by the Runtime in update status)
     expect(INSTALLER_UPDATE_REASON_MESSAGES['windows-upgrade-unsupported']).not.toMatch(/Run the command|try again/i);
   });
 
-  it('resolves to a notice with no command and no Update now, never the generic line', () => {
+  it('resolves to a notice with the command options and no in-app Update, never the generic line', () => {
     for (const context of ['page', 'settings'] as const) {
       const resolution = resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 11, releaseBehind: true, updateReason: 'windows-upgrade-unsupported', updateNowAvailable: true, selfUpdate: true }, context);
-      expect(resolution).toMatchObject({ updateReason: 'windows-upgrade-unsupported', body: INSTALLER_UPDATE_REASON_MESSAGES['windows-upgrade-unsupported'], primary: null, secondary: null });
+      expect(resolution).toMatchObject({
+        card: 'notice',
+        updateReason: 'windows-upgrade-unsupported',
+        body: INSTALLER_UPDATE_REASON_MESSAGES['windows-upgrade-unsupported'],
+        primary: { label: 'Copy instructions for your agent' },
+        secondary: { label: 'Run it yourself' },
+      });
+      expect(resolution.primary?.execute).toBeUndefined();
       expect(JSON.stringify(resolution)).not.toContain(GENERIC);
     }
   });

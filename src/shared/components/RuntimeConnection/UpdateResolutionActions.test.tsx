@@ -274,4 +274,15 @@ describe('windows-upgrade-unsupported', () => {
     expect(screen.getByRole('code')).toBeInTheDocument();
     expect(container.textContent).not.toContain('Run the command below');
   });
+
+  it('on Windows, the command is the PowerShell update line, never curl, and there is no in-app Update', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+    runtime.origin = HOSTED_ORIGIN;
+    render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);
+    expect(screen.queryByRole('button', { name: /^Update( now)?$/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.getByText(ASTRID_COMMANDS.windowsUpdate, { exact: true })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
+  });
 });

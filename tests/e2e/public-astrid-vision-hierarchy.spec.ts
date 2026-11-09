@@ -90,7 +90,7 @@ test('mobile principle action sits beneath its description, modal stays on scree
 
   const principle = page.locator('.astrid-vision-standards-list > li').last();
   const trigger = principle.getByRole('button', { name: /Explore .*: gaps and projects/ });
-  await expect(trigger).toContainText('Explore gaps and projects');
+  await expect(trigger).toContainText('Explore gaps & projects');
   const copyBounds = await principle.locator(':scope > div').boundingBox();
   const triggerBounds = await trigger.boundingBox();
   expect(copyBounds).not.toBeNull();
@@ -242,4 +242,76 @@ test('first touch outside the dialog only dismisses it and cannot click through 
   } finally {
     await context.close();
   }
+});
+
+
+test('aspiration cards join edge-to-edge, fit the long title in two lines, and open from anywhere', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json() as { principles: { id: string; title: string }[] };
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+
+  for (const width of [1200, 1440, 1920]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const cards = page.locator('.astrid-vision-standards-list > li');
+    await expect(cards).toHaveCount(4);
+
+    const rects = await cards.evaluateAll(elements => elements.map(el => {
+      const r = el.getBoundingClientRect();
+      return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
+    }));
+    for (let i = 1; i < rects.length; i++) {
+      expect(Math.abs(rects[i].left - rects[i - 1].right)).toBeLessThan(1);
+      expect(Math.abs(rects[i].top - rects[0].top)).toBeLessThan(1);
+    }
+    const fourthTitle = cards.last().locator('h3');
+    const lines = await fourthTitle.evaluate(el => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return [...range.getClientRects()].filter(rect => rect.width > 0).length;
+    });
+    expect(lines, 'the longest principle title should occupy two actual lines').toBe(2);
+    const titleToCopy = await cards.last().evaluate(el => {
+      const heading = el.querySelector('h3')!.getBoundingClientRect();
+      const copy = el.querySelector('.astrid-vision-markdown')!.getBoundingClientRect();
+      return copy.top - heading.bottom;
+    });
+    expect(titleToCopy).toBeLessThan(16);
+    const explore = cards.last().locator('.astrid-vision-principle-open');
+    await expect(explore).toHaveText('Explore gaps & projects ↗');
+    expect(await explore.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(1);
+
+    // The title and sigil, not just the footer button, should open the same pop-up.
+    await fourthTitle.click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.getByRole('dialog').getByRole('button', { name: 'Close details' }).click();
+    await cards.last().locator('.astrid-vision-principle-sigil').click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+  }
+});
+
+test('aspiration hover animates only its arrow without underlining the title', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const card = page.locator('.astrid-vision-standards-list > li').first();
+  await card.hover();
+  await expect(card.locator('h3')).toHaveCSS('text-decoration-line', 'none');
+  await expect(card.locator('.astrid-vision-principle-arrow'))
+    .toHaveCSS('animation-name', 'astrid-vision-arrow-nudge');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect(card.locator('.astrid-vision-principle-arrow')).toHaveCSS('animation-name', 'none');
 });

@@ -150,6 +150,12 @@ describe('every receipt from a terminal run has its row and its next action (rev
     });
   });
 
+  it('runtime-not-running: the title never says nothing was installed when the release was', () => {
+    const notice = lastRunNotice(receiptOf({ kind: 'not-updated', reason: 'runtime-not-running' }), 10, 11);
+    expect(notice?.title).toBeDefined();
+    expect(notice?.title).not.toMatch(/didn't install/);
+  });
+
   it('windows-upgrade-unsupported: no command to try again, only diagnostics', () => {
     expect(lastRunNotice(receiptOf({ kind: 'failed', reason: 'windows-upgrade-unsupported' }), 10, 11)).toEqual({
       title: "This update can't install on this computer yet",

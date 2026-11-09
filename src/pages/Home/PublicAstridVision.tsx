@@ -171,7 +171,15 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
   const [showAllGaps, setShowAllGaps] = useState(false);
+  const [headerCondensed, setHeaderCondensed] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState<VisionSubject | null>(null);
+  useEffect(() => {
+    if (!visible) return;
+    const update = () => setHeaderCondensed(window.scrollY > 72);
+    update();
+    window.addEventListener('scroll', update, { passive: true });
+    return () => window.removeEventListener('scroll', update);
+  }, [visible]);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const detailScrollY = useRef(0);
   const openSubject = (subject: VisionSubject, trigger: HTMLButtonElement) => {
@@ -277,14 +285,14 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         reducedMotion={reducedMotion}
         quietBehind={VISION_QUIET_TEXT}
       />}
-      <header className="astrid-vision-bar">
+      <header className="astrid-vision-bar" data-condensed={headerCondensed || undefined}>
         <a className="astrid-vision-brand" href="/home" aria-label="Astrid home" onClick={(event) => followInPage(event, onGoHome)}>
           <img src="/astrid-mink-provisional.webp" alt="" />
-          <span>Astrid</span>
+          <span className="astrid-vision-brand-name">Astrid</span>
         </a>
+        {content && <VisionSectionNav reducedMotion={reducedMotion}
+          includeHelp={Boolean(content.vision.contributeMarkdown)} />}
       </header>
-      {content && <VisionSectionNav reducedMotion={reducedMotion}
-        includeHelp={Boolean(content.vision.contributeMarkdown)} />}
 
       <section id="astrid-vision-manifesto" className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
         <div className="astrid-vision-hero">

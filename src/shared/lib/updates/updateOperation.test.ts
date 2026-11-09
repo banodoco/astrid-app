@@ -236,6 +236,17 @@ describe('UpdateOperation', () => {
   });
 });
 
+describe('mirrored Runtime reasons', () => {
+  it.each([
+    ['legacy-update-record', "This update was started by an older Astrid, so this one can't continue it. Next: run the update command from a terminal to start a fresh update."],
+    ['acknowledgement-unknown', "The update was started, but Astrid can't confirm yet that it was accepted. Next: wait a minute, then run the same update command again. It checks the earlier attempt before starting a new one."],
+  ])('%s renders its own line, not the generic self-update line', (reason, line) => {
+    const message = installerUpdateStatusMessage({ available: true, state: 'none', reason } as InstallerUpdateStatus);
+    expect(message).toBe(line);
+    expect(message).not.toBe("Astrid can't update itself on this computer. Run the command below to update it.");
+  });
+});
+
 describe('LocalPageUpdate', () => {
   const TARGET = { url: 'http://127.0.0.1:5000/page-update', token: 'ef'.repeat(32) };
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });

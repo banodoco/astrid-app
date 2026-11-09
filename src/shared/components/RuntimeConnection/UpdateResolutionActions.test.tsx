@@ -39,9 +39,25 @@ describe('update resolution after an in-app update ends', () => {
 
   it('offers the plain install line as the next action after a failed update, not --update', () => {
     render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={finished('failed')} />);
-    expect(screen.getByText('The update did not complete. Check diagnostics before trying again.')).toBeInTheDocument();
+    expect(screen.getByText('The update did not complete. Download diagnostics to see why.')).toBeInTheDocument();
     expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
     expect(screen.getByRole('code').textContent).not.toContain('--update');
+  });
+
+  it('a failed update offers both ways to repair and points to the full story', () => {
+    const failed = finished('failed');
+    const operation = { ...failed, status: { ...failed.status, log_path: '/Users/me/Library/Logs/Astrid Runtime/install.log' } } as unknown as InstallerUpdateView;
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={operation} />);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.getAllByRole('code')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    expect(screen.getByText('Details: /Users/me/Library/Logs/Astrid Runtime/install.log')).toBeInTheDocument();
+  });
+
+  it('Settings keeps its own Diagnostics row, so a failed update there adds no second button', () => {
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 }, 'settings')} operation={finished('failed')} context="settings" />);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download diagnostics' })).toBeNull();
   });
 
   it('does not offer the install line after an update that finished', () => {
@@ -167,5 +183,24 @@ describe('update resolution in-app availability', () => {
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable'])).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+  });
+});
+
+describe('windows-upgrade-unsupported', () => {
+  const resolution = (context: 'page' | 'settings') => resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 11, releaseBehind: true, updateReason: 'windows-upgrade-unsupported', updateNowAvailable: true, selfUpdate: true }, context);
+
+  it('on the page: no command and no Update now, only Download diagnostics', () => {
+    render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    expect(screen.queryByRole('code')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
+    expect(document.body.textContent).not.toContain(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']);
+  });
+
+  it('in Settings: no command either; its own Diagnostics row is the pointer', () => {
+    const { container } = render(<UpdateResolutionActions resolution={resolution('settings')} operation={installerOperation()} context="settings" />);
+    expect(screen.queryByRole('code')).toBeNull();
+    expect(container.textContent).not.toContain('Run the command below');
   });
 });

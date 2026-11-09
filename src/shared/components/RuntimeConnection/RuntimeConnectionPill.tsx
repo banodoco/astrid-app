@@ -115,6 +115,7 @@ export function RuntimeConnectionPill({
       {operation.pending && <p role="status">Update in progress. Checking its result…</p>}
       {operation.fresh && installerUpdateStatusMessage(operation.status) && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
       {operation.error && <p role="alert">Could not confirm the update status. Download diagnostics before trying again.</p>}
+      {operation.error && <DownloadDiagnosticsButton />}
       <Button type="button" className="w-full sm:w-auto" disabled={guarded.pending} onClick={() => void guarded.reload()}>{COPY.restarted.reload}</Button>
       {guarded.error && <p role="alert">{guarded.error}</p>}
     </div>

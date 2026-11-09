@@ -430,7 +430,8 @@
 @media (max-width: 760px) {
   .astrid-vision-hero { grid-template-columns: minmax(0, 1fr); }
   /* The hero illustration sits below, so fit this opening to its copy instead of a screen. */
-  .astrid-vision-manifesto { min-height: 0; align-content: start; padding: 12px 0 36px; }
+  /* The mobile hero needs space to breathe below the sticky navigation. */
+  .astrid-vision-manifesto { min-height: 0; align-content: start; padding: clamp(34px, 6vw, 48px) 0 36px; }
   .astrid-vision-bar { padding-block: 16px; }
   .astrid-vision-hero-copy > .astrid-vision-eyebrow { margin-bottom: 14px; }
   .astrid-vision-lead { margin-top: 16px; }
@@ -1009,10 +1010,11 @@
   grid-row: 1;
   margin-bottom: 18px;
   color: var(--tone-ink);
-  font-family: var(--astrid-vision-serif);
-  font-size: 22px;
-  font-style: italic;
-  line-height: 1.2;
+  font-family: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 17px;
+  font-style: normal;
+  letter-spacing: .04em;
+  line-height: 1.35;
 }
 .astrid-vision[data-dusk] .astrid-vision-principles .astrid-vision-pillar-number {
   color: color-mix(in oklab, color-mix(in oklab, var(--tone-ink), var(--tone-ink-night) calc(var(--astrid-dusk-ink) * 100%)), var(--astrid-ink) calc(var(--astrid-dusk-firm) * 100%));
@@ -1666,14 +1668,29 @@
   height: 36px;
   margin-top: 16px;
   border: 1px solid color-mix(in oklab, currentColor 55%, transparent);
-  border-radius: 9px;
+  border-radius: 3px;
   background: transparent;
   color: var(--sigil-display-ink);
   opacity: var(--sigil-display-opacity);
-  font-size: 17px;
   transition: color 280ms ease, opacity 280ms ease, border-color 170ms ease;
 }
-.astrid-vision-card-arrow { display: inline-block; }
+/* A crisp, centered pixel arrow instead of a font glyph that sits low.
+   Both pillar and principle arrow controls share this exact geometry. */
+.astrid-vision-card-arrow {
+  display: inline-grid;
+  place-items: center;
+  vertical-align: middle;
+  width: 18px;
+  height: 18px;
+  line-height: 0;
+}
+.astrid-vision-card-arrow svg {
+  display: block;
+  width: 18px;
+  height: 18px;
+  shape-rendering: crispEdges;
+}
+.astrid-vision-pillar-details .astrid-vision-card-arrow { margin-left: 4px; }
 .astrid-vision .astrid-vision-standards-list > li {
   display: flex;
   flex-direction: column;

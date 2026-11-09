@@ -732,12 +732,12 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
             </button>
             <span className="astrid-brand-name">Astrid</span>
             <span className="astrid-visually-hidden">(beta)</span>
-            {/* The beta stamp doubles as the way into the Vision & Issues page: what we're building
+            {/* The beta stamp doubles as the way into the Vision page: what we're building
                 toward, and what's still open, is the natural companion to "this is a beta". */}
-            <a className="astrid-beta" href={VISION_PATH} aria-label="Vision & Issues" onClick={(event) => followInPage(event, onOpenVision)}>
+            <a className="astrid-beta" href={VISION_PATH} aria-label="Vision" onClick={(event) => followInPage(event, onOpenVision)}>
               <span className="astrid-beta-tag" aria-hidden="true">BETA</span>
               <span className="astrid-beta-link">
-                <span className="astrid-beta-link-text">Vision &amp; Issues</span>
+                <span className="astrid-beta-link-text">Vision</span>
                 <ArrowUpRight size={10} strokeWidth={2.2} aria-hidden="true" />
               </span>
             </a>

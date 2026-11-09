@@ -231,7 +231,7 @@ describe('RuntimeConnectionPill', () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Download diagnostics' })); await Promise.resolve(); });
       expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
-      expect(screen.getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
+      expect(screen.getByText(/sh -s -- --doctor/)).toBeInTheDocument();
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' })); await Promise.resolve(); });
       expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/doctor.*log directory named in its report/));
 

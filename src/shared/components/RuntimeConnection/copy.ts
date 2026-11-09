@@ -101,8 +101,8 @@ export function setupChoiceFlags(choices: SetupChoices = RECOMMENDED_SETUP_CHOIC
 /** One owner for G1's offline diagnostics fallback, shared by Settings and recovery surfaces. */
 export const DIAGNOSTICS_FALLBACK_COPY = {
   intro: "Couldn't collect diagnostics from Astrid.",
-  agent: "Astrid couldn't produce its diagnostics from the page. Please run `astrid-runtime doctor > astrid-diagnostics.txt` on this computer, read the log directory named in its report, and tell me what's wrong. Don't change or delete my Astrid workspace.",
-  command: 'astrid-runtime doctor > astrid-diagnostics.txt',
+  agent: "Astrid couldn't produce its diagnostics from the page. Please run `curl -fsSL https://astrid.haus/install | sh -s -- --doctor` on this computer (in PowerShell: `& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --doctor`), read the log directory named in its report, and tell me what's wrong. Don't change or delete my Astrid workspace.",
+  command: 'curl -fsSL https://astrid.haus/install | sh -s -- --doctor',
 } as const;
 
 export const ASTRID_REPO_URL = 'https://github.com/banodoco/astrid-app';

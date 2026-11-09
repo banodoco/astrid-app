@@ -76,7 +76,7 @@ describe('Astrid Updates Settings section', () => {
     expect(await within(section).findByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
     expect(await within(section).findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
-    expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
+    expect(within(section).getByText(/sh -s -- --doctor/)).toBeInTheDocument();
   });
 
   it('checks immediately when opened and shows the shared update action', async () => {
@@ -277,7 +277,7 @@ describe('Astrid Updates Settings section', () => {
     fireEvent.click(await within(section).findByRole('button', { name: 'Diagnostics' }));
     fireEvent.click(within(section).getByRole('button', { name: 'Download diagnostics' }));
     expect(await within(section).findByText("Couldn't collect diagnostics from Astrid.")).toBeInTheDocument();
-    expect(within(section).getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
+    expect(within(section).getByText(/sh -s -- --doctor/)).toBeInTheDocument();
     expect(createObjectURL).not.toHaveBeenCalled();
   });
 

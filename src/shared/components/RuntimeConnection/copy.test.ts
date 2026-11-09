@@ -66,8 +66,8 @@ describe('setup consent wording', () => {
 
 describe('offline diagnostics copy', () => {
   it('owns one command for each of the two G1 options', () => {
-    expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('astrid-runtime doctor');
-    expect(DIAGNOSTICS_FALLBACK_COPY.command).toBe('astrid-runtime doctor > astrid-diagnostics.txt');
+    expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('--doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.command).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --doctor');
   });
 });
 

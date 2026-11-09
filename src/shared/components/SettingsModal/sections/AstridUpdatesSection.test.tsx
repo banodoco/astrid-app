@@ -444,6 +444,11 @@ describe("Hannah's state: Release 1 after a finished storage move, Release 10 se
     expect(within(section).getAllByRole('button', { name: 'Download diagnostics' })).toHaveLength(2);
     expect(within(section).getByRole('button', { name: 'Copy command (try again)' })).toBeInTheDocument();
     expect(section.textContent).not.toContain("Astrid can't update itself on this computer");
+    // Every command on this update state is the --update form; the plain install line is for repair only.
+    const commands = within(section).getAllByRole('code').map((node) => node.textContent ?? '');
+    expect(commands.length).toBeGreaterThanOrEqual(2);
+    for (const command of commands) expect(command).toBe(installCommand('update'));
+    expect(within(section).queryByText(ASTRID_STATUS_COPY.repairTitle)).toBeNull();
   });
 
   it('reads the update log under the Runtime\'s new label', async () => {

@@ -315,3 +315,46 @@ test('aspiration hover animates only its arrow without underlining the title', a
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(card.locator('.astrid-vision-principle-arrow')).toHaveCSS('animation-name', 'none');
 });
+
+
+test('gap headers and their projects share distinct stable color families', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json() as {
+    pillars: { id: string; title: string }[];
+    principles: { id: string; title: string }[];
+  };
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+
+  const pillar = content.pillars.find(item => item.id === 'artistic-ambition')!;
+  await page.getByRole('button', { name: 'Explore ' + pillar.title + ': gaps and projects' }).click();
+  const dialog = page.getByRole('dialog');
+  const gaps = dialog.locator('.astrid-vision-details-gap');
+  const appearances = await gaps.evaluateAll(elements => elements.map(el => ({
+    tone: el.getAttribute('data-tone'),
+    title: el.querySelector('h4')?.textContent,
+    headerBackground: getComputedStyle(el.querySelector('.astrid-vision-details-gap-heading')!).backgroundColor,
+    projectBackground: el.querySelector('.astrid-vision-details-projects')
+      ? getComputedStyle(el.querySelector('.astrid-vision-details-projects')!).backgroundColor
+      : null,
+  })));
+  expect(appearances.length).toBeGreaterThanOrEqual(2);
+  expect(new Set(appearances.map(item => item.tone)).size).toBe(appearances.length);
+  expect(appearances.every(item => item.headerBackground !== 'rgba(0, 0, 0, 0)')).toBeTruthy();
+  expect(appearances.filter(item => item.projectBackground)
+    .every(item => item.projectBackground !== item.headerBackground)).toBeTruthy();
+  const sharedGap = gaps.filter({ hasText: "Artists can't yet sustain ambitious work end to end" });
+  const firstTone = await sharedGap.getAttribute('data-tone');
+  await dialog.getByRole('button', { name: 'Close details' }).click();
+
+  const principle = content.principles.find(item => item.id === 'in-the-creators-control')!;
+  await page.getByRole('button', { name: 'Explore ' + principle.title + ': gaps and projects' }).click();
+  const sameGap = page.getByRole('dialog').locator('.astrid-vision-details-gap')
+    .filter({ hasText: "Artists can't yet sustain ambitious work end to end" });
+  await expect(sameGap).toHaveAttribute('data-tone', firstTone!);
+});

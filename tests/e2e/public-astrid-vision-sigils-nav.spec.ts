@@ -114,6 +114,43 @@ test('technical wrangling dissolves its knot into a clean arrow in five seconds'
   await expect(knot).toHaveCSS('transition-duration', '0s');
 });
 
+
+test('mobile hero gets breathing room and the editorial arrows and pillar numbers use pixel geometry', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const hero = page.locator('#astrid-vision-manifesto');
+    const heroPadding = await hero.evaluate(el => Number.parseFloat(getComputedStyle(el).paddingTop));
+    if (width === 390) expect(heroPadding).toBeGreaterThanOrEqual(34);
+    else expect(heroPadding).toBeLessThan(20);
+    const pixelNumbers = page.locator('.astrid-vision-pillar-number');
+    await expect(pixelNumbers).toHaveCount(4);
+    await expect(pixelNumbers.first()).toHaveCSS('font-family', /Departure Mono/);
+    const arrows = page.locator('.astrid-vision-standards-list > li .astrid-vision-principle-corner');
+    await expect(arrows).toHaveCount(4);
+    for (let index = 0; index < 4; index++) {
+      const corner = arrows.nth(index);
+      const mark = corner.locator('.astrid-vision-card-arrow');
+      await expect(mark.locator('svg[viewBox="0 0 18 18"]')).toHaveCount(1);
+      const positions = await corner.evaluate(el => {
+        const outer = el.getBoundingClientRect();
+        const inner = el.querySelector('svg')!.getBoundingClientRect();
+        return {
+          dx: inner.x + inner.width / 2 - (outer.x + outer.width / 2),
+          dy: inner.y + inner.height / 2 - (outer.y + outer.height / 2),
+        };
+      });
+      expect(Math.abs(positions.dx)).toBeLessThan(1);
+      expect(Math.abs(positions.dy)).toBeLessThan(1);
+      await expect(corner).toHaveCSS('border-radius', '3px');
+    }
+    await expect(page.locator('.astrid-vision-principles .astrid-vision-pillar-details svg[viewBox="0 0 18 18"]')).toHaveCount(4);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+  }
+});
+
 test('sticky header navigation tracks sections and folds the wordmark to its icon', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1720, height: 900 });
@@ -146,7 +183,7 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
     ['Principles', 'astrid-vision-standards'],
     ['Gaps', 'astrid-vision-parts'],
     ['Projects', 'astrid-vision-projects'],
-    ['Help us build', 'astrid-vision-contribute'],
+    ['Help us', 'astrid-vision-contribute'],
   ]) {
     const link = nav.getByRole('link', { name: new RegExp(label + '$') });
     await link.click();
@@ -262,7 +299,7 @@ test('the enlarged header spans the viewport while navigation stays aligned in o
     await expect(pillars).toHaveAttribute('href', '#astrid-vision-pillars');
     await pillars.click();
     await expect(pillars).toHaveAttribute('aria-current', 'location');
-    await expect(page.getByRole('heading', { name: 'The four pillars of our vision' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'The pillars of our vision' })).toBeVisible();
     await expect(page).toHaveURL(/#astrid-vision-pillars$/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
   }

@@ -43,6 +43,11 @@ function builderChoices(choices: typeof fixture.cases[number]['choices']): Setup
   };
 }
 
+// An empty argv renders without the ` -s --` suffix: sh takes no `-s --` when there are no arguments.
+function renderedLine(argv: string[]) {
+  return argv.length === 0 ? fixture.install_line.replace(/ -s --$/, '') : [fixture.install_line, ...argv].join(' ');
+}
+
 function displayedArgv() {
   const command = screen.getByRole('code').textContent;
   expect(command).toMatch(new RegExp(`^${fixture.install_line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} `));
@@ -58,8 +63,10 @@ describe('shared installer argv fixture', () => {
       expect(Object.values(testCase.choices).every(value => value === 'on' || value === 'off')).toBe(true);
       const command = testCase.id.startsWith('update-')
         ? installCommand('update')
-        : installCommand('install', builderChoices(testCase.choices));
-      expect(command).toBe([fixture.install_line, ...testCase.argv].join(' '));
+        : testCase.id === 'already-set-up'
+          ? installCommand('install', undefined, false, false, true)
+          : installCommand('install', builderChoices(testCase.choices));
+      expect(command).toBe(renderedLine(testCase.argv));
     }
   });
 
@@ -88,13 +95,13 @@ describe('shared installer argv fixture', () => {
     const untouched = fixture.cases.find(testCase => testCase.id === 'untouched')!;
     const alreadySetUp = fixture.cases.find(testCase => testCase.id === 'already-set-up')!;
     expect(untouched.argv).toEqual(['--yes']);
-    expect(alreadySetUp.argv).toEqual(['--yes']);
+    expect(alreadySetUp.argv).toEqual([]);
     expect(displayedArgv()).toEqual(untouched.argv);
     expect(fixtureChoices(readPendingSetupState().choices)).toEqual(untouched.choices);
     fireEvent.click(screen.getByRole('checkbox', { name: "I've already set up Astrid" }));
     expect(screen.getByText('Start Astrid')).toBeInTheDocument();
     // Set up already: the plain install line, no choice flags, so a stale saved choice cannot flip the Agent's policy.
-    expect(screen.getByRole('code').textContent).toBe(ASTRID_COMMANDS.macLinux);
+    expect(screen.getByRole('code').textContent).toBe(renderedLine(alreadySetUp.argv));
     expect(fixtureChoices(readPendingSetupState().choices)).toEqual(alreadySetUp.choices);
   });
 

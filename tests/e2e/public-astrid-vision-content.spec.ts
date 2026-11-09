@@ -337,14 +337,15 @@ test('different valid feed content renders without rebuilding the app', async ({
   const content = await feed(request);
   const changed = {
     ...content,
-    vision: { ...content.vision, title: 'Dynamic vision heading from published data' },
+    vision: { ...content.vision, title: 'Dynamic source title', introMarkdown: 'A new published ambition, without rebuilding the app.' },
   };
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json', body: JSON.stringify(changed),
     headers: { 'access-control-allow-origin': '*' },
   }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText(changed.vision.title);
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Vision');
+  await expect(page.locator('.astrid-vision-lead')).toContainText('A new published ambition');
 });
 
 test('feed errors are explained and offer a retry', async ({ page }) => {

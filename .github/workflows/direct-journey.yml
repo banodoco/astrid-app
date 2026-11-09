@@ -171,6 +171,17 @@ jobs:
           name: direct-journey
           path: ${{ runner.temp }}/direct-artifacts/
           if-no-files-found: warn
+      - name: Collect the autostart-off card
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/autostart-off-card"
+          find "${{ runner.temp }}/direct-results" -name 'autostart-off-card.png' -exec cp {} "$RUNNER_TEMP/autostart-off-card/" \;
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: autostart-off-card
+          path: ${{ runner.temp }}/autostart-off-card/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:

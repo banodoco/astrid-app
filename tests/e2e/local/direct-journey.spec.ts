@@ -1312,3 +1312,26 @@ test('speed table: each step through the door against the Runtime directly', asy
   await testInfo.attach('direct-measurements.json', { path: file, contentType: 'application/json' });
   await testInfo.attach('direct-measurements.txt', { body: table, contentType: 'text/plain' });
 });
+
+// Capture for review (UX pass): the autostart-off update card in Settings > Astrid updates, from the connected Runtime.
+// Only the installer status route is answered here (reason autostart-off); the Runtime itself is unchanged. The step fails
+// unless the card and its agent action are on screen, so the PNG always shows the card.
+test.describe('autostart-off card capture', () => {
+  test.use({ deviceScaleFactor: 2 });
+  test('the autostart-off update card is shown in Settings and captured', async ({ page, harness }, testInfo) => {
+    await page.route(`http://127.0.0.1:${DOOR_PORT}/api/runtime/v1/update/status`, (route) => route.fulfill({
+      status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ available: true, state: 'none', self_update: true, reason: 'autostart-off' }),
+    }));
+    await openApp(page, harness);
+    await expectConnected(page);
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const updates = page.locator('#settings-updates');
+    await expect(updates).toBeVisible();
+    await expect(updates.getByText('Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.')).toHaveCount(1);
+    await expect(updates.getByRole('button', { name: 'Copy instructions for your agent' })).toBeVisible();
+    const png = await updates.screenshot();
+    writeFileSync(path.join(testInfo.outputDir, 'autostart-off-card.png'), png);
+    await testInfo.attach('autostart-off-card', { body: png, contentType: 'image/png' });
+  });
+});

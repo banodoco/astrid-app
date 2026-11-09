@@ -174,6 +174,8 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
   const releaseNotice = currentResolution?.card === 'notice' && !currentResolution.updateReason;
   // A Runtime reason is already the status line, so its sentence is not repeated as the detail.
   const detail = state === 'ready' && currentResolution?.body && currentResolution.card !== 'newer' && !releaseNotice && currentResolution.body !== operationMessage ? currentResolution.body : null;
+  // The reason sentence (the card body) is on screen when the detail or the status line shows it; its actions then do not repeat it.
+  const bodyShown = Boolean(currentResolution?.body) && (detail === currentResolution?.body || statusLine === currentResolution?.body);
   // A card other than an update (reload, restart, error) names itself above its sentence; an update is the status line.
   const heading = state === 'ready' && currentResolution?.title && !updateCard ? currentResolution.title : null;
   const actionsFor = state === 'ready' && currentResolution && (currentResolution.card !== 'none' || operation.status?.state !== 'none') ? currentResolution : null;
@@ -198,7 +200,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
       </>}
       action={!updateAvailable && <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void check()} disabled={state === 'checking'}>Check for updates</Button>}
     >
-      {actionsFor && <UpdateResolutionActions resolution={actionsFor} operation={operation} context="settings" reasonShown={Boolean(lastRun)} />}
+      {actionsFor && <UpdateResolutionActions resolution={actionsFor} operation={operation} context="settings" reasonShown={Boolean(lastRun)} reasonLineShown={bodyShown} />}
       {lastResult && lastResult !== statusLine && <p className="text-muted-foreground">Last result: {lastResult}</p>}
     </SettingsRow>
     {lastRun && <SettingsRow

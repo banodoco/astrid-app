@@ -26,10 +26,12 @@ export function openUpdatesSettings() {
  * Render only the actions selected by K6; source and Pinokio must never fall through to installer commands.
  * `context` is where the actions sit: Settings is the Details destination, so it never links to itself.
  */
-export function UpdateResolutionActions({ resolution, operation, context = 'page', installType, reasonShown = false }: {
+export function UpdateResolutionActions({ resolution, operation, context = 'page', installType, reasonShown = false, reasonLineShown = false }: {
   readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView; readonly context?: 'page' | 'settings'; readonly installType?: InstallType;
   /** A reason is already on screen beside these actions (Settings' last-run row), so the generic line would contradict it. */
   readonly reasonShown?: boolean;
+  /** The container already shows this card's reason sentence (its body) above the actions; an autostart-off card then does not repeat it. */
+  readonly reasonLineShown?: boolean;
 }) {
   const guarded = useGuardedReload();
   const localUpdate = pageLocalUpdate();
@@ -78,7 +80,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {commandOptions && installerPath && !execute && !resolution.updateReason && !reasonShown && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']}</p>}
     {commandOptions && resolution.updateReason !== 'autostart-off' && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair' || failedInstall} />}
     {commandOptions && resolution.updateReason === 'self-update-too-old' && <p className="text-sm">{SELF_UPDATE_TOO_OLD_STEPS}</p>}
-    {resolution.updateReason === 'autostart-off' && <AutostartOffUpdate />}
+    {resolution.updateReason === 'autostart-off' && <AutostartOffUpdate sentenceShown={reasonLineShown} />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
@@ -97,11 +99,11 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
 }
 
 /** Start at sign-in is off: update from a terminal with the strict update line (no choice flags), or hand the agent the brief. */
-function AutostartOffUpdate() {
+function AutostartOffUpdate({ sentenceShown }: { readonly sentenceShown: boolean }) {
   const windows = detectPlatform() === 'windows';
   const agent = useCopyAction(autostartOffAgentBrief(windows));
   return <div className="space-y-2">
-    <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']}</p>
+    {!sentenceShown && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']}</p>}
     <Button type="button" className="h-11 w-full justify-between rounded-xl px-4 text-sm" onClick={() => void agent.copy()}>
       <span aria-live="polite">{agent.status === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : COPY_FOR_AGENT_ACTION}</span>
     </Button>

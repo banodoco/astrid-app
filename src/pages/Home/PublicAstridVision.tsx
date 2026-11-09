@@ -182,6 +182,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   }, [visible]);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const detailScrollY = useRef(0);
+  // Restore keyboard focus after a dialog, but don't leave touch users with
+  // a persistent WebKit focus rectangle around the whole card.
+  const lastInteractionWasPointer = useRef(false);
   const openSubject = (subject: VisionSubject, trigger: HTMLButtonElement) => {
     detailTrigger.current = trigger;
     detailScrollY.current = window.scrollY;
@@ -191,9 +194,15 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     const trigger = detailTrigger.current;
     const previousScrollY = detailScrollY.current;
     setSelectedSubject(null);
-    // WebKit may scroll the document while restoring focus after a modal closes.
-    trigger?.focus({ preventScroll: true });
-    window.requestAnimationFrame(() => window.scrollTo(0, previousScrollY));
+    const pointerClose = lastInteractionWasPointer.current;
+    // Keyboard users get focus back. Touch users don't inherit the large
+    // outline caused by Safari restoring focus to a full-card button.
+    if (pointerClose) trigger?.blur();
+    else trigger?.focus({ preventScroll: true });
+    window.requestAnimationFrame(() => {
+      if (pointerClose && document.activeElement === trigger) trigger?.blur();
+      window.scrollTo(0, previousScrollY);
+    });
   };
   const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const agentCopyTimer = useRef<number>();
@@ -259,6 +268,28 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     cards.forEach((card) => observer.observe(card));
     return () => observer.disconnect();
   }, [phone, visible, reducedMotion, content?.source.revision]);
+  // Mirror the pillar minks: each principle's pixel sigil animates as its
+  // card crosses the center of the phone viewport, without requiring hover.
+  const sigilsRef = useRef<HTMLOListElement>(null);
+  const [centeredSigil, setCenteredSigil] = useState<string | null>(null);
+  useEffect(() => {
+    const list = sigilsRef.current;
+    if (!visible || reducedMotion || !phone || !list || typeof IntersectionObserver !== 'function') {
+      setCenteredSigil(null);
+      return undefined;
+    }
+    const cards = [...list.querySelectorAll<HTMLElement>('[data-principle]')];
+    const observer = new IntersectionObserver(() => {
+      const middle = window.innerHeight / 2;
+      const match = cards.find(card => {
+        const bounds = card.getBoundingClientRect();
+        return bounds.top <= middle && bounds.bottom >= middle;
+      });
+      setCenteredSigil(match?.dataset.principle ?? null);
+    }, { rootMargin: '-45% 0px -45% 0px' });
+    cards.forEach(card => observer.observe(card));
+    return () => observer.disconnect();
+  }, [phone, visible, reducedMotion, content?.source.revision]);
   const filteredGaps = (content?.gaps ?? []).filter(gap =>
     gapFilter === 'all' || (gapFilter === 'current' ? gap.assessment !== 'closed' : gap.assessment === gapFilter));
   const gapsToShow = showAllGaps ? filteredGaps : filteredGaps.slice(0, 10);
@@ -269,7 +300,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const projectsToShow = projectFilter !== 'current' || showAllProjects
     ? selectedProjects : selectedProjects.slice(0, 8);
   return (
-    <main className="astrid-vision" ref={pageRef} tabIndex={-1} data-astrid-visual-active={visible} data-dusk style={{
+    <main className="astrid-vision" ref={pageRef} tabIndex={-1}
+      onPointerDownCapture={() => { lastInteractionWasPointer.current = true; }}
+      onKeyDownCapture={() => { lastInteractionWasPointer.current = false; }}
+      data-astrid-visual-active={visible} data-dusk style={{
       '--astrid-paper': palette.paper,
       '--astrid-dusk': palette.dusk,
       '--astrid-dusk-ink': palette.ink,
@@ -393,9 +427,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <p className="astrid-vision-eyebrow">Our aspirations</p>
           <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
         </div>
-        <ol className="astrid-vision-standards-list">
+        <ol className="astrid-vision-standards-list" ref={sigilsRef}>
           {content.principles.map(principle => (
-            <li key={principle.id} data-reveal data-principle={principle.id}>
+            <li key={principle.id} data-reveal data-principle={principle.id}
+              data-sigil-active={centeredSigil === principle.id || undefined}>
               <VisionPrincipleSigil principleId={principle.id} />
               <div>
                 <h3>{principle.title}</h3>

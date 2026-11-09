@@ -7,6 +7,12 @@ import { CopyInstallCommand } from './CopyInstallCommand.tsx';
 import { ASTRID_COMMANDS, installCommand, readPendingSetupState, type SetupChoices } from './copy.ts';
 import fixture from './installArgv.fixture.json';
 
+// A hosted astrid.haus page: its update line is the installer's --update command. A local App shows npm run update.
+vi.mock('@/integrations/runtime/connection.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/integrations/runtime/connection.ts')>()),
+  runtimeOrigin: () => 'https://astrid.test',
+}));
+
 beforeEach(() => {
   vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
   vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');

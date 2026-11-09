@@ -12,7 +12,7 @@ vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: host
 
 import { AstridUpdatesSection } from './AstridUpdatesSection.tsx';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
-import { ASTRID_COMMANDS, installCommand, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { ASTRID_COMMANDS, installCommand, LOCAL_UPDATE_COMMAND, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
 import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
@@ -142,7 +142,7 @@ describe('Astrid Updates Settings section', () => {
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
   });
 
-  it('does not expose the fully-local in-app updater or stale npm route', async () => {
+  it('does not expose the fully-local in-app updater; shows the local npm update command', async () => {
     originMock.value = '';
     vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
     localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
@@ -152,8 +152,7 @@ describe('Astrid Updates Settings section', () => {
     expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
-    expect(within(section).getByRole('code')).toHaveTextContent(installCommand('update'));
-    expect(within(section).queryByText(/npm run update/)).toBeNull();
+    expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
   });
 
   it.each([
@@ -340,9 +339,8 @@ describe('Updates for an Astrid older than this page', () => {
     const section = screen.getByRole('region', { name: 'Updates' });
 
     expect(await within(section).findByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
-    expect(within(section).getByRole('code')).toHaveTextContent(installCommand('update'));
+    expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
     expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
-    expect(section.textContent).not.toContain('npm run update');
   });
 
   it('turns an old chat service into the update card, with the direct-install update command', async () => {

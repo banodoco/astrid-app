@@ -7,6 +7,11 @@ vi.mock('@/shared/hooks/platformInstall/platformDetection.ts', async (importOrig
   ...await importOriginal<object>(), detectPlatform: () => mocks.platform,
 }));
 vi.mock('@/shared/lib/browser/clipboard.ts', () => ({ writeClipboardTextSafe: mocks.clipboard }));
+// A hosted astrid.haus page: the update line is the installer's --update command. A local App shows npm run update.
+vi.mock('@/integrations/runtime/connection.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/integrations/runtime/connection.ts')>()),
+  runtimeOrigin: () => 'https://astrid.test',
+}));
 
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';

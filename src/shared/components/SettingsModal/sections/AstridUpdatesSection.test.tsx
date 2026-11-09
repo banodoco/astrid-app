@@ -4,9 +4,9 @@ import path from 'node:path';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { connectionMock, readStatusMock, statusMock, hostedCheckMock, localCheckMock, originMock } = vi.hoisted(() => ({ connectionMock: { value: null as unknown }, readStatusMock: vi.fn(), statusMock: { value: null as unknown }, hostedCheckMock: vi.fn(), localCheckMock: vi.fn(), originMock: { value: 'https://astrid.test' } }));
+const { connectionMock, readStatusMock, statusReadMock, statusMock, hostedCheckMock, localCheckMock, originMock } = vi.hoisted(() => ({ connectionMock: { value: null as unknown }, readStatusMock: vi.fn(), statusReadMock: vi.fn(), statusMock: { value: null as unknown }, hostedCheckMock: vi.fn(), localCheckMock: vi.fn(), originMock: { value: 'https://astrid.test' } }));
 vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({ useRuntimeConnection: () => connectionMock.value }));
-vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readInstallerUpdateHealth = async () => (await readStatusMock()).health; readInstallerUpdateStatus = async () => statusMock.value; } }));
+vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readInstallerUpdateHealth = async () => (await readStatusMock()).health; readInstallerUpdateStatus = async () => { statusReadMock(); return statusMock.value; }; } }));
 vi.mock('@/integrations/runtime/connection.ts', () => ({ runtimeOrigin: () => originMock.value, runtimeApiBase: () => 'http://127.0.0.1:17340/api/runtime' }));
 vi.mock('@/shared/lib/updates/updateStatus.ts', () => ({ checkHostedUpdate: hostedCheckMock, checkLocalUpdate: localCheckMock }));
 
@@ -20,6 +20,7 @@ import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
 beforeEach(() => {
   vi.unstubAllEnvs();
   connectionMock.value = { isConnected: true, managedByPinokio: false };
+  statusReadMock.mockReset();
   readStatusMock.mockReset().mockResolvedValue({ health: { status: 'ok', release: 3 } });
   statusMock.value = { available: false, state: 'none' };
   hostedCheckMock.mockReset();
@@ -131,8 +132,11 @@ describe('Astrid Updates Settings section', () => {
     render(<AstridUpdatesSection isOpen />);
     const section = screen.getByRole('region', { name: 'Updates' });
     expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
-    expect(localCheckMock).toHaveBeenCalledOnce();
-    expect(readStatusMock).not.toHaveBeenCalled();
+    // The releases come only from the launcher. The Runtime's health is read for its instance (a finished update shows
+    // live, UR-15l-3 a8), but never its installer status route nor the hosted release check.
+    expect(localCheckMock).toHaveBeenCalled();
+    expect(hostedCheckMock).not.toHaveBeenCalled();
+    expect(statusReadMock).not.toHaveBeenCalled();
     expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).getByText('Run it yourself')).toBeInTheDocument();
   });

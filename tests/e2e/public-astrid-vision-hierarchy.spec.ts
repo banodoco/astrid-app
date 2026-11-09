@@ -189,3 +189,57 @@ test('mobile modal keeps the X fixed, scrolls within the panel and closes from t
   await page.mouse.click(again!.x + again!.width / 2, again!.y + again!.height + 14);
   await expect(dialog).toHaveCount(0);
 });
+
+
+test('first touch outside the dialog only dismisses it and cannot click through to cards', async ({ browser, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json() as { principles: { id: string; title: string }[] };
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 780 },
+    isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+  });
+  const page = await context.newPage();
+  try {
+    await page.route(FEED, route => route.fulfill({
+      status: 200, contentType: 'application/json',
+      headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+    }));
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const title = content.principles.find(p => p.id === 'in-the-creators-control')?.title
+      ?? content.principles[0].title;
+    const opener = page.getByRole('button', { name: 'Explore ' + title + ': gaps and projects' });
+    await opener.tap();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toBeVisible();
+
+    await page.evaluate(() => {
+      const marker = window as typeof window & { __visionCardClicks?: number };
+      marker.__visionCardClicks = 0;
+      document.addEventListener('click', event => {
+        if (event.target instanceof Element &&
+            event.target.closest('.astrid-vision-principle-open, .astrid-vision-card-open')) {
+          marker.__visionCardClicks = (marker.__visionCardClicks ?? 0) + 1;
+        }
+      }, true);
+    });
+
+    const bounds = await dialog.boundingBox();
+    expect(bounds).not.toBeNull();
+    await page.touchscreen.tap(bounds!.x + bounds!.width / 2, bounds!.y - 14);
+    await expect(dialog).toHaveCount(0);
+    // A delayed synthetic click from the same touch must not reach the card below.
+    await page.waitForTimeout(350);
+    expect(await page.evaluate(() =>
+      (window as typeof window & { __visionCardClicks?: number }).__visionCardClicks)).toBe(0);
+
+    // A *new* deliberate tap still opens the card, rather than the first tap
+    // being allowed to operate both the backdrop and the underlying UI.
+    await opener.tap();
+    await expect(dialog).toBeVisible();
+    await dialog.getByRole('button', { name: 'Close details' }).tap();
+    await expect(dialog).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});

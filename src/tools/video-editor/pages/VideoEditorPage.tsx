@@ -51,7 +51,7 @@ import {
   getSnapshot as getBuiltInDisabledSnapshot,
   subscribe as subscribeBuiltInDisabled,
 } from "@/tools/video-editor/runtime/builtInExtensionEnablement.ts";
-import { useExtensionLoaderWiring } from "@/tools/video-editor/runtime/useExtensionLoaderWiring";
+import { useRuntimePackExtensions } from "@/tools/video-editor/runtime/useRuntimePackExtensions";
 import { AstridVideoEditorShell } from "@/tools/video-editor/components/AstridVideoEditorShell.tsx";
 import {
   ProjectTimelinePicker,
@@ -242,11 +242,10 @@ export default function VideoEditorPage() {
   const {
     resolvedExtensions,
     diagnostics: loaderDiagnostics,
-  } = useExtensionLoaderWiring({
-    directExtensions: smokeDirectExtensions,
-    repository: null,
-    bundleStore: null,
-  });
+    packageStateEntries,
+    repository: extensionStateRepository,
+    triggerExtensionRefresh,
+  } = useRuntimePackExtensions(smokeDirectExtensions, 2000);
   useEffect(() => {
     publishLocalTestExtensionDiagnostics("loader", loaderDiagnostics);
   }, [loaderDiagnostics]);
@@ -914,6 +913,9 @@ export default function VideoEditorPage() {
             onSaveStatusChange={setMountedSaveStatus}
             onPendingWorkChange={onPendingWorkChange}
             extensions={resolvedExtensions}
+            packageStateEntries={packageStateEntries}
+            extensionStateRepository={extensionStateRepository}
+            triggerExtensionRefresh={triggerExtensionRefresh}
             timelineOverlaysEnabled={timelineOverlaysEnabled}
             extensionHostEnabled
             extensionReleaseRevision="shipped"

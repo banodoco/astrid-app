@@ -54,6 +54,26 @@ async function readAgentRuntime(agentSha) {
   return lock.source_commit;
 }
 
+async function readAgentSources(agentSha) {
+  const pins = JSON.parse((await readRaw(agentRepo, agentSha, 'astrid/packs/runpod/pins.json')).toString('utf8'));
+  const sources = pins?.sources ?? {};
+  const vibecomfy = sources.vibecomfy;
+  const lifecycle = sources.lifecycle;
+  if (!/^[0-9a-f]{40}$/.test(vibecomfy?.revision ?? '')) {
+    throw new Error(`Agent ${agentSha} pins.json needs a full vibecomfy revision`);
+  }
+  if (!/^[0-9a-f]{40}$/.test(lifecycle?.revision ?? '') || typeof lifecycle.repository !== 'string') {
+    throw new Error(`Agent ${agentSha} pins.json needs a full lifecycle revision and repository`);
+  }
+  if (typeof lifecycle.version !== 'string' || !lifecycle.version.trim()) {
+    throw new Error(`Agent ${agentSha} pins.json needs a lifecycle version`);
+  }
+  return {
+    vibecomfy: { sha: vibecomfy.revision },
+    lifecycle: { repo: lifecycle.repository, sha: lifecycle.revision, version: lifecycle.version },
+  };
+}
+
 // pin.mjs never writes `release`. A change to the install tuple must raise
 // `release` by exactly 1 in the same change; release-guard enforces that.
 // `--require` sets the floor to the manifest's own release, the one being published. Bump release first:
@@ -79,6 +99,9 @@ async function pin(agentSha, reason) {
   manifest.agent.sha = agentSha;
   manifest.runtime.sha = runtimeSha;
   manifest.runtime.schema_digest = schemaDigest;
+  const sources = await readAgentSources(agentSha);
+  manifest.vibecomfy = sources.vibecomfy;
+  manifest.lifecycle = sources.lifecycle;
   if (reason !== undefined) applyRequiredPin(manifest, reason);
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
@@ -89,6 +112,18 @@ export async function checkManifest(manifest) {
   const runtimeSha = await readAgentRuntime(agentSha);
   if (manifest.runtime?.sha !== runtimeSha) {
     throw new Error(`install-manifest.json runtime.sha ${manifest.runtime?.sha ?? '(missing)'} does not match agent ${agentSha} runtime.lock.json source_commit ${runtimeSha}`);
+  }
+  if (manifest.runpod !== undefined) {
+    throw new Error('install-manifest.json must not carry a runpod block; lifecycle is the single RunPod source');
+  }
+  const sources = await readAgentSources(agentSha);
+  for (const name of ['vibecomfy', 'lifecycle']) {
+    if (manifest[name] === undefined) {
+      throw new Error(`install-manifest.json is missing the ${name} block; run pin.mjs ${agentSha}`);
+    }
+    if (JSON.stringify(manifest[name]) !== JSON.stringify(sources[name])) {
+      throw new Error(`install-manifest.json ${name} does not match Agent ${agentSha} pins; run pin.mjs ${agentSha}`);
+    }
   }
   const schemaDigest = await runtimeSchemaDigest(runtimeSha);
   if (manifest.runtime?.schema_digest !== schemaDigest) {

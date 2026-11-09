@@ -1,0 +1,10 @@
+schema_version: 3
+id: live_effect
+name: Live Effect
+version: 1.0.0
+pack_api: "2.3"
+documentation: {kind: none, reason: PK-14 live-loading journey fixture.}
+ui:
+  editor:
+    type: editor
+    entry: ui/live-effect/index.tsx

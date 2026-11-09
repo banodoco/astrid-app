@@ -510,7 +510,7 @@ describe('receipts from terminal runs: each has its row, Download diagnostics an
   it('windows-upgrade-unsupported in update status: its line, no retry command, never the generic line', async () => {
     const section = await mount('Astrid diagnostics\nLast update result: none\n', { available: true, self_update: true, state: 'none', reason: 'windows-upgrade-unsupported' });
     expect(await within(section).findAllByText(INSTALLER_UPDATE_REASON_MESSAGES['windows-upgrade-unsupported'])).not.toHaveLength(0);
-    expect(within(section).queryByRole('code')).toBeNull();
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
     expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
     expect(section.textContent).not.toContain('Run the command below');

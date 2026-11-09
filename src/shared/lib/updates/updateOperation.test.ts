@@ -269,6 +269,16 @@ describe('LocalPageUpdate', () => {
     expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
   });
 
+  it('shows the Agent lines, Next and Details included, for a not-updated or failed run', async () => {
+    const next = 'Next: open astrid.haus > Settings > Updates > Download diagnostics, and send the file to support.';
+    const details = 'Details: /home/me/.local/state/astrid/install.log';
+    const notUpdated = ['Astrid did NOT update. It is still Release 13; Release 14 is available.', 'Why: an earlier update was interrupted.', next, details];
+    const skipped = await make(() => json(200, { result: { status: 'not-updated', exitCode: 3, lines: notUpdated, message: notUpdated.join('\n') } })).update.start();
+    expect(skipped).toEqual({ phase: 'failed', message: notUpdated.join('\n') });
+    const failed = await make(() => json(422, { error: 'busy', lines: ['Astrid did NOT update: busy.', next, details], exitCode: 1 })).update.start();
+    expect(failed.phase === 'failed' && failed.message.split('\n').slice(-2)).toEqual([next, details]);
+  });
+
   it('reports recovered (rollback) as a completed outcome', async () => {
     const { update } = make(() => json(200, { result: { status: 'recovered', message: 'Rolled back.' } }));
     expect(await update.start()).toMatchObject({ phase: 'done', status: 'recovered' });

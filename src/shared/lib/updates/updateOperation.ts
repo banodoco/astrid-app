@@ -250,6 +250,12 @@ export type LocalPageUpdateState =
 const JSON_HEADERS = { Accept: 'application/json', 'Content-Type': 'application/json' } as const;
 const REFUSALS = new Set<string>(['update_busy', 'non_fast_forward', 'dirty']);
 
+function agentLines(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const lines = value.filter((line): line is string => typeof line === 'string' && line.length > 0);
+  return lines.length ? lines : undefined;
+}
+
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   const parsed: unknown = await response.json().catch(() => null);
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
@@ -299,7 +305,10 @@ export class LocalPageUpdate {
       if (response.ok && result && (result.status === 'updated' || result.status === 'up-to-date' || result.status === 'recovered')) {
         return this.set({ phase: 'done', status: result.status, message: result.status === 'updated' ? 'Astrid updated.' : result.status === 'up-to-date' ? 'Astrid is up to date.' : 'The update did not finish. Astrid was restored to its previous version.' });
       }
-      return this.set({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
+      // A settled run that did not update (or failed) carries the Agent's own
+      // plain lines, its reason and the Next and Details lines included.
+      const lines = agentLines(body.lines) ?? agentLines((result as { lines?: unknown } | undefined)?.lines);
+      return this.set({ phase: 'failed', message: lines ? lines.join('\n') : 'The update did not complete. Check diagnostics before trying again.' });
     } catch {
       return this.set({ phase: 'failed', message: 'The update result could not be confirmed. Check for updates before trying again.' });
     }

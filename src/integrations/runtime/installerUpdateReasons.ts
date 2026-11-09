@@ -7,7 +7,7 @@
 export const FIRST_SELF_UPDATE_RELEASE = 10;
 
 /** Editor-owned reason keys. Runtime refusal codes map to their own key; any other code reads as self-update-unavailable. */
-export type InstallerUpdateReason = 'busy' | 'autostart-off' | 'unsupported-service-manager' | 'source' | 'recovery-needed' | 'needs-repair' | 'windows-upgrade-unsupported' | 'self-update-too-old' | 'self-update-unavailable';
+export type InstallerUpdateReason = 'busy' | 'autostart-off' | 'unsupported-service-manager' | 'source' | 'recovery-needed' | 'needs-repair' | 'windows-upgrade-unsupported' | 'self-update-too-old' | 'self-update-unavailable' | 'legacy-update-record' | 'acknowledgement-unknown';
 
 /** Exact editor-owned explanations for the Runtime's allowlisted refusal states. */
 export const INSTALLER_UPDATE_REASON_MESSAGES: Readonly<Record<InstallerUpdateReason, string>> = Object.freeze({
@@ -22,6 +22,8 @@ export const INSTALLER_UPDATE_REASON_MESSAGES: Readonly<Record<InstallerUpdateRe
   // What happened (the installed release is too old for this page), is my work safe, and the one next action.
   'self-update-too-old': `Releases before ${FIRST_SELF_UPDATE_RELEASE} can't update from this page, so this one update needs a command. It keeps your projects. After it, future updates are one click here.`,
   'self-update-unavailable': "Astrid can't update itself on this computer. Run the command below to update it.",
+  'legacy-update-record': "This update was started by an older Astrid, so this one can't continue it. Next: run the update command from a terminal to start a fresh update.",
+  'acknowledgement-unknown': "The update was started, but Astrid can't confirm yet that it was accepted. Next: wait a minute, then run the same update command again. It checks the earlier attempt before starting a new one.",
 });
 
 /** Shown under the command for self-update-too-old. */

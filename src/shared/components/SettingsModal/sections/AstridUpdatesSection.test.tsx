@@ -515,6 +515,15 @@ describe('receipts from terminal runs: each has its row, Download diagnostics an
     expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
   });
 
+  it('autostart-off status shows the reason sentence once, directly above the agent action and the command', async () => {
+    const section = await mount('Astrid diagnostics\nLast update result: none\n', { available: true, self_update: true, state: 'none', reason: 'autostart-off' });
+    const shown = await within(section).findAllByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']);
+    expect(shown).toHaveLength(1);
+    const agent = within(section).getByRole('button', { name: 'Copy instructions for your agent' });
+    expect(shown[0].compareDocumentPosition(agent) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(shown[0].compareDocumentPosition(within(section).getByRole('code')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('windows-upgrade-unsupported in update status: its line, no retry command, never the generic line', async () => {
     const section = await mount('Astrid diagnostics\nLast update result: none\n', { available: true, self_update: true, state: 'none', reason: 'windows-upgrade-unsupported' });
     expect(await within(section).findAllByText(INSTALLER_UPDATE_REASON_MESSAGES['windows-upgrade-unsupported'])).not.toHaveLength(0);

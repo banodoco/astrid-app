@@ -41,3 +41,19 @@ test('manifest pins its agent Runtime and schema digest', () => {
   assert.ifError(result.error);
   assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
 });
+
+test('--check refuses a manifest whose lifecycle block is missing', async () => {
+  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'pin-check-'));
+  await mkdir(path.join(dir, 'public'));
+  const manifest = JSON.parse(await readFile(path.join(repo, 'public/install-manifest.json'), 'utf8'));
+  delete manifest.lifecycle;
+  await writeFile(path.join(dir, 'public/install-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  const result = spawnSync(process.execPath, [path.join(repo, 'scripts/installer/pin.mjs'), '--check'], {
+    cwd: dir,
+    encoding: 'utf8',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}${result.stderr}`, /missing the lifecycle block/);
+});

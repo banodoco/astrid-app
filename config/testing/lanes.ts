@@ -14,6 +14,9 @@ export const CHECKOUT_LANE = [
   'src/tools/video-editor/runtime/astridSceneAuthoring.test.ts',
   // Checks the extension catalog against the selected Astrid checkout.
   'src/tools/video-editor/dev/localExtensions.catalog.test.ts',
+  // Builds an installed effect with explicitly selected Agent/Runtime roots,
+  // then exercises their real browser transport and the open editor renderer.
+  'src/tools/video-editor/runtime/runtimePackRefresh.integration.test.ts',
 ];
 
 /**

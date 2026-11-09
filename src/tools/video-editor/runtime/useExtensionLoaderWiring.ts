@@ -14,6 +14,7 @@ import type { ExtensionDiagnostic, AstridExtension } from '@astrid/editor-sdk';
 import type { ExtensionStateRepository } from '@/tools/video-editor/runtime/extensionStateRepository';
 import {
   createExtensionLoader,
+  releaseAdmittedExtensionAssets,
   type ExtensionLoader,
   type ExtensionLoaderLoadResult,
   type DirectExtensionInput,
@@ -230,6 +231,8 @@ function contributionsFromInput(input: ExtensionLoaderInput): readonly Extension
  */
 export interface BundleContentStore {
   getBundleContent(ref: string): Promise<string | null>;
+  /** Optional untrusted builder manifest carrier, bound to Runtime M at load. */
+  getArtifactManifest?(ref: string): Promise<unknown>;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +259,11 @@ export interface UseExtensionLoaderWiringOptions {
 
   /**
    * Store for retrieving installed bundle content bytes.
+   *
+   * Runtime pack inputs can carry the builder artifact manifest JSON in the existing
+   * content slot, with the record's integrity hash covering that carrier. The
+   * loader binds it to live Runtime M before importing. Existing byte stores
+   * can instead provide getArtifactManifest; JS text alone grants no admission.
    *
    * Required when `repository` is provided AND installed packs exist.
    * This is typically the IndexedDB-backed repository.
@@ -528,6 +536,7 @@ export function useExtensionLoaderWiring(
             kind: 'installed',
             packRecord: record,
             bundleContent: content,
+            artifactManifest: await bundleStore.getArtifactManifest?.(record.bundleContentRef),
           });
         }
 
@@ -658,7 +667,10 @@ export function useExtensionLoaderWiring(
         // 4. Load (includes dependency + conflict resolution)
         const loadResult = await loader.load(loadablePackages);
 
-        if (cancelled) return;
+        if (cancelled) {
+          loadResult.loadedExtensions.forEach(releaseAdmittedExtensionAssets);
+          return;
+        }
 
         lastResolvedKeyRef.current = resolveKey;
 
@@ -736,8 +748,25 @@ export function useExtensionLoaderWiring(
             }),
           ];
 
-        setState({
-          resolvedExtensions: loadResult.loadedExtensions,
+        setState((previous) => ({
+          resolvedExtensions: [
+            ...loadResult.loadedExtensions.map((extension) => {
+              // Native import() caches a module namespace. A refresh of the same
+              // revision must keep its lifecycle and release the redundant lease.
+              const existing = previous.resolvedExtensions.find((old) => old.manifest === extension.manifest);
+              if (existing && existing !== extension) {
+                releaseAdmittedExtensionAssets(extension);
+                return existing;
+              }
+              return extension;
+            }),
+            ...previous.resolvedExtensions.filter((extension) => {
+              const id = extension.manifest.id as string;
+              return !loadResult.loadedExtensions.some((next) => next.manifest.id === id)
+                && packageStateEntries.some((entry) => entry.extensionId === id
+                  && ['invalid', 'incompatible', 'runtime-error'].includes(entry.packageState));
+            }),
+          ],
           diagnostics: [
             ...validation.diagnostics,
             ...settingsDiagnostics,
@@ -746,7 +775,7 @@ export function useExtensionLoaderWiring(
           loaderResult: loadResult,
           error: null,
           packageStateEntries: Object.freeze(packageStateEntries),
-        });
+        }));
       } catch (err) {
         if (cancelled) return;
         setState((prev) => ({

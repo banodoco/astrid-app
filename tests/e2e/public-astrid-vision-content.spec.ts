@@ -67,7 +67,8 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
 
   const current = content.gaps.filter(gap => gap.assessment !== 'closed');
   const gapRows = page.locator('.astrid-vision-part');
-  await expect(gapRows).toHaveCount(current.length);
+  await expect(gapRows).toHaveCount(Math.min(10, current.length));
+  await expect(page.getByRole('button', { name: 'Show all gaps' })).toBeVisible();
   const first = gapRows.first();
   const trigger = first.locator('h3 button');
   const body = first.locator('.astrid-vision-part-body');
@@ -283,7 +284,7 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
   const gap = page.locator('#gap-aa-001');
   const selector = page.getByRole('combobox', { name: 'Filter gaps by status' });
   await expect(selector).toHaveValue('current');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(current.length);
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, current.length));
   await expect(gap).toBeVisible();
   await expect(gap.getByRole('button', { name: first.title })).toHaveAttribute('aria-expanded', 'false');
   await gap.getByRole('button', { name: first.title }).click();
@@ -292,6 +293,8 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
   await expect(source).toHaveAttribute('href', first.githubUrl);
   expect(await source.evaluate(element => getComputedStyle(element).borderTopStyle)).toBe('solid');
   await selector.selectOption('all');
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, content.gaps.length));
+  await page.getByRole('button', { name: 'Show all gaps' }).click();
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.length);
   await selector.selectOption('closed');
   await expect(page.locator('.astrid-vision-part')).toHaveCount(content.gaps.filter(gap => gap.assessment === 'closed').length);
@@ -299,7 +302,7 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
     await expect(page.locator('.astrid-vision-filter-empty')).toHaveText('No gaps with this status yet.');
   }
   await selector.selectOption('current');
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(current.length);
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, current.length));
 });
 
 test('status filters include closed gaps and completed projects from a valid feed', async ({ page, request }) => {
@@ -316,10 +319,13 @@ test('status filters include closed gaps and completed projects from a valid fee
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const gapFilter = page.getByRole('combobox', { name: 'Filter gaps by status' });
   const projectFilter = page.getByRole('combobox', { name: 'Filter projects by status' });
-  await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.filter(gap => gap.assessment !== 'closed').length);
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(
+    Math.min(10, altered.gaps.filter(gap => gap.assessment !== 'closed').length));
   await gapFilter.selectOption('closed');
   await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.filter(gap => gap.assessment === 'closed').length);
   await gapFilter.selectOption('all');
+  await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, altered.gaps.length));
+  await page.getByRole('button', { name: 'Show all gaps' }).click();
   await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.length);
   await projectFilter.selectOption('all');
   await expect(page.locator('.astrid-vision-project-row')).toHaveCount(altered.projects.length);

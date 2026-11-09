@@ -729,8 +729,35 @@
     animation: astrid-vision-sigil-clear .85s ease-out both;
   }
 }
+/* A phone has no hover. Give each principle the same center-of-screen
+   moment as the pillar minks, then settle as it leaves that viewing band. */
+@media (max-width: 640px) {
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-principle-sigil {
+    opacity: .82;
+    color: color-mix(in oklab, var(--sigil-ink) 62%, var(--astrid-muted));
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-orbit {
+    animation: astrid-vision-sigil-orbit 1.25s ease-in-out infinite alternate;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-open-ring {
+    animation: astrid-vision-sigil-ring 1.4s ease-in-out infinite;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-open-sparks {
+    animation: astrid-vision-sigil-spark-orbit 1.7s ease-in-out infinite alternate;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-spark {
+    animation: astrid-vision-sigil-spark-rise 1.35s ease-in-out infinite;
+  }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-knot { opacity: .45; }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-clear-path {
+    animation: astrid-vision-sigil-clear .85s ease-out both;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-sigil-art g { animation: none !important; transform: none !important; }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-principle-sigil {
+    opacity: .58;
+  }
 }
 .astrid-vision-standards-list h3 {
   margin: 0 0 11px;
@@ -1365,6 +1392,9 @@
   font: 400 clamp(28px, 4vw, 40px)/1.15 var(--astrid-vision-serif);
   letter-spacing: -.03em;
 }
+/* A programmatically focused dialog title shouldn't have a control-style
+   ring. Keyboard users still see focus when they tab to the X or links. */
+.astrid-vision-details-header h2:focus { outline: none; }
 .astrid-vision-details-close {
   position: static;
   flex: none;

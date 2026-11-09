@@ -705,12 +705,19 @@
   transform-box: view-box;
   transform-origin: 20px 20px;
 }
-.astrid-vision-sigil-clear-path { opacity: .4; stroke-dasharray: 60; stroke-dashoffset: 14; }
+/* Give the knot time to dissolve as a clean path replaces it. Keep the
+   transition reversible so leaving hover (or the phone's center band)
+   returns gradually rather than snapping back. */
+.astrid-vision-sigil-knot,
+.astrid-vision-sigil-knot-fragments,
+.astrid-vision-sigil-clear-path {
+  transition: opacity 5s ease-in-out;
+}
+.astrid-vision-sigil-clear-path { opacity: 0; }
 @keyframes astrid-vision-sigil-orbit { to { transform: rotate(16deg); } }
 @keyframes astrid-vision-sigil-ring { 50% { transform: scale(1.07); opacity: .75; } }
 @keyframes astrid-vision-sigil-spark-rise { 50% { transform: translateY(-3px); } }
 @keyframes astrid-vision-sigil-spark-orbit { to { transform: rotate(24deg); } }
-@keyframes astrid-vision-sigil-clear { to { stroke-dashoffset: 0; opacity: 1; } }
 @media (hover: hover) and (pointer: fine) {
   .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-orbit {
     animation: astrid-vision-sigil-orbit 1.25s ease-in-out infinite alternate;
@@ -724,9 +731,11 @@
   .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-spark {
     animation: astrid-vision-sigil-spark-rise 1.35s ease-in-out infinite;
   }
-  .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-knot { opacity: .45; }
+  .astrid-vision-standards-list > li:is(:hover, :focus-within) :is(.astrid-vision-sigil-knot, .astrid-vision-sigil-knot-fragments) {
+    opacity: 0;
+  }
   .astrid-vision-standards-list > li:is(:hover, :focus-within) .astrid-vision-sigil-clear-path {
-    animation: astrid-vision-sigil-clear .85s ease-out both;
+    opacity: 1;
   }
 }
 /* A phone has no hover. Give each principle the same center-of-screen
@@ -748,13 +757,18 @@
   .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-spark {
     animation: astrid-vision-sigil-spark-rise 1.35s ease-in-out infinite;
   }
-  .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-knot { opacity: .45; }
+  .astrid-vision-standards-list > li[data-sigil-active="true"] :is(.astrid-vision-sigil-knot, .astrid-vision-sigil-knot-fragments) {
+    opacity: 0;
+  }
   .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-sigil-clear-path {
-    animation: astrid-vision-sigil-clear .85s ease-out both;
+    opacity: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-sigil-art g { animation: none !important; transform: none !important; }
+  .astrid-vision-sigil-knot,
+  .astrid-vision-sigil-knot-fragments,
+  .astrid-vision-sigil-clear-path { transition: none !important; }
   .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-principle-sigil {
     opacity: .58;
   }

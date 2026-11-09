@@ -26,7 +26,11 @@ export function openUpdatesSettings() {
  * Render only the actions selected by K6; source and Pinokio must never fall through to installer commands.
  * `context` is where the actions sit: Settings is the Details destination, so it never links to itself.
  */
-export function UpdateResolutionActions({ resolution, operation, context = 'page', installType }: { readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView; readonly context?: 'page' | 'settings'; readonly installType?: InstallType }) {
+export function UpdateResolutionActions({ resolution, operation, context = 'page', installType, reasonShown = false }: {
+  readonly resolution: UpdateResolution; readonly operation?: InstallerUpdateView; readonly context?: 'page' | 'settings'; readonly installType?: InstallType;
+  /** A reason is already on screen beside these actions (Settings' last-run row), so the generic line would contradict it. */
+  readonly reasonShown?: boolean;
+}) {
   const guarded = useGuardedReload();
   const localUpdate = pageLocalUpdate();
   const localState = useSyncExternalStore(localUpdate.subscribe, localUpdate.getSnapshot, localUpdate.getSnapshot);
@@ -34,7 +38,9 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   const installerPath = (operation?.installType ?? installType ?? (operation ? 'installer' : undefined)) === 'installer';
   // A failed in-app update's next action is the plain install line, the same repair line a degraded install shows.
   const failedInstall = installerPath && installerUpdateFailed(operation);
-  if (actions.length === 0 && localState.phase === 'idle' && resolution.updateReason !== 'autostart-off' && !operation?.pending && !operation?.status?.result && !operation?.error && !failedInstall) return null;
+  // A reason with no command of its own still offers the diagnostics its line points to.
+  const diagnosticsOnly = resolution.updateReason === 'windows-upgrade-unsupported';
+  if (actions.length === 0 && localState.phase === 'idle' && resolution.updateReason !== 'autostart-off' && !diagnosticsOnly && !operation?.pending && !operation?.status?.result && !operation?.error && !failedInstall) return null;
 
   const commandOptions = actions.some((action) => action.label === COPY_FOR_AGENT_ACTION || action.label === RUN_IT_YOURSELF_ACTION);
   const route = actions.find((action) => action.destination === 'settings-updates');
@@ -70,7 +76,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {/* The generic line only when no reason explains why this Astrid can't update itself. */}
-    {commandOptions && installerPath && !execute && !resolution.updateReason && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']}</p>}
+    {commandOptions && installerPath && !execute && !resolution.updateReason && !reasonShown && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']}</p>}
     {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair' || failedInstall} />}
     {commandOptions && resolution.updateReason === 'self-update-too-old' && <p className="text-sm">{SELF_UPDATE_TOO_OLD_STEPS}</p>}
     {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
@@ -89,7 +95,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
       {!commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain />}
     </div>}
     {/* Settings has its own Diagnostics row; a card on the page points to the full story here. */}
-    {context === 'page' && (failedInstall || localState.phase === 'failed') && <DownloadDiagnosticsButton />}
+    {context === 'page' && (failedInstall || localState.phase === 'failed' || diagnosticsOnly) && <DownloadDiagnosticsButton />}
     {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
     {guarded.error && <p role="alert">{guarded.error}</p>}
   </div>;

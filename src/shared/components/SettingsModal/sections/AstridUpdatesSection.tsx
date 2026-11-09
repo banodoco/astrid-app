@@ -14,7 +14,7 @@ import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { installerOutcomeMessage, installerUpdateFailed, installerUpdateLine } from '@/shared/lib/updates/updateOperation.ts';
-import { lastRunFromReport, lastUpdateDidNothing } from '@/shared/lib/updates/lastRun.ts';
+import { lastRunFromReport, lastRunNotice } from '@/shared/lib/updates/lastRun.ts';
 import { updatedLine } from '@/shared/lib/updates/liveUpdate.ts';
 import { usePageStale } from '@/shared/components/RuntimeConnection/AppBuildProvider.tsx';
 import { astridOutOfDate } from './ConnectionSection.tsx';
@@ -182,8 +182,9 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
     ? 'The latest log is not available in diagnostics yet. Check again.'
     // Current Runtimes label the log "Installer log (<file>, last 80 lines)"; older ones "Installer transaction log".
     : diagnostics.match(/(?:Installer transaction log|Installer log \([^)\n]*\)):\n([\s\S]*?)\n(?:Retained back-end copies|Program versions on disk):/)?.[1]?.trim() ?? '';
-  // The installer's receipt says the last update installed nothing while Astrid is still behind.
-  const didNothing = state === 'ready' ? lastUpdateDidNothing(lastRunFromReport(diagnostics), currentStatus?.release, currentStatus?.servedRelease) : null;
+  // The installer's receipt from the last run (often a terminal run) that left Astrid behind: not updated, failed,
+  // rolled back, out of disk space or two copies running. A failed in-app update already shows its own repair above.
+  const lastRun = state === 'ready' && !installerUpdateFailed(operation) ? lastRunNotice(lastRunFromReport(diagnostics), currentStatus?.release, currentStatus?.servedRelease) : null;
 
   const appBuild = currentStatus?.app || APP_BUILD;
 
@@ -196,19 +197,21 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
       </>}
       action={!updateAvailable && <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void check()} disabled={state === 'checking'}>Check for updates</Button>}
     >
-      {actionsFor && <UpdateResolutionActions resolution={actionsFor} operation={operation} context="settings" />}
+      {actionsFor && <UpdateResolutionActions resolution={actionsFor} operation={operation} context="settings" reasonShown={Boolean(lastRun)} />}
       {lastResult && lastResult !== statusLine && <p className="text-muted-foreground">Last result: {lastResult}</p>}
     </SettingsRow>
-    {didNothing && <SettingsRow
-      label={<p className="font-medium text-foreground">{didNothing.title}</p>}
-      description={didNothing.body}
+    {lastRun && <SettingsRow
+      label={<p className="font-medium text-foreground">{lastRun.title}</p>}
+      description={lastRun.body}
     >
       <div className="space-y-2">
         <Button type="button" variant="retro-secondary" size="retro-sm" onClick={() => void downloadDiagnostics()}>Download diagnostics</Button>
-        <CopyCommandRow command={installCommand('update')} label="Copy command (try again)" copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+        {lastRun.command === 'update' && <CopyCommandRow command={installCommand('update')} label="Copy command (try again)" copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />}
+        {lastRun.command === 'repair' && <CopyCommandRow command={repairCommand} label="Copy repair command" copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />}
       </div>
     </SettingsRow>}
-    {repairNeeded && <SettingsRow
+    {/* A receipt that asks for the repair command already offers it. */}
+    {repairNeeded && lastRun?.command !== 'repair' && <SettingsRow
       label={<p className="font-medium text-foreground">{ASTRID_STATUS_COPY.repairTitle}</p>}
       description={ASTRID_STATUS_COPY.repairDescription}
     >

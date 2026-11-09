@@ -185,3 +185,22 @@ describe('update resolution in-app availability', () => {
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 });
+
+describe('windows-upgrade-unsupported', () => {
+  const resolution = (context: 'page' | 'settings') => resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 11, releaseBehind: true, updateReason: 'windows-upgrade-unsupported', updateNowAvailable: true, selfUpdate: true }, context);
+
+  it('on the page: no command and no Update now, only Download diagnostics', () => {
+    render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    expect(screen.queryByRole('code')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).toBeNull();
+    expect(document.body.textContent).not.toContain(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']);
+  });
+
+  it('in Settings: no command either; its own Diagnostics row is the pointer', () => {
+    const { container } = render(<UpdateResolutionActions resolution={resolution('settings')} operation={installerOperation()} context="settings" />);
+    expect(screen.queryByRole('code')).toBeNull();
+    expect(container.textContent).not.toContain('Run the command below');
+  });
+});

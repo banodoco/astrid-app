@@ -114,14 +114,15 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   }
   // A setup refusal on an install that is already current has no update to offer: it shows no card and no command.
   const current = input.installedRelease !== undefined && input.servedRelease !== undefined && input.installedRelease >= input.servedRelease;
-  const silentWhenCurrent = current && (input.updateReason === 'autostart-off' || input.updateReason === 'unsupported-service-manager');
+  const silentWhenCurrent = current && (input.updateReason === 'autostart-off' || input.updateReason === 'unsupported-service-manager' || input.updateReason === 'windows-upgrade-unsupported');
   // A fully local install shows only the source line its launcher reports; its other refusals follow the release rules.
   const sourceLocal = input.installType === 'fully-local' && input.updateReason === 'source';
   if (input.updateReason && (input.installType === 'installer' || sourceLocal) && !silentWhenCurrent) {
     // A recovery or repair is an update card. Without an in-app update the reason is the one line and the command is the path;
     // autostart-off has its own setup command, and a source checkout has its own update route, not the installer command.
     const card = input.updateReason === 'recovery-needed' || input.updateReason === 'needs-repair';
-    const noAction = input.updateReason === 'autostart-off' || input.updateReason === 'source';
+    // windows-upgrade-unsupported has no command that would work yet: its line points to Download diagnostics.
+    const noAction = input.updateReason === 'autostart-off' || input.updateReason === 'source' || input.updateReason === 'windows-upgrade-unsupported';
     // Only recovery-needed still starts the update. Every other reason is a refusal, so Update now is not offered with it even when
     // self_update is true: the reason's line and the command are the path.
     const actions = noAction ? { primary: null, secondary: null }

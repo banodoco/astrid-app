@@ -22,7 +22,7 @@ export interface UpdateOperationSnapshot {
 }
 
 /** Runtime refusal codes with a line of their own. Any other code reads as self-update-unavailable. */
-const RUNTIME_REFUSAL_REASONS: ReadonlySet<string> = new Set(['busy', 'autostart-off', 'unsupported-service-manager', 'source']);
+const RUNTIME_REFUSAL_REASONS: ReadonlySet<string> = new Set(['busy', 'autostart-off', 'unsupported-service-manager', 'source', 'windows-upgrade-unsupported']);
 /** A 409's details.kind reports how an earlier update ended. It is an outcome, never a refusal reason. */
 const CONFLICT_OUTCOMES: ReadonlySet<string> = new Set(['updated', 'rolled_back', 'failed']);
 const OUTCOME_MESSAGES: Readonly<Record<InstallerUpdateOutcome, string>> = {

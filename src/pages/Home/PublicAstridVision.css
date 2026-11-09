@@ -1565,7 +1565,7 @@
   z-index: 12;
   /* Bleed the header to the viewport edges while leaving the editorial
      content below within its existing reading column. */
-  width: calc(100% + 2 * var(--astrid-vision-gutter));
+  width: calc(100% + var(--astrid-vision-gutter) + var(--astrid-vision-gutter));
   max-width: none;
   display: flex;
   align-items: center;

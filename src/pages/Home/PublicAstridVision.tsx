@@ -42,6 +42,17 @@ function MarkdownText({ value, className }: { value: string; className?: string 
   </div>;
 }
 
+/** One little crisp pixel arrow shared by the pillar and principle cards. */
+function PixelArrow() {
+  return (
+    <svg viewBox="0 0 18 18" width="18" height="18" fill="none"
+      stroke="currentColor" strokeWidth="2" shapeRendering="crispEdges"
+      aria-hidden="true" focusable="false">
+      <path d="M4 14L13 5M8 5h5v5" />
+    </svg>
+  );
+}
+
 const JUGGLED_ITEMS = [
   { name: 'reel', x: 20, y: 1 },
   { name: 'chip', x: 1, y: 20 },
@@ -414,7 +425,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <p>{pillar.descriptor}</p>
               <NorthStarMink art={pillar.art} />
               <span className="astrid-vision-pillar-details" aria-hidden="true">
-                Details <span className="astrid-vision-card-arrow">↗</span>
+                Details <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + pillar.title + ': gaps and projects'}
@@ -441,7 +452,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   : <MarkdownText value={principle.bodyMarkdown} />}
               </div>
               <span className="astrid-vision-principle-corner" aria-hidden="true">
-                <span className="astrid-vision-card-arrow">↗</span>
+                <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}

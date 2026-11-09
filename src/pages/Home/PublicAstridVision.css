@@ -496,7 +496,7 @@
 /* The home page's sky sits behind Vision too, and the page follows it through twilight with the same
    dusk values (set inline from the sky; see the dusk rules in PublicAstridShell.css). */
 .astrid-vision > .astrid-sky { width: auto; margin: 0; }
-.astrid-vision > :not(.astrid-sky) { position: relative; z-index: 1; }
+.astrid-vision > :not(.astrid-sky):not(.astrid-vision-details) { position: relative; z-index: 1; }
 .astrid-vision[data-dusk] {
   --astrid-panel: color-mix(in oklab, #fffefa, #221f1a calc(var(--astrid-dusk) * 100%));
   --astrid-ink: color-mix(in oklab, #25241f, #f3eee4 calc(var(--astrid-dusk-ink) * 100%));
@@ -1140,14 +1140,25 @@
   outline: 3px solid var(--astrid-accent);
   outline-offset: 4px;
 }
-.astrid-vision-principles > li:is(:hover, :focus-within) h3,
-.astrid-vision-standards-list > li:is(:hover, :focus-within) h3 {
-  text-decoration: underline;
-  text-decoration-color: var(--astrid-accent);
-  text-decoration-thickness: 1px;
-  text-underline-offset: 5px;
+/* Touch WebKit retains :hover/:focus-within after closing a dialog; neither may
+   leave the title permanently underlined. Buttons have their own focus rings. */
+@media (hover: hover) and (pointer: fine) {
+  .astrid-vision-principles > li:hover h3,
+  .astrid-vision-standards-list > li:hover h3 {
+    text-decoration: underline;
+    text-decoration-color: var(--astrid-accent);
+    text-decoration-thickness: 1px;
+    text-underline-offset: 5px;
+  }
 }
 
+/* A dialog in the top layer must be viewport-positioned, not treated as a page section.
+   In particular, never let the broad .astrid-vision > * section rule make it relative. */
+.astrid-vision > .astrid-vision-details {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+}
 /* Native dialog supplies Escape, focus containment and a real modal backdrop. */
 .astrid-vision-details {
   width: min(740px, calc(100vw - 32px));
@@ -1286,8 +1297,7 @@
 }
 
 /* A visible, quiet affordance also works on touch screens without hover. */
-.astrid-vision-principles > li::after,
-.astrid-vision-standards-list > li::after {
+.astrid-vision-principles > li::after {
   content: 'Details ↗';
   position: absolute;
   right: 0;
@@ -1300,4 +1310,33 @@
   top: clamp(22px, 2.6vw, 32px);
   right: clamp(22px, 2.6vw, 32px);
   color: var(--tone-ink);
+}
+
+/* The principles use a clear footer action, rather than a card-wide overlay. */
+.astrid-vision .astrid-vision-standards-list > li {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.astrid-vision-standards-list > li > div { flex: 1 1 auto; }
+.astrid-vision-principle-open {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+  padding: 7px 0;
+  border: 0;
+  border-bottom: 1px solid currentColor;
+  background: transparent;
+  color: var(--astrid-accent);
+  font: 600 13px/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.astrid-vision-principle-open:hover { opacity: .75; }
+.astrid-vision-principle-open:focus-visible {
+  outline: 2px solid var(--astrid-accent);
+  outline-offset: 4px;
+  border-radius: 2px;
 }

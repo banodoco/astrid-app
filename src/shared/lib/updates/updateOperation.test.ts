@@ -259,6 +259,17 @@ describe('LocalPageUpdate', () => {
     expect(JSON.parse(init.body as string).requestId).toMatch(/^[0-9a-f]{32}$/);
   });
 
+  it('shows the warning lines of a success that has warnings, not only Astrid updated', async () => {
+    const lines = [
+      'Astrid updated: Release 4 → Release 5, but skills did not refresh.',
+      'Next: Restart your coding agent so it loads the refreshed skills.',
+      'Details: /home/user/.astrid/install.log',
+    ];
+    const { update } = make(() => json(200, { result: { status: 'updated', lines } }));
+    const outcome = await update.start();
+    expect(outcome).toEqual({ phase: 'done', status: 'updated', message: lines.join('\n') });
+  });
+
   it.each(['update_busy', 'non_fast_forward', 'dirty'] as const)('maps the 409 %s refusal', async (refusal) => {
     const { update } = make(() => json(409, { refusal, code: 'x' }));
     expect(await update.start()).toEqual({ phase: 'refused', refusal, message: LOCAL_PAGE_REFUSAL_MESSAGES[refusal] });

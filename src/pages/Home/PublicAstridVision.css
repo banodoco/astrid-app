@@ -237,8 +237,10 @@
   --tone-night: #3b2b23;
   --tone-ink-night: #f28a4e;
   padding: clamp(22px, 2.6vw, 32px);
+  border: 1px solid color-mix(in oklab, var(--tone-ink) 28%, transparent);
   border-radius: 16px;
   background: var(--tone);
+  transition: border-color 170ms ease, box-shadow 170ms ease;
   counter-increment: astrid-principle;
   container-type: inline-size;
 }
@@ -631,14 +633,49 @@
   padding: 0;
   list-style: none;
 }
-/* The section divider is enough; suppress inherited list-item rules as well. */
+/* Principles use the same card structure with a quiet transparent surface.
+   Accent color belongs to the future sigil, not a whole-card tint. */
 .astrid-vision .astrid-vision-standards-list > li {
-  border-top: none;
-  padding-top: 0;
+  --sigil-ink: #a94714;
+  --sigil-bg: #f2dcca;
+  padding: clamp(20px, 2.4vw, 28px);
+  border: 1px solid color-mix(in oklab, var(--astrid-ink) 22%, transparent);
+  border-radius: 16px;
+  background: transparent;
+  transition: border-color 170ms ease, box-shadow 170ms ease;
 }
-.astrid-vision-standards-list li > span {
-  color: var(--astrid-accent);
-  font: 12px "Departure Mono", ui-monospace, monospace;
+.astrid-vision .astrid-vision-standards-list > li:nth-child(2) {
+  --sigil-ink: #916a30;
+  --sigil-bg: #f1e6cf;
+}
+.astrid-vision .astrid-vision-standards-list > li:nth-child(3) {
+  --sigil-ink: #50744e;
+  --sigil-bg: #dbe9d9;
+}
+.astrid-vision .astrid-vision-standards-list > li:nth-child(4) {
+  --sigil-ink: #50738b;
+  --sigil-bg: #dde8ef;
+}
+/* This is a reserved artwork slot, not an illustration. Future bespoke SVG or
+   PNG sigils can replace its internals without shifting any card's layout. */
+.astrid-vision-principle-sigil {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 20px;
+  border: 1px solid var(--sigil-ink);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--sigil-bg) 42%, transparent);
+}
+.astrid-vision-principle-sigil::before {
+  content: "";
+  position: absolute;
+  inset: 13px;
+  border: 2px solid var(--sigil-ink);
+  border-radius: 50%;
+  opacity: .9;
 }
 .astrid-vision-standards-list h3 {
   margin: 12px 0;
@@ -1143,12 +1180,22 @@
 /* Touch WebKit retains :hover/:focus-within after closing a dialog; neither may
    leave the title permanently underlined. Buttons have their own focus rings. */
 @media (hover: hover) and (pointer: fine) {
-  .astrid-vision-principles > li:hover h3,
-  .astrid-vision-standards-list > li:hover h3 {
-    text-decoration: underline;
-    text-decoration-color: var(--astrid-accent);
-    text-decoration-thickness: 1px;
-    text-underline-offset: 5px;
+  .astrid-vision-principles > li:hover {
+    border-color: color-mix(in oklab, var(--tone-ink) 82%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) 24%, transparent);
+  }
+  .astrid-vision-standards-list > li:hover {
+    border-color: color-mix(in oklab, var(--astrid-ink) 65%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--astrid-ink) 16%, transparent);
+  }
+  .astrid-vision-principles > li:hover::after {
+    color: var(--astrid-ink);
+    font-weight: 800;
+  }
+  .astrid-vision-standards-list > li:hover .astrid-vision-principle-open {
+    color: var(--astrid-ink);
+    border-bottom-color: var(--astrid-ink);
+    font-weight: 700;
   }
 }
 
@@ -1335,9 +1382,17 @@
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
-.astrid-vision-principle-open:hover { opacity: .75; }
+.astrid-vision-principle-open:hover {
+  opacity: 1;
+  color: var(--astrid-ink);
+  border-bottom-color: var(--astrid-ink);
+  font-weight: 700;
+}
 .astrid-vision-principle-open:focus-visible {
   outline: 2px solid var(--astrid-accent);
   outline-offset: 4px;
   border-radius: 2px;
+}
+.astrid-vision-standards-list > li:focus-within {
+  border-color: color-mix(in oklab, var(--astrid-ink) 65%, transparent);
 }

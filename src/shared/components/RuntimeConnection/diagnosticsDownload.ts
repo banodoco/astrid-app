@@ -1,10 +1,20 @@
 import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
 import { APP_BUILD, fetchBuildInfo } from '@/shared/lib/updates/appBuildWatch.ts';
 import { isReleaseNumber } from '@/shared/lib/updates/installedRelease.ts';
+import { localUpdateStatus } from '@/shared/lib/updates/pageUpdateStatus.ts';
+import { checkLocalUpdate } from '@/shared/lib/updates/updateStatus.ts';
 
-/** The served manifest's release, or null when it cannot be read; the file then says unknown rather than failing. */
+/**
+ * The served manifest's release, or null when it cannot be read; the file then says unknown rather than failing.
+ * A local checkout's own /install-manifest.json is the checkout's release, so there the launcher's status, which
+ * reads astrid.haus, names the served release.
+ */
 async function servedRelease(fetchImpl: typeof fetch): Promise<number | null> {
   try {
+    if (localUpdateStatus()) {
+      const release = (await checkLocalUpdate(fetchImpl)).servedRelease;
+      return isReleaseNumber(release) && release > 0 ? release : null;
+    }
     const response = await fetchImpl('/install-manifest.json', { cache: 'no-store', redirect: 'error', headers: { Accept: 'application/json' } });
     if (!response.ok) return null;
     const value: unknown = await response.json();

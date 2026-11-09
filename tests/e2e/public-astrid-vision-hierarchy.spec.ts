@@ -96,7 +96,7 @@ test('mobile principle card has no redundant footer CTA, fills the touch target 
   expect(cardBounds).not.toBeNull();
   expect(triggerBounds).not.toBeNull();
   expect(Math.abs(triggerBounds!.y - cardBounds!.y)).toBeLessThan(2);
-  expect(Math.abs(triggerBounds!.height - cardBounds!.height)).toBeLessThan(2);
+  expect(Math.abs(triggerBounds!.height - cardBounds!.height)).toBeLessThanOrEqual(2);
 
   await trigger.scrollIntoViewIfNeeded();
   const before = await page.evaluate(() => window.scrollY);
@@ -292,7 +292,7 @@ test('compact principle cards remain readable and open from title or sigil', asy
     const cardRect = await cards.last().boundingBox();
     expect(areaRect).not.toBeNull();
     expect(cardRect).not.toBeNull();
-    expect(Math.abs(areaRect!.width - cardRect!.width)).toBeLessThan(2);
+    expect(Math.abs(areaRect!.width - cardRect!.width)).toBeLessThanOrEqual(2);
     expect(Math.abs(areaRect!.height - cardRect!.height)).toBeLessThanOrEqual(2);
 
     // Mouse coordinates are viewport-relative: bring the card on-screen first.

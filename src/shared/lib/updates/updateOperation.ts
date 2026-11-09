@@ -47,7 +47,9 @@ export function installerUpdateReasonOf(status: InstallerUpdateStatus | null | u
 /** Only a Runtime that reports self_update can run an in-app update; a refusal reason keeps it from starting. */
 export function canStartInstallerUpdate(status: InstallerUpdateStatus | null | undefined): boolean {
   if (!status || status.self_update !== true) return false;
-  return status.state === 'recovery-needed' || installerUpdateReasonOf(status) === null;
+  // A recovery is an in-app update only when the Runtime gives no refusal reason; a busy or policy reason refuses it.
+  if (status.state === 'recovery-needed') return !status.reason || status.reason === 'none';
+  return installerUpdateReasonOf(status) === null;
 }
 
 /** The Runtime's refusal code: details.reason only. */

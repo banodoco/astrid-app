@@ -70,7 +70,8 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   const installType = operationInstallType(snapshot, connection?.managedByPinokio);
   // Missing identity is never evidence of an installer-owned installation. The
   // Runtime performs the full ownership/lock/busy admission on the explicit POST.
-  const recovery = snapshot.status?.state === 'recovery-needed';
+  // A recovery whose Runtime refuses it (a busy or policy reason) gets the terminal line, never the in-app Update.
+  const recovery = snapshot.status?.state === 'recovery-needed' && canStartInstallerUpdate(snapshot.status);
   // Update now is offered when the installed Astrid reports self_update, and while it is busy, when it is shown disabled.
   // canStartInstallerUpdate gates the start itself.
   const available = enabled && installType === 'installer' && manager === null

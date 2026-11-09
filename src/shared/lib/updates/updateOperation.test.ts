@@ -41,6 +41,9 @@ describe('canStartInstallerUpdate', () => {
     expect(canStartInstallerUpdate({ available: false, self_update: true, state: 'none' })).toBe(true);
     expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'none', reason: 'busy' })).toBe(false);
     expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed' })).toBe(true);
+    // A recovery the Runtime refuses (reason busy, or any policy reason) must not start an in-app update.
+    expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed', reason: 'busy' })).toBe(false);
+    expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed', reason: 'autostart-off' })).toBe(false);
     expect(canStartInstallerUpdate(null)).toBe(false);
   });
 });

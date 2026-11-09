@@ -1205,25 +1205,39 @@
 }
 /* Touch WebKit retains :hover/:focus-within after closing a dialog; neither may
    leave the title permanently underlined. Buttons have their own focus rings. */
+/* Draw a complete inner outline independently of the joined cards' shared
+   borders: the middle cards have no actual left border by design. */
+.astrid-vision-standards-list > li::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border: 2px solid color-mix(in oklab, var(--astrid-ink) 70%, transparent);
+  border-radius: inherit;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 170ms ease;
+}
 @media (hover: hover) and (pointer: fine) {
   .astrid-vision-principles > li:hover {
     border-color: color-mix(in oklab, var(--tone-ink) 82%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--tone-ink) 24%, transparent);
   }
   .astrid-vision-standards-list > li:hover {
+    z-index: 1;
     border-color: color-mix(in oklab, var(--astrid-ink) 65%, transparent);
-    box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--astrid-ink) 16%, transparent);
   }
-  .astrid-vision-principles > li:hover::after {
+  .astrid-vision-standards-list > li:hover::after { opacity: 1; }
+  .astrid-vision-principles > li:hover .astrid-vision-pillar-details {
     color: var(--astrid-ink);
     font-weight: 800;
   }
-  .astrid-vision-standards-list > li:hover .astrid-vision-principle-open {
-    color: var(--astrid-ink);
-    border-bottom-color: var(--astrid-ink);
-    font-weight: 700;
+  .astrid-vision :is(.astrid-vision-principles, .astrid-vision-standards-list) > li:hover .astrid-vision-card-arrow {
+    animation: astrid-vision-arrow-nudge 1s ease-in-out infinite;
   }
 }
+/* Preserve a visible keyboard focus treatment without a sticky touch hover. */
+.astrid-vision-standards-list > li:has(> .astrid-vision-card-open:focus-visible)::after { opacity: 1; }
 
 /* A dialog in the top layer must be viewport-positioned, not treated as a page section.
    In particular, never let the broad .astrid-vision > * section rule make it relative. */
@@ -1447,79 +1461,34 @@
   .astrid-vision-details-project-heading { flex-wrap: wrap; gap: 3px 10px; }
 }
 
-/* A visible, quiet affordance also works on touch screens without hover. */
-.astrid-vision-principles > li::after {
-  content: 'Details ↗';
+/* A quiet affordance, with a separately animated arrow for each kind of card. */
+.astrid-vision-pillar-details,
+.astrid-vision-principle-corner {
   position: absolute;
-  right: 0;
-  top: 0;
-  pointer-events: none;
-  color: var(--astrid-accent);
-  font: 600 11px/1.4 ui-monospace, monospace;
-}
-.astrid-vision-principles > li::after {
+  z-index: 1;
   top: clamp(22px, 2.6vw, 32px);
   right: clamp(22px, 2.6vw, 32px);
+  pointer-events: none;
   color: var(--tone-ink);
+  font: 600 11px/1.4 ui-monospace, monospace;
 }
-
-/* The principles use a clear footer action, rather than a card-wide overlay. */
+.astrid-vision-principle-corner {
+  top: clamp(16px, 1.4vw, 22px);
+  right: clamp(16px, 1.4vw, 22px);
+  color: var(--sigil-ink);
+  font-size: 16px;
+}
+.astrid-vision-card-arrow { display: inline-block; }
 .astrid-vision .astrid-vision-standards-list > li {
   display: flex;
   flex-direction: column;
   align-items: stretch;
 }
-.astrid-vision-principle-open { align-self: flex-start; }
 .astrid-vision-standards-list > li > div { flex: 1 1 auto; }
-.astrid-vision-principle-open {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  margin-top: 18px;
-  padding: 7px 0;
-  border: 0;
-  border-bottom: 1px solid currentColor;
-  background: transparent;
-  color: var(--astrid-accent);
-  font: 600 13px/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
-  white-space: nowrap;
-  text-align: left;
-  cursor: pointer;
-  -webkit-tap-highlight-color: transparent;
-}
-.astrid-vision-principle-open:hover {
-  opacity: 1;
-  color: var(--astrid-ink);
-  border-bottom-color: var(--astrid-ink);
-  font-weight: 700;
-}
-.astrid-vision-principle-open:focus-visible {
-  outline: 2px solid var(--astrid-accent);
-  outline-offset: 4px;
-  border-radius: 2px;
-}
-.astrid-vision-standards-list > li:focus-within {
-  border-color: color-mix(in oklab, var(--astrid-ink) 65%, transparent);
-}
-
-/* The movement belongs to the small external-link glyph, not the card or copy. */
-.astrid-vision-principle-arrow {
-  display: inline-block;
-  flex: none;
-  transition: color 170ms ease;
-}
 @keyframes astrid-vision-arrow-nudge {
   0%, 100% { transform: translate(-1px, 1px); }
   50% { transform: translate(2px, -2px); }
 }
-@media (hover: hover) and (pointer: fine) {
-  .astrid-vision-standards-list > li:hover .astrid-vision-principle-arrow {
-    animation: astrid-vision-arrow-nudge 1s ease-in-out infinite;
-  }
-}
-.astrid-vision-principle-open:focus-visible .astrid-vision-principle-arrow {
-  transform: translate(2px, -2px);
-}
 @media (prefers-reduced-motion: reduce) {
-  .astrid-vision-principle-arrow { animation: none !important; transform: none !important; }
+  .astrid-vision-card-arrow { animation: none !important; transform: none !important; }
 }

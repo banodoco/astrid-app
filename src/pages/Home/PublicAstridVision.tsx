@@ -363,6 +363,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <h3>{pillar.title}</h3>
               <p>{pillar.descriptor}</p>
               <NorthStarMink art={pillar.art} />
+              <span className="astrid-vision-pillar-details" aria-hidden="true">
+                Details <span className="astrid-vision-card-arrow">↗</span>
+              </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + pillar.title + ': gaps and projects'}
                 onClick={event => openSubject({ kind: 'pillar', id: pillar.id }, event.currentTarget)} />
@@ -378,25 +381,19 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </div>
         <ol className="astrid-vision-standards-list">
           {content.principles.map(principle => (
-            <li key={principle.id} data-reveal data-principle={principle.id}
-              onClick={event => {
-                // The whole card is a pointer target, while links remain independently usable.
-                if ((event.target as HTMLElement).closest('button, a')) return;
-                const trigger = event.currentTarget.querySelector<HTMLButtonElement>('.astrid-vision-principle-open');
-                if (trigger) openSubject({ kind: 'principle', id: principle.id }, trigger);
-              }}>
-              {/* Reserve a color-coded mark for future custom sigil artwork. */}
+            <li key={principle.id} data-reveal data-principle={principle.id}>
+              {/* The colored mark remains a placeholder until custom artwork is ready. */}
               <span className="astrid-vision-principle-sigil" aria-hidden="true" />
+              <span className="astrid-vision-principle-corner" aria-hidden="true">
+                <span className="astrid-vision-card-arrow">↗</span>
+              </span>
               <div>
                 <h3>{principle.title}</h3>
                 <MarkdownText value={principle.bodyMarkdown} />
               </div>
-              <button type="button" className="astrid-vision-principle-open"
+              <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}
-                onClick={event => openSubject({ kind: 'principle', id: principle.id }, event.currentTarget)}>
-                <span>Explore gaps &amp; projects</span>
-                <span className="astrid-vision-principle-arrow" aria-hidden="true">↗</span>
-              </button>
+                onClick={event => openSubject({ kind: 'principle', id: principle.id }, event.currentTarget)} />
             </li>
           ))}
         </ol>

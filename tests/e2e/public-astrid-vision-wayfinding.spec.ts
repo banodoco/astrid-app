@@ -11,6 +11,12 @@ async function pinFeed(page: Page, request: APIRequestContext) {
   }));
   return content;
 }
+async function openVision(page: Page, path = '/vision') {
+  await page.goto(path);
+  // Vite's first WebKit request compiles the lazy page after its HTML is ready.
+  // Keep this bootstrap allowance separate from the normal interaction timeout.
+  await expect(page.locator('main.astrid-vision')).toBeVisible({ timeout: 20_000 });
+}
 const sections = [
   ['Vision', 'astrid-vision-overview'],
   ['Principles', 'astrid-vision-principles'],
@@ -23,7 +29,7 @@ test('four background-free pixel sigils preserve the page palette and animate on
   await pinFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto('/vision');
+  await openVision(page);
   const cards = page.locator('.astrid-vision-standards-list > li');
   const marks = cards.locator('[data-sigil]');
   await expect(marks).toHaveCount(4);
@@ -56,7 +62,7 @@ test('four background-free pixel sigils preserve the page palette and animate on
 test('reduced-motion keeps every sigil still including keyboard focus', async ({ page, request }) => {
   await pinFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/vision');
+  await openVision(page);
   const cards = page.locator('.astrid-vision-standards-list > li');
   for (let index = 0; index < 4; index++) {
     const card = cards.nth(index);
@@ -72,7 +78,7 @@ test('section links track scroll, highlight hovered sections and keep out of the
   await pinFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
-  await page.goto('/vision');
+  await openVision(page);
   const nav = page.getByRole('navigation', { name: 'Vision page sections' });
   await expect(nav).toHaveCSS('position', 'fixed');
   await expect(nav.getByRole('link')).toHaveCount(5);
@@ -107,7 +113,7 @@ test('section links track scroll, highlight hovered sections and keep out of the
 test('section deep links survive loading and list expansion without losing the active section', async ({ page, request }) => {
   await pinFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/vision#astrid-vision-gaps');
+  await openVision(page, '/vision#astrid-vision-gaps');
   const nav = page.getByRole('navigation', { name: 'Vision page sections' });
   await expect(nav.getByRole('link', { name: 'Gaps', exact: true })).toHaveAttribute('aria-current', 'location');
   await expect(page.locator('.astrid-vision-part')).toHaveCount(10);
@@ -123,7 +129,7 @@ test('phone navigation fits the viewport and the first backdrop tap cannot navig
   const page = await context.newPage();
   try {
     await pinFeed(page, request);
-    await page.goto('/vision');
+    await openVision(page);
     const nav = page.getByRole('navigation', { name: 'Vision page sections' });
     await expect(nav).toHaveCSS('position', 'fixed');
     for (const width of [320, 390]) {

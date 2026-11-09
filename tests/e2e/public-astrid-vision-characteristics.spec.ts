@@ -48,6 +48,10 @@ test('pillars and principles use the same progressive disclosure of characterist
       await expect(dialog.getByRole('region', { name: 'Characteristics' })).toBeVisible();
       const characteristics = dialog.locator('.astrid-vision-details-characteristic');
       await expect(characteristics).toHaveCount(2);
+      // One rule separates the characteristics from the gaps. The final
+      // row must not draw another border immediately above it.
+      await expect(characteristics.last()).toHaveCSS('border-bottom-width', '0px');
+      await expect(dialog.locator('.astrid-vision-details-gaps')).toHaveCSS('border-top-width', '1px');
       await expect(characteristics.locator('summary')).toContainText([
         'Creator agencyCreators retain meaningful decisions.',
         'Sustained practiceProjects stay editable over time.',

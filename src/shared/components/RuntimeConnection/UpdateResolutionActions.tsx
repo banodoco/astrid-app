@@ -4,7 +4,8 @@ import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
 import { CopyCommandRow, CopyInstallCommand, useCopyAction } from './CopyInstallCommand.tsx';
 import { DownloadDiagnosticsButton } from './DownloadDiagnosticsButton.tsx';
-import { ASTRID_COMMANDS, autostartOffAgentBrief, RUNTIME_CONNECTION_COPY } from './copy.ts';
+import { autostartOffAgentBrief, installCommand, RUNTIME_CONNECTION_COPY } from './copy.ts';
+import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
@@ -101,13 +102,15 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
 /** Start at sign-in is off: update from a terminal with the strict update line (no choice flags), or hand the agent the brief. */
 function AutostartOffUpdate({ sentenceShown }: { readonly sentenceShown: boolean }) {
   const windows = detectPlatform() === 'windows';
-  const agent = useCopyAction(autostartOffAgentBrief(windows));
+  // Same rule as CopyInstallCommand and every other update surface: a locally served App runs `npm run update`.
+  const localBuild = runtimeOrigin() === '';
+  const agent = useCopyAction(autostartOffAgentBrief(windows, localBuild));
   return <div className="space-y-2">
     {!sentenceShown && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']}</p>}
     <Button type="button" className="h-11 w-full justify-between rounded-xl px-4 text-sm" onClick={() => void agent.copy()}>
       <span aria-live="polite">{agent.status === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : COPY_FOR_AGENT_ACTION}</span>
     </Button>
     <p className="text-xs font-medium text-muted-foreground">Run it yourself</p>
-    <CopyCommandRow command={windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
+    <CopyCommandRow command={installCommand('update', undefined, false, localBuild)} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
   </div>;
 }

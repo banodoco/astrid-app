@@ -105,9 +105,9 @@ export const DIAGNOSTICS_FALLBACK_COPY = {
   command: 'curl -fsSL https://astrid.haus/install | sh -s -- --doctor',
 } as const;
 
-/** The agent brief for a start-at-sign-in-off Astrid: the strict update line with no choice flags, its success words, and the doctor fallback. */
-export function autostartOffAgentBrief(windows: boolean): string {
-  const command = windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
+/** The agent brief for a start-at-sign-in-off Astrid: the strict update line with no choice flags, its success words, and the doctor fallback. A locally served App updates from its folder (the installCommand local rule). */
+export function autostartOffAgentBrief(windows: boolean, localBuild = false): string {
+  const command = localBuild ? LOCAL_UPDATE_COMMAND : windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
   const doctor = windows ? '& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --doctor' : DIAGNOSTICS_FALLBACK_COPY.command;
   return `Please update my Astrid installation on this computer. Start at sign-in is off, so update from a terminal and keep that choice off. Run exactly this command: ${command}. It succeeds when it ends with "Astrid updated" or "already up to date". If it fails, run this diagnostics command: ${doctor}, and give me the file path it reports. Don't try other fixes. Don't change or delete my Astrid workspace.`;
 }

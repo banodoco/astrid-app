@@ -229,6 +229,13 @@ describe('autostart-off agent brief', () => {
     expect(brief).toContain("Don't try other fixes");
     expect(autostartOffAgentBrief(true)).toContain(ASTRID_COMMANDS.windowsUpdate);
   });
+
+  it('a locally served App gets the npm run update line in its brief, not the curl or irm line', () => {
+    const brief = autostartOffAgentBrief(false, true);
+    expect(brief).toContain('Run exactly this command: npm run update.');
+    expect(brief).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(autostartOffAgentBrief(true, true)).not.toContain(ASTRID_COMMANDS.windowsUpdate);
+  });
 });
 
 describe('fully local brief for a set-up user', () => {

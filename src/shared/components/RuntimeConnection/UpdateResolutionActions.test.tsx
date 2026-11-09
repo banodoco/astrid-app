@@ -4,17 +4,29 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
-import { ASTRID_COMMANDS, installCommand } from './copy.ts';
+import { ASTRID_COMMANDS, installCommand, LOCAL_UPDATE_COMMAND } from './copy.ts';
 import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/client.ts';
+
+// '' is a locally served App (same-origin); a non-empty origin is hosted astrid.haus.
+const runtime = vi.hoisted(() => ({ origin: '' }));
+vi.mock('@/integrations/runtime/connection.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/integrations/runtime/connection.ts')>()),
+  runtimeOrigin: () => runtime.origin,
+}));
+
+const HOSTED_ORIGIN = 'https://astrid.test';
 
 const installerResolutions = [
   ['Update now', resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'installer', updateNowAvailable: true })],
   ['Update', resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: true })],
 ] as const;
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  runtime.origin = '';
+});
 
 function installerOperation(start = vi.fn(async () => undefined)): InstallerUpdateView {
   return { available: true, pending: false, start } as unknown as InstallerUpdateView;
@@ -76,6 +88,7 @@ describe('update resolution Settings actions', () => {
   });
 
   it('shows the strict update line, with no choice flags, when Update Now is refused for autostart off', () => {
+    runtime.origin = HOSTED_ORIGIN;
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
     render(<UpdateResolutionActions resolution={resolution} />);
     expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off'])).toBeInTheDocument();
@@ -188,6 +201,7 @@ describe('update resolution in-app availability', () => {
 
 describe('autostart-off card', () => {
   it('shows the new copy, the strict update command, the agent action, and no Update now', () => {
+    runtime.origin = HOSTED_ORIGIN;
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
     expect(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']).toBe('Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.');
@@ -197,6 +211,38 @@ describe('autostart-off card', () => {
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
     expect(document.body.textContent).not.toContain('then start Astrid');
+  });
+
+  it('a locally served App with autostart off gets the npm run update line, not the curl line', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    runtime.origin = '';
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    expect(screen.getByRole('code')).toHaveTextContent(installCommand('update', undefined, false, true));
+    expect(screen.getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
+    expect(document.body.textContent).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
+  });
+
+  it('a hosted App with autostart off keeps the curl update line', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    runtime.origin = HOSTED_ORIGIN;
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(document.body.textContent).not.toContain(LOCAL_UPDATE_COMMAND);
+  });
+
+  it('the agent brief for a locally served App names npm run update, not the curl line', async () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    const clipboard = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } });
+    runtime.origin = '';
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
+    expect(clipboard.mock.calls[0][0]).toContain(`Run exactly this command: ${LOCAL_UPDATE_COMMAND}.`);
+    expect(clipboard.mock.calls[0][0]).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
   });
 });
 

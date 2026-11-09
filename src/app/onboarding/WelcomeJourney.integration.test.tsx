@@ -247,7 +247,8 @@ it('carries all-off and copies-on choices plus the checked state from Welcome in
   fireEvent.click(screen.getByRole('checkbox', { name: 'Use copies for skills' }));
   const checkbox = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
   fireEvent.click(checkbox);
-  const setupCommand = screen.getByText(/--yes --autostart off --command off --skills off --skill-copies on/).textContent;
+  // Set up already: the plain install line; the saved choices are not sent as flags.
+  const setupCommand = screen.getByText('curl -fsSL https://astrid.haus/install | sh', { exact: true }).textContent;
   fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
   await waitFor(() => expect(door.requests).toHaveLength(1));
   fireEvent.focus(window);
@@ -255,7 +256,7 @@ it('carries all-off and copies-on choices plus the checked state from Welcome in
   expect(await screen.findByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
   expect(screen.getByRole('checkbox', { name: "I've already set up Astrid" })).toBeChecked();
   expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-  expect(screen.getByText(/--yes --autostart off --command off --skills off --skill-copies on/).textContent).toBe(setupCommand);
+  expect(screen.getByText('curl -fsSL https://astrid.haus/install | sh', { exact: true }).textContent).toBe(setupCommand);
   expect(localStorage.getItem('astrid:pending-setup-v1')).toContain('"alreadySetUp":true');
   expect(door.unexpected).toEqual([]);
 });

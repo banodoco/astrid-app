@@ -942,7 +942,10 @@ test('a Pinokio Runtime with an incompatible schema points to a Pinokio restart'
   try {
     const result = await launcherEnds({ fixture, env: { ASTRID_INSTALL_MANAGED_BY: 'pinokio' } });
     assert.equal(result.code, 1);
-    assert.match(result.stderr.split('\n')[0], /; restart: Stop and start Astrid in Pinokio$/);
+    const lines = result.stderr.trim().split('\n');
+    assert.deepEqual(lines.map((line) => line.split(' ')[0]), ['Astrid\'s', 'Details:'], result.stderr);
+    assert.equal(lines[0], "Astrid's engine doesn't match this App. Stop and start Astrid in Pinokio.");
+    assert.match(lines[1], /^Details: Runtime workspace\.v0 schema .* is incompatible with App workspace\.v1 schema sha256:[0-9a-f]+; /);
   } finally { await fixture.close(); }
 });
 
@@ -971,9 +974,12 @@ test('health and handshake schema mismatches include A1 source action and stop b
     try {
       const result = await launcherEnds({ fixture });
       assert.equal(result.code, 1, `${endpoint} ${digest}: ${result.stderr}`);
-      assert.match(result.stderr, new RegExp(SOURCE_SCHEMA_MISMATCH_ACTION));
-      assert.match(result.stderr, /App workspace\.v1 schema sha256:[0-9a-f]+/);
-      assert.match(result.stderr, /restart: astrid-runtime restart --profile astrid --data-root/);
+      // One plain line saying what to do, then the digests on the Details line.
+      const [plain, details, ...rest] = result.stderr.trim().split('\n');
+      assert.deepEqual(rest, [], result.stderr);
+      assert.match(plain, new RegExp(`^Astrid's engine doesn't match this App: ${SOURCE_SCHEMA_MISMATCH_ACTION}, then restart its engine: astrid-runtime restart --profile astrid --data-root`));
+      assert.doesNotMatch(plain, /sha256|schema|workspace\.v1/);
+      assert.match(details, /^Details: Runtime .* is incompatible with App workspace\.v1 schema sha256:[0-9a-f]+; .*schema digest mismatch$/);
       assert.equal(result.spawned, '', `${endpoint} ${digest}: app/bridge spawned`);
       assert.deepEqual(runtimeCliCalls(fixture), []);
     } finally { await fixture.close(); }
@@ -1242,7 +1248,7 @@ test('an exited Runtime owner PID is treated as stale discovery and replaced by 
   } finally { await fixture.close(); }
 });
 
-test('live protocol, schema and scope incompatibilities stop before app start with an actionable one-line diagnostic', async () => {
+test('live protocol, schema and scope incompatibilities stop before app start with one plain line, then a Details line', async () => {
   const expectedDigest = readGeneratedSchemaDigest(resolve('src/integrations/runtime/generated-contract-metadata.ts'));
   const cases = [
     ['protocol', { healthProtocol: 'workspace.v0' }, 'workspace.v0'],
@@ -1269,17 +1275,20 @@ test('live protocol, schema and scope incompatibilities stop before app start wi
         runtimeEnv.ASTRID_RUNTIME_CHECKOUT = runtimeCheckout;
         runtimeEnv.ASTRID_RUNTIME_PYTHON = runtimePython;
         runtimeEnv.ASTRID_RUNTIME_SOURCE_MANIFEST = sourceManifest;
-        expectedRestart = `restart: cd ${shellQuote(runtimeCheckout)} && ${shellQuote(runtimePython)} -m astrid_runtime.cli restart --profile astrid --data-root ${shellQuote(dataRoot)} --source-manifest ${shellQuote(sourceManifest)}`;
+        expectedRestart = `restart its engine: cd ${shellQuote(runtimeCheckout)} && ${shellQuote(runtimePython)} -m astrid_runtime.cli restart --profile astrid --data-root ${shellQuote(dataRoot)} --source-manifest ${shellQuote(sourceManifest)}`;
       }
       const result = await launcherEnds({ fixture, env: runtimeEnv });
       assert.equal(result.code, 1, `${label}: ${result.stderr}`);
       const lines = result.stderr.trim().split('\n');
-      assert.equal(lines.length, 1, `${label}: ${result.stderr}`);
-      assert.match(lines[0], new RegExp(actual.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-      assert.match(lines[0], /App workspace\.v1 schema/);
-      assert.match(lines[0], new RegExp(expectedDigest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.equal(lines.length, 2, `${label}: ${result.stderr}`);
+      assert.match(lines[0], /^Astrid's engine doesn't match this App: /);
+      assert.doesNotMatch(lines[0], /sha256|App workspace\.v1 schema/, lines[0]);
       if (expectedRestart) assert(lines[0].includes(expectedRestart), lines[0]);
-      else assert.match(lines[0], /restart: astrid-runtime restart --profile astrid --data-root/);
+      else assert.match(lines[0], /restart its engine: astrid-runtime restart --profile astrid --data-root/);
+      assert.match(lines[1], /^Details: Runtime /);
+      assert.match(lines[1], new RegExp(actual.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+      assert.match(lines[1], /App workspace\.v1 schema/);
+      assert.match(lines[1], new RegExp(expectedDigest.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
       assert.deepEqual(runtimeCliCalls(fixture), []);
       assert.equal(result.spawned, '', `${label}: app/bridge spawned`);
     } finally { await fixture.close(); }

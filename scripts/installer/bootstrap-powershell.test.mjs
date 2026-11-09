@@ -399,6 +399,27 @@ test('PowerShell preserves one core failure paragraph and keeps iex shell', () =
   assert.doesNotMatch(result.stdout, /Astrid could not get ready/);
 }));
 
+// The receipt streams, then the bootstrap must not throw a red "couldn't finish" with a second Details line.
+for (const code of ['2', '3']) {
+  test(`PowerShell adds nothing after an exit ${code} installer receipt already named its Details`, () => scenario(async (_context, run) => {
+    const result = await run([], { MOCK_CORE_RECEIPT: code });
+    alive(result);
+    assert.match(result.stdout, /Astrid did NOT update\./);
+    assert.match(result.stdout, new RegExp(`NATIVE-STATUS: ${code}`));
+    assert.doesNotMatch(result.stdout, /CAUGHT:|Astrid couldn't finish/);
+    assert.equal((result.stdout.match(/Details:/g) || []).length, 1);
+  }));
+}
+
+// Runs without pwsh too: the same receipt check as the POSIX bootstrap, ahead of the generic throw.
+nodeTest('PowerShell bootstrap source stops quietly after a streamed receipt with a Details line', async () => {
+  const script = await readFile(path.join(repo, 'public/install.ps1'), 'utf8');
+  const receipt = script.indexOf("$FailureStart -lt 0 -and $Result.Output -match '(?m)^Details: '");
+  const generic = script.indexOf("throw 'The Astrid installer did not finish; see the log.'");
+  assert.ok(receipt >= 0 && generic > receipt);
+  assert.match(script.slice(receipt, generic), /if \(\$FileInvocation\) \{ exit \$NativeExitCode \}\s*return/);
+});
+
 test('PowerShell preserves the installer low-space failure without adding a second error', () => scenario(async (context, run) => {
   const result = await run([], { MOCK_CORE_DISK_FAILURE: '1' });
   alive(result);

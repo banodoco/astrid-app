@@ -7,7 +7,7 @@ PYTHON_VERSION=3.11.13
 case "$(uname -s)" in
     Darwin) data_home="$HOME/.local/share"; log="$HOME/Library/Logs/Astrid Runtime/install.log" ;;
     Linux) data_home=${XDG_DATA_HOME:-$HOME/.local/share}; log="${XDG_STATE_HOME:-$HOME/.local/state}/astrid-runtime/logs/install.log" ;;
-    *) echo 'Use https://astrid.haus/install.ps1 on Windows.' >&2; exit 1 ;; esac
+    *) echo 'Astrid installs on Windows from PowerShell. Open PowerShell and run: irm https://astrid.haus/install.ps1 | iex' >&2; exit 1 ;; esac
 bootstrap="$data_home/astrid/bootstrap"
 mkdir -p "$bootstrap" "$(dirname "$log")"
 chmod 700 "$(dirname "$log")"

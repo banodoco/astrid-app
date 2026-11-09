@@ -160,6 +160,16 @@ test('POSIX adds nothing after the installer receipt already named its Details',
   assert.equal(((result.stdout + result.stderr).match(/Details:/g) || []).length, 1);
 }));
 
+test('POSIX on an unsupported system gives the exact PowerShell install command', () => scenario(async (context) => {
+  // Git Bash and similar shells on Windows report a MINGW/MSYS uname.
+  await writeFile(path.join(context.root, 'bin', 'uname'), '#!/bin/sh\necho MINGW64_NT-10.0-19045\n', { mode: 0o755 });
+  const result = await run(context);
+  assert.equal(result.code, 1);
+  assert.equal(result.stderr.trim(), 'Astrid installs on Windows from PowerShell. Open PowerShell and run: irm https://astrid.haus/install.ps1 | iex');
+  assert.equal(result.stdout, '');
+  assert.deepEqual(await context.calls(), []);
+}));
+
 test('POSIX preserves the core failure paragraph and nonzero status once', () => scenario(async (context) => {
   const result = await run(context, [], { MOCK_CORE_EXIT: '23' });
   assert.equal(result.code, 23);

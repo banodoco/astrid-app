@@ -69,7 +69,7 @@ test('each principle animates a different part of its sigil on hover and respect
   }
 });
 
-test('technical wrangling dissolves its knot into a clean arrow in five seconds', async ({ page, request }) => {
+test('technical wrangling takes three seconds to resolve and one second to return', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1720, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -83,11 +83,14 @@ test('technical wrangling dissolves its knot into a clean arrow in five seconds'
   await expect(fragments).toHaveCSS('opacity', '1');
   await expect(arrow).toHaveCSS('opacity', '0');
   for (const part of [knot, fragments, arrow]) {
-    await expect(part).toHaveCSS('transition-duration', '5s');
+    await expect(part).toHaveCSS('transition-duration', '1s');
     await expect(part).toHaveCSS('animation-name', 'none');
   }
   await card.hover();
-  await page.waitForTimeout(500);
+  for (const part of [knot, fragments, arrow]) {
+    await expect(part).toHaveCSS('transition-duration', '3s');
+  }
+  await page.waitForTimeout(450);
   const halfway = await card.evaluate(el => {
     const opacity = (selector: string) => Number(getComputedStyle(el.querySelector(selector)!).opacity);
     return {
@@ -100,15 +103,20 @@ test('technical wrangling dissolves its knot into a clean arrow in five seconds'
     expect(value).toBeGreaterThan(0);
     expect(value).toBeLessThan(1);
   }
-  await expect(knot).toHaveCSS('opacity', '0', { timeout: 7500 });
-  await expect(fragments).toHaveCSS('opacity', '0', { timeout: 7500 });
-  await expect(arrow).toHaveCSS('opacity', '1', { timeout: 7500 });
+  await expect(knot).toHaveCSS('opacity', '0', { timeout: 4500 });
+  await expect(fragments).toHaveCSS('opacity', '0', { timeout: 4500 });
+  await expect(arrow).toHaveCSS('opacity', '1', { timeout: 4500 });
 
   await page.mouse.move(0, 3);
-  await page.waitForTimeout(450);
+  for (const part of [knot, fragments, arrow]) {
+    await expect(part).toHaveCSS('transition-duration', '1s');
+  }
+  await page.waitForTimeout(330);
   const reversing = Number(await arrow.evaluate(el => getComputedStyle(el).opacity));
   expect(reversing).toBeGreaterThan(0);
   expect(reversing).toBeLessThan(1);
+  await expect(arrow).toHaveCSS('opacity', '0', { timeout: 1800 });
+  await expect(knot).toHaveCSS('opacity', '1', { timeout: 1800 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect(arrow).toHaveCSS('transition-duration', '0s');
   await expect(knot).toHaveCSS('transition-duration', '0s');
@@ -353,8 +361,8 @@ test('phone scroll activates each principle sigil through the middle of the view
     await expect(card).toHaveAttribute('data-sigil-active', 'true');
     await expect(card.locator(motions[index][0])).toHaveCSS('animation-name', motions[index][1]);
     if (index === 3) {
-      await expect(card.locator('.astrid-vision-sigil-knot')).toHaveCSS('transition-duration', '5s');
-      await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '5s');
+      await expect(card.locator('.astrid-vision-sigil-knot')).toHaveCSS('transition-duration', '3s');
+      await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '3s');
     }
     await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
     await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '0.82');

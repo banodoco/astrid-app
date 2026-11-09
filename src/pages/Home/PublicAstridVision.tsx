@@ -378,7 +378,13 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </div>
         <ol className="astrid-vision-standards-list">
           {content.principles.map(principle => (
-            <li key={principle.id} data-reveal data-principle={principle.id}>
+            <li key={principle.id} data-reveal data-principle={principle.id}
+              onClick={event => {
+                // The whole card is a pointer target, while links remain independently usable.
+                if ((event.target as HTMLElement).closest('button, a')) return;
+                const trigger = event.currentTarget.querySelector<HTMLButtonElement>('.astrid-vision-principle-open');
+                if (trigger) openSubject({ kind: 'principle', id: principle.id }, trigger);
+              }}>
               {/* Reserve a color-coded mark for future custom sigil artwork. */}
               <span className="astrid-vision-principle-sigil" aria-hidden="true" />
               <div>
@@ -388,8 +394,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <button type="button" className="astrid-vision-principle-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}
                 onClick={event => openSubject({ kind: 'principle', id: principle.id }, event.currentTarget)}>
-                <span>Explore gaps and projects</span>
-                <span aria-hidden="true">↗</span>
+                <span>Explore gaps &amp; projects</span>
+                <span className="astrid-vision-principle-arrow" aria-hidden="true">↗</span>
               </button>
             </li>
           ))}

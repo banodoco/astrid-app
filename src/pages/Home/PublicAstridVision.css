@@ -625,10 +625,19 @@
 }
 
 .astrid-vision-standards { margin-top: clamp(80px, 10vw, 128px); }
+/* This connected group earns more horizontal room than the text sections.
+   The edge-to-edge dividers are intentional: the principles work together. */
+.astrid-vision > .astrid-vision-standards { width: min(100%, 1360px); }
+/* Keep editorial headings in the original 1120px reading column even though
+   the four connected cards themselves extend further toward the edges. */
+.astrid-vision-standards > .astrid-vision-section-head {
+  max-width: 1120px;
+  margin-inline: auto;
+}
 .astrid-vision-standards-list {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: clamp(18px, 3vw, 40px);
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -638,10 +647,11 @@
 .astrid-vision .astrid-vision-standards-list > li {
   --sigil-ink: #a94714;
   --sigil-bg: #f2dcca;
-  padding: clamp(20px, 2.4vw, 28px);
+  padding: clamp(16px, 1.4vw, 22px);
   border: 1px solid color-mix(in oklab, var(--astrid-ink) 22%, transparent);
-  border-radius: 16px;
+  border-radius: 0;
   background: transparent;
+  cursor: pointer;
   transition: border-color 170ms ease, box-shadow 170ms ease;
 }
 .astrid-vision .astrid-vision-standards-list > li[data-principle="open-by-design"] {
@@ -664,7 +674,7 @@
   flex: none;
   width: 44px;
   height: 44px;
-  margin-bottom: 20px;
+  margin-bottom: 14px;
   border: 1px solid var(--sigil-ink);
   border-radius: 12px;
   background: color-mix(in oklab, var(--sigil-bg) 42%, transparent);
@@ -678,17 +688,15 @@
   opacity: .9;
 }
 .astrid-vision-standards-list h3 {
-  margin: 12px 0;
+  margin: 0 0 11px;
+  min-height: 2.34em;
   color: var(--astrid-ink);
-  font: 400 clamp(23px, 2vw, 30px)/1.2 var(--astrid-vision-serif);
+  font: 400 clamp(18px, 1.6vw, 24px)/1.17 var(--astrid-vision-serif);
+  letter-spacing: -.035em;
+  text-wrap: balance;
 }
-/* Four equal title slots keep the footer actions aligned when longer
-   principle names wrap within the new bordered cards. */
-@media (min-width: 1101px) {
-  .astrid-vision-standards-list h3 { min-height: 4.8em; }
-}
-@media (min-width: 761px) and (max-width: 1100px) {
-  .astrid-vision-standards-list h3 { min-height: 2.4em; }
+@media (max-width: 760px) {
+  .astrid-vision-standards-list h3 { min-height: 0; font-size: clamp(22px, 5vw, 26px); }
 }
 .astrid-vision-standards-list .astrid-vision-markdown {
   max-width: 46ch;
@@ -881,7 +889,7 @@
   .astrid-vision-project-row > a { grid-column: 2; grid-row: 1; }
 }
 @media (max-width: 760px) {
-  .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 22px; }
+  .astrid-vision-standards-list { grid-template-columns: 1fr; gap: 0; }
   .astrid-vision-project-list .astrid-vision-project-row { grid-template-columns: 1fr; gap: 10px; }
   .astrid-vision-project-row > .astrid-vision-markdown { grid-column: 1; grid-row: auto; }
   .astrid-vision-project-row > a { grid-column: 1; grid-row: auto; }
@@ -997,12 +1005,25 @@
 }
 .astrid-vision-copy-agent-status a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
 
-/* Four creator-first operating principles, one row on wide screens. */
+/* Shared borders and only exterior rounded corners give the set one silhouette. */
 @media (min-width: 1101px) {
-  .astrid-vision-standards-list { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .astrid-vision .astrid-vision-standards-list > li:not(:first-child) { border-left: 0; }
+  .astrid-vision .astrid-vision-standards-list > li:first-child { border-radius: 16px 0 0 16px; }
+  .astrid-vision .astrid-vision-standards-list > li:last-child { border-radius: 0 16px 16px 0; }
 }
 @media (min-width: 761px) and (max-width: 1100px) {
   .astrid-vision-standards-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .astrid-vision .astrid-vision-standards-list > li:nth-child(even) { border-left: 0; }
+  .astrid-vision .astrid-vision-standards-list > li:nth-child(n + 3) { border-top: 0; }
+  .astrid-vision .astrid-vision-standards-list > li:first-child { border-radius: 16px 0 0 0; }
+  .astrid-vision .astrid-vision-standards-list > li:nth-child(2) { border-radius: 0 16px 0 0; }
+  .astrid-vision .astrid-vision-standards-list > li:nth-child(3) { border-radius: 0 0 0 16px; }
+  .astrid-vision .astrid-vision-standards-list > li:last-child { border-radius: 0 0 16px 0; }
+}
+@media (max-width: 760px) {
+  .astrid-vision .astrid-vision-standards-list > li:not(:first-child) { border-top: 0; }
+  .astrid-vision .astrid-vision-standards-list > li:first-child { border-radius: 16px 16px 0 0; }
+  .astrid-vision .astrid-vision-standards-list > li:last-child { border-radius: 0 0 16px 16px; }
 }
 
 /* A real loading surface so the page never flashes as an empty manifesto. */
@@ -1317,13 +1338,33 @@
   margin: 0 0 18px;
   font: 400 24px/1.25 var(--astrid-vision-serif);
 }
-.astrid-vision-details-gap-list,
+/* Small, repeatable color families connect each gap heading to the work below.
+   The palette is editorial, not a progress/status indicator. */
+.astrid-vision-details-gap-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
 .astrid-vision-details-projects ul { margin: 0; padding: 0; list-style: none; }
 .astrid-vision-details-gap {
-  padding: 18px 0;
-  border-top: 1px solid var(--astrid-line);
+  --gap-accent: #985d46;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--gap-accent) 40%, var(--astrid-line));
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--gap-accent) 5%, var(--astrid-panel));
 }
-.astrid-vision-details-gap:first-child { padding-top: 0; border-top: 0; }
+.astrid-vision-details-gap[data-tone="ochre"] { --gap-accent: #90702e; }
+.astrid-vision-details-gap[data-tone="sage"] { --gap-accent: #55765e; }
+.astrid-vision-details-gap[data-tone="teal"] { --gap-accent: #367a83; }
+.astrid-vision-details-gap[data-tone="blue"] { --gap-accent: #5b6e98; }
+.astrid-vision-details-gap[data-tone="plum"] { --gap-accent: #806185; }
+.astrid-vision-details-gap-heading {
+  padding: 16px 18px;
+  border-bottom: 1px solid color-mix(in oklab, var(--gap-accent) 30%, var(--astrid-line));
+  background: color-mix(in oklab, var(--gap-accent) 17%, var(--astrid-panel));
+}
 .astrid-vision-details-gap h4 {
   margin: 0;
   font: 500 17px/1.4 var(--astrid-vision-serif);
@@ -1339,19 +1380,23 @@
 }
 .astrid-vision-details-gap a:hover { text-decoration-color: currentColor; }
 .astrid-vision-details-gap a svg { flex: 0 0 auto; }
+/* The lighter project area visually belongs to its darker gap header. */
 .astrid-vision-details-projects {
-  margin: 14px 0 0 14px;
-  padding-left: 16px;
-  border-left: 2px solid var(--astrid-line);
+  padding: 14px 18px 16px;
+  background: color-mix(in oklab, var(--gap-accent) 6%, var(--astrid-panel));
 }
 .astrid-vision-details-projects > p {
-  margin: 0 0 10px;
-  color: var(--astrid-muted);
+  margin: 0 0 8px;
+  color: color-mix(in oklab, var(--gap-accent) 65%, var(--astrid-ink));
   font-size: 12px;
   font-weight: 600;
   letter-spacing: .035em;
 }
-.astrid-vision-details-projects li { padding: 10px 0; }
+.astrid-vision-details-projects li {
+  padding: 10px 0;
+  border-top: 1px solid color-mix(in oklab, var(--gap-accent) 20%, transparent);
+}
+.astrid-vision-details-projects li:first-child { border-top: 0; }
 .astrid-vision-details-project-heading {
   display: flex;
   align-items: baseline;
@@ -1378,6 +1423,11 @@
   font-size: 14px;
   line-height: 1.5;
 }
+.astrid-vision-details-gap > .astrid-vision-details-empty {
+  margin: 0;
+  padding: 13px 18px 16px;
+  background: color-mix(in oklab, var(--gap-accent) 6%, var(--astrid-panel));
+}
 @media (max-width: 560px) {
   /* Leave a real hit target around every side, especially the top and bottom. */
   .astrid-vision-details {
@@ -1391,7 +1441,9 @@
   .astrid-vision-details-header { gap: 10px; padding: 20px 18px 16px; }
   .astrid-vision-details-scroll { padding: 18px 18px 22px; }
   .astrid-vision-details-close { width: 38px; height: 38px; }
-  .astrid-vision-details-projects { margin-left: 5px; padding-left: 12px; }
+  .astrid-vision-details-gap-heading { padding: 14px; }
+  .astrid-vision-details-projects { padding: 12px 14px 14px; }
+  .astrid-vision-details-gap > .astrid-vision-details-empty { padding: 12px 14px; }
   .astrid-vision-details-project-heading { flex-wrap: wrap; gap: 3px 10px; }
 }
 
@@ -1422,14 +1474,15 @@
 .astrid-vision-principle-open {
   display: inline-flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 20px;
+  gap: 8px;
+  margin-top: 18px;
   padding: 7px 0;
   border: 0;
   border-bottom: 1px solid currentColor;
   background: transparent;
   color: var(--astrid-accent);
   font: 600 13px/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
+  white-space: nowrap;
   text-align: left;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -1447,4 +1500,26 @@
 }
 .astrid-vision-standards-list > li:focus-within {
   border-color: color-mix(in oklab, var(--astrid-ink) 65%, transparent);
+}
+
+/* The movement belongs to the small external-link glyph, not the card or copy. */
+.astrid-vision-principle-arrow {
+  display: inline-block;
+  flex: none;
+  transition: color 170ms ease;
+}
+@keyframes astrid-vision-arrow-nudge {
+  0%, 100% { transform: translate(-1px, 1px); }
+  50% { transform: translate(2px, -2px); }
+}
+@media (hover: hover) and (pointer: fine) {
+  .astrid-vision-standards-list > li:hover .astrid-vision-principle-arrow {
+    animation: astrid-vision-arrow-nudge 1s ease-in-out infinite;
+  }
+}
+.astrid-vision-principle-open:focus-visible .astrid-vision-principle-arrow {
+  transform: translate(2px, -2px);
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-principle-arrow { animation: none !important; transform: none !important; }
 }

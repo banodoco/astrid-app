@@ -4,6 +4,10 @@ import { ExternalLink, X } from 'lucide-react';
 import type { PublicVisionContent } from './publicVisionContent';
 import { currentGapsForSubject, type VisionSubject } from './visionHierarchy';
 
+// Keep each gap's palette identity stable across pillar and principle dialogs.
+// These are editorial accents, not gap status colors; the actual status remains text.
+const GAP_TONES = ['clay', 'ochre', 'sage', 'teal', 'blue', 'plum'] as const;
+
 export function VisionDetailDialog({
   content, subject, onClose,
 }: {
@@ -100,13 +104,16 @@ export function VisionDetailDialog({
           ) : (
             <ul className="astrid-vision-details-gap-list">
               {gaps.map(({ gap, projects }) => (
-                <li key={gap.id} className="astrid-vision-details-gap">
-                  <h4>
-                    <a href={gap.githubUrl} target="_blank" rel="noreferrer">
-                      {gap.title}
-                      <ExternalLink size={14} aria-hidden="true" />
-                    </a>
-                  </h4>
+                <li key={gap.id} className="astrid-vision-details-gap"
+                  data-tone={GAP_TONES[content.gaps.findIndex(item => item.id === gap.id) % GAP_TONES.length]}>
+                  <div className="astrid-vision-details-gap-heading">
+                    <h4>
+                      <a href={gap.githubUrl} target="_blank" rel="noreferrer">
+                        {gap.title}
+                        <ExternalLink size={14} aria-hidden="true" />
+                      </a>
+                    </h4>
+                  </div>
                   {projects.length > 0 ? (
                     <div className="astrid-vision-details-projects">
                       <p>Projects addressing this gap</p>

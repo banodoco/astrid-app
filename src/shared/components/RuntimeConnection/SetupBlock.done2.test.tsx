@@ -49,16 +49,18 @@ describe('done2', () => {
       for (const alreadySetUp of [false, true]) {
         if ((checkbox as HTMLInputElement).checked !== alreadySetUp) fireEvent.click(checkbox);
         expect(setup.getByText(alreadySetUp ? 'Start Astrid' : 'Recommended setup')).toBeInTheDocument();
-        expect(setup.getByText(surface.command, { selector: 'pre code' }).textContent).toBe(surface.command);
+        // Set up already: the plain install line, no saved choice flags.
+        const expected = alreadySetUp ? 'curl -fsSL https://astrid.haus/install | sh' : surface.command;
+        expect(setup.getByText(expected, { selector: 'pre code' }).textContent).toBe(expected);
         mocks.clipboard.mockClear();
         fireEvent.click(setup.getByRole('button', { name: /^(Copy command|Command copied)$/ }));
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
-        expect(mocks.clipboard).toHaveBeenLastCalledWith(surface.command);
+        expect(mocks.clipboard).toHaveBeenLastCalledWith(expected);
         mocks.clipboard.mockClear();
         fireEvent.click(setup.getByRole('button', { name: new RegExp(`^(Copy instructions for your agent|${COPY.agent.copied.replace('.', '\\.')})$`) }));
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
         const instructions = mocks.clipboard.mock.calls[0][0] as string;
-        expect(instructions.split('\n')).toContain(surface.command);
+        expect(instructions.split('\n')).toContain(expected);
         // Existing-install surfaces (update, Settings) keep saved choices: no consent question for them.
         const existingSurface = surface.command.endsWith('--update');
         if (alreadySetUp || existingSurface) expect(instructions).not.toContain('May I install Astrid');

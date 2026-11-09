@@ -644,15 +644,15 @@
   background: transparent;
   transition: border-color 170ms ease, box-shadow 170ms ease;
 }
-.astrid-vision .astrid-vision-standards-list > li:nth-child(2) {
+.astrid-vision .astrid-vision-standards-list > li[data-principle="open-by-design"] {
   --sigil-ink: #916a30;
   --sigil-bg: #f1e6cf;
 }
-.astrid-vision .astrid-vision-standards-list > li:nth-child(3) {
+.astrid-vision .astrid-vision-standards-list > li[data-principle="in-the-creators-control"] {
   --sigil-ink: #50744e;
   --sigil-bg: #dbe9d9;
 }
-.astrid-vision .astrid-vision-standards-list > li:nth-child(4) {
+.astrid-vision .astrid-vision-standards-list > li[data-principle="eliminate-needless-technical-wrangling"] {
   --sigil-ink: #50738b;
   --sigil-bg: #dde8ef;
 }

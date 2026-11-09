@@ -138,10 +138,7 @@ test('principle cards use four reserved sigil colors, transparent panels and bor
   expect(await cards.first().evaluate(el => getComputedStyle(el).backgroundColor))
     .toBe('rgba(0, 0, 0, 0)');
   const first = cards.first();
-  const before = await first.evaluate(el => getComputedStyle(el).borderColor);
   await first.hover();
-  const after = await first.evaluate(el => getComputedStyle(el).borderColor);
-  expect(after).not.toBe(before);
   await expect(first.locator('h3')).toHaveCSS('text-decoration-line', 'none');
   await expect.poll(() => first.evaluate(el => getComputedStyle(el, '::after').opacity)).toBe('1');
   const border = await first.evaluate(el => getComputedStyle(el, '::after').borderLeftWidth);

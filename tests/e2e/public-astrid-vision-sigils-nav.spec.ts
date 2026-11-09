@@ -335,3 +335,40 @@ test('phone header centers the active section when horizontal scroll bounds perm
   expect(centered).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(321);
 });
+
+
+test('desktop section clicks keep the chosen highlight throughout smooth page scrolling', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  await page.setViewportSize({ width: 1720, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const nav = page.getByRole('navigation', { name: 'Vision page sections' });
+  await expect(nav.getByRole('link', { name: /Vision$/ })).toHaveAttribute('aria-current', 'location');
+
+  await page.evaluate(() => {
+    const monitor = window as typeof window & { __astridNavSelections?: string[] };
+    monitor.__astridNavSelections = [];
+    const nav = document.querySelector('.astrid-vision-section-nav')!;
+    new MutationObserver(() => {
+      const selected = nav.querySelector('a[aria-current="location"]');
+      if (selected) monitor.__astridNavSelections?.push(selected.getAttribute('href') ?? '');
+    }).observe(nav, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
+  });
+
+  const destination = nav.getByRole('link', { name: /Projects$/ });
+  await destination.click();
+  await expect(destination).toHaveAttribute('aria-current', 'location');
+  await expect.poll(() => page.evaluate(() =>
+    document.getElementById('astrid-vision-projects')?.getBoundingClientRect().top ?? 9999))
+    .toBeLessThan(230);
+  await page.waitForTimeout(200);
+  const selections = await page.evaluate(() =>
+    (window as typeof window & { __astridNavSelections?: string[] }).__astridNavSelections ?? []);
+  expect(selections.length).toBeGreaterThan(0);
+  expect(selections.every(id => id === '#astrid-vision-projects'), selections.join(' → ')).toBe(true);
+
+  // After the smooth jump completes, ordinary user scrolling can update the
+  // active section again; the clicked item must not remain locked.
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(nav.getByRole('link', { name: /Vision$/ })).toHaveAttribute('aria-current', 'location');
+});

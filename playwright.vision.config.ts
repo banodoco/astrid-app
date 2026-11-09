@@ -5,6 +5,8 @@ import base from './playwright.config';
 // launch flags to WebKit. The normal e2e matrix remains unchanged.
 export default defineConfig({
   ...base,
+  // Keep the first pass's screenshots instead of clearing all test-results.
+  outputDir: 'test-results/vision-webkit',
   use: { ...base.use, launchOptions: {} },
   projects: [{
     name: 'vision-webkit',

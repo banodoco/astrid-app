@@ -198,6 +198,14 @@ describe('windows-upgrade-unsupported', () => {
     expect(document.body.textContent).not.toContain(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']);
   });
 
+  it('on the page: offers Copy instructions for your agent and the manual command, with Download diagnostics', () => {
+    render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(document.body.textContent).toContain('Run it yourself');
+    expect(screen.getByRole('code')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+  });
+
   it('in Settings: no command either; its own Diagnostics row is the pointer', () => {
     const { container } = render(<UpdateResolutionActions resolution={resolution('settings')} operation={installerOperation()} context="settings" />);
     expect(screen.queryByRole('code')).toBeNull();

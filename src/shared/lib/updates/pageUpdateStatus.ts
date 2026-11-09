@@ -8,6 +8,16 @@ export function localUpdateStatus(): boolean {
   return import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
 }
 
+/** The launcher's status does not name the install manager; the Runtime's identity does (identity.managed_by). Unknown reads as null. */
+async function runtimeManagedBy(): Promise<string | null> {
+  try {
+    const health = await new AstridRuntimeClient().readInstallerUpdateHealth();
+    return typeof health.identity?.managed_by === 'string' ? health.identity.managed_by : null;
+  } catch {
+    return null;
+  }
+}
+
 let pageStatusPromise: Promise<UpdateStatus | null> | null = null;
 
 /** One update-status request per page load, shared by the notice and Settings indicator. A page with neither a launcher nor a Runtime origin has none. */
@@ -16,7 +26,7 @@ export function loadPageUpdateStatus(): Promise<UpdateStatus | null> {
   if (!pageStatusPromise) {
     pageStatusPromise = (async () => {
       try {
-        if (localUpdateStatus()) return await checkLocalUpdate();
+        if (localUpdateStatus()) return { ...(await checkLocalUpdate()), managedBy: await runtimeManagedBy() };
         const health = await new AstridRuntimeClient().readInstallerUpdateHealth();
         return await checkHostedUpdate(health);
       } catch {

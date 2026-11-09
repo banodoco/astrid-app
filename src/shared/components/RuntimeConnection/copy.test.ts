@@ -230,3 +230,14 @@ describe('autostart-off agent brief', () => {
     expect(autostartOffAgentBrief(true)).toContain(ASTRID_COMMANDS.windowsUpdate);
   });
 });
+
+describe('fully local brief for a set-up user', () => {
+  it('sends the plain install line with no choice flags and no Setup choices line, despite stale saved choices', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    const text = localSetupInstructions({ autostart: false, command: true, skills: false, skillCopies: true }, true);
+    expect(text).toContain(`Run this official installer command: \`${ASTRID_COMMANDS.macLinux}\``);
+    expect(text).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
+    expect(text).not.toContain('Setup choices:');
+  });
+});

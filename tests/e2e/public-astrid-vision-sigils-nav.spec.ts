@@ -84,9 +84,11 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
   await expect(nav).toHaveCSS('position', 'relative');
   await expect(wordmark).toHaveCSS('max-width', '100px');
   await expect(nav.getByRole('link')).toHaveCount(6);
-  await expect(nav.getByRole('link').allTextContents()).resolves.toEqual([
-    '01Vision', '02Pillars', '03Principles', '04Gaps', '05Projects', '06Help us build',
-  ]);
+  expect(await nav.locator('a').evaluateAll(elements => elements.map(el => el.getAttribute('href'))))
+    .toEqual([
+      '#astrid-vision-manifesto', '#astrid-vision-pillars', '#astrid-vision-standards',
+      '#astrid-vision-parts', '#astrid-vision-projects', '#astrid-vision-contribute',
+    ]);
   const brand = header.locator('.astrid-vision-brand');
   const brandRect = await brand.boundingBox();
   const navRect = await nav.boundingBox();

@@ -1316,8 +1316,9 @@
 .astrid-vision .astrid-vision-standards-list > li {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
+  align-items: stretch;
 }
+.astrid-vision-principle-open { align-self: flex-start; }
 .astrid-vision-standards-list > li > div { flex: 1 1 auto; }
 .astrid-vision-principle-open {
   display: inline-flex;

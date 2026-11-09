@@ -212,6 +212,7 @@ test('the joined principle panels and corner arrows never gain light fills, even
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const cards = page.locator('.astrid-vision-standards-list > li');
+  await expect(cards).toHaveCount(4);
   const checkTransparent = async () => {
     const surfaces = await cards.evaluateAll(elements => elements.map(el => ({
       card: getComputedStyle(el).backgroundColor,

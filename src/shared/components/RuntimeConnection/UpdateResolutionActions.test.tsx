@@ -126,12 +126,14 @@ describe('update resolution Settings actions', () => {
   });
 
   it('shows the install update command for fully-local installs', () => {
+    runtime.origin = HOSTED_ORIGIN;
     mountWithEventCapture(resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'fully-local' }), 'fully-local');
     expect(screen.getByRole('code')).toHaveTextContent(installCommand('update'));
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
   });
 
   it.each(installerResolutions)('flushes registered drafts before starting the explicit installer %s action', async (label, resolution) => {
+    runtime.origin = HOSTED_ORIGIN;
     const events: string[] = [];
     const flush = vi.fn(async () => { events.push('flush'); });
     const start = vi.fn(async () => { events.push('start'); });

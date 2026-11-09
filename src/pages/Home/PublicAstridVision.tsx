@@ -362,10 +362,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </div>
       )}
       {content && (<>
-      <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
+      <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">The vision</p>
-          <h2 id="astrid-vision-north-star-title">What we're building towards</h2>
+          <h2 id="astrid-vision-north-star-title">The four pillars of our vision</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (

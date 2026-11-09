@@ -94,7 +94,8 @@ export async function startLocalUpdateControl({ cwd, origin, update, page = fals
         const refusal = isPage ? PAGE_REFUSALS.get(error.code) : undefined;
         send(response, refusal ? 409 : 422, { error: error.message, step: error.step ?? 'update', code: error.code ?? 'update_failed',
           ...(refusal ? { refusal } : {}),
-          details: error.details, stopRefused: error.stopRefused, stopCompleted: error.stopCompleted });
+          details: error.details, stopRefused: error.stopRefused, stopCompleted: error.stopCompleted,
+          ...(Array.isArray(error.lines) ? { lines: error.lines, exitCode: error.exitCode } : {}) });
       } finally { busy = false; active = undefined; }
     } catch {
       if (!response.headersSent) send(response, 400, { error: 'Invalid update request', step: 'control-channel', code: 'invalid_request' });
@@ -153,6 +154,7 @@ export async function requestLocalUpdate({ cwd = process.cwd(), request = fetch 
   if (!response.ok || result.error) throw Object.assign(new Error(result.error ?? `Update request failed (HTTP ${response.status})`), {
     step: result.step ?? 'control-channel', code: result.code, details: result.details,
     stopRefused: result.stopRefused, stopCompleted: result.stopCompleted,
+    ...(Array.isArray(result.lines) ? { lines: result.lines, exitCode: result.exitCode } : {}),
   });
   return result.result;
 }

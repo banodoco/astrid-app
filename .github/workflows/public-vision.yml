@@ -6,6 +6,8 @@ on:
       - "src/pages/Home/PublicAstridVision.tsx"
       - "src/pages/Home/PublicAstridVision.css"
       - "src/pages/Home/VisionDetailDialog.tsx"
+      - "src/pages/Home/VisionPrincipleSigil.tsx"
+      - "src/pages/Home/VisionSectionNav.tsx"
       - "src/pages/Home/visionHierarchy.ts"
       - "src/pages/Home/visionHierarchy.test.ts"
       - "src/pages/Home/publicVisionContent.ts"
@@ -16,6 +18,7 @@ on:
       - "tests/e2e/public-astrid-vision-mobile-feedback.spec.ts"
       - "tests/e2e/public-astrid-vision-layout-feedback.spec.ts"
       - "tests/e2e/public-astrid-vision-hierarchy.spec.ts"
+      - "tests/e2e/public-astrid-vision-sigils-nav.spec.ts"
       - "package.json"
       - ".github/workflows/public-vision.yml"
       - ".github/workflows/served-manifest-canary.yml"
@@ -42,13 +45,13 @@ jobs:
       - name: Check production vision canary syntax
         run: node --check scripts/quality/check-public-vision-production.mjs
       - name: Check changed vision code
-        run: npx eslint src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx src/pages/Home/visionHierarchy.ts src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
+        run: npx eslint src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx src/pages/Home/VisionPrincipleSigil.tsx src/pages/Home/VisionSectionNav.tsx src/pages/Home/visionHierarchy.ts src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
       - name: Preserve public page lifecycle and share metadata
         run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts
       - name: Install Chromium for focused browser validation
         run: npx playwright install --with-deps chromium
       - name: Verify vision content on desktop and phone
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts --project=chromium-desktop
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts --project=chromium-desktop
 
       - name: Upload actual Vision screenshots
         if: always()

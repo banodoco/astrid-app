@@ -133,7 +133,7 @@ test('principle cards use four reserved sigil colors, transparent panels and bor
   const marks = cards.locator('.astrid-vision-principle-sigil');
   await expect(marks).toHaveCount(4);
   const colors = await marks.evaluateAll(elements =>
-    elements.map(el => getComputedStyle(el).borderColor));
+    elements.map(el => getComputedStyle(el).color));
   expect(new Set(colors).size).toBe(4);
   expect(await cards.first().evaluate(el => getComputedStyle(el).backgroundColor))
     .toBe('rgba(0, 0, 0, 0)');

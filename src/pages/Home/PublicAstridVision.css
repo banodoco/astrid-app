@@ -1208,12 +1208,12 @@
 }
 /* Native dialog supplies Escape, focus containment and a real modal backdrop. */
 .astrid-vision-details {
-  width: min(740px, calc(100vw - 32px));
+  width: min(740px, calc(100vw - 48px));
   max-width: none;
-  max-height: min(88dvh, 900px);
+  max-height: min(86dvh, 900px);
   margin: auto;
   padding: 0;
-  overflow-y: auto;
+  overflow: hidden;
   border: 1px solid var(--astrid-line);
   border-radius: 16px;
   background: var(--astrid-paper);
@@ -1224,8 +1224,45 @@
   background: rgba(22, 20, 18, .58);
   backdrop-filter: blur(3px);
 }
-.astrid-vision-details-shell { padding: clamp(22px, 4vw, 44px); }
-.astrid-vision-details-header { position: relative; padding-right: 40px; }
+/* Header stays put; only the content well scrolls. In particular, the close
+   button must belong to the panel frame, not disappearing content. */
+.astrid-vision-details-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: min(86dvh, 900px);
+}
+.astrid-vision-details-header {
+  display: flex;
+  flex: none;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: clamp(22px, 4vw, 36px);
+  padding-bottom: clamp(16px, 2.5vw, 22px);
+  border-bottom: 1px solid var(--astrid-line);
+}
+.astrid-vision-details-header-copy { flex: 1 1 auto; min-width: 0; }
+.astrid-vision-details-scroll {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: clamp(20px, 3.2vw, 32px) clamp(22px, 4vw, 36px);
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--astrid-ink) 36%, transparent) transparent;
+}
+.astrid-vision-details-scroll::-webkit-scrollbar { width: 9px; }
+.astrid-vision-details-scroll::-webkit-scrollbar-track { background: transparent; }
+.astrid-vision-details-scroll::-webkit-scrollbar-thumb {
+  background: color-mix(in oklab, var(--astrid-ink) 36%, transparent);
+  border: 2px solid var(--astrid-paper);
+  border-radius: 999px;
+}
+.astrid-vision-details-scroll::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklab, var(--astrid-ink) 55%, transparent);
+}
 .astrid-vision-details-eyebrow {
   margin: 0 0 12px;
   color: var(--astrid-accent);
@@ -1239,9 +1276,8 @@
   letter-spacing: -.03em;
 }
 .astrid-vision-details-close {
-  position: absolute;
-  top: 0;
-  right: 0;
+  position: static;
+  flex: none;
   display: grid;
   place-items: center;
   width: 36px;
@@ -1260,7 +1296,7 @@
   outline-offset: 3px;
 }
 .astrid-vision-details-description {
-  margin-top: 20px;
+  margin-top: 0;
   color: var(--astrid-muted);
   font-size: 16px;
   line-height: 1.65;
@@ -1338,7 +1374,18 @@
   line-height: 1.5;
 }
 @media (max-width: 560px) {
-  .astrid-vision-details { width: calc(100vw - 16px); max-height: 92dvh; border-radius: 12px; }
+  /* Leave a real hit target around every side, especially the top and bottom. */
+  .astrid-vision-details {
+    width: calc(100vw - 44px);
+    max-height: min(82dvh, calc(100dvh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+    border-radius: 14px;
+  }
+  .astrid-vision-details-shell {
+    max-height: min(82dvh, calc(100dvh - 64px - env(safe-area-inset-top) - env(safe-area-inset-bottom)));
+  }
+  .astrid-vision-details-header { gap: 10px; padding: 20px 18px 16px; }
+  .astrid-vision-details-scroll { padding: 18px 18px 22px; }
+  .astrid-vision-details-close { width: 38px; height: 38px; }
   .astrid-vision-details-projects { margin-left: 5px; padding-left: 12px; }
   .astrid-vision-details-project-heading { flex-wrap: wrap; gap: 3px 10px; }
 }

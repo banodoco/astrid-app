@@ -42,8 +42,19 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
       setActiveId(previous => previous === current ? previous : current);
     };
     const schedule = () => { if (!frame) frame = window.requestAnimationFrame(measure); };
-    const finishJump = () => {
-      if (!pendingJumpRef.current) return;
+    const finishJump = (force = false) => {
+      const pending = pendingJumpRef.current;
+      if (!pending) return;
+      const target = document.getElementById(pending);
+      if (!force && target) {
+        const scrollMargin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+        const top = target.getBoundingClientRect().top;
+        const atBottom = window.scrollY + window.innerHeight >=
+          document.documentElement.scrollHeight - 8;
+        // An unrelated scrollend (or a layout transition) may fire while
+        // the long smooth jump is still passing through other sections.
+        if (!atBottom && Math.abs(top - scrollMargin) > 36) return;
+      }
       pendingJumpRef.current = null;
       window.clearTimeout(jumpFallbackRef.current);
       schedule();
@@ -59,14 +70,15 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
     window.addEventListener('scrollend', onPageScrollEnd);
     window.addEventListener('resize', schedule);
     // A real user interruption should immediately restore scroll tracking.
-    window.addEventListener('wheel', finishJump, { passive: true });
-    window.addEventListener('touchstart', finishJump, { passive: true });
+    const interrupted = () => finishJump(true);
+    window.addEventListener('wheel', interrupted, { passive: true });
+    window.addEventListener('touchstart', interrupted, { passive: true });
     return () => {
       window.removeEventListener('scroll', schedule);
       window.removeEventListener('scrollend', onPageScrollEnd);
       window.removeEventListener('resize', schedule);
-      window.removeEventListener('wheel', finishJump);
-      window.removeEventListener('touchstart', finishJump);
+      window.removeEventListener('wheel', interrupted);
+      window.removeEventListener('touchstart', interrupted);
       window.clearTimeout(jumpFallbackRef.current);
       if (frame) window.cancelAnimationFrame(frame);
     };

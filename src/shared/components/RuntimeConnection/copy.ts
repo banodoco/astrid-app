@@ -288,8 +288,9 @@ export function installCommand(mode: CommandMode, choices?: SetupChoices, explic
   const windows = detectPlatform() === 'windows';
   // An existing install never gets choice flags: the Agent applies its saved policy, and --yes would replace legacy choices.
   if (mode === 'update' || explicitChoices) return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
-  // An already set-up install restarts with the plain line: explicit flags would override the Agent's saved choices (a stale browser could flip them).
-  if (alreadySetUp) return windows ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
+  // An already set-up install gets --yes with no choice flags: explicit choice flags would override the Agent's saved choices
+  // (a stale browser could flip them), and --yes stops a curl | sh from waiting on a prompt with no terminal.
+  if (alreadySetUp) return windows ? `& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --yes` : `${ASTRID_COMMANDS.macLinux} -s -- --yes`;
   const selected = choices ?? RECOMMENDED_SETUP_CHOICES;
   const args = ['--yes', ...setupChoiceFlags(selected)].join(' ');
   return windows

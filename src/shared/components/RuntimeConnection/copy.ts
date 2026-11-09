@@ -269,12 +269,14 @@ function serviceBrief(services: readonly ServiceStatus[] | undefined, platform: 
     : `If a service fails, inspect its service-<name>.log under ${runtimeLogDirectory(platform)}.`;
 }
 
-export function installCommand(mode: CommandMode, choices?: SetupChoices, explicitChoices = false, localBuild = false): string {
+export function installCommand(mode: CommandMode, choices?: SetupChoices, explicitChoices = false, localBuild = false, alreadySetUp = false): string {
   // A locally run App updates from its Astrid folder; hosted astrid.haus keeps the installer's update line.
   if (mode === 'update' && localBuild) return LOCAL_UPDATE_COMMAND;
   const windows = detectPlatform() === 'windows';
   // An existing install never gets choice flags: the Agent applies its saved policy, and --yes would replace legacy choices.
   if (mode === 'update' || explicitChoices) return windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate;
+  // An already set-up install restarts with the plain line: explicit flags would override the Agent's saved choices (a stale browser could flip them).
+  if (alreadySetUp) return windows ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   const selected = choices ?? RECOMMENDED_SETUP_CHOICES;
   const args = ['--yes', ...setupChoiceFlags(selected)].join(' ');
   return windows
@@ -304,7 +306,7 @@ export function agentInstructions(
   const alreadySetup = setup.alreadySetup ?? false;
   // A repair runs the plain install line, never --update: that line respects the saved autostart choice.
   const repair = setup.repair ?? false;
-  const command = repair ? (windows ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux) : installCommand(mode, choices, setup.explicitChoices ?? false, localBuild);
+  const command = repair ? (windows ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux) : installCommand(mode, choices, setup.explicitChoices ?? false, localBuild, alreadySetup);
   // Existing installs keep their saved choices: no consent question and no choice summary.
   const existing = mode === 'update' || repair || (setup.explicitChoices ?? false);
   return [

@@ -36,7 +36,7 @@ export function SetupBlock({ initiallySetUp, initialChoices, mode = 'install', s
   const [choices, setChoices] = useState<SetupChoices>(initialChoices ?? savedSetup.choices ?? RECOMMENDED_SETUP_CHOICES);
   const saveState = (nextAlreadySetUp: boolean, nextChoices: SetupChoices) => writePendingSetupState({ alreadySetUp: nextAlreadySetUp, choices: nextChoices });
   useEffect(() => { writePendingSetupState({ alreadySetUp, choices }); }, [alreadySetUp, choices]);
-  const command = installCommand(mode, choices, explicitChoices, localBuild);
+  const command = installCommand(mode, choices, explicitChoices, localBuild, alreadySetUp);
   const instructions = localSetup
     ? localSetupInstructions(choices, alreadySetUp, explicitChoices)
     : agentInstructions(mode, window.location.origin, localBuild, services, { choices, alreadySetup: alreadySetUp, explicitChoices });

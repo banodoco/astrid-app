@@ -3795,3 +3795,69 @@ describe('ExtensionContext — ctx.ui render surface', () => {
     expect(lc.state).toBe('active');
   });
 });
+
+// Real registries and context factory: only extension callbacks vary.
+import { createEffectRegistry } from '@/tools/video-editor/effects/registry/EffectRegistry';
+import { createEffectRegistrationService } from './effectRegistrationService';
+import { createCommandRegistry } from './commandRegistry';
+
+describe('live effect replacement transaction', () => {
+  it('keeps old effects and handlers visible through failed activation, then swaps and disables', async () => {
+    const effects = createEffectRegistry();
+    const commands = createCommandRegistry();
+    const host = createExtensionLifecycleHost();
+    const id = 'com.test.transaction';
+    const firstComponent = () => null;
+    const secondComponent = () => null;
+    const make = (component: typeof firstComponent, fail: boolean | 'commit' = false) => defineExtension({
+      manifest: { id: id as never, version: '1.0.0', label: 'Transaction', apiVersion: 1,
+        contributions: [{ id: 'effect' as never, kind: 'effect', effectId: 'live-transaction' },
+          { id: 'command' as never, kind: 'command', command: 'com.test.transaction.ping', label: 'Ping' }] },
+      activate(ctx) {
+        ctx.effects.registerComponent('live-transaction', component);
+        ctx.commands.registerCommand('com.test.transaction.ping', () => {});
+        if (fail === true) {
+          expect(effects.resolve('live-transaction')?.component).toBe(firstComponent);
+          throw new Error('replacement refused after registration');
+        }
+        if (fail === 'commit') {
+          ctx.effects.registerComponent('live-transaction', component, {
+            get label(): string { throw new Error('extension registration options failed'); },
+          });
+        }
+        // Host tracks these handles even if the extension fails to return one.
+      },
+    });
+    host.onLifecycleDisposed((owner) => commands.unregisterAll(owner));
+    const context = (extension: AstridExtension) => createExtensionContext(extension, undefined,
+      { registerCommand: (commandId, handler, options) => {
+        for (const contribution of extension.manifest.contributions ?? []) {
+          if (contribution.kind === 'command') commands.ingestCommandContribution(id, contribution);
+        }
+        return commands.registerCommand(id, commandId, handler, options);
+      } },
+      createEffectRegistrationService({ extension, effectRegistry: effects,
+        diagnosticsService: createExtensionDiagnosticsService(id) }));
+    const first = make(firstComponent);
+    host.synchronize([first], context);
+    const old = host.lifecycles.get(id);
+    expect(effects.resolve('live-transaction')?.component).toBe(firstComponent);
+    expect(commands.getSnapshot().getCommand('com.test.transaction.ping')).toBeDefined();
+    host.synchronize([make(secondComponent, true)], context);
+    expect(host.lifecycles.get(id)).toBe(old);
+    expect(old?.state).toBe('active');
+    expect(effects.resolve('live-transaction')?.component).toBe(firstComponent);
+    expect(commands.getSnapshot().getCommand('com.test.transaction.ping')).toBeDefined();
+    host.synchronize([make(secondComponent, 'commit')], context);
+    expect(host.lifecycles.get(id)).toBe(old);
+    expect(old?.state).toBe('active');
+    expect(effects.resolve('live-transaction')?.component).toBe(firstComponent);
+    expect(await commands.executeCommand('com.test.transaction.ping')).toBe(true);
+    host.synchronize([make(secondComponent)], context);
+    expect(old?.state).toBe('disposed');
+    expect(effects.resolve('live-transaction')?.component).toBe(secondComponent);
+    host.synchronize([], context);
+    expect(effects.resolve('live-transaction')).toBeUndefined();
+    expect(commands.getSnapshot().getCommand('com.test.transaction.ping')).toBeUndefined();
+  });
+});

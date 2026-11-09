@@ -46,20 +46,31 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
     };
   }, [sections]);
 
-  // Keep the highlighted destination in view within the narrow header,
-  // without invoking scrollIntoView (which would also move the document).
+  // On phones, position the active section in the middle as far as the
+  // horizontal scroll bounds allow. The first/last links naturally clamp.
+  // Recenter as the Astrid wordmark folds and the nav gains more width.
   useEffect(() => {
     const nav = navRef.current;
-    const active = nav?.querySelector<HTMLAnchorElement>('a[aria-current="location"]');
-    if (!nav || !active || nav.scrollWidth <= nav.clientWidth) return;
-    const navBounds = nav.getBoundingClientRect();
-    const linkBounds = active.getBoundingClientRect();
-    if (linkBounds.left < navBounds.left + 6) {
-      nav.scrollLeft += linkBounds.left - navBounds.left - 6;
-    } else if (linkBounds.right > navBounds.right - 6) {
-      nav.scrollLeft += linkBounds.right - navBounds.right + 6;
-    }
-  }, [activeId]);
+    if (!nav) return;
+    const alignActive = (behavior: ScrollBehavior) => {
+      const active = nav.querySelector<HTMLAnchorElement>('a[aria-current="location"]');
+      if (!active || nav.scrollWidth <= nav.clientWidth) return;
+      const navBox = nav.getBoundingClientRect();
+      const linkBox = active.getBoundingClientRect();
+      const desired = nav.scrollLeft + linkBox.left - navBox.left +
+        linkBox.width / 2 - nav.clientWidth / 2;
+      const bounded = Math.max(0, Math.min(nav.scrollWidth - nav.clientWidth, desired));
+      nav.scrollTo({ left: bounded, behavior });
+    };
+    const frame = window.requestAnimationFrame(() => alignActive(reducedMotion ? 'auto' : 'smooth'));
+    const resize = typeof ResizeObserver === 'function'
+      ? new ResizeObserver(() => alignActive('auto')) : null;
+    resize?.observe(nav);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      resize?.disconnect();
+    };
+  }, [activeId, reducedMotion]);
 
   return (
     <nav ref={navRef} className="astrid-vision-section-nav" aria-label="Vision page sections">

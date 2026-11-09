@@ -279,7 +279,9 @@ public sealed class AstridInstallerProcessV4 {
             if ($FailureStart -ge 0) {
                 $CoreFailure = $Result.Output.Substring($FailureStart).TrimEnd()
             }
-            if ($Result.FailureDisplayed) {
+            # The installer's run receipt (which ends with a Details line) has
+            # already streamed and said what happened; add nothing after it.
+            if ($Result.FailureDisplayed -or ($FailureStart -lt 0 -and $Result.Output -match '(?m)^Details: ')) {
                 if ($FileInvocation) { exit $NativeExitCode }
                 return
             }

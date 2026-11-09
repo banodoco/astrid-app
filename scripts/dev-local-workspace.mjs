@@ -437,9 +437,13 @@ async function verifyRuntime(endpoint, token, expectedIdentity, allowStart = fal
       const quote = (value) => /^[A-Za-z0-9_./:=+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
       const invocation = [selected.command, ...selected.args.filter((value) => value !== '--json')].map(quote).join(' ');
       const restart = pinokioManaged ? 'Stop and start Astrid in Pinokio' : `${selected.cwd ? `cd ${quote(selected.cwd)} && ` : ''}${invocation}`;
-      console.error(`Astrid: Runtime ${actual?.protocol ?? 'unknown'} schema ${actual?.schema_digest ?? 'unknown'} is incompatible with App workspace.v1 schema ${expectedSchemaDigest}; ${reason}; ${SOURCE_SCHEMA_MISMATCH_ACTION}; restart: ${restart}`);
-      process.exitCode = 1;
-      return null;
+      // One plain line with what to do; the protocol, digests and reason go on the Details line.
+      return fail(
+        pinokioManaged
+          ? `Astrid's engine doesn't match this App. ${restart}.`
+          : `Astrid's engine doesn't match this App: ${SOURCE_SCHEMA_MISMATCH_ACTION}, then restart its engine: ${restart}`,
+        `Runtime ${actual?.protocol ?? 'unknown'} schema ${actual?.schema_digest ?? 'unknown'} is incompatible with App workspace.v1 schema ${expectedSchemaDigest}; ${reason}`,
+      );
     };
     if (health?.status !== 'ok' || health?.protocol !== 'workspace.v1') {
       return incompatible(health, 'runtime health check did not report workspace.v1/ok');

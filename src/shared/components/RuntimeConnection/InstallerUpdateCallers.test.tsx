@@ -11,6 +11,7 @@ const harness = vi.hoisted(() => ({
   manager: null as string | null,
   statusAvailable: true,
   statusState: 'none' as string,
+  statusReason: null as string | null,
   operationId: null as string | null,
   result: 'Update accepted.',
   outcome: 'updated' as 'updated' | 'rolled_back' | 'failed',
@@ -38,6 +39,7 @@ import { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
 import { RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { connectionFor } from './connectionFixture.ts';
+import { installCommand, LOCAL_UPDATE_COMMAND } from './copy.ts';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 
 const connection = () => ({ isConnected: true, managedByPinokio: false } as RuntimeConnectionValue);
@@ -50,6 +52,7 @@ beforeEach(() => {
   harness.manager = null;
   harness.statusAvailable = true;
   harness.statusState = 'none';
+  harness.statusReason = null;
   harness.operationId = null;
   harness.result = 'Update accepted.';
   harness.outcome = 'updated';
@@ -70,6 +73,7 @@ beforeEach(() => {
     } else if (url.endsWith('/v1/update/status')) {
       body = {
         available: harness.statusAvailable, self_update: harness.statusAvailable, state: harness.statusState,
+        ...(harness.statusReason ? { reason: harness.statusReason } : {}),
         ...(harness.operationId ? { operation_id: harness.operationId, result: harness.result } : {}),
         ...(harness.statusState === 'terminal' ? { outcome: harness.outcome } : {}),
       };
@@ -101,6 +105,17 @@ afterEach(() => {
 });
 
 describe('installer update callers', () => {
+  it('a recovery the Runtime refuses as busy offers no in-app Update and shows the installer line', async () => {
+    harness.statusState = 'recovery-needed';
+    harness.statusReason = 'busy';
+    render(<AstridUpdatesSection isOpen />);
+    await screen.findByRole('button', { name: 'Copy instructions for your agent' });
+    expect(screen.queryByRole('button', { name: /^Update( now)?$/ })).not.toBeInTheDocument();
+    // The hosted App (runtime origin set) shows the installer line, not the local npm run update.
+    expect(screen.getByText(installCommand('update'), { exact: true })).toBeInTheDocument();
+    expect(screen.queryByText(LOCAL_UPDATE_COMMAND)).not.toBeInTheDocument();
+  });
+
   it('removes execution after permission/auth loss and keeps both command options', async () => {
     const view = render(<AstridUpdatesSection isOpen />);
     const staleButton = await screen.findByRole('button', { name: 'Update now' });

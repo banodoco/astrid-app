@@ -72,10 +72,13 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   // Runtime performs the full ownership/lock/busy admission on the explicit POST.
   // A recovery whose Runtime refuses it (a busy or policy reason) gets the terminal line, never the in-app Update.
   const recovery = snapshot.status?.state === 'recovery-needed' && canStartInstallerUpdate(snapshot.status);
+  // A recovery the Runtime refuses offers no in-app Update, even when this release is also behind.
+  const recoveryRefused = snapshot.status?.state === 'recovery-needed' && !recovery;
   // Update now is offered when the installed Astrid reports self_update, and while it is busy, when it is shown disabled.
   // canStartInstallerUpdate gates the start itself.
   const available = enabled && installType === 'installer' && manager === null
     && typeof snapshot.health?.runtime_instance_id === 'string'
+    && !recoveryRefused
     && (recovery || snapshot.releaseStatus?.behind === true)
     && !snapshot.restartRequired
     && snapshot.fresh && (snapshot.status?.self_update === true || snapshot.status?.reason === 'busy');

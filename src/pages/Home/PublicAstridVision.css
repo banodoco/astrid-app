@@ -1118,3 +1118,186 @@
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-skeleton-line { animation: none; }
 }
+
+
+/* Both editorial card types share one accessible, full-card disclosure target. */
+.astrid-vision-principles > li,
+.astrid-vision-standards-list > li { position: relative; }
+.astrid-vision-card-open {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.astrid-vision-card-open:focus-visible {
+  outline: 3px solid var(--astrid-accent);
+  outline-offset: 4px;
+}
+.astrid-vision-principles > li:is(:hover, :focus-within) h3,
+.astrid-vision-standards-list > li:is(:hover, :focus-within) h3 {
+  text-decoration: underline;
+  text-decoration-color: var(--astrid-accent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 5px;
+}
+
+/* Native dialog supplies Escape, focus containment and a real modal backdrop. */
+.astrid-vision-details {
+  width: min(740px, calc(100vw - 32px));
+  max-width: none;
+  max-height: min(88dvh, 900px);
+  margin: auto;
+  padding: 0;
+  overflow-y: auto;
+  border: 1px solid var(--astrid-line);
+  border-radius: 16px;
+  background: var(--astrid-paper);
+  color: var(--astrid-ink);
+  box-shadow: 0 22px 88px rgba(20, 20, 18, .28);
+}
+.astrid-vision-details::backdrop {
+  background: rgba(22, 20, 18, .58);
+  backdrop-filter: blur(3px);
+}
+.astrid-vision-details-shell { padding: clamp(22px, 4vw, 44px); }
+.astrid-vision-details-header { position: relative; padding-right: 40px; }
+.astrid-vision-details-eyebrow {
+  margin: 0 0 12px;
+  color: var(--astrid-accent);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .06em;
+}
+.astrid-vision-details-header h2 {
+  margin: 0;
+  font: 400 clamp(28px, 4vw, 40px)/1.15 var(--astrid-vision-serif);
+  letter-spacing: -.03em;
+}
+.astrid-vision-details-close {
+  position: absolute;
+  top: 0;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--astrid-line);
+  border-radius: 50%;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.astrid-vision-details-close:hover { background: var(--astrid-panel); }
+.astrid-vision-details-close:focus-visible,
+.astrid-vision-details a:focus-visible {
+  outline: 2px solid var(--astrid-accent);
+  outline-offset: 3px;
+}
+.astrid-vision-details-description {
+  margin-top: 20px;
+  color: var(--astrid-muted);
+  font-size: 16px;
+  line-height: 1.65;
+}
+.astrid-vision-details-description p { margin: 0 0 12px; }
+.astrid-vision-details-description a { color: inherit; text-underline-offset: 3px; }
+.astrid-vision-details-gaps {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid var(--astrid-line);
+}
+.astrid-vision-details-gaps > h3 {
+  margin: 0 0 18px;
+  font: 400 24px/1.25 var(--astrid-vision-serif);
+}
+.astrid-vision-details-gap-list,
+.astrid-vision-details-projects ul { margin: 0; padding: 0; list-style: none; }
+.astrid-vision-details-gap {
+  padding: 18px 0;
+  border-top: 1px solid var(--astrid-line);
+}
+.astrid-vision-details-gap:first-child { padding-top: 0; border-top: 0; }
+.astrid-vision-details-gap h4 {
+  margin: 0;
+  font: 500 17px/1.4 var(--astrid-vision-serif);
+}
+.astrid-vision-details-gap h4 a,
+.astrid-vision-details-project-heading a {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 7px;
+  color: var(--astrid-ink);
+  text-decoration-color: transparent;
+  text-underline-offset: 3px;
+}
+.astrid-vision-details-gap a:hover { text-decoration-color: currentColor; }
+.astrid-vision-details-gap a svg { flex: 0 0 auto; }
+.astrid-vision-details-projects {
+  margin: 14px 0 0 14px;
+  padding-left: 16px;
+  border-left: 2px solid var(--astrid-line);
+}
+.astrid-vision-details-projects > p {
+  margin: 0 0 10px;
+  color: var(--astrid-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: .035em;
+}
+.astrid-vision-details-projects li { padding: 10px 0; }
+.astrid-vision-details-project-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+.astrid-vision-details-project-heading a { font-size: 14px; font-weight: 600; }
+.astrid-vision-details-project-heading span {
+  flex-shrink: 0;
+  color: var(--astrid-muted);
+  font: 11px/1.4 ui-monospace, monospace;
+  text-transform: capitalize;
+}
+.astrid-vision-details-project-goal {
+  margin-top: 5px;
+  color: var(--astrid-muted);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.astrid-vision-details-project-goal p { margin: 0; }
+.astrid-vision-details-empty {
+  margin: 10px 0 0;
+  color: var(--astrid-muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+@media (max-width: 560px) {
+  .astrid-vision-details { width: calc(100vw - 16px); max-height: 92dvh; border-radius: 12px; }
+  .astrid-vision-details-projects { margin-left: 5px; padding-left: 12px; }
+  .astrid-vision-details-project-heading { flex-wrap: wrap; gap: 3px 10px; }
+}
+
+/* A visible, quiet affordance also works on touch screens without hover. */
+.astrid-vision-principles > li::after,
+.astrid-vision-standards-list > li::after {
+  content: 'Details ↗';
+  position: absolute;
+  right: 0;
+  top: 0;
+  pointer-events: none;
+  color: var(--astrid-accent);
+  font: 600 11px/1.4 ui-monospace, monospace;
+}
+.astrid-vision-principles > li::after {
+  top: clamp(22px, 2.6vw, 32px);
+  right: clamp(22px, 2.6vw, 32px);
+  color: var(--tone-ink);
+}

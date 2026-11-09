@@ -9,6 +9,8 @@ import { followInPage } from './publicAstridLinks';
 import { NORTH_STAR_ART, NorthStarMink, type NorthStarArt } from './PublicAstridNorthStarArt.tsx';
 import { usePublicAstridEnvironment, type PublicAstridEnvironment } from './publicAstridLifecycle';
 import { usePublicVisionContent, PUBLIC_VISION_REPO_URL, type PublicVisionGap, type PublicVisionProject } from './publicVisionContent';
+import { VisionDetailDialog } from './VisionDetailDialog';
+import type { VisionSubject } from './visionHierarchy';
 import './PublicAstridVision.css';
 
 const PILLAR_ART: readonly NorthStarArt[] = [
@@ -166,6 +168,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [gapFilter, setGapFilter] = useState<GapFilter>('current');
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  const [selectedSubject, setSelectedSubject] = useState<VisionSubject | null>(null);
   const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const agentCopyTimer = useRef<number>();
   const contributionIntro = content?.vision.contributeMarkdown
@@ -345,6 +348,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <h3>{pillar.title}</h3>
               <p>{pillar.descriptor}</p>
               <NorthStarMink art={pillar.art} />
+              <button type="button" className="astrid-vision-card-open"
+                aria-label={'Explore ' + pillar.title + ': gaps and projects'}
+                onClick={() => setSelectedSubject({ kind: 'pillar', id: pillar.id })} />
             </li>
           ))}
         </ol>
@@ -363,6 +369,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                 <h3>{principle.title}</h3>
                 <MarkdownText value={principle.bodyMarkdown} />
               </div>
+              <button type="button" className="astrid-vision-card-open"
+                aria-label={'Explore ' + principle.title + ': gaps and projects'}
+                onClick={() => setSelectedSubject({ kind: 'principle', id: principle.id })} />
             </li>
           ))}
         </ol>
@@ -432,6 +441,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       </section>
 
       </>)}
+      {content && selectedSubject && (
+        <VisionDetailDialog key={selectedSubject.kind + ':' + selectedSubject.id}
+          content={content} subject={selectedSubject} onClose={() => setSelectedSubject(null)} />
+      )}
       {content?.vision.contributeMarkdown && (
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"
           aria-labelledby="astrid-vision-contribute-title" data-reveal>

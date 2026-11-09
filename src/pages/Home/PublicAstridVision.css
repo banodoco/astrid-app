@@ -1899,8 +1899,15 @@
     margin-top: 11px;
   }
 }
-@media (max-width: 640px) {
+@media (max-width: 760px) {
+  /* Portrait tablets get readable lines rather than two squeezed columns. */
   .astrid-vision-principles { grid-template-columns: minmax(0, 1fr); }
+  .astrid-vision .astrid-vision-principles > li {
+    grid-template-columns: minmax(0, 1fr) 96px;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: 1.1px; }
+}
+@media (max-width: 640px) {
   .astrid-vision .astrid-vision-principles > li {
     grid-template-columns: minmax(0, 1fr) 75px;
     column-gap: 10px;

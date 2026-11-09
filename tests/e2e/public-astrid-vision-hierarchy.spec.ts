@@ -293,12 +293,15 @@ test('aspiration cards join edge-to-edge, fit the long title in two lines, and o
     expect(Math.abs(areaRect!.width - cardRect!.width)).toBeLessThan(2);
     expect(Math.abs(areaRect!.height - cardRect!.height)).toBeLessThanOrEqual(2);
 
+    // Mouse coordinates are viewport-relative: bring the card on-screen first.
     // The entire surface, including where the title and sigil are drawn, opens the dialog.
+    await cards.last().scrollIntoViewIfNeeded();
     const titleRect = await fourthTitle.boundingBox();
     expect(titleRect).not.toBeNull();
     await page.mouse.click(titleRect!.x + 10, titleRect!.y + titleRect!.height / 2);
     await expect(page.getByRole('dialog')).toBeVisible();
     await page.getByRole('dialog').getByRole('button', { name: 'Close details' }).click();
+    await cards.last().scrollIntoViewIfNeeded();
     const sigilRect = await cards.last().locator('.astrid-vision-principle-sigil').boundingBox();
     expect(sigilRect).not.toBeNull();
     await page.mouse.click(sigilRect!.x + 8, sigilRect!.y + 8);

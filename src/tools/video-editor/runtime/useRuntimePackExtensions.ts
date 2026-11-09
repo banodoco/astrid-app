@@ -33,7 +33,6 @@ export function useRuntimePackExtensions(directExtensions: readonly AstridExtens
     let stopped = false;
     let running = false;
     let last = '';
-    let timer: number | undefined;
     let packsAbsent = false;
     async function refresh() {
       if (running || stopped || packsAbsent) return;
@@ -84,7 +83,7 @@ export function useRuntimePackExtensions(directExtensions: readonly AstridExtens
       } finally { running = false; }
     }
     void refresh();
-    timer = window.setInterval(() => void refresh(), refreshIntervalMs);
+    const timer = window.setInterval(() => void refresh(), refreshIntervalMs);
     const onRefresh = () => { if (packsAbsent) return; last = ''; setRefreshKey((key) => key + 1); void refresh(); };
     window.addEventListener('focus', onRefresh);
     window.addEventListener('astrid:pack-inventory-changed', onRefresh);

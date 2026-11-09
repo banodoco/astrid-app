@@ -18,6 +18,14 @@ async function runtimeManagedBy(): Promise<string | null> {
   }
 }
 
+/**
+ * The same-origin page's status: the launcher's, with the install manager from the Runtime identity. It resolves only once that
+ * identity is read, so a card built from it never shows an install type that is still unknown.
+ */
+export async function loadLocalPageStatus(): Promise<UpdateStatus> {
+  return { ...(await checkLocalUpdate()), managedBy: await runtimeManagedBy() };
+}
+
 let pageStatusPromise: Promise<UpdateStatus | null> | null = null;
 
 /** One update-status request per page load, shared by the notice and Settings indicator. A page with neither a launcher nor a Runtime origin has none. */
@@ -26,7 +34,7 @@ export function loadPageUpdateStatus(): Promise<UpdateStatus | null> {
   if (!pageStatusPromise) {
     pageStatusPromise = (async () => {
       try {
-        if (localUpdateStatus()) return { ...(await checkLocalUpdate()), managedBy: await runtimeManagedBy() };
+        if (localUpdateStatus()) return await loadLocalPageStatus();
         const health = await new AstridRuntimeClient().readInstallerUpdateHealth();
         return await checkHostedUpdate(health);
       } catch {

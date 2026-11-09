@@ -106,6 +106,42 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The same-origin launcher path: the page reads the launcher's status (a build flag), and the install type needs the Runtime identity.
+describe('the same-origin launcher card waits for the install type', () => {
+  const launcherBody = { app: 'a'.repeat(40), release: 10, servedApp: 'b'.repeat(40), servedRelease: 11, behind: true, self_update: true };
+  const withLauncher = (health: () => Promise<Response> | Response) => {
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/__astrid/local-update-status')) return new Response(JSON.stringify(launcherBody), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.endsWith('/v1/health')) return health();
+      return base(input, init);
+    }));
+  };
+  beforeEach(() => {
+    vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
+    harness.origin = '';
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('shows no shell command while the Runtime identity (and so the install type) is still unknown', async () => {
+    withLauncher(() => new Promise<Response>(() => undefined));
+    render(<AstridUpdatesSection isOpen />);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+  });
+
+  it('a Pinokio-managed fully local install gets the Pinokio instruction once the identity is known', async () => {
+    // The connection does not know it is Pinokio; only the Runtime's own identity (health) says so.
+    harness.manager = 'pinokio';
+    harness.connection = { isConnected: true, managedByPinokio: false, state: { status: 'connected' } };
+    withLauncher(() => new Response(JSON.stringify({ status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test', runtime_instance_id: harness.instance, runtime_session_id: 'session-a', runtime_epoch: 1, identity: { managed_by: 'pinokio', release: 10 } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    render(<AstridUpdatesSection isOpen />);
+    await screen.findAllByText(PINOKIO_UPDATE_INSTRUCTION);
+    expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+  });
+});
+
 describe('installer update callers', () => {
   // A recovery the Runtime refuses as busy: no in-app Update, and the install type's own update instruction.
   // Hosted-origin Apps read the installer status route. Same-origin Apps (developer checkout, fully local) read the

@@ -10,8 +10,8 @@ import { fetchDiagnosticsReport, saveDiagnosticsReport } from '@/shared/componen
 import { ASTRID_COMMANDS, installCommand, RUNTIME_CONNECTION_COPY, updateNeededSentence } from '@/shared/components/RuntimeConnection/copy.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { resolveUpdate, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
-import { localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpdateStatus.ts';
-import { checkHostedUpdate, checkLocalUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
+import { loadLocalPageStatus, localUpdateStatus, pageInstallType } from '@/shared/lib/updates/pageUpdateStatus.ts';
+import { checkHostedUpdate, type UpdateStatus } from '@/shared/lib/updates/updateStatus.ts';
 import { APP_BUILD } from '@/shared/lib/updates/appBuildWatch.ts';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { installerOutcomeMessage, installerUpdateFailed, installerUpdateLine } from '@/shared/lib/updates/updateOperation.ts';
@@ -85,7 +85,7 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
     try {
       let next: UpdateStatus;
       if (local) {
-        next = await checkLocalUpdate();
+        next = await loadLocalPageStatus();
       } else {
         // A schema-incompatible Runtime can still expose authenticated health
         // and installer status without a workspace session. Older test and
@@ -98,7 +98,9 @@ export function AstridUpdatesSection({ isOpen }: { readonly isOpen: boolean }) {
         next = await checkHostedUpdate(health);
       }
       setStatus(next);
-      setResolution(resolveUpdate({ ...next.resolution, compatibility: compatibilityFor(installType), installType, updateNowAvailable: false, selfUpdate: operation.status?.self_update ?? next.selfUpdate, updateReason: operation.updateReason }, 'settings'));
+      // On the same-origin page the install type comes from the identity this status was read with, not the operation's health.
+      const reportedType = local ? pageInstallType(next.managedBy, connection.managedByPinokio) : installType;
+      setResolution(resolveUpdate({ ...next.resolution, compatibility: compatibilityFor(reportedType), installType: reportedType, updateNowAvailable: false, selfUpdate: operation.status?.self_update ?? next.selfUpdate, updateReason: operation.updateReason }, 'settings'));
       setState('ready');
     } catch {
       setStatus(null);

@@ -12,6 +12,7 @@ const harness = vi.hoisted(() => ({
   statusAvailable: true,
   statusState: 'none' as string,
   statusReason: null as string | null,
+  origin: 'https://astrid.test',
   operationId: null as string | null,
   result: 'Update accepted.',
   outcome: 'updated' as 'updated' | 'rolled_back' | 'failed',
@@ -27,7 +28,7 @@ vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({
   useRuntimeConnectionSafe: () => harness.connection,
 }));
 vi.mock('@/integrations/runtime/connection.ts', () => ({
-  runtimeOrigin: () => 'https://astrid.test',
+  runtimeOrigin: () => harness.origin,
   runtimeApiBase: () => 'https://astrid.test/api/runtime',
 }));
 vi.mock('@/shared/components/RuntimeConnection/AppBuildProvider.tsx', () => ({ usePageStale: () => harness.pageStale }));
@@ -39,7 +40,7 @@ import { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
 import { RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { connectionFor } from './connectionFixture.ts';
-import { installCommand, LOCAL_UPDATE_COMMAND } from './copy.ts';
+import { installCommand, LOCAL_UPDATE_COMMAND, PINOKIO_UPDATE_INSTRUCTION } from './copy.ts';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 
 const connection = () => ({ isConnected: true, managedByPinokio: false } as RuntimeConnectionValue);
@@ -53,6 +54,7 @@ beforeEach(() => {
   harness.statusAvailable = true;
   harness.statusState = 'none';
   harness.statusReason = null;
+  harness.origin = 'https://astrid.test';
   harness.operationId = null;
   harness.result = 'Update accepted.';
   harness.outcome = 'updated';
@@ -105,15 +107,29 @@ afterEach(() => {
 });
 
 describe('installer update callers', () => {
-  it('a recovery the Runtime refuses as busy offers no in-app Update and shows the installer line', async () => {
+  // A recovery the Runtime refuses as busy: no in-app Update, and the install type's own update instruction.
+  // Hosted-origin Apps read the installer status route. Same-origin Apps (developer checkout, fully local) read the
+  // launcher's status instead (localUpdateStatus, a build flag), which this harness does not drive.
+  it.each([
+    ['hosted astrid.haus', 'https://astrid.test', null, { command: installCommand('update') }],
+    ['installer install', 'http://127.0.0.1:17340', null, { command: installCommand('update') }],
+    ['Pinokio hosted', 'https://astrid.test', 'pinokio', { pinokio: true }],
+  ] as const)('a recovery refused as busy, on %s: no in-app Update and the right update instruction', async (_name, origin, manager, expected) => {
+    harness.origin = origin;
+    harness.manager = manager;
+    harness.connection = { isConnected: true, managedByPinokio: manager === 'pinokio', state: { status: 'connected' } };
     harness.statusState = 'recovery-needed';
     harness.statusReason = 'busy';
     render(<AstridUpdatesSection isOpen />);
-    await screen.findByRole('button', { name: 'Copy instructions for your agent' });
+    if ('pinokio' in expected) {
+      await screen.findAllByText(PINOKIO_UPDATE_INSTRUCTION);
+      expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+    } else {
+      await screen.findByRole('button', { name: 'Copy instructions for your agent' });
+      expect(screen.getByText(expected.command, { exact: true })).toBeInTheDocument();
+      if (expected.command !== LOCAL_UPDATE_COMMAND) expect(document.body.textContent).not.toContain('npm run update');
+    }
     expect(screen.queryByRole('button', { name: /^Update( now)?$/ })).not.toBeInTheDocument();
-    // The hosted App (runtime origin set) shows the installer line, not the local npm run update.
-    expect(screen.getByText(installCommand('update'), { exact: true })).toBeInTheDocument();
-    expect(screen.queryByText(LOCAL_UPDATE_COMMAND)).not.toBeInTheDocument();
   });
 
   it('removes execution after permission/auth loss and keeps both command options', async () => {

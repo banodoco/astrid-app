@@ -37,8 +37,6 @@ export function VisionDetailDialog({
       className="astrid-vision-details"
       aria-labelledby={titleId}
       onClose={onClose}
-      // Backdrop events are dispatched to the dialog itself in native dialogs.
-      // Coordinates work even when mobile Safari retargets a backdrop tap.
       onPointerDown={event => closeIfOutside(event.clientX, event.clientY)}
       onClick={event => {
         if (event.target === event.currentTarget) {

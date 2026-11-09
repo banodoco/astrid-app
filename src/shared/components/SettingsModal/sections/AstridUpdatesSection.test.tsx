@@ -60,7 +60,7 @@ describe('Astrid Updates Settings section', () => {
     fireEvent.click(within(section).getByRole('button', { name: 'Download diagnostics' }));
     await waitFor(() => expect(createObjectURL).toHaveBeenCalledOnce());
     const report = await (createObjectURL.mock.calls[0][0] as Blob).text();
-    expect(report).toContain(`App build: ${APP_BUILD || 'served-app-build'}\nApp release: 12`);
+    expect(report).toContain(`App release: 12\nApp build: ${APP_BUILD || 'served-app-build'}`);
     expect(report.match(/^App build:/gm)).toHaveLength(1);
     expect(report.match(/^App release:/gm)).toHaveLength(1);
   });

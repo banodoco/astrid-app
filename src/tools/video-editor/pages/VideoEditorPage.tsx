@@ -52,6 +52,7 @@ import {
   subscribe as subscribeBuiltInDisabled,
 } from "@/tools/video-editor/runtime/builtInExtensionEnablement.ts";
 import { useRuntimePackExtensions } from "@/tools/video-editor/runtime/useRuntimePackExtensions";
+import { useRuntimeConnectionSafe } from "@/integrations/runtime/RuntimeConnectionProvider.tsx";
 import { AstridVideoEditorShell } from "@/tools/video-editor/components/AstridVideoEditorShell.tsx";
 import {
   ProjectTimelinePicker,
@@ -239,13 +240,15 @@ export default function VideoEditorPage() {
   // Resolves direct-local extensions + optional repository state through the
   // ExtensionLoader pipeline.  When no repository is provided, direct-local
   // extensions pass through unchanged (backward compatible).
+  // The connected Runtime's identity: a reconnect or another Runtime lets a Runtime without packs be polled again.
+  const runtimeConnection = useRuntimeConnectionSafe();
   const {
     resolvedExtensions,
     diagnostics: loaderDiagnostics,
     packageStateEntries,
     repository: extensionStateRepository,
     triggerExtensionRefresh,
-  } = useRuntimePackExtensions(smokeDirectExtensions, 2000);
+  } = useRuntimePackExtensions(smokeDirectExtensions, 2000, [runtimeConnection?.isConnected, runtimeConnection?.realmName, runtimeConnection?.schemaDigest].map(String).join('|'));
   useEffect(() => {
     publishLocalTestExtensionDiagnostics("loader", loaderDiagnostics);
   }, [loaderDiagnostics]);

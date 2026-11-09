@@ -65,3 +65,15 @@ it('gives an update no choice controls: the Agent keeps the saved policy', () =>
   expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
   expect(screen.getByRole('code')).toHaveTextContent(/sh -s -- --update$/);
 });
+
+it.each([false, true])('a set-up install with stale saved autostart=%s sends the plain install line, no choice flags', (autostart) => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+  localStorage.setItem('astrid:pending-setup-v1', JSON.stringify({
+    alreadySetUp: true,
+    choices: { autostart, command: true, skills: true, skillCopies: false },
+  }));
+  render(<SetupBlock />);
+  expect(screen.getByText('Start Astrid')).toBeInTheDocument();
+  expect(screen.getByRole('code').textContent).toBe('curl -fsSL https://astrid.haus/install | sh');
+});

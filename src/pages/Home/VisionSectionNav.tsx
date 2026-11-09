@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 const SECTIONS = [
   { id: 'astrid-vision-manifesto', label: 'Vision' },
+  { id: 'astrid-vision-pillars', label: 'Pillars' },
   { id: 'astrid-vision-standards', label: 'Principles' },
   { id: 'astrid-vision-parts', label: 'Gaps' },
   { id: 'astrid-vision-projects', label: 'Projects' },

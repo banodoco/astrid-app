@@ -507,6 +507,14 @@ describe('receipts from terminal runs: each has its row, Download diagnostics an
     expect(within(section).queryByRole('button', { name: 'Copy command (try again)' })).toBeNull();
   });
 
+  it('autostart-off status (reason from the installer report): the card, its command and agent action, and no Update now', async () => {
+    const section = await mount('Astrid diagnostics\nLast update result: none\n', { available: true, self_update: true, state: 'none', reason: 'autostart-off' });
+    expect(await within(section).findAllByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off'])).not.toHaveLength(0);
+    expect(within(section).getByRole('code')).toHaveTextContent('--update');
+    expect(within(section).getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
+  });
+
   it('windows-upgrade-unsupported in update status: its line, no retry command, never the generic line', async () => {
     const section = await mount('Astrid diagnostics\nLast update result: none\n', { available: true, self_update: true, state: 'none', reason: 'windows-upgrade-unsupported' });
     expect(await within(section).findAllByText(INSTALLER_UPDATE_REASON_MESSAGES['windows-upgrade-unsupported'])).not.toHaveLength(0);

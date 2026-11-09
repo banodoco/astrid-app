@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
+import { agentInstructions, autostartOffAgentBrief, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -216,5 +216,17 @@ describe('diagnostics fallback', () => {
     expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('--doctor');
     expect(DIAGNOSTICS_FALLBACK_COPY.command).not.toContain('astrid-runtime doctor');
     expect(DIAGNOSTICS_FALLBACK_COPY.agent).not.toContain('astrid-runtime doctor');
+  });
+});
+
+describe('autostart-off agent brief', () => {
+  it('runs exactly the strict update line, success words, a doctor fallback, and no other fixes', () => {
+    const brief = autostartOffAgentBrief(false);
+    expect(brief).toContain(`Run exactly this command: ${ASTRID_COMMANDS.macLinuxUpdate}.`);
+    expect(brief).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
+    expect(brief).toContain('"Astrid updated" or "already up to date"');
+    expect(brief).toContain(DIAGNOSTICS_FALLBACK_COPY.command);
+    expect(brief).toContain("Don't try other fixes");
+    expect(autostartOffAgentBrief(true)).toContain(ASTRID_COMMANDS.windowsUpdate);
   });
 });

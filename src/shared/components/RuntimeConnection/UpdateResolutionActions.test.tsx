@@ -186,6 +186,20 @@ describe('update resolution in-app availability', () => {
   });
 });
 
+describe('autostart-off card', () => {
+  it('shows the new copy, the strict update command, the agent action, and no Update now', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    expect(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']).toBe('Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.');
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off'])).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(document.body.textContent).not.toContain('then start Astrid');
+  });
+});
+
 describe('windows-upgrade-unsupported', () => {
   const resolution = (context: 'page' | 'settings') => resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 11, releaseBehind: true, updateReason: 'windows-upgrade-unsupported', updateNowAvailable: true, selfUpdate: true }, context);
 

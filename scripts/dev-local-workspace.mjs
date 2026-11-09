@@ -964,7 +964,13 @@ updateControl = await startLocalUpdateControl({ cwd: process.cwd(), origin: new 
     prepare: (options) => prepareUpdate({ ...options, environment: env, execPath: env.ASTRID_NODE_EXECUTABLE || process.execPath, preparationDirectory: backend.root }),
     ...(pinokioManaged ? { session: pinokioSession(backend) } : {}),
   });
-  const result = await update();
+  let result;
+  try { result = await update(); }
+  catch (error) {
+    // The person is watching this window: it says the update did not happen, as the requester does.
+    console.error(`Astrid did NOT update: ${error.message}`);
+    throw error;
+  }
   console.log(result.message);
   return result;
 } });

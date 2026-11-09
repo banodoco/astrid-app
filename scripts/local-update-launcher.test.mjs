@@ -446,7 +446,11 @@ test('a new launcher controller recovers a retained failed activation before ser
   await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
   const failed = await invokeUpdate(fixture);
   assert.equal(failed.code, 1, failed.stdout);
-  assert.match(failed.stderr, /simulated interruption after candidate start/);
+  assert.match(failed.stderr, /^Astrid did NOT update: .*simulated interruption after candidate start/m);
+  assert.match(failed.stderr, /^Details: .*Download diagnostics/m);
+  assert.doesNotMatch(failed.stderr, /Astrid update failed at/);
+  // The window running Astrid says so too, not only the window that asked.
+  await first.waitFor(() => /Astrid did NOT update: .*simulated interruption/.test(first.output.stderr));
   assert.equal(await gitSha(fixture.app), fixture.targetSha);
   await waitForBuild(fixture.env.PORT, fixture.targetSha, 2);
   const journalPath = join(fixture.runtimeRoot, 'update-transaction.json');
@@ -506,7 +510,8 @@ test('the live launcher controller recovers a failed activation after its candid
   assert.equal(pending.step, 'applying');
   const retainedRoot = pending.transaction_context.app.preparationRoot;
   const retry = await invokeUpdate(fixture);
-  assert.equal(retry.code, 0, retry.stderr);
+  // The retry only restored the earlier version: it did not update, so it does not exit 0.
+  assert.equal(retry.code, 3, retry.stderr);
   assert.match(retry.stdout, /interrupted update was restored and Astrid is running/);
   assert.equal(await gitSha(fixture.app), fixture.oldSha);
   assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.oldSha, 1), { app: fixture.oldSha, release: 1 });

@@ -16,6 +16,7 @@ import { ASTRID_COMMANDS, installCommand, RUNTIME_CONNECTION_COPY } from '@/shar
 import { ASTRID_STATUS_COPY } from './astridStatusCopy.ts';
 import { pageUpdateOperation } from '@/shared/lib/updates/updateOperation.ts';
 import { runtimeApiBase } from '@/integrations/runtime/connection.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/installerUpdateReasons.ts';
 
 beforeEach(() => {
   vi.unstubAllEnvs();
@@ -464,5 +465,56 @@ describe("Hannah's state: Release 1 after a finished storage move, Release 10 se
     await within(section).findByText('Release 10 is ready');
     fireEvent.click(within(section).getByRole('button', { name: 'Diagnostics' }));
     expect(await within(section).findByText('new label line')).toBeInTheDocument();
+  });
+});
+
+describe('receipts from terminal runs: each has its row, Download diagnostics and the right command', () => {
+  const behind = { release: 10, app: 'current', servedRelease: 11, servedApp: 'served', behind: true, resolution: { installedRelease: 10, servedRelease: 11, releaseBehind: true } };
+  const receipt = (fields: Record<string, unknown>) => `Astrid diagnostics\nLast installer run (last-run.json): ${JSON.stringify({ format: 'astrid-last-run/v1', mode: 'update', start: 10, still: 10, target: 11, exit_code: 1, ...fields })}\nLast update result: none\n`;
+  const serve = (report: string) => vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => Promise.resolve(new Response(JSON.stringify(
+    String(input) === '/build.json' ? { app: 'served-app-build', release: 11 } : { report }), { status: 200, headers: { 'Content-Type': 'application/json' } }))));
+  const mount = async (report: string, status: Record<string, unknown> = { available: true, state: 'none' }) => {
+    readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 10, identity: { managed_by: null, release: 10 } } });
+    statusMock.value = status;
+    // The page's update operation is kept per fetch, so the report is served first.
+    serve(report);
+    hostedCheckMock.mockResolvedValue(behind);
+    await pageUpdateOperation(runtimeApiBase()).refresh();
+    render(<AstridUpdatesSection isOpen />);
+    return screen.getByRole('region', { name: 'Updates' });
+  };
+  const repairLine = ASTRID_COMMANDS.macLinux;
+
+  it.each([
+    ['failed', { kind: 'failed', reason: 'error' }, "The update to Release 11 didn't finish", /^Astrid is still Release 10 and your projects are unchanged\. Reason: the update stopped with an error\.$/, 'Copy command (try again)', installCommand('update')],
+    ['rolled-back', { kind: 'rolled-back', reason: 'error' }, "The update to Release 11 didn't finish", /^Astrid went back to Release 10 and your projects are unchanged\. Reason: the new version didn't start\.$/, 'Copy command (try again)', installCommand('update')],
+    ['disk-full', { kind: 'not-updated', reason: 'disk-space', exit_code: 3 }, 'Not enough disk space to update', /Free up space, then try again\.$/, 'Copy command (try again)', installCommand('update')],
+    ['two copies', { kind: 'not-updated', reason: 'other-runtime-running', exit_code: 3 }, 'Two copies of Astrid are running', /^An older copy of Astrid started again alongside this one\./, 'Copy repair command', repairLine],
+  ] as const)('%s', async (_name, fields, title, body, label, command) => {
+    const section = await mount(receipt(fields));
+    expect(await within(section).findByText(title)).toBeInTheDocument();
+    expect(within(section).getByText(body)).toBeInTheDocument();
+    // Its own Download diagnostics, beside the Diagnostics row's.
+    expect(within(section).getAllByRole('button', { name: 'Download diagnostics' })).toHaveLength(2);
+    expect(within(section).getByRole('button', { name: label })).toBeInTheDocument();
+    expect(within(section).getAllByRole('code').map((node) => node.textContent)).toContain(command);
+    expect(section.textContent).not.toContain("Astrid can't update itself on this computer");
+    expect(section.textContent).not.toMatch(/R0|R1|handoff|back-end|the message above/);
+  });
+
+  it('windows-upgrade-unsupported receipt: Download diagnostics and no command to try again', async () => {
+    const section = await mount(receipt({ kind: 'failed', reason: 'windows-upgrade-unsupported' }));
+    expect(await within(section).findByText("This update can't install on this computer yet")).toBeInTheDocument();
+    expect(within(section).getAllByRole('button', { name: 'Download diagnostics' })).toHaveLength(2);
+    expect(within(section).queryByRole('button', { name: 'Copy command (try again)' })).toBeNull();
+  });
+
+  it('windows-upgrade-unsupported in update status: its line, no retry command, never the generic line', async () => {
+    const section = await mount('Astrid diagnostics\nLast update result: none\n', { available: true, self_update: true, state: 'none', reason: 'windows-upgrade-unsupported' });
+    expect(await within(section).findAllByText(INSTALLER_UPDATE_REASON_MESSAGES['windows-upgrade-unsupported'])).not.toHaveLength(0);
+    expect(within(section).queryByRole('code')).toBeNull();
+    expect(within(section).queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(within(section).getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    expect(section.textContent).not.toContain('Run the command below');
   });
 });

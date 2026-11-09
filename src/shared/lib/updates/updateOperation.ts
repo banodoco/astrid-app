@@ -22,13 +22,13 @@ export interface UpdateOperationSnapshot {
 }
 
 /** Runtime refusal codes with a line of their own. Any other code reads as self-update-unavailable. */
-const RUNTIME_REFUSAL_REASONS: ReadonlySet<string> = new Set(['busy', 'autostart-off', 'unsupported-service-manager', 'source']);
+const RUNTIME_REFUSAL_REASONS: ReadonlySet<string> = new Set(['busy', 'autostart-off', 'unsupported-service-manager', 'source', 'windows-upgrade-unsupported']);
 /** A 409's details.kind reports how an earlier update ended. It is an outcome, never a refusal reason. */
 const CONFLICT_OUTCOMES: ReadonlySet<string> = new Set(['updated', 'rolled_back', 'failed']);
 const OUTCOME_MESSAGES: Readonly<Record<InstallerUpdateOutcome, string>> = {
   updated: 'Astrid updated. Reload to continue.',
   rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
-  failed: 'The update did not complete. Check diagnostics before trying again.',
+  failed: 'The update did not complete. Download diagnostics to see why.',
 };
 
 function installerReasonOf(code: string): InstallerUpdateReason {
@@ -335,7 +335,7 @@ export class LocalPageUpdate {
       // A settled run that did not update (or failed) carries the Agent's own
       // plain lines, its reason and the Next and Details lines included.
       const lines = agentLines(body.lines) ?? agentLines((result as { lines?: unknown } | undefined)?.lines);
-      return this.set({ phase: 'failed', message: lines ? lines.join('\n') : 'The update did not complete. Check diagnostics before trying again.' });
+      return this.set({ phase: 'failed', message: lines ? lines.join('\n') : 'The update did not complete. Download diagnostics to see why.' });
     } catch {
       return this.set({ phase: 'failed', message: 'The update result could not be confirmed. Check for updates before trying again.' });
     }

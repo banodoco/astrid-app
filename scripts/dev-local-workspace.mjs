@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { packageManagerInvocation } from './node-package-manager.mjs';
 import { terminateProcessTree } from './terminate-process-tree.mjs';
 import { startLocalUpdateControl } from './local-update-control.mjs';
-import { createLocalUpdater, restorePreparedResources, validateAppContext } from './local-update-runner.mjs';
+import { createLocalUpdater, restorePreparedResources, updateFailureLines, validateAppContext } from './local-update-runner.mjs';
 import { restoreCheckout, releasePreparation, prepareUpdate, selectUpdateTarget } from './local-update-checkout.mjs';
 import { installedBackend, journalSettled, pinokioSession, readUpdateJournal, runBackendUpdate } from './local-update-backend.mjs';
 import { homedir } from 'node:os';
@@ -967,7 +967,13 @@ updateControl = await startLocalUpdateControl({ cwd: process.cwd(), origin: new 
     prepare: (options) => prepareUpdate({ ...options, environment: env, execPath: env.ASTRID_NODE_EXECUTABLE || process.execPath, preparationDirectory: backend.root }),
     ...(pinokioManaged ? { session: pinokioSession(backend) } : {}),
   });
-  const result = await update();
+  let result;
+  try { result = await update(); }
+  catch (error) {
+    // The person is watching this window: it says the update did not happen, with the same lines as the requester.
+    for (const line of updateFailureLines(error)) console.error(line);
+    throw error;
+  }
   console.log(result.message);
   return result;
 } });

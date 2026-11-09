@@ -121,8 +121,10 @@ export function lastRunNotice(receipt: LastRunReceipt | null, installedRelease: 
   // not-updated. Without a known reason (or with installer-bug) it is Astrid's problem; with one, its line says why.
   const still = `Astrid is still Release ${installedRelease}; Release ${servedRelease} is available.`;
   const line = reason && reason !== 'installer-bug' ? REASON_LINES[reason] : undefined;
+  // A runtime that did not restart onto an installed release is a change: the title must not say nothing was installed.
+  const title = reason === 'runtime-not-running' ? "The new release is installed; Astrid hasn't restarted onto it" : "The last update didn't install anything";
   return {
-    title: "The last update didn't install anything",
+    title,
     body: line
       ? `${still} Why: ${line} Your projects are safe.`
       : `${still} This is a problem in Astrid, not something you did. Your projects are safe. Send the diagnostics file to support so we can fix it.`,

@@ -92,6 +92,22 @@ describe('update handoff', () => {
   });
 });
 
+describe('update command by surface', () => {
+  it("a locally run App updates with npm run update in the Astrid folder, not the curl line", () => {
+    expect(installCommand('update', undefined, false, true)).toBe('npm run update');
+    const brief = agentInstructions('update', 'http://localhost:5180', true);
+    expect(brief).toContain('npm run update');
+    expect(brief).not.toContain('--update');
+  });
+
+  it('a hosted astrid.haus update keeps the curl --update line', () => {
+    expect(installCommand('update', undefined, false, false)).toBe(ASTRID_COMMANDS.macLinuxUpdate);
+    const brief = agentInstructions('update', 'https://astrid.haus', false);
+    expect(brief).toContain(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(brief).not.toContain('npm run update');
+  });
+});
+
 describe('onboarding instructions', () => {
   it.each(['install', 'update'] as const)('ends %s instructions with the same browser handoff', mode => {
     const text = agentInstructions(mode, 'https://astrid.haus');

@@ -65,7 +65,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {localState.phase === 'running' && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {localState.phase === 'done' && <p role="status">{localState.message}</p>}
     {localState.phase === 'done' && localState.status !== 'up-to-date' && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
-    {(localState.phase === 'failed' || localState.phase === 'refused') && <p role="alert">{localState.message}</p>}
+    {(localState.phase === 'failed' || localState.phase === 'refused') && <p role="alert" className="whitespace-pre-line">{localState.message}</p>}
     {route && <Button type="button" variant="retro-secondary" size="retro-sm" data-destination={route.destination} onClick={openUpdatesSettings}>{route.label}</Button>}
     {details && <Button type="button" variant="link" size="sm" onClick={openUpdatesSettings}>Details</Button>}
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}

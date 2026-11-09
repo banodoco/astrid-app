@@ -151,7 +151,7 @@ const sendHook = async (id, name, app, release, rollback = false) => {
 const first = await iterator.next();
 if (!first.value) process.exit(2);
 const action = JSON.parse(first.value);
-log({ action: action.action, pid: process.pid });
+log({ action: action.action, purpose: action.purpose, pid: process.pid });
 if (action.action === 'recover') {
   let journal;
   try { journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')); } catch {}
@@ -169,7 +169,17 @@ if (action.action === 'recover') {
       fs.writeFileSync(journalPath, JSON.stringify(journal));
     }
   }
-  process.stdout.write(JSON.stringify({ result: { status: 'recovered' } }) + '\\n');
+  // As the Agent settles it: the update's own recovery is not-updated (exit 3);
+  // the launcher's start-time recovery is a repair with one plain line.
+  if (action.purpose === 'update') {
+    process.stdout.write(JSON.stringify({ result: { status: 'recovered' },
+      outcome: { kind: 'not-updated', reason: 'recovered-previous-version', exit_code: 3 },
+      lines: ['Astrid did NOT update. It is still Release 1; Release 2 is available.', 'Next: fake next step.', 'Details: fake install.log'] }) + '\\n');
+    process.exit(3);
+  }
+  process.stdout.write(JSON.stringify({ result: { status: 'recovered' },
+    outcome: { kind: 'repaired', reason: 'recovered-previous-version', exit_code: 0 },
+    lines: ['Astrid finished an interrupted update from earlier: it went back to Release 1 and kept your projects.'] }) + '\\n');
   process.exit(0);
 }
 if (action.action !== 'update') process.exit(3);
@@ -473,6 +483,8 @@ test('a new launcher controller recovers a retained failed activation before ser
   await assert.rejects(readFile(retainedRoot), { code: 'ENOENT' });
   const backend = (await readFile(fixture.env.FAKE_BACKEND_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(backend.map(({ action }) => action), ['update', 'recover']);
+  assert.equal(backend[1].purpose, undefined, 'a start-time recovery is not the update\'s own recovery');
+  assert.match(second.output.stdout, /finished an interrupted update from earlier: it went back to Release 1/);
   await second.stop();
 });
 
@@ -510,9 +522,10 @@ test('the live launcher controller recovers a failed activation after its candid
   assert.equal(pending.step, 'applying');
   const retainedRoot = pending.transaction_context.app.preparationRoot;
   const retry = await invokeUpdate(fixture);
-  // The retry only restored the earlier version: it did not update, so it does not exit 0.
+  // The update's own recovery: not updated (exit 3), with the Agent's Next and Details lines.
   assert.equal(retry.code, 3, retry.stderr);
-  assert.match(retry.stdout, /interrupted update was restored and Astrid is running/);
+  assert.match(retry.stdout, /Astrid did NOT update\. It is still Release 1/);
+  assert.match(retry.stdout, /Next: fake next step\.\nDetails: fake install\.log/);
   assert.equal(await gitSha(fixture.app), fixture.oldSha);
   assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.oldSha, 1), { app: fixture.oldSha, release: 1 });
   assert.equal(await readFile(join(fixture.app, 'dist', 'build.json'), 'utf8'), JSON.stringify({ app: fixture.oldSha, release: 1 }));
@@ -521,6 +534,7 @@ test('the live launcher controller recovers a failed activation after its candid
   await assert.rejects(readFile(retainedRoot), { code: 'ENOENT' });
   const backend = (await readFile(fixture.env.FAKE_BACKEND_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(backend.map(({ action }) => action), ['update', 'recover']);
+  assert.equal(backend[1].purpose, 'update');
   await first.stop();
 });
 

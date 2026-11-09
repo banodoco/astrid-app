@@ -523,7 +523,8 @@ if (!checkOnly && !buildOnly) {
       recoveryEditor = undefined;
     };
     try {
-      await runBackendUpdate({ backend, action: { action: 'recover' }, hook: async (message) => {
+      // A start-time recovery: no `purpose`, so the Agent settles it as a repair.
+      const restored = await runBackendUpdate({ backend, action: { action: 'recover' }, hook: async (message) => {
         const app = validateAppContext(message.app, process.cwd());
         switch (message.hook) {
           case 'stop-editor':
@@ -571,6 +572,8 @@ if (!checkOnly && !buildOnly) {
           default: throw new Error(`Unexpected recovery callback ${message.hook}`);
         }
       } });
+      // The Agent's one plain line saying the interrupted update was restored.
+      for (const line of restored?.lines ?? []) console.log(line);
     } finally { await stopRecoveryEditor(); }
   }
 }

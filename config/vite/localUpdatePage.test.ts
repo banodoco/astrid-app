@@ -31,7 +31,8 @@ describe('local update page endpoint', () => {
     expect(() => readPageTarget(JSON.stringify({ ...RECEIPT, page: { url: RECEIPT.page.url, token: 'short' } }), ORIGIN)).toThrow();
   });
 
-  it('serves the receipt page entry from the checkout git dir without writing it', async () => {
+  // `vite preview` (dev:local --preview) offers Update now too, so its page route must exist there as on the dev server.
+  it.each(['dev', 'preview'] as const)('serves the receipt page entry from the checkout git dir without writing it (%s server)', async (mode) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'astrid-local-page-'));
     tempDirs.push(dir);
     const checkout = path.join(dir, 'checkout');
@@ -44,7 +45,11 @@ describe('local update page endpoint', () => {
     try {
       const plugin = createLocalUpdatePagePlugin();
       let middleware!: (request: unknown, response: unknown, next: () => void) => Promise<void>;
-      plugin.configureServer?.({ config: { root: checkout, server: { port: 4317 } }, middlewares: { use: (h: typeof middleware) => { middleware = h; } } } as never);
+      const server = { config: { root: checkout, server: { port: mode === 'dev' ? 4317 : 5173 }, preview: { port: mode === 'preview' ? 4317 : 4173 } }, middlewares: { use: (h: typeof middleware) => { middleware = h; } } } as never;
+      const hook = mode === 'dev' ? plugin.configureServer : plugin.configurePreviewServer;
+      expect(typeof hook).toBe('function');
+      (hook as (server: never) => void)(server);
+      expect(middleware).toBeDefined();
       const call = async (headers: Record<string, string>) => {
         const out: Record<string, string> = {};
         const response = { statusCode: 0, body: '', setHeader: (n: string, v: string) => { out[n.toLowerCase()] = v; }, end: (b: string) => { response.body = b; } };

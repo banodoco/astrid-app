@@ -62,6 +62,15 @@ export async function restorePreparedResources(app) {
   }
 }
 
+/**
+ * A settled run whose receipt is not exit 0 (3: not updated). Its own reason
+ * and the Agent's plain lines, Next and Details included, are the message.
+ */
+function notUpdated({ outcome, lines, exitCode }) {
+  const message = lines.length ? lines.join('\n') : `Astrid did NOT update: ${outcome.reason_line ?? outcome.reason ?? 'no reason was given'}`;
+  return { status: 'not-updated', reason: outcome.reason ?? null, exitCode, outcome, lines, message };
+}
+
 /** All mutation callbacks execute under the backend's existing C2 journal. */
 export function createLocalUpdater({ cwd, backend, editor, session, backendUpdate,
   selectTarget = selectUpdateTarget, preflight = preflightUpdate, prepare = prepareUpdate,
@@ -104,7 +113,10 @@ export function createLocalUpdater({ cwd, backend, editor, session, backendUpdat
   };
   return async function update() {
     // The same journal must be recovered before selecting any served target.
-    const recovered = await backendUpdate({ backend, action: { action: 'recover' }, hook });
+    // `purpose: update` makes a recovery here this update's own result: not
+    // updated (exit 3). The launcher's start-time recovery does not send it.
+    const recovered = await backendUpdate({ backend, action: { action: 'recover', purpose: 'update' }, hook });
+    if (recovered.exitCode) return notUpdated(recovered);
     if (recovered.status === 'recovered') return { status: 'recovered', message: 'The interrupted update was restored and Astrid is running. Run npm run update again to check for a new release.' };
     const target = await selectTarget({ cwd });
     if (target.upToDate) return { status: 'up-to-date', message: 'Astrid is up to date.' };
@@ -123,11 +135,14 @@ export function createLocalUpdater({ cwd, backend, editor, session, backendUpdat
     };
     retained = app;
     try {
-      await backendUpdate({ backend, action: { action: 'update', manifest: target.manifest, app }, hook });
+      const updated = await backendUpdate({ backend, action: { action: 'update', manifest: target.manifest, app }, hook });
       // Cleanup is after C2 has durably recorded completion/rollback.
       if (retained) { await session?.end(); await release({ cwd, state: app }); retained = undefined; }
+      if (updated?.exitCode) return notUpdated(updated);
+      const restart = target.launcherChanged ? ' Restart Astrid when convenient.' : '';
       return { status: 'updated', app: target.targetSha, release: target.release,
-        message: `Astrid is updated and running.${target.launcherChanged ? ' Restart Astrid when convenient.' : ''}` };
+        ...(updated?.lines?.length ? { lines: updated.lines, message: `${updated.lines.join('\n')}${restart}` }
+          : { message: `Astrid is updated and running.${restart}` }) };
     } catch (error) {
       // A journal may have been written before the process failed. Retain the
       // prepared tree and old resources until a fresh controller recovers it.

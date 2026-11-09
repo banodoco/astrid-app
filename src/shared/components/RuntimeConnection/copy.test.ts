@@ -209,3 +209,12 @@ describe('failure diagnostics', () => {
     expect(windowsBrief).toContain("Invoke-RestMethod -Uri 'https://astrid.haus/api/runtime/v1/health' -Headers @{ Origin = 'https://astrid.haus' }");
   });
 });
+
+describe('diagnostics fallback', () => {
+  it('offers the installer --doctor line, never astrid-runtime doctor', () => {
+    expect(DIAGNOSTICS_FALLBACK_COPY.command).toContain('--doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('--doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.command).not.toContain('astrid-runtime doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.agent).not.toContain('astrid-runtime doctor');
+  });
+});

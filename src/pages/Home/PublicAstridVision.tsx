@@ -10,8 +10,11 @@ import { NORTH_STAR_ART, NorthStarMink, type NorthStarArt } from './PublicAstrid
 import { usePublicAstridEnvironment, type PublicAstridEnvironment } from './publicAstridLifecycle';
 import { usePublicVisionContent, PUBLIC_VISION_REPO_URL, type PublicVisionGap, type PublicVisionProject } from './publicVisionContent';
 import { VisionDetailDialog } from './VisionDetailDialog';
+import { VisionPrincipleSigil } from './VisionPrincipleSigil';
+import { VisionSectionNav } from './VisionSectionNav';
 import type { VisionSubject } from './visionHierarchy';
 import './PublicAstridVision.css';
+import './PublicVisionWayfinding.css';
 
 const PILLAR_ART: readonly NorthStarArt[] = [
   NORTH_STAR_ART.art,
@@ -49,7 +52,7 @@ const JUGGLED_ITEMS = [
 /**
  * The juggling mink, with the three items as separate sprites so they can drift above its paws. The mink
  * is a strip of hand-finished keyframes: it lifts its head and paws, settles, then dips them, and the items
- * rise and sink a beat behind, as if held up by magic.
+ * rise and sink a beat behind it, as if held up by magic.
  */
 function Juggler() {
   return (
@@ -275,6 +278,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         reducedMotion={reducedMotion}
         quietBehind={VISION_QUIET_TEXT}
       />}
+      {content && <VisionSectionNav rootRef={pageRef} active={visible} reducedMotion={reducedMotion}
+        includeContribute={Boolean(content.vision.contributeMarkdown)} contentKey={content.source.revision} />}
       <header className="astrid-vision-bar">
         <a className="astrid-vision-brand" href="/home" aria-label="Astrid home" onClick={(event) => followInPage(event, onGoHome)}>
           <img src="/astrid-mink-provisional.webp" alt="" />
@@ -282,7 +287,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </a>
       </header>
 
-      <section className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
+      <section className="astrid-vision-manifesto" id="astrid-vision-overview" data-vision-section="astrid-vision-overview"
+        tabIndex={-1} aria-labelledby="astrid-vision-title">
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
             <p className="astrid-vision-eyebrow">Vision &amp; Issues</p>
@@ -350,7 +356,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </div>
       )}
       {content && (<>
-      <section className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
+      <section className="astrid-vision-north-star" data-vision-section="astrid-vision-overview" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">The vision</p>
           <h2 id="astrid-vision-north-star-title">What we're building towards</h2>
@@ -376,7 +382,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </ol>
       </section>
 
-      <section className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
+      <section className="astrid-vision-standards" id="astrid-vision-principles" data-vision-section="astrid-vision-principles"
+        tabIndex={-1} aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow">Our aspirations</p>
           <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
@@ -384,8 +391,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <ol className="astrid-vision-standards-list">
           {content.principles.map(principle => (
             <li key={principle.id} data-reveal data-principle={principle.id}>
-              {/* The colored mark remains a placeholder until custom artwork is ready. */}
-              <span className="astrid-vision-principle-sigil" aria-hidden="true" />
+              <VisionPrincipleSigil principleId={principle.id} reducedMotion={reducedMotion} />
               <div>
                 <h3>{principle.title}</h3>
                 <MarkdownText value={principle.bodyMarkdown} />
@@ -401,7 +407,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </ol>
       </section>
 
-      <section className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
+      <section className="astrid-vision-parts" id="astrid-vision-gaps" data-vision-section="astrid-vision-gaps"
+        tabIndex={-1} aria-labelledby="astrid-vision-parts-title">
         <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
           <p className="astrid-vision-eyebrow">The gaps</p>
           <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : "What's still missing"}</h2>
@@ -430,7 +437,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         )}
       </section>
 
-      <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
+      <section className="astrid-vision-issues astrid-vision-projects" id="astrid-vision-projects" data-vision-section="astrid-vision-projects"
+        tabIndex={-1} aria-labelledby="astrid-vision-projects-title">
         <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
           <p className="astrid-vision-eyebrow">Project catalog</p>
           <h2 id="astrid-vision-projects-title">Help us build what's next</h2>
@@ -477,8 +485,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           content={content} subject={selectedSubject} onClose={closeSubject} />
       )}
       {content?.vision.contributeMarkdown && (
-        <section className="astrid-vision-contribute" id="astrid-vision-contribute"
-          aria-labelledby="astrid-vision-contribute-title" data-reveal>
+        <section className="astrid-vision-contribute" id="astrid-vision-contribute" data-vision-section="astrid-vision-contribute"
+          tabIndex={-1} aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
             <p className="astrid-vision-eyebrow">Get involved</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>

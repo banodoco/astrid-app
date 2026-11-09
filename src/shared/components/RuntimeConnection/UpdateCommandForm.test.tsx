@@ -48,7 +48,6 @@ const UPDATE_STATES: ReadonlyArray<readonly [string, UpdateResolution]> = [
 /** The repair states: needs-repair, autostart off (its setup line respects the saved choice) and a failed in-app update. */
 const REPAIR_STATES: ReadonlyArray<readonly [string, UpdateResolution, InstallerUpdateView]> = [
   ['needs repair', resolveUpdate({ ...behind, updateReason: 'needs-repair' }, 'settings'), idle],
-  ['autostart off', resolveUpdate({ ...behind, updateReason: 'autostart-off' }, 'settings'), idle],
   ['failed in-app update', resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 10 }, 'settings'), failed],
 ];
 

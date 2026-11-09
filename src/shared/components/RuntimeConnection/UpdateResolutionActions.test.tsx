@@ -75,12 +75,12 @@ describe('update resolution Settings actions', () => {
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 
-  it('shows the plain install line, not --update, when Update Now is refused for autostart off', () => {
+  it('shows the strict update line, with no choice flags, when Update Now is refused for autostart off', () => {
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
     render(<UpdateResolutionActions resolution={resolution} />);
-    expect(screen.getByText('Run this command, then start Astrid:')).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
-    expect(screen.getByRole('code').textContent).not.toContain('--update');
+    expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off'])).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(screen.getByRole('code').textContent).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
   });

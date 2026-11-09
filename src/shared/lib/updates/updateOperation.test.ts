@@ -24,7 +24,7 @@ describe('installerUpdateStatusMessage', () => {
     [{ state: 'recovery-needed', self_update: true, result: 'repair_required' }, 'Astrid needs recovery. Select Update to check the previous operation before continuing.'],
     [{ state: 'recovery-needed', result: 'repair_required' }, 'Astrid needs repair before it can update.'],
     [{ state: 'none', reason: 'busy' }, 'Astrid is busy. Wait for the current operation to finish before trying again.'],
-    [{ state: 'none', reason: 'autostart-off' }, 'Automatic startup is off. Turn it on before updating Astrid here.'],
+    [{ state: 'none', reason: 'autostart-off' }, 'Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.'],
     [{ state: 'none', reason: 'unsupported-service-manager' }, 'In-app updates require user systemd 254 or newer on Linux.'],
     [{ state: 'none', reason: 'source' }, 'This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.'],
     [{ state: 'none', reason: 'updater-unavailable' }, GENERIC_LINE],

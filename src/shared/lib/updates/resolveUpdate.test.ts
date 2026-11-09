@@ -42,9 +42,9 @@ describe('resolveUpdate', () => {
     });
   });
 
-  it('keeps autostart-off without an action, since its setup command is shown on its own', () => {
+  it('gives autostart-off the agent copy action and the manual line, and no Update now', () => {
     expect(resolveUpdate({ installType: 'installer', updateReason: 'autostart-off', updateNowAvailable: false })).toMatchObject({
-      card: 'notice', primary: null, secondary: null, updateReason: 'autostart-off',
+      card: 'notice', primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' }, updateReason: 'autostart-off',
     });
   });
 

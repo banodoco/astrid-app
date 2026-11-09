@@ -12,7 +12,7 @@ export type InstallerUpdateReason = 'busy' | 'autostart-off' | 'unsupported-serv
 /** Exact editor-owned explanations for the Runtime's allowlisted refusal states. */
 export const INSTALLER_UPDATE_REASON_MESSAGES: Readonly<Record<InstallerUpdateReason, string>> = Object.freeze({
   busy: 'Astrid is busy. Wait for the current operation to finish before trying again.',
-  'autostart-off': 'Automatic startup is off. Turn it on before updating Astrid here.',
+  'autostart-off': 'Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.',
   'unsupported-service-manager': 'In-app updates require user systemd 254 or newer on Linux.',
   'recovery-needed': 'Astrid needs recovery. Select Update to check the previous operation before continuing.',
   'needs-repair': 'Astrid needs repair before it can update.',

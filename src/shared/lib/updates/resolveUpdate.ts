@@ -119,9 +119,9 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   const sourceLocal = input.installType === 'fully-local' && input.updateReason === 'source';
   if (input.updateReason && (input.installType === 'installer' || sourceLocal) && !silentWhenCurrent) {
     // A recovery or repair is an update card. Without an in-app update the reason is the one line and the command is the path;
-    // autostart-off has its own setup command, and a source checkout has its own update route, not the installer command.
+    // A source checkout has its own update route, not the installer command. autostart-off takes the command path with its own card.
     const card = input.updateReason === 'recovery-needed' || input.updateReason === 'needs-repair';
-    const noAction = input.updateReason === 'autostart-off' || input.updateReason === 'source';
+    const noAction = input.updateReason === 'source';
     // Only recovery-needed still starts the update. Every other reason is a refusal, so Update now is not offered with it even when
     // self_update is true: the reason's line and the command are the path.
     const actions = noAction ? { primary: null, secondary: null }

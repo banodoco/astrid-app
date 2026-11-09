@@ -2,9 +2,9 @@ import { useSyncExternalStore } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { COPY_FOR_AGENT_ACTION, RELOAD_ACTION, RUN_IT_YOURSELF_ACTION, UPDATE_IN_PINOKIO_ACTION, type InstallType, type UpdateResolution } from '@/shared/lib/updates/resolveUpdate.ts';
 import { SOURCE_SCHEMA_MISMATCH_ACTION } from '@/integrations/runtime/runtime-update-contract.mjs';
-import { CopyCommandRow, CopyInstallCommand } from './CopyInstallCommand.tsx';
+import { CopyCommandRow, CopyInstallCommand, useCopyAction } from './CopyInstallCommand.tsx';
 import { DownloadDiagnosticsButton } from './DownloadDiagnosticsButton.tsx';
-import { ASTRID_COMMANDS, RUNTIME_CONNECTION_COPY } from './copy.ts';
+import { ASTRID_COMMANDS, autostartOffAgentBrief, RUNTIME_CONNECTION_COPY } from './copy.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
 import { dispatchAppEvent } from '@/shared/lib/typedEvents.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
@@ -51,7 +51,6 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
   // Details opens Settings Updates; a card whose action already goes there (See updates) does not repeat it.
   const details = context === 'page' && !route && (resolution.card === 'update' || resolution.card === 'notice') && !resolution.updateReason;
   const statusLine = installerUpdateLine(operation?.status, resolution.updateReason);
-  const plainInstallCommand = detectPlatform() === 'windows' ? ASTRID_COMMANDS.windows : ASTRID_COMMANDS.macLinux;
   const startUpdate = async () => {
     const validate = await guarded.flush();
     if (validate) await operation?.start(validate);
@@ -77,13 +76,9 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {installSpecific && <p className="text-sm font-medium">{installSpecific.label}</p>}
     {/* The generic line only when no reason explains why this Astrid can't update itself. */}
     {commandOptions && installerPath && !execute && !resolution.updateReason && !reasonShown && <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']}</p>}
-    {commandOptions && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair' || failedInstall} />}
+    {commandOptions && resolution.updateReason !== 'autostart-off' && <CopyInstallCommand mode="update" agentLabel={COPY_FOR_AGENT_ACTION} plain={resolution.updateReason === 'needs-repair' || failedInstall} />}
     {commandOptions && resolution.updateReason === 'self-update-too-old' && <p className="text-sm">{SELF_UPDATE_TOO_OLD_STEPS}</p>}
-    {resolution.updateReason === 'autostart-off' && <div className="space-y-2">
-      <p className="text-sm">Run this command, then start Astrid:</p>
-      {/* The plain install line, not --update: it respects autostart off, so the saved choice is kept. */}
-      <CopyCommandRow command={plainInstallCommand} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
-    </div>}
+    {resolution.updateReason === 'autostart-off' && <AutostartOffUpdate />}
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
@@ -98,5 +93,19 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {context === 'page' && (failedInstall || localState.phase === 'failed' || diagnosticsOnly) && <DownloadDiagnosticsButton />}
     {!reload && operation?.fresh && !operation.error && (operation.restartRequired || operation.status?.state === 'terminal' && ['updated', 'rolled_back'].includes(operation.status.outcome ?? '')) && <Button type="button" variant="retro-secondary" size="retro-sm" disabled={guarded.pending} onClick={() => void guarded.reload()}>{RELOAD_ACTION}</Button>}
     {guarded.error && <p role="alert">{guarded.error}</p>}
+  </div>;
+}
+
+/** Start at sign-in is off: update from a terminal with the strict update line (no choice flags), or hand the agent the brief. */
+function AutostartOffUpdate() {
+  const windows = detectPlatform() === 'windows';
+  const agent = useCopyAction(autostartOffAgentBrief(windows));
+  return <div className="space-y-2">
+    <p className="text-sm">{INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']}</p>
+    <Button type="button" className="h-11 w-full justify-between rounded-xl px-4 text-sm" onClick={() => void agent.copy()}>
+      <span aria-live="polite">{agent.status === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : COPY_FOR_AGENT_ACTION}</span>
+    </Button>
+    <p className="text-xs font-medium text-muted-foreground">Run it yourself</p>
+    <CopyCommandRow command={windows ? ASTRID_COMMANDS.windowsUpdate : ASTRID_COMMANDS.macLinuxUpdate} label={RUNTIME_CONNECTION_COPY.agent.commandCopy} copiedLabel={RUNTIME_CONNECTION_COPY.agent.commandCopied} />
   </div>;
 }

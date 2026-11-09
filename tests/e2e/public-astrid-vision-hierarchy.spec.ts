@@ -142,7 +142,7 @@ test('principle cards use four reserved sigil colors, transparent panels and bor
   await expect(first.locator('h3')).toHaveCSS('text-decoration-line', 'none');
   await expect.poll(() => first.evaluate(el => getComputedStyle(el, '::after').opacity)).toBe('1');
   const border = await first.evaluate(el => getComputedStyle(el, '::after').borderLeftWidth);
-  expect(border).toBe('2px');
+  expect(border).toBe('1px');
 });
 
 test('mobile modal keeps the X fixed, scrolls within the panel and closes from top and bottom backdrop', async ({ page, request }) => {
@@ -395,7 +395,43 @@ test('every joined principle, including interior cards without physical left bor
       const css = getComputedStyle(el, '::after');
       return [css.borderTopWidth, css.borderRightWidth, css.borderBottomWidth, css.borderLeftWidth];
     });
-    expect(outline).toEqual(['2px', '2px', '2px', '2px']);
+    expect(outline).toEqual(['1px', '1px', '1px', '1px']);
     await expect(card.locator('h3')).toHaveCSS('text-decoration-line', 'none');
+  }
+});
+
+
+test('principle arrow is a subtle boxed control in the bottom-right corner at every layout width', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  for (const width of [390, 880, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const cards = page.locator('.astrid-vision-standards-list > li');
+    for (let index = 0; index < 4; index++) {
+      const card = cards.nth(index);
+      const arrow = card.locator('.astrid-vision-principle-corner');
+      const cardBounds = await card.boundingBox();
+      const arrowBounds = await arrow.boundingBox();
+      expect(cardBounds).not.toBeNull();
+      expect(arrowBounds).not.toBeNull();
+      expect(cardBounds!.x + cardBounds!.width - (arrowBounds!.x + arrowBounds!.width))
+        .toBeGreaterThanOrEqual(12);
+      expect(cardBounds!.x + cardBounds!.width - (arrowBounds!.x + arrowBounds!.width))
+        .toBeLessThan(27);
+      expect(cardBounds!.y + cardBounds!.height - (arrowBounds!.y + arrowBounds!.height))
+        .toBeGreaterThanOrEqual(12);
+      expect(cardBounds!.y + cardBounds!.height - (arrowBounds!.y + arrowBounds!.height))
+        .toBeLessThan(27);
+      await expect(arrow).toHaveCSS('border-top-width', '1px');
+      await expect(arrow).toHaveCSS('position', 'relative');
+      // A single full-card button remains the actual keyboard-accessible hit area.
+      await expect(card.getByRole('button', { name: /Explore .*: gaps and projects/ })).toHaveCount(1);
+    }
   }
 });

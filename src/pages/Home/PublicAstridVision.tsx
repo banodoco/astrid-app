@@ -168,6 +168,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [gapFilter, setGapFilter] = useState<GapFilter>('current');
   const [projectFilter, setProjectFilter] = useState<ProjectFilter>('current');
   const [showAllProjects, setShowAllProjects] = useState(false);
+  const [showAllGaps, setShowAllGaps] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState<VisionSubject | null>(null);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
   const detailScrollY = useRef(0);
@@ -210,7 +211,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   }, [content?.source.revision]);
   // Newly filtered rows must still receive reveal observation.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
-    gapFilter + ':' + projectFilter + ':' + showAllProjects);
+    gapFilter + ':' + showAllGaps + ':' + projectFilter + ':' + showAllProjects);
   useLayoutEffect(() => {
     if (!visible) return undefined;
     return skySession.registerPaletteTarget(pageRef.current, 'vision');
@@ -248,8 +249,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     cards.forEach((card) => observer.observe(card));
     return () => observer.disconnect();
   }, [phone, visible, reducedMotion, content?.source.revision]);
-  const gapsToShow = (content?.gaps ?? []).filter(gap =>
+  const filteredGaps = (content?.gaps ?? []).filter(gap =>
     gapFilter === 'all' || (gapFilter === 'current' ? gap.assessment !== 'closed' : gap.assessment === gapFilter));
+  const gapsToShow = showAllGaps ? filteredGaps : filteredGaps.slice(0, 10);
   const selectedProjects = (content?.projects ?? []).filter(project =>
     projectFilter === 'all' || (projectFilter === 'current'
       ? project.status !== 'done' && project.status !== 'cancelled'
@@ -384,13 +386,13 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             <li key={principle.id} data-reveal data-principle={principle.id}>
               {/* The colored mark remains a placeholder until custom artwork is ready. */}
               <span className="astrid-vision-principle-sigil" aria-hidden="true" />
-              <span className="astrid-vision-principle-corner" aria-hidden="true">
-                <span className="astrid-vision-card-arrow">↗</span>
-              </span>
               <div>
                 <h3>{principle.title}</h3>
                 <MarkdownText value={principle.bodyMarkdown} />
               </div>
+              <span className="astrid-vision-principle-corner" aria-hidden="true">
+                <span className="astrid-vision-card-arrow">↗</span>
+              </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}
                 onClick={event => openSubject({ kind: 'principle', id: principle.id }, event.currentTarget)} />
@@ -409,7 +411,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <div className="astrid-vision-filter-bar">
             <label htmlFor="astrid-vision-gap-filter">Status</label>
             <select id="astrid-vision-gap-filter" aria-label="Filter gaps by status" value={gapFilter}
-              onChange={event => setGapFilter(event.target.value as GapFilter)}>
+              onChange={event => { setGapFilter(event.target.value as GapFilter); setShowAllGaps(false); }}>
               {GAP_FILTERS.map(option => <option key={option.value} value={option.value}>
                 {option.label} ({option.value === 'current' ? CURRENT_GAPS.length : option.value === 'all'
                   ? content.gaps.length : content.gaps.filter(gap => gap.assessment === option.value).length})
@@ -418,7 +420,14 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           </div>
         </div>
         <ol id="astrid-vision-gap-list">{gapsToShow.map(gap => <GapPoint key={gap.id} gap={gap} openProjects={CURRENT_PROJECTS} />)}</ol>
-        {gapsToShow.length === 0 && <p className="astrid-vision-filter-empty" role="status">No gaps with this status yet.</p>}
+        {filteredGaps.length === 0 && <p className="astrid-vision-filter-empty" role="status">No gaps with this status yet.</p>}
+        {filteredGaps.length > 10 && (
+          <button className="astrid-vision-more-button astrid-vision-gaps-more" type="button"
+            aria-expanded={showAllGaps} aria-controls="astrid-vision-gap-list"
+            onClick={() => setShowAllGaps(value => !value)}>
+            {showAllGaps ? 'Show fewer gaps' : 'Show all gaps'}
+          </button>
+        )}
       </section>
 
       <section className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">

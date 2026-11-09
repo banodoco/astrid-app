@@ -840,6 +840,7 @@
 }
 .astrid-vision-more-button:hover { border-color: var(--astrid-accent); }
 .astrid-vision-more-button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+.astrid-vision-gaps-more { display: flex; width: fit-content; margin: 24px auto 0; }
 
 .astrid-vision-project-list .astrid-vision-project-row {
   display: grid;
@@ -1212,7 +1213,7 @@
   position: absolute;
   inset: 0;
   z-index: 3;
-  border: 2px solid color-mix(in oklab, var(--astrid-ink) 70%, transparent);
+  border: 1px solid color-mix(in oklab, var(--astrid-ink) 70%, transparent);
   border-radius: inherit;
   opacity: 0;
   pointer-events: none;
@@ -1228,6 +1229,10 @@
     border-color: color-mix(in oklab, var(--astrid-ink) 65%, transparent);
   }
   .astrid-vision-standards-list > li:hover::after { opacity: 1; }
+  .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
+    border-color: color-mix(in oklab, var(--sigil-ink) 80%, var(--astrid-ink));
+    background: color-mix(in oklab, var(--sigil-bg) 58%, transparent);
+  }
   .astrid-vision-principles > li:hover .astrid-vision-pillar-details {
     color: var(--astrid-ink);
     font-weight: 800;
@@ -1472,11 +1477,25 @@
   color: var(--tone-ink);
   font: 600 11px/1.4 ui-monospace, monospace;
 }
+/* Bottom-right corner control belongs to the content flow so it never
+   overlaps wrapped copy, and stays aligned across all joined cards. */
 .astrid-vision-principle-corner {
-  top: clamp(16px, 1.4vw, 22px);
-  right: clamp(16px, 1.4vw, 22px);
+  position: relative;
+  top: auto;
+  right: auto;
+  flex: none;
+  align-self: flex-end;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  margin-top: 16px;
+  border: 1px solid color-mix(in oklab, var(--sigil-ink) 45%, var(--astrid-line));
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--sigil-bg) 25%, transparent);
   color: var(--sigil-ink);
-  font-size: 16px;
+  font-size: 17px;
+  transition: border-color 170ms ease, background-color 170ms ease;
 }
 .astrid-vision-card-arrow { display: inline-block; }
 .astrid-vision .astrid-vision-standards-list > li {

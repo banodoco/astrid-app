@@ -34,15 +34,25 @@ test('current gaps show a compact list; status filter reveals all and closed', a
   const current = data.gaps.filter(gap => gap.assessment !== 'closed').length;
   const filter = page.getByRole('combobox', { name: 'Filter gaps by status' });
   await expect(filter).toHaveValue('current');
-  await expect(items).toHaveCount(current);
+  await expect(items).toHaveCount(Math.min(10, current));
   await expect(items.first().locator('.astrid-vision-part-body')).toBeHidden();
+  const showAll = page.getByRole('button', { name: 'Show all gaps' });
+  await expect(showAll).toHaveAttribute('aria-expanded', 'false');
+  await showAll.click();
+  await expect(items).toHaveCount(current);
+  await expect(page.locator('#gap-ls-004')).toBeVisible();
+  await page.getByRole('button', { name: 'Show fewer gaps' }).click();
+  await expect(items).toHaveCount(Math.min(10, current));
+  await expect(page.locator('#gap-ls-004')).toHaveCount(0);
   await filter.selectOption('all');
+  await expect(items).toHaveCount(Math.min(10, data.gaps.length));
+  await showAll.click();
   await expect(items).toHaveCount(data.gaps.length);
   await filter.selectOption('closed');
   await expect(items).toHaveCount(data.gaps.filter(gap => gap.assessment === 'closed').length);
   await filter.selectOption('current');
-  await expect(items).toHaveCount(current);
-  await expect(page.locator('#gap-ls-004')).toBeVisible();
+  await expect(items).toHaveCount(Math.min(10, current));
+  await expect(showAll).toHaveAttribute('aria-expanded', 'false');
 });
 
 test('pillars are numbered 1–4 and use deliberate mobile title wrapping', async ({ page }) => {

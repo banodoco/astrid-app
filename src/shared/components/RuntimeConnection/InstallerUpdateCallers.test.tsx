@@ -131,6 +131,13 @@ describe('the same-origin launcher card waits for the install type', () => {
     expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
   });
 
+  it('when the Runtime health cannot be read, shows no command, only the neutral check line, never the fully-local command', async () => {
+    withLauncher(() => new Response('unavailable', { status: 503 }));
+    render(<AstridUpdatesSection isOpen />);
+    await screen.findByText('Could not check Astrid update status. Check your connection and try again.');
+    expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+  });
+
   it('a Pinokio-managed fully local install gets the Pinokio instruction once the identity is known', async () => {
     // The connection does not know it is Pinokio; only the Runtime's own identity (health) says so.
     harness.manager = 'pinokio';

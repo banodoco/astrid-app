@@ -26,8 +26,13 @@ import { AstridUpdatesSection } from '@/shared/components/SettingsModal/sections
 
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
+// A readable Runtime (its health names no manager): the fully-local card needs the Runtime's identity before it shows a command.
+const healthyRuntime = { status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test', runtime_instance_id: 'instance-a', runtime_session_id: 'session-a', runtime_epoch: 1, identity: { managed_by: null, release: 10 } };
 function stubFetch() {
-  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json(200, { report: 'Astrid diagnostics' }))));
+  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    return Promise.resolve(url.endsWith('/v1/health') ? json(200, healthyRuntime) : json(200, { report: 'Astrid diagnostics' }));
+  }));
 }
 
 beforeEach(() => {
@@ -83,6 +88,7 @@ describe('fully-local update guidance', () => {
         const url = String(input);
         if (url === '/__astrid/local-update-page') return Promise.resolve(json(200, TARGET));
         if (url === TARGET.url) return Promise.resolve(launcher());
+        if (url.endsWith('/v1/health')) return Promise.resolve(json(200, healthyRuntime));
         return Promise.resolve(json(200, { report: 'Astrid diagnostics' }));
       });
       vi.stubGlobal('fetch', fetchMock);

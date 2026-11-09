@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 
 const SECTIONS = [
   { id: 'astrid-vision-manifesto', label: 'Vision' },
@@ -15,7 +15,7 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
   includeHelp: boolean;
 }) {
   const [activeId, setActiveId] = useState<string>(SECTIONS[0].id);
-  const sections = SECTIONS.filter(section => includeHelp || section.id !== 'astrid-vision-contribute');
+  const sections = useMemo(() => SECTIONS.filter(section => includeHelp || section.id !== 'astrid-vision-contribute'), [includeHelp]);
 
   useEffect(() => {
     let frame = 0;
@@ -42,7 +42,7 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
       window.removeEventListener('resize', schedule);
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [includeHelp]);
+  }, [sections]);
 
   return (
     <nav className="astrid-vision-section-nav" aria-label="Vision page sections">

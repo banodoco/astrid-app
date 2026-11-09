@@ -209,14 +209,31 @@ test('principle sigils use softer faded page colors while retaining delicate hov
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const cards = page.locator('.astrid-vision-standards-list > li');
   const marks = cards.locator('.astrid-vision-principle-sigil');
+  const cornerArrows = cards.locator('.astrid-vision-principle-corner');
   for (let index = 0; index < 4; index++) {
     await expect(marks.nth(index)).toHaveCSS('opacity', '0.58');
+    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '0.58');
     await expect(marks.nth(index)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(cornerArrows.nth(index)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect.poll(() => cards.nth(index).evaluate(card => {
+      const mark = card.querySelector('.astrid-vision-principle-sigil')!;
+      const arrow = card.querySelector('.astrid-vision-principle-corner')!;
+      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
+    })).toBe(true);
   }
   const colors = await marks.evaluateAll(elements => elements.map(element => getComputedStyle(element).color));
   expect(new Set(colors).size).toBe(4);
+  for (let index = 0; index < 4; index++) {
+    await cards.nth(index).hover();
+    await expect(marks.nth(index)).toHaveCSS('opacity', '0.82');
+    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '0.82');
+    await expect.poll(() => cards.nth(index).evaluate(card => {
+      const mark = card.querySelector('.astrid-vision-principle-sigil')!;
+      const arrow = card.querySelector('.astrid-vision-principle-corner')!;
+      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
+    })).toBe(true);
+  }
   await cards.nth(0).hover();
-  await expect(marks.nth(0)).toHaveCSS('opacity', '0.82');
   await expect(cards.nth(0).locator('.astrid-vision-sigil-orbit'))
     .toHaveCSS('animation-name', 'astrid-vision-sigil-orbit');
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -303,6 +320,12 @@ test('phone scroll activates each principle sigil through the middle of the view
       await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '5s');
     }
     await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
+    await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '0.82');
+    await expect.poll(() => card.evaluate(el => {
+      const mark = el.querySelector('.astrid-vision-principle-sigil')!;
+      const arrow = el.querySelector('.astrid-vision-principle-corner')!;
+      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
+    })).toBe(true);
     if (index > 0) await expect(cards.nth(index - 1)).not.toHaveAttribute('data-sigil-active', 'true');
   }
   await page.emulateMedia({ reducedMotion: 'reduce' });

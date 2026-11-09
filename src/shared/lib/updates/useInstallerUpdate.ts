@@ -41,6 +41,16 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   const latest = useRef({ enabled, connection });
   latest.current = { enabled, connection };
   const confirmPermission = connection?.confirmPermission;
+  // A reconnect (Astrid restarted, or came back) re-reads the release at once instead of waiting for the next tick.
+  const connected = connection?.isConnected === true;
+  const wasConnected = useRef<boolean | null>(null);
+  useEffect(() => {
+    const before = wasConnected.current;
+    wasConnected.current = connected;
+    if (before === false && connected && enabled) void operation.refresh(true);
+  }, [connected, enabled, operation]);
+  // While any update surface is mounted, a light poll keeps the status live: a new runtime_instance_id or installed
+  // release (an update run from a terminal, or by Update now) re-checks the release without a click or a reload.
   useEffect(() => {
     if (!monitor) return;
     let disposed = false;

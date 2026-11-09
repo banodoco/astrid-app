@@ -247,7 +247,7 @@ test('first touch outside the dialog only dismisses it and cannot click through 
 });
 
 
-test('aspiration cards join edge-to-edge, fit the long title in two lines, and open from anywhere', async ({ page, request }) => {
+test('compact principle cards remain readable and open from title or sigil', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json() as { principles: { id: string; title: string }[] };
@@ -266,10 +266,13 @@ test('aspiration cards join edge-to-edge, fit the long title in two lines, and o
       const r = el.getBoundingClientRect();
       return { left: r.left, right: r.right, top: r.top, bottom: r.bottom };
     }));
-    for (let i = 1; i < rects.length; i++) {
-      expect(Math.abs(rects[i].left - rects[i - 1].right)).toBeLessThan(1);
-      expect(Math.abs(rects[i].top - rects[0].top)).toBeLessThan(1);
-    }
+    // Two columns with their own breathing room, rather than one joined
+    // four-up strip. The second row returns to the first column.
+    expect(rects[1].left).toBeGreaterThan(rects[0].right);
+    expect(Math.abs(rects[1].top - rects[0].top)).toBeLessThan(2);
+    expect(Math.abs(rects[2].left - rects[0].left)).toBeLessThan(2);
+    expect(rects[2].top).toBeGreaterThan(rects[0].bottom);
+    expect(Math.abs(rects[3].left - rects[1].left)).toBeLessThan(2);
     const fourthTitle = cards.last().locator('h3');
     const lines = await fourthTitle.evaluate(el => {
       const range = document.createRange();

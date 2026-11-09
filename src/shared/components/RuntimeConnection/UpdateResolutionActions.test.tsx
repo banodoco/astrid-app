@@ -95,7 +95,8 @@ describe('update resolution Settings actions', () => {
     expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinuxUpdate);
     expect(screen.getByRole('code').textContent).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
+    // The autostart-off card offers the agent brief too: it runs the same strict line in a terminal, never the in-app update.
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 
   it('routes a soft update nudge to the expanded Updates destination and preserves the URL hash', () => {

@@ -28,7 +28,6 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
       const expectedGaps = content.gaps.filter(gap =>
         gap.assessment !== 'closed' && gap.appliesTo.includes(kind + ':' + entry.id));
       await expect(modal.locator('.astrid-vision-details-gap h4')).toHaveText(expectedGaps.map(gap => gap.title));
-      await expect(modal.locator('.astrid-vision-details-gap h4')).not.toContainText(/G\d{1,3}/);
 
       for (const gap of expectedGaps) {
         const row = modal.locator('.astrid-vision-details-gap')

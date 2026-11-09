@@ -682,7 +682,12 @@
   color: var(--astrid-ink);
   font: 400 clamp(23px, 2vw, 30px)/1.2 var(--astrid-vision-serif);
 }
+/* Four equal title slots keep the footer actions aligned when longer
+   principle names wrap within the new bordered cards. */
 @media (min-width: 1101px) {
+  .astrid-vision-standards-list h3 { min-height: 4.8em; }
+}
+@media (min-width: 761px) and (max-width: 1100px) {
   .astrid-vision-standards-list h3 { min-height: 2.4em; }
 }
 .astrid-vision-standards-list .astrid-vision-markdown {

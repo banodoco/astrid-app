@@ -3,7 +3,8 @@ import { disabledBuiltInExtensions } from '@/shared/settings/declarations';
 import { getSettingsStore } from '@/shared/settings/instance';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setRuntimePacksUnsupported } from '@/tools/video-editor/runtime/runtimePackSupport';
 import { ExtensionManager } from '@/tools/video-editor/components/ExtensionManager/ExtensionManager';
 import {
   ManagerLoadingState,
@@ -3818,5 +3819,29 @@ describe('ExtensionManager — built-in extensions section (T2.4)', () => {
       expect(localRow(REVIEWED_ID)).toHaveTextContent('Inactive');
       expect(screen.queryByText('No extensions are installed.')).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('ExtensionManager — a Runtime without packs', () => {
+  beforeEach(() => {
+    mockUseVideoEditorRuntime.mockReset();
+    mockUseVideoEditorRuntime.mockReturnValue({
+      extensionRuntime: makeRuntime([]),
+      extensionStateRepository: makeRepository(),
+      triggerExtensionRefresh: vi.fn(),
+    });
+  });
+  afterEach(() => setRuntimePacksUnsupported(false));
+
+  it('shows the one calm line on the pack surface when the Runtime has no packs', () => {
+    setRuntimePacksUnsupported(true);
+    render(<ExtensionManager />);
+    expect(screen.getByText('Packs need a newer Astrid. Update to use them.')).toBeInTheDocument();
+  });
+
+  it('shows no pack line while the Runtime serves packs', () => {
+    setRuntimePacksUnsupported(false);
+    render(<ExtensionManager />);
+    expect(screen.queryByText('Packs need a newer Astrid. Update to use them.')).toBeNull();
   });
 });

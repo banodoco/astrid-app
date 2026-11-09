@@ -74,6 +74,7 @@ test('section links track scroll, highlight hovered sections and keep out of the
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision');
   const nav = page.getByRole('navigation', { name: 'Vision page sections' });
+  await expect(nav).toHaveCSS('position', 'fixed');
   await expect(nav.getByRole('link')).toHaveCount(5);
   await expect(nav.getByRole('link', { name: 'Vision', exact: true })).toHaveAttribute('aria-current', 'location');
   for (const [label, id] of sections) {
@@ -93,6 +94,8 @@ test('section links track scroll, highlight hovered sections and keep out of the
   const n = await nav.boundingBox();
   const cards = await page.locator('.astrid-vision-standards-list').boundingBox();
   expect(n).not.toBeNull(); expect(cards).not.toBeNull();
+  expect(n!.y).toBeGreaterThanOrEqual(0);
+  expect(n!.y + n!.height).toBeLessThanOrEqual(900);
   expect(n!.x + n!.width).toBeLessThan(cards!.x);
   const gaps = nav.getByRole('link', { name: 'Gaps', exact: true });
   await gaps.focus();
@@ -122,6 +125,7 @@ test('phone navigation fits the viewport and the first backdrop tap cannot navig
     await pinFeed(page, request);
     await page.goto('/vision');
     const nav = page.getByRole('navigation', { name: 'Vision page sections' });
+    await expect(nav).toHaveCSS('position', 'fixed');
     for (const width of [320, 390]) {
       await page.setViewportSize({ width, height: 844 });
       const rect = await nav.boundingBox();
@@ -134,13 +138,15 @@ test('phone navigation fits the viewport and the first backdrop tap cannot navig
     await nav.getByRole('link', { name: 'Principles', exact: true }).tap();
     await expect(nav.getByRole('link', { name: 'Principles', exact: true })).toHaveAttribute('aria-current', 'location');
     await page.screenshot({ path: 'test-results/vision-captures/pixel-sigils-mobile.png' });
+    // Capture the fixed navigation position while it is still accessible; a
+    // native modal correctly removes its inert background from the a11y tree.
+    const projects = await nav.getByRole('link', { name: 'Projects', exact: true }).boundingBox();
+    expect(projects).not.toBeNull();
     const opener = page.locator('.astrid-vision-standards-list > li').first().getByRole('button');
     await opener.tap();
     const dialog = page.getByRole('dialog');
     await expect(dialog).toBeVisible();
     const url = page.url();
-    const projects = await nav.getByRole('link', { name: 'Projects', exact: true }).boundingBox();
-    expect(projects).not.toBeNull();
     await page.touchscreen.tap(projects!.x + projects!.width / 2, projects!.y + projects!.height / 2);
     await expect(dialog).toHaveCount(0);
     expect(page.url()).toBe(url);

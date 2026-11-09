@@ -2,7 +2,8 @@ import { AstridRuntimeClient, type InstallerUpdateOutcome, type InstallerUpdateS
 import { INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason } from '@/integrations/runtime/installerUpdateReasons.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
-import { checkHostedUpdate } from './updateStatus.ts';
+import { checkHostedUpdate, checkLocalUpdate } from './updateStatus.ts';
+import { localUpdateStatus } from './pageUpdateStatus.ts';
 import { installedReleaseOf } from './installedRelease.ts';
 import { activeTransition, noteRelease, type UpdatedTransition } from './liveUpdate.ts';
 
@@ -143,6 +144,7 @@ export class UpdateOperation {
     return this.reading;
   };
   private async read() {
+    if (localUpdateStatus()) return this.readLocal();
     try {
       const [healthRead, statusRead] = await Promise.allSettled([this.client.readInstallerUpdateHealth(), this.client.readInstallerUpdateStatus()]);
       if (healthRead.status === 'rejected') throw healthRead.reason;
@@ -186,6 +188,31 @@ export class UpdateOperation {
       this.publish({ health, status, pending, fresh: true, error: this.refusal });
     } catch {
       this.publish({ fresh: false, error: UPDATE_STATUS_UNAVAILABLE });
+    }
+  }
+  /**
+   * A fully local page: the launcher's status names the releases, and the Runtime's health names the instance. The
+   * Runtime's installer status is not read, because this page updates through its launcher, never the installer route.
+   * The instance is the Runtime's and the checkout's together, so an update that moved either one is noticed.
+   */
+  private async readLocal() {
+    try {
+      // No restartRequired here: a local editor reloads itself onto the updated Astrid, and its launcher owns restarts.
+      const health = await this.client.readInstallerUpdateHealth();
+      this.publish({ health });
+      const identity = JSON.stringify([health.runtime_instance_id, installedReleaseOf(health)]);
+      if (this.releaseIdentity === identity && this.snapshot.releaseStatus) return;
+      try {
+        const releaseStatus = await checkLocalUpdate();
+        this.releaseIdentity = identity;
+        const transition = noteRelease(health.runtime_instance_id && `${health.runtime_instance_id}:${releaseStatus.app}`, releaseStatus.release);
+        if (transition) this.showUpdated(transition);
+        this.publish({ releaseStatus });
+      } catch {
+        this.publish({ releaseStatus: null });
+      }
+    } catch {
+      // The editor's own status line speaks for a local page; an unreadable Runtime adds no line of its own here.
     }
   }
   start = async (validateDrafts: () => boolean): Promise<void> => {

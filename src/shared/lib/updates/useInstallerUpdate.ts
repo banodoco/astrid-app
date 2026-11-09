@@ -32,12 +32,16 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   // only the read-only installer routes are enabled; capability and ownership
   // checks below continue to decide whether an explicit update is offered.
   const updateTransportAvailable = connection?.isConnected === true || connection?.state?.status === 'update_needed';
-  const enabled = isAuthenticated && updateTransportAvailable && !local && runtimeOrigin() !== '';
+  // The installer routes (status, Update now) are the hosted page's. A fully local page updates through its launcher,
+  // but it watches its Astrid the same way, so a finished update shows live there too.
+  const hosted = !local && runtimeOrigin() !== '';
+  const enabled = isAuthenticated && updateTransportAvailable && hosted;
+  const watched = isAuthenticated && updateTransportAvailable && (hosted || local);
   // An accepted operation outlives the workspace connection. Its read-only
   // status route still authenticates through the connector after a restart.
   // Never turn this permission to observe into permission to POST.
   const disconnected = ['connecting', 'not_running', 'restart'].includes(connection?.state?.status ?? '');
-  const monitor = enabled || snapshot.pending && disconnected && !authError && !local && runtimeOrigin() !== '';
+  const monitor = watched || snapshot.pending && disconnected && !authError && hosted;
   const latest = useRef({ enabled, connection });
   latest.current = { enabled, connection };
   const confirmPermission = connection?.confirmPermission;
@@ -47,8 +51,8 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
   useEffect(() => {
     const before = wasConnected.current;
     wasConnected.current = connected;
-    if (before === false && connected && enabled) void operation.refresh(true);
-  }, [connected, enabled, operation]);
+    if (before === false && connected && watched) void operation.refresh(true);
+  }, [connected, watched, operation]);
   // While any update surface is mounted, a light poll keeps the status live: a new runtime_instance_id or installed
   // release (an update run from a terminal, or by Update now) re-checks the release without a click or a reload.
   useEffect(() => {
@@ -75,7 +79,7 @@ export function useInstallerUpdate(connection?: RuntimeConnectionValue | null) {
     && !snapshot.restartRequired
     && snapshot.fresh && (snapshot.status?.self_update === true || snapshot.status?.reason === 'busy');
   return { ...snapshot, installType, available, updateReason: installerUpdateReasonOf(snapshot.status) ?? undefined,
-    refresh: async () => { if (enabled) await operation.refresh(true); },
+    refresh: async () => { if (watched) await operation.refresh(true); },
     start: async (validateDrafts: () => boolean) => {
       if (!available || !canStartInstallerUpdate(snapshot.status) || !latest.current.enabled) return;
       const current = latest.current.connection;

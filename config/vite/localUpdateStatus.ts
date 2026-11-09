@@ -8,8 +8,8 @@ const execFileAsync = promisify(execFile);
 const STATUS_PATH = '/__astrid/local-update-status';
 const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]', '::1']);
 // Vite's documented default port for `vite preview` when preview.port is unset.
-const DEFAULT_PREVIEW_PORT = 4173;
-const DEFAULT_DEV_PORT = 5173;
+export const DEFAULT_PREVIEW_PORT = 4173;
+export const DEFAULT_DEV_PORT = 5173;
 
 export function validLocalStatusRequest(method: string | undefined, url: string | undefined, host: string | undefined, origin: string | undefined, fetchSite: string | undefined, contentLength: string | undefined, transferEncoding: string | undefined, contentType: string | undefined, accept: string | undefined, port: number, expectedPath = STATUS_PATH): boolean {
   if (method !== 'POST' || url !== expectedPath || !host || !origin || (fetchSite && fetchSite !== 'same-origin') || (contentLength && contentLength !== '0') || transferEncoding || contentType !== 'application/json' || accept !== 'application/json') return false;

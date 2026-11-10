@@ -65,6 +65,23 @@ function saveOf(payload: OutboxJson): StoredSave {
   return save;
 }
 
+// A lone track-name draft can remain on its original displayed basis while the
+// conflict is resolved. Other edit shapes still require canonical rollback.
+function isSingleTrackLabelDraft(record: OutboxRecord): boolean {
+  if (record.intents.length !== 1) return false;
+  const intent = saveOf(record.intents[0].payload).documentIntent;
+  if (!intent || typeof intent !== 'object' || Array.isArray(intent)) return false;
+  const changes = intent.changes;
+  if (!Array.isArray(changes) || changes.length !== 1) return false;
+  const change = changes[0];
+  if (!change || typeof change !== 'object' || Array.isArray(change)) return false;
+  const path = change.path;
+  return change.op === 'set' && change.ref === 'parent' && Array.isArray(path)
+    && path.length === 4 && path[0] === 'config' && path[1] === 'tracks'
+    && typeof path[2] === 'string' && path[2].startsWith('id:') && path[3] === 'label'
+    && typeof change.value === 'string';
+}
+
 /** One existing durable owner; commands and guards are never recaptured after an ACK. */
 export async function createLocalSaveSession(options: Options) {
   const storage = options.outboxes ?? createCommitOutbox();
@@ -113,13 +130,16 @@ export async function createLocalSaveSession(options: Options) {
       return commands?.some((command) => command.op === 'timeline.inverse') ?? false;
     }) ?? false;
     const at = generation;
-    // Retain the entire rejected chain in the outbox; only the visible preview rolls back.
+    // Retain the entire rejected chain in the outbox.
     // A guarded inverse refusal is an authoritative-history conflict even
     // when Runtime reports the guard as a typed refusal/validation response;
     // the user must reload history before another undo can be offered.
     const conflict = inverse || (failure.error && typeof failure.error === 'object' && !Array.isArray(failure.error)
       && failure.error.kind === 'conflict');
     publish(conflict ? 'conflict' : 'error', failure.error);
+    // Keep the original draft and head together; never present it as an edit
+    // of the newer Runtime head or resend it automatically.
+    if (conflict && record && isSingleTrackLabelDraft(record)) return true;
     try {
       const latest = await options.loadLatest();
       checkBasis(latest);

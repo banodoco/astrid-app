@@ -490,7 +490,8 @@ test.describe('core journey', () => {
     const revisionPath = `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions/${newHead}`;
     const beforeReload = await call(revisionPath);
     expect(beforeReload.status).toBe(200);
-    expect(beforeReload.text).toContain('Main (edited through the door)');
+    // The composition name, read from the Runtime after the save: exactly the value the guarded doc.patch set.
+    expect(json(beforeReload).parent_composition?.name).toBe('Main (edited through the door)');
     const afterReadInspect = await call(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 
     await page.reload();

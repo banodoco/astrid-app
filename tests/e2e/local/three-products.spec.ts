@@ -2921,7 +2921,12 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
     .toEqual(retained.pending!.request);
   expect(wire.posts).toHaveLength(1);
   expectRawTransitionsCleared((await revisionState(harness, seed3, pinOf(cleared).revision_id)).parent, original.parent, [seed3.transitionClipId]);
-  await page.getByRole('button', { name: /^Recover saved edits/ }).and(page.locator(`[data-owner-id="${retained.ownerId}"]`)).click();
+  // The App recovers the single retained owner by itself after reload and retries its pending request (useTimelineSave.ts:380,
+  // localSaveSession.ts:351). The explicit "Recover saved edits" control was removed (7b33f8f50, 4394b74a1), so the retry is gated
+  // here: the fault route holds that second POST until it is released, and exactly one POST has completed until then.
+  await wire.waitForStagedRetry();
+  expect(wire.posts, 'exactly one completed POST while the automatic retry is held').toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);
   expect(wire.posts[1], 'exact bytes, key, receipt and accepted closure survive reload and Runtime restart').toEqual(wire.posts[0]);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);

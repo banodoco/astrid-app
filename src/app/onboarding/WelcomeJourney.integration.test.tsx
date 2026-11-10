@@ -183,6 +183,13 @@ it('recovers from hosted permission denial, creates a real canonical starter tim
   expect(door.requests.map(request => request.path)).toEqual(['/v1/health']);
   expect(screen.queryByRole('main', { name: 'Opening your project' })).not.toBeInTheDocument();
   fireEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+  expect(await screen.findByRole('heading', { name: 'Your project is ready' })).toBeInTheDocument();
+  expect(replaceNavigate).not.toHaveBeenCalled();
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } });
+  fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
+  await waitFor(() => expect(writeText).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole('button', { name: 'Open your project' }));
   await waitFor(() => expect(replaceNavigate).toHaveBeenCalledOnce(), { timeout: 10_000 });
 
   const url = destination();

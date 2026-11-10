@@ -35,6 +35,8 @@ describe('StarterProjectHandoff while Runtime is slow', () => {
     expect(signal.aborted).toBe(false);
 
     await act(async () => result.resolve({ projectId: 'ready-project', timelineId: 'main' }));
+    expect(ready).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Open your project' }));
     expect(ready).toHaveBeenCalledWith({ projectId: 'ready-project', timelineId: 'main' });
     expect(localStorage.getItem(PENDING_STARTER_PROJECT_KEY)).toBeNull();
   });
@@ -60,6 +62,7 @@ describe('StarterProjectHandoff while Runtime is slow', () => {
     expect(localStorage.getItem(PENDING_STARTER_PROJECT_KEY)).toBe(intentId);
 
     await act(async () => second.resolve({ projectId: 'current-project', timelineId: 'main' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open your project' }));
     expect(ready).toHaveBeenCalledExactlyOnceWith({ projectId: 'current-project', timelineId: 'main' });
     expect(localStorage.getItem(PENDING_STARTER_PROJECT_KEY)).toBeNull();
   });

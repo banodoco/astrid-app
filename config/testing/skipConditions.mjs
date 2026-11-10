@@ -49,6 +49,22 @@ export function agentAuthoringUnavailableReason() {
   return authoringPythonUnavailableReason();
 }
 
+/**
+ * Why the P1 corpus tests cannot read the Agent checkout here, or null. A missing checkout is a skip only on a
+ * developer machine. In CI (CI set) the App Tests job checks out the pinned Agent, so a missing input fails the test.
+ */
+export const AGENT_CORPUS_CHECKOUT = path.resolve(process.env.ASTRID_AGENT_CHECKOUT ?? path.join(REPO_ROOT, '..', 'astrid-agent'));
+
+export function agentCorpusCheckoutUnavailableReason() {
+  if (process.env.CI) return null;
+  try {
+    if (statSync(AGENT_CORPUS_CHECKOUT).isDirectory()) return null;
+  } catch (error) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  return `Agent checkout not found at ${AGENT_CORPUS_CHECKOUT} (set ASTRID_AGENT_CHECKOUT)`;
+}
+
 /** Why the direct-journey harness cannot run here, or null when it can. */
 export function harnessUnavailableReason() {
   if (!existsSync(path.join(RUNTIME_CHECKOUT, '.venv', 'bin', 'python'))) return `Runtime venv not found at ${RUNTIME_CHECKOUT}/.venv (set ASTRID_RUNTIME_CHECKOUT)`;

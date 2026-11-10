@@ -52,7 +52,21 @@ jobs:
           node-version: "20.19.0"
       - run: node --test scripts/installer/release.test.mjs
       - run: npm ci --legacy-peer-deps
+      # The P1 corpus tests read git blobs from the Agent at the release-12 pin (public/install-manifest.json).
+      # ASTRID_AGENT_CHECKOUT points them there; a missing checkout fails the test instead of skipping it.
+      - name: Check out the pinned Agent for the P1 corpus
+        uses: actions/checkout@v4
+        with:
+          repository: banodoco/astrid-agent
+          ref: 0f792afb1ec8205eeef177b1d5b415f2435c8370
+          path: astrid-agent
+          fetch-depth: 0
+      # Browser-backed unit tests launch Playwright's Chromium from the default cache.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
       - run: npm test
+        env:
+          ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
       - run: npm run test:sdk-boundary
 
   # The release tooling is macOS-only by design (lockf broker, BSD ps eww, darwin-pinned attestation), so the vitest job

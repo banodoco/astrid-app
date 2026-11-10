@@ -669,7 +669,9 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   expect(draftBefore.pending?.request.body).toBe(request.postData());
   expect(draftBefore.pending?.outcome).toBeUndefined();
   expect(request.postDataJSON()).toMatchObject({ base_revision_id: headBefore,
-    commands: [{ op: 'track.set', select: 'parent/track:V1', args: { values: { label: 'F2 kept across restart' }, clear: [] } }] });
+    commands: [{ op: 'doc.patch', select: null, args: { changes: [{ op: 'set', ref: 'parent',
+      path: ['config', 'tracks', 'id:V1', 'label'], before: { state: 'present', value: 'F2 App A' },
+      value: 'F2 kept across restart' }] } }] });
   expect(await currentHead(harness)).toBe(headBefore);
   await plantNoReloadFlag(page);
 

@@ -1365,12 +1365,12 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
       },
     };
     const timelineId = randomUUID();
-    const publication = compositionPublication({ projectId, timelineId }, null, 'Media', 30);
-    publication.parent_composition.config = { ...publication.parent_composition.config, clips } as typeof publication.parent_composition.config;
-    publication.parent_composition.clips = clips as unknown as typeof publication.parent_composition.clips;
-    publication.parent_composition.registry = registry as unknown as typeof publication.parent_composition.registry;
-    const published = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, publication);
-    if (published.status !== 200) throw new Error(`seed media timeline: ${published.status} ${JSON.stringify(published.body)}`);
+    const shell = await this.createCommitTimeline(projectId, timelineId, 'Media');
+    await this.commitNativeSeed({
+      fixture: 'parent', initialize: true, label: 'Seed media timeline', project_id: projectId, timeline_id: timelineId,
+      head_revision_id: shell.revisionId, base_publication_id: shell.publicationId, idempotency_key: randomUUID(),
+      raw_media: [image.objectId, video.objectId], parent: { name: 'Media', clips, registry },
+    });
     this.mediaSeed = { projectSlug: (project.body.data ?? project.body).slug, timelineId, imageClipId, videoClipId };
     return this.mediaSeed;
   }

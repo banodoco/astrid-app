@@ -107,7 +107,7 @@ const LOCAL_SETUP_DIRECTORY = 'astrid-app';
 
 /** A short agent handoff for setting up image generation with the installed skill. */
 export function setUpGenerationInstructions(): string {
-  return 'Please set up image generation using the installed generation skill. Follow its “Set up my generation” instructions: https://github.com/banodoco/astrid-agent/blob/main/astrid/packs/generation/docs/SKILL.md#set-up-my-generation';
+  return 'Please use the installed generation skill to set up image generation. Follow “Set up my generation” here: https://github.com/banodoco/astrid-agent/blob/main/astrid/packs/generation/docs/SKILL.md#set-up-my-generation';
 }
 
 /** The fully local setup: the editor's source, how to start it, and where it serves. */
@@ -166,10 +166,10 @@ export function localSetupInstructions(choices: SetupChoices = RECOMMENDED_SETUP
   return [
     `Please ${alreadySetup ? 'restart Astrid and set up the fully local editor' : 'set up Astrid to run fully on this computer, including the editor'} so I can change Astrid itself. Do the work yourself and verify the result.`,
     alreadySetup ? null : `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.`,
-    alreadySetup ? null : 'Show these choices and offer a change.',
-    alreadySetup ? null : 'If a choice changes, use its installer flag: `--autostart`, `--command`, `--skills` or `--skill-copies`.',
+    alreadySetup ? null : 'Show me these four choices as my setup decisions. Offer to change them. Wait for my reply before running the installer.',
+    alreadySetup ? null : 'If I keep these choices, run the installer command in this brief exactly as written. If I change any choice, set all four flags explicitly in that command: `--autostart`, `--command`, `--skills` and `--skill-copies`. Give each flag the `on` or `off` value I chose.',
     SETUP_SKILL_POINTER,
-    `1. Install or repair Astrid with the official installer. Fetch and read the script before running it. Run this official installer command: \`${installCommand('install', choices, explicitChoices)}\`. Keep my existing workspace, projects, media, credentials, and agent instructions. The installer may open astrid.haus; finish this setup in the local editor below.`,
+    `1. Install or repair Astrid with the official installer. Fetch and read the script before running it. The official installer command is: \`${installCommand('install', choices, explicitChoices)}\`. Keep my existing workspace, projects, media, credentials, and agent instructions. The installer may open astrid.haus; finish this setup in the local editor below.`,
     `2. Get the editor's code from ${L.repoUrl}. Install Git and Node.js 20.19 or newer in the Node 20 release line if needed. Clone with \`${L.cloneCommand}\`, then \`${L.changeDirectoryCommand}\` and \`${L.installDependenciesCommand}\`. If a clone already exists, preserve its changes and update it to \`main\` without discarding work; use \`git pull --ff-only origin main\` when it can fast-forward and resolve any divergence before continuing.`,
     `3. In that clone, run \`${L.startCommand}\` in a terminal that stays open. This starts the source editor on port 5180, checks the installed Runtime and selected workspace, and connects through the editor's own server. Keep the existing hosted door for https://astrid.haus; do not change its origin or turn it off. If the launcher reports a problem, diagnose it and repair through the official installer when needed. Do not delete or replace my workspace or credentials.`,
     `4. Open ${L.openUrl} in my browser. The editor opens with my project. This first-open address resumes at connection because I already completed the tour. Verify \`/api/runtime/v1/health\` and \`/api/runtime/v1/realm\` through http://127.0.0.1:5180 and confirm the editor uses my existing Runtime workspace. No browser local-network permission is needed for this route. Do not claim success if any check could not be run; tell me the actual result.`,
@@ -313,8 +313,8 @@ export function agentInstructions(
   return [
     `Please ${repair ? 'repair my existing Astrid installation' : mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
     !alreadySetup && !existing ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
-    !alreadySetup && !existing ? 'Show these choices and offer a change.' : null,
-    !alreadySetup && !existing ? 'If a choice changes, use its installer flag: `--autostart`, `--command`, `--skills` or `--skill-copies`.' : null,
+    !alreadySetup && !existing ? 'Show me these four choices as my setup decisions. Offer to change them. Wait for my reply before running the installer.' : null,
+    !alreadySetup && !existing ? 'If I keep these choices, run the installer command in this brief exactly as written. If I change any choice, set all four flags explicitly in that command: `--autostart`, `--command`, `--skills` and `--skill-copies`. Give each flag the `on` or `off` value I chose.' : null,
     SETUP_SKILL_POINTER,
     'First inspect the existing installation, running services, profile, selected workspace and data root. Preserve my projects, media, credentials and agent instructions. Do not reset or delete my workspace, or replace it with an empty one.',
     "Use the current official Astrid installer; read it before running it. The installer adopts an existing workspace itself; don't run workspace or migration commands by hand. Do not bypass ownership guards or overwrite a directory just because the installer refuses it.",

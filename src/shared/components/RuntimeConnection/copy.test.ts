@@ -71,8 +71,8 @@ describe('setup consent wording', () => {
       ? agentInstructions('install', 'https://astrid.haus', false, undefined, { choices })
       : localSetupInstructions(choices);
 
-    expect(text).not.toMatch(/May I install|wait for my answer/i);
-    expect(text).toContain('Show these choices and offer a change.');
+    expect(text).not.toContain('May I install');
+    expect(text).toContain('Show me these four choices as my setup decisions. Offer to change them. Wait for my reply before running the installer.');
     expect(text).toContain(`Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.`);
     for (const flag of setupFlags) expect(text).toContain(`\`${flag}\``);
     expect(text).toContain(`\`astrid-setup\` skill: ${setupGuideUrl}`);
@@ -83,7 +83,7 @@ describe('setup consent wording', () => {
   it('shows selected setup choices with the same runnable command', () => {
     const choices = { ...RECOMMENDED_SETUP_CHOICES, autostart: false, skills: false };
     const text = agentInstructions('install', 'https://astrid.haus', false, undefined, { choices });
-    expect(text).toContain('Show these choices and offer a change.');
+    expect(text).toContain('Show me these four choices as my setup decisions. Offer to change them. Wait for my reply before running the installer.');
     expect(text).toContain('Setup choices: start at sign-in off · `astrid` terminal command on · coding-agent skills off · skill copies off.');
     expect(text).toContain('curl -fsSL https://astrid.haus/install | sh -s -- --yes --autostart off --skills off');
   });
@@ -93,19 +93,19 @@ describe('setup consent wording', () => {
     expect(text).toContain('Please restart Astrid on this computer');
     expect(text).not.toContain('May I install');
     expect(text).not.toContain('Setup choices:');
-    expect(text).not.toContain('Show these choices');
+    expect(text).not.toContain('Show me these four choices');
   });
 
   it('keeps update briefs free of choice lines', () => {
     const text = agentInstructions('update', 'https://astrid.haus');
     expect(text).not.toContain('Setup choices:');
-    expect(text).not.toContain('Show these choices');
+    expect(text).not.toContain('Show me these four choices');
   });
 
   it('keeps an already-set-up local brief free of choice lines', () => {
     const text = localSetupInstructions(RECOMMENDED_SETUP_CHOICES, true);
     expect(text).not.toContain('Setup choices:');
-    expect(text).not.toContain('Show these choices');
+    expect(text).not.toContain('Show me these four choices');
   });
 });
 

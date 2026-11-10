@@ -11,6 +11,7 @@ import { acceptedCommit, fixtureDigest } from '@/integrations/runtime/__tests__/
 import type { Transport } from '@/integrations/runtime/generated.ts';
 import type { CommitRequest, MediaSelection } from '@/integrations/runtime/timeline-commit-types.ts';
 import type { DataProvider, TimelineCommandBasis, TimelineCommitResult } from '../data/DataProvider.ts';
+import { loadTimelineDraft } from '../data/timelineDraftIndexedDb.ts';
 import { VideoEditorRuntimeProvider, type VideoEditorRuntimeContextValue } from '../contexts/VideoEditorRuntimeContext.tsx';
 import { createDefaultTimelineConfig } from '../lib/defaults.ts';
 import { createInteractionState } from '../lib/interaction-state.ts';
@@ -454,7 +455,7 @@ describe('mounted prepared-media command persistence', () => {
     }
   });
 
-  it('rolls back an accepted preview when the mounted save receives a real conflict', async () => {
+  it('rolls back an accepted preview on conflict and Keep preserves the durable draft and original base', async () => {
     const config = authoredConfig();
     const document = authoredDocument(config);
     const initial: TimelineCommandBasis = { head, canonicalDocument: document };
@@ -515,6 +516,12 @@ describe('mounted prepared-media command persistence', () => {
       await waitFor(() => expect(mounted.result.current.save.localSaveState?.status).toBe('conflict'));
       expect(mounted.result.current.save.dataRef.current?.config.clips.some((clip) => clip.id === 'clip-0')).toBe(false);
       expect(mounted.result.current.save.dataRef.current?.config.clips.find((clip) => clip.id === 'later')?.at).toBe(6);
+      const draftBeforeKeep = await loadTimelineDraft(scope.timelineId);
+      expect(draftBeforeKeep).toMatchObject({ baseHeadRevisionId: 'r0', baseHeadProjectId: scope.projectId,
+        baseHeadTimelineId: scope.timelineId });
+      const draftConfig = draftBeforeKeep!.draft.config as unknown as TimelineConfig;
+      expect(draftConfig.clips.some((clip) => clip.id === 'clip-0')).toBe(true);
+      expect(draftConfig.clips.find((clip) => clip.id === 'later')?.at).toBe(7);
       expect(send).toHaveBeenCalledOnce();
       const refusal = await send.mock.results[0]!.value.catch((error: unknown) => error);
       expect(refusal).toMatchObject({ status: 409, code: 'dependency_changed', details: {
@@ -537,6 +544,25 @@ describe('mounted prepared-media command persistence', () => {
             status: 'conflict', reason: 'dependency_changed', current: { revision_id: 'agent-r', publication_id: 'agent-p' },
           } },
       });
+      // The display is canonical now. Keep must preserve the already durable
+      // user draft, including its old CAS base, rather than copying that view.
+      const canonicalRead = vi.spyOn(provider, 'loadReferencedTimeline').mockResolvedValue({
+        timeline: { config: latestConfig, configVersion: 1,
+          head: { projectId: scope.projectId, timelineId: scope.timelineId,
+            headRevisionId: 'agent-r', headPublicationId: 'agent-p' } },
+        registry: initialData.registry,
+        resolveAssetUrl: async (file) => file,
+      });
+      await act(async () => { await mounted.result.current.save.retrySaveAfterConflict(); });
+      expect(canonicalRead).toHaveBeenCalledOnce();
+      expect(mounted.result.current.save.isConflictExhausted).toBe(false);
+      expect(mounted.result.current.save.dataRef.current?.config.clips.some((clip) => clip.id === 'clip-0')).toBe(false);
+      expect(mounted.result.current.save.dataRef.current?.config.clips.find((clip) => clip.id === 'later')?.at).toBe(6);
+      expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
+      const keptOwner = (await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)!;
+      expect(keptOwner.intents).toEqual(retained!.intents);
+      expect(keptOwner.pending).toEqual(retained!.pending);
+      expect(send).toHaveBeenCalledOnce();
     } finally {
       mounted.unmount();
       await new Promise((resolve) => setTimeout(resolve, 0));

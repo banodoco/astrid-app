@@ -758,23 +758,15 @@ test.describe('restarts', () => {
     const headBefore = await currentHead(harness);
     const reloadButton = page.getByRole('status').getByRole('button', { name: 'Reload' });
     await expect(reloadButton).toBeVisible();
-    let release!: () => void;
-    let signalRequest!: () => void;
-    const saveStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
-    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
-      if (route.request().method() !== 'POST') return route.fallback();
-      signalRequest();
-      await new Promise<void>((resolve) => { release = resolve; });
-      await route.continue();
-    });
+    const hold = await holdTimelineSaves(page);
     await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
     await editFirstTrackName(page, 'Saved before App reload');
     await reloadButton.click();
-    await saveStarted;
+    await expect.poll(() => hold.requests.length, { timeout: 20_000 }).toBeGreaterThan(0);
     await expect(page.getByRole('status').getByRole('button', { name: 'Saving drafts…' })).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'reload waits while the save is unacknowledged').toBe(true);
     const pageReload = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
-    release();
+    await hold.release(true);
     await pageReload;
     await expectConnected(page);
     await openSeededTimeline(page, harness);
@@ -790,7 +782,7 @@ test.describe('restarts', () => {
     await expectConnected(page);
     await openSeededTimeline(page, harness);
     const headBefore = await currentHead(harness);
-    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
+    await page.route(/\/timelines\/[^/]+\/commit$/, async route => {
       if (route.request().method() === 'POST') return route.abort('failed');
       return route.fallback();
     });

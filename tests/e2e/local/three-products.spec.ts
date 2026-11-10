@@ -578,6 +578,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i, CEILING);
   const kept = await timelineDraft(page, seed3.timelineId);
+  expect(kept?.draft).toEqual(draftC.draft);
   expect(kept?.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label).toBe('F2 App A');
   expect(kept?.draft.config?.clips?.find((clip: any) => clip.id === seed3.transitionClipId)?.transition).toBeUndefined();
   expect(kept?.baseHeadProjectId).toBe(harness.seed.projectId);
@@ -3002,7 +3003,11 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expectTransitionClear(JSON.parse(wire.posts[0].body), before.head, original.parentClips, ids);
   const owner = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.pending?.request.key === wire.posts[0].key)!;
   expect(owner.intents, 'one atomic intent owns both commands').toHaveLength(1);
-  expect(commandsOf(owner.intents[0].payload)).toEqual(JSON.parse(wire.posts[0].body).commands);
+  const intent = mountedDocumentIntentOf(owner.intents[0].payload);
+  expect(JSON.parse(wire.posts[0].body).commands).toEqual([{
+    schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [],
+    args: { changes: intent.changes },
+  }]);
   expectRawTransitionsCleared(cleared.data.canonical_document.parent_revision.payload, original.parent, ids);
   await expectImmutableClosure(harness, seed3, cleared);
   await expectRecordedTransitionClears(harness, seed3, cleared, JSON.parse(wire.posts[0].body), original.parentClips);

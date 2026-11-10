@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { consumeAutoConnectQuery } from '@/integrations/runtime/autoConnectRequest.ts';
 import { CONNECTED_MIN_MS, LEAVE_MS, RuntimeConnectionPanel, SETTLED_QUIET_MS } from './RuntimeConnectionPanel.tsx';
-import { installCommand, PINOKIO_INSTALL_COPY, pinokioReconnectInstructions, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
+import { installCommand, PINOKIO_INSTALL_COPY, pinokioReconnectInstructions, RUNTIME_CONNECTION_COPY as COPY, SETUP_SKILL_POINTER } from './copy.ts';
 import { COPY_FOR_AGENT_ACTION } from '@/shared/lib/updates/resolveUpdate.ts';
 import { CONNECTED_REALM, connectionFor } from './connectionFixture.ts';
 
@@ -58,6 +58,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.queryByRole('code')).not.toBeInTheDocument();
     fireEvent.click(installDisclosure);
     expect(installDisclosure).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getAllByText(SETUP_SKILL_POINTER)).toHaveLength(1);
     expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
@@ -384,7 +385,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(command);
     fireEvent.click(screen.getByRole('button', { name: COPY.agent.copied }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
-    expect(clipboard.mock.calls[0][0]).toContain('May I install Astrid with these setup choices?');
+    expect(clipboard.mock.calls[0][0]).toContain('Please set up Astrid on this computer');
   });
 
   it('Pinokio update guidance points to Pinokio without installer steps', () => {

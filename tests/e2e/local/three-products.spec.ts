@@ -453,12 +453,13 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   const watched = watchPageReads(page, harness);
 
   // Every save the page sends, with the key and head it names and what became of it.
-  interface Post { key: string; body: string; expectedHead: string | null; status: number | null; outcome: 'held' | 'sent' | 'lost' }
+  interface Post { key: string; body: string; base: { revision_id: string; publication_id: string } | null; revisionId: string | null; status: number | null; outcome: 'held' | 'sent' | 'lost' }
   const posts: Post[] = [];
   const postOf = new Map<Request, Post>();
   page.on('request', (request) => {
-    if (request.method() !== 'POST' || !SAVES.test(new URL(request.url()).pathname)) return;
-    const post: Post = { key: request.headers()['idempotency-key'], body: request.postData()!, expectedHead: JSON.parse(request.postData() ?? '{}').expected_head ?? null, status: null, outcome: 'sent' };
+    if (request.method() !== 'POST' || !COMMITS.test(new URL(request.url()).pathname)) return;
+    const sent = JSON.parse(request.postData() ?? '{}');
+    const post: Post = { key: request.headers()['idempotency-key'], body: request.postData()!, base: sent.base_revision_id ? { revision_id: sent.base_revision_id, publication_id: sent.base_publication_id } : null, revisionId: null, status: null, outcome: 'sent' };
     postOf.set(request, post);
     posts.push(post);
   });
@@ -468,19 +469,21 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   // Hold the acknowledgement, not the request: the Runtime commits the save, the page never hears back.
   let holding = true;
   const held: Array<{ route: Parameters<Parameters<Page['route']>[1]>[0]; post: Post }> = [];
-  await page.route(SAVES, async (route) => {
+  await page.route(COMMITS, async (route) => {
     const request = route.request();
     if (!holding || request.method() !== 'POST') return route.fallback();
     const post = postOf.get(request)!;
     const response = await route.fetch({ maxRetries: 0 });
     post.status = response.status();
+    // The receipt names the revision this commit made.
+    post.revisionId = (await response.json().catch(() => null))?.data?.accepted_revision_id ?? null;
     post.outcome = 'held';
     held.push({ route, post });
   });
 
   await openApp(page, harness);
   await expectConnected(page);
-  await openSeededTimeline(page, harness);
+  await openCommandTimeline(page, harness, seed3);
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
   const baseHead = await currentHead(harness);
   const revisionsBefore = (await allRevisions(harness, seed3)).length;
@@ -489,17 +492,21 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await editFirstTrackName(page, 'F2 App A');
   await expect.poll(() => held.length, CEILING).toBe(1);
   expect(held[0].post.status, 'the Runtime committed A').toBe(200);
-  expect(held[0].post.expectedHead).toBe(baseHead);
+  expect(held[0].post.base, 'A is built on the base revision and publication').toEqual({ revision_id: baseHead, publication_id: expect.any(String) });
   const keyA = held[0].post.key;
-  await expect.poll(() => currentHead(harness), CEILING).not.toBe(baseHead);
-  const headA = await currentHead(harness);
-  expect(headA, 'the App\'s save is stored under its idempotency key').toBe(keyA);
+  // A's revision comes from the receipt the Runtime returned for A.
+  const headA = held[0].post.revisionId!;
+  expect(headA, 'the receipt names A\'s revision').toEqual(expect.any(String));
+  expect(headA).not.toBe(baseHead);
+  await expect.poll(() => currentHead(harness), CEILING).toBe(headA);
 
   // B: the agent builds on A and publishes (it extends one clip and clears another one's asset).
   await agent.checkout();
   const stateA = await revisionState(harness, seed3, headA);
   await agent.edit('--clip', seed3.agentClipId, '--extend', '1');
   await agent.edit('--clip', seed3.agentClearClipId, '--clear-asset');
+  // A competing transition change on the clip the App clears below: B's publication conflicts with C.
+  await agent.edit('--clip', seed3.transitionClipId, '--set', 'transition={"type":"crossfade","duration":1.2}');
   const published = await agent.commit('agent: extend and clear', 'f2-case2');
   expect(published.old_head, 'the agent built on the App\'s save').toBe(headA);
   const headB = published.new_head;
@@ -522,14 +529,14 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(conflict.getByText('Keep your changes, or switch to the latest version.')).toBeVisible();
   await expect(conflict.getByRole('button', { name: 'Keep my changes' })).toBeVisible();
   await expect(conflict.getByRole('button', { name: 'Use latest version' })).toBeVisible();
-  await page.unroute(SAVES);
+  await page.unroute(COMMITS);
 
   // Which of the two ways to the conflict ran (recorded, not asserted).
   const afterRelease = posts.slice(1);
-  const queuedEditPosted = afterRelease.find((post) => post.expectedHead === headA && post.key !== keyA);
+  const queuedEditPosted = afterRelease.find((post) => post.base?.revision_id === headA && post.key !== keyA);
   const branch = queuedEditPosted ? 'b: the receipt was accepted, the queued edit was posted on A and the Runtime answered 409 stale_head' : 'a: the provider refused the confirmed receipt after its cached head moved to B';
   test.info().annotations.push({ type: 'case-2-branch', description: branch });
-  journey.facts = { ...journey.facts, verdict: 'named_conflict', branch, posts: posts.map(({ expectedHead, status, outcome }, index) => ({ n: index + 1, expectedHead: expectedHead === null ? null : expectedHead === baseHead ? 'base head' : expectedHead === headA ? 'A' : expectedHead, status, outcome, sameKeyAsA: posts[index].key === keyA })) };
+  journey.facts = { ...journey.facts, verdict: 'named_conflict', branch, posts: posts.map(({ base, status, outcome }, index) => ({ n: index + 1, base: base?.revision_id === undefined ? null : base.revision_id === baseHead ? 'base head' : base.revision_id === headA ? 'A' : base.revision_id, status, outcome, sameKeyAsA: posts[index].key === keyA })) };
 
   // The draft is kept: the dialog is modal, so the editor behind it is hidden from the accessibility tree but still holds A and C.
   await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
@@ -553,7 +560,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   const retriesA = posts.filter((post) => post.key === keyA);
   expect(retriesA.length, 'A was replayed with the same key').toBeGreaterThanOrEqual(2);
   expect(retriesA.every((post) => post.body === posts[0].body), 'every replay of A keeps the exact request bytes').toBe(true);
-  expect(posts.filter((post) => post.expectedHead === baseHead).every((post) => post.key === keyA), 'every send on the base head is A\'s').toBe(true);
+  expect(posts.filter((post) => post.base?.revision_id === baseHead).every((post) => post.key === keyA), 'every send on the base head is A\'s').toBe(true);
 
   // Opaque data and clears, in every revision.
   await expectOpaqueDataKept(harness, seed3);
@@ -2913,6 +2920,8 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   expect(acceptedHistory.items).toHaveLength(before.items.length + 1);
   expect(acceptedHistory.head).toEqual(pinOf(cleared));
   const revisionCount = (await allRevisions(harness, seed3)).length;
+  // Arm the App's automatic recovery retry before the restart: it is the next commit POST after reload.
+  wire.armRecoveryRetry();
   await harness.restartRuntime();
   await page.reload();
   await expectConnected(page);
@@ -2924,7 +2933,9 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   // The App recovers the single retained owner by itself after reload and retries its pending request (useTimelineSave.ts:380,
   // localSaveSession.ts:351). The explicit "Recover saved edits" control was removed (7b33f8f50, 4394b74a1), so the retry is gated
   // here: the fault route holds that second POST until it is released, and exactly one POST has completed until then.
-  await wire.waitForStagedRetry();
+  // A stage taken before the reload is obsolete (reload cancels it), so wait for the third attempt itself.
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  expect(wire.observed[2], 'the App retries the retained request byte-identically').toEqual(wire.observed[0]);
   expect(wire.posts, 'exactly one completed POST while the automatic retry is held').toHaveLength(1);
   await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);

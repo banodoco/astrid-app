@@ -47,7 +47,7 @@ export function StarterProjectHandoff({ onReady, onContinueWithoutProject }: {
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const pending = useRef<{ controller: AbortController; result: Promise<StarterProjectSelection> } | null>(null);
-  const stillWaiting = useRuntimeRequestWait(!error, attempt);
+  const stillWaiting = useRuntimeRequestWait(!error && !selection, attempt);
   useEffect(() => {
     let active = true;
     if (!pending.current) {
@@ -76,6 +76,7 @@ export function StarterProjectHandoff({ onReady, onContinueWithoutProject }: {
     setAttempt(value => value + 1);
   };
   const state = error ? 'error' : selection ? 'ready' : stillWaiting ? 'waiting' : 'opening';
+  const showRecoveryActions = !selection && (error || stillWaiting);
   const archivedOnly = error === 'Your only project is archived. Unarchive it or create a new one in the editor.';
   const copyGenerationInstructions = () => { void generationCopy.copy(); };
   return <main aria-label="Opening your project">
@@ -86,7 +87,7 @@ export function StarterProjectHandoff({ onReady, onContinueWithoutProject }: {
           ? <span role="status">Astrid on this computer is taking longer than usual. You can keep waiting or try again.</span>
           : <span role="status">Astrid is connected and getting your project ready.</span>}>
         {selection && <Button className="h-11 w-full rounded-xl" onClick={() => onReadyRef.current(selection)}>Open your project</Button>}
-        {(error || stillWaiting) && <div className="space-y-3">
+        {showRecoveryActions && <div className="space-y-3">
           {error && !archivedOnly && <CardDisclosure label="Details"><p className="break-words font-mono text-xs">{error}</p></CardDisclosure>}
           <div className={onContinueWithoutProject ? 'grid gap-2 sm:grid-cols-2' : ''}>
             {!archivedOnly && <Button className="h-11 w-full rounded-xl" onClick={retry}>Try again</Button>}

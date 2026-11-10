@@ -1673,15 +1673,26 @@ export function useTimelinePersistence({
     }
 
     try {
-      await createRecoverySave(latest, editSeqRef.current).draftWrite;
+      if (session.localDocumentSave && persistenceEnabled) {
+        // Native rejection can already have rolled the display back to the
+        // latest canonical document. The scheduled edit owns the durable
+        // draft and its original CAS base; copying the display would erase it.
+        await waitForRecoveryDraftWrites();
+        if (session.storageFailure) throw session.storageFailure;
+        const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
+        if (!await loadTimelineDraft(recoveryKey)) throw new Error('The retained timeline draft is unavailable.');
+      } else {
+        await createRecoverySave(latest, editSeqRef.current).draftWrite;
+      }
     } catch {
-      // IndexedDB unavailable (private mode etc.) — the copy can't persist.
+      // Failed storage or a missing native draft cannot resolve the conflict.
       // Keep the diverged state so the user knows local edits are at risk.
       return;
     }
     setIsConflictExhausted(false);
     await reloadFromServer({ preserveDraft: true });
-  }, [createRecoverySave, dataRef, editSeqRef, getDataRef, reloadFromServer]);
+  }, [createRecoverySave, dataRef, editSeqRef, getDataRef, persistenceEnabled, provider, reloadFromServer,
+    session, timelineId, waitForRecoveryDraftWrites]);
 
   useEffect(() => {
     // A durable save receipt acknowledges the edit: clear the watchdog.

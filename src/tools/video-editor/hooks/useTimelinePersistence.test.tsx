@@ -2185,6 +2185,37 @@ describe('useTimelinePersistence — interaction gating', () => {
     });
   });
 
+  it.each(['missing', 'write failed'] as const)('Keep leaves a native conflict open when its durable draft is %s', async (failure) => {
+    const handoff = {
+      capture: vi.fn(async () => {}),
+      flush: vi.fn(async () => { throw new TimelineVersionConflictError(); }),
+      remoteHistoryAvailable: () => false, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(), redo: vi.fn(),
+    } satisfies TimelineLocalSaveHandoff;
+    const harness = setup({ persistenceEnabled: true, localDocumentSave: handoff });
+    try {
+      if (failure === 'write failed') vi.mocked(saveTimelineDraft).mockRejectedValueOnce(new Error('IndexedDB full'));
+      harness.scheduleSave(makeTimelineData('retained-native-draft'));
+      await act(async () => {
+        await expect(harness.result.current.flushPendingSave()).rejects.toThrow(TimelineVersionConflictError);
+      });
+      expect(harness.result.current.isConflictExhausted).toBe(true);
+      // Even a readable older slot cannot stand in for the failed draft write.
+      if (failure === 'write failed') await saveTimelineDraft('timeline-1', { old: true }, 1);
+      else await clearTimelineDraft('timeline-1');
+      const before = await loadTimelineDraft('timeline-1');
+      await act(async () => { await harness.result.current.retrySaveAfterConflict(); });
+      expect(harness.result.current.isConflictExhausted).toBe(true);
+      expect(harness.loadTimeline).not.toHaveBeenCalled();
+      expect(await loadTimelineDraft('timeline-1')).toEqual(before);
+      expect(handoff.capture).toHaveBeenCalledOnce();
+      expect(handoff.flush).toHaveBeenCalledOnce();
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+    } finally {
+      harness.unmount();
+    }
+  });
+
   it('direct reload adopts server state and clears a diverged recovery draft', async () => {
     const harness = setup({ persistenceEnabled: true });
     harness.scheduleSave(makeTimelineData('local-before-reload'));

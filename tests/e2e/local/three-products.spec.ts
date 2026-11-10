@@ -2945,7 +2945,7 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
   const headAfter = (await revisionBody(harness, pinOf(result).revision_id)).payload as Record<string, any>;
   // before and after are {state, value} objects in the Runtime's record, so each side is asserted exactly as that form:
   // before is the clips at the base revision, after is the clips at the revision the clear made.
-  expect(mirror).toEqual({ ref: 'parent', path: ['config', 'clips'],
+  expect(mirror).toEqual({ ref: 'parent', path: ['config', 'clips'], cause: 0,
     before: { state: 'present', value: headBefore.config.clips },
     after: { state: 'present', value: headAfter.config.clips } });
   for (const id of ids) {

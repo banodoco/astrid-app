@@ -309,16 +309,19 @@ describe('shot timeline popup real recovery integration', () => {
     fireEvent.contextMenu(clip!, { clientX: 20, clientY: 20 });
     fireEvent.click(screen.getByText('Delete Clip'));
 
-    expect(onSession).toHaveBeenCalledWith(expect.objectContaining({
-      projectId: composition.projectId,
-      parentDocumentId: composition.parentDocumentId,
-      occurrenceId: 'occ-1',
-    }), true);
-    expect(onDraft).toHaveBeenCalledWith(expect.objectContaining({
-      scope: expect.objectContaining({ occurrenceId: 'occ-1' }),
-      generation: 1,
-      composition: expect.objectContaining({ parentDocumentId: composition.parentDocumentId }),
-    }));
+    // The projection and draft follow the async adoption (loadTimeline, setLoaded), so they are asserted inside waitFor.
+    await waitFor(() => {
+      expect(onSession).toHaveBeenCalledWith(expect.objectContaining({
+        projectId: composition.projectId,
+        parentDocumentId: composition.parentDocumentId,
+        occurrenceId: 'occ-1',
+      }), true);
+      expect(onDraft).toHaveBeenCalledWith(expect.objectContaining({
+        scope: expect.objectContaining({ occurrenceId: 'occ-1' }),
+        generation: 1,
+        composition: expect.objectContaining({ parentDocumentId: composition.parentDocumentId }),
+      }));
+    });
     expect(publish).not.toHaveBeenCalled();
   });
 

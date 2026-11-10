@@ -117,6 +117,8 @@ jobs:
           # Astrid imports runtime_protocol but does not declare it: use the pinned sibling Runtime under test.
           .venv/bin/python -m pip install --no-deps -e ../astrid-runtime
           .venv/bin/python -m astrid.core.dev.cross_client --help > /dev/null
+          # The pack lifecycle journey invokes the console script from this pinned Agent environment.
+          test -x .venv/bin/astrid
 
       - name: Install App dependencies, Chromium and ffmpeg
         working-directory: astrid-app
@@ -135,6 +137,7 @@ jobs:
           ASTRID_APP_DIRECT_DOOR_PORT: "17341"
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
           ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
+          ASTRID_PACKS_AGENT: ${{ github.workspace }}/astrid-agent/.venv/bin/astrid
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
           APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
           RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}

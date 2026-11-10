@@ -2884,9 +2884,13 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
   result: CommitAcceptedMutation, request: CommitRequest, original: Record<string, any>) {
   const records = (await history(harness, seed)).items.find((entry) => entry.publication_id === pinOf(result).publication_id)!.records!;
   expect(records.commands.map((record) => record.command)).toEqual(request.commands);
-  // UNCONFIRMED: the Runtime's record.writes shape for a doc.patch remove (the App-side change is asserted above).
-  // The per-clip writes check from the clip.set era was dropped rather than guessed; see the report.
-  void original;
+  // KNOWN MISMATCH (unresolved): this writes check is the clip.set-era shape. The App now sends a guarded doc.patch with
+  // select null, so record.command.select is null and the slice below does not match it. Kept unchanged, not weakened.
+  for (const record of records.commands) {
+    const id = record.command.select!.slice('parent/clip:'.length);
+    expect(record.writes).toContainEqual({ ref: record.command.select, path: ['transition'],
+      before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } });
+  }
 }
 
 async function bulkTransitionNone(page: Page, seed: ThreeProductsSeed) {

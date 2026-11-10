@@ -416,7 +416,7 @@ async function plantNoReloadFlag(page: Page) {
 test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, the App edits again; the App names the conflict and keeps its draft', async ({ page, harness, astrid, seed3 }) => {
   const agent = agentOf(astrid, seed3);
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   const watched = watchPageReads(page, harness);
 
   // Every save the page sends, with the key and head it names and what became of it.
@@ -608,7 +608,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
 test('Runtime restart with the App open: the draft survives, saves after the relaunch, and the agent follows', async ({ page, harness, astrid, seed3 }) => {
   const agent = agentOf(astrid, seed3);
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
 
   await openApp(page, harness);
@@ -1482,7 +1482,7 @@ async function expectFreshPreviewUnavailable(page: Page, astrid: AstridCli, harn
 
 test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, exact retry and UI undo preserve independent Agent work', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   const { wire, before, a, owner } = await prepareDependentMoves(page, harness, seed3);
   const realmBefore = await expectSameRealm(page, harness, astrid);
   // track.create is the supported structural proof; it does not alter the moved clip or its lane.
@@ -1504,7 +1504,7 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
   expect(harness.runtimeInstanceId).not.toBe(restarted.oldInstanceId);
   expect(harness.realmId).toBe(realmBefore.realmId);
   const reopened = await context.newPage();
-  sniff.attach(reopened);
+  await sniff.attach(reopened);
   await wire.attach(reopened);
   await openApp(reopened, harness);
   await expectConnected(reopened);
@@ -1595,7 +1595,7 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
 
 test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local gesture, exact retry, restart and undo preserve intent', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   let c!: CommitAcceptedMutation;
   const preconditionOwner = await openCommandTimeline(page, harness, seed3);
   const preconditionBase = await history(harness, seed3);
@@ -1703,7 +1703,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   expect(harness.runtimeInstanceId).not.toBe(restarted.oldInstanceId);
   expect(harness.realmId).toBe(realmBefore.realmId);
   const reopened = await context.newPage();
-  sniff.attach(reopened);
+  await sniff.attach(reopened);
   await wire.attach(reopened);
   await openApp(reopened, harness);
   await expectConnected(reopened);
@@ -1812,7 +1812,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
 
 test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart, exact retry and guarded undo', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed3);
@@ -1905,7 +1905,7 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
   const reopened = await context.newPage();
-  sniff.attach(reopened);
+  await sniff.attach(reopened);
   await wire.attach(reopened);
   await openApp(reopened, harness);
   await expectConnected(reopened);
@@ -1983,7 +1983,7 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
 
 test('M2 real mounted manual video drop: Runtime selection refusal is closed, native ADD recovers exactly, and undo preserves opaque data', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   captureBoundedBrowserEvidence(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   await openCommandTimeline(page, harness, seed3);
@@ -2166,7 +2166,7 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await harness.restartRuntime();
   const reopened = await context.newPage();
   captureBoundedBrowserEvidence(reopened);
-  sniff.attach(reopened);
+  await sniff.attach(reopened);
   await wire.attach(reopened);
   await openApp(reopened, harness);
   await expectConnected(reopened);
@@ -2215,7 +2215,7 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
 
 test('M2 real gate 5 bootstrap actual consumer: production initializer uses native create/init, exact retry, restart and guarded undo', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
 
   const auditedBeforeCreate = harness.audit().length;
@@ -2371,7 +2371,7 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(beforeRestart.runtimeInstanceId);
   const reopened = await context.newPage();
-  sniff.attach(reopened);
+  await sniff.attach(reopened);
   await wire.attach(reopened);
   await reopened.goto(`${harness.origin}${APP_ENTRY_ROUTE}?project=${encodeURIComponent(expectedScope.projectId)}&timeline=${encodeURIComponent(expectedScope.timelineId)}`);
   await expectConnected(reopened);
@@ -2398,7 +2398,7 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
 
 test('M1 real dependency conflict retains B original guards and pending identity', async ({ page, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   const legacy: string[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && SAVES.test(new URL(request.url()).pathname)) legacy.push(request.url());
@@ -2461,7 +2461,7 @@ test('M1 real dependency conflict retains B original guards and pending identity
 
 test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restart, exact retry and guarded undo', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed3);
@@ -2555,7 +2555,7 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
   const reopened = await context.newPage();
-  sniff.attach(reopened);
+  await sniff.attach(reopened);
   await wire.attach(reopened);
   await openApp(reopened, harness);
   await expectConnected(reopened);
@@ -2643,7 +2643,7 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
 // Complements track-label-command.spec.ts: Unicode + disjoint undo there; exact retained-label recovery here.
 test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reload, exact recovery and guarded undo', async ({ page, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   await openCommandTimeline(page, harness, seed3);
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
@@ -2882,7 +2882,7 @@ async function bulkTransitionNone(page: Page, seed: ThreeProductsSeed) {
 
 nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mirrors, reloads, retries exactly after restart and undoes through Runtime', async ({ page, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed3);
@@ -2969,7 +2969,7 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
 
 nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves unknown revision and opaque data; real conflict retains the whole draft', async ({ page, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed3);
@@ -3171,7 +3171,7 @@ const rounded = (difference: GridDifference) => ({ meanPerChannel: difference.me
 
 test('render R, publish R+1 before it runs: the render is R\'s, it plays, and it is the film the App showed', async ({ page, harness, astrid }, testInfo) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   const reads = watchPageReads(page, harness);
   const outputDir = path.join(testInfo.outputDir, 'render-journey');
   mkdirSync(outputDir, { recursive: true });
@@ -3394,7 +3394,7 @@ test('quick: Astrid edit then App edit are visible and readable on the adopted t
   const quickSeed = { timelineId: seed!.timelineId, projectSlug: seed!.projectSlug };
   const agent = agentOf(quickAstrid, quickSeed);
   const sniff = new TokenSniff(secretsOf(harness, quickAstrid));
-  sniff.attach(page);
+  await sniff.attach(page);
   const reads = watchPageReads(page, harness);
 
   await openApp(page, harness);

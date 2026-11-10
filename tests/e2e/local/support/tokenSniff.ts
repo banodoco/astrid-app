@@ -1,7 +1,7 @@
 import { expect, type Page, type Request } from '@playwright/test';
 import { commandOutboxes } from './app.ts';
 
-type Capture = { label: string; state: string; pending: boolean };
+type Capture = { label: string; state: string; pending: boolean; failed?: boolean };
 
 /** A credential never reaches the page, requests, door answers or browser storage. */
 export class TokenSniff {
@@ -27,10 +27,10 @@ export class TokenSniff {
 
   private track(capture: Capture, task: Promise<void>) {
     this.captures.push(capture);
-    this.pending.push(task.finally(() => { capture.pending = false; }));
+    this.pending.push(task.catch(() => { capture.failed = true; }).finally(() => { capture.pending = false; }));
   }
 
-  attach(page: Page) {
+  async attach(page: Page) {
     page.on('request', (request: Request) => {
       const where = this.label(request.method(), request.url(), 'headers');
       const capture: Capture = { label: where, state: 'requested', pending: true };
@@ -38,7 +38,7 @@ export class TokenSniff {
       this.scan(`the URL of ${where}`, request.url());
       this.scan(`the initial headers of ${where}`, JSON.stringify(request.headers()));
       this.scan(`the body of ${where}`, request.postData());
-      this.track(capture, request.allHeaders().catch(() => request.headers()).then(headers => {
+      this.track(capture, request.allHeaders().then(headers => {
         this.scan(`the headers of ${where}`, JSON.stringify(headers));
       }));
     });
@@ -48,8 +48,12 @@ export class TokenSniff {
       const type = response.headers()['content-type'] ?? '';
       if (!/json|text/.test(type) || !response.url().includes(`:${new URL(response.url()).port}/api/`)) return;
       const capture: Capture = { label: this.label(response.request().method(), response.url(), 'body'), state: 'responded', pending: true };
-      this.track(capture, response.text().then(text => this.scan(`the answer to ${capture.label}`, text)).catch(() => {}));
+      this.track(capture, response.text().then(text => this.scan(`the answer to ${capture.label}`, text)));
     });
+    // Interception stays active through navigations. It preserves the request
+    // lifecycle for raw-header capture, while falling through to the browser.
+    // Playwright disables HTTP caching while routing is enabled.
+    await page.route('**/*', route => route.fallback());
   }
 
   async expectClean(page: Page, timelineId?: string) {
@@ -63,6 +67,8 @@ export class TokenSniff {
         )), this.drainMs); }),
       ]);
     } finally { if (timer) clearTimeout(timer); }
+    const failed = captures.filter(item => item.failed);
+    if (failed.length) throw new Error(`Incomplete credential scan: ${failed.map(item => `${item.label} (${item.state}; capture failed)`).join(', ')}`);
     const inPage = await page.evaluate(() => JSON.stringify({
       dom: document.documentElement.outerHTML,
       local: Object.fromEntries(Object.entries(window.localStorage)),

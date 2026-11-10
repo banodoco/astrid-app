@@ -114,7 +114,7 @@ export class TokenSniff {
   }
 
   async expectClean(page: Page, timelineId?: string) {
-    await this.drain(() => true);
+    await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal));
     const inPage = await page.evaluate(() => JSON.stringify({
       dom: document.documentElement.outerHTML,
       local: Object.fromEntries(Object.entries(window.localStorage)),

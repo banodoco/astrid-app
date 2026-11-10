@@ -84,7 +84,9 @@ test('an unresolved raw-header capture fails closed with a sanitized request lab
   const page = fakePage();
   const sniff = new TokenSniff({ secret }, 30);
   await sniff.attach(page);
-  page.emit('request', request(`http://localhost:1234/api/private/${secret}?key=${secret}`, '', {}, () => new Promise(() => {})));
+  const req = request(`http://localhost:1234/api/private/${secret}?key=${secret}`, '', {}, () => new Promise(() => {}));
+  page.emit('request', req);
+  page.emit('requestfinished', req);
   const error = await sniff.expectClean(page).then(() => '', (failure: Error) => failure.message);
   expect(error).toContain('Incomplete credential scan: POST /other headers (requested)');
   expect(error).not.toContain(secret);
@@ -94,7 +96,9 @@ test('a rejected raw-header capture fails closed', async () => {
   const page = fakePage();
   const sniff = new TokenSniff({ secret });
   await sniff.attach(page);
-  page.emit('request', request('http://localhost:1234/api/health', '', {}, async () => { throw new Error(secret); }));
+  const req = request('http://localhost:1234/api/health', '', {}, async () => { throw new Error(secret); });
+  page.emit('request', req);
+  page.emit('requestfinished', req);
   const error = await sniff.expectClean(page).then(() => '', (failure: Error) => failure.message);
   expect(error).toContain('POST /health headers (requested; capture failed)');
   expect(error).not.toContain(secret);
@@ -107,6 +111,7 @@ test('a rejected response-body capture fails closed', async () => {
   const req = request();
   page.emit('request', req);
   page.emit('response', { headers: () => ({ 'content-type': 'application/json' }), url: () => 'http://localhost:1234/api/health', request: () => req, text: async () => { throw new Error(secret); } });
+  page.emit('requestfinished', req);
   const error = await sniff.expectClean(page).then(() => '', (failure: Error) => failure.message);
   expect(error).toContain('POST /health body (responded; capture failed)');
   expect(error).not.toContain(secret);
@@ -123,6 +128,7 @@ for (const where of ['url', 'body', 'initial header', 'full header', 'response',
       async () => where === 'full header' ? { authorization: secret } : {});
     page.emit('request', req);
     if (where === 'response') page.emit('response', { headers: () => ({ 'content-type': 'application/json' }), url: () => 'http://localhost:1234/api/health', request: () => req, text: async () => secret });
+    page.emit('requestfinished', req);
     await expect(sniff.expectClean(page, 'timeline')).rejects.toThrow('no credential reached the page');
   });
 }

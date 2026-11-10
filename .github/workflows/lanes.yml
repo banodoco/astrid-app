@@ -4,7 +4,7 @@ name: Lanes
 
 on:
   push:
-    branches: [main, release-1, "int/**"]
+    branches: [main, release-1, "cand/**"]
   # Nightly, like direct-journey.yml: the siblings' main moves without an App push, and these lanes catch that drift.
   schedule:
     - cron: "43 3 * * *"

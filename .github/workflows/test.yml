@@ -3,7 +3,7 @@ name: Tests
 
 on:
   push:
-    branches: [main, release-1, "int/**"]
+    branches: [main, release-1, "cand/**"]
   pull_request:
     branches: [main]
   workflow_dispatch:

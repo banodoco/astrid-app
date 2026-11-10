@@ -5,7 +5,7 @@ name: E2E
 
 on:
   push:
-    branches: [main, release-1, "int/**"]
+    branches: [main, release-1, "cand/**"]
   workflow_dispatch:
 
 concurrency:

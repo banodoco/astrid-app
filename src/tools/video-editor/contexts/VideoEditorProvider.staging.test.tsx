@@ -304,7 +304,7 @@ describe('registered parent element outbox handoff', () => {
       let result: unknown;
       await act(async () => {
         const pending = mounted.capture().execute(mounted.operation);
-        if (outcome === 'conflict' || outcome === 'invalid') await expect(pending).rejects.toThrow('draft retained');
+        if (outcome === 'conflict' || outcome === 'invalid') await expect(pending).rejects.toThrow('Element dependency changed');
         else result = await pending;
       });
       expect(mounted.commit).toHaveBeenCalledOnce();
@@ -320,6 +320,7 @@ describe('registered parent element outbox handoff', () => {
       const [stored] = await outboxes.list({ realmId: 'realm', actorId: 'actor', projectId, timelineId });
       if (outcome === 'conflict' || outcome === 'invalid') {
         expect(stored.intents).toHaveLength(1);
+        expect(JSON.stringify(stored.intents)).toContain('"red"');
         expect(stored.pending?.outcome).toMatchObject({ kind: 'rejected', error: { details: { reason: 'dependency_changed' } } });
         expect(mounted.getEditor().dataRef.current?.config.clips[0].elementRef).toBeUndefined();
       } else {

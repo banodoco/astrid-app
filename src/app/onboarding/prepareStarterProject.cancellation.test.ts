@@ -28,9 +28,10 @@ describe('prepareStarterProject cancellation recovery', () => {
       }),
       listTimelines: vi.fn(async (id: string) => timelines.get(id) ?? []),
       getProject: vi.fn(async (id: string) => projects.find(row => row.project_id === id)!),
-      publishParentComposition: vi.fn(async (id: string, timelineId: string) => {
-        timelines.set(id, [{ timeline_id: timelineId, head_revision_id: 'head', slug: 'main' }]);
-        return { revision_id: 'head' };
+      // Catalog creation installs the canonical bootstrap atomically (createDefaultTimeline.ts).
+      createTimeline: vi.fn(async (id: string, timelineId: string, _key: string, name?: string) => {
+        timelines.set(id, [{ timeline_id: timelineId, head_revision_id: 'head', slug: 'main', name }]);
+        return { data: { timeline_id: timelineId } };
       }),
       updateProject: vi.fn(async (id: string, _key: string, _version: number, _name: string | undefined,
         metadata: Record<string, unknown>) => {

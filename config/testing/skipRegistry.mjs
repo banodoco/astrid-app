@@ -15,7 +15,7 @@
 // name and the helper evaluates it, so no catch-all can turn an unrelated error into a declared skip.
 // Share this definition with the Runtime (tests/lanes.py) and Astrid agent repos.
 
-import { ffmpegUnavailableReason, harnessUnavailableReason, isWindows, macosLockfMissing, pwshUnavailableReason, symlinkCreationRefused } from './skipConditions.mjs';
+import { agentCorpusCheckoutUnavailableReason, ffmpegUnavailableReason, harnessUnavailableReason, isWindows, macosLockfMissing, pwshUnavailableReason, symlinkCreationRefused } from './skipConditions.mjs';
 
 /**
  * Skips reported at run time. `applies` = the predicate (true or a reason string when the skip applies, false when the test runs). `ci` = CI jobs (job ids in .github/workflows) where the skip condition is
@@ -36,6 +36,12 @@ export const SKIP_REGISTRY = {
     applies: ffmpegUnavailableReason,
     ci: ['direct-journey'],
     requireInLane: 'direct-journey',
+  },
+  'agent-corpus-checkout': {
+    skipWhen: 'not CI and no Agent checkout at ASTRID_CHECKOUT: the P1 corpus reads Agent git blobs at their pinned commit',
+    reason: 'the P1 corpus fixtures are git blobs of the Agent repo; a developer machine without an Agent checkout cannot read them',
+    applies: agentCorpusCheckoutUnavailableReason,
+    ci: ['vitest'],
   },
   'posix-owner-only-modes': {
     skipWhen: "process.platform === 'win32'",

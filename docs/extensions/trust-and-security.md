@@ -89,7 +89,7 @@ those service interfaces. That does not remove the browser privileges of
 extension JavaScript executing in the page. Cleanup of host-owned service
 registrations on disposal is lifecycle management, not a security boundary.
 
-There is no permission enforcement: manifest permissions are descriptive and the loader does not enforce them. There is no permission broker that mediates extension access to browser capabilities. There is no marketplace, and there is no update enforcement: the App does not check or enforce extension versions.
+There is no permission enforcement: manifest permissions are descriptive and the loader does not enforce them. There is no permission broker that mediates extension access to browser capabilities. There is no marketplace, and there is no update enforcement: nothing checks that installed extensions are the latest versions. The loader does enforce dependency version ranges and identity: it checks each declared dependency range against the loaded version, blocks a required dependency whose version does not match, and requires the admitted manifest version to match the pack metadata.
 
 ## Failure handling is not isolation
 

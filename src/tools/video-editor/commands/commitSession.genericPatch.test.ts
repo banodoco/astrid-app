@@ -1,10 +1,14 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { SCHEMA_DIGEST } from '@/integrations/runtime/generated-contract-metadata.ts';
 import type { TimelineData } from '../lib/timeline-data.ts';
 import { environment, h0, scope } from './__tests__/localSaveSessionEnvironment.ts';
 
 // The current generated contract is the only path this migration is intended to exercise.
-expect(SCHEMA_DIGEST).toBe('sha256:4118b1e26d30be43cb1a01649df0065fed6e55a528b8956364df8f4eedb413d2');
+// It must be the schema digest the release manifest pins for the Runtime (not a hand-copied value).
+const releaseManifest = JSON.parse(readFileSync(resolve(process.cwd(), 'public/install-manifest.json'), 'utf8')) as { runtime: { schema_digest: string } };
+expect(SCHEMA_DIGEST).toBe(releaseManifest.runtime.schema_digest);
 
 describe('local save session', () => {
   it('persists one doc.patch and retries the exact request after restart', async () => {

@@ -744,6 +744,58 @@ describe('upstream local document handoff', () => {
     } } });
     await env.session.dispose();
   });
+
+  it('persists a parent track-label rename beside child shots and changes only that track label', async () => {
+    const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
+    const trackId = env.source.config.tracks![0].id;
+    const next = structuredClone(env.source);
+    next.config.tracks![0].label = 'Renamed track';
+    await env.handoff.capture(next, structuredClone({ kind: 'track-label' as const, trackId, label: 'Renamed track',
+      config: env.source.config, registry: env.source.registry }));
+    const [stored] = await env.outboxes.list(env.scope);
+    expect(stored.intents).toHaveLength(1);
+    expect(env.session.getDocument()).toMatchObject({ parent_revision: { payload: {
+      config: { tracks: expect.arrayContaining([expect.objectContaining({ id: trackId, label: 'Renamed track' })]) },
+    } } });
+    // The children are the authored ones, untouched by the rename.
+    expect(env.session.getDocument().shot_revisions).toEqual(env.initial.canonicalDocument.shot_revisions);
+    expect(env.session.getDocument().internal_timeline_revisions).toEqual(env.initial.canonicalDocument.internal_timeline_revisions);
+    await env.session.dispose();
+  });
+
+  it('refuses a track-label gesture that also changes another field, even beside child shots', async () => {
+    const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
+    const next = structuredClone(env.source);
+    next.config.tracks![0].label = 'Renamed track';
+    next.config.output.fps = 60;
+    await expect(env.handoff.capture(next, structuredClone({ kind: 'track-label' as const,
+      trackId: env.source.config.tracks![0].id, label: 'Renamed track', config: env.source.config, registry: env.source.registry })))
+      .rejects.toThrow('track label change exceeds its selected field');
+    expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
+    expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
+    expect(env.send).not.toHaveBeenCalled();
+    await env.session.dispose();
+  });
+
+  it('refuses a track-label gesture that names no unique authored track', async () => {
+    const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
+    const next = structuredClone(env.source);
+    next.config.tracks![0].label = 'Renamed track';
+    await expect(env.handoff.capture(next, structuredClone({ kind: 'track-label' as const, trackId: 'no-such-track',
+      label: 'Renamed track', config: env.source.config, registry: env.source.registry })))
+      .rejects.toThrow('track label binds no unique authored track');
+    expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
+    await env.session.dispose();
+  });
+
+  it('keeps a track-label change without its own gesture refused beside child shots', async () => {
+    const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
+    const next = structuredClone(env.source);
+    next.config.tracks![0].label = 'Renamed track';
+    await expect(env.handoff.capture(next)).rejects.toThrow('child ownership/fork mapping is unavailable');
+    expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
+    await env.session.dispose();
+  });
 });
 
 

@@ -432,8 +432,12 @@ test.describe('core journey', () => {
     // Hold the App's own commit until the competing write has landed, so both writers start from the same head.
     let releaseAppCommit!: () => void;
     const appCommitHeld = new Promise<void>((resolve) => { releaseAppCommit = resolve; });
-    await page.route(/\/timelines\/[^/]+\/commit$/, async (route) => { await appCommitHeld; await route.continue(); });
+    let appCommitIntercepted!: () => void;
+    const intercepted = new Promise<void>((resolve) => { appCommitIntercepted = resolve; });
+    await page.route(/\/timelines\/[^/]+\/commit$/, async (route) => { appCommitIntercepted(); await appCommitHeld; await route.continue(); });
     await editFirstTrackName(page, 'Draft from the first writer');
+    // Handshake: the App's commit must be held in the route before the competing write is published.
+    await intercepted;
     // The second writer edits the same field (track V1's label) through a guarded /commit against the same base.
     const second = await harness.runtimeJson<{ data: { accepted_revision_id: string } }>('POST', `/v1/projects/${projectId}/timelines/${timelineId}/commit`, {
       api_version: 1, project_id: projectId, timeline_id: timelineId,
@@ -495,21 +499,28 @@ test.describe('core journey', () => {
   test('through the hosted origin: a second writer saves first, the stale save is refused and the first writer keeps its draft', async ({ page, harness }) => {
     const { projectId, timelineId } = harness.seed;
     await openHostedPage(page, harness);
-    const publishUrl = `${harness.doorBase}/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`;
-    const head = await currentHead(harness);
-    const draft = compositionPublication(harness.seed, head, 'First writer draft', 12); // held by the caller
+    const commitUrl = `${harness.doorBase}/v1/projects/${projectId}/timelines/${timelineId}/commit`;
+    const base = (await harness.runtimeJson<{ head: { revision_id: string; publication_id: string } }>('GET', `/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).body.head;
+    // A guarded commit of one track-label edit against the head this writer read.
+    const commit = (label: string, pin: { revision_id: string; publication_id: string }) => ({
+      api_version: 1, project_id: projectId, timeline_id: timelineId,
+      base_revision_id: pin.revision_id, base_publication_id: pin.publication_id,
+      commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label }, clear: [] } }],
+    });
+    const draft = commit('First writer draft', base); // held by the caller
 
-    const second = await harness.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
+    const second = await harness.runtimeJson<{ data: { accepted_revision_id: string }; receipt: { receipt_id: string } }>('POST', `/v1/projects/${projectId}/timelines/${timelineId}/commit`, commit('Second writer', base));
     expect(second.status).toBe(200);
+    const secondHead = { revision_id: second.body.data.accepted_revision_id, publication_id: second.body.receipt.receipt_id };
 
-    const refused = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: JSON.stringify(draft) });
+    const refused = await pageFetch(page, commitUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: JSON.stringify(draft) });
     expect(refused.status).toBe(409);
-    expect(json(refused).details).toMatchObject({ reason: 'stale_head', expected_head: head, actual_head: second.body.data.new_head });
+    expect(json(refused).details).toMatchObject({ reason: 'stale_head', current: { revision_id: secondHead.revision_id } });
     // Nothing of the draft reached the Runtime; the draft object itself is untouched for a retry.
-    expect(await currentHead(harness)).toBe(second.body.data.new_head);
-    expect(draft.expected_head).toBe(head);
-    expect(draft.parent_composition.name).toBe('First writer draft');
-    const rebased = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify({ ...draft, expected_head: second.body.data.new_head }) });
+    expect(await currentHead(harness)).toBe(secondHead.revision_id);
+    expect(draft.base_revision_id).toBe(base.revision_id);
+    expect(draft.commands[0].args).toEqual({ values: { label: 'First writer draft' }, clear: [] });
+    const rebased = await pageFetch(page, commitUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify(commit('First writer draft', secondHead)) });
     expect(rebased.status, rebased.text).toBe(200);
   });
 });

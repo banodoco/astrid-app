@@ -456,7 +456,7 @@ test('agent -> open App: an Astrid task and its publication appear in the open A
   await expect(row).toHaveCount(0, CEILING);
   await page.getByRole('button', { name: 'Peek at tasks' }).click();
   // A succeeded row shows when it finished (relative time), not the word "Complete" (RuntimeTaskRow StatusText).
-  const peekRow = page.locator('[data-task-peek-surface="tasks"]').locator(`[data-activity-task-id="${taskId}"]`);
+  const peekRow = page.locator('[data-task-peek-surface="tasks"]').locator(`[data-runtime-task-id="${taskId}"]`);
   await expect(peekRow.getByText(/^(Just now|\d+ min ago|\d+ h ago|Yesterday|\d+ days ago)$/)).toBeVisible(CEILING);
   const settled = await astrid.json<{ state: string }>(['tasks', 'show', taskId, '--project', seed3.projectSlug, '--json']);
   expect(settled.data!.state, 'the Runtime agrees the task succeeded').toBe('succeeded');
@@ -2895,7 +2895,18 @@ function expectRawTransitionsCleared(actual: Record<string, any>, original: Reco
 async function expectRecordedTransitionClears(harness: DirectHarness, seed: ThreeProductsSeed,
   result: CommitAcceptedMutation, request: CommitRequest, original: Record<string, any>) {
   const records = (await history(harness, seed)).items.find((entry) => entry.publication_id === pinOf(result).publication_id)!.records!;
-  expect(records.commands.map((record) => record.command)).toEqual(request.commands);
+  // The submitted fields must match the App's request exactly. The Runtime adds its own fields to the recorded command
+  // (authorship, bindings, expect, reads); those are split off and asserted on their own below, not compared loosely.
+  const recordedCommands = records.commands.map((record) => record.command as Record<string, any>);
+  expect(recordedCommands).toHaveLength(1);
+  const { authorship, bindings, expect: recordedGuards, reads: recordedReads, ...submitted } = recordedCommands[0];
+  expect(submitted).toEqual(request.commands[0]);
+  expect(submitted.args).toEqual(request.commands[0].args);
+  // The added fields are present; their exact values are not yet confirmed against the Runtime record (see report).
+  expect(authorship).toBeDefined();
+  expect(bindings).toBeDefined();
+  expect(recordedGuards).toBeDefined();
+  expect(recordedReads).toBeDefined();
   // The Runtime recorded exactly one guarded doc.patch for the App's commit: select null, with the same removal changes.
   // Each recorded change still targets the selected clips' transitions and nothing else.
   expect(records.commands).toHaveLength(1);

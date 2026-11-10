@@ -6,6 +6,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { ParameterControls } from '@/tools/video-editor/components/ParameterControls.tsx';
 import { BlockerActionCard } from '@/tools/video-editor/components/BlockerActionCard.tsx';
 import type { ClipMeta } from '@/tools/video-editor/lib/timeline-data.ts';
+import { transitionReferenceId } from '@/tools/video-editor/lib/transition-reference.ts';
 import type { ResolvedTimelineClip } from '@/tools/video-editor/types/index.ts';
 import {
   useOptionalTransitionRegistryContext,
@@ -113,13 +114,14 @@ export function ClipTransitionSection({
     () => listTransitions(mergedTransitionSnapshot),
     [mergedTransitionSnapshot],
   );
+  const transitionId = transitionReferenceId(clip.transition);
   const resolvedTransitionRecord = useMemo(() => {
-    if (!clip?.transition?.type || clip.transition.type === NO_TRANSITION) return undefined;
-    return resolveTransition(clip.transition.type, mergedTransitionSnapshot);
-  }, [clip?.transition?.type, mergedTransitionSnapshot]);
+    if (!transitionId || transitionId === NO_TRANSITION) return undefined;
+    return resolveTransition(transitionId, mergedTransitionSnapshot);
+  }, [transitionId, mergedTransitionSnapshot]);
   const isTransitionUnresolvable =
-    clip?.transition?.type != null &&
-    clip.transition.type !== NO_TRANSITION &&
+    transitionId != null &&
+    transitionId !== NO_TRANSITION &&
     !resolvedTransitionRecord;
   const isTransitionInError = resolvedTransitionRecord?.status === 'error';
   const isTransitionInactive = resolvedTransitionRecord?.status === 'inactive';
@@ -128,7 +130,7 @@ export function ClipTransitionSection({
     <div className="space-y-2 md:col-span-2">
       <FieldLabel>Transition</FieldLabel>
       <Select
-        value={clip.transition?.type ?? NO_TRANSITION}
+        value={resolvedTransitionRecord?.transitionId ?? transitionId ?? NO_TRANSITION}
         onValueChange={(value) => {
           if (value === NO_TRANSITION) {
             onChange({ transition: undefined });
@@ -149,18 +151,18 @@ export function ClipTransitionSection({
       >
         <SelectTrigger>
           <SelectValue placeholder="None">
-            {!clip.transition?.type || clip.transition.type === NO_TRANSITION
+            {!transitionId || transitionId === NO_TRANSITION
               ? 'None'
               : isTransitionUnresolvable
-                ? `${clip.transition.type} (missing)`
+                ? `${transitionId} (missing)`
                 : resolvedTransitionRecord
                   ? (() => {
                       const label = getTransitionProvenanceLabel(resolvedTransitionRecord);
                       return label
-                        ? `${clip.transition.type} · ${label}`
-                        : clip.transition.type;
+                        ? `${transitionId} · ${label}`
+                        : transitionId;
                     })()
-                  : clip.transition.type}
+                  : transitionId}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
@@ -196,12 +198,12 @@ export function ClipTransitionSection({
             );
           })}
           {/* Show the current transition if it's not in the list (e.g. removed contributed) */}
-          {isTransitionUnresolvable && clip.transition?.type && (
+          {isTransitionUnresolvable && transitionId && (
             <>
               <div className="my-1 h-px bg-border" />
-              <SelectItem value={clip.transition.type} disabled>
+              <SelectItem value={transitionId} disabled>
                 <span className="text-muted-foreground">
-                  {clip.transition.type} (missing)
+                  {transitionId} (missing)
                 </span>
               </SelectItem>
             </>
@@ -234,7 +236,7 @@ export function ClipTransitionSection({
         <BlockerActionCard
           severity="error"
           code="composition/transition-missing-ref"
-          message={`Transition "${clip.transition.type}" is not available. The extension may have been removed.`}
+          message={`Transition "${transitionId}" is not available. The extension may have been removed.`}
         />
       )}
 

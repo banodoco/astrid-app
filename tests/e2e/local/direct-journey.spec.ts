@@ -38,7 +38,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BIG_DOWNLOAD_BYTES, BIG_UPLOAD_BYTES, DirectHarness, DOOR_PORT, rawRequest, sha256Hex, compositionPublication } from './support/harness.ts';
-import { APP_ENTRY_ROUTE, UI, currentHead, editFirstTrackName, expectConnected, firstTrackName, holdTimelineSaves, openApp, openSeededTimeline, revisionBody, test, waitForAudit } from './support/app.ts';
+import { APP_ENTRY_ROUTE, UI, commandOutboxes, currentHead, editFirstTrackName, expectConnected, firstTrackName, holdTimelineSaves, openApp, openSeededTimeline, revisionBody, test, waitForAudit } from './support/app.ts';
 import { skipWhen } from '../support/declaredSkip.ts';
 import { DIST_DIR } from '../../../config/testing/skipConditions.mjs';
 import { SpeedTable } from './support/measure.ts';
@@ -715,6 +715,9 @@ test.describe('restarts', () => {
     await expect.poll(() => hold.requests.length, { timeout: 20_000 }).toBeGreaterThan(0);
     const sentBody = hold.requests[0].postData()!;
     const sentKey = hold.requests[0].headers()['idempotency-key'];
+    const retained = (await commandOutboxes(page, harness.seed.timelineId))
+      .find((owner) => owner.pending?.request.key === sentKey)!;
+    expect(retained.pending!.request.body).toBe(sentBody);
     // A mark on this page: the App's own reload replaces the page and clears it.
     await page.evaluate(() => { (window as unknown as { __beforeRestart: boolean }).__beforeRestart = true; });
 
@@ -723,15 +726,23 @@ test.describe('restarts', () => {
     const instanceBefore = harness.runtimeInstanceId;
     await harness.restartRuntime();
     expect(harness.runtimeInstanceId, 'the Runtime came back as a new instance').not.toBe(instanceBefore);
-    await expect.poll(() => page.evaluate(() => (window as unknown as { __beforeRestart?: boolean }).__beforeRestart ?? false), { timeout: 60_000 }).toBe(false);
+    // The test-owned route is not a socket to the stopped Runtime: it stays pending forever unless we abort it.
+    // Let the old save settle so the guarded automatic reload can preserve it. Recovery delivery remains held.
+    await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toBeVisible({ timeout: 20_000 });
+    await hold.abortHeld();
+    await page.waitForFunction(() => !(window as unknown as { __beforeRestart?: boolean }).__beforeRestart, undefined, { timeout: 60_000 });
     await expectConnected(page);
     await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toHaveCount(0);
 
     // Native recovery: the retained owner's outbox holds the exact bytes and key the old page sent, and nothing reached the
     // Runtime yet. The recovery delivery is held by the same gate, so it cannot go before these bytes are verified.
     await expect.poll(async () => (await commandOutboxes(page, harness.seed.timelineId))
-      .some((owner) => owner.pending?.request.body === sentBody && owner.pending?.request.key === sentKey), { timeout: 30_000 }).toBe(true);
+      .find((owner) => owner.ownerId === retained.ownerId)?.pending?.request, { timeout: 30_000 }).toEqual(retained.pending!.request);
     expect(await currentHead(harness)).toBe(headBefore);
+    await openSeededTimeline(page, harness);
+    await expect.poll(() => hold.requests.length, { timeout: 30_000 }).toBeGreaterThan(1);
+    expect(hold.requests.slice(1).every((request) => request.postData() === sentBody
+      && request.headers()['idempotency-key'] === sentKey), 'recovery sends only the retained bytes and key').toBe(true);
 
     // Recovery delivery is allowed: the draft reaches the Runtime and the editor shows it.
     await hold.release(true);

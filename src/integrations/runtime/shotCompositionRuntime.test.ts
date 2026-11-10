@@ -693,6 +693,18 @@ describe('Runtime shot-composition port', () => {
     expect(publication).toMatchObject({ expected_head: null });
   });
 
+  it('retains the discovered preview target when its immutable parent read fails', async () => {
+    const fixtureRuntime = fixtureTransport();
+    const transport: typeof fixtureRuntime.transport = async (method, path, headers, body) => {
+      if (path.endsWith('/composition-revisions/timeline-rev-2')) throw new TypeError('Failed to fetch');
+      return fixtureRuntime.transport(method, path, headers, body);
+    };
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport });
+
+    await expect(provider.shotComposition.load({ projectId: PROJECT_ID, parentDocumentId: TIMELINE_ID, poll: true }))
+      .rejects.toMatchObject({ message: 'Failed to fetch', targetRevisionId: 'timeline-rev-2' });
+  });
+
   it('fails closed when the canonical immutable internal revision is unavailable', async () => {
     const fixtureRuntime = fixtureTransport({ internalRevisionUnavailable: true });
     const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: fixtureRuntime.transport });

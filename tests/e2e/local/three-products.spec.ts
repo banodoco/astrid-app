@@ -519,6 +519,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
       ?.find((candidate) => candidate.id === seed3.transitionClipId);
     return { present: Boolean(clip), transition: clip?.transition ?? null };
   }, CEILING).toEqual({ present: true, transition: null });
+  const draftC = (await timelineDraft(page, seed3.timelineId))!;
 
   // The acknowledgement is lost: the page sees a connection reset, and its own retry follows.
   holding = false;
@@ -538,9 +539,12 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   test.info().annotations.push({ type: 'case-2-branch', description: branch });
   journey.facts = { ...journey.facts, verdict: 'named_conflict', branch, posts: posts.map(({ base, status, outcome }, index) => ({ n: index + 1, base: base?.revision_id === undefined ? null : base.revision_id === baseHead ? 'base head' : base.revision_id === headA ? 'A' : base.revision_id, status, outcome, sameKeyAsA: posts[index].key === keyA })) };
 
-  // The draft is kept: the dialog is modal, so the editor behind it is hidden from the accessibility tree but still holds A and C.
-  await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
-  await expect(transitionSelect(page)).toContainText('None');
+  // Native rejection rolls the display back to canonical B. A+C must remain intact in durable storage.
+  expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(draftC.draft);
+  expect(draftC.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label).toBe('F2 App A');
+  expect(draftC.draft.config?.clips?.find((clip: any) => clip.id === seed3.transitionClipId))
+    .toBeTruthy();
+  expect(draftC.draft.config?.clips?.find((clip: any) => clip.id === seed3.transitionClipId)?.transition).toBeUndefined();
 
   // The Runtime head is B and holds A and B, and not C.
   expect(await currentHead(harness), 'nothing was published after B').toBe(headB);
@@ -572,7 +576,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(conflict).toHaveCount(0, CEILING);
   await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
   await selectClip(page, seed3.transitionClipId);
-  await expect(transitionSelect(page)).toContainText('crossfade', CEILING);
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i, CEILING);
   const kept = await timelineDraft(page, seed3.timelineId);
   expect(kept?.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label).toBe('F2 App A');
   expect(kept?.draft.config?.clips?.find((clip: any) => clip.id === seed3.transitionClipId)?.transition).toBeUndefined();
@@ -591,11 +595,11 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   await recovered.getByRole('button', { name: 'Save them' }).click();
   await expect(conflict).toBeVisible(CEILING);
   await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
-  await expect(transitionSelect(page)).toContainText('None');
+  expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
   expect(await currentHead(harness)).toBe(headB);
   await conflict.getByRole('button', { name: 'Use latest version' }).click();
   await expect(conflict).toHaveCount(0, CEILING);
@@ -612,7 +616,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
   await expect.poll(() => watched.urls.slice(readsBeforeReload).some((url) => url.includes(`/composition-revisions/${headB}`)), CEILING).toBe(true);
   await selectClip(page, seed3.transitionClipId);
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   expect((await agent.status()).current_head).toBe(headB);
   const shown = await agent.show();
   expect(shown.head_revision_id).toBe(headB);
@@ -1484,13 +1488,13 @@ async function expectFreshPreviewUnavailable(page: Page, astrid: AstridCli, harn
   try {
     const retained = (await history(harness, seed)).head;
     expect(retained.revision_id).toBe(retainedRevision);
+    await expect(page.locator(`[data-preview-revision="${retainedRevision}"]`)).toBeVisible(CEILING);
     const target = await astrid.commitCaptured(harness.seed.projectId, seed.timelineId,
       { revision_id: retainedRevision, publication_id: retained.publication_id },
       { kind: 'track', id: 'f2-gate3-preview-unavailable' }, 'f2-gate3-preview-unavailable');
     const targetRevision = target.data.accepted_revision_id;
-    // While the target is unavailable, the preview shows 'Preview unavailable' and marks the exact unavailable target.
-    // The retained revision is not rendered while unavailable, so its identity is asserted from the head above.
-    await expect(page.locator(`[data-preview-target="${targetRevision}"]`)).toBeVisible(CEILING);
+    // Retained pixels keep their delivered identity while the exact new target is marked unavailable.
+    await expect(page.locator(`[data-preview-revision="${retainedRevision}"][data-preview-target="${targetRevision}"]`)).toBeVisible(CEILING);
     await expect(page.getByText('Preview unavailable', { exact: true })).toBeVisible(CEILING);
     return targetRevision;
   } finally {

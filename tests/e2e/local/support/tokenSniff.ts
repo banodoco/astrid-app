@@ -2,7 +2,7 @@ import { expect, type Frame, type Page, type Request, type Route } from '@playwr
 import { commandOutboxes } from './app.ts';
 
 type Capture = { label: string; state: string; pending: boolean; failed?: boolean; request?: Request };
-type Admission = { state: 'unclassified' | 'dispatched' | 'queued'; terminal: boolean };
+type Admission = { state: 'unclassified' | 'dispatched' | 'blocked'; terminal: boolean };
 
 /** A credential never reaches the page, requests, door answers or browser storage. */
 export class TokenSniff {
@@ -55,6 +55,10 @@ export class TokenSniff {
     page.on('requestfinished', request => { const capture = this.requests.get(request); if (capture) capture.state = 'finished'; const admission = this.admissions.get(request); if (admission) admission.terminal = true; this.signal(); });
     page.on('requestfailed', request => { const capture = this.requests.get(request); if (capture) capture.state = 'failed'; const admission = this.admissions.get(request); if (admission) admission.terminal = true; this.signal(); });
     page.on('response', (response) => {
+      if (this.admissions.get(response.request())?.state === 'blocked') {
+        this.captures.push({ label: this.label(response.request().method(), response.url(), 'route'), state: 'response after blocked dispatch', pending: false, failed: true });
+        this.signal();
+      }
       const type = response.headers()['content-type'] ?? '';
       if (!/json|text/.test(type) || !response.url().includes(`:${new URL(response.url()).port}/api/`)) return;
       const capture: Capture = { label: this.label(response.request().method(), response.url(), 'body'), state: 'responded', pending: true, request: response.request() };
@@ -80,7 +84,13 @@ export class TokenSniff {
       const failed = captures.filter(item => item.failed);
       if (failed.length) throw new Error(`Incomplete credential scan: ${failed.map(item => `${item.label} (${item.state}; capture failed)`).join(', ')}`);
       const remaining = deadline - Date.now();
-      if (remaining <= 0) throw new Error(`Incomplete credential scan: ${captures.filter(item => item.pending).map(item => `${item.label} (${item.state})`).join(', ')}; requests still in flight`);
+      if (remaining <= 0) {
+        const outstanding = captures.filter(item => item.pending).map(item => `${item.label} (${item.state})`);
+        if (waiting()) for (const [request, admission] of this.admissions) {
+          if (!admission.terminal) outstanding.push(`${this.label(request.method(), request.url(), 'request')} (${admission.state}; no terminal event)`);
+        }
+        throw new Error(`Incomplete credential scan: ${outstanding.join(', ') || 'scan deadline exceeded'}`);
+      }
       if (!waiting() && !captures.some(item => item.pending)) return;
       await new Promise<void>(resolve => {
         const timer = setTimeout(() => { this.changed = undefined; resolve(); }, remaining);
@@ -89,29 +99,35 @@ export class TokenSniff {
     }
   }
 
-  /** Hold new API dispatch while old-document requests and bodies are captured. */
-  async navigate(page: Page, navigate: () => Promise<unknown>) {
-    let release!: () => void;
-    const gate = new Promise<void>(resolve => { release = resolve; });
+  /** Stop new API dispatch while old-document requests and bodies are captured. */
+  async navigate(page: Page, navigate: () => Promise<unknown>, settleTestRequests?: () => Promise<void>) {
+    const deadline = Date.now() + this.drainMs;
+    const aborts: Capture[] = [];
     const handler = async (route: Route) => {
       const admission = this.admissions.get(route.request());
-      if (admission) admission.state = 'queued';
+      if (admission) admission.state = 'blocked';
       this.signal();
-      const capture: Capture = { label: this.label(route.request().method(), route.request().url(), 'route'), state: 'queued', pending: true, request: route.request() };
-      const task = (async () => { await gate; await route.fallback(); })();
+      const capture: Capture = { label: this.label(route.request().method(), route.request().url(), 'route'), state: 'aborting', pending: true, request: route.request() };
+      aborts.push(capture);
+      // In particular, beforeunload requests must not wait for navigation to
+      // finish and then fall through from a destroyed document. Abort promptly,
+      // but keep requiring real terminal events and every raw-header capture.
+      const task = (async () => { await route.abort('aborted'); capture.state = 'aborted'; })();
       this.track(capture, task);
       await task.catch(() => {}); // The credential ledger retains a failed disposition.
     };
     await page.route('**/api/**', handler);
     try {
-      await this.drain(
-        capture => !capture.request || this.admissions.get(capture.request)?.state !== 'queued',
-        () => [...this.admissions.values()].some(item => item.state !== 'queued' && !item.terminal),
-      );
+      // A fault fixture may own a deliberately held request. Settle that hold
+      // under the gate so its retry cannot race the old-document drain.
+      await settleTestRequests?.();
+      await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline);
       await navigate();
+      await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline);
     } finally {
-      release();
-      await page.unroute('**/api/**', handler);
+      // Removing a still-running handler can fall through to another route.
+      // A failed/stalled abort therefore leaves the gate installed, fail-closed.
+      if (aborts.every(capture => !capture.pending && !capture.failed)) await page.unroute('**/api/**', handler);
     }
   }
 

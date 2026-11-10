@@ -2888,7 +2888,7 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
-  await openCommandTimeline(page, harness, seed3);
+  await openCommandTimeline(page, harness, seed3, sniff);
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
   const before = await history(harness, seed3);
   const original = await revisionState(harness, seed3, before.head.revision_id);
@@ -2916,7 +2916,11 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   // Arm the App's automatic recovery retry before the restart: it is the next commit POST after reload.
   wire.armRecoveryRetry();
   await harness.restartRuntime();
-  await page.reload();
+  // The fixture holds the old automatic retry. Cancel that hold under the
+  // navigation gate before draining; do not forward it or wait on our own fault.
+  // Reload must still recover the durable owner and send the exact next retry.
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
+  await page.waitForLoadState('load');
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   expect((await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === retained.ownerId)?.pending?.request)
@@ -2926,7 +2930,7 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   // The App recovers the single retained owner by itself after reload and retries its pending request (useTimelineSave.ts:380,
   // localSaveSession.ts:351). The explicit "Recover saved edits" control was removed (7b33f8f50, 4394b74a1), so the retry is gated
   // here: the fault route holds that second POST until it is released, and exactly one POST has completed until then.
-  // A stage taken before the reload is obsolete (reload cancels it), so wait for the third attempt itself.
+  // The old stage was canceled before reload, so wait for the third attempt itself.
   await expect.poll(() => wire.observed.length, CEILING).toBe(3);
   expect(wire.observed[2], 'the App retries the retained request byte-identically').toEqual(wire.observed[0]);
   expect(wire.posts, 'exactly one completed POST while the automatic retry is held').toHaveLength(1);
@@ -2955,7 +2959,8 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
     .toEqual([pinOf(cleared).publication_id]);
   await expectImmutableClosure(harness, seed3, undone);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
+  await page.waitForLoadState('load');
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   await selectClip(page, seed3.transitionClipId);

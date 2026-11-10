@@ -354,7 +354,7 @@ test('Chromium drains a response that starts during the final DOM evaluation', a
 });
 
 for (const headers of ['complete', 'reject', 'unresolved'] as const) {
-  test(`navigation excludes its own queued capture then checks ${headers} headers after release`, async () => {
+  test(`navigation checks ${headers} raw headers even after aborting a blocked request`, async () => {
     const page = fakePage();
     const sniff = new TokenSniff({ secret }, 150);
     await sniff.attach(page);
@@ -365,24 +365,110 @@ for (const headers of ['complete', 'reject', 'unresolved'] as const) {
     let rejectHeaders!: (error: Error) => void;
     const rawHeaders = new Promise<Record<string, string>>((resolve, reject) => { resolveHeaders = resolve; rejectHeaders = reject; });
     const req = request(undefined, '', {}, () => rawHeaders);
-    let released = false;
+    let aborted = false;
     let navigated = false;
     const navigation = sniff.navigate(page, async () => {
-      expect(released).toBe(false);
+      expect(aborted).toBe(true);
       navigated = true;
     });
     page.emit('request', req);
-    const routed = handler({ request: () => req, fallback: async () => {
-      released = true;
+    const routed = handler({ request: () => req, abort: async () => {
+      aborted = true;
       if (headers === 'complete') resolveHeaders({});
       if (headers === 'reject') rejectHeaders(new Error(secret));
-      page.emit('requestfinished', req);
+      page.emit('requestfailed', req);
     } } as unknown as Route);
-    await navigation;
+    if (headers === 'complete') await navigation;
+    else await expect(navigation).rejects.toThrow('Incomplete credential scan');
     await routed;
-    expect(navigated).toBe(true);
-    expect(released).toBe(true);
+    expect(navigated).toBe(headers === 'complete');
+    expect(aborted).toBe(true);
     if (headers === 'complete') await sniff.expectClean(page);
     else await expect(sniff.expectClean(page)).rejects.toThrow('Incomplete credential scan');
   });
 }
+
+test('navigation aborts late gate-owned requests before they can outlive the old document', async ({ page }) => {
+  let reachedServer = false;
+  const server = createServer((req, res) => {
+    if (req.url === '/api/leaving') reachedServer = true;
+    res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html></html>');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  try {
+    const sniff = new TokenSniff({ secret });
+    await sniff.attach(page);
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    let terminal = false;
+    page.on('requestfailed', req => { if (req.url().endsWith('/api/leaving')) terminal = true; });
+    await sniff.navigate(page, async () => {
+      // This request starts after the initial drain, as an unload callback can.
+      await page.evaluate(() => { void fetch('/api/leaving', { keepalive: true }).catch(() => {}); });
+      await expect.poll(() => terminal).toBe(true);
+      expect(reachedServer).toBe(false);
+      await page.reload({ waitUntil: 'commit' });
+    });
+    await sniff.expectClean(page);
+    expect(reachedServer).toBe(false);
+  } finally { server.close(); }
+});
+
+for (const outcome of ['no terminal event', 'abort rejects', 'abort stalls', 'unexpected response'] as const) {
+  test(`navigation fails closed when ${outcome}`, async () => {
+    const page = fakePage();
+    const sniff = new TokenSniff({ secret }, 100);
+    await sniff.attach(page);
+    let handler!: (route: Route) => Promise<void>;
+    page.route = (async (_pattern, callback) => { handler = callback as typeof handler; }) as Page['route'];
+    let unrouted = false;
+    page.unroute = async () => { unrouted = true; };
+    const req = request();
+    const navigation = sniff.navigate(page, async () => {});
+    page.emit('request', req);
+    void handler({ request: () => req,
+      fallback: async () => {},
+      abort: async () => {
+        if (outcome === 'abort rejects') throw new Error(secret);
+        if (outcome === 'abort stalls') return new Promise(() => {});
+        if (outcome === 'unexpected response') {
+          page.emit('response', { headers: () => ({ 'content-type': 'application/json' }), url: () => req.url(), request: () => req, text: async () => '{}' });
+          page.emit('requestfinished', req);
+        }
+      },
+    } as unknown as Route);
+    await expect(navigation).rejects.toThrow('Incomplete credential scan');
+    if (outcome === 'abort stalls') expect(unrouted).toBe(false);
+    await expect(sniff.expectClean(page)).rejects.toThrow('Incomplete credential scan');
+  });
+}
+
+test('navigation settles a fixture-held retry under the gate before draining', async ({ page }) => {
+  let reachedServer = false;
+  const server = createServer((req, res) => {
+    if (req.url?.startsWith('/api/')) reachedServer = true;
+    res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html></html>');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  try {
+    const sniff = new TokenSniff({ secret });
+    await sniff.attach(page);
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    let held: Route | undefined;
+    await page.route('**/api/held', route => { held = route; });
+    await page.evaluate(() => { void fetch('/api/held').catch(() => {}); });
+    await expect.poll(() => Boolean(held)).toBe(true);
+    await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), async () => {
+      const retryFailed = page.waitForEvent('requestfailed', req => req.url().endsWith('/api/retry'));
+      await page.evaluate(() => { void fetch('/api/retry').catch(() => {}); });
+      await retryFailed;
+      expect(reachedServer).toBe(false);
+      await held!.abort('connectionclosed');
+    });
+    await sniff.expectClean(page);
+    expect(reachedServer).toBe(false);
+  } finally { server.close(); }
+});

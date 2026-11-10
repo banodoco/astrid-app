@@ -290,18 +290,27 @@ export async function editFirstTrackName(page: Page, name: string) {
 export async function holdCommandRequests(page: Page) {
   const commits = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/commit$/;
   const requests: Request[] = [];
+  const held = new Set<import('@playwright/test').Route>();
   let release!: (send: boolean) => void;
   const gate = new Promise<boolean>((resolve) => { release = resolve; });
   const intercept = async (route: import('@playwright/test').Route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     requests.push(route.request());
+    held.add(route);
     const send = await gate;
+    if (!held.delete(route)) return;
     // Reload may have already cancelled the held browser request.
     await (send ? route.continue() : route.abort('connectionreset')).catch(() => {});
   };
   await page.route(commits, intercept);
   return {
     requests,
+    /** End old-page transport without opening the gate for recovery requests. */
+    async abortHeld() {
+      const routes = [...held];
+      routes.forEach((route) => held.delete(route));
+      await Promise.all(routes.map((route) => route.abort('connectionreset')));
+    },
     async release(send = false) {
       await page.unroute(commits, intercept);
       release(send);

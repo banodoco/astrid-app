@@ -551,9 +551,16 @@ export class RuntimeDataProvider implements DataProvider {
     }
     const key = JSON.stringify([projectId, timelineId]);
     const cached = this.shotGraphs.get(key);
-    const graph = poll && cached?.headRevisionId === headRevisionId
-      ? cached.graph
-      : await this.loadRuntimeShotCompositionAtHead({ projectId, parentDocumentId: timelineId, headRevisionId });
+    let graph: unknown;
+    try {
+      graph = poll && cached?.headRevisionId === headRevisionId
+        ? cached.graph
+        : await this.loadRuntimeShotCompositionAtHead({ projectId, parentDocumentId: timelineId, headRevisionId });
+    } catch (error) {
+      // The discovered head is the failed target; the last delivered graph still names its own revision.
+      // The public boundary still classifies this error for outage/fencing handling.
+      throw Object.assign(error instanceof Error ? error : new Error(String(error)), { targetRevisionId: headRevisionId });
+    }
     if (poll && cached?.headRevisionId !== headRevisionId) this.shotGraphs.set(key, { headRevisionId, graph });
     this.logShotTimelineLatency('runtime-composition-load', startedAt);
     return graph;
@@ -1605,6 +1612,9 @@ export class RuntimeDataProvider implements DataProvider {
       );
     } else {
       providerError = error instanceof Error ? error : new Error(String(error));
+    }
+    if (error instanceof Error && 'targetRevisionId' in error && typeof error.targetRevisionId === 'string') {
+      Object.assign(providerError, { targetRevisionId: error.targetRevisionId });
     }
     this.reportRuntimeError(providerError);
     return providerError;

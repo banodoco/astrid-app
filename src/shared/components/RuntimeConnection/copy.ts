@@ -160,8 +160,10 @@ export function localSetupInstructions(choices: SetupChoices = RECOMMENDED_SETUP
   const L = LOCAL_SETUP;
   return [
     `Please ${alreadySetup ? 'restart Astrid and set up the fully local editor' : 'set up Astrid to run fully on this computer, including the editor'} so I can change Astrid itself. Do the work yourself and verify the result.`,
-    alreadySetup ? null : 'Before you run the command, ask me once: “May I install Astrid with these setup choices?” Wait for my answer, then run it only if I agree.',
-    `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.`,
+    alreadySetup ? null : `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.`,
+    alreadySetup ? null : 'Show these choices and offer a change.',
+    alreadySetup ? null : 'If a choice changes, use its installer flag: `--autostart`, `--command`, `--skills` or `--skill-copies`.',
+    SETUP_SKILL_POINTER,
     `1. Install or repair Astrid with the official installer. Fetch and read the script before running it. Run this official installer command: \`${installCommand('install', choices, explicitChoices)}\`. Keep my existing workspace, projects, media, credentials, and agent instructions. The installer may open astrid.haus; finish this setup in the local editor below.`,
     `2. Get the editor's code from ${L.repoUrl}. Install Git and Node.js 20.19 or newer in the Node 20 release line if needed. Clone with \`${L.cloneCommand}\`, then \`${L.changeDirectoryCommand}\` and \`${L.installDependenciesCommand}\`. If a clone already exists, preserve its changes and update it to \`main\` without discarding work; use \`git pull --ff-only origin main\` when it can fast-forward and resolve any divergence before continuing.`,
     `3. In that clone, run \`${L.startCommand}\` in a terminal that stays open. This starts the source editor on port 5180, checks the installed Runtime and selected workspace, and connects through the editor's own server. Keep the existing hosted door for https://astrid.haus; do not change its origin or turn it off. If the launcher reports a problem, diagnose it and repair through the official installer when needed. Do not delete or replace my workspace or credentials.`,
@@ -278,6 +280,7 @@ export function installCommand(mode: CommandMode, choices?: SetupChoices, explic
 }
 
 const SETUP_GUIDE_URL = 'https://github.com/banodoco/astrid-agent/blob/main/docs/setup/SKILL.md';
+const SETUP_SKILL_POINTER = `Read the \`astrid-setup\` skill: ${SETUP_GUIDE_URL}`;
 
 /** The two ways to update, since this page can't tell an installer install from source checkouts. */
 export const UPDATE_ROUTES = {
@@ -304,8 +307,10 @@ export function agentInstructions(
   const existing = mode === 'update' || repair || (setup.explicitChoices ?? false);
   return [
     `Please ${repair ? 'repair my existing Astrid installation' : mode === 'update' ? 'update my existing Astrid installation' : alreadySetup ? 'restart Astrid on this computer' : 'set up Astrid on this computer'} so the page at ${pageOrigin} can connect. Do the work yourself and verify the result.`,
-    !alreadySetup && !existing ? `Before you run the command, ask me once: “May I install Astrid with these setup choices?” Wait for my answer, then run the command only if I agree.` : null,
     !alreadySetup && !existing ? `Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.` : null,
+    !alreadySetup && !existing ? 'Show these choices and offer a change.' : null,
+    !alreadySetup && !existing ? 'If a choice changes, use its installer flag: `--autostart`, `--command`, `--skills` or `--skill-copies`.' : null,
+    SETUP_SKILL_POINTER,
     'First inspect the existing installation, running services, profile, selected workspace and data root. Preserve my projects, media, credentials and agent instructions. Do not reset or delete my workspace, or replace it with an empty one.',
     "Use the current official Astrid installer; read it before running it. The installer adopts an existing workspace itself; don't run workspace or migration commands by hand. Do not bypass ownership guards or overwrite a directory just because the installer refuses it.",
     windows && mode === 'install'
@@ -319,7 +324,7 @@ export function agentInstructions(
     'If installation or startup fails, read the log path printed by the installer, diagnose the actual cause and resolve it before retrying. Keep the existing workspace selection and data root connected; do not infer that no installation exists merely because the browser cannot reach it.',
     serviceBrief(services, platform),
     `Check Runtime health: \`${healthCheckCommand(new URL(runtimeApiBase(), runtimeOrigin() || pageOrigin).toString(), pageOrigin, platform)}\`.`,
-    `The installer verifies Astrid and opens astrid.haus. Tell me to choose Allow if Chrome or Edge asks, and confirm Astrid shows Connected. Setup guide: ${SETUP_GUIDE_URL}`,
+    'The installer verifies Astrid and opens astrid.haus. Tell me to choose Allow if Chrome or Edge asks, and confirm Astrid shows Connected.',
     "If the installer couldn't open a browser, open https://astrid.haus/?connect=1.",
     'My astrid.haus tab connects by itself once Astrid answers; if it shows a Connect button, click it.',
   ].filter((part): part is string => part !== null).join('\n\n');

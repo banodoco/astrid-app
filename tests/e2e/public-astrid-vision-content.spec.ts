@@ -368,3 +368,35 @@ test('feed errors are explained and offer a retry', async ({ page }) => {
   await expect(page.getByRole('link', { name: 'Read on GitHub' }))
     .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev/blob/main/vision/README.md');
 });
+
+test('project goals show at most five lines, then dissolve the sixth', async ({ page, request }) => {
+  await pinnedFeed(page, request);
+  for (const width of [390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const goals = page.locator('.astrid-vision-project-row .astrid-vision-project-goal');
+    await expect(goals.first()).toBeVisible();
+    const measured = await goals.evaluateAll(elements => elements.map(element => {
+      const css = getComputedStyle(element);
+      const line = Number.parseFloat(css.lineHeight);
+      const body = element.firstElementChild as HTMLElement;
+      return {
+        clamped: element.hasAttribute('data-clamped'),
+        lines: element.getBoundingClientRect().height / line,
+        fullLines: body.offsetHeight / line,
+        mask: css.maskImage || css.webkitMaskImage,
+      };
+    }));
+    for (const goal of measured) {
+      expect(goal.clamped).toBe(goal.fullLines > 5.1);
+      if (goal.clamped) {
+        expect(goal.lines).toBeGreaterThan(5.9);
+        expect(goal.lines).toBeLessThan(6.1);
+        expect(goal.mask).toContain('linear-gradient');
+      } else {
+        expect(goal.lines).toBeLessThan(5.2);
+      }
+    }
+    expect(measured.some(goal => goal.clamped)).toBeTruthy();
+  }
+});

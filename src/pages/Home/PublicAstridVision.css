@@ -2062,3 +2062,30 @@
   letter-spacing: .08em;
   text-transform: uppercase;
 }
+
+/* Project goals: five full lines, then the sixth dissolves (a soft blur under a
+   fade) so long plans read as a teaser; the GitHub link below carries the rest. */
+.astrid-vision .astrid-vision-project-goal {
+  --goal-line: calc(14px * 1.55);
+  position: relative;
+  font-size: 14px;
+  line-height: 1.55;
+}
+.astrid-vision .astrid-vision-project-goal :is(p, li) { line-height: inherit; }
+.astrid-vision .astrid-vision-project-goal[data-clamped] {
+  max-height: calc(var(--goal-line) * 6);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * 4.85), rgb(0 0 0 / .45) calc(var(--goal-line) * 5.45), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * 4.85), rgb(0 0 0 / .45) calc(var(--goal-line) * 5.45), transparent);
+}
+.astrid-vision .astrid-vision-project-goal[data-clamped]::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: calc(var(--goal-line) * 1.15);
+  pointer-events: none;
+  -webkit-backdrop-filter: blur(1.6px);
+  backdrop-filter: blur(1.6px);
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 70%);
+  mask-image: linear-gradient(to bottom, transparent, #000 70%);
+}

@@ -157,6 +157,36 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
   );
 }
 
+const PROJECT_GOAL_LINES = 5;
+
+/**
+ * A project's goal shows at most five lines; when there is more, the sixth line is
+ * softly blurred and faded so the card reads as a teaser for its GitHub plan.
+ */
+function ProjectGoal({ value }: { value: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [clamped, setClamped] = useState(false);
+  useLayoutEffect(() => {
+    const frame = ref.current;
+    const body = frame?.firstElementChild as HTMLElement | null;
+    if (!frame || !body) return undefined;
+    const measure = () => {
+      const line = Number.parseFloat(getComputedStyle(frame).lineHeight);
+      setClamped(Number.isFinite(line) && body.offsetHeight > line * PROJECT_GOAL_LINES + 2);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [value]);
+  return (
+    <div className="astrid-vision-project-goal" ref={ref} data-clamped={clamped || undefined}>
+      <MarkdownText value={value} />
+    </div>
+  );
+}
+
 function ProjectRow({ project }: { project: PublicVisionProject }) {
   return (
     <li className="astrid-vision-project-row">
@@ -164,7 +194,7 @@ function ProjectRow({ project }: { project: PublicVisionProject }) {
         <span className="astrid-vision-project-status" data-status={project.status}>{project.status}</span>
         <h3>{project.title}</h3>
       </div>
-      <MarkdownText value={project.goalMarkdown} />
+      <ProjectGoal value={project.goalMarkdown} />
       <a href={project.githubUrl} target="_blank" rel="noreferrer">Project details on GitHub</a>
     </li>
   );

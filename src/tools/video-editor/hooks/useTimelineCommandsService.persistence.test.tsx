@@ -506,7 +506,12 @@ describe('mounted prepared-media command persistence', () => {
       const ownerId = mounted.result.current.save.localSaveState!.ownerId!;
       await waitFor(async () => expect((await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)?.intents).toHaveLength(1));
       latest = { head: { revisionId: 'agent-r', publicationId: 'agent-p' }, canonicalDocument: latestDocument };
-      await act(async () => { await expect(mounted.result.current.save.flushPendingSave()).rejects.toThrow('draft retained'); });
+      await act(async () => { await expect(mounted.result.current.save.flushPendingSave()).rejects.toThrow('The prepared after-anchor source changed'); });
+      // The rejected save keeps the prepared draft in the outbox store; the editor view rolls back below.
+      const retained = (await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId);
+      expect(retained?.intents).toHaveLength(1);
+      expect(JSON.stringify(retained?.intents)).toContain('copy.mp4');
+      expect(retained?.pending?.outcome).toMatchObject({ kind: 'rejected', error: { details: { reason: 'dependency_changed' } } });
       await waitFor(() => expect(mounted.result.current.save.localSaveState?.status).toBe('conflict'));
       expect(mounted.result.current.save.dataRef.current?.config.clips.some((clip) => clip.id === 'clip-0')).toBe(false);
       expect(mounted.result.current.save.dataRef.current?.config.clips.find((clip) => clip.id === 'later')?.at).toBe(6);

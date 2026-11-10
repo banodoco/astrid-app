@@ -26,6 +26,17 @@ export type ToolLaunchResolution =
 
 export const ASTRID_TOOL_CATALOG = astridToolCatalogJson as AstridToolCatalog;
 
+/**
+ * Owners the App accepts for the Video Editor's catalog binding.
+ * `rendering` is the owner the release-12 Agent (0f792afb1) serves.
+ * `video_editing` is a TEMPORARY compatibility entry for the vendored Astrid catalog (ec0a9f5) and
+ * older Agents. Remove it with the Plan 39 item that refreshes the vendor from the release Agent.
+ */
+const VIDEO_EDITOR_OWNERS = [
+  { canonical_id: 'rendering.video-editor', pack_id: 'rendering' },
+  { canonical_id: 'video_editing.video-editor', pack_id: 'video_editing' }, // temporary: Plan 39
+] as const;
+
 /** Resolve the catalog-bound Video Editor while leaving legacy Tool routes host-owned. */
 export function resolveToolLaunch(
   catalog: AstridToolCatalog,
@@ -41,8 +52,7 @@ export function resolveToolLaunch(
 
   const entry = matches[0];
   if (toolId !== TOOL_IDS.VIDEO_EDITOR
-    || entry.canonical_id !== 'video_editing.video-editor'
-    || entry.pack_id !== 'video_editing') {
+    || !VIDEO_EDITOR_OWNERS.some((owner) => owner.canonical_id === entry.canonical_id && owner.pack_id === entry.pack_id)) {
     return { available: false, reason: 'unsupported-canonical-tool-binding' };
   }
   if (entry.target !== 'astrid' || entry.compatibility?.host !== '1') {

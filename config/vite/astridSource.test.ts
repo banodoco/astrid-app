@@ -40,12 +40,12 @@ describe('Astrid source binding', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'astrid-app-catalog-'));
     temporaryRoots.push(root);
     const sourceRoot = path.join(root, 'astrid');
-    const packRoot = path.join(sourceRoot, 'packs', 'video_editing');
+    const packRoot = path.join(sourceRoot, 'packs', 'rendering');
     const entryPath = path.join(packRoot, 'ui/video-editor/entry.json');
     const resourcePath = path.join(packRoot, 'shared/label.txt');
     fs.mkdirSync(path.dirname(entryPath), { recursive: true });
     fs.mkdirSync(path.dirname(resourcePath), { recursive: true });
-    const manifest = 'schema_version: 3\nid: video_editing\n';
+    const manifest = 'schema_version: 3\nid: rendering\n';
     const entry = '{"schema_version":1,"tool_id":"video-editor","host_entry":"video-editor"}\n';
     const resource = 'café — UTF-8\n';
     fs.writeFileSync(path.join(packRoot, 'pack.yaml'), manifest, 'utf8');
@@ -53,8 +53,8 @@ describe('Astrid source binding', () => {
     fs.writeFileSync(resourcePath, resource, 'utf8');
     const descriptor = {
       id: 'video-editor',
-      canonical_id: 'video_editing.video-editor',
-      pack_id: 'video_editing',
+      canonical_id: 'rendering.video-editor',
+      pack_id: 'rendering',
       pack_version: '1.0.0',
       target: 'astrid',
       compatibility: { host: '1' },

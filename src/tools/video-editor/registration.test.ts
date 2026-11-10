@@ -16,7 +16,7 @@ describe('video-editor registration', () => {
     expect(toolsUIManifest.some((tool) => tool.id === TOOL_IDS.TRAVEL_BETWEEN_IMAGES)).toBe(true);
     expect(VIDEO_EDITOR_TOOL_LAUNCH).toMatchObject({
       available: true,
-      entry: { canonical_id: 'video_editing.video-editor', target: 'astrid', entry: { host_entry: 'video-editor' } },
+      entry: { canonical_id: expect.stringMatching(/^(rendering|video_editing)\.video-editor$/), target: 'astrid', entry: { host_entry: 'video-editor' } },
     });
     expect(ASTRID_TOOL_CATALOG.tools.find((entry) => entry.id === TOOL_IDS.VIDEO_EDITOR)?.release_sha256).toMatch(/^[a-f0-9]{64}$/);
     expect(TOOL_ROUTES.VIDEO_EDITOR).toBe('/tools/video-editor');

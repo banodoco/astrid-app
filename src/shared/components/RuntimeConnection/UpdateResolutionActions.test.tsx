@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
@@ -250,7 +250,12 @@ describe('autostart-off card', () => {
 });
 
 describe('windows-upgrade-unsupported', () => {
-  const resolution = (context: 'page' | 'settings') => resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 11, releaseBehind: true, updateReason: 'windows-upgrade-unsupported', updateNowAvailable: true, selfUpdate: true }, context);
+  // The Windows test spies on navigator.platform and userAgent; restore them so the next test sees the real platform.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const resolution =(context: 'page' | 'settings') => resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 11, releaseBehind: true, updateReason: 'windows-upgrade-unsupported', updateNowAvailable: true, selfUpdate: true }, context);
 
   it('on the page: no Update now; the copy and manual actions sit beside Download diagnostics', () => {
     render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);

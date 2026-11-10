@@ -49,7 +49,7 @@ function bodyOf(init?: RequestInit): Record<string, unknown> {
   return JSON.parse(typeof body === 'string' ? body : new TextDecoder().decode(body as Uint8Array));
 }
 
-function runtimeDoor({ unavailable = false, failDiscovery = false } = {}) {
+function runtimeDoor({ unavailable = false, failDiscovery = false, holdDiscovery = false } = {}) {
   let project: Project | null = null;
   let timeline: Record<string, unknown> | null = null;
   let allowPrompt = false;
@@ -83,6 +83,7 @@ function runtimeDoor({ unavailable = false, failDiscovery = false } = {}) {
     }
     if (path === '/v1/realm') return json({ realm_id: REALM, display_name: 'My computer', version: 1, created_at: NOW } satisfies Realm);
     if (path === '/v1/projects' && method === 'GET') {
+      if (holdDiscovery) return new Promise<Response>(() => {});
       if (failDiscovery) return json({ code: 'service_unavailable', message: 'Project index unavailable', request_id: 'journey-failure' }, 503);
       return json({ items: project ? [project] : [], next_cursor: null });
     }
@@ -205,6 +206,25 @@ it('recovers from hosted permission denial, creates a real canonical starter tim
   expect(door.project?.metadata.default_timeline_id).toBe(url.searchParams.get('timeline'));
   expect(door.timeline?.head_revision_id).toBeTruthy();
   expect(door.unexpected).toEqual([]);
+});
+
+it('shows generation setup only after the Runtime gate connects', async () => {
+  vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] });
+  const door = runtimeDoor({ holdDiscovery: true });
+  chooseHosted();
+  expect(await screen.findByRole('heading', { name: 'Allow Astrid in Chrome' })).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Set up image generation' })).not.toBeInTheDocument();
+
+  door.acceptNextPrompt();
+  act(() => changePermission('prompt'));
+  await act(async () => { await vi.advanceTimersByTimeAsync(SLOW_PROBE_TIMEOUT_MS); });
+  fireEvent.focus(window);
+  fireEvent.click(await screen.findByRole('button', { name: 'Connect' }));
+
+  expect(await screen.findByRole('heading', { name: 'Set up image generation' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Copy for your agent' })).toBeInTheDocument();
+  expect(door.requests.some(request => request.path === '/v1/projects' && request.method === 'GET')).toBe(true);
+  expect(replaceNavigate).not.toHaveBeenCalled();
 });
 
 it('keeps an absent Runtime in setup, and Back returns to the real chooser so local setup remains available', async () => {

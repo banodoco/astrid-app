@@ -72,6 +72,13 @@ describe('update resolution after an in-app update ends', () => {
     expect(screen.queryByRole('button', { name: 'Download diagnostics' })).toBeNull();
   });
 
+  it('lets Settings display the fresh installer status without repeating it in its actions', () => {
+    const status = { ...finished('failed'), status: { available: true, self_update: true, state: 'none', reason: 'autostart-off' } } as unknown as InstallerUpdateView;
+    const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' }, 'settings');
+    render(<><p>{INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']}</p><UpdateResolutionActions resolution={resolution} operation={status} context="settings" reasonLineShown /></>);
+    expect(screen.getAllByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off'])).toHaveLength(1);
+  });
+
   it('does not offer the install line after an update that finished', () => {
     render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={finished('updated')} />);
     expect(screen.queryByRole('code')).toBeNull();

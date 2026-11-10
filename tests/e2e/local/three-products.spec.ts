@@ -39,6 +39,7 @@ import { timelineBase as runtimeTimelineBase, timelineFromList, type TimelineLis
 import type { CanonicalDocument, CommitAcceptedMutation, CommitRequest, EditCommand, HeadPin, HistoryEntry, HistoryPage } from '../../../src/integrations/runtime/timeline-commit-types.ts';
 import { ASTRID_PYTHON, AstridCli, astridUnavailableReason, contractDigest, realmDisagreements, revisionSet, type AstridCall, type AstridIdentity } from './support/astrid.ts';
 import { centreCell, gridDifference, letterbox, matches, pictureGrid, MATCH, type GridDifference, type PictureGrid, type Rect } from './support/pictures.ts';
+import { TokenSniff } from './support/tokenSniff.ts';
 import { assertGate5ResetPrecondition } from './support/gate5-reset-precondition.ts';
 import { classifyGate5FaultOrder, sameGate5CommitIdentity, type Gate5CommitIdentity } from './support/gate5-fault-order.ts';
 
@@ -322,48 +323,6 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
     status: async () => (await astrid.json<{ current_head: string }>(['timelines', 'status', ...common, '--json'])).data!,
     show: async () => (await astrid.json<AgentTimelineInspection>(['timelines', 'show', ...common, '--published', '--json'])).data!,
   };
-}
-
-/** A credential never reaches the page: not in a request, a door answer, the DOM, or the page's storage. */
-class TokenSniff {
-  private readonly pending: Array<Promise<void>> = [];
-  private readonly leaks: string[] = [];
-
-  constructor(private readonly tokens: Record<string, string>) {}
-
-  private scan(where: string, text: string | null | undefined) {
-    if (!text) return;
-    for (const [name, token] of Object.entries(this.tokens)) if (text.includes(token)) this.leaks.push(`${name} token in ${where}`);
-  }
-
-  attach(page: Page) {
-    page.on('request', (request: Request) => {
-      this.pending.push((async () => {
-        const headers = await request.allHeaders().catch(() => request.headers());
-        this.scan(`the URL of ${request.method()} ${request.url().split('?')[0]}`, request.url());
-        this.scan(`the headers of ${request.method()} ${request.url().split('?')[0]}`, JSON.stringify(headers));
-        this.scan(`the body of ${request.method()} ${request.url().split('?')[0]}`, request.postData());
-      })());
-    });
-    page.on('response', (response) => {
-      const type = response.headers()['content-type'] ?? '';
-      if (!/json|text/.test(type) || !response.url().includes(`:${new URL(response.url()).port}/api/`)) return;
-      this.pending.push(response.text().then((text) => this.scan(`the answer to ${response.request().method()} ${response.url().split('?')[0]}`, text)).catch(() => {}));
-    });
-  }
-
-  async expectClean(page: Page, timelineId?: string) {
-    await Promise.all(this.pending);
-    const inPage = await page.evaluate(() => JSON.stringify({
-      dom: document.documentElement.outerHTML,
-      local: Object.fromEntries(Object.entries(window.localStorage)),
-      session: Object.fromEntries(Object.entries(window.sessionStorage)),
-      cookie: document.cookie,
-    }));
-    this.scan('the page (DOM, storage, cookies)', inPage);
-    if (timelineId) this.scan('native command outboxes', JSON.stringify(await commandOutboxes(page, timelineId)));
-    expect(this.leaks, 'no credential reached the page').toEqual([]);
-  }
 }
 
 /** The credentials in play: the App's, Astrid's, and the Runtime's owner and worker credentials (none belongs in a page). */

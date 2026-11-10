@@ -87,7 +87,7 @@ export function UpdateResolutionActions({ resolution, operation, context = 'page
     {operation?.pending && <p role="status">Update in progress. Astrid may disconnect while it restarts.</p>}
     {operation?.error && <p role="alert">{operation.error}</p>}
     {operation?.restartRequired && <p role="status">Astrid restarted. Reload when your drafts can be saved.</p>}
-    {operation?.fresh && !operation.error && statusLine && !operation.pending && <p role="status">{statusLine}</p>}
+    {context !== 'settings' && operation?.fresh && !operation.error && statusLine && !operation.pending && <p role="status">{statusLine}</p>}
     {failedInstall && <div className="space-y-2">
       {operation?.status?.log_path && <p className="text-xs text-muted-foreground [overflow-wrap:anywhere]">Details: {operation.status.log_path}</p>}
       <p className="text-sm">{ASTRID_STATUS_COPY.repairDescription}</p>

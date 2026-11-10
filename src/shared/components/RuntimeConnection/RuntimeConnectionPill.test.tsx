@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { RuntimeConnectionPill } from './RuntimeConnectionPill.tsx';
-import { installCommand, RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
+import { installCommand, RUNTIME_CONNECTION_COPY as COPY, SETUP_SKILL_POINTER } from './copy.ts';
 import { CONNECTED_REALM, connectionFor } from './connectionFixture.ts';
 
 afterEach(() => {
@@ -103,6 +103,7 @@ describe('RuntimeConnectionPill', () => {
     route.answer = unreachable;
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
+    expect(screen.getAllByText(SETUP_SKILL_POINTER)).toHaveLength(1);
     const checkedSetup = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
     expect(checkedSetup).toBeChecked();
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();

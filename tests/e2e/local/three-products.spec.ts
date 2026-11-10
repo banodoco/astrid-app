@@ -2895,33 +2895,31 @@ function expectRawTransitionsCleared(actual: Record<string, any>, original: Reco
 async function expectRecordedTransitionClears(harness: DirectHarness, seed: ThreeProductsSeed,
   result: CommitAcceptedMutation, request: CommitRequest, original: Record<string, any>) {
   const records = (await history(harness, seed)).items.find((entry) => entry.publication_id === pinOf(result).publication_id)!.records!;
-  // The submitted fields must match the App's request exactly. The Runtime adds its own fields to the recorded command
-  // (authorship, bindings, expect, reads); those are split off and asserted on their own below, not compared loosely.
-  const recordedCommands = records.commands.map((record) => record.command as Record<string, any>);
-  expect(recordedCommands).toHaveLength(1);
-  const { authorship, bindings, expect: recordedGuards, reads: recordedReads, ...submitted } = recordedCommands[0];
-  expect(submitted).toEqual(request.commands[0]);
-  expect(submitted.args).toEqual(request.commands[0].args);
-  // The added fields are present; their exact values are not yet confirmed against the Runtime record (see report).
-  expect(authorship).toBeDefined();
-  expect(bindings).toBeDefined();
-  expect(recordedGuards).toBeDefined();
-  expect(recordedReads).toBeDefined();
-  // The Runtime recorded exactly one guarded doc.patch for the App's commit: select null, with the same removal changes.
-  // Each recorded change still targets the selected clips' transitions and nothing else.
   expect(records.commands).toHaveLength(1);
   const [recorded] = records.commands;
-  expect(recorded.command).toMatchObject({ op: 'doc.patch', select: null });
-  const requested = request.commands[0].args as { changes: unknown[] };
-  expect((recorded.command.args as { changes: unknown[] }).changes).toEqual(requested.changes);
-  // Each recorded change clears one clip's transition. The clip id comes from the change's identity-keyed path
-  // (['clips', 'id:<clipId>', 'transition']), and the record's writes show the transition cleared on that clip.
-  for (const change of requested.changes as Array<Record<string, any>>) {
-    const id = String(change.path[1]).slice('id:'.length);
-    expect(change.before).toEqual({ state: 'present', value: original[id].transition });
-    expect(recorded.writes).toContainEqual({ ref: `parent/clip:${id}`, path: ['transition'],
-      before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } });
+  // One guarded doc.patch, select null. Every field is pinned exactly. The removal mirrors the crossfade set in the M2
+  // record (items[1].records.commands[20]): op remove, the present value as precondition, direct authorship.
+  const requested = request.commands[0].args as { changes: Array<Record<string, any>> };
+  const ids = requested.changes.map((change) => String(change.path[1]).slice('id:'.length));
+  const guardKey = (id: string) => `parent/clip:${id}::transition`;
+  expect(recorded.command).toEqual({
+    schema_version: 1, op: 'doc.patch', version: '1', select: null,
+    args: { changes: requested.changes },
+    created: [], intent: {}, bindings: {}, resolved: [], selections: [],
+    authorship: Object.fromEntries(ids.map((id) => [guardKey(id), 'direct'])),
+    expect: Object.fromEntries(ids.map((id) => [guardKey(id), { state: 'present', value: original[id].transition }])),
+    reads: ids.map((id) => ({ path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } })),
+  });
+  // Each clip's transition is cleared, present -> absent, on that clip and nothing else.
+  expect(recorded.writes).toEqual(ids.map((id) => ({ ref: `parent/clip:${id}`, path: ['transition'],
+    before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } })));
+  // The record-level reads: the timeline read's digest and revision are run-specific, so only its path and ref are asserted.
+  expect(recorded.reads).toContainEqual(expect.objectContaining({ path: [], ref: 'timeline' }));
+  for (const id of ids) {
+    expect(recorded.reads).toContainEqual({ path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } });
   }
+  // The whole-array mirror of the clips, as in the crossfade set's record.
+  expect(recorded.derived_writes).toEqual([{ ref: 'parent', path: ['config', 'clips'] }]);
 }
 
 async function bulkTransitionNone(page: Page, seed: ThreeProductsSeed) {

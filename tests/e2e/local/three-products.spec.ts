@@ -2903,10 +2903,13 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
   expect(recorded.command).toMatchObject({ op: 'doc.patch', select: null });
   const requested = request.commands[0].args as { changes: unknown[] };
   expect((recorded.command.args as { changes: unknown[] }).changes).toEqual(requested.changes);
-  // The recorded removals still carry their original-value guards: each guard is the transition the clip had before.
+  // Each recorded change clears one clip's transition. The clip id comes from the change's identity-keyed path
+  // (['clips', 'id:<clipId>', 'transition']), and the record's writes show the transition cleared on that clip.
   for (const change of requested.changes as Array<Record<string, any>>) {
     const id = String(change.path[1]).slice('id:'.length);
     expect(change.before).toEqual({ state: 'present', value: original[id].transition });
+    expect(recorded.writes).toContainEqual({ ref: `parent/clip:${id}`, path: ['transition'],
+      before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } });
   }
 }
 

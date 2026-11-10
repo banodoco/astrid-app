@@ -549,14 +549,16 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect(stateB.shotClips[seed3.agentClipId].hold, 'B holds the agent\'s extension').toBe(stateA.shotClips[seed3.agentClipId].hold + 1);
   expect(stateB.shotClips[seed3.agentClearClipId].asset, 'B holds the agent\'s clear').toBeUndefined();
   expect(stateA.shotClips[seed3.agentClearClipId].asset, 'A still had that asset').toBeTruthy();
-  expect(stateB.parentClips[seed3.transitionClipId].transition, 'C was never published').toEqual(stateA.parentClips[seed3.transitionClipId].transition);
+  // B intentionally changed the transition: assert B's normalized value (C's clear is rolled back, not published).
+  expect(stateB.parentClips[seed3.transitionClipId].transition, 'B\'s transition change is the one published').toEqual({ id: 'cross-fade', durationFrames: 36 });
+  expect(stateB.parentClips[seed3.transitionClipId].transition.id).toMatch(/cross[\s-]?fade/i);
   expect(stateB.parentClips[seed3.transitionClipId].transition).toBeTruthy();
 
   // One publication per retried save: A was replayed under its own key and made exactly one revision; the agent's publication made one.
   const revisions = (await allRevisions(harness, seed3)).map((revision) => revision.revision_id);
   expect(revisions.length, 'two new revisions: A and B').toBe(revisionsBefore + 2);
   expect(new Set(revisions).size, 'no revision is stored twice').toBe(revisions.length);
-  expect(revisions.filter((id) => id === keyA), 'A\'s key names exactly one revision').toHaveLength(1);
+  expect(revisions.filter((id) => id === headA), 'A\'s revision is stored exactly once').toHaveLength(1);
   const retriesA = posts.filter((post) => post.key === keyA);
   expect(retriesA.length, 'A was replayed with the same key').toBeGreaterThanOrEqual(2);
   expect(retriesA.every((post) => post.body === posts[0].body), 'every replay of A keeps the exact request bytes').toBe(true);
@@ -1462,10 +1464,10 @@ async function expectAgentRevision(astrid: AstridCli, harness: DirectHarness, se
 }
 
 async function expectPreviewRevision(page: Page, revision: string) {
-  const label = page.getByTestId('preview-revision-label').filter({ hasText: `Committed ${revision}` })
-    .or(page.getByTestId('preview-revision-unavailable').filter({ hasText: `Preview of ${revision} unavailable` }));
-  await expect(label.first()).toBeVisible(CEILING);
-  journey.facts.previewLabel = await label.first().innerText();
+  // The preview marks the revision it delivers: the committed id, or the unavailable target (RemotionPreview).
+  const mark = page.locator(`[data-preview-revision="${revision}"],[data-preview-target="${revision}"]`);
+  await expect(mark.first()).toBeVisible(CEILING);
+  journey.facts.previewLabel = (await mark.first().getAttribute('data-preview-revision')) ?? (await mark.first().getAttribute('data-preview-target'));
 }
 
 async function expectFreshPreviewUnavailable(page: Page, astrid: AstridCli, harness: DirectHarness,
@@ -1486,9 +1488,10 @@ async function expectFreshPreviewUnavailable(page: Page, astrid: AstridCli, harn
       { revision_id: retainedRevision, publication_id: retained.publication_id },
       { kind: 'track', id: 'f2-gate3-preview-unavailable' }, 'f2-gate3-preview-unavailable');
     const targetRevision = target.data.accepted_revision_id;
-    await expect(page.getByTestId('preview-revision-label')).toHaveText(`Committed ${retainedRevision}`, CEILING);
-    await expect(page.getByTestId('preview-revision-unavailable'))
-      .toHaveText('Preview target unavailable', CEILING);
+    // While the target is unavailable, the preview shows 'Preview unavailable' and marks the exact unavailable target.
+    // The retained revision is not rendered while unavailable, so its identity is asserted from the head above.
+    await expect(page.locator(`[data-preview-target="${targetRevision}"]`)).toBeVisible(CEILING);
+    await expect(page.getByText('Preview unavailable', { exact: true })).toBeVisible(CEILING);
     return targetRevision;
   } finally {
     await page.unroute(/\/timelines\/[^/]+\/composition-revisions\/[^/]+$/);

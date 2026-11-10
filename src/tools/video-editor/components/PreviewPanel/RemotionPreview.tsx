@@ -654,6 +654,9 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
       style={VIDEO_EDITOR_THEME_VARS}
       onPointerMove={fullscreen ? (event) => { if (event.pointerType === 'mouse') wakeChrome(); } : undefined}
       {...(fullscreen ? { [PREVIEW_FULLSCREEN_ATTRIBUTE]: fullscreenMode } : {})}
+      // The delivered revision: the committed id, or the unavailable target's id. Inspection only; no visual change.
+      data-preview-revision={delivery.revision.kind === 'committed' ? delivery.revision.revisionId : undefined}
+      data-preview-target={delivery.revision.unavailableTarget?.targetRevisionId}
     >
       <PreviewAudioFailureNotice />
       {hasSourceTracks && !fullscreen && (

@@ -705,33 +705,36 @@ test.describe('restarts', () => {
     expect(response.json().runtime_instance_id).toBe(harness.runtimeInstanceId);
   });
 
-  test('App: an Astrid restart on a new port shows the restart card, and Reload reconnects with the draft kept', async ({ page, harness }) => {
+  test('App: an Astrid restart on a new port reloads by itself, and the draft is delivered only after its outbox bytes survive', async ({ page, harness }) => {
     await openApp(page, harness);
     await expectConnected(page);
     await openSeededTimeline(page, harness);
-    const releaseSaves = await holdTimelineSaves(page);
+    const headBefore = await currentHead(harness);
+    const hold = await holdTimelineSaves(page);
     await editFirstTrackName(page, 'Draft kept across the restart');
-    await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
+    await expect.poll(() => hold.requests.length, { timeout: 20_000 }).toBeGreaterThan(0);
+    const sentBody = hold.requests[0].postData()!;
+    const sentKey = hold.requests[0].headers()['idempotency-key'];
+    // A mark on this page: the App's own reload replaces the page and clears it.
+    await page.evaluate(() => { (window as unknown as { __beforeRestart: boolean }).__beforeRestart = true; });
 
-    // The Runtime comes back on a new port, and its door on the same fixed one.
+    // The Runtime comes back as a new instance on a new port. The App detects it and reloads by itself
+    // (RuntimeConnectionPill.tsx:64-72; draftSafeReload.ts:130-145 flushes and preserves the draft before navigating).
+    const instanceBefore = harness.runtimeInstanceId;
     await harness.restartRuntime();
-    await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toBeVisible({ timeout: 20_000 });
-    expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'the page does not reload by itself').toBe(true);
-    // One recovery path: the editor's own technical cards stay out of the way, and the save badge is neutral.
-    await expect(page.getByText('Workspace connection unavailable')).toHaveCount(0);
-    await expect(page.getByText('Reload needed')).toHaveCount(0);
-    await expect(page.getByText('Not saved', { exact: true })).toBeVisible();
-
-    await page.getByRole('button', { name: UI.reload }).click();
+    expect(harness.runtimeInstanceId, 'the Runtime came back as a new instance').not.toBe(instanceBefore);
+    await expect.poll(() => page.evaluate(() => (window as unknown as { __beforeRestart?: boolean }).__beforeRestart ?? false), { timeout: 60_000 }).toBe(false);
     await expectConnected(page);
     await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toHaveCount(0);
-    // The draft survives the reload: the editor offers it back as a recovered draft, and Save them saves it.
-    await openSeededTimeline(page, harness);
-    const recovered = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
-    await expect(recovered).toBeVisible();
-    const headBefore = await currentHead(harness);
-    await releaseSaves();
-    await recovered.getByRole('button', { name: 'Save them' }).click();
+
+    // Native recovery: the retained owner's outbox holds the exact bytes and key the old page sent, and nothing reached the
+    // Runtime yet. The recovery delivery is held by the same gate, so it cannot go before these bytes are verified.
+    await expect.poll(async () => (await commandOutboxes(page, harness.seed.timelineId))
+      .some((owner) => owner.pending?.request.body === sentBody && owner.pending?.request.key === sentKey), { timeout: 30_000 }).toBe(true);
+    expect(await currentHead(harness)).toBe(headBefore);
+
+    // Recovery delivery is allowed: the draft reaches the Runtime and the editor shows it.
+    await hold.release(true);
     await expect.poll(() => currentHead(harness), { timeout: 20_000 }).not.toBe(headBefore);
     await expect(firstTrackName(page)).toHaveValue('Draft kept across the restart');
   });

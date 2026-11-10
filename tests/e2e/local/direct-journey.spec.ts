@@ -1381,6 +1381,7 @@ test.describe('autostart-off card capture', () => {
     await expect(updates.getByText('Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.')).toHaveCount(1);
     await expect(updates.getByRole('button', { name: 'Copy instructions for your agent' })).toBeVisible();
     const png = await updates.screenshot();
+    mkdirSync(testInfo.outputDir, { recursive: true });
     writeFileSync(path.join(testInfo.outputDir, 'autostart-off-card.png'), png);
     await testInfo.attach('autostart-off-card', { body: png, contentType: 'image/png' });
   });

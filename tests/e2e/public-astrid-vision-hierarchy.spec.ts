@@ -57,6 +57,45 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
   }
 });
 
+test('pillar and principle detail scroll edges blur only when more content remains', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+
+  for (const subject of [content.pillars[0], content.principles[0]]) {
+    await page.getByRole('button', { name: 'Explore ' + subject.title + ': gaps and projects' }).click();
+    const dialog = page.getByRole('dialog', { name: subject.title });
+    const viewport = dialog.locator('.astrid-vision-details-scroll');
+    const top = dialog.locator('.astrid-vision-details-scroll-fade--top');
+    const bottom = dialog.locator('.astrid-vision-details-scroll-fade--bottom');
+
+    await expect(bottom).toHaveAttribute('data-visible', 'true');
+    await expect(top).not.toHaveAttribute('data-visible', 'true');
+    await expect(top).toHaveCSS('pointer-events', 'none');
+    await expect(bottom).toHaveCSS('pointer-events', 'none');
+
+    await viewport.evaluate(node => { node.scrollTop = (node.scrollHeight - node.clientHeight) / 2; });
+    await expect(top).toHaveAttribute('data-visible', 'true');
+    await expect(bottom).toHaveAttribute('data-visible', 'true');
+
+    await viewport.evaluate(node => { node.scrollTop = node.scrollHeight; });
+    await expect(bottom).not.toHaveAttribute('data-visible', 'true');
+    await expect(top).toHaveAttribute('data-visible', 'true');
+
+    await viewport.evaluate(node => { node.scrollTop = 0; });
+    await expect(top).not.toHaveAttribute('data-visible', 'true');
+    await expect(bottom).toHaveAttribute('data-visible', 'true');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
+  }
+});
+
 test('a dialog can be dismissed via its close button and returns focus to the card', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();

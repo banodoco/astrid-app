@@ -1,4 +1,4 @@
-import { useLayoutEffect, useId, useRef } from 'react';
+import { useLayoutEffect, useId, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ExternalLink, X } from 'lucide-react';
 import type { PublicVisionContent } from './publicVisionContent';
@@ -17,6 +17,9 @@ export function VisionDetailDialog({
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollContentRef = useRef<HTMLDivElement>(null);
+  const [scrollEdges, setScrollEdges] = useState({ top: false, bottom: false });
   const titleId = useId();
   const entry = subject.kind === 'pillar'
     ? content.pillars.find(pillar => pillar.id === subject.id)
@@ -31,6 +34,32 @@ export function VisionDetailDialog({
       titleRef.current?.focus({ preventScroll: true });
     }
   }, []);
+
+  // Show a fade only where scrollable content actually continues. Observe both the
+  // viewport and its content so expanded characteristics update the edges too.
+  useLayoutEffect(() => {
+    const viewport = scrollRef.current;
+    const inner = scrollContentRef.current;
+    if (!viewport || !inner) return;
+
+    const updateEdges = () => {
+      const remaining = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+      const top = remaining > 2 && viewport.scrollTop > 2;
+      const bottom = remaining > 2 && viewport.scrollTop < remaining - 2;
+      setScrollEdges(previous =>
+        previous.top === top && previous.bottom === bottom ? previous : { top, bottom });
+    };
+
+    viewport.addEventListener('scroll', updateEdges, { passive: true });
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateEdges);
+    observer?.observe(viewport);
+    observer?.observe(inner);
+    updateEdges();
+    return () => {
+      viewport.removeEventListener('scroll', updateEdges);
+      observer?.disconnect();
+    };
+  }, [content.source.revision, subject.id, subject.kind]);
 
   const backdropPointerRef = useRef<number | null>(null);
   const closeScheduledRef = useRef(false);
@@ -99,7 +128,9 @@ export function VisionDetailDialog({
             <X size={20} aria-hidden="true" />
           </button>
         </header>
-        <div className="astrid-vision-details-scroll">
+        <div className="astrid-vision-details-scroll-frame">
+          <div className="astrid-vision-details-scroll" ref={scrollRef}>
+            <div className="astrid-vision-details-scroll-inner" ref={scrollContentRef}>
           {entry.statement && entry.explanationMarkdown && entry.characteristics ? (
             <>
               <div className="astrid-vision-details-description">
@@ -176,6 +207,12 @@ export function VisionDetailDialog({
             </ul>
           )}
           </section>
+            </div>
+          </div>
+          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"
+            data-visible={scrollEdges.top || undefined} aria-hidden="true" />
+          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"
+            data-visible={scrollEdges.bottom || undefined} aria-hidden="true" />
         </div>
       </div>
     </dialog>

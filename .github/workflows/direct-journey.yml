@@ -30,12 +30,12 @@ on:
       runtime_ref:
         description: Full Runtime commit SHA or ref for both journey jobs
         required: true
-        default: "5453366458f7b4ee874c94d15ae7952e3e82d3c3"
+        default: "42ae24aff8d2cb854f874ce134161077a3ba3641"
         type: string
       agent_ref:
         description: Full Agent commit SHA or ref for both journey jobs
         required: true
-        default: "e425903f7a9fa5b82973281d15054c0716b46e2d"
+        default: "0f792afb1ec8205eeef177b1d5b415f2435c8370"
         type: string
 
 concurrency:
@@ -56,14 +56,14 @@ jobs:
         id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
+          ref: ${{ inputs.runtime_ref || '42ae24aff8d2cb854f874ce134161077a3ba3641' }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_ref || '0f792afb1ec8205eeef177b1d5b415f2435c8370' }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 
@@ -219,14 +219,14 @@ jobs:
         id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
+          ref: ${{ inputs.runtime_ref || '42ae24aff8d2cb854f874ce134161077a3ba3641' }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_ref || '0f792afb1ec8205eeef177b1d5b415f2435c8370' }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 

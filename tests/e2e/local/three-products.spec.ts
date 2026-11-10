@@ -597,10 +597,12 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
+  const postsBeforeRecoveryRetry = posts.length;
   await recovered.getByRole('button', { name: 'Save them' }).click();
   await expect(conflict).toBeVisible(CEILING);
   await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
-  expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
+  expect(await timelineDraft(page, seed3.timelineId)).toEqual(kept);
+  expect(posts, 'the retained refusal is resolved without recapturing or resubmitting it').toHaveLength(postsBeforeRecoveryRetry);
   expect(await currentHead(harness)).toBe(headB);
   await conflict.getByRole('button', { name: 'Use latest version' }).click();
   await expect(conflict).toHaveCount(0, CEILING);
@@ -2860,29 +2862,34 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
   // Each clip's transition is cleared, present -> absent, on that clip and nothing else.
   expect(recorded.writes).toEqual(ids.map((id) => ({ ref: `parent/clip:${id}`, path: ['transition'],
     before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } })));
-  // The clear's record reads, exactly, per cleared clip (run 42745357116's three-products log): the clip's id is present,
-  // its transition is present with the original value, and the parent has no pinnedShotGroups. None are run-specific.
-  expect(recorded.reads).toEqual(ids.flatMap((id) => [
+  // The atomic command records each clip's original id/transition, followed
+  // by the shared parent guard once (run 42840758126, both attempts).
+  expect(recorded.reads).toEqual([...ids.flatMap((id) => [
     { path: ['id'], ref: `parent/clip:${id}`, state: { state: 'present', value: id } },
     { path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } },
+  ]),
     { path: ['config', 'pinnedShotGroups'], ref: 'parent', state: { state: 'absent' } },
-  ]));
-  // The whole-array mirror of the clips, as in the crossfade set's record: exactly one derived write, at parent config.clips.
-  // Its before is the clips as the clear found them (each cleared clip still carries its transition), and its after is the
-  // head document's clips read after the save, so the mirror reflects the cleared state exactly.
-  expect(recorded.derived_writes).toHaveLength(1);
-  const [mirror] = recorded.derived_writes;
+  ]);
+  // Each removal records its whole-array mirror in order. Pin every before
+  // and after, including the intermediate state of an atomic bulk clear.
   const headBefore = (await revisionBody(harness, request.base_revision_id)).payload as Record<string, any>;
   const headAfter = (await revisionBody(harness, pinOf(result).revision_id)).payload as Record<string, any>;
-  // before and after are {state, value} objects in the Runtime's record, so each side is asserted exactly as that form:
-  // before is the clips at the base revision, after is the clips at the revision the clear made.
-  expect(mirror).toEqual({ ref: 'parent', path: ['config', 'clips'], cause: 0,
-    before: { state: 'present', value: headBefore.config.clips },
-    after: { state: 'present', value: headAfter.config.clips } });
+  let clips = structuredClone(headBefore.config.clips) as Array<Record<string, any>>;
+  const mirrors = ids.map((id) => {
+    const before = structuredClone(clips);
+    clips = structuredClone(clips);
+    const clip = clips.find((row) => row.id === id)!;
+    expect(clip.transition).toEqual(original[id].transition);
+    delete clip.transition;
+    return { ref: 'parent', path: ['config', 'clips'], cause: 0,
+      before: { state: 'present', value: before }, after: { state: 'present', value: clips } };
+  });
+  expect(recorded.derived_writes).toEqual(mirrors);
+  expect(clips).toEqual(headAfter.config.clips);
   for (const id of ids) {
-    const before = (mirror.before.value as Array<Record<string, any>>).find((clip) => clip.id === id);
+    const before = (headBefore.config.clips as Array<Record<string, any>>).find((clip) => clip.id === id);
     expect(before?.transition, `clip ${id} in the mirror's before keeps its transition`).toEqual(original[id].transition);
-    const after = (mirror.after.value as Array<Record<string, any>>).find((clip) => clip.id === id);
+    const after = clips.find((clip) => clip.id === id);
     expect(after, `clip ${id} in the mirror's after`).toBeDefined();
     expect(after, `clip ${id} in the mirror's after has no transition`).not.toHaveProperty('transition');
   }

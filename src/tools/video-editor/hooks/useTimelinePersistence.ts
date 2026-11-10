@@ -218,6 +218,8 @@ export interface UseTimelinePersistenceResult {
   discardUncommittedSaveTarget: (target: TimelineSaveTarget, error: unknown) => boolean;
   saveStatus: SaveStatus;
   isConflictExhausted: boolean;
+  /** Reopen resolution for a native refusal already retained in the recovered outbox. */
+  restoreRetainedConflict: () => void;
   schemaIncompatible: ReadonlyArray<TimelineSchemaIssue> | null;
   reloadFromServer: (options?: { clearDraft?: boolean; preserveDraft?: boolean }) => Promise<void>;
   retrySaveAfterConflict: () => Promise<void>;
@@ -409,6 +411,10 @@ export function useTimelinePersistence({
     isConflictExhaustedRef.current = true;
     setSaveStatus('error');
   }, []);
+
+  const restoreRetainedConflict = useCallback(() => {
+    handleConflictExhausted({ expectedVersion: configVersionRef.current, retries: 0, reason: 'max_retries' });
+  }, [configVersionRef, handleConflictExhausted]);
 
   const saveMutation = useMutation({
     mutationFn: ({
@@ -1782,6 +1788,7 @@ export function useTimelinePersistence({
     discardUncommittedSaveTarget,
     saveStatus,
     isConflictExhausted,
+    restoreRetainedConflict,
     schemaIncompatible,
     reloadFromServer,
     retrySaveAfterConflict,

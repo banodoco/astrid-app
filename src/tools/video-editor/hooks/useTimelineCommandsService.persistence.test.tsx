@@ -455,7 +455,7 @@ describe('mounted prepared-media command persistence', () => {
     }
   });
 
-  it('rolls back an accepted preview on conflict and Keep preserves the durable draft and original base', async () => {
+  it('keeps the native conflict draft through Keep, remount and Save them without recapturing or rebasing', async () => {
     const config = authoredConfig();
     const document = authoredDocument(config);
     const initial: TimelineCommandBasis = { head, canonicalDocument: document };
@@ -492,6 +492,7 @@ describe('mounted prepared-media command persistence', () => {
     provider.commitTimeline = send;
     const store = createTimelineStore();
     const mounted = renderHook(() => useMountedCommands(store, provider, initialData), { wrapper: wrapperFor(store, provider) });
+    let recovered: typeof mounted | undefined;
     try {
       await waitFor(() => expect(mounted.result.current.save.localSaveState).not.toBeNull());
       expect(mounted.result.current.save.localSaveState).toMatchObject({ status: 'saved', ownerId: expect.any(String) });
@@ -563,7 +564,39 @@ describe('mounted prepared-media command persistence', () => {
       expect(keptOwner.intents).toEqual(retained!.intents);
       expect(keptOwner.pending).toEqual(retained!.pending);
       expect(send).toHaveBeenCalledOnce();
+
+      // Reload the real retained owner against canonical B. Save them must
+      // reopen the durable refusal, never capture this draft as a new edit.
+      mounted.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const latestData = await buildTimelineData(latestConfig, initialData.registry, async (file) => file, 1, undefined,
+        { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'agent-r', headPublicationId: 'agent-p' });
+      const recoveredStore = createTimelineStore();
+      recovered = renderHook(() => useMountedCommands(recoveredStore, provider, latestData),
+        { wrapper: wrapperFor(recoveredStore, provider) });
+      await waitFor(() => expect(recovered!.result.current.save.localSaveState?.status).toBe('conflict'));
+      await waitFor(() => expect(recovered!.result.current.save.recoveryDraft?.retryAllowed).toBe(true));
+      expect(recovered.result.current.save.isConflictExhausted).toBe(false);
+      expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
+      const ownerBeforeRetry = (await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)!;
+      await act(async () => { await recovered!.result.current.save.retryRecoveredDraft(); });
+      expect(recovered.result.current.save.isConflictExhausted).toBe(true);
+      expect(recovered.result.current.save.recoveryDraft).toBeNull();
+      expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
+      expect((await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)).toEqual(ownerBeforeRetry);
+      expect(send).toHaveBeenCalledOnce();
+      expect(recovered.result.current.save.dataRef.current?.config.clips).toEqual(latestData.config.clips);
+
+      // Use latest is the explicit discard; it clears the slot and conflict
+      // without publishing the retained edit over the other writer.
+      await act(async () => { await recovered!.result.current.save.reloadFromServer({ clearDraft: true }); });
+      expect(recovered.result.current.save.isConflictExhausted).toBe(false);
+      expect(recovered.result.current.save.recoveryDraft).toBeNull();
+      expect(await loadTimelineDraft(scope.timelineId)).toBeNull();
+      expect(recovered.result.current.save.dataRef.current?.config.clips).toEqual(latestData.config.clips);
+      expect(send).toHaveBeenCalledOnce();
     } finally {
+      recovered?.unmount();
       mounted.unmount();
       await new Promise((resolve) => setTimeout(resolve, 0));
     }

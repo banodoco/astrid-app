@@ -285,7 +285,7 @@ export function installCommand(mode: CommandMode, choices?: SetupChoices, explic
 }
 
 const SETUP_GUIDE_URL = 'https://github.com/banodoco/astrid-agent/blob/main/docs/setup/SKILL.md';
-const SETUP_SKILL_POINTER = `Read the \`astrid-setup\` skill: ${SETUP_GUIDE_URL}`;
+export const SETUP_SKILL_POINTER = `Read the \`astrid-setup\` skill: ${SETUP_GUIDE_URL}`;
 
 /** The two ways to update, since this page can't tell an installer install from source checkouts. */
 export const UPDATE_ROUTES = {

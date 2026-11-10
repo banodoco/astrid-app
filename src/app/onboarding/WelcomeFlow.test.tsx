@@ -4,6 +4,7 @@ import { finishEditorTour } from '@/tools/video-editor/tour/runner/tourBeats';
 import { registerBrowserTourFinish } from '@/tools/video-editor/tour/runner/tourBeats';
 import { startEditorTour, setEditorTourBeat, getEditorTourState } from '@/shared/state/editorTourStore';
 import { useEffect } from 'react';
+import { SETUP_SKILL_POINTER } from '@/shared/components/RuntimeConnection/copy.ts';
 const spies = vi.hoisted(() => ({ record: vi.fn(), connected: vi.fn() }));
 vi.mock('@/tools/video-editor/tour/runner/tourRecord', () => ({ recordEditorTour: spies.record, buildEditorTourRecord: vi.fn() }));
 vi.mock('./BrowserTourEditor', () => ({ BrowserTourEditor: ({onFinish, atEnd = false}: {onFinish:()=>void; atEnd?: boolean}) => {
@@ -18,7 +19,7 @@ vi.mock('./BrowserTourEditor', () => ({ BrowserTourEditor: ({onFinish, atEnd = f
 } }));
 vi.mock('./WelcomeConnection', () => ({ default: ({ onBack }: { onBack: () => void }) => { spies.connected(); return <><h1>Connect your machine</h1><button onClick={onBack}>Back</button></>; } }));
 vi.mock('./WelcomeRunMode', () => ({ WelcomeRunMode: ({ onContinue, runMode, setRunMode }: { onContinue: (phase: 'setup') => void; runMode: 'hosted' | 'local'; setRunMode: (mode: 'hosted' | 'local') => void }) => <><h1>How do you want to run the app?</h1><button onClick={() => { setRunMode('hosted'); onContinue('setup'); }}>Connect</button><button onClick={() => { setRunMode('local'); onContinue('setup'); }}>Local</button><span>{runMode}</span></> }));
-vi.mock('./WelcomeLocalSetup', () => ({ WelcomeLocalSetup: ({ onBack, onContinue }: { onBack: () => void; onContinue?: () => void }) => <><h1>Have your agent set it up</h1><span>npm run dev:local</span><button onClick={onContinue}>Continue to Astrid</button><button onClick={onBack}>Back</button></> }));
+vi.mock('./WelcomeLocalSetup', async () => await vi.importActual<typeof import('./WelcomeLocalSetup')>('./WelcomeLocalSetup'));
 import { WelcomeFlow } from './WelcomeFlow';
 beforeEach(() => {
   localStorage.clear(); sessionStorage.clear(); spies.record.mockClear(); spies.connected.mockClear();
@@ -50,6 +51,7 @@ it('moves from the choice to local setup or connection and back', async () => {
   render(<WelcomeFlow entry="choose" />);
   fireEvent.click(screen.getByText('Local'));
   expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
+  expect(screen.getAllByText(SETUP_SKILL_POINTER)).toHaveLength(1);
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('setup');
   fireEvent.click(screen.getByText('Back'));
   expect(await screen.findByText('How do you want to run the app?')).toBeInTheDocument();

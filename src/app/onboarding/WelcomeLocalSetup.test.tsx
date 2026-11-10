@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, PINOKIO_INSTALL_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, PINOKIO_INSTALL_COPY, SETUP_SKILL_POINTER } from '@/shared/components/RuntimeConnection/copy.ts';
 import { WelcomeLocalSetup } from './WelcomeLocalSetup.tsx';
 
 beforeEach(() => {
@@ -12,6 +12,7 @@ afterEach(() => { cleanup(); vi.restoreAllMocks(); });
 describe('local setup card', () => {
   it('copies instructions and shows copied feedback', async () => {
     render(<WelcomeLocalSetup onBack={vi.fn()} />);
+    expect(screen.getAllByText(SETUP_SKILL_POINTER)).toHaveLength(1);
     fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
     expect(await screen.findByRole('button', { name: 'Copied. Paste them into your agent.' })).toBeInTheDocument();
     expect(navigator.clipboard.writeText).toHaveBeenCalledWith(localSetupInstructions());

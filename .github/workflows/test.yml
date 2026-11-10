@@ -34,7 +34,8 @@ jobs:
   # Pull requests run only release-guard above; the rest of this workflow runs on push as before.
   vitest:
     if: ${{ github.event_name != 'pull_request' }}
-    runs-on: ubuntu-latest
+    # Pinned: Playwright does not support Chromium on ubuntu-latest (ubuntu 26.04) for this job.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:

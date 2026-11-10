@@ -64,6 +64,7 @@ describe('useTimelineSave stable occurrence recovery', () => {
     };
     recovery.persistence = {
       scheduleSave: vi.fn(), resumeDeferredRecoverySave: vi.fn(), clearDeferredRecoverySave: vi.fn(),
+      isTimelineSavePending: vi.fn(() => false),
       flushPendingSave: vi.fn(async () => 1), saveStatus: 'saved', isConflictExhausted: false,
       schemaIncompatible: null, isSavingRef: { current: false }, reloadFromServer: vi.fn(),
       retrySaveAfterConflict: vi.fn(), watchdogTripped: false, watchdogReason: null,
@@ -113,6 +114,7 @@ describe('useTimelineSave stable occurrence recovery', () => {
       scheduleSave: vi.fn(),
       resumeDeferredRecoverySave: vi.fn(),
       clearDeferredRecoverySave: vi.fn(),
+      isTimelineSavePending: vi.fn(() => false),
       flushPendingSave: vi.fn(async () => 1),
       saveStatus: 'saved',
       isConflictExhausted: false,

@@ -226,6 +226,8 @@ export function createFakeRuntimeRouter(options: FakeRuntimeRouterOptions = {}):
     });
   }
 
+const ADMITTED_CLASSIFICATION = { is_generation: false, is_root: true, version: 1 } as const;
+
   let eventSequence = options.eventSequenceStart ?? 0;
   function emitTaskEvent(taskId: string, eventType: string, payload: Record<string, unknown>): void {
     eventSequence += 1;
@@ -341,7 +343,8 @@ export function createFakeRuntimeRouter(options: FakeRuntimeRouterOptions = {}):
     state.admittedByTaskId.set(readModel.id, readModel);
     state.receipts.set(rawKey, serializedBody);
     state.receiptTasks.set(rawKey, readModel.id);
-    emitTaskEvent(readModel.id, 'task.admitted', { capability: parsed.data.capability_id });
+    // The recorded daemon admits every task with this classification object (events_page_1_200).
+    emitTaskEvent(readModel.id, 'task.admitted', { capability: parsed.data.capability_id, classification: ADMITTED_CLASSIFICATION });
 
     const payload = { task: readModel };
     // Round-trip through the schema: a fixture that stops matching the
@@ -506,7 +509,8 @@ export function createFakeRuntimeRouter(options: FakeRuntimeRouterOptions = {}):
     state.admittedByTaskId.set(readModel.id, neutralReadModel);
     state.receipts.set(rawKey, serializedBody);
     state.receiptTasks.set(rawKey, readModel.id);
-    emitTaskEvent(readModel.id, 'task.admitted', { capability: parsed.data.capability_id });
+    // The recorded daemon admits every task with this classification object (events_page_1_200).
+    emitTaskEvent(readModel.id, 'task.admitted', { capability: parsed.data.capability_id, classification: ADMITTED_CLASSIFICATION });
     const resource = runtimeTaskResource(readModel.id, body);
     return json(201, { data: resource, receipt: runtimeReceipt('task.create', rawKey, taskCreateReceiptResult(resource)) });
   }

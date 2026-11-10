@@ -135,11 +135,11 @@ test.describe('zero-click connection (App)', () => {
       await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
       const panel = page.locator(UI.panel);
       await expect(panel).toBeVisible();
-      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh');
+      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await panel.getByRole('button', { name: UI.copy }).click();
       await expect(panel.getByRole('button', { name: 'Command copied' })).toBeVisible();
       const copied = await page.evaluate(() => navigator.clipboard.readText());
-      expect(copied).toBe('curl -fsSL https://astrid.haus/install | sh');
+      expect(copied).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await harness.startRuntime();
       await expect(page.locator(UI.status)).toHaveAttribute('data-state', 'connected', { timeout: 20_000 });
       // The card shows that it worked, then leaves by itself once the editor beneath has opened.
@@ -226,7 +226,7 @@ test.describe('first time and returning panels (App)', () => {
       await expect(panel).toBeVisible();
       await expect(panel.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeVisible();
       await expect(panel.getByText("Your coding agent can start it, or install it if it isn't there yet.")).toBeVisible();
-      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh');
+      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await expect(panel.getByRole('button', { name: UI.copy })).toBeVisible();
 
       await harness.startRuntime();
@@ -237,7 +237,7 @@ test.describe('first time and returning panels (App)', () => {
       await expect(panel.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeVisible();
       await expect(panel.getByText("Your coding agent can start it, or install it if it isn't there yet.")).toBeVisible();
       await expect(panel.getByRole('button', { name: UI.copy })).toBeVisible();
-      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh');
+      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await expect(panel.getByText('Set up Astrid on this computer')).toHaveCount(0);
     } finally {
       await harness.resetToHealthy();

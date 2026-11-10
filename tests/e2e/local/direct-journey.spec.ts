@@ -515,13 +515,17 @@ test.describe('core journey', () => {
     });
     const draft = commit('First writer draft', base); // held by the caller
 
-    const second = await harness.runtimeJson<{ data: { accepted_revision_id: string }; receipt: { receipt_id: string } }>('POST', `/v1/projects/${projectId}/timelines/${timelineId}/commit`, commit('Second writer', base));
+    // A unique competing label: a label a sibling already left would be a no-op that Runtime merges (200, not a conflict).
+    const second = await harness.runtimeJson<{ data: { accepted_revision_id: string }; receipt: { receipt_id: string } }>('POST', `/v1/projects/${projectId}/timelines/${timelineId}/commit`, commit(`Hosted second writer ${randomUUID()}`, base));
     expect(second.status).toBe(200);
     const secondHead = { revision_id: second.body.data.accepted_revision_id, publication_id: second.body.receipt.receipt_id };
+    expect(secondHead.revision_id).not.toBe(base.revision_id);
 
     const refused = await pageFetch(page, commitUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: JSON.stringify(draft) });
     expect(refused.status).toBe(409);
-    expect(json(refused).details).toMatchObject({ reason: 'stale_head', current: { revision_id: secondHead.revision_id } });
+    // The native conflict envelope: the track label is the conflicting address, and the current head is the second writer's.
+    expect(json(refused).details).toMatchObject({ status: 'conflict', current: { revision_id: secondHead.revision_id } });
+    expect(json(refused).details.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ ref: 'parent/track:V1', path: expect.arrayContaining(['label']) })]));
     // Nothing of the draft reached the Runtime; the draft object itself is untouched for a retry.
     expect(await currentHead(harness)).toBe(secondHead.revision_id);
     expect(draft.base_revision_id).toBe(base.revision_id);

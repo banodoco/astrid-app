@@ -105,6 +105,11 @@ export const DIAGNOSTICS_FALLBACK_COPY = {
 export const ASTRID_REPO_URL = 'https://github.com/banodoco/astrid-app';
 const LOCAL_SETUP_DIRECTORY = 'astrid-app';
 
+/** A short agent handoff for setting up image generation with the installed skill. */
+export function setUpGenerationInstructions(): string {
+  return 'Please set up image generation using the installed generation skill. Follow its “Set up my generation” instructions: https://github.com/banodoco/astrid-agent/blob/main/astrid/packs/generation/docs/SKILL.md#set-up-my-generation';
+}
+
 /** The fully local setup: the editor's source, how to start it, and where it serves. */
 export const LOCAL_SETUP = {
   repoUrl: ASTRID_REPO_URL,

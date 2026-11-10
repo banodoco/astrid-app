@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
+import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, setUpGenerationInstructions, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -93,6 +93,13 @@ describe('update handoff', () => {
 });
 
 describe('onboarding instructions', () => {
+  it('names the installed generation skill and its setup section', () => {
+    const text = setUpGenerationInstructions();
+    expect(text).toContain('generation');
+    expect(text).toContain('https://github.com/banodoco/astrid-agent/blob/main/astrid/packs/generation/docs/SKILL.md#set-up-my-generation');
+    expect(text).not.toContain('Setup choices:');
+  });
+
   it.each(['install', 'update'] as const)('ends %s instructions with the same browser handoff', mode => {
     const text = agentInstructions(mode, 'https://astrid.haus');
     expect(text).toContain('If the installer couldn\'t open a browser, open https://astrid.haus/?connect=1.');

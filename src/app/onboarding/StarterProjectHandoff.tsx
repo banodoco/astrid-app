@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { CardDisclosure, EditorCard } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
 import { EditorCardLayer } from '@/shared/components/RuntimeConnection/EditorCardLayer.tsx';
+import { setUpGenerationInstructions, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { useRuntimeRequestWait } from '@/integrations/runtime/useRuntimeRequestWait.ts';
 import { prepareStarterProject, type StarterProjectSelection } from './prepareStarterProject.ts';
 
@@ -40,6 +41,7 @@ export function StarterProjectHandoff({ onReady, onContinueWithoutProject }: {
   const [intentId] = useState(projectIntent);
   const [attempt, setAttempt] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [generationCopyState, setGenerationCopyState] = useState<'ready' | 'copied' | 'failed'>('ready');
   const onReadyRef = useRef(onReady);
   onReadyRef.current = onReady;
   const pending = useRef<{ controller: AbortController; result: Promise<StarterProjectSelection> } | null>(null);
@@ -73,6 +75,14 @@ export function StarterProjectHandoff({ onReady, onContinueWithoutProject }: {
   };
   const state = error ? 'error' : stillWaiting ? 'waiting' : 'opening';
   const archivedOnly = error === 'Your only project is archived. Unarchive it or create a new one in the editor.';
+  const copyGenerationInstructions = async () => {
+    try {
+      await navigator.clipboard.writeText(setUpGenerationInstructions());
+      setGenerationCopyState('copied');
+    } catch {
+      setGenerationCopyState('failed');
+    }
+  };
   return <main aria-label="Opening your project">
     <EditorCardLayer cardKey={state}>
       <EditorCard title={error ? "Couldn't open your project" : stillWaiting ? 'Still getting your project ready' : 'Opening your project…'}
@@ -86,6 +96,14 @@ export function StarterProjectHandoff({ onReady, onContinueWithoutProject }: {
             {onContinueWithoutProject && <Button className="h-11 w-full rounded-xl" variant="outline" onClick={() => { cancelAttempt(); onContinueWithoutProject(); }}>Open editor</Button>}
           </div>
         </div>}
+        <section className="mt-4 rounded-xl border border-border/70 bg-muted/30 p-4 text-left">
+          <h2 className="font-medium">Set up image generation</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Ask your agent to set up generation on this computer.</p>
+          <Button className="mt-3 h-10 w-full rounded-xl" variant="outline" onClick={copyGenerationInstructions}>
+            {generationCopyState === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : RUNTIME_CONNECTION_COPY.agent.copy}
+          </Button>
+          {generationCopyState === 'failed' && <p role="status" className="mt-2 text-sm text-muted-foreground">Copying didn&apos;t work. Please copy the setup instructions from the generation skill.</p>}
+        </section>
       </EditorCard>
     </EditorCardLayer>
   </main>;

@@ -3,12 +3,26 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StarterProjectHandoff, PENDING_STARTER_PROJECT_KEY } from './StarterProjectHandoff.tsx';
 import { prepareStarterProject, type StarterProjectSelection } from './prepareStarterProject.ts';
+import { setUpGenerationInstructions } from '@/shared/components/RuntimeConnection/copy.ts';
 
 vi.mock('./prepareStarterProject.ts', () => ({ prepareStarterProject: vi.fn() }));
 const selection = { projectId: 'project', timelineId: 'main' };
-beforeEach(() => { localStorage.clear(); vi.mocked(prepareStarterProject).mockReset(); });
+beforeEach(() => {
+  localStorage.clear();
+  vi.mocked(prepareStarterProject).mockReset();
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: vi.fn().mockResolvedValue(undefined) } });
+});
 
 describe('StarterProjectHandoff', () => {
+  it('offers generation setup instructions to copy for an agent', async () => {
+    vi.mocked(prepareStarterProject).mockReturnValue(new Promise(() => {}));
+    render(<StarterProjectHandoff onReady={vi.fn()} />);
+    expect(screen.getByRole('heading', { name: 'Set up image generation' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
+    await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(setUpGenerationInstructions()));
+    expect(await screen.findByRole('button', { name: 'Copied. Paste them into your agent.' })).toBeInTheDocument();
+  });
+
   it('shares the in-flight attempt through StrictMode and completes once', async () => {
     let resolve!: (value: StarterProjectSelection) => void;
     vi.mocked(prepareStarterProject).mockReturnValue(new Promise(done => { resolve = done; }));

@@ -911,7 +911,14 @@ export function useTimelineTrackManagement({
       ...resolvedConfig,
       tracks: resolvedConfig.tracks.map((track) => (track.id === trackId ? { ...track, ...patch } : track)),
     };
-    applyEdit({ type: 'config', resolvedConfig: nextConfig }, { selectedTrackId: trackId });
+    // A label-only rename is a causal parent gesture: it binds this one authored track, so a timeline with child shots can
+    // commit it (timelineLocalSaveHandoff.ts 'track-label'). Any other field still needs its own gesture.
+    const current = dataRef.current;
+    const labelOnly = typeof patch.label === 'string' && Object.keys(patch).length === 1;
+    const gestureBasis = labelOnly && current
+      ? structuredClone({ kind: 'track-label' as const, trackId, label: patch.label!, config: current.config, registry: current.registry })
+      : undefined;
+    applyEdit({ type: 'config', resolvedConfig: nextConfig }, { selectedTrackId: trackId, ...(gestureBasis ? { gestureBasis } : {}) });
   }, [applyEdit, resolvedConfig]);
 
   const handleMoveTrack = useCallback((activeId: string, overId: string, lanes?: readonly DataLaneView[]) => {

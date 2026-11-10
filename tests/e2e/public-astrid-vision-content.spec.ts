@@ -33,7 +33,7 @@ test('vision displays the GitHub-published pillars and operating principles', as
   const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await expect(page.locator('main.astrid-vision')).toBeVisible();
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Vision');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText(content.vision.title);
   const pillars = page.locator('.astrid-vision-principles h3');
   await expect(pillars).toHaveCount(content.pillars.length);
   for (const [index, pillar] of content.pillars.entries()) {
@@ -153,30 +153,36 @@ test('phone status controls stay right-aligned under descriptions and within hal
   }
 });
 
-test('all editorial section headers share a consistent divider and title system', async ({ page }) => {
+test('every chapter, Help us included, opens with one shared rule, pixel eyebrow and title', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  const sections = page.locator('.astrid-vision-north-star, .astrid-vision-standards, .astrid-vision-parts, .astrid-vision-projects');
-  await expect(sections).toHaveCount(4);
-  const headers = sections.locator('.astrid-vision-section-head');
-  await expect(headers).toHaveCount(4);
-  const styles = await headers.evaluateAll(elements => elements.map(element => {
+  const heads = page.locator('.astrid-vision-north-star > .astrid-vision-section-head, .astrid-vision-standards > .astrid-vision-section-head, .astrid-vision-parts > .astrid-vision-section-head, .astrid-vision-projects > .astrid-vision-section-head, .astrid-vision-contribute');
+  await expect(heads).toHaveCount(5);
+  const styles = await heads.evaluateAll(elements => elements.map(element => {
     const css = getComputedStyle(element);
+    const eyebrow = element.querySelector('.astrid-vision-eyebrow')!;
+    const box = element.getBoundingClientRect();
     return {
-      borderStyle: css.borderBottomStyle,
-      borderWidth: css.borderBottomWidth,
-      borderColor: css.borderBottomColor,
-      padding: css.paddingBottom,
+      topStyle: css.borderTopStyle,
+      topWidth: css.borderTopWidth,
+      topColor: css.borderTopColor,
+      bottomWidth: css.borderBottomWidth,
+      paddingTop: css.paddingTop,
       headingSize: getComputedStyle(element.querySelector('h2')!).fontSize,
-      childParagraphs: element.querySelectorAll(':scope > p').length,
-      x: element.getBoundingClientRect().left,
+      eyebrowFont: getComputedStyle(eyebrow).fontFamily,
+      eyebrowIndex: getComputedStyle(eyebrow, '::before').content,
+      x: box.left,
+      width: box.width,
     };
   }));
-  expect(styles.every(s => s.borderStyle === 'solid' && s.borderWidth === '1px' && s.childParagraphs === 1)).toBeTruthy();
-  expect(new Set(styles.map(s => s.borderColor)).size).toBe(1);
-  expect(new Set(styles.map(s => s.padding)).size).toBe(1);
+  expect(styles.every(s => s.topStyle === 'solid' && s.topWidth === '1px' && s.bottomWidth === '0px')).toBeTruthy();
+  expect(new Set(styles.map(s => s.topColor)).size).toBe(1);
+  expect(new Set(styles.map(s => s.paddingTop)).size).toBe(1);
   expect(new Set(styles.map(s => s.headingSize)).size).toBe(1);
+  expect(styles.every(s => s.eyebrowFont.includes('Departure Mono'))).toBeTruthy();
+  expect(styles.map(s => s.eyebrowIndex)).toEqual(['"02"', '"03"', '"04"', '"05"', '"06"']);
   expect(Math.max(...styles.map(s => s.x)) - Math.min(...styles.map(s => s.x))).toBeLessThan(2);
+  expect(Math.max(...styles.map(s => s.width)) - Math.min(...styles.map(s => s.width))).toBeLessThan(2);
 });
 
 test('hero keeps the vision narrative separate from website source attribution', async ({ page, request }) => {
@@ -349,7 +355,7 @@ test('different valid feed content renders without rebuilding the app', async ({
     headers: { 'access-control-allow-origin': '*' },
   }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Vision');
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Dynamic source title');
   await expect(page.locator('.astrid-vision-lead')).toContainText('A new published ambition');
 });
 

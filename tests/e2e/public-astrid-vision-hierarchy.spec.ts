@@ -406,7 +406,7 @@ test('every joined principle, including interior cards without physical left bor
 });
 
 
-test('principle arrow is a subtle boxed control in the bottom-right corner at every layout width', async ({ page, request }) => {
+test('principle details cue sits bottom-left on the copy edge, with the sigil on the right, at every layout width', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json();
@@ -423,18 +423,22 @@ test('principle arrow is a subtle boxed control in the bottom-right corner at ev
       const arrow = card.locator('.astrid-vision-principle-corner');
       const cardBounds = await card.boundingBox();
       const arrowBounds = await arrow.boundingBox();
+      const titleBounds = await card.locator('h3').boundingBox();
+      const sigilBounds = await card.locator('.astrid-vision-principle-sigil').boundingBox();
       expect(cardBounds).not.toBeNull();
       expect(arrowBounds).not.toBeNull();
-      expect(cardBounds!.x + cardBounds!.width - (arrowBounds!.x + arrowBounds!.width))
-        .toBeGreaterThanOrEqual(12);
-      expect(cardBounds!.x + cardBounds!.width - (arrowBounds!.x + arrowBounds!.width))
-        .toBeLessThan(27);
+      // Same left edge as the title, close to the card's bottom edge.
+      expect(Math.abs(arrowBounds!.x - titleBounds!.x)).toBeLessThan(2);
       expect(cardBounds!.y + cardBounds!.height - (arrowBounds!.y + arrowBounds!.height))
         .toBeGreaterThanOrEqual(12);
       expect(cardBounds!.y + cardBounds!.height - (arrowBounds!.y + arrowBounds!.height))
-        .toBeLessThan(27);
-      await expect(arrow).toHaveCSS('border-top-width', '1px');
-      await expect(arrow).toHaveCSS('position', 'relative');
+        .toBeLessThan(32);
+      // The sigil owns the right-hand column and is vertically centred in the card.
+      expect(sigilBounds!.x).toBeGreaterThan(titleBounds!.x + titleBounds!.width - 1);
+      const sigilMid = sigilBounds!.y + sigilBounds!.height / 2;
+      expect(Math.abs(sigilMid - (cardBounds!.y + cardBounds!.height / 2))).toBeLessThan(cardBounds!.height * .2);
+      await expect(arrow).toHaveText(/Details/i);
+      await expect(arrow).toHaveCSS('border-top-width', '0px');
       // A single full-card button remains the actual keyboard-accessible hit area.
       await expect(card.getByRole('button', { name: /Explore .*: gaps and projects/ })).toHaveCount(1);
     }

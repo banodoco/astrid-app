@@ -1806,130 +1806,195 @@
   background: transparent;
 }
 
-/* Pillars form a deliberate four-up portrait sequence on wide screens:
-   number → ambition → short claim → animated illustration → small detail cue.
-   The art shares a baseline across cards, rather than creating random gaps. */
+/* ------------------------------------------------------------------------
+   Page system. One rule opens every chapter, the pixel face carries every
+   small "system" label (indices, eyebrows, statuses, cues) at its native
+   11px, serif carries headings and Inter carries reading text.
+   ------------------------------------------------------------------------ */
+.astrid-vision {
+  --astrid-vision-pixel: "Departure Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  --astrid-vision-rule: color-mix(in oklab, var(--astrid-ink) 20%, transparent);
+}
+.astrid-vision .astrid-vision-eyebrow,
+.astrid-vision .astrid-vision-section-head .astrid-vision-eyebrow,
+.astrid-vision-details-eyebrow {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  color: var(--astrid-accent);
+  font: 400 11px/1.4 var(--astrid-vision-pixel);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.astrid-vision .astrid-vision-eyebrow[data-index]::before {
+  content: attr(data-index);
+  opacity: .55;
+}
+/* The rule sits above each chapter, not between a heading and its own content. */
+.astrid-vision .astrid-vision-section-head {
+  margin-bottom: clamp(28px, 3vw, 40px);
+  padding-top: clamp(18px, 2vw, 22px);
+  padding-bottom: 0;
+  border-top: 1px solid var(--astrid-vision-rule);
+  border-bottom: 0;
+}
+.astrid-vision .astrid-vision-section-head .astrid-vision-eyebrow { margin-bottom: clamp(18px, 2vw, 26px); }
+.astrid-vision .astrid-vision-context-row { margin-top: calc(-1 * clamp(8px, 1vw, 14px)); }
+/* Help us is a chapter too: same width, same opening rule, same eyebrow. */
+.astrid-vision .astrid-vision-contribute {
+  max-width: none;
+  padding-top: clamp(18px, 2vw, 22px);
+  border-top: 1px solid var(--astrid-vision-rule);
+}
+.astrid-vision .astrid-vision-contribute .astrid-vision-eyebrow { margin-bottom: clamp(18px, 2vw, 26px); }
+.astrid-vision-end { border-top-color: var(--astrid-vision-rule); }
+/* Small system labels that had drifted to the platform monospace. */
+.astrid-vision-details-project-heading span { font-family: var(--astrid-vision-pixel); }
+
+/* Hero: the authored vision title is a sentence, so it sits a step smaller. */
+.astrid-vision-manifesto h1 {
+  max-width: 23ch;
+  font-size: clamp(34px, 4vw, 56px);
+  line-height: 1.04;
+  letter-spacing: -0.04em;
+}
+.astrid-vision-hero-copy > .astrid-vision-eyebrow { margin-bottom: clamp(18px, 2vw, 26px); }
+
+/* A lighter sticky bar so the sky reads through it. */
+.astrid-vision > .astrid-vision-bar {
+  border-bottom-color: color-mix(in oklab, var(--astrid-line) 55%, transparent);
+  background: color-mix(in oklab, var(--astrid-paper) 62%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  backdrop-filter: blur(14px) saturate(1.2);
+}
+
+/* Both card types share one quiet cue: pixel "Details ↗", bottom-left,
+   on the same edge as the copy above it. */
+.astrid-vision .astrid-vision-pillar-details,
+.astrid-vision .astrid-vision-principle-corner {
+  position: relative;
+  inset: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  font: 400 11px/1 var(--astrid-vision-pixel);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  justify-self: start;
+  align-self: end;
+}
+.astrid-vision .astrid-vision-pillar-details .astrid-vision-card-arrow { margin-left: 0; }
+.astrid-vision .astrid-vision-card-arrow,
+.astrid-vision .astrid-vision-card-arrow svg { width: 14px; height: 14px; }
+@media (hover: hover) and (pointer: fine) {
+  .astrid-vision .astrid-vision-principles > li:hover .astrid-vision-pillar-details { font-weight: 400; }
+}
+
+/* Pillars: index → illustration on its own tinted stage → claim → cue.
+   The stage has a fixed height, so every title starts on the same line. */
+.astrid-vision .astrid-vision-principles { gap: clamp(12px, 1.4vw, 18px); }
 .astrid-vision .astrid-vision-principles > li {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: auto auto auto minmax(16px, 1fr) auto auto;
+  grid-template-rows: auto auto auto 1fr auto;
   align-content: start;
   min-width: 0;
-  min-height: 438px;
-  padding: clamp(17px, 1.65vw, 23px);
+  min-height: 0;
+  padding: clamp(14px, 1.3vw, 18px) clamp(14px, 1.3vw, 18px) clamp(18px, 1.8vw, 22px);
 }
 .astrid-vision .astrid-vision-principles .astrid-vision-pillar-number {
-  grid-column: 1;
   grid-row: 1;
-  margin-bottom: 13px;
+  margin: 0 0 10px 4px;
+  font: 400 11px/1.4 var(--astrid-vision-pixel);
+  letter-spacing: .08em;
 }
-.astrid-vision .astrid-vision-principles h3 {
-  grid-column: 1;
+.astrid-vision-pillar-stage {
   grid-row: 2;
-  max-width: none;
-  margin-bottom: 12px;
-  font-size: clamp(22px, 1.9vw, 26px);
-  line-height: 1.16;
-}
-.astrid-vision .astrid-vision-principles li > p {
-  grid-column: 1;
-  grid-row: 3;
-  min-width: 0;
-  max-width: none;
-  font-size: 15px;
-  line-height: 1.52;
+  display: grid;
+  place-items: end center;
+  height: clamp(168px, 15vw, 196px);
+  margin-bottom: clamp(18px, 1.8vw, 22px);
+  padding-bottom: 14px;
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--tone-ink) 9%, transparent);
 }
 .astrid-vision .astrid-vision-principles .astrid-vision-principle-art {
-  --px: 1.45px;
-  grid-column: 1;
-  grid-row: 5;
+  --px: 2px;
+  grid-row: auto;
+  grid-column: auto;
   align-self: end;
   justify-self: center;
   margin: 0;
 }
+.astrid-vision .astrid-vision-principles h3 {
+  grid-row: 3;
+  max-width: none;
+  margin: 0 4px 10px;
+  font-size: clamp(22px, 1.9vw, 26px);
+  line-height: 1.14;
+}
+.astrid-vision .astrid-vision-principles li > p {
+  grid-row: 4;
+  min-width: 0;
+  max-width: none;
+  margin: 0 4px;
+  font-size: 15px;
+  line-height: 1.52;
+}
 .astrid-vision .astrid-vision-principles .astrid-vision-pillar-details {
-  position: relative;
-  top: auto;
-  right: auto;
-  grid-column: 1;
-  grid-row: 6;
-  align-self: end;
-  justify-self: end;
-  margin-top: 12px;
+  grid-row: 5;
+  margin: 18px 4px 0;
 }
-
-/* A tablet benefits from two calmer, shallow cards per row. On a phone
-   the same composition remains one column, with art beside the copy. */
 @media (max-width: 1179px) {
-  .astrid-vision-principles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .astrid-vision .astrid-vision-principles > li {
-    grid-template-columns: minmax(0, 1fr) max-content;
-    grid-template-rows: auto auto auto auto;
-    column-gap: 14px;
-    min-height: 0;
-    padding: 19px;
-  }
-  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-number {
-    grid-column: 1;
-    grid-row: 1;
-    margin-bottom: 9px;
-  }
-  .astrid-vision .astrid-vision-principles h3 {
-    grid-column: 1;
-    grid-row: 2;
-    margin-bottom: 9px;
-  }
-  .astrid-vision .astrid-vision-principles li > p {
-    grid-column: 1;
-    grid-row: 3;
-    font-size: 15px;
-    line-height: 1.48;
-  }
-  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art {
-    --px: 1.15px;
-    grid-column: 2;
-    grid-row: 1 / span 3;
-    align-self: center;
-    justify-self: end;
-    margin: 0;
-  }
-  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-details {
-    grid-column: 1 / -1;
-    grid-row: 4;
-    margin-top: 11px;
-  }
+  .astrid-vision .astrid-vision-principles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .astrid-vision-pillar-stage { height: 176px; }
 }
+/* One column: the stage moves beside the copy so each card stays short. */
 @media (max-width: 760px) {
-  /* Portrait tablets get readable lines rather than two squeezed columns. */
-  .astrid-vision-principles { grid-template-columns: minmax(0, 1fr); }
+  .astrid-vision .astrid-vision-principles { grid-template-columns: minmax(0, 1fr); }
   .astrid-vision .astrid-vision-principles > li {
-    grid-template-columns: minmax(0, 1fr) 96px;
-  }
-  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: 1.1px; }
-}
-@media (max-width: 640px) {
-  .astrid-vision .astrid-vision-principles > li {
-    grid-template-columns: minmax(0, 1fr) 75px;
-    column-gap: 10px;
+    grid-template-columns: minmax(0, 1fr) clamp(108px, 30vw, 150px);
+    grid-template-rows: auto auto 1fr auto;
+    column-gap: 16px;
     padding: 16px;
   }
-  .astrid-vision .astrid-vision-principles h3 { font-size: clamp(21px, 5.8vw, 25px); }
-  .astrid-vision .astrid-vision-principles li > p { font-size: 14px; line-height: 1.48; }
-  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: .88px; }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-number { grid-column: 1; grid-row: 1; margin-left: 0; }
+  .astrid-vision .astrid-vision-principles h3 { grid-column: 1; grid-row: 2; margin-inline: 0; font-size: clamp(21px, 5.6vw, 25px); }
+  .astrid-vision .astrid-vision-principles li > p { grid-column: 1; grid-row: 3; margin-inline: 0; font-size: 14.5px; line-height: 1.48; }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-details { grid-column: 1; grid-row: 4; margin: 14px 0 0; }
+  .astrid-vision-pillar-stage {
+    grid-column: 2;
+    grid-row: 1 / -1;
+    align-self: stretch;
+    height: auto;
+    min-height: 132px;
+    margin: 0;
+    padding-bottom: 0;
+    place-items: center;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: 1.25px; align-self: center; }
 }
 
-/* Principles use the pillars' former compact grammar: text on the left,
-   quiet sigil on the right, small directional control below it. */
+/* Principles: the reading column on the left, a larger sigil on the right,
+   both inside the same column as the heading above them. */
+.astrid-vision > .astrid-vision-standards { width: min(100%, 1120px); }
 .astrid-vision .astrid-vision-standards-list > li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 66px;
-  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) 96px;
+  grid-template-rows: 1fr auto;
   align-items: start;
   min-width: 0;
-  min-height: 190px;
-  column-gap: clamp(12px, 2vw, 20px);
-  row-gap: 8px;
-  padding: clamp(18px, 2vw, 24px);
+  min-height: 0;
+  column-gap: clamp(18px, 2.4vw, 32px);
+  row-gap: 0;
+  padding: clamp(20px, 2.2vw, 28px);
   border-radius: 14px;
 }
 .astrid-vision .astrid-vision-standards-list > li > div {
@@ -1940,38 +2005,60 @@
 }
 .astrid-vision .astrid-vision-standards-list > li h3 {
   min-height: 0;
-  margin-bottom: 11px;
+  margin-bottom: 10px;
   font-size: clamp(21px, 2vw, 26px);
   line-height: 1.16;
 }
 .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-sigil {
   grid-column: 2;
-  grid-row: 1;
-  justify-self: end;
-  align-self: start;
+  grid-row: 1 / -1;
+  align-self: center;
+  justify-self: center;
+  width: 96px;
+  height: 96px;
   margin: 0;
 }
+.astrid-vision .astrid-vision-standards-list > li .astrid-vision-sigil-art { width: 80px; height: 80px; }
 .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner {
-  grid-column: 2;
+  grid-column: 1;
   grid-row: 2;
-  align-self: end;
-  justify-self: end;
-  margin: 0;
+  margin-top: 18px;
 }
 @media (max-width: 760px) {
+  .astrid-vision .astrid-vision-standards-list { grid-template-columns: minmax(0, 1fr); }
   .astrid-vision .astrid-vision-standards-list > li {
-    grid-template-columns: minmax(0, 1fr) 54px;
-    column-gap: 12px;
-    min-height: 0;
+    grid-template-columns: minmax(0, 1fr) 72px;
+    column-gap: 14px;
     padding: 18px;
   }
   .astrid-vision .astrid-vision-standards-list > li h3 { font-size: clamp(21px, 5.5vw, 25px); }
-  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-sigil {
-    width: 54px;
-    height: 54px;
-  }
-  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-sigil-art {
-    width: 52px;
-    height: 52px;
-  }
+  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-sigil { width: 72px; height: 72px; }
+  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-sigil-art { width: 60px; height: 60px; }
+}
+
+/* The cue reads as text, not as a faded decoration: it follows each card's
+   own ink through dusk, and the principle cue no longer borrows the
+   sigil's resting opacity. */
+.astrid-vision[data-dusk] .astrid-vision-principles .astrid-vision-pillar-details {
+  color: color-mix(in oklab, color-mix(in oklab, var(--tone-ink), var(--tone-ink-night) calc(var(--astrid-dusk-ink) * 100%)), var(--astrid-ink) calc(var(--astrid-dusk-firm) * 100%));
+}
+.astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner {
+  color: color-mix(in oklab, var(--sigil-display-ink) 55%, var(--astrid-ink));
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision .astrid-vision-standards-list > li[data-sigil-active="true"] .astrid-vision-principle-corner { opacity: 1; }
+}
+
+/* Every chapter title, Help us included, shares one size. */
+.astrid-vision .astrid-vision-contribute h2 { font-size: clamp(32px, 4vw, 48px); line-height: 1.05; }
+
+/* The remaining small labels join the pixel system voice. */
+.astrid-vision .astrid-vision-label,
+.astrid-vision .astrid-vision-filter-bar label {
+  font-family: var(--astrid-vision-pixel);
+  font-size: 11px !important;
+  font-weight: 400;
+  letter-spacing: .08em;
+  text-transform: uppercase;
 }

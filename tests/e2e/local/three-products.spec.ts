@@ -284,6 +284,14 @@ async function expectOpaqueDataKept(harness: DirectHarness, seed: ThreeProductsS
   return revisions.length;
 }
 
+/** `show --json` uses RemoteTimelines._native_projection, not the human cut-table rows. */
+type AgentTimelineInspection = {
+  kind: 'timeline-inspection';
+  summary: { revision_id: string; head_revision_id: string | null; is_current_head: boolean };
+  clips: Array<{ clip_id: string; occurrence_id?: string; asset_id: string | null; authored_fields: Record<string, unknown> }>;
+  pagination: { next_cursor: string | null };
+};
+
 /** The agent's verbs, as the CLI ships them. */
 function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' | 'projectSlug'>) {
   const common = [seed.timelineId, '--project', seed.projectSlug];
@@ -312,7 +320,7 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
       return { new_head: envelope.data!.accepted_revision_id, old_head: oldHead, idempotency_key: idempotencyKey };
     },
     status: async () => (await astrid.json<{ current_head: string }>(['timelines', 'status', ...common, '--json'])).data!,
-    show: async () => (await astrid.json<{ head_revision_id: string; rows: Array<{ layers: Array<{ clip_id: string; asset: string | null }> }> }>(['timelines', 'show', ...common, '--published', '--json'])).data!,
+    show: async () => (await astrid.json<AgentTimelineInspection>(['timelines', 'show', ...common, '--published', '--json'])).data!,
   };
 }
 
@@ -622,9 +630,15 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   expect((await agent.status()).current_head).toBe(headB);
   const shown = await agent.show();
-  expect(shown.head_revision_id).toBe(headB);
-  const layers = shown.rows.flatMap((row) => row.layers);
-  expect(layers.find((layer) => layer.clip_id === seed3.agentClearClipId)?.asset, 'the agent sees the clear').toBeNull();
+  expect(shown.kind).toBe('timeline-inspection');
+  expect(shown.summary.revision_id).toBe(headB);
+  expect(shown.summary.head_revision_id).toBe(headB);
+  expect(shown.summary.is_current_head).toBe(true);
+  expect(shown.pagination.next_cursor, 'the complete seed fits in this inspection page').toBeNull();
+  const clearedClips = shown.clips.filter((clip) => clip.occurrence_id === seed3.occurrenceId && clip.clip_id === seed3.agentClearClipId);
+  expect(clearedClips, 'the Agent sees the exact cleared occurrence clip').toHaveLength(1);
+  expect(clearedClips[0].asset_id, 'the Agent sees the clear').toBeNull();
+  expect(clearedClips[0].authored_fields).toEqual(stateB.shotClips[seed3.agentClearClipId]);
   journey.facts.headB = headB;
   await sniff.expectClean(page, seed3.timelineId);
 });
@@ -708,7 +722,7 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   // The agent reads what the App saved after the relaunch.
   const headAfter = await currentHead(harness);
   expect((await agent.status()).current_head).toBe(headAfter);
-  expect((await agent.show()).head_revision_id).toBe(headAfter);
+  expect((await agent.show()).summary.revision_id).toBe(headAfter);
   const state = await revisionState(harness, seed3, headAfter);
   expect(state.trackLabel, 'the saved revision is the draft').toBe('F2 kept across restart');
   expect(result.receipt.receipt_id, 'the post-restart publication keeps its persisted retry identity').toBe(keyAfter);
@@ -1450,10 +1464,10 @@ async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHa
 }
 
 async function expectAgentRevision(astrid: AstridCli, harness: DirectHarness, seed: ThreeProductsSeed, revision: string) {
-  const shown = await astrid.json<{ revision_id: string }>(['timelines', 'show', seed.timelineId,
+  const shown = await astrid.json<AgentTimelineInspection>(['timelines', 'show', seed.timelineId,
     '--project', seed.projectSlug, '--revision-id', revision, '--json']);
   expect(shown.ok, JSON.stringify(shown)).toBe(true);
-  expect(shown.data?.revision_id).toBe(revision);
+  expect(shown.data?.summary.revision_id).toBe(revision);
   const visualized = await astrid.json<{ outputs: { inspection: { revision_id: string }; evidence_kind: string;
     render_requested: boolean; artifacts: { md: { object_id: string } } } }>(['timelines', 'visualize', seed.timelineId,
     '--project', seed.projectSlug, '--revision-id', revision, '--mode', 'inputs', '--format', 'md', '--json']);
@@ -3020,11 +3034,19 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   await expectRecordedTransitionClears(harness, seed3, cleared, JSON.parse(wire.posts[0].body), original.parentClips);
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
-  await page.getByRole('button', { name: 'Retry save', exact: true }).and(page.getByTestId('timeline-command-retry')).click();
+  const acceptedHistory = await history(harness, seed3);
+  const acceptedRevisions = await allRevisions(harness, seed3);
+  // loseAck stages the App's automatic retry; the former command Retry save control no longer exists.
+  expect(wire.observed).toEqual([wire.observed[0], wire.observed[0]]);
+  expect(wire.observed[1]).toEqual({ body: owner.pending!.request.body, key: owner.pending!.request.key });
+  expect(wire.posts, 'only the initial acceptance has reached Runtime while its retry is held').toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);
   expect(wire.posts[1]).toEqual(wire.posts[0]);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 1);
+  expect(await history(harness, seed3)).toEqual(acceptedHistory);
+  expect(await allRevisions(harness, seed3)).toEqual(acceptedRevisions);
   await page.reload();
   await expectConnected(page);
   await openSeededTimeline(page, harness);
@@ -3087,22 +3109,35 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect(atConflict.head).toEqual(pinOf(concurrent));
   expectRawTransitionsCleared(concurrent.data.canonical_document.parent_revision.payload, original.parent, [seed3.appClipId]);
   await expectImmutableClosure(harness, seed3, concurrent);
+  await expect.poll(() => timelineDraft(page, seed3.timelineId), CEILING).not.toBeNull();
+  const retainedDraft = await timelineDraft(page, seed3.timelineId);
+  expectRawTransitionsCleared(mountedDocumentIntentOf(retained.intents[0].payload).after.parent_revision.payload, original.parent, ids);
   await page.reload();
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   const reloaded = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;
   expect(reloaded.pending).toEqual(retained.pending);
   expect(reloaded.intents).toEqual(retained.intents);
-  await page.getByRole('button', { name: /^Recover saved edits/ }).and(page.locator(`[data-owner-id="${pending.ownerId}"]`)).click();
-  await expect(page.getByTestId('timeline-command-recovery')).toContainText('Your changes are retained and need resolution before they can be saved.');
+  // The single native owner is recovered automatically. Its rejected draft remains durable;
+  // rollback shows the Agent's canonical partial clear, and Save them reopens the refusal.
+  const recovery = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
+  await expect(recovery).toBeVisible(CEILING);
+  expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
   for (const id of ids) {
     await selectClip(page, id);
     await page.getByRole('tab', { name: 'Effects', exact: true }).click();
-    await expect(transitionSelect(page)).toContainText('None');
+    await expect(transitionSelect(page)).toContainText(id === seed3.appClipId ? 'None' : /cross[\s-]?fade/i);
   }
-  expect((await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)?.pending).toEqual(retained.pending);
+  await recovery.getByRole('button', { name: 'Save them' }).click();
+  await expect(page.getByRole('alertdialog', { name: CONFLICT_TITLE })).toBeVisible(CEILING);
+  expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
+  const recoveredConflict = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;
+  expect(recoveredConflict.pending).toEqual(retained.pending);
+  expect(recoveredConflict.intents).toEqual(retained.intents);
+  expectRawTransitionsCleared(mountedDocumentIntentOf(recoveredConflict.intents[0].payload).after.parent_revision.payload, original.parent, ids);
   expect(wire.posts).toHaveLength(3);
   expect(await history(harness, seed3)).toEqual(atConflict);
+  expect(await allRevisions(harness, seed3)).toEqual(revisionsAtConflict);
   await expectOpaqueDataKept(harness, seed3);
   expect(wire.legacy).toEqual([]);
   journey.facts = { ...journey.facts, cleared: pinOf(cleared), undone: pinOf(undone), concurrent: pinOf(concurrent),
@@ -3451,7 +3486,7 @@ test('quick: Astrid edit then App edit are visible and readable on the adopted t
   const status = await agent.status();
   const show = await agent.show();
   expect(status.current_head).toBe(savedRevisionId);
-  expect(show.head_revision_id).toBe(savedRevisionId);
+  expect(show.summary.revision_id).toBe(savedRevisionId);
   const lineage = (await allRevisions(harness, quickSeed)).map((revision) => revision.revision_id);
   expect(lineage.indexOf(savedRevisionId)).toBeGreaterThanOrEqual(0);
   expect(lineage.indexOf(savedRevisionId)).toBeLessThan(lineage.indexOf(astridRevisionId));

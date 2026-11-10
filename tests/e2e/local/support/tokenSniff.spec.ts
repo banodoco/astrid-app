@@ -86,7 +86,6 @@ test('an unresolved raw-header capture fails closed with a sanitized request lab
   await sniff.attach(page);
   const req = request(`http://localhost:1234/api/private/${secret}?key=${secret}`, '', {}, () => new Promise(() => {}));
   page.emit('request', req);
-  page.emit('requestfinished', req);
   const error = await sniff.expectClean(page).then(() => '', (failure: Error) => failure.message);
   expect(error).toContain('Incomplete credential scan: POST /other headers (requested)');
   expect(error).not.toContain(secret);
@@ -98,7 +97,6 @@ test('a rejected raw-header capture fails closed', async () => {
   await sniff.attach(page);
   const req = request('http://localhost:1234/api/health', '', {}, async () => { throw new Error(secret); });
   page.emit('request', req);
-  page.emit('requestfinished', req);
   const error = await sniff.expectClean(page).then(() => '', (failure: Error) => failure.message);
   expect(error).toContain('POST /health headers (requested; capture failed)');
   expect(error).not.toContain(secret);

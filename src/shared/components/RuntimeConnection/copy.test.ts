@@ -1,5 +1,22 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, setUpGenerationInstructions, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
+import fixture from './installArgv.fixture.json';
+
+const setupGuideUrl = 'https://github.com/banodoco/astrid-agent/blob/main/docs/setup/SKILL.md';
+const setupFlags = ['--autostart', '--command', '--skills', '--skill-copies'];
+
+function choicesFromFixture(id: string) {
+  const testCase = fixture.cases.find(candidate => candidate.id === id)!;
+  return {
+    testCase,
+    choices: {
+      autostart: testCase.choices.autostart === 'on',
+      command: testCase.choices.command === 'on',
+      skills: testCase.choices.skills === 'on',
+      skillCopies: testCase.choices.skill_copies === 'on',
+    },
+  };
+}
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -48,10 +65,25 @@ describe('install commands', () => {
 });
 
 describe('setup consent wording', () => {
-  it('asks once for setup with the selected choices and the same runnable command', () => {
+  it.each(['agent', 'local'] as const)('offers changes and points to astrid-setup for the %s fresh-install brief using the shared argv fixture', route => {
+    const { choices, testCase } = choicesFromFixture('combined-0001');
+    const text = route === 'agent'
+      ? agentInstructions('install', 'https://astrid.haus', false, undefined, { choices })
+      : localSetupInstructions(choices);
+
+    expect(text).not.toMatch(/May I install|wait for my answer/i);
+    expect(text).toContain('Show these choices and offer a change.');
+    expect(text).toContain(`Setup choices: start at sign-in ${choices.autostart ? 'on' : 'off'} · \`astrid\` terminal command ${choices.command ? 'on' : 'off'} · coding-agent skills ${choices.skills ? 'on' : 'off'} · skill copies ${choices.skillCopies ? 'on' : 'off'}.`);
+    for (const flag of setupFlags) expect(text).toContain(`\`${flag}\``);
+    expect(text).toContain(`\`astrid-setup\` skill: ${setupGuideUrl}`);
+    expect(text).not.toContain('Setup guide:');
+    expect(text).toContain(testCase.argv.slice(1).join(' '));
+  });
+
+  it('shows selected setup choices with the same runnable command', () => {
     const choices = { ...RECOMMENDED_SETUP_CHOICES, autostart: false, skills: false };
     const text = agentInstructions('install', 'https://astrid.haus', false, undefined, { choices });
-    expect(text).toContain('May I install Astrid with these setup choices?');
+    expect(text).toContain('Show these choices and offer a change.');
     expect(text).toContain('Setup choices: start at sign-in off · `astrid` terminal command on · coding-agent skills off · skill copies off.');
     expect(text).toContain('curl -fsSL https://astrid.haus/install | sh -s -- --yes --autostart off --skills off');
   });
@@ -61,6 +93,19 @@ describe('setup consent wording', () => {
     expect(text).toContain('Please restart Astrid on this computer');
     expect(text).not.toContain('May I install');
     expect(text).not.toContain('Setup choices:');
+    expect(text).not.toContain('Show these choices');
+  });
+
+  it('keeps update briefs free of choice lines', () => {
+    const text = agentInstructions('update', 'https://astrid.haus');
+    expect(text).not.toContain('Setup choices:');
+    expect(text).not.toContain('Show these choices');
+  });
+
+  it('keeps an already-set-up local brief free of choice lines', () => {
+    const text = localSetupInstructions(RECOMMENDED_SETUP_CHOICES, true);
+    expect(text).not.toContain('Setup choices:');
+    expect(text).not.toContain('Show these choices');
   });
 });
 

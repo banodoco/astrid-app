@@ -290,10 +290,22 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
   return {
     checkout: () => astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']),
     edit: (...flags: string[]) => astrid.astrid(['timelines', 'edit', ...common, ...flags]),
-    publish: async (message: string, idempotencyKey: string) => {
-      const envelope = await astrid.json<{ new_head: string; old_head: string; idempotency_key: string; published?: boolean }>(['timelines', 'publish', ...common, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
+    // `timelines commit --file` on the draft that `timelines checkout` and `timelines edit` share. The draft path is
+    // store.draft_path(project_id, timeline_id, draft) (cli.py:2521; cli.py:2369-2376), and `status --json` gives those inputs.
+    commit: async (message: string, idempotencyKey: string) => {
+      const status = (await astrid.json<{ project_id: string; timeline_id: string; draft: string; current_head: string }>(['timelines', 'status', ...common, '--json'])).data!;
+      const oldHead = status.current_head;
+      const draft = await astrid.python(['-c',
+        'import sys; from astrid.sdk.timeline import store; print(store.draft_path(sys.argv[1], sys.argv[2], sys.argv[3]))',
+        status.project_id, status.timeline_id, status.draft]);
+      const draftFile = draft.stdout.trim().split('\n').pop()!;
+      const envelope = await astrid.json<{ accepted_revision_id: string; accepted_publication_id: string }>(['timelines', 'commit', ...common, '--file', draftFile, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
       expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
-      return envelope.data!;
+      // The commit envelope (cli_native.py:84-105): the Runtime's accepted revision and publication.
+      expect(envelope.data?.accepted_revision_id).toEqual(expect.any(String));
+      expect(envelope.data?.accepted_publication_id).toEqual(expect.any(String));
+      // The callers' shape: the revision the commit made, and the head it was built on (status, read just before).
+      return { new_head: envelope.data!.accepted_revision_id, old_head: oldHead, idempotency_key: idempotencyKey };
     },
     status: async () => (await astrid.json<{ current_head: string }>(['timelines', 'status', ...common, '--json'])).data!,
     show: async () => (await astrid.json<{ head_revision_id: string; rows: Array<{ layers: Array<{ clip_id: string; asset: string | null }> }> }>(['timelines', 'show', ...common, '--published', '--json'])).data!,
@@ -465,7 +477,7 @@ test('agent -> open App: an Astrid task and its publication appear in the open A
   const before = await currentHead(harness);
   await agent.checkout();
   await agent.edit('--clip', seed3.agentClipId, '--swap-asset', `${seed3.markerAssetKey}=task:${taskId}/marker#0`);
-  const published = await agent.publish('agent: marker', 'f2-case1');
+  const published = await agent.commit('agent: marker', 'f2-case1');
   expect(published.old_head, 'the agent built on the head the App has').toBe(before);
   expect(published.new_head).not.toBe(before);
   expect(await currentHead(harness), 'the Runtime head is the agent\'s revision').toBe(published.new_head);
@@ -568,7 +580,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   const stateA = await revisionState(harness, seed3, headA);
   await agent.edit('--clip', seed3.agentClipId, '--extend', '1');
   await agent.edit('--clip', seed3.agentClearClipId, '--clear-asset');
-  const published = await agent.publish('agent: extend and clear', 'f2-case2');
+  const published = await agent.commit('agent: extend and clear', 'f2-case2');
   expect(published.old_head, 'the agent built on the App\'s save').toBe(headA);
   const headB = published.new_head;
   expect(await currentHead(harness)).toBe(headB);
@@ -2913,11 +2925,13 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
   // Each clip's transition is cleared, present -> absent, on that clip and nothing else.
   expect(recorded.writes).toEqual(ids.map((id) => ({ ref: `parent/clip:${id}`, path: ['transition'],
     before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } })));
-  // The record-level reads: the timeline read's digest and revision are run-specific, so only its path and ref are asserted.
-  expect(recorded.reads).toContainEqual(expect.objectContaining({ path: [], ref: 'timeline' }));
-  for (const id of ids) {
-    expect(recorded.reads).toContainEqual({ path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } });
-  }
+  // The clear's record reads, exactly, per cleared clip (run 42745357116's three-products log): the clip's id is present,
+  // its transition is present with the original value, and the parent has no pinnedShotGroups. None are run-specific.
+  expect(recorded.reads).toEqual(ids.flatMap((id) => [
+    { path: ['id'], ref: `parent/clip:${id}`, state: { state: 'present', value: id } },
+    { path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } },
+    { path: ['config', 'pinnedShotGroups'], ref: 'parent', state: { state: 'absent' } },
+  ]));
   // The whole-array mirror of the clips, as in the crossfade set's record.
   expect(recorded.derived_writes).toEqual([{ ref: 'parent', path: ['config', 'clips'] }]);
 }
@@ -3252,7 +3266,7 @@ test('render R, publish R+1 before it runs: the render is R\'s, it plays, and it
     // c. The agent fills the slot with it and publishes R. The open App adopts R by itself.
     await agent.checkout();
     await agent.edit('--clip', render.slotClipId, '--swap-asset', `${render.markerAssetKey}=task:${markerTask}/marker_clip#${clip!.ordinal}`);
-    const publishedR = await agent.publish('agent: marker clip in the slot', 'f2-render-r');
+    const publishedR = await agent.commit('agent: marker clip in the slot', 'f2-render-r');
     expect(publishedR.old_head, 'R builds on the seed').toBe(render.headRevisionId);
     revisionR = publishedR.new_head;
     await expect.poll(() => reads.urls.some((url) => url.includes(`/composition-revisions/${revisionR}`)), { message: 'the App read R', ...CEILING }).toBe(true);
@@ -3284,7 +3298,7 @@ test('render R, publish R+1 before it runs: the render is R\'s, it plays, and it
     expect(eventsBefore.status, JSON.stringify(eventsBefore.body)).toBe(200);
     await agent.checkout();
     await agent.edit('--clip', render.slotClipId, '--swap-asset', `f2-render-grey=${render.placeholder.digest}`);
-    const publishedR1 = await agent.publish('agent: placeholder back in the slot', 'f2-render-r1');
+    const publishedR1 = await agent.commit('agent: placeholder back in the slot', 'f2-render-r1');
     expect(publishedR1.old_head, 'R+1 builds on R').toBe(revisionR);
     revisionR1 = publishedR1.new_head;
     expect(revisionR1).not.toBe(revisionR);
@@ -3442,7 +3456,7 @@ test('quick: Astrid edit then App edit are visible and readable on the adopted t
 
   await agent.checkout();
   await agent.edit('--clip', String(clip.id), '--set', 'opacity=0.5');
-  const astridPublished = await agent.publish('Quick Astrid edit', `quick-astrid-${descriptor!.timelineId}`);
+  const astridPublished = await agent.commit('Quick Astrid edit', `quick-astrid-${descriptor!.timelineId}`);
   expect(astridPublished.old_head).toBe(baseRevisionId);
   const astridRevisionId = astridPublished.new_head;
   await expect.poll(async () => (await currentHead(harness)), { message: 'the App observes Astrid’s published revision', timeout: 0 }).toBe(astridRevisionId);

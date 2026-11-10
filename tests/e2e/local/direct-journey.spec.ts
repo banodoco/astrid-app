@@ -474,10 +474,14 @@ test.describe('core journey', () => {
     expect(read.text).toBe(await direct.text());
 
     const pin = json(await call(`/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).head;
+    // The composition name is a field of the parent: read its current value from the head document, and guard the set with it.
+    const headDoc = await revisionBody(harness, pin.revision_id);
+    const currentName = headDoc.parent_composition?.name;
     const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
       body: JSON.stringify({ api_version: 1, project_id: projectId, timeline_id: timelineId, base_revision_id: pin.revision_id, base_publication_id: pin.publication_id,
-        commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: 'Main (edited through the door)' }, clear: [] } }] }),
+        commands: [{ schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [], args: { changes: [{ op: 'set', ref: 'parent', path: ['name'],
+          before: currentName === undefined ? { state: 'absent' } : { state: 'present', value: currentName }, value: 'Main (edited through the door)' }] } }] }),
     });
     expect(saved.status, saved.text).toBe(200);
     const newHead: string = json(saved).data.accepted_revision_id;

@@ -450,7 +450,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
 
   await openApp(page, harness);
   await expectConnected(page);
-  await openCommandTimeline(page, harness, seed3);
+  await openCommandTimeline(page, harness, seed3, sniff);
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
   const baseHead = await currentHead(harness);
   const revisionsBefore = (await allRevisions(harness, seed3)).length;
@@ -554,7 +554,8 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect(await currentHead(harness)).toBe(headB);
 
   // A reload offers that same draft. Retrying its original CAS cannot erase B; Use latest resolves it explicitly.
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
+  await page.waitForLoadState('load');
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   const recovered = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
@@ -580,7 +581,8 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
 
   // Both clients agree after another reload: the App reads head B and shows A; the agent reads B.
   const readsBeforeReload = watched.urls.length;
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
+  await page.waitForLoadState('load');
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
@@ -1309,12 +1311,13 @@ async function ownerWithTwoMountedDocuments(page: Page, seed: ThreeProductsSeed)
   return owner;
 }
 
-async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed) {
+async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, sniff?: TokenSniff) {
   // A case selected alone must establish its own verified authoring baseline.
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   // The hosted blank page establishes the storage origin without mounting an
   // editor or claiming an owner, including on an ordinary fresh Playwright page.
-  await page.goto(`${harness.origin}/__blank.html`);
+  if (sniff) await sniff.navigate(page, () => page.goto(`${harness.origin}/__blank.html`, { waitUntil: 'commit' }));
+  else await page.goto(`${harness.origin}/__blank.html`);
   const previous = await commandOutboxes(page, seed.timelineId);
   await openApp(page, harness);
   await expectConnected(page);

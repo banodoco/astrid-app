@@ -126,3 +126,49 @@ for (const where of ['url', 'body', 'initial header', 'full header', 'response',
     await expect(sniff.expectClean(page, 'timeline')).rejects.toThrow('no credential reached the page');
   });
 }
+
+test('navigation drains a delayed response while holding new API dispatch', async ({ page }) => {
+  let finish!: () => void;
+  const delayed = new Promise<void>(resolve => { finish = resolve; });
+  let began = false;
+  let queuedReachedServer = false;
+  const server = createServer(async (req, res) => {
+    if (req.url === '/api/slow') { began = true; res.writeHead(200, { 'content-type': 'application/json' }); res.write('{"value":"'); await delayed; res.end(`${secret}"}`); return; }
+    if (req.url === '/api/queued') queuedReachedServer = true;
+    res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html></html>');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  const origin = `http://127.0.0.1:${address.port}`;
+  try {
+    const sniff = new TokenSniff({ secret });
+    await sniff.attach(page);
+    await page.goto(origin);
+    await page.evaluate(() => { void fetch('/api/slow').catch(() => {}); });
+    await expect.poll(() => began).toBe(true);
+    let navigated = false;
+    const navigation = sniff.navigate(page, async () => { navigated = true; await page.goto(`${origin}/blank`, { waitUntil: 'commit' }); });
+    await page.evaluate(() => { void fetch('/api/queued').catch(() => {}); });
+    await expect.poll(() => queuedReachedServer).toBe(false);
+    expect(navigated).toBe(false);
+    finish();
+    await navigation;
+    await expect(sniff.expectClean(page)).rejects.toThrow('no credential reached the page');
+  } finally { finish(); server.close(); }
+});
+
+test('navigation failure releases the gate', async ({ page }) => {
+  const server = createServer((_req, res) => { res.writeHead(200, { 'content-type': 'text/html' }); res.end('ok'); });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  try {
+    const sniff = new TokenSniff({ secret });
+    await sniff.attach(page);
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    await expect(sniff.navigate(page, async () => { throw new Error('navigation failed'); })).rejects.toThrow('navigation failed');
+    expect(await page.evaluate(() => fetch('/api/after').then(response => response.text()))).toBe('ok');
+    await sniff.expectClean(page);
+  } finally { server.close(); }
+});

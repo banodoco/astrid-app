@@ -2941,12 +2941,17 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
   // head document's clips read after the save, so the mirror reflects the cleared state exactly.
   expect(recorded.derived_writes).toHaveLength(1);
   const [mirror] = recorded.derived_writes;
+  const headBefore = (await revisionBody(harness, request.base_revision_id)).payload as Record<string, any>;
   const headAfter = (await revisionBody(harness, pinOf(result).revision_id)).payload as Record<string, any>;
-  expect(mirror).toEqual({ ref: 'parent', path: ['config', 'clips'], before: expect.any(Array), after: headAfter.config.clips });
+  // before and after are {state, value} objects in the Runtime's record, so each side is asserted exactly as that form:
+  // before is the clips at the base revision, after is the clips at the revision the clear made.
+  expect(mirror).toEqual({ ref: 'parent', path: ['config', 'clips'],
+    before: { state: 'present', value: headBefore.config.clips },
+    after: { state: 'present', value: headAfter.config.clips } });
   for (const id of ids) {
-    const before = (mirror.before as Array<Record<string, any>>).find((clip) => clip.id === id);
+    const before = (mirror.before.value as Array<Record<string, any>>).find((clip) => clip.id === id);
     expect(before?.transition, `clip ${id} in the mirror's before keeps its transition`).toEqual(original[id].transition);
-    const after = (mirror.after as Array<Record<string, any>>).find((clip) => clip.id === id);
+    const after = (mirror.after.value as Array<Record<string, any>>).find((clip) => clip.id === id);
     expect(after, `clip ${id} in the mirror's after`).toBeDefined();
     expect(after, `clip ${id} in the mirror's after has no transition`).not.toHaveProperty('transition');
   }

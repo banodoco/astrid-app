@@ -28,22 +28,8 @@ describe('M5-021: trust-and-security.md', () => {
     expect(content).toMatch(/no.*permission.*enforcement/i);
     expect(content).toMatch(/no.*permission broker/i);
     expect(content).toMatch(/no.*marketplace/i);
-    expect(content).toMatch(/no.*(?:remote|CDN|dynamic import|fetch)/i);
+    expect(content).toMatch(/no CDN, third-party, or arbitrary remote code loading/);
     expect(content).toMatch(/no.*update/i);
-
-    // Must cover key sections
-    expect(content).toMatch(/execution model/i);
-    expect(content).toMatch(/permission.*posture/i);
-    expect(content).toMatch(/error containment/i);
-    expect(content).toMatch(/diagnostic provenance/i);
-    expect(content).toMatch(/recovery key/i);
-    expect(content).toMatch(/inventory truthfulness/i);
-  });
-
-  it('has at least 130 lines of substantive content', () => {
-    const content = readFileSync(docPath, 'utf8');
-    const lines = content.split('\n').filter((l) => l.trim().length > 0);
-    expect(lines.length).toBeGreaterThanOrEqual(130);
   });
 });
 

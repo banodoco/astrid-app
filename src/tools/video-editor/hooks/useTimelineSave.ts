@@ -698,6 +698,13 @@ export function useTimelineSave(
       offerRecovery(record);
       return;
     }
+    if (localDocumentSave && localOwner.recovered && localOwner.session?.getState().status === 'conflict') {
+      // Native recovery already owns the original intents and refusal. Trying
+      // to capture the one-slot draft again can fail before the conflict UI is
+      // reached (and must never rebase it onto the newly displayed head).
+      persistence.restoreRetainedConflict();
+      return;
+    }
     const draft = record.draft as { config?: TimelineConfig; registry?: AssetRegistry; bundle?: TimelineBundleEnvelope | null };
     if (!draft.config || !commit.data) {
       return;
@@ -733,7 +740,7 @@ export function useTimelineSave(
     // or transport failure must leave the recovered work retryable.
     setRecoveredAsDirty(true);
     commit.commitData(recovered, { save: true });
-  }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef]);
+  }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef, localDocumentSave, localOwner]);
 
   const reloadCanonicalFromServer = persistence.reloadFromServer;
   const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean }) => {

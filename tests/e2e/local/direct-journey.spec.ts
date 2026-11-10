@@ -786,13 +786,25 @@ test.describe('restarts', () => {
       if (route.request().method() === 'POST') return route.abort('failed');
       return route.fallback();
     });
+    // Reload may fall back to a verified local draft when the Runtime cannot
+    // acknowledge. Fail that durable boundary too, while leaving outbox storage
+    // and readonly inspection available. A transport abort alone allows reload.
+    await page.evaluate(() => {
+      const transaction = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (this: IDBDatabase, ...args: Parameters<IDBDatabase['transaction']>) {
+        if (this.name === 'astrid.timeline-drafts' && args[1] === 'readwrite') {
+          throw new DOMException('Injected timeline persistence failure', 'QuotaExceededError');
+        }
+        return transaction.apply(this, args);
+      };
+    });
     await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
     await editFirstTrackName(page, 'Keep this unsaved draft');
     const reloadButton = page.getByRole('status').getByRole('button', { name: 'Reload' });
     await expect(reloadButton).toBeVisible();
     await reloadButton.click();
     const reloadError = page.getByRole('alert').filter({ hasText: 'Could not safely reload' });
-    await expect(reloadError).toContainText('Timeline:');
+    await expect(reloadError).toContainText('Timeline owner: Injected timeline persistence failure');
     expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'failed persistence prevents navigation').toBe(true);
     await expect(firstTrackName(page)).toHaveValue('Keep this unsaved draft');
     expect(await currentHead(harness)).toBe(headBefore);

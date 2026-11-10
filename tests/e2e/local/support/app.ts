@@ -290,18 +290,27 @@ export async function editFirstTrackName(page: Page, name: string) {
 export async function holdCommandRequests(page: Page) {
   const commits = /\/v1\/projects\/[^/]+\/timelines\/[^/]+\/commit$/;
   const requests: Request[] = [];
+  const held = new Set<import('@playwright/test').Route>();
   let release!: (send: boolean) => void;
   const gate = new Promise<boolean>((resolve) => { release = resolve; });
   const intercept = async (route: import('@playwright/test').Route) => {
     if (route.request().method() !== 'POST') return route.fallback();
     requests.push(route.request());
+    held.add(route);
     const send = await gate;
+    if (!held.delete(route)) return;
     // Reload may have already cancelled the held browser request.
     await (send ? route.continue() : route.abort('connectionreset')).catch(() => {});
   };
   await page.route(commits, intercept);
   return {
     requests,
+    /** End old-page transport without opening the gate for recovery requests. */
+    async abortHeld() {
+      const routes = [...held];
+      routes.forEach((route) => held.delete(route));
+      await Promise.all(routes.map((route) => route.abort('connectionreset')));
+    },
     async release(send = false) {
       await page.unroute(commits, intercept);
       release(send);
@@ -332,14 +341,13 @@ export async function holdTimelineCreation(page: Page) {
 }
 
 /**
- * Holds every save of a composition revision in flight, so the Runtime never receives it and an edit stays an unsaved
- * draft by construction. The editor autosaves 500 ms after an edit, so without this a restart that follows the edit
- * only keeps the draft when it happens to win that race. Returns the release (later saves go through).
+ * Holds every commit the App sends in flight (its autosave, and any recovery delivery), so the Runtime never receives
+ * it and an edit stays an unsaved draft by construction. The App saves through /commit; the retired composition-revisions
+ * route is no longer used. Returns the command-request hold: release(true) lets the held requests through, release(false)
+ * aborts them.
  */
 export async function holdTimelineSaves(page: Page) {
-  const saves = /\/timelines\/[^/]+\/composition-revisions$/;
-  await page.route(saves, (route) => (route.request().method() === 'POST' ? new Promise<void>(() => {}) : route.fallback()));
-  return () => page.unroute(saves);
+  return holdCommandRequests(page);
 }
 
 export async function revisionBody(harness: DirectHarness, revisionId: string) {

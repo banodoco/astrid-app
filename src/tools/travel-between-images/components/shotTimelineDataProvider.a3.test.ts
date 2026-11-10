@@ -75,6 +75,8 @@ const internalRef = 'internal-revision:timeline-alpha-b';
 
 beforeEach(() => {
   Object.defineProperty(globalThis, 'indexedDB', { configurable: true, value: createFakeIndexedDB() });
+  // Node 20 (the CI runner) has no global navigator; provide the shell that carries the Web Locks API.
+  if (globalThis.navigator === undefined) Object.defineProperty(globalThis, 'navigator', { configurable: true, value: {} });
   Object.defineProperty(globalThis.navigator, 'locks', {
     configurable: true,
     value: { request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}) },

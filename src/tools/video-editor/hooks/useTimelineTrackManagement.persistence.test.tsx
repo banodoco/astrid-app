@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { createFakeIndexedDB, resetFakeIndexedDB } from 'fake-indexeddb';
@@ -19,6 +19,7 @@ import { createInteractionState } from '@/tools/video-editor/lib/interaction-sta
 import { buildTimelineData, type TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import type { TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import { createCommitOutbox } from '@/tools/video-editor/commands/commitOutbox.ts';
+import { TrackLabelContent } from '@/tools/video-editor/components/TimelineEditor/TrackLabel.tsx';
 
 vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
@@ -122,9 +123,11 @@ type MountedHarness = {
   basis: TimelineCommandBasis;
   data: TimelineData;
   transportCalls: Array<{ method: string; path: string; headers: Record<string, string>; rawBody?: string; body?: unknown }>;
+  advanceSecondWriter(): void;
+  runtimeHead(): TimelineCommandBasis;
 };
 
-async function mountHarness(outcome: 'accepted' | 'refused') : Promise<MountedHarness> {
+async function mountHarness(outcome: 'accepted' | 'refused' | 'label-conflict') : Promise<MountedHarness> {
   const config = authoredConfig();
   const basis = makeBasis(config);
   let latest = basis;
@@ -147,6 +150,10 @@ async function mountHarness(outcome: 'accepted' | 'refused') : Promise<MountedHa
       return { status: 200, headers: {}, body: json({ realm_id: scope.realmId, display_name: 'track fixture', version: 1, created_at: '2026-10-19T00:00:00Z' }) };
     }
     if (method === 'POST' && path === `/v1/projects/${scope.projectId}/timelines/${scope.timelineId}/commit`) {
+      if (outcome === 'label-conflict') {
+        return { status: 409, headers: {}, body: json({ code: 'conflict', message: 'stale head',
+          details: { status: 'conflict', reason: 'stale_head' } }) };
+      }
       if (outcome === 'refused') {
         const remoteConfig = authoredConfig();
         remoteConfig.tracks = [remoteConfig.tracks![0], remoteConfig.tracks![2], remoteConfig.tracks![1]];
@@ -210,7 +217,14 @@ async function mountHarness(outcome: 'accepted' | 'refused') : Promise<MountedHa
   }, { wrapper });
   await waitFor(() => expect(hook.result.current.save.localSaveState?.ownerId).toBeTruthy());
   await waitFor(() => expect(hook.result.current.save.localSaveState?.status).toBe('saved'));
-  return { hook, provider, send, basis, data, transportCalls };
+  return { hook, provider, send, basis, data, transportCalls,
+    advanceSecondWriter() {
+      const remote = authoredConfig();
+      remote.tracks![0].label = 'Second writer';
+      latest = makeBasis(remote, 'remote-r2', 'remote-p2');
+    },
+    runtimeHead: () => structuredClone(latest),
+  };
 }
 
 async function settlePromises() {
@@ -385,6 +399,36 @@ describe('mounted track reorder persistence through A2', () => {
       expect(intent.documentIntent.after.parent_revision.payload.opaque_parent)
         .toEqual({ keep: null, sibling: [false, 0] });
     } finally {
+      mounted.hook.unmount();
+      await settlePromises();
+    }
+  });
+
+  it('keeps the first track draft visible behind the conflict dialog after another writer commits', async () => {
+    const mounted = await mountHarness('label-conflict');
+    const view = () => <>
+      <TrackLabelContent track={mounted.hook.result.current.save.dataRef.current!.resolvedConfig.tracks[0]}
+        isSelected={false} hasClips deviceClass="desktop" onSelect={() => {}} onRemove={() => {}}
+        onChange={mounted.hook.result.current.tracks.handleTrackPopoverChange} />
+      {mounted.hook.result.current.save.isConflictExhausted && <div role="alertdialog" aria-label="This timeline changed somewhere else" />}
+    </>;
+    const rendered = render(view());
+    try {
+      mounted.advanceSecondWriter();
+      fireEvent.change(screen.getByRole('textbox', { name: 'Track name' }), { target: { value: 'Draft from the first writer' } });
+      await waitFor(() => expect(mounted.hook.result.current.save.isConflictExhausted).toBe(true), { timeout: 3000 });
+      rendered.rerender(view());
+      expect(screen.getByRole('alertdialog', { name: 'This timeline changed somewhere else' })).toBeTruthy();
+      expect((screen.getByRole('textbox', { name: 'Track name' }) as HTMLInputElement).value).toBe('Draft from the first writer');
+      expect(mounted.runtimeHead().head).toEqual({ revisionId: 'remote-r2', publicationId: 'remote-p2' });
+      expect((mounted.runtimeHead().canonicalDocument.parent_revision.payload.config as TimelineConfig).tracks[0].label).toBe('Second writer');
+      expect(mounted.send).toHaveBeenCalledTimes(1);
+      expect(mounted.send.mock.calls[0][0]).toMatchObject({ base_revision_id: 'r0', base_publication_id: 'p0' });
+      const [stored] = await createCommitOutbox().list(scope);
+      expect(stored.pending?.outcome).toMatchObject({ kind: 'rejected', error: { kind: 'conflict' } });
+      expect(stored.intents).toHaveLength(1);
+    } finally {
+      rendered.unmount();
       mounted.hook.unmount();
       await settlePromises();
     }

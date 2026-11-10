@@ -8,6 +8,21 @@ export function localUpdateStatus(): boolean {
   return import.meta.env.VITE_ASTRID_LOCAL_UPDATE_STATUS === '1';
 }
 
+/** The launcher's status does not name the install manager; the Runtime's identity does (identity.managed_by). */
+async function runtimeManagedBy(): Promise<string | null> {
+  const health = await new AstridRuntimeClient().readInstallerUpdateHealth();
+  return typeof health.identity?.managed_by === 'string' ? health.identity.managed_by : null;
+}
+
+/**
+ * The same-origin page's status: the launcher's, with the install manager from the Runtime identity. It resolves only once that
+ * identity is read, so a card built from it never shows an install type that is still unknown. If the Runtime cannot be read, it
+ * rejects: no install type is known, so the page shows no update command (the caller shows its neutral line).
+ */
+export async function loadLocalPageStatus(): Promise<UpdateStatus> {
+  return { ...(await checkLocalUpdate()), managedBy: await runtimeManagedBy() };
+}
+
 let pageStatusPromise: Promise<UpdateStatus | null> | null = null;
 
 /** One update-status request per page load, shared by the notice and Settings indicator. A page with neither a launcher nor a Runtime origin has none. */
@@ -16,7 +31,7 @@ export function loadPageUpdateStatus(): Promise<UpdateStatus | null> {
   if (!pageStatusPromise) {
     pageStatusPromise = (async () => {
       try {
-        if (localUpdateStatus()) return await checkLocalUpdate();
+        if (localUpdateStatus()) return await loadLocalPageStatus();
         const health = await new AstridRuntimeClient().readInstallerUpdateHealth();
         return await checkHostedUpdate(health);
       } catch {

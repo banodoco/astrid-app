@@ -1,4 +1,4 @@
-import { useLayoutEffect } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
@@ -61,6 +61,16 @@ export function RuntimeConnectionPill({
     return () => setRecoveryCardShowing(false);
   }, [cardShowing]);
 
+  // A restarted Astrid (an update finishing is the usual cause) needs the page reloaded onto it. The page does that
+  // itself, once per restart, after saving drafts; if a draft cannot be saved the card stays with its Reload button.
+  const autoReloaded = useRef(false);
+  const { reload } = guarded;
+  useEffect(() => {
+    if (restart !== 'restarted' || autoReloaded.current) return;
+    autoReloaded.current = true;
+    void reload();
+  }, [restart, reload]);
+
   if (!connection.isConnected) return null;
 
   if (restart === 'ok') {
@@ -105,6 +115,7 @@ export function RuntimeConnectionPill({
       {operation.pending && <p role="status">Update in progress. Checking its result…</p>}
       {operation.fresh && installerUpdateStatusMessage(operation.status) && <p role="status">{installerUpdateStatusMessage(operation.status)}</p>}
       {operation.error && <p role="alert">Could not confirm the update status. Download diagnostics before trying again.</p>}
+      {operation.error && <DownloadDiagnosticsButton />}
       <Button type="button" className="w-full sm:w-auto" disabled={guarded.pending} onClick={() => void guarded.reload()}>{COPY.restarted.reload}</Button>
       {guarded.error && <p role="alert">{guarded.error}</p>}
     </div>

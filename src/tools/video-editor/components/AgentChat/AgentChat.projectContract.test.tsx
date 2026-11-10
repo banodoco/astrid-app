@@ -898,7 +898,8 @@ describe('project chat draft sync across clients', () => {
     // B blurred and unedited: adopted.
     act(() => boxes()[1].blur());
     await act(async () => { await clients[1].refetchQueries({ queryKey: key }); });
-    await waitFor(() => expect(boxes()[1]).toHaveValue('from A'));
+    // Adoption waits on a refetch; testing-library's 1s default timed out under CI load (App Tests 42707607396).
+    await waitFor(() => expect(boxes()[1]).toHaveValue('from A'), { timeout: 5000 });
     // Now A edits again while B has local edits (unsaved, save refused): B keeps its text.
     fixture.draftFailure = 500;
     fireEvent.change(boxes()[1], { target: { value: 'B local edit' } });

@@ -64,7 +64,7 @@ const GATEWAY_REFUSAL_OUTCOMES: Readonly<Record<RuntimeRefusalCode, 'down' | 're
 type RealmSummary = Pick<Realm, 'realm_id' | 'display_name'>;
 
 export type RuntimeProbeOutcome =
-  | { kind: 'connected'; realm: RealmSummary; schemaDigest: string | null; managedByPinokio: boolean }
+  | { kind: 'connected'; realm: RealmSummary; schemaDigest: string | null; managedByPinokio: boolean; release: number | null }
   | { kind: 'restart' }
   | { kind: 'update_needed'; managedByPinokio: boolean; authenticated: boolean }
   | { kind: 'down' }
@@ -136,6 +136,9 @@ export async function probeRuntime(
   const identity = (health.body as { identity?: unknown }).identity;
   const managedBy = typeof identity === 'object' && identity !== null ? (identity as { managed_by?: unknown }).managed_by : undefined;
   const managedByPinokio = managedBy === 'pinokio';
+  // The installed release. Schema digests can match across releases, so the pack re-poll key needs this too. Null when the identity is absent.
+  const releaseValue = typeof identity === 'object' && identity !== null ? (identity as { release?: unknown }).release : undefined;
+  const release = typeof releaseValue === 'number' ? releaseValue : null;
   const schemaDigest = (health.body as { schema_digest?: unknown }).schema_digest;
   if (typeof schemaDigest !== 'string' || !RUNTIME_ACCEPTED_SCHEMA_DIGESTS.includes(schemaDigest as typeof RUNTIME_ACCEPTED_SCHEMA_DIGESTS[number])) {
     return { kind: 'update_needed', managedByPinokio, authenticated: typeof schemaDigest === 'string' };
@@ -144,7 +147,7 @@ export async function probeRuntime(
   if ('kind' in realm) return realm;
   const { realm_id, display_name } = (realm.body ?? {}) as Partial<RealmSummary>;
   if (typeof realm_id !== 'string' || typeof display_name !== 'string') return { kind: 'silent' };
-  return { kind: 'connected', realm: { realm_id, display_name }, schemaDigest, managedByPinokio };
+  return { kind: 'connected', realm: { realm_id, display_name }, schemaDigest, managedByPinokio, release };
 }
 
 function readPinokioManaged(): boolean | null {
@@ -194,6 +197,8 @@ export interface RuntimeConnectionValue {
   realmName: string | null;
   /** The health digest seen by the provider's existing probe, when the Runtime reports one. */
   schemaDigest: string | null;
+  /** The installed Runtime release from its health identity; null when unknown. Releases can share a schema digest. */
+  runtimeRelease?: number | null;
   /**
    * A local Astrid service (chat) answered with something this page can't read, so Astrid on this computer is older
    * than the page. Settings shows the same Update Astrid status as an incompatible Runtime; the app is never gated on
@@ -489,7 +494,7 @@ export function RuntimeConnectionProvider({
       setLocalServiceOutOfDate,
     } as const;
     if (outcome?.kind === 'connected' && !permissionLost) {
-      return { ...base, state: { status: 'connected', realm: outcome.realm, ...(outcome.managedByPinokio ? { managedByPinokio: true } : {}) }, isConnected: true, isBooting: false, realmName: outcome.realm.display_name, schemaDigest: outcome.schemaDigest };
+      return { ...base, state: { status: 'connected', realm: outcome.realm, ...(outcome.managedByPinokio ? { managedByPinokio: true } : {}) }, isConnected: true, isBooting: false, realmName: outcome.realm.display_name, schemaDigest: outcome.schemaDigest, runtimeRelease: outcome.release };
     }
     const notConnected = { ...base, isConnected: false, realmName: null, schemaDigest: null };
     if (scenario === 'mobile') return { ...notConnected, state: { status: 'phone' }, isBooting: false };

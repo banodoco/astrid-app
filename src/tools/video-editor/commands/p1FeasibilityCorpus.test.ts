@@ -11,6 +11,8 @@ import { authoringBundleFromDocument } from './authoringBundle.ts';
 import { executeClipMove } from './clipMoveCapture.ts';
 import { executeClipTrim } from './clipTrimCapture.ts';
 import { environment, scope } from './__tests__/commitSessionEnvironment.ts';
+import { AGENT_CORPUS_CHECKOUT } from '../../../../config/testing/skipConditions.mjs';
+import { skipWhen } from '../../../test/declaredSkip.ts';
 
 type CorpusCase = (typeof corpus.cases)[number];
 type Source = CorpusCase['source'];
@@ -21,7 +23,7 @@ const mutableHarnessSourceKind = 'e2e-seed-and-harness';
 const mutableHarnessSourcePath = 'tests/e2e/local/support/harness.ts';
 
 function sourceRoot(source: Source): string {
-  return source.repo === 'app' ? appRoot : resolve('/home/user/work/agent');
+  return source.repo === 'app' ? appRoot : resolve(AGENT_CORPUS_CHECKOUT);
 }
 
 function sourcePath(source: Source): string {
@@ -69,12 +71,17 @@ function expectSource(entry: CorpusCase): void {
 }
 
 describe('P1 feasibility corpus', () => {
-  it.each(corpus.cases)('keeps exact provenance for $id', (entry) => {
-    expectSource(entry);
-    expect(entry.source.commit).toMatch(/^[0-9a-f]{40}$/);
-  });
+  // One test per case: the declared skip needs the test context, which `it.each` does not pass.
+  for (const entry of corpus.cases) {
+    it(`keeps exact provenance for ${entry.id}`, (ctx) => {
+      if (entry.source.repo !== 'app') skipWhen('agent-corpus-checkout', ctx);
+      expectSource(entry);
+      expect(entry.source.commit).toMatch(/^[0-9a-f]{40}$/);
+    });
+  }
 
-  it('validates real App trim document effects and the created-id handoff source', async () => {
+  it('validates real App trim document effects and the created-id handoff source', async (ctx) => {
+    skipWhen('agent-corpus-checkout', ctx);
     const document = appTrim.input as unknown as CanonicalDocument;
     const bundle = await authoringBundleFromDocument(document);
     const command = appTrim.commands[0] as EditCommand;

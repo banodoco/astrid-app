@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { connectionFor } from './connectionFixture.ts';
-import { installCommand } from './copy.ts';
+import { LOCAL_UPDATE_COMMAND } from './copy.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
 
@@ -24,11 +24,15 @@ vi.mock('@/shared/components/RuntimeConnection/AppBuildProvider.tsx', () => ({ u
 
 import { AstridUpdatesSection } from '@/shared/components/SettingsModal/sections/AstridUpdatesSection.tsx';
 
-const LOCAL_UPDATE_COMMAND = installCommand('update');
 const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } });
 
+// A readable Runtime (its health names no manager): the fully-local card needs the Runtime's identity before it shows a command.
+const healthyRuntime = { status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test', runtime_instance_id: 'instance-a', runtime_session_id: 'session-a', runtime_epoch: 1, identity: { managed_by: null, release: 10 } };
 function stubFetch() {
-  vi.stubGlobal('fetch', vi.fn(() => Promise.resolve(json(200, { report: 'Astrid diagnostics' }))));
+  vi.stubGlobal('fetch', vi.fn((input: string | URL | Request) => {
+    const url = String(input);
+    return Promise.resolve(url.endsWith('/v1/health') ? json(200, healthyRuntime) : json(200, { report: 'Astrid diagnostics' }));
+  }));
 }
 
 beforeEach(() => {
@@ -47,7 +51,7 @@ afterEach(() => {
 });
 
 describe('fully-local update guidance', () => {
-  it('shows install-command guidance without a Settings updater or npm route', async () => {
+  it('shows the local update command without a Settings updater', async () => {
     localCheckMock.mockResolvedValue({ release: 3, app: 'local', servedRelease: 4, servedApp: 'served', behind: true, resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true } });
     stubFetch();
     render(<AstridUpdatesSection isOpen />);
@@ -56,7 +60,6 @@ describe('fully-local update guidance', () => {
     expect(await within(section).findByText('Update available: Release 4')).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
-    expect(section.textContent).not.toContain('npm run update');
   });
 
   it('uses the same install-command guidance for a required fully-local update', async () => {
@@ -68,7 +71,6 @@ describe('fully-local update guidance', () => {
     expect(await within(section).findByText('This update is required: Security fix')).toBeInTheDocument();
     expect(within(section).queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
-    expect(section.textContent).not.toContain('npm run update');
   });
 
   it('keeps the fully-local hard card on install-command guidance', async () => {
@@ -76,7 +78,6 @@ describe('fully-local update guidance', () => {
 
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(screen.getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
-    expect(document.body.textContent ?? '').not.toContain('npm run update');
   });
 
   describe('when the status reports self_update', () => {
@@ -87,13 +88,14 @@ describe('fully-local update guidance', () => {
         const url = String(input);
         if (url === '/__astrid/local-update-page') return Promise.resolve(json(200, TARGET));
         if (url === TARGET.url) return Promise.resolve(launcher());
+        if (url.endsWith('/v1/health')) return Promise.resolve(json(200, healthyRuntime));
         return Promise.resolve(json(200, { report: 'Astrid diagnostics' }));
       });
       vi.stubGlobal('fetch', fetchMock);
       return fetchMock;
     }
 
-    it('offers Update now with the install command as the secondary, and no npm route', async () => {
+    it('offers Update now with the local update command as the secondary', async () => {
       localCheckMock.mockResolvedValue(behind);
       stubFetch();
       render(<AstridUpdatesSection isOpen />);
@@ -101,7 +103,6 @@ describe('fully-local update guidance', () => {
 
       expect(await within(section).findByRole('button', { name: 'Update now' })).toBeInTheDocument();
       expect(within(section).getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
-      expect(section.textContent).not.toContain('npm run update');
     });
 
     it('offers no Update now when the status does not report self_update', async () => {

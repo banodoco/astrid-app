@@ -41,6 +41,14 @@ export function installedBackend(command) {
   throw Object.assign(new Error('This Astrid runs from source checkouts; update those checkouts and restart Astrid before updating the local App. An installed backend is required for npm run update.'), { step: 'select-backend' });
 }
 
+/** The Agent's run receipt from a final reply, or undefined for an older Agent that sends none. */
+export function replyReceipt(reply) {
+  const outcome = reply?.outcome;
+  if (!outcome || typeof outcome !== 'object' || !Number.isInteger(outcome.exit_code)) return undefined;
+  const lines = Array.isArray(reply.lines) ? reply.lines.filter((line) => typeof line === 'string') : [];
+  return { outcome, lines, exitCode: outcome.exit_code };
+}
+
 /** JSONL callbacks extend C2's transaction; no shell and no separate journal. */
 export async function runBackendUpdate({ backend, action, hook, spawnProcess = spawn }) {
   if (action.action === 'recover') {
@@ -52,7 +60,7 @@ export async function runBackendUpdate({ backend, action, hook, spawnProcess = s
   const child = spawnProcess(backend.python, ['-I', '-m', 'astrid.installer.local_update', '--root', backend.root], {
     cwd: backend.root, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PYTHONPATH: '', PYTHONHOME: '' },
   });
-  let result, failure, stderr = '', sequence = Promise.resolve();
+  let result, failure, receipt, stderr = '', sequence = Promise.resolve();
   child.stderr.on('data', (chunk) => { stderr = (stderr + chunk).slice(-16000); });
   const lines = createInterface({ input: child.stdout });
   lines.on('line', (line) => {
@@ -62,11 +70,15 @@ export async function runBackendUpdate({ backend, action, hook, spawnProcess = s
       if (message.hook) {
         try { await hook(message); child.stdin.write(`${JSON.stringify({ id: message.id, ok: true })}\n`); }
         catch (error) { child.stdin.write(`${JSON.stringify({ id: message.id, ok: false, error: `${error.step ?? message.hook}: ${error.message}` })}\n`); }
-      } else if (message.error) {
-        failure = Object.assign(new Error(message.error), { step: message.step ?? 'backend-transaction', code: message.code,
-          details: message.details, stopRefused: message.stop_refused, stopCompleted: message.stop_completed });
-      } else if (message.result) result = message.result;
-      else throw new Error('Backend updater returned an unknown protocol message');
+      } else if (message.error || message.result) {
+        // The final reply. A settled run also carries the Agent's run receipt
+        // (`outcome`) and its plain terminal lines, Next and Details included.
+        receipt = replyReceipt(message);
+        if (message.error) {
+          failure = Object.assign(new Error(message.error), { step: message.step ?? 'backend-transaction', code: message.code,
+            details: message.details, stopRefused: message.stop_refused, stopCompleted: message.stop_completed, ...receipt });
+        } else result = message.result;
+      } else throw new Error('Backend updater returned an unknown protocol message');
     }).catch((error) => { failure = error; child.stdin.destroy(); });
   });
   child.stdin.on('error', () => {});
@@ -78,6 +90,14 @@ export async function runBackendUpdate({ backend, action, hook, spawnProcess = s
   const { code, signal } = await closed;
   await sequence;
   if (failure) throw failure;
+  if (receipt && !signal) {
+    // The receipt, not the process, decides the exit code: 3 is not-updated
+    // (a recovery during an update included), never "the updater failed".
+    if (result) return { ...result, ...receipt };
+    throw Object.assign(new Error(receipt.outcome.reason_line ?? receipt.lines[0] ?? `The update ended with exit ${receipt.exitCode}`),
+      { step: 'backend-transaction', ...receipt });
+  }
+  // An older Agent sends no receipt: the process exit decides, as before.
   if (code !== 0 || signal || !result) throw Object.assign(new Error(`The backend updater failed: ${stderr.trim() || `exit ${signal ?? code}`}. This backend must include Astrid's local updater. Install the paired local-update release, restart Astrid, then retry npm run update.`), { step: 'backend-transaction' });
   return result;
 }

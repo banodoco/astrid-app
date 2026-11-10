@@ -28,14 +28,12 @@ on:
   workflow_dispatch:
     inputs:
       runtime_ref:
-        description: Full Runtime commit SHA or ref for both journey jobs
-        required: true
-        default: "5453366458f7b4ee874c94d15ae7952e3e82d3c3"
+        description: Optional Runtime SHA or ref for both journey jobs; empty uses the App manifest's pin
+        required: false
         type: string
       agent_ref:
-        description: Full Agent commit SHA or ref for both journey jobs
-        required: true
-        default: "e425903f7a9fa5b82973281d15054c0716b46e2d"
+        description: Optional Agent SHA or ref for both journey jobs; empty uses the App manifest's pin
+        required: false
         type: string
 
 concurrency:
@@ -52,18 +50,26 @@ jobs:
         id: app-checkout
         with:
           path: astrid-app
+      - name: Read the Agent and Runtime pins from the App manifest
+        id: pins
+        run: |
+          node -e '
+            const m = require("./astrid-app/public/install-manifest.json");
+            const agent = m.agent?.sha, runtime = m.runtime?.sha;
+            for (const sha of [agent, runtime]) if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error(`manifest pin is not a full SHA: ${sha}`);
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `agent_sha=${agent}\nruntime_sha=${runtime}\n`);'
       - uses: actions/checkout@v4
         id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
+          ref: ${{ inputs.runtime_ref || steps.pins.outputs.runtime_sha }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_ref || steps.pins.outputs.agent_sha }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 
@@ -111,6 +117,8 @@ jobs:
           # Astrid imports runtime_protocol but does not declare it: use the pinned sibling Runtime under test.
           .venv/bin/python -m pip install --no-deps -e ../astrid-runtime
           .venv/bin/python -m astrid.core.dev.cross_client --help > /dev/null
+          # The pack lifecycle journey invokes the console script from this pinned Agent environment.
+          test -x .venv/bin/astrid
 
       - name: Install App dependencies, Chromium and ffmpeg
         working-directory: astrid-app
@@ -129,6 +137,7 @@ jobs:
           ASTRID_APP_DIRECT_DOOR_PORT: "17341"
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
           ASTRID_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
+          ASTRID_PACKS_AGENT: ${{ github.workspace }}/astrid-agent/.venv/bin/astrid
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
           APP_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.app_head }}
           RUNTIME_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.runtime_head }}
@@ -171,6 +180,17 @@ jobs:
           name: direct-journey
           path: ${{ runner.temp }}/direct-artifacts/
           if-no-files-found: warn
+      - name: Collect the autostart-off card
+        if: ${{ !cancelled() }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/autostart-off-card"
+          find "${{ runner.temp }}/direct-results" -name 'autostart-off-card.png' -exec cp {} "$RUNNER_TEMP/autostart-off-card/" \;
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: autostart-off-card
+          path: ${{ runner.temp }}/autostart-off-card/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v4
         if: ${{ failure() }}
         with:
@@ -204,18 +224,26 @@ jobs:
         id: app-checkout
         with:
           path: astrid-app
+      - name: Read the Agent and Runtime pins from the App manifest
+        id: pins
+        run: |
+          node -e '
+            const m = require("./astrid-app/public/install-manifest.json");
+            const agent = m.agent?.sha, runtime = m.runtime?.sha;
+            for (const sha of [agent, runtime]) if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error(`manifest pin is not a full SHA: ${sha}`);
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `agent_sha=${agent}\nruntime_sha=${runtime}\n`);'
       - uses: actions/checkout@v4
         id: runtime-checkout
         with:
           repository: banodoco/astrid-runtime
-          ref: ${{ inputs.runtime_ref || '5453366458f7b4ee874c94d15ae7952e3e82d3c3' }}
+          ref: ${{ inputs.runtime_ref || steps.pins.outputs.runtime_sha }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         id: agent-checkout
         with:
           repository: banodoco/astrid-agent
-          ref: ${{ inputs.agent_ref || 'e425903f7a9fa5b82973281d15054c0716b46e2d' }}
+          ref: ${{ inputs.agent_ref || steps.pins.outputs.agent_sha }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
 

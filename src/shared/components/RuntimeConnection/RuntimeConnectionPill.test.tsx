@@ -5,6 +5,7 @@ import { isRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { RuntimeConnectionPill } from './RuntimeConnectionPill.tsx';
 import { installCommand, RUNTIME_CONNECTION_COPY as COPY, SETUP_SKILL_POINTER } from './copy.ts';
 import { CONNECTED_REALM, connectionFor } from './connectionFixture.ts';
+import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 
 afterEach(() => {
   cleanup();
@@ -79,8 +80,41 @@ describe('RuntimeConnectionPill', () => {
     expect(screen.getByText(COPY.restarted.sentence)).toHaveClass('text-sm', 'text-muted-foreground');
     expect(isRecoveryCardShowing()).toBe(true);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    // The page reloads itself onto the restarted Astrid once; the card's Reload stays for when that cannot happen.
     await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+    await waitFor(() => expect(onReload).toHaveBeenCalledTimes(2));
+  });
+
+  it('restarted (an update finished): reloads itself without a click, after saving drafts, once', async () => {
+    const fetchImpl = healthRoute(healthy('instance-1'), healthy('instance-2'));
+    const onReload = vi.fn();
+    const flush = vi.fn(async () => undefined);
+    const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush, isDirty: () => false });
+    try {
+      render(<RuntimeConnectionPill connection={connected()} onReload={onReload} fetchImpl={fetchImpl} restartCheckIntervalMs={5} />);
+      await waitFor(() => expect(onReload).toHaveBeenCalledOnce());
+      expect(flush).toHaveBeenCalled();
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(onReload).toHaveBeenCalledOnce();
+    } finally {
+      unregister();
+    }
+  });
+
+  it('restarted with a draft that cannot be saved: does not reload, and keeps the card with Reload', async () => {
+    const fetchImpl = healthRoute(healthy('instance-1'), healthy('instance-2'));
+    const onReload = vi.fn();
+    const unregister = registerDraftSafeReloadGuard({ label: 'draft', flush: async () => { throw new Error('offline'); }, isDirty: () => true });
+    try {
+      render(<RuntimeConnectionPill connection={connected()} onReload={onReload} fetchImpl={fetchImpl} restartCheckIntervalMs={5} />);
+      await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid restarted' })).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByText(/draft: offline/)).toBeInTheDocument());
+      expect(onReload).not.toHaveBeenCalled();
+      expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument();
+    } finally {
+      unregister();
+    }
   });
 
   it('another identity behind the door after connecting is the same restart card, not a second message', async () => {
@@ -107,10 +141,12 @@ describe('RuntimeConnectionPill', () => {
     const checkedSetup = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
     expect(checkedSetup).toBeChecked();
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    const setupCommand = screen.getByText(installCommand('install'), { exact: true }).textContent;
+    const setupCommand = screen.getByText(installCommand('install', undefined, false, false, true), { exact: true }).textContent;
     fireEvent.click(checkedSetup);
     expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(setupCommand);
+    // Unchecked: a fresh install, which keeps --yes. It intentionally differs from the set-up line captured above.
+    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(installCommand('install'));
+    expect(installCommand('install')).not.toBe(setupCommand);
     expect(screen.getByText('Give these instructions to your coding agent to start Astrid again. Your changes are kept.')).toBeInTheDocument();
     expect(status()).toHaveAttribute('data-state', 'stopped');
     expect(status()).not.toHaveTextContent('Connected');
@@ -198,7 +234,7 @@ describe('RuntimeConnectionPill', () => {
       vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('offline')));
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Download diagnostics' })); await Promise.resolve(); });
       expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
-      expect(screen.getByText(/astrid-runtime doctor.*astrid-diagnostics\.txt/)).toBeInTheDocument();
+      expect(screen.getByText(/sh -s -- --doctor/)).toBeInTheDocument();
       await act(async () => { fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' })); await Promise.resolve(); });
       expect(writeText).toHaveBeenCalledWith(expect.stringMatching(/doctor.*log directory named in its report/));
 
@@ -244,7 +280,7 @@ describe('RuntimeConnectionPill', () => {
       expect(diagnosticsCall?.[1]).toEqual(expect.objectContaining({ cache: 'no-store' }));
       expect(createObjectURL).toHaveBeenCalledOnce();
       const report = await (createObjectURL.mock.calls[0][0] as Blob).text();
-      expect(report).toContain('App build: served-app-build\nApp release: 42');
+      expect(report).toContain('App release: 42\nApp build: served-app-build');
       expect(report.match(/^App build:/gm)).toHaveLength(1);
       expect(report.match(/^App release:/gm)).toHaveLength(1);
       await act(async () => { await vi.advanceTimersByTimeAsync(0); });
@@ -299,7 +335,7 @@ describe('RuntimeConnectionPill', () => {
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
     expect(status()).toHaveAttribute('data-state', 'stopped');
     expect(isRecoveryCardShowing()).toBe(true);
-    expect(document.body.textContent).toContain(installCommand('install'));
+    expect(document.body.textContent).toContain(installCommand('install', undefined, false, false, true));
 
     route.answer = healthy('instance-1');
     await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
@@ -340,10 +376,10 @@ describe('RuntimeConnectionPill', () => {
     await waitFor(() => expect(fetchImpl).toHaveBeenCalled());
     route.answer = unreachable;
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid stopped' })).toBeInTheDocument());
-    expect(document.body.textContent).toContain(installCommand('install'));
+    expect(document.body.textContent).toContain(installCommand('install', undefined, false, false, true));
     route.answer = healthy('instance-2');
     await waitFor(() => expect(screen.getByRole('heading', { name: 'Astrid restarted' })).toBeInTheDocument());
-    expect(document.body.textContent).not.toContain(installCommand('install'));
+    expect(document.body.textContent).not.toContain(installCommand('install', undefined, false, false, true));
   });
 
   it.each(['not_running', 'refused'] as const)('renders nothing while %s, and asks Astrid nothing', (status) => {

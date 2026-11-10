@@ -151,7 +151,7 @@ const sendHook = async (id, name, app, release, rollback = false) => {
 const first = await iterator.next();
 if (!first.value) process.exit(2);
 const action = JSON.parse(first.value);
-log({ action: action.action, pid: process.pid });
+log({ action: action.action, purpose: action.purpose, pid: process.pid });
 if (action.action === 'recover') {
   let journal;
   try { journal = JSON.parse(fs.readFileSync(journalPath, 'utf8')); } catch {}
@@ -169,7 +169,17 @@ if (action.action === 'recover') {
       fs.writeFileSync(journalPath, JSON.stringify(journal));
     }
   }
-  process.stdout.write(JSON.stringify({ result: { status: 'recovered' } }) + '\\n');
+  // As the Agent settles it: the update's own recovery is not-updated (exit 3);
+  // the launcher's start-time recovery is a repair with one plain line.
+  if (action.purpose === 'update') {
+    process.stdout.write(JSON.stringify({ result: { status: 'recovered' },
+      outcome: { kind: 'not-updated', reason: 'recovered-previous-version', exit_code: 3 },
+      lines: ['Astrid did NOT update. It is still Release 1; Release 2 is available.', 'Next: fake next step.', 'Details: fake install.log'] }) + '\\n');
+    process.exit(3);
+  }
+  process.stdout.write(JSON.stringify({ result: { status: 'recovered' },
+    outcome: { kind: 'repaired', reason: 'recovered-previous-version', exit_code: 0 },
+    lines: ['Astrid finished an interrupted update from earlier: it went back to Release 1 and kept your projects.'] }) + '\\n');
   process.exit(0);
 }
 if (action.action !== 'update') process.exit(3);
@@ -188,6 +198,11 @@ await sendHook(id++, 'verify-editor', app, 2);
 await sendHook(id++, 'release-app', app, 2);
 pending.step = 'complete';
 fs.writeFileSync(journalPath, JSON.stringify(pending));
+// A settled Agent reply with its run receipt, as the test asks for it.
+if (process.env.FAKE_FINAL_REPLY) {
+  process.stdout.write(process.env.FAKE_FINAL_REPLY + '\\n');
+  process.exit(Number(process.env.FAKE_FINAL_CODE || 0));
+}
 process.stdout.write(JSON.stringify({ result: { status: 'updated' } }) + '\\n');
 process.exit(0);
 })().catch((error) => { process.stderr.write(String(error.stack || error) + '\\n'); process.exit(1); });
@@ -437,6 +452,55 @@ for (const mode of ['dev', 'preview']) {
   });
 }
 
+// The Agent's settled reply (astrid-agent local_update.main): the receipt and its plain lines.
+const RECEIPT_NEXT = 'Next: open astrid.haus > Settings > Updates > Download diagnostics, and send the file to support.';
+const RECEIPT_DETAILS = 'Details: /home/me/.local/state/astrid/install.log';
+async function settledRun(t, reply, code) {
+  const fixture = await createFixture(); t.after(fixture.close);
+  fixture.env.FAKE_FINAL_REPLY = JSON.stringify(reply);
+  fixture.env.FAKE_FINAL_CODE = String(code);
+  const started = launch(fixture); t.after(started.stop);
+  await started.waitFor(() => started.output.stdout.includes('Local App:'));
+  const result = await invokeUpdate(fixture);
+  return { fixture, started, result };
+}
+
+test('a local exit-3 reply shows its lines in both windows, not "backend updater failed"', { timeout: 60_000 }, async (t) => {
+  const lines = ['Astrid did NOT update. It is still Release 1; Release 2 is available.',
+    'Why: the new release was installed, but the running Astrid did not restart onto it.', 'Your projects are safe — nothing was changed.', RECEIPT_NEXT, RECEIPT_DETAILS];
+  const { started, result } = await settledRun(t, { result: { status: 'updated' }, outcome: { kind: 'not-updated', reason: 'runtime-not-running', exit_code: 3 }, lines }, 3);
+  assert.equal(result.code, 3, result.stderr);
+  assert.ok(result.stdout.includes(lines.join('\n')), result.stdout);
+  assert.doesNotMatch(result.stdout + result.stderr, /backend updater failed|Astrid is updated and running/i);
+  await started.waitFor(() => started.output.stdout.includes(lines.join('\n')));
+  assert.doesNotMatch(started.output.stdout + started.output.stderr, /backend updater failed/i);
+  await started.stop();
+});
+
+test('a local exit-0 reply whose receipt did not update is not reported as updated', { timeout: 60_000 }, async (t) => {
+  const lines = ['Astrid did NOT update. It is still Release 1; Release 2 is available.',
+    'Why: the installer finished without installing the new release. This is a bug in Astrid, not something you did.', RECEIPT_NEXT, RECEIPT_DETAILS];
+  const { started, result } = await settledRun(t, { result: { status: 'updated' }, outcome: { kind: 'not-updated', reason: 'installer-bug', exit_code: 0 }, lines }, 0);
+  assert.equal(result.code, 3, result.stdout);
+  assert.ok(result.stdout.includes(lines.join('\n')), result.stdout);
+  assert.doesNotMatch(result.stdout, /Astrid is updated and running|Astrid updated/);
+  await started.waitFor(() => started.output.stdout.includes(lines[0]));
+  await started.stop();
+});
+
+test('a local failure with a receipt shows its Next and Details lines in both windows, once', { timeout: 60_000 }, async (t) => {
+  const lines = ['Astrid did NOT update: the run stopped with an error; the message above says why.', 'Astrid is still Release 1.', RECEIPT_NEXT, RECEIPT_DETAILS];
+  const { started, result } = await settledRun(t, { error: 'simulated failure after settle', step: 'verify-editor', outcome: { kind: 'failed', reason: 'error', exit_code: 1 }, lines }, 1);
+  assert.equal(result.code, 1, result.stdout);
+  assert.ok(result.stderr.includes(lines.join('\n')), result.stderr);
+  // The Agent's headline is the first line; it is not printed twice.
+  assert.equal(result.stderr.split('\n').filter((line) => line.startsWith('Astrid did NOT update')).length, 1, result.stderr);
+  assert.doesNotMatch(result.stderr, /backend updater failed|Astrid update failed at/);
+  await started.waitFor(() => started.output.stderr.includes(`${RECEIPT_NEXT}\n${RECEIPT_DETAILS}`));
+  assert.equal(started.output.stderr.split('\n').filter((line) => line.startsWith('Astrid did NOT update')).length, 1, started.output.stderr);
+  await started.stop();
+});
+
 test('a new launcher controller recovers a retained failed activation before serving the old App again', { timeout: 90_000 }, async (t) => {
   const fixture = await createFixture(); t.after(fixture.close);
   fixture.env.FAKE_FAIL_AFTER_START = '1';
@@ -446,7 +510,11 @@ test('a new launcher controller recovers a retained failed activation before ser
   await waitForBuild(fixture.env.PORT, fixture.oldSha, 1);
   const failed = await invokeUpdate(fixture);
   assert.equal(failed.code, 1, failed.stdout);
-  assert.match(failed.stderr, /simulated interruption after candidate start/);
+  assert.match(failed.stderr, /^Astrid did NOT update: .*simulated interruption after candidate start/m);
+  assert.match(failed.stderr, /^Details: .*Download diagnostics/m);
+  assert.doesNotMatch(failed.stderr, /Astrid update failed at/);
+  // The window running Astrid says so too, not only the window that asked.
+  await first.waitFor(() => /Astrid did NOT update: .*simulated interruption/.test(first.output.stderr));
   assert.equal(await gitSha(fixture.app), fixture.targetSha);
   await waitForBuild(fixture.env.PORT, fixture.targetSha, 2);
   const journalPath = join(fixture.runtimeRoot, 'update-transaction.json');
@@ -469,6 +537,8 @@ test('a new launcher controller recovers a retained failed activation before ser
   await assert.rejects(readFile(retainedRoot), { code: 'ENOENT' });
   const backend = (await readFile(fixture.env.FAKE_BACKEND_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(backend.map(({ action }) => action), ['update', 'recover']);
+  assert.equal(backend[1].purpose, undefined, 'a start-time recovery is not the update\'s own recovery');
+  assert.match(second.output.stdout, /finished an interrupted update from earlier: it went back to Release 1/);
   await second.stop();
 });
 
@@ -506,8 +576,10 @@ test('the live launcher controller recovers a failed activation after its candid
   assert.equal(pending.step, 'applying');
   const retainedRoot = pending.transaction_context.app.preparationRoot;
   const retry = await invokeUpdate(fixture);
-  assert.equal(retry.code, 0, retry.stderr);
-  assert.match(retry.stdout, /interrupted update was restored and Astrid is running/);
+  // The update's own recovery: not updated (exit 3), with the Agent's Next and Details lines.
+  assert.equal(retry.code, 3, retry.stderr);
+  assert.match(retry.stdout, /Astrid did NOT update\. It is still Release 1/);
+  assert.match(retry.stdout, /Next: fake next step\.\nDetails: fake install\.log/);
   assert.equal(await gitSha(fixture.app), fixture.oldSha);
   assert.deepEqual(await waitForBuild(fixture.env.PORT, fixture.oldSha, 1), { app: fixture.oldSha, release: 1 });
   assert.equal(await readFile(join(fixture.app, 'dist', 'build.json'), 'utf8'), JSON.stringify({ app: fixture.oldSha, release: 1 }));
@@ -516,6 +588,7 @@ test('the live launcher controller recovers a failed activation after its candid
   await assert.rejects(readFile(retainedRoot), { code: 'ENOENT' });
   const backend = (await readFile(fixture.env.FAKE_BACKEND_LOG, 'utf8')).trim().split('\n').filter(Boolean).map(JSON.parse);
   assert.deepEqual(backend.map(({ action }) => action), ['update', 'recover']);
+  assert.equal(backend[1].purpose, 'update');
   await first.stop();
 });
 

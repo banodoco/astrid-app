@@ -20,20 +20,32 @@ jobs:
   # Siblings come from main, like the journeys: drift between the App and either one is exactly what these catch.
   checkout-lanes:
     runs-on: ubuntu-latest
+    env:
+      M4_TEST_AGENT_ROOT: ${{ github.workspace }}/astrid-agent
+      M4_TEST_RUNTIME_ROOT: ${{ github.workspace }}/astrid-runtime
+      M4_TEST_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
     steps:
       - uses: actions/checkout@v4
         with:
           path: astrid-app
+      - name: Read the Agent and Runtime pins from the App manifest
+        id: pins
+        run: |
+          node -e '
+            const m = require("./astrid-app/public/install-manifest.json");
+            const agent = m.agent?.sha, runtime = m.runtime?.sha;
+            for (const sha of [agent, runtime]) if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error(`manifest pin is not a full SHA: ${sha}`);
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `agent_sha=${agent}\nruntime_sha=${runtime}\n`);'
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
-          ref: main
+          ref: ${{ steps.pins.outputs.runtime_sha }}
           path: astrid-runtime
           token: ${{ secrets.RUNTIME_READ_TOKEN || github.token }}
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
-          ref: main
+          ref: ${{ steps.pins.outputs.agent_sha }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
       - name: Restore npm cache (C-08)
@@ -51,6 +63,13 @@ jobs:
       - name: Install App dependencies
         working-directory: astrid-app
         run: npm ci --legacy-peer-deps
+      - name: Build the Agent venv for the checkout lane (with the sibling Runtime)
+        working-directory: astrid-agent
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install -e .
+          .venv/bin/python -m pip install --no-deps -e ../astrid-runtime -e ../astrid-runtime/packages/python
+          echo "M4_TEST_PYTHON_SITE=$(.venv/bin/python -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')" >> "$GITHUB_ENV"
       - name: Checkout lane
         working-directory: astrid-app
         env:
@@ -110,10 +129,18 @@ jobs:
           path: astrid-app
           fetch-depth: 0
           filter: blob:none
+      - name: Read the Agent and Runtime pins from the App manifest
+        id: pins
+        run: |
+          node -e '
+            const m = require("./astrid-app/public/install-manifest.json");
+            const agent = m.agent?.sha, runtime = m.runtime?.sha;
+            for (const sha of [agent, runtime]) if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error(`manifest pin is not a full SHA: ${sha}`);
+            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `agent_sha=${agent}\nruntime_sha=${runtime}\n`);'
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-runtime
-          ref: main
+          ref: ${{ steps.pins.outputs.runtime_sha }}
           path: astrid-runtime
           fetch-depth: 0
           filter: blob:none
@@ -121,7 +148,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
-          ref: main
+          ref: ${{ steps.pins.outputs.agent_sha }}
           path: astrid-agent
           fetch-depth: 0
           filter: blob:none

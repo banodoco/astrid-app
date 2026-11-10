@@ -23,6 +23,15 @@ describe('resolveUpdate', () => {
     });
   });
 
+  it('titles an acknowledgement-unknown notice so the title agrees with its body', () => {
+    expect(resolveUpdate({ installType: 'installer', updateReason: 'acknowledgement-unknown', updateNowAvailable: false })).toMatchObject({
+      card: 'notice',
+      title: 'Update not confirmed yet',
+      body: INSTALLER_UPDATE_REASON_MESSAGES['acknowledgement-unknown'],
+      updateReason: 'acknowledgement-unknown',
+    });
+  });
+
   it('shows a needs-repair recovery as an update card with the command and no in-app Update', () => {
     expect(resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', updateNowAvailable: false })).toMatchObject({
       card: 'update', body: 'Astrid needs repair before it can update.', primary: { label: 'Copy instructions for your agent' }, updateReason: 'needs-repair',
@@ -42,9 +51,9 @@ describe('resolveUpdate', () => {
     });
   });
 
-  it('keeps autostart-off without an action, since its setup command is shown on its own', () => {
+  it('gives autostart-off the agent copy action and the manual line, and no Update now', () => {
     expect(resolveUpdate({ installType: 'installer', updateReason: 'autostart-off', updateNowAvailable: false })).toMatchObject({
-      card: 'notice', primary: null, secondary: null, updateReason: 'autostart-off',
+      card: 'notice', primary: { label: 'Copy instructions for your agent' }, secondary: { label: 'Run it yourself' }, updateReason: 'autostart-off',
     });
   });
 

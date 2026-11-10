@@ -5,9 +5,26 @@ import { generateIntegrityHash } from './extensionIntegrity';
 import type { ExtensionPackRecord } from './extensionStateRepository';
 import { useExtensionLoaderWiring } from './useExtensionLoaderWiring';
 import { runtimeApiBase } from '@/integrations/runtime/connection';
+import { setRuntimePacksUnsupported } from './runtimePackSupport';
+
+/** The connection fields that name the Runtime for the pack re-poll key. */
+export interface RuntimePackKeySource {
+  readonly isConnected?: boolean;
+  readonly realmName?: string | null;
+  readonly schemaDigest?: string | null;
+  /** The installed release. Releases can share a schema digest, so an update to a new release must change the key. */
+  readonly runtimeRelease?: number | null;
+}
+
+/** The identity the pack re-poll waits on: connection, realm, schema digest, and release. */
+export function runtimePackKey(connection?: RuntimePackKeySource): string {
+  return [connection?.isConnected, connection?.realmName, connection?.schemaDigest, connection?.runtimeRelease].map(String).join('|');
+}
 
 /** Runtime owns installed presence and canonical manifests; IndexedDB is a carrier. */
-export function useRuntimePackExtensions(directExtensions: readonly AstridExtension[] | undefined, refreshIntervalMs: number) {
+// `runtimeKey` names the connected Runtime's identity. A Runtime that answers 404 on the inventory route has no packs yet:
+// polling stops and resumes only when this key changes (a reconnect, another Runtime, or a new release of it).
+export function useRuntimePackExtensions(directExtensions: readonly AstridExtension[] | undefined, refreshIntervalMs: number, runtimeKey = '') {
   const [repository, setRepository] = useState<ReturnType<typeof createIndexedDBExtensionStateRepository> | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [transportError, setTransportError] = useState<Error | null>(null);
@@ -16,12 +33,21 @@ export function useRuntimePackExtensions(directExtensions: readonly AstridExtens
     let stopped = false;
     let running = false;
     let last = '';
+    let packsAbsent = false;
     async function refresh() {
-      if (running || stopped) return;
+      if (running || stopped || packsAbsent) return;
       running = true;
       try {
         await repo.initialize();
         const response = await fetch(`${runtimeApiBase()}/packs/inventory`, { cache: 'no-store', credentials: 'same-origin' });
+        if (response.status === 404) {
+          // Not a transport failure: this Runtime has no packs to show. Stop polling until its identity changes.
+          packsAbsent = true;
+          if (timer !== undefined) window.clearInterval(timer);
+          setRuntimePacksUnsupported(true);
+          if (!stopped) setTransportError(null);
+          return;
+        }
         if (!response.ok || response.redirected) throw new Error('Runtime installed pack inventory is unavailable');
         const inventory = await response.json();
         if (inventory.version !== 1 || !Number.isSafeInteger(inventory.revision) || inventory.revision < 0 || !Array.isArray(inventory.packs)) {
@@ -50,6 +76,7 @@ export function useRuntimePackExtensions(directExtensions: readonly AstridExtens
           }
           if (!stopped) { last = fingerprint; setRepository(repo); setRefreshKey((key) => key + 1); }
         }
+        setRuntimePacksUnsupported(false);
         if (!stopped) setTransportError(null);
       } catch (error) {
         if (!stopped) setTransportError(error instanceof Error ? error : new Error(String(error)));
@@ -57,11 +84,11 @@ export function useRuntimePackExtensions(directExtensions: readonly AstridExtens
     }
     void refresh();
     const timer = window.setInterval(() => void refresh(), refreshIntervalMs);
-    const onRefresh = () => { last = ''; setRefreshKey((key) => key + 1); void refresh(); };
+    const onRefresh = () => { if (packsAbsent) return; last = ''; setRefreshKey((key) => key + 1); void refresh(); };
     window.addEventListener('focus', onRefresh);
     window.addEventListener('astrid:pack-inventory-changed', onRefresh);
     return () => { stopped = true; window.clearInterval(timer); window.removeEventListener('focus', onRefresh); window.removeEventListener('astrid:pack-inventory-changed', onRefresh); };
-  }, [refreshIntervalMs]);
+  }, [refreshIntervalMs, runtimeKey]);
   const triggerExtensionRefresh = useCallback(() => {
     window.dispatchEvent(new Event('astrid:pack-inventory-changed'));
   }, []);

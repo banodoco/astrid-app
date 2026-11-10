@@ -16,9 +16,7 @@
     },
     {
       "id": "already-set-up",
-      "argv": [
-        "--yes"
-      ],
+      "argv": [],
       "choices": {
         "autostart": "on",
         "command": "on",

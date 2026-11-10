@@ -145,6 +145,31 @@ for (const env of [{ MOCK_FETCH_EXIT: '7' }, { MOCK_PYTHON_EXIT: '17' }]) {
   }));
 }
 
+test('POSIX says what a pre-core failure was, in one plain line', () => scenario(async (context) => {
+  const download = await run(context, [], { MOCK_FETCH_EXIT: '7' });
+  assert.match(download.stderr, /Your work is kept\.\r?\nIt couldn't download what it needs\. Check your internet connection, then run the same command again\.\r?\nDetails:/);
+  const python = await run(context, [], { MOCK_PYTHON_EXIT: '17' });
+  assert.match(python.stderr, /Your work is kept\.\r?\nIt couldn't prepare Python on this computer\./);
+}));
+
+test('POSIX adds nothing after the installer receipt already named its Details', () => scenario(async (context) => {
+  const result = await run(context, [], { MOCK_CORE_RECEIPT: '3' });
+  assert.equal(result.code, 3);
+  assert.match(result.stdout, /Astrid did NOT update\./);
+  assert.doesNotMatch(result.stderr, /Astrid couldn't finish/);
+  assert.equal(((result.stdout + result.stderr).match(/Details:/g) || []).length, 1);
+}));
+
+test('POSIX on an unsupported system gives the exact PowerShell install command', () => scenario(async (context) => {
+  // Git Bash and similar shells on Windows report a MINGW/MSYS uname.
+  await writeFile(path.join(context.root, 'bin', 'uname'), '#!/bin/sh\necho MINGW64_NT-10.0-19045\n', { mode: 0o755 });
+  const result = await run(context);
+  assert.equal(result.code, 1);
+  assert.equal(result.stderr.trim(), 'Astrid installs on Windows from PowerShell. Open PowerShell and run: irm https://astrid.haus/install.ps1 | iex');
+  assert.equal(result.stdout, '');
+  assert.deepEqual(await context.calls(), []);
+}));
+
 test('POSIX preserves the core failure paragraph and nonzero status once', () => scenario(async (context) => {
   const result = await run(context, [], { MOCK_CORE_EXIT: '23' });
   assert.equal(result.code, 23);

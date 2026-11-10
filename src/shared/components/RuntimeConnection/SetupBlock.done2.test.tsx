@@ -7,7 +7,7 @@ import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { connectionFor } from './connectionFixture.ts';
-import { RUNTIME_CONNECTION_COPY as COPY } from './copy.ts';
+import { RUNTIME_CONNECTION_COPY as COPY, SETUP_SKILL_POINTER } from './copy.ts';
 
 const mocks = vi.hoisted(() => ({ clipboard: vi.fn() }));
 vi.mock('@/shared/lib/browser/clipboard.ts', () => ({ writeClipboardTextSafe: mocks.clipboard }));
@@ -49,20 +49,25 @@ describe('done2', () => {
       for (const alreadySetUp of [false, true]) {
         if ((checkbox as HTMLInputElement).checked !== alreadySetUp) fireEvent.click(checkbox);
         expect(setup.getByText(alreadySetUp ? 'Start Astrid' : 'Recommended setup')).toBeInTheDocument();
-        expect(setup.getByText(surface.command, { selector: 'pre code' }).textContent).toBe(surface.command);
+        // Set up already: the plain install line, no saved choice flags.
+        const expected = alreadySetUp ? 'curl -fsSL https://astrid.haus/install | sh' : surface.command;
+        expect(setup.getByText(expected, { selector: 'pre code' }).textContent).toBe(expected);
         mocks.clipboard.mockClear();
         fireEvent.click(setup.getByRole('button', { name: /^(Copy command|Command copied)$/ }));
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
-        expect(mocks.clipboard).toHaveBeenLastCalledWith(surface.command);
+        expect(mocks.clipboard).toHaveBeenLastCalledWith(expected);
         mocks.clipboard.mockClear();
         fireEvent.click(setup.getByRole('button', { name: new RegExp(`^(Copy instructions for your agent|${COPY.agent.copied.replace('.', '\\.')})$`) }));
         await waitFor(() => expect(mocks.clipboard).toHaveBeenCalledTimes(1));
         const instructions = mocks.clipboard.mock.calls[0][0] as string;
-        expect(instructions.split('\n')).toContain(surface.command);
+        expect(instructions.split('\n')).toContain(expected);
         // Existing-install surfaces (update, Settings) keep saved choices: no consent question for them.
         const existingSurface = surface.command.endsWith('--update');
         if (alreadySetUp || existingSurface) expect(instructions).not.toContain('May I install Astrid');
-        else expect(instructions).toContain('May I install Astrid with these setup choices?');
+        else {
+          expect(instructions).toContain('Show me these four choices as my setup decisions. Offer to change them. Wait for my reply before running the installer.');
+          expect(instructions).toContain(SETUP_SKILL_POINTER);
+        }
       }
       view.unmount();
     }

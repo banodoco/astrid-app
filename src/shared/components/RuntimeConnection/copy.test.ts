@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentInstructions, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, setUpGenerationInstructions, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
+import { agentInstructions, autostartOffAgentBrief, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, setUpGenerationInstructions, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
 import fixture from './installArgv.fixture.json';
 
 const setupGuideUrl = 'https://github.com/banodoco/astrid-agent/blob/main/docs/setup/SKILL.md';
@@ -111,8 +111,8 @@ describe('setup consent wording', () => {
 
 describe('offline diagnostics copy', () => {
   it('owns one command for each of the two G1 options', () => {
-    expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('astrid-runtime doctor');
-    expect(DIAGNOSTICS_FALLBACK_COPY.command).toBe('astrid-runtime doctor > astrid-diagnostics.txt');
+    expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('--doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.command).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --doctor');
   });
 });
 
@@ -120,12 +120,17 @@ describe('update handoff', () => {
   it('offers the installer route on hosted builds and source-checkout guidance only on local builds', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
-    const text = agentInstructions('update', 'https://astrid.haus', true);
-    expect(text).toContain('If you installed Astrid with the installer');
-    expect(text).toContain("If you run Astrid from source checkouts: update those checkouts to their main branches and restart Astrid. Don't run the installer over them.");
-    expect(text).toContain('running runtime_protocol from a git checkout');
+    // Hosted (localBuild=false): the installer route, and no source-checkout guidance.
+    const hosted = agentInstructions('update', 'https://astrid.haus', false);
+    expect(hosted).toContain('If you installed Astrid with the installer');
+    expect(hosted).not.toContain('source checkouts');
     expect(agentInstructions('install', 'https://astrid.haus')).not.toContain('source checkouts');
     expect(agentInstructions('update', 'https://astrid.haus')).not.toContain('source checkouts');
+    // Local (localBuild=true): the command runs in the Astrid folder, with the source-checkout guidance.
+    const local = agentInstructions('update', 'http://localhost:5180', true);
+    expect(local).toContain('npm run update');
+    expect(local).toContain("If you run Astrid from source checkouts: update those checkouts to their main branches and restart Astrid. Don't run the installer over them.");
+    expect(local).toContain('running runtime_protocol from a git checkout');
   });
 
   it('offers the agent-safe Windows update command in update briefs', () => {
@@ -133,7 +138,23 @@ describe('update handoff', () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
     expect(ASTRID_COMMANDS.windowsAgentUpdate).toBe('powershell -NoProfile -ExecutionPolicy Bypass -Command "& ([scriptblock]::Create((irm https://astrid.haus/install.ps1))) --update"');
     expect(agentInstructions('update', 'https://astrid.haus')).toContain(ASTRID_COMMANDS.windowsUpdate);
-    expect(localSetupInstructions()).toContain(ASTRID_COMMANDS.windowsAgentUpdate);
+    expect(localSetupInstructions()).toContain('npm run update');
+  });
+});
+
+describe('update command by surface', () => {
+  it("a locally run App updates with npm run update in the Astrid folder, not the curl line", () => {
+    expect(installCommand('update', undefined, false, true)).toBe('npm run update');
+    const brief = agentInstructions('update', 'http://localhost:5180', true);
+    expect(brief).toContain('npm run update');
+    expect(brief).not.toContain('--update');
+  });
+
+  it('a hosted astrid.haus update keeps the curl --update line', () => {
+    expect(installCommand('update', undefined, false, false)).toBe(ASTRID_COMMANDS.macLinuxUpdate);
+    const brief = agentInstructions('update', 'https://astrid.haus', false);
+    expect(brief).toContain(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(brief).not.toContain('npm run update');
   });
 });
 
@@ -243,5 +264,44 @@ describe('failure diagnostics', () => {
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
     const windowsBrief = agentInstructions('install', 'https://astrid.haus');
     expect(windowsBrief).toContain("Invoke-RestMethod -Uri 'https://astrid.haus/api/runtime/v1/health' -Headers @{ Origin = 'https://astrid.haus' }");
+  });
+});
+
+describe('diagnostics fallback', () => {
+  it('offers the installer --doctor line, never astrid-runtime doctor', () => {
+    expect(DIAGNOSTICS_FALLBACK_COPY.command).toContain('--doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.agent).toContain('--doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.command).not.toContain('astrid-runtime doctor');
+    expect(DIAGNOSTICS_FALLBACK_COPY.agent).not.toContain('astrid-runtime doctor');
+  });
+});
+
+describe('autostart-off agent brief', () => {
+  it('runs exactly the strict update line, success words, a doctor fallback, and no other fixes', () => {
+    const brief = autostartOffAgentBrief(false);
+    expect(brief).toContain(`Run exactly this command: ${ASTRID_COMMANDS.macLinuxUpdate}.`);
+    expect(brief).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
+    expect(brief).toContain('"Astrid updated" or "already up to date"');
+    expect(brief).toContain(DIAGNOSTICS_FALLBACK_COPY.command);
+    expect(brief).toContain("Don't try other fixes");
+    expect(autostartOffAgentBrief(true)).toContain(ASTRID_COMMANDS.windowsUpdate);
+  });
+
+  it('a locally served App gets the npm run update line in its brief, not the curl or irm line', () => {
+    const brief = autostartOffAgentBrief(false, true);
+    expect(brief).toContain('Run exactly this command: npm run update.');
+    expect(brief).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(autostartOffAgentBrief(true, true)).not.toContain(ASTRID_COMMANDS.windowsUpdate);
+  });
+});
+
+describe('fully local brief for a set-up user', () => {
+  it('sends the plain install line with no choice flags and no Setup choices line, despite stale saved choices', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    const text = localSetupInstructions({ autostart: false, command: true, skills: false, skillCopies: true }, true);
+    expect(text).toContain(`The official installer command is: \`${ASTRID_COMMANDS.macLinux}\``);
+    expect(text).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
+    expect(text).not.toContain('Setup choices:');
   });
 });

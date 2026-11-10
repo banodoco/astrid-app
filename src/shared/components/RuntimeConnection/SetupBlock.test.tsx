@@ -2,6 +2,7 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import { SetupBlock } from './SetupBlock.tsx';
+import { installCommand } from './copy.ts';
 
 afterEach(() => localStorage.clear());
 
@@ -48,14 +49,17 @@ it('keeps changed choices and checked state when Welcome hands off to a new setu
   const command = screen.getByRole('code').textContent;
   expect(command).toContain('--yes --autostart off --command off --skills off --skill-copies on');
   fireEvent.click(screen.getByRole('checkbox', { name: "I've already set up Astrid" }));
-  expect(screen.getByRole('code').textContent).toBe(command);
+  // Set up already: the plain line, with no choice flags (871bb95), not the fresh command that carried the choices.
+  expect(command).toContain('--yes --autostart off --command off --skills off --skill-copies on');
+  expect(screen.getByRole('code').textContent).toBe(installCommand('install', undefined, false, false, true));
   expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
 
   first.unmount();
   render(<SetupBlock initiallySetUp={false} />);
   expect(screen.getByRole('checkbox', { name: "I've already set up Astrid" })).toBeChecked();
   expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-  expect(screen.getByRole('code').textContent).toBe(command);
+  // Checked as already set up: the plain line, not the fresh command the choices built (871bb95).
+  expect(screen.getByRole('code').textContent).toBe(installCommand('install', undefined, false, false, true));
 });
 
 it('gives an update no choice controls: the Agent keeps the saved policy', () => {
@@ -64,4 +68,16 @@ it('gives an update no choice controls: the Agent keeps the saved policy', () =>
   render(<SetupBlock mode="update" />);
   expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
   expect(screen.getByRole('code')).toHaveTextContent(/sh -s -- --update$/);
+});
+
+it.each([false, true])('a set-up install with stale saved autostart=%s sends the plain install line, no choice flags', (autostart) => {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+  localStorage.setItem('astrid:pending-setup-v1', JSON.stringify({
+    alreadySetUp: true,
+    choices: { autostart, command: true, skills: true, skillCopies: false },
+  }));
+  render(<SetupBlock />);
+  expect(screen.getByText('Start Astrid')).toBeInTheDocument();
+  expect(screen.getByRole('code').textContent).toBe('curl -fsSL https://astrid.haus/install | sh');
 });

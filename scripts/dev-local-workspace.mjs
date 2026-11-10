@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import { packageManagerInvocation } from './node-package-manager.mjs';
 import { terminateProcessTree } from './terminate-process-tree.mjs';
 import { startLocalUpdateControl } from './local-update-control.mjs';
-import { createLocalUpdater, restorePreparedResources, validateAppContext } from './local-update-runner.mjs';
+import { createLocalUpdater, restorePreparedResources, updateFailureLines, validateAppContext } from './local-update-runner.mjs';
 import { restoreCheckout, releasePreparation, prepareUpdate, selectUpdateTarget } from './local-update-checkout.mjs';
 import { installedBackend, journalSettled, pinokioSession, readUpdateJournal, runBackendUpdate } from './local-update-backend.mjs';
 import { homedir } from 'node:os';
@@ -437,9 +437,13 @@ async function verifyRuntime(endpoint, token, expectedIdentity, allowStart = fal
       const quote = (value) => /^[A-Za-z0-9_./:=+-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\"'\"'")}'`;
       const invocation = [selected.command, ...selected.args.filter((value) => value !== '--json')].map(quote).join(' ');
       const restart = pinokioManaged ? 'Stop and start Astrid in Pinokio' : `${selected.cwd ? `cd ${quote(selected.cwd)} && ` : ''}${invocation}`;
-      console.error(`Astrid: Runtime ${actual?.protocol ?? 'unknown'} schema ${actual?.schema_digest ?? 'unknown'} is incompatible with App workspace.v1 schema ${expectedSchemaDigest}; ${reason}; ${SOURCE_SCHEMA_MISMATCH_ACTION}; restart: ${restart}`);
-      process.exitCode = 1;
-      return null;
+      // One plain line with what to do; the protocol, digests and reason go on the Details line.
+      return fail(
+        pinokioManaged
+          ? `Astrid's engine doesn't match this App. ${restart}.`
+          : `Astrid's engine doesn't match this App: ${SOURCE_SCHEMA_MISMATCH_ACTION}, then restart its engine: ${restart}`,
+        `Runtime ${actual?.protocol ?? 'unknown'} schema ${actual?.schema_digest ?? 'unknown'} is incompatible with App workspace.v1 schema ${expectedSchemaDigest}; ${reason}`,
+      );
     };
     if (health?.status !== 'ok' || health?.protocol !== 'workspace.v1') {
       return incompatible(health, 'runtime health check did not report workspace.v1/ok');
@@ -523,7 +527,8 @@ if (!checkOnly && !buildOnly) {
       recoveryEditor = undefined;
     };
     try {
-      await runBackendUpdate({ backend, action: { action: 'recover' }, hook: async (message) => {
+      // A start-time recovery: no `purpose`, so the Agent settles it as a repair.
+      const restored = await runBackendUpdate({ backend, action: { action: 'recover' }, hook: async (message) => {
         const app = validateAppContext(message.app, process.cwd());
         switch (message.hook) {
           case 'stop-editor':
@@ -571,6 +576,8 @@ if (!checkOnly && !buildOnly) {
           default: throw new Error(`Unexpected recovery callback ${message.hook}`);
         }
       } });
+      // The Agent's one plain line saying the interrupted update was restored.
+      for (const line of restored?.lines ?? []) console.log(line);
     } finally { await stopRecoveryEditor(); }
   }
 }
@@ -964,7 +971,13 @@ updateControl = await startLocalUpdateControl({ cwd: process.cwd(), origin: new 
     prepare: (options) => prepareUpdate({ ...options, environment: env, execPath: env.ASTRID_NODE_EXECUTABLE || process.execPath, preparationDirectory: backend.root }),
     ...(pinokioManaged ? { session: pinokioSession(backend) } : {}),
   });
-  const result = await update();
+  let result;
+  try { result = await update(); }
+  catch (error) {
+    // The person is watching this window: it says the update did not happen, with the same lines as the requester.
+    for (const line of updateFailureLines(error)) console.error(line);
+    throw error;
+  }
   console.log(result.message);
   return result;
 } });

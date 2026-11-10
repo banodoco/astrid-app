@@ -11,6 +11,7 @@ import { acceptedCommit, fixtureDigest } from '@/integrations/runtime/__tests__/
 import type { Transport } from '@/integrations/runtime/generated.ts';
 import type { CommitRequest, MediaSelection } from '@/integrations/runtime/timeline-commit-types.ts';
 import type { DataProvider, TimelineCommandBasis, TimelineCommitResult } from '../data/DataProvider.ts';
+import { loadTimelineDraft } from '../data/timelineDraftIndexedDb.ts';
 import { VideoEditorRuntimeProvider, type VideoEditorRuntimeContextValue } from '../contexts/VideoEditorRuntimeContext.tsx';
 import { createDefaultTimelineConfig } from '../lib/defaults.ts';
 import { createInteractionState } from '../lib/interaction-state.ts';
@@ -454,7 +455,7 @@ describe('mounted prepared-media command persistence', () => {
     }
   });
 
-  it('rolls back an accepted preview when the mounted save receives a real conflict', async () => {
+  it('keeps the native conflict draft through Keep, remount and Save them without recapturing or rebasing', async () => {
     const config = authoredConfig();
     const document = authoredDocument(config);
     const initial: TimelineCommandBasis = { head, canonicalDocument: document };
@@ -491,6 +492,7 @@ describe('mounted prepared-media command persistence', () => {
     provider.commitTimeline = send;
     const store = createTimelineStore();
     const mounted = renderHook(() => useMountedCommands(store, provider, initialData), { wrapper: wrapperFor(store, provider) });
+    let recovered: typeof mounted | undefined;
     try {
       await waitFor(() => expect(mounted.result.current.save.localSaveState).not.toBeNull());
       expect(mounted.result.current.save.localSaveState).toMatchObject({ status: 'saved', ownerId: expect.any(String) });
@@ -506,10 +508,21 @@ describe('mounted prepared-media command persistence', () => {
       const ownerId = mounted.result.current.save.localSaveState!.ownerId!;
       await waitFor(async () => expect((await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)?.intents).toHaveLength(1));
       latest = { head: { revisionId: 'agent-r', publicationId: 'agent-p' }, canonicalDocument: latestDocument };
-      await act(async () => { await expect(mounted.result.current.save.flushPendingSave()).rejects.toThrow('draft retained'); });
+      await act(async () => { await expect(mounted.result.current.save.flushPendingSave()).rejects.toThrow('The prepared after-anchor source changed'); });
+      // The rejected save keeps the prepared draft in the outbox store; the editor view rolls back below.
+      const retained = (await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId);
+      expect(retained?.intents).toHaveLength(1);
+      expect(JSON.stringify(retained?.intents)).toContain('copy.mp4');
+      expect(retained?.pending?.outcome).toMatchObject({ kind: 'rejected', error: { details: { reason: 'dependency_changed' } } });
       await waitFor(() => expect(mounted.result.current.save.localSaveState?.status).toBe('conflict'));
       expect(mounted.result.current.save.dataRef.current?.config.clips.some((clip) => clip.id === 'clip-0')).toBe(false);
       expect(mounted.result.current.save.dataRef.current?.config.clips.find((clip) => clip.id === 'later')?.at).toBe(6);
+      const draftBeforeKeep = await loadTimelineDraft(scope.timelineId);
+      expect(draftBeforeKeep).toMatchObject({ baseHeadRevisionId: 'r0', baseHeadProjectId: scope.projectId,
+        baseHeadTimelineId: scope.timelineId });
+      const draftConfig = draftBeforeKeep!.draft.config as unknown as TimelineConfig;
+      expect(draftConfig.clips.some((clip) => clip.id === 'clip-0')).toBe(true);
+      expect(draftConfig.clips.find((clip) => clip.id === 'later')?.at).toBe(7);
       expect(send).toHaveBeenCalledOnce();
       const refusal = await send.mock.results[0]!.value.catch((error: unknown) => error);
       expect(refusal).toMatchObject({ status: 409, code: 'dependency_changed', details: {
@@ -532,7 +545,58 @@ describe('mounted prepared-media command persistence', () => {
             status: 'conflict', reason: 'dependency_changed', current: { revision_id: 'agent-r', publication_id: 'agent-p' },
           } },
       });
+      // The display is canonical now. Keep must preserve the already durable
+      // user draft, including its old CAS base, rather than copying that view.
+      const canonicalRead = vi.spyOn(provider, 'loadReferencedTimeline').mockResolvedValue({
+        timeline: { config: latestConfig, configVersion: 1,
+          head: { projectId: scope.projectId, timelineId: scope.timelineId,
+            headRevisionId: 'agent-r', headPublicationId: 'agent-p' } },
+        registry: initialData.registry,
+        resolveAssetUrl: async (file) => file,
+      });
+      await act(async () => { await mounted.result.current.save.retrySaveAfterConflict(); });
+      expect(canonicalRead).toHaveBeenCalledOnce();
+      expect(mounted.result.current.save.isConflictExhausted).toBe(false);
+      expect(mounted.result.current.save.dataRef.current?.config.clips.some((clip) => clip.id === 'clip-0')).toBe(false);
+      expect(mounted.result.current.save.dataRef.current?.config.clips.find((clip) => clip.id === 'later')?.at).toBe(6);
+      expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
+      const keptOwner = (await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)!;
+      expect(keptOwner.intents).toEqual(retained!.intents);
+      expect(keptOwner.pending).toEqual(retained!.pending);
+      expect(send).toHaveBeenCalledOnce();
+
+      // Reload the real retained owner against canonical B. Save them must
+      // reopen the durable refusal, never capture this draft as a new edit.
+      mounted.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      const latestData = await buildTimelineData(latestConfig, initialData.registry, async (file) => file, 1, undefined,
+        { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'agent-r', headPublicationId: 'agent-p' });
+      const recoveredStore = createTimelineStore();
+      recovered = renderHook(() => useMountedCommands(recoveredStore, provider, latestData),
+        { wrapper: wrapperFor(recoveredStore, provider) });
+      await waitFor(() => expect(recovered!.result.current.save.localSaveState?.status).toBe('conflict'));
+      await waitFor(() => expect(recovered!.result.current.save.recoveryDraft?.retryAllowed).toBe(true));
+      expect(recovered.result.current.save.isConflictExhausted).toBe(false);
+      expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
+      const ownerBeforeRetry = (await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)!;
+      await act(async () => { await recovered!.result.current.save.retryRecoveredDraft(); });
+      expect(recovered.result.current.save.isConflictExhausted).toBe(true);
+      expect(recovered.result.current.save.recoveryDraft).toBeNull();
+      expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
+      expect((await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)).toEqual(ownerBeforeRetry);
+      expect(send).toHaveBeenCalledOnce();
+      expect(recovered.result.current.save.dataRef.current?.config.clips).toEqual(latestData.config.clips);
+
+      // Use latest is the explicit discard; it clears the slot and conflict
+      // without publishing the retained edit over the other writer.
+      await act(async () => { await recovered!.result.current.save.reloadFromServer({ clearDraft: true }); });
+      expect(recovered.result.current.save.isConflictExhausted).toBe(false);
+      expect(recovered.result.current.save.recoveryDraft).toBeNull();
+      expect(await loadTimelineDraft(scope.timelineId)).toBeNull();
+      expect(recovered.result.current.save.dataRef.current?.config.clips).toEqual(latestData.config.clips);
+      expect(send).toHaveBeenCalledOnce();
     } finally {
+      recovered?.unmount();
       mounted.unmount();
       await new Promise((resolve) => setTimeout(resolve, 0));
     }

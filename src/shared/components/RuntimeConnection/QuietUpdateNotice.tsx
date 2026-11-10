@@ -4,6 +4,7 @@ import { usePageStale } from './AppBuildProvider.tsx';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
+import { updatedLine } from '@/shared/lib/updates/liveUpdate.ts';
 
 export function QuietUpdateNotice({ connection }: { readonly connection: RuntimeConnectionValue }) {
   const pageStale = usePageStale();
@@ -12,6 +13,12 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
 
   const current = operation.releaseStatus;
   const decision = current ? resolveUpdate({ ...current.resolution, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason }) : page?.resolution ?? null;
+  // An update that just finished under this page says so briefly, then the page is simply up to date.
+  if (operation.updated) {
+    return <div role="status" data-testid="update-finished-notice" className="fixed bottom-4 left-4 z-[100110] max-w-[min(28rem,calc(100%-2rem))] rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-md">
+      <span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-emerald-500" />{updatedLine(operation.updated)}
+    </div>;
+  }
   if (pageStale || !decision || (decision.card !== 'notice' && decision.card !== 'update')) return null;
   // A required update (K6 rule 6) uses this same card, with its own title and reason.
   const required = decision.card === 'update';

@@ -7,9 +7,11 @@
 // is validated on its own.
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+import { checkManifest } from './pin.mjs';
 
 export const MANIFEST_PATH = 'public/install-manifest.json';
 export const BOOTSTRAP_PATHS = ['public/install', 'public/install.ps1', 'public/install.sh'];
+export const APP_RUNTIME_LOCK_PATH = 'runtime.lock.json';
 
 const SHA = /^[0-9a-f]{40}$/;
 
@@ -136,13 +138,36 @@ export function readSnapshot(repo, ref) {
   return { manifest: readAtRef(repo, commit, MANIFEST_PATH), bootstraps };
 }
 
+// The App's own runtime.lock.json must name the same Runtime the manifest pins.
+export function checkAppRuntimeLock(manifest, lockBytes) {
+  const lock = parseManifest(lockBytes, 'App runtime.lock.json');
+  if (!SHA.test(lock.source_commit ?? '')) throw new Error('App runtime.lock.json needs a full source_commit');
+  if (manifest.runtime?.sha !== lock.source_commit) {
+    throw new Error(`install-manifest.json runtime.sha ${manifest.runtime?.sha ?? '(missing)'} does not match App runtime.lock.json source_commit ${lock.source_commit}`);
+  }
+  return `install-manifest.json runtime.sha matches App runtime.lock.json source_commit ${lock.source_commit}.`;
+}
+
+// `--pins` adds the pin.mjs --check logic at the head: the App lock agreement, then the Agent pins and schema digest.
+// It needs the network (Agent and Runtime repositories), so it is opt-in; CI passes it.
+async function checkHeadPins(repo, headRef, headSnapshot) {
+  const manifest = parseManifest(headSnapshot.manifest, 'head install-manifest.json');
+  const lockBytes = readAtRef(repo, headRef, APP_RUNTIME_LOCK_PATH);
+  const lockMessage = checkAppRuntimeLock(manifest, lockBytes);
+  const pinMessage = await checkManifest(manifest);
+  return `${lockMessage} ${pinMessage}`;
+}
+
 async function main(argv) {
-  const [baseRef, headRef = 'HEAD', ...extra] = argv;
+  const pins = argv.includes('--pins');
+  const [baseRef, headRef = 'HEAD', ...extra] = argv.filter((arg) => arg !== '--pins');
   if (!baseRef || extra.length) {
-    throw new Error('Usage: node scripts/installer/release-guard.mjs <base-ref-or-sha> [head-ref]');
+    throw new Error('Usage: node scripts/installer/release-guard.mjs <base-ref-or-sha> [head-ref] [--pins]');
   }
   const repo = process.cwd();
-  const message = checkReleaseGuard({ base: readSnapshot(repo, baseRef), head: readSnapshot(repo, headRef) });
+  const head = readSnapshot(repo, headRef);
+  let message = checkReleaseGuard({ base: readSnapshot(repo, baseRef), head });
+  if (pins) message = `${message}\n${await checkHeadPins(repo, headRef, head)}`;
   process.stdout.write(`${message}\n`);
 }
 

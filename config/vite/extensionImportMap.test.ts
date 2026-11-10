@@ -228,7 +228,8 @@ describe('extension shared module import map build', () => {
 
     const browser = await chromium.launch({
       headless: true,
-      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || '/opt/pw-browsers/chromium',
+      // Unset: Playwright's own Chromium (installed by App Tests). A sandbox-only path here broke CI.
+      executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined,
       args: ['--no-sandbox'],
     });
     browsers.push(browser);

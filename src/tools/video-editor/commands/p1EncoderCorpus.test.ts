@@ -8,13 +8,15 @@ import type { OutboxJson } from './commitOutbox.ts';
 import { documentPatchIntent } from './documentPatchIntent.ts';
 import trimFixture from './fixtures/recipe_m2_clip_trim.json';
 import corpus from '../../../../tests/fixtures/p1-feasibility/cases.json';
+import { AGENT_CORPUS_CHECKOUT } from '../../../../config/testing/skipConditions.mjs';
+import { skipWhen } from '../../../test/declaredSkip.ts';
 
 type Intent = Parameters<typeof documentPatchIntent>[0];
 type JsonObject = { [key: string]: OutboxJson };
 type Fixture = { input: CanonicalDocument; output: CanonicalDocument };
 
 const appRoot = resolve(import.meta.dirname, '../../../../');
-const agentRoot = resolve('/home/user/work/agent');
+const agentRoot = resolve(AGENT_CORPUS_CHECKOUT);
 const copy = <T>(value: T): T => structuredClone(value);
 const present = (value: OutboxJson) => ({ state: 'present', value });
 
@@ -93,7 +95,8 @@ describe('P1 real corpus document patch encoder', () => {
     expect((proposal.after as JsonObject).parent_revision).toEqual(after.parent_revision);
   });
 
-  it('encodes the authored split allocation and reports the missing App dependent trim seam', () => {
+  it('encodes the authored split allocation and reports the missing App dependent trim seam', (ctx) => {
+    skipWhen('agent-corpus-checkout', ctx);
     const split = readAgentSplit();
     const before = split.input;
     const after = authoredPayloadAfter(before, split.output);

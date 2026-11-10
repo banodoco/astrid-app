@@ -210,3 +210,112 @@ test('failed transaction with a pending journal retains its worktree and prior r
   assert.equal(await readFile(join(root.cwd, 'node_modules', 'candidate.txt'), 'utf8'), 'new dependencies');
   assert.equal(await readFile(join(prepared.preparationRoot, 'previous-node_modules', 'old.txt'), 'utf8'), 'old dependencies');
 });
+
+const NEXT = 'Next: open astrid.haus > Settings > Updates > Download diagnostics, and send the file to support.';
+const DETAILS = 'Details: /home/me/.local/state/astrid/install.log';
+
+test('the update path recovers with purpose "update"', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const actions = [];
+  const updater = createLocalUpdater({
+    cwd: root.cwd, backend: { root: root.cwd }, editor: {}, session: {},
+    backendUpdate: async ({ action }) => { actions.push(action); return { status: 'clean' }; },
+    selectTarget: async () => ({ upToDate: true }),
+  });
+  await updater();
+  assert.deepEqual(actions, [{ action: 'recover', purpose: 'update' }]);
+});
+
+test('a recovery during an update that settles exit 3 is not updated, with its reason and the Next and Details lines', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const lines = ['Astrid did NOT update. It is still Release 13; Release 14 is available.',
+    'Why: an earlier update was interrupted and Astrid restored the version before it; run the same command again to update.',
+    'Your projects are safe — nothing was changed.', NEXT, DETAILS];
+  const updater = createLocalUpdater({
+    cwd: root.cwd, backend: { root: root.cwd }, editor: {}, session: {},
+    backendUpdate: async () => ({ status: 'recovered', exitCode: 3, lines,
+      outcome: { kind: 'not-updated', reason: 'recovered-previous-version', exit_code: 3 } }),
+    selectTarget: async () => { throw new Error('must not select after recovery'); },
+  });
+  const result = await updater();
+  assert.equal(result.status, 'not-updated');
+  assert.equal(result.exitCode, 3);
+  assert.equal(result.reason, 'recovered-previous-version');
+  assert.doesNotMatch(result.message, /backend updater failed|was restored and Astrid is running/);
+  assert.deepEqual(result.message.split('\n').slice(-2), [NEXT, DETAILS]);
+});
+
+test('an update whose receipt is exit 3 reports not updated with its own reason, not "updated"', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const prepared = await createApp(t, root.cwd);
+  const lines = ['Astrid did NOT update. It is still Release 1; Release 2 is available.',
+    'Why: the new release was installed, but the running Astrid did not restart onto it.', 'Your projects are safe — nothing was changed.', NEXT, DETAILS];
+  const updater = createLocalUpdater({
+    cwd: root.cwd, backend: { root: root.cwd }, editor: { mode: 'local' }, session: { end: async () => {} },
+    backendUpdate: async ({ action }) => (action.action === 'recover' ? { status: 'clean' }
+      : { status: 'complete', exitCode: 3, lines, outcome: { kind: 'not-updated', reason: 'runtime-not-running', exit_code: 3 } }),
+    selectTarget: async () => ({ manifest, oldSha: OLD_SHA, targetSha: TARGET_SHA, release: 2, upToDate: false }),
+    preflight: async () => {}, prepare: async () => prepared, release: async () => {},
+  });
+  const result = await updater();
+  assert.equal(result.status, 'not-updated');
+  assert.equal(result.reason, 'runtime-not-running');
+  assert.equal(result.exitCode, 3);
+  assert.match(result.message, /did not restart onto it/);
+  assert.deepEqual(result.message.split('\n').slice(-2), [NEXT, DETAILS]);
+});
+
+test('an updated run shows the Agent line; a reply with no receipt keeps the existing messages', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const run = async (reply) => {
+    const prepared = await createApp(t, root.cwd);
+    return createLocalUpdater({
+      cwd: root.cwd, backend: { root: root.cwd }, editor: { mode: 'local' }, session: { end: async () => {} },
+      backendUpdate: async ({ action }) => (action.action === 'recover' ? { status: 'clean' } : reply),
+      selectTarget: async () => ({ manifest, oldSha: OLD_SHA, targetSha: TARGET_SHA, release: 2, upToDate: false }),
+      preflight: async () => {}, prepare: async () => prepared, release: async () => {},
+    })();
+  };
+  const updated = await run({ status: 'complete', exitCode: 0, lines: ['Astrid updated: Release 1 → Release 2.'], outcome: { kind: 'updated', exit_code: 0 } });
+  assert.equal(updated.status, 'updated');
+  assert.equal(updated.message, 'Astrid updated: Release 1 → Release 2.');
+  const older = await run({ status: 'complete' });
+  assert.equal(older.status, 'updated');
+  assert.equal(older.message, 'Astrid is updated and running.');
+  assert.equal(older.exitCode, undefined);
+});
+
+test('an exit-0 reply whose receipt did not update is not reported as updated', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const run = async (reply) => {
+    const prepared = await createApp(t, root.cwd);
+    return createLocalUpdater({
+      cwd: root.cwd, backend: { root: root.cwd }, editor: { mode: 'local' }, session: { end: async () => {} },
+      backendUpdate: async ({ action }) => (action.action === 'recover' ? { status: 'clean' } : reply),
+      selectTarget: async () => ({ manifest, oldSha: OLD_SHA, targetSha: TARGET_SHA, release: 2, upToDate: false }),
+      preflight: async () => {}, prepare: async () => prepared, release: async () => {},
+    })();
+  };
+  const lines = ['Astrid did NOT update. It is still Release 1; Release 2 is available.', 'Why: the installer finished without installing the new release.', NEXT, DETAILS];
+  const notUpdated = await run({ status: 'complete', exitCode: 0, lines, outcome: { kind: 'not-updated', reason: 'installer-bug', exit_code: 0 } });
+  assert.equal(notUpdated.status, 'not-updated');
+  assert.equal(notUpdated.exitCode, 3);
+  assert.equal(notUpdated.message, lines.join('\n'));
+  // Already current: nothing was updated, so it is not "updated" either, and the Agent's line is the message.
+  const current = await run({ status: 'complete', exitCode: 0, lines: ['Astrid is already up to date (Release 2). Nothing was changed.'], outcome: { kind: 'already-current', exit_code: 0 } });
+  assert.equal(current.status, 'up-to-date');
+  assert.equal(current.message, 'Astrid is already up to date (Release 2). Nothing was changed.');
+});
+
+test('a recovery reply whose receipt did not update is not updated even with exit 0', async (t) => {
+  const root = await tempRoot(); t.after(root.close);
+  const lines = ['Astrid did NOT update. It is still Release 13; Release 14 is available.', NEXT, DETAILS];
+  const result = await createLocalUpdater({
+    cwd: root.cwd, backend: { root: root.cwd }, editor: {}, session: {},
+    backendUpdate: async () => ({ status: 'recovered', exitCode: 0, lines, outcome: { kind: 'not-updated', reason: 'recovered-previous-version', exit_code: 0 } }),
+    selectTarget: async () => { throw new Error('must not select after recovery'); },
+  })();
+  assert.equal(result.status, 'not-updated');
+  assert.equal(result.exitCode, 3);
+  assert.equal(result.message, lines.join('\n'));
+});

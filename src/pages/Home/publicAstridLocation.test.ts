@@ -9,7 +9,9 @@ describe('the visitor\'s real sky', () => {
   it('places a visitor from their time zone, including the hemisphere for unlisted zones', () => {
     expect(locationForTimeZone('Europe/London')).toMatchObject({ name: 'London', latitude: 51.51 });
     expect(locationForTimeZone('Australia/Lord_Howe').latitude).toBeLessThan(0);
-    expect(locationForTimeZone('America/Winnipeg').longitude).toBeCloseTo(-75, -1);
+    // Unlisted zones take their longitude from the UTC offset at `at`. Pin a summer date: in winter
+    // Winnipeg is on CST (UTC-6), so an unpinned clock made this check depend on the day it ran.
+    expect(locationForTimeZone('America/Winnipeg', at('2026-07-01T12:00:00Z')).longitude).toBeCloseTo(-75, -1);
   });
 
   it('reads wall-clock time and UTC offsets for a place', () => {

@@ -154,6 +154,21 @@ test('C1 busy blockers and stop evidence survive the launcher control channel', 
   });
 });
 
+test('the Agent receipt exit code and its Next and Details lines survive the launcher control channel', async (t) => {
+  const repo = await gitRepo(); t.after(repo.close);
+  const lines = ['Astrid did NOT update: Astrid or another installer is busy; try again when it finishes.', 'Astrid is still Release 13.',
+    'Next: open astrid.haus > Settings > Updates > Download diagnostics, and send the file to support.', 'Details: /tmp/install.log'];
+  const control = await startLocalUpdateControl({ cwd: repo.cwd, origin: 'http://127.0.0.1:5180', update: async () => {
+    throw Object.assign(new Error('busy'), { step: 'lock', exitCode: 1, lines, outcome: { kind: 'failed', exit_code: 1 } });
+  } });
+  t.after(() => control.close());
+  await assert.rejects(requestLocalUpdate({ cwd: repo.cwd }), (error) => {
+    assert.equal(error.exitCode, 1);
+    assert.deepEqual(error.lines, lines);
+    return true;
+  });
+});
+
 const pageReceipt = (control) => ({ url: control.receipt.page.url, origin: control.receipt.origin, token: control.receipt.page.token });
 const preflight = (url, headers) => new Promise((resolve, reject) => {
   const address = new URL(url);

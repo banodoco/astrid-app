@@ -11,6 +11,8 @@ const harness = vi.hoisted(() => ({
   manager: null as string | null,
   statusAvailable: true,
   statusState: 'none' as string,
+  statusReason: null as string | null,
+  origin: 'https://astrid.test',
   operationId: null as string | null,
   result: 'Update accepted.',
   outcome: 'updated' as 'updated' | 'rolled_back' | 'failed',
@@ -26,7 +28,7 @@ vi.mock('@/integrations/runtime/RuntimeConnectionProvider.tsx', () => ({
   useRuntimeConnectionSafe: () => harness.connection,
 }));
 vi.mock('@/integrations/runtime/connection.ts', () => ({
-  runtimeOrigin: () => 'https://astrid.test',
+  runtimeOrigin: () => harness.origin,
   runtimeApiBase: () => 'https://astrid.test/api/runtime',
 }));
 vi.mock('@/shared/components/RuntimeConnection/AppBuildProvider.tsx', () => ({ usePageStale: () => harness.pageStale }));
@@ -38,6 +40,7 @@ import { RuntimeCompatibilityError } from '@/integrations/runtime/client.ts';
 import { RuntimeUnavailableError } from '@/integrations/runtime/client.ts';
 import { RuntimeConnectionPanel } from './RuntimeConnectionPanel.tsx';
 import { connectionFor } from './connectionFixture.ts';
+import { ASTRID_COMMANDS, installCommand, LOCAL_UPDATE_COMMAND, PINOKIO_UPDATE_INSTRUCTION } from './copy.ts';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 
 const connection = () => ({ isConnected: true, managedByPinokio: false } as RuntimeConnectionValue);
@@ -50,6 +53,8 @@ beforeEach(() => {
   harness.manager = null;
   harness.statusAvailable = true;
   harness.statusState = 'none';
+  harness.statusReason = null;
+  harness.origin = 'https://astrid.test';
   harness.operationId = null;
   harness.result = 'Update accepted.';
   harness.outcome = 'updated';
@@ -65,11 +70,12 @@ beforeEach(() => {
       body = {
         status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test',
         runtime_instance_id: harness.instance, runtime_session_id: 'session-a', runtime_epoch: 1,
-        release: 3, identity: { managed_by: harness.manager, release: 3 },
+        release: 10, identity: { managed_by: harness.manager, release: 10 },
       };
     } else if (url.endsWith('/v1/update/status')) {
       body = {
         available: harness.statusAvailable, self_update: harness.statusAvailable, state: harness.statusState,
+        ...(harness.statusReason ? { reason: harness.statusReason } : {}),
         ...(harness.operationId ? { operation_id: harness.operationId, result: harness.result } : {}),
         ...(harness.statusState === 'terminal' ? { outcome: harness.outcome } : {}),
       };
@@ -79,9 +85,9 @@ beforeEach(() => {
       harness.statusState = 'active';
       body = { accepted: true, state: 'accepted', operation_id: '0123456789abcdef0123456789abcdef', message: 'Update accepted.' };
     } else if (url === '/build.json') {
-      body = { app: 'served-build', release: 4 };
+      body = { app: 'served-build', release: 11 };
     } else if (url === '/install-manifest.json') {
-      body = { release: 4, ...(harness.manifestRequired ? { required: { release: 4, reason: 'Security fix' } } : {}) };
+      body = { release: 11, ...(harness.manifestRequired ? { required: { release: 11, reason: 'Security fix' } } : {}) };
     } else if (url.includes('/v1/diagnostics')) {
       body = { report: 'Last update result: none\nInstaller transaction log:\n\nRetained back-end copies: 0 bytes' };
     } else {
@@ -100,7 +106,81 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+// The same-origin launcher path: the page reads the launcher's status (a build flag), and the install type needs the Runtime identity.
+describe('the same-origin launcher card waits for the install type', () => {
+  const launcherBody = { app: 'a'.repeat(40), release: 10, servedApp: 'b'.repeat(40), servedRelease: 11, behind: true, self_update: true };
+  const withLauncher = (health: () => Promise<Response> | Response) => {
+    const base = vi.mocked(fetch).getMockImplementation()!;
+    vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/__astrid/local-update-status')) return new Response(JSON.stringify(launcherBody), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.endsWith('/v1/health')) return health();
+      return base(input, init);
+    }));
+  };
+  beforeEach(() => {
+    vi.stubEnv('VITE_ASTRID_LOCAL_UPDATE_STATUS', '1');
+    harness.origin = '';
+  });
+  afterEach(() => vi.unstubAllEnvs());
+
+  it('shows no shell command while the Runtime identity (and so the install type) is still unknown', async () => {
+    withLauncher(() => new Promise<Response>(() => undefined));
+    render(<AstridUpdatesSection isOpen />);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+  });
+
+  it('when the Runtime health cannot be read, shows no command, only the neutral check line, never the fully-local command', async () => {
+    withLauncher(() => new Response('unavailable', { status: 503 }));
+    render(<AstridUpdatesSection isOpen />);
+    await screen.findByText('Could not check Astrid update status. Check your connection and try again.');
+    expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+  });
+
+  it('a Pinokio-managed fully local install gets the Pinokio instruction once the identity is known', async () => {
+    // The connection does not know it is Pinokio; only the Runtime's own identity (health) says so.
+    harness.manager = 'pinokio';
+    harness.connection = { isConnected: true, managedByPinokio: false, state: { status: 'connected' } };
+    withLauncher(() => new Response(JSON.stringify({ status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test', runtime_instance_id: harness.instance, runtime_session_id: 'session-a', runtime_epoch: 1, identity: { managed_by: 'pinokio', release: 10 } }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    render(<AstridUpdatesSection isOpen />);
+    await screen.findAllByText(PINOKIO_UPDATE_INSTRUCTION);
+    expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+  });
+});
+
 describe('installer update callers', () => {
+  // A recovery the Runtime refuses as busy: no in-app Update, and the install type's own update instruction.
+  // Hosted-origin Apps read the installer status route. Same-origin Apps (developer checkout, fully local) read the
+  // launcher's status instead (localUpdateStatus, a build flag), which this harness does not drive.
+  it.each([
+    ['hosted astrid.haus', 'https://astrid.test', null, { command: installCommand('update') }],
+    ['installer install', 'http://127.0.0.1:17340', null, { command: installCommand('update') }],
+    ['Pinokio hosted', 'https://astrid.test', 'pinokio', { pinokio: true }],
+    ['Windows, hosted astrid.haus', 'https://astrid.test', 'windows', { command: ASTRID_COMMANDS.windowsUpdate }],
+  ] as const)('a recovery refused as busy, on %s: no in-app Update and the right update instruction', async (_name, origin, manager, expected) => {
+    if (manager === 'windows') {
+      vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+      vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+    }
+    harness.origin = origin;
+    // A Windows row is hosted and not Pinokio: the manager stays unset, but the platform is Windows.
+    harness.manager = manager === 'windows' ? null : manager;
+    harness.connection = { isConnected: true, managedByPinokio: manager === 'pinokio', state: { status: 'connected' } };
+    harness.statusState = 'recovery-needed';
+    harness.statusReason = 'busy';
+    render(<AstridUpdatesSection isOpen />);
+    if ('pinokio' in expected) {
+      await screen.findAllByText(PINOKIO_UPDATE_INSTRUCTION);
+      expect(document.body.textContent).not.toMatch(/curl|irm |npm run update|--update/);
+    } else {
+      await screen.findByRole('button', { name: 'Copy instructions for your agent' });
+      expect(screen.getByText(expected.command, { exact: true })).toBeInTheDocument();
+      if (expected.command !== LOCAL_UPDATE_COMMAND) expect(document.body.textContent).not.toContain('npm run update');
+    }
+    expect(screen.queryByRole('button', { name: /^Update( now)?$/ })).not.toBeInTheDocument();
+  });
+
   it('removes execution after permission/auth loss and keeps both command options', async () => {
     const view = render(<AstridUpdatesSection isOpen />);
     const staleButton = await screen.findByRole('button', { name: 'Update now' });
@@ -134,7 +214,7 @@ describe('installer update callers', () => {
       <AstridUpdatesSection isOpen />
     </>);
 
-    await screen.findAllByText('Update available: Release 4');
+    await screen.findAllByText('Update available: Release 11');
     const statusReads = calls().filter((call) => call.url.endsWith('/v1/update/status'));
     expect(statusReads.length).toBeGreaterThan(0);
     expect(statusReads.every((call) => call.method === 'GET')).toBe(true);
@@ -256,7 +336,7 @@ describe('installer update callers', () => {
       fireEvent.click(update);
       await waitFor(() => expect(calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST')).toHaveLength(1));
     }
-    else await screen.findAllByText('Update available: Release 4');
+    else await screen.findAllByText('Update available: Release 11');
     if (!statusReadable) expect(calls().some((call) => call.url.endsWith('/v1/update/status'))).toBe(false);
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     const postCount = calls().filter((call) => call.url.endsWith('/v1/update') && call.method === 'POST').length;
@@ -290,11 +370,11 @@ describe('installer update callers', () => {
       const url = String(input);
       if (url.endsWith('/v1/health')) return new Response(JSON.stringify({
         status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test', runtime_instance_id: harness.instance,
-        runtime_session_id: 'session-a', runtime_epoch: 1, release: 5, identity: { managed_by: null, release: 5 },
+        runtime_session_id: 'session-a', runtime_epoch: 1, release: 12, identity: { managed_by: null, release: 12 },
       }), { status: 200 });
       if (url.endsWith('/v1/update/status')) return new Response(JSON.stringify({ available: true, self_update: true, state: 'none' }), { status: 200 });
-      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 4 }), { status: 200 });
-      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 4 }), { status: 200 });
+      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 11 }), { status: 200 });
+      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 11 }), { status: 200 });
       return new Response('{}', { status: 200 });
     }));
     render(<RuntimeConnectorRecoveryBanner error={recoveryError} onRetry={vi.fn()} />);
@@ -321,14 +401,14 @@ describe('installer update callers', () => {
       if (url.endsWith('/v1/health')) return new Response(JSON.stringify({
         status: 'ok', protocol: 'workspace.v1', schema_digest: 'schema-test',
         runtime_instance_id: harness.instance, runtime_session_id: 'session-a', runtime_epoch: 1,
-        release: 3, identity: { managed_by: null, release: 3 },
+        release: 10, identity: { managed_by: null, release: 10 },
       }), { status: 200 });
-      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 4 }), { status: 200 });
-      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 4 }), { status: 200 });
+      if (url === '/build.json') return new Response(JSON.stringify({ app: 'served-build', release: 11 }), { status: 200 });
+      if (url === '/install-manifest.json') return new Response(JSON.stringify({ release: 11 }), { status: 200 });
       return new Response('{}', { status: 200 });
     }));
     render(<AstridUpdatesSection isOpen />);
-    await screen.findAllByText('Update available: Release 4');
+    await screen.findAllByText('Update available: Release 11');
     expect(await screen.findByRole('alert')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
   });

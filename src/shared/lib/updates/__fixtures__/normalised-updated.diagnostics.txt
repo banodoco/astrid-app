@@ -1,0 +1,32 @@
+Astrid diagnostics: NOT OK. Installed: Release 10. Latest: Release 10. Last update: Astrid updated: Release 1 → Release 10.
+Generated 2026-11-08 22:31 UTC · linux · Runtime 0.1.0
+
+Installed release        Release 10 (the running Runtime)
+Latest release           Release 10 (the release the last installer run aimed for)
+Last update              2026-11-08 23:38 UTC · update · Release 1 → Release 10 · updated · exit 0
+Storage move             finished and normalised (journal archived); the old workspace copy is kept
+Runtimes found           0 running
+Disk                     1.3 GB (1395864371 bytes) free
+Problems                 low disk space: 1.3 GB (1395864371 bytes) free, below 2 GB
+
+--- Raw detail ---
+Selection record identity: managed_by=None; release=10
+Active data root: ~/Library/Application Support/Astrid Runtime-r1
+Retained old workspace copy: ~/Library/Application Support/Astrid Runtime
+Free disk space: 1395864371 bytes
+This Runtime's support state: ready (healthy=True)
+Last installer run (last-run.json): {"exit_code": 0, "finished_at": 1794181080, "format": "astrid-last-run/v1", "headline": "Astrid updated: Release 1 \u2192 Release 10.", "kind": "updated", "mode": "update", "reason": null, "reason_line": null, "start": 1, "still": 10, "target": 10}
+Last update result: none recorded
+Update log: ~/.local/state/astrid-runtime/logs/install.log
+Installer log (install.log, last 80 lines):
+(not available)
+Program versions on disk: 1 version, 0 bytes (versions folder, current version included)
+Runtime support issues:
+- disk-full
+Runtime log for ~/Library/Application Support/Astrid Runtime-r1 (selected; runtime/runtime.log, last 80 lines):
+(not available)
+Runtime log for ~/Library/Application Support/Astrid Runtime (old workspace copy; runtime/runtime.log, last 80 lines):
+(not available)
+Runtime log directory: ~/.local/state/astrid-runtime/logs
+Shared Runtime log (runtime.log; written by every Runtime on this computer, last 80 lines):
+(not available)

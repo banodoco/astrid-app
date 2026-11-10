@@ -5,7 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { applyRequiredPin } from './pin.mjs';
+import { applyRequiredPin, checkManifest } from './pin.mjs';
+import * as guard from './release-guard.mjs';
 import { checkReleaseGuard, readSnapshot } from './release-guard.mjs';
 import { servedMismatches } from './served-manifest.mjs';
 
@@ -252,6 +253,60 @@ test('a floor pinned before release is bumped is refused, and a floor at the pub
   assert.match(checkReleaseGuard({ base: floored, head: snapshot(manifestOf({ release: 3, required: { release: 2, reason: 'Old fix' } })) }), /release 3 unchanged/);
 });
 
+
+test('the App runtime.lock.json source_commit must be the runtime.sha the manifest pins', () => {
+  const SHA_C = 'c'.repeat(40);
+  const lockFor = (sha) => Buffer.from(`${JSON.stringify({ source_commit: sha }, null, 2)}\n`);
+  assert.match(guard.checkAppRuntimeLock(manifestOf(), lockFor(SHA_B)), /runtime\.sha matches App runtime\.lock\.json source_commit/);
+  assert.throws(
+    () => guard.checkAppRuntimeLock(manifestOf(), lockFor(SHA_C)),
+    { message: `install-manifest.json runtime.sha ${SHA_B} does not match App runtime.lock.json source_commit ${SHA_C}` },
+  );
+});
+
+test('the pin check refuses a manifest runtime.sha that disagrees with the Agent runtime.lock.json', async () => {
+  const SHA_C = 'c'.repeat(40);
+  const reader = async (repository, sha, file) => {
+    if (file === 'runtime.lock.json') return Buffer.from(JSON.stringify({ source_commit: SHA_C }));
+    throw new Error(`unexpected read of ${file}`);
+  };
+  await assert.rejects(
+    () => checkManifest(manifestOf(), reader),
+    { message: `install-manifest.json runtime.sha ${SHA_B} does not match agent ${SHA_A} runtime.lock.json source_commit ${SHA_C}` },
+  );
+});
+
+test('the CLI with --pins refuses a head whose runtime.sha disagrees with the App runtime.lock.json', async (t) => {
+  const SHA_C = 'c'.repeat(40);
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'release-guard-pins-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+  const commitState = async (manifest, appLockSha) => {
+    const files = {
+      'public/install-manifest.json': Buffer.from(`${JSON.stringify(manifest, null, 2)}\n`),
+      'runtime.lock.json': Buffer.from(`${JSON.stringify({ source_commit: appLockSha }, null, 2)}\n`),
+      ...bootstrapDefaults,
+    };
+    for (const [file, bytes] of Object.entries(files)) {
+      await mkdir(path.dirname(path.join(repo, file)), { recursive: true });
+      await writeFile(path.join(repo, file), bytes);
+    }
+    git('add', '.');
+    git('-c', 'user.name=Release guard test', '-c', 'user.email=release-guard-test@example.invalid', 'commit', '-q', '-m', 'state');
+    return git('rev-parse', 'HEAD');
+  };
+
+  git('init', '-q', '-b', 'main');
+  const base = await commitState(manifestOf(), SHA_B);
+  // Release +1 with a moved runtime.sha, but the App lock still names the old Runtime: the tuple passes, the pin does not.
+  await commitState(manifestOf({ release: 4, runtime: { sha: SHA_C, schema_digest: DIGEST } }), SHA_B);
+  const result = spawnSync(process.execPath, [releaseGuardPath, '--pins', base, 'HEAD'], { cwd: repo, encoding: 'utf8' });
+  assert.equal(result.status, 1, result.stdout);
+  assert.ok(
+    result.stderr.includes(`release guard refused: install-manifest.json runtime.sha ${SHA_C} does not match App runtime.lock.json source_commit ${SHA_B}`),
+    result.stderr,
+  );
+});
 
 test('a later push to main never cancels the release guard for an earlier one', async () => {
   const workflow = await readFile(fileURLToPath(new URL('../../.github/workflows/test.yml', import.meta.url)), 'utf8');

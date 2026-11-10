@@ -59,7 +59,7 @@ describe('RuntimeConnectionPanel', () => {
     fireEvent.click(installDisclosure);
     expect(installDisclosure).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getAllByText(SETUP_SKILL_POINTER)).toHaveLength(1);
-    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('install', undefined, false, false, true), { exact: true })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
     expect(connect).toHaveBeenCalledOnce();
@@ -79,7 +79,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(pinokioLink).toHaveAttribute('href', PINOKIO_INSTALL_COPY.installUrl);
     expect(pinokioLink).toHaveClass('underline', 'underline-offset-4', 'hover:text-foreground');
     expect(pinokioLink.parentElement).toHaveClass('text-sm', 'text-muted-foreground');
-    expect(pinokioLink.compareDocumentPosition(screen.getByText(installCommand('install'), { exact: true })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
+    expect(pinokioLink.compareDocumentPosition(screen.getByText(installCommand('install', undefined, false, false, true), { exact: true })) & Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();
     expect(screen.queryByRole('link', { name: 'Get Pinokio' })).not.toBeInTheDocument();
   });
 
@@ -108,7 +108,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(shownText()).toContain('Astrid');
     if (_name === 'not running') {
       expect(shownText()).toContain('npm run dev:local');
-      expect(shownText()).toContain(installCommand('install'));
+      expect(shownText()).toContain(installCommand('install', undefined, false, false, true));
     } else expect(shownText()).not.toMatch(ENGINEER_WORDS);
     expect(shownText()).not.toMatch(/\bport\b|\borigin\b/i);
   });
@@ -318,7 +318,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Connect' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('install', undefined, false, false, true), { exact: true })).toBeInTheDocument();
     expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
     // The card says what the instructions are for; no line repeats it, and none explains how to open a terminal.
     expect(shownText()).not.toContain('Paste these instructions');
@@ -340,7 +340,7 @@ describe('RuntimeConnectionPanel', () => {
     expect(screen.getByText(COPY.waiting)).toBeInTheDocument();
     expect(screen.getAllByRole('button')).toHaveLength(3);
     expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
+    expect(screen.getByText(installCommand('install', undefined, false, false, true), { exact: true })).toBeInTheDocument();
     expect(shownText()).not.toMatch(/reload/i);
     expect(screen.queryByText('Set up Astrid on this computer')).not.toBeInTheDocument();
   });
@@ -358,7 +358,7 @@ describe('RuntimeConnectionPanel', () => {
     const retry = screen.getByRole('button', { name: COPY.notRunning.retry });
     expect(retry).toBeInTheDocument();
     if (showsInstaller) {
-      expect(screen.getByText(installCommand('install'), { exact: true })).toBeInTheDocument();
+      expect(screen.getByText(installCommand('install', undefined, false, false, true), { exact: true })).toBeInTheDocument();
       expect(screen.getByRole('button', { name: COPY.agent.commandCopy })).toBeInTheDocument();
     } else {
       expect(screen.queryByRole('code')).not.toBeInTheDocument();
@@ -375,17 +375,21 @@ describe('RuntimeConnectionPanel', () => {
     const checkbox = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
     expect(checkbox).toBeChecked();
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    const command = screen.getByText(installCommand('install'), { exact: true }).textContent;
+    const command = screen.getByText(installCommand('install', undefined, false, false, true), { exact: true }).textContent;
     fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
     expect(clipboard.mock.calls[0][0]).not.toContain('May I install Astrid');
     clipboard.mockClear();
     fireEvent.click(checkbox);
     expect(screen.getByRole('button', { name: 'Customize' })).toBeInTheDocument();
-    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(command);
+    // Checked: the set-up line. Unchecked: a fresh install, which keeps --yes. The two intentionally differ.
+    expect(command).toBe(installCommand('install', undefined, false, false, true));
+    expect(screen.getByText(installCommand('install'), { exact: true }).textContent).toBe(installCommand('install'));
+    expect(installCommand('install')).not.toBe(command);
     fireEvent.click(screen.getByRole('button', { name: COPY.agent.copied }));
     await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
-    expect(clipboard.mock.calls[0][0]).toContain('Please set up Astrid on this computer');
+    expect(clipboard.mock.calls[0][0]).toContain('Show me these four choices as my setup decisions. Offer to change them. Wait for my reply before running the installer.');
+    expect(clipboard.mock.calls[0][0]).toContain(SETUP_SKILL_POINTER);
   });
 
   it('Pinokio update guidance points to Pinokio without installer steps', () => {
@@ -538,7 +542,7 @@ describe('RuntimeConnectionPanel', () => {
       const writeText = vi.fn(async (_text: string) => undefined);
       stubClipboard(writeText);
       panel(connection());
-      const command = mode === 'update' ? installCommand('update') : installCommand('install');
+      const command = mode === 'update' ? installCommand('update') : installCommand('install', undefined, false, false, true);
       expect(screen.getByText(command, { exact: true })).toBeInTheDocument();
       fireEvent.click(screen.getByRole('button', { name: COPY.agent.commandCopy }));
       await waitFor(() => expect(writeText).toHaveBeenCalledWith(command));
@@ -558,7 +562,7 @@ describe('RuntimeConnectionPanel', () => {
       const commandCopy = screen.getByRole('button', { name: 'Copy command' });
       expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
       expect(primary.compareDocumentPosition(commandCopy) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(commandCopy.parentElement).toContainElement(screen.getByText(installCommand('install'), { exact: true }));
+      expect(commandCopy.parentElement).toContainElement(screen.getByText(installCommand('install', undefined, false, false, true), { exact: true }));
       fireEvent.click(primary);
       await waitFor(() => expect(writeText).toHaveBeenCalledOnce());
       const brief = writeText.mock.calls[0][0];
@@ -568,7 +572,8 @@ describe('RuntimeConnectionPanel', () => {
       expect(brief).toContain('read the log path printed by the installer');
       expect(brief).toContain('Tell me to choose Allow if Chrome or Edge asks');
       expect(brief).toContain('docs/setup/SKILL.md');
-      const command = installCommand(status === 'update_needed' ? 'update' : 'install');
+      // A set-up Runtime (connectedBefore, the fixture default) is briefed with the set-up line.
+      const command = installCommand(status === 'update_needed' ? 'update' : 'install', undefined, false, false, status !== 'update_needed');
       expect(brief).toContain(command);
       expect(brief).not.toBe(command);
       expect(screen.getByRole('button', { name: 'Copy command' })).toBeInTheDocument();
@@ -595,7 +600,7 @@ describe('RuntimeConnectionPanel', () => {
       fireEvent.click(screen.getByRole('button', { name: COPY.agent.commandCopy }));
       expect(await screen.findByText(COPY.agent.copyFailed)).toHaveAttribute('role', 'status');
       const field = screen.getByRole('textbox') as HTMLTextAreaElement;
-      expect(field.value).toBe(installCommand('install'));
+      expect(field.value).toBe(installCommand('install', undefined, false, false, true));
       expect(field.selectionEnd).toBe(field.value.length);
     });
   });

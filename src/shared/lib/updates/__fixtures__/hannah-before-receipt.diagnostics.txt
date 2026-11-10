@@ -1,0 +1,34 @@
+Astrid diagnostics: NOT OK. Installed: Release 1. Latest: unknown. Last update: no installer run recorded (last-run.json absent); in-app update record: none recorded
+Generated 2026-11-08 22:31 UTC · linux · Runtime 0.1.0
+
+Installed release        Release 1 (the running Runtime)
+Latest release           unknown (no installer run recorded a target)
+Last update              no installer run recorded (last-run.json absent); in-app update record: none recorded
+Storage move             phase complete, journal still authoritative (not normalised)
+Runtimes found           1 running
+                         · ~/Library/Application Support/Astrid Runtime · Release 0 · instance r0-era-runtime-disk-full · pid 1273 · running (not selected; old workspace copy)
+Disk                     1.3 GB (1395864371 bytes) free
+Problems                 disk or database full ("database or disk is full" in ~/Library/Application Support/Astrid Runtime)
+
+--- Raw detail ---
+Selection record identity: managed_by=None; release=1
+Active data root: ~/Library/Application Support/Astrid Runtime-r1
+Retained old workspace copy: ~/Library/Application Support/Astrid Runtime
+Free disk space: 1395864371 bytes
+This Runtime's support state: ready (healthy=True)
+Last installer run (last-run.json): (not available)
+Last update result: none recorded
+Update log: ~/.local/state/astrid-runtime/logs/install.log
+Installer log (install.log, last 80 lines):
+(not available)
+Program versions on disk: 1 version, 0 bytes (versions folder, current version included)
+Runtime support issues:
+- disk-full
+Runtime log for ~/Library/Application Support/Astrid Runtime-r1 (selected; runtime/runtime.log, last 80 lines):
+(not available)
+Runtime log for ~/Library/Application Support/Astrid Runtime (old workspace copy; runtime/runtime.log, last 80 lines):
+Traceback (most recent call last):
+sqlite3.OperationalError: database or disk is full
+Runtime log directory: ~/.local/state/astrid-runtime/logs
+Shared Runtime log (runtime.log; written by every Runtime on this computer, last 80 lines):
+(not available)

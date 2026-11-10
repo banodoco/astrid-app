@@ -239,6 +239,26 @@ describe.each([
     expect(gateway.calls).toEqual([`${origin ?? ''}/api/runtime/v1/health`, `${origin ?? ''}/api/runtime/v1/realm`]);
   });
 
+  it('carries the installed release from the health identity, so the pack re-poll key can tell releases apart', async () => {
+    const gateway = fakeGateway();
+    gateway.routes['/v1/health'] = () => json({ status: 'ok', protocol: 'workspace.v1', schema_digest: RUNTIME_SCHEMA_DIGEST, identity: { managed_by: 'pinokio', release: 12 } });
+    const { RuntimeConnectionProvider: Provider, useRuntimeConnection: useConnection } = await loadProviderFor(origin);
+    const values: RuntimeConnectionValue[] = [];
+    function Watch() {
+      const connection = useConnection();
+      values.push(connection);
+      return <span data-testid="status">{connection.state.status}</span>;
+    }
+    render(
+      <Provider gated requireLocalNetworkPermission fetchImpl={gateway.fetchImpl} permissions={fakePermissions('granted').permissions} pollIntervalMs={10}>
+        <Watch />
+      </Provider>,
+    );
+    await waitFor(() => expect(status()).toBe('connected'));
+    expect(values.at(-1)?.runtimeRelease).toBe(12);
+    expect(values.at(-1)?.schemaDigest).toBe(RUNTIME_SCHEMA_DIGEST);
+  });
+
   it('shows the Pinokio update sentence and no installer command for an incompatible Pinokio Runtime', async () => {
     const gateway = fakeGateway();
     gateway.routes['/v1/health'] = () => json({ status: 'ok', schema_digest: 'sha256:old-runtime', identity: { managed_by: 'pinokio' } });

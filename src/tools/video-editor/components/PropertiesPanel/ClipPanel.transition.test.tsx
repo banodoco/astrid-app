@@ -214,6 +214,21 @@ describe('ClipPanel transition controls (T11)', () => {
 
   // -- Selector: None clears --------------------------------------------------
 
+  it('shows an Agent transition reference without rewriting its authored shape, and still offers None', () => {
+    const transition = { id: 'cross-fade', durationFrames: 36 };
+    const onChange = vi.fn();
+    render(<ClipPanel {...defaultProps({ onChange, clip: mediaClip({
+      transition: transition as unknown as NonNullable<ResolvedTimelineClip['transition']>,
+    }) })} />);
+
+    expect(getTransitionSelectTrigger().textContent).toMatch(/cross[\s-]?fade/i);
+    expect(getTransitionSelectTrigger().textContent).not.toContain('missing');
+    expect(onChange).not.toHaveBeenCalled();
+    expect(transition).toEqual({ id: 'cross-fade', durationFrames: 36 });
+    fireEvent.click(getTransitionSelectTrigger());
+    expect(screen.getAllByRole('option').some((option) => option.textContent === 'None')).toBe(true);
+  });
+
   it('calls onChange with undefined transition when None is selected', () => {
     // This test verifies the Select onValueChange wiring by directly
     // testing that "None" option exists and the current transition is displayed.

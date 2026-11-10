@@ -38,7 +38,7 @@ import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BIG_DOWNLOAD_BYTES, BIG_UPLOAD_BYTES, DirectHarness, DOOR_PORT, rawRequest, sha256Hex, compositionPublication } from './support/harness.ts';
-import { APP_ENTRY_ROUTE, UI, currentHead, editFirstTrackName, expectConnected, firstTrackName, holdTimelineSaves, openApp, openSeededTimeline, revisionBody, test, waitForAudit } from './support/app.ts';
+import { APP_ENTRY_ROUTE, UI, commandOutboxes, currentHead, editFirstTrackName, expectConnected, firstTrackName, holdTimelineSaves, openApp, openSeededTimeline, revisionBody, test, waitForAudit } from './support/app.ts';
 import { skipWhen } from '../support/declaredSkip.ts';
 import { DIST_DIR } from '../../../config/testing/skipConditions.mjs';
 import { SpeedTable } from './support/measure.ts';
@@ -135,11 +135,11 @@ test.describe('zero-click connection (App)', () => {
       await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
       const panel = page.locator(UI.panel);
       await expect(panel).toBeVisible();
-      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh');
+      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await panel.getByRole('button', { name: UI.copy }).click();
       await expect(panel.getByRole('button', { name: 'Command copied' })).toBeVisible();
       const copied = await page.evaluate(() => navigator.clipboard.readText());
-      expect(copied).toBe('curl -fsSL https://astrid.haus/install | sh');
+      expect(copied).toBe('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await harness.startRuntime();
       await expect(page.locator(UI.status)).toHaveAttribute('data-state', 'connected', { timeout: 20_000 });
       // The card shows that it worked, then leaves by itself once the editor beneath has opened.
@@ -226,7 +226,7 @@ test.describe('first time and returning panels (App)', () => {
       await expect(panel).toBeVisible();
       await expect(panel.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeVisible();
       await expect(panel.getByText("Your coding agent can start it, or install it if it isn't there yet.")).toBeVisible();
-      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh');
+      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await expect(panel.getByRole('button', { name: UI.copy })).toBeVisible();
 
       await harness.startRuntime();
@@ -237,7 +237,7 @@ test.describe('first time and returning panels (App)', () => {
       await expect(panel.getByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeVisible();
       await expect(panel.getByText("Your coding agent can start it, or install it if it isn't there yet.")).toBeVisible();
       await expect(panel.getByRole('button', { name: UI.copy })).toBeVisible();
-      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh');
+      await expect(panel.getByRole('code')).toHaveText('curl -fsSL https://astrid.haus/install | sh -s -- --yes');
       await expect(panel.getByText('Set up Astrid on this computer')).toHaveCount(0);
     } finally {
       await harness.resetToHealthy();
@@ -427,10 +427,25 @@ test.describe('core journey', () => {
     await openApp(page, harness);
     await expectConnected(page);
     await openSeededTimeline(page, harness);
-    const head = await currentHead(harness);
-    const second = await harness.runtimeJson('POST', `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
-    expect(second.status).toBe(200);
+    const { projectId, timelineId } = harness.seed;
+    const base = (await harness.runtimeJson<{ head: { revision_id: string; publication_id: string } }>('GET', `/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).body.head;
+    // Hold the App's own commit until the competing write has landed, so both writers start from the same head.
+    let releaseAppCommit!: () => void;
+    const appCommitHeld = new Promise<void>((resolve) => { releaseAppCommit = resolve; });
+    let appCommitIntercepted!: () => void;
+    const intercepted = new Promise<void>((resolve) => { appCommitIntercepted = resolve; });
+    await page.route(/\/timelines\/[^/]+\/commit$/, async (route) => { appCommitIntercepted(); await appCommitHeld; await route.continue(); });
     await editFirstTrackName(page, 'Draft from the first writer');
+    // Handshake: the App's commit must be held in the route before the competing write is published.
+    await intercepted;
+    // The second writer edits the same field (track V1's label) through a guarded /commit against the same base.
+    const second = await harness.runtimeJson<{ data: { accepted_revision_id: string } }>('POST', `/v1/projects/${projectId}/timelines/${timelineId}/commit`, {
+      api_version: 1, project_id: projectId, timeline_id: timelineId,
+      base_revision_id: base.revision_id, base_publication_id: base.publication_id,
+      commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: 'Second writer' }, clear: [] } }],
+    });
+    expect(second.status).toBe(200);
+    releaseAppCommit();
     const conflict = page.getByRole('alertdialog', { name: 'This timeline changed somewhere else' });
     await expect(conflict).toBeVisible({ timeout: 20_000 });
     await expect(conflict.getByText('Keep your changes, or switch to the latest version.')).toBeVisible();
@@ -440,7 +455,7 @@ test.describe('core journey', () => {
     const draftField = page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first();
     await expect(draftField).toHaveValue('Draft from the first writer');
     // The stale save was refused, not applied: the second writer's revision is still the head.
-    expect(await currentHead(harness)).toBe(second.body.data.new_head);
+    expect(await currentHead(harness)).toBe(second.body.data.accepted_revision_id);
   });
 
   test('through the hosted origin: open, read the timeline, save with the expected head, reload byte-identical', async ({ page, harness }) => {
@@ -458,19 +473,25 @@ test.describe('core journey', () => {
     const direct = await harness.runtimeFetch(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     expect(read.text).toBe(await direct.text());
 
-    const head = await currentHead(harness);
-    const publication = compositionPublication(harness.seed, head, 'Main (edited through the door)', 24);
-    const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify(publication),
+    const pin = json(await call(`/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).head;
+    // The composition name is a field of the parent: read its current value from the head document, and guard the set with it.
+    const headDoc = await revisionBody(harness, pin.revision_id);
+    const currentName = headDoc.payload?.name;
+    const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify({ api_version: 1, project_id: projectId, timeline_id: timelineId, base_revision_id: pin.revision_id, base_publication_id: pin.publication_id,
+        commands: [{ schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [], args: { changes: [{ op: 'set', ref: 'parent', path: ['name'],
+          before: currentName === undefined ? { state: 'absent' } : { state: 'present', value: currentName }, value: 'Main (edited through the door)' }] } }] }),
     });
     expect(saved.status, saved.text).toBe(200);
-    const newHead: string = json(saved).data.new_head;
-    expect(newHead).not.toBe(head);
+    const newHead: string = json(saved).data.accepted_revision_id;
+    expect(newHead).not.toBe(pin.revision_id);
 
     const revisionPath = `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions/${newHead}`;
     const beforeReload = await call(revisionPath);
     expect(beforeReload.status).toBe(200);
-    expect(beforeReload.text).toContain('Main (edited through the door)');
+    // The composition name, read from the Runtime after the save: exactly the value the guarded doc.patch set.
+    expect(json(beforeReload).payload?.name).toBe('Main (edited through the door)');
     const afterReadInspect = await call(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 
     await page.reload();
@@ -484,21 +505,32 @@ test.describe('core journey', () => {
   test('through the hosted origin: a second writer saves first, the stale save is refused and the first writer keeps its draft', async ({ page, harness }) => {
     const { projectId, timelineId } = harness.seed;
     await openHostedPage(page, harness);
-    const publishUrl = `${harness.doorBase}/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`;
-    const head = await currentHead(harness);
-    const draft = compositionPublication(harness.seed, head, 'First writer draft', 12); // held by the caller
+    const commitUrl = `${harness.doorBase}/v1/projects/${projectId}/timelines/${timelineId}/commit`;
+    const base = (await harness.runtimeJson<{ head: { revision_id: string; publication_id: string } }>('GET', `/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).body.head;
+    // A guarded commit of one track-label edit against the head this writer read.
+    const commit = (label: string, pin: { revision_id: string; publication_id: string }) => ({
+      api_version: 1, project_id: projectId, timeline_id: timelineId,
+      base_revision_id: pin.revision_id, base_publication_id: pin.publication_id,
+      commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label }, clear: [] } }],
+    });
+    const draft = commit('First writer draft', base); // held by the caller
 
-    const second = await harness.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
+    // A unique competing label: a label a sibling already left would be a no-op that Runtime merges (200, not a conflict).
+    const second = await harness.runtimeJson<{ data: { accepted_revision_id: string }; receipt: { receipt_id: string } }>('POST', `/v1/projects/${projectId}/timelines/${timelineId}/commit`, commit(`Hosted second writer ${randomUUID()}`, base));
     expect(second.status).toBe(200);
+    const secondHead = { revision_id: second.body.data.accepted_revision_id, publication_id: second.body.receipt.receipt_id };
+    expect(secondHead.revision_id).not.toBe(base.revision_id);
 
-    const refused = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: JSON.stringify(draft) });
+    const refused = await pageFetch(page, commitUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: JSON.stringify(draft) });
     expect(refused.status).toBe(409);
-    expect(json(refused).details).toMatchObject({ reason: 'stale_head', expected_head: head, actual_head: second.body.data.new_head });
+    // The native conflict envelope: the track label is the conflicting address, and the current head is the second writer's.
+    expect(json(refused).details).toMatchObject({ status: 'conflict', current: { revision_id: secondHead.revision_id } });
+    expect(json(refused).details.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ ref: 'parent/track:V1', path: expect.arrayContaining(['label']) })]));
     // Nothing of the draft reached the Runtime; the draft object itself is untouched for a retry.
-    expect(await currentHead(harness)).toBe(second.body.data.new_head);
-    expect(draft.expected_head).toBe(head);
-    expect(draft.parent_composition.name).toBe('First writer draft');
-    const rebased = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify({ ...draft, expected_head: second.body.data.new_head }) });
+    expect(await currentHead(harness)).toBe(secondHead.revision_id);
+    expect(draft.base_revision_id).toBe(base.revision_id);
+    expect(draft.commands[0].args).toEqual({ values: { label: 'First writer draft' }, clear: [] });
+    const rebased = await pageFetch(page, commitUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify(commit('First writer draft', secondHead)) });
     expect(rebased.status, rebased.text).toBe(200);
   });
 });
@@ -673,33 +705,47 @@ test.describe('restarts', () => {
     expect(response.json().runtime_instance_id).toBe(harness.runtimeInstanceId);
   });
 
-  test('App: an Astrid restart on a new port shows the restart card, and Reload reconnects with the draft kept', async ({ page, harness }) => {
+  test('App: an Astrid restart on a new port reloads by itself, and the draft is delivered only after its outbox bytes survive', async ({ page, harness }) => {
     await openApp(page, harness);
     await expectConnected(page);
     await openSeededTimeline(page, harness);
-    const releaseSaves = await holdTimelineSaves(page);
+    const headBefore = await currentHead(harness);
+    const hold = await holdTimelineSaves(page);
     await editFirstTrackName(page, 'Draft kept across the restart');
-    await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
+    await expect.poll(() => hold.requests.length, { timeout: 20_000 }).toBeGreaterThan(0);
+    const sentBody = hold.requests[0].postData()!;
+    const sentKey = hold.requests[0].headers()['idempotency-key'];
+    const retained = (await commandOutboxes(page, harness.seed.timelineId))
+      .find((owner) => owner.pending?.request.key === sentKey)!;
+    expect(retained.pending!.request.body).toBe(sentBody);
+    // A mark on this page: the App's own reload replaces the page and clears it.
+    await page.evaluate(() => { (window as unknown as { __beforeRestart: boolean }).__beforeRestart = true; });
 
-    // The Runtime comes back on a new port, and its door on the same fixed one.
+    // The Runtime comes back as a new instance on a new port. The App detects it and reloads by itself
+    // (RuntimeConnectionPill.tsx:64-72; draftSafeReload.ts:130-145 flushes and preserves the draft before navigating).
+    const instanceBefore = harness.runtimeInstanceId;
     await harness.restartRuntime();
+    expect(harness.runtimeInstanceId, 'the Runtime came back as a new instance').not.toBe(instanceBefore);
+    // The test-owned route is not a socket to the stopped Runtime: it stays pending forever unless we abort it.
+    // Let the old save settle so the guarded automatic reload can preserve it. Recovery delivery remains held.
     await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toBeVisible({ timeout: 20_000 });
-    expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'the page does not reload by itself').toBe(true);
-    // One recovery path: the editor's own technical cards stay out of the way, and the save badge is neutral.
-    await expect(page.getByText('Workspace connection unavailable')).toHaveCount(0);
-    await expect(page.getByText('Reload needed')).toHaveCount(0);
-    await expect(page.getByText('Not saved', { exact: true })).toBeVisible();
-
-    await page.getByRole('button', { name: UI.reload }).click();
+    await hold.abortHeld();
+    await page.waitForFunction(() => !(window as unknown as { __beforeRestart?: boolean }).__beforeRestart, undefined, { timeout: 60_000 });
     await expectConnected(page);
     await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toHaveCount(0);
-    // The draft survives the reload: the editor offers it back as a recovered draft, and Save them saves it.
+
+    // Native recovery: the retained owner's outbox holds the exact bytes and key the old page sent, and nothing reached the
+    // Runtime yet. The recovery delivery is held by the same gate, so it cannot go before these bytes are verified.
+    await expect.poll(async () => (await commandOutboxes(page, harness.seed.timelineId))
+      .find((owner) => owner.ownerId === retained.ownerId)?.pending?.request, { timeout: 30_000 }).toEqual(retained.pending!.request);
+    expect(await currentHead(harness)).toBe(headBefore);
     await openSeededTimeline(page, harness);
-    const recovered = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
-    await expect(recovered).toBeVisible();
-    const headBefore = await currentHead(harness);
-    await releaseSaves();
-    await recovered.getByRole('button', { name: 'Save them' }).click();
+    await expect.poll(() => hold.requests.length, { timeout: 30_000 }).toBeGreaterThan(1);
+    expect(hold.requests.slice(1).every((request) => request.postData() === sentBody
+      && request.headers()['idempotency-key'] === sentKey), 'recovery sends only the retained bytes and key').toBe(true);
+
+    // Recovery delivery is allowed: the draft reaches the Runtime and the editor shows it.
+    await hold.release(true);
     await expect.poll(() => currentHead(harness), { timeout: 20_000 }).not.toBe(headBefore);
     await expect(firstTrackName(page)).toHaveValue('Draft kept across the restart');
   });
@@ -712,23 +758,15 @@ test.describe('restarts', () => {
     const headBefore = await currentHead(harness);
     const reloadButton = page.getByRole('status').getByRole('button', { name: 'Reload' });
     await expect(reloadButton).toBeVisible();
-    let release!: () => void;
-    let signalRequest!: () => void;
-    const saveStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
-    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
-      if (route.request().method() !== 'POST') return route.fallback();
-      signalRequest();
-      await new Promise<void>((resolve) => { release = resolve; });
-      await route.continue();
-    });
+    const hold = await holdTimelineSaves(page);
     await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
     await editFirstTrackName(page, 'Saved before App reload');
     await reloadButton.click();
-    await saveStarted;
+    await expect.poll(() => hold.requests.length, { timeout: 20_000 }).toBeGreaterThan(0);
     await expect(page.getByRole('status').getByRole('button', { name: 'Saving drafts…' })).toBeVisible();
     expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'reload waits while the save is unacknowledged').toBe(true);
     const pageReload = page.waitForNavigation({ waitUntil: 'domcontentloaded' });
-    release();
+    await hold.release(true);
     await pageReload;
     await expectConnected(page);
     await openSeededTimeline(page, harness);
@@ -744,9 +782,21 @@ test.describe('restarts', () => {
     await expectConnected(page);
     await openSeededTimeline(page, harness);
     const headBefore = await currentHead(harness);
-    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
+    await page.route(/\/timelines\/[^/]+\/commit$/, async route => {
       if (route.request().method() === 'POST') return route.abort('failed');
       return route.fallback();
+    });
+    // Reload may fall back to a verified local draft when the Runtime cannot
+    // acknowledge. Fail that durable boundary too, while leaving outbox storage
+    // and readonly inspection available. A transport abort alone allows reload.
+    await page.evaluate(() => {
+      const transaction = IDBDatabase.prototype.transaction;
+      IDBDatabase.prototype.transaction = function (this: IDBDatabase, ...args: Parameters<IDBDatabase['transaction']>) {
+        if (this.name === 'astrid.timeline-drafts' && args[1] === 'readwrite') {
+          throw new DOMException('Injected timeline persistence failure', 'QuotaExceededError');
+        }
+        return transaction.apply(this, args);
+      };
     });
     await page.evaluate(() => { (window as unknown as { __noReload: boolean }).__noReload = true; });
     await editFirstTrackName(page, 'Keep this unsaved draft');
@@ -754,7 +804,7 @@ test.describe('restarts', () => {
     await expect(reloadButton).toBeVisible();
     await reloadButton.click();
     const reloadError = page.getByRole('alert').filter({ hasText: 'Could not safely reload' });
-    await expect(reloadError).toContainText('Timeline:');
+    await expect(reloadError).toContainText('Timeline owner: Injected timeline persistence failure');
     expect(await page.evaluate(() => (window as unknown as { __noReload?: boolean }).__noReload), 'failed persistence prevents navigation').toBe(true);
     await expect(firstTrackName(page)).toHaveValue('Keep this unsaved draft');
     expect(await currentHead(harness)).toBe(headBefore);
@@ -1259,8 +1309,8 @@ test('speed table: each step through the door against the Runtime directly', asy
       expect((await call(`/v1/projects/${projectId}/timelines/${timelineId}/inspect`, { method: 'POST', headers: jsonHeaders, body: '{}' })).status).toBe(200);
     });
     await speed.time('save timeline (publish revision)', via, SMALL, async () => {
-      const head = await currentHead(harness);
-      const response = await call(`/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, { method: 'POST', headers: { ...jsonHeaders, 'Idempotency-Key': idem() }, body: JSON.stringify(compositionPublication(harness.seed, head, `speed ${via}`, 30)) });
+      const pin = json(await call(`/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).head;
+      const response = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, { method: 'POST', headers: { ...jsonHeaders, 'Idempotency-Key': idem() }, body: JSON.stringify({ api_version: 1, project_id: projectId, timeline_id: timelineId, base_revision_id: pin.revision_id, base_publication_id: pin.publication_id, commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: `speed ${via}` }, clear: [] } }] }) });
       expect(response.status, response.text).toBe(200);
     });
     await speed.time('image GET (small)', via, SMALL, async () => {
@@ -1311,4 +1361,27 @@ test('speed table: each step through the door against the Runtime directly', asy
   writeFileSync(file, JSON.stringify(speed.toJSON(), null, 2));
   await testInfo.attach('direct-measurements.json', { path: file, contentType: 'application/json' });
   await testInfo.attach('direct-measurements.txt', { body: table, contentType: 'text/plain' });
+});
+
+// Capture for review (UX pass): the autostart-off update card in Settings > Astrid updates, from the connected Runtime.
+// Only the installer status route is answered here (reason autostart-off); the Runtime itself is unchanged. The step fails
+// unless the card and its agent action are on screen, so the PNG always shows the card.
+test.describe('autostart-off card capture', () => {
+  test.use({ deviceScaleFactor: 2 });
+  test('the autostart-off update card is shown in Settings and captured', async ({ page, harness }, testInfo) => {
+    await page.route(`http://127.0.0.1:${DOOR_PORT}/api/runtime/v1/update/status`, (route) => route.fulfill({
+      status: 200, contentType: 'application/json', headers: { 'Cache-Control': 'no-store' },
+      body: JSON.stringify({ available: true, state: 'none', self_update: true, reason: 'autostart-off' }),
+    }));
+    await openApp(page, harness);
+    await expectConnected(page);
+    await page.getByRole('button', { name: 'Settings', exact: true }).click();
+    const updates = page.locator('#settings-updates');
+    await expect(updates).toBeVisible();
+    await expect(updates.getByText('Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.')).toHaveCount(1);
+    await expect(updates.getByRole('button', { name: 'Copy instructions for your agent' })).toBeVisible();
+    const png = await updates.screenshot();
+    writeFileSync(path.join(testInfo.outputDir, 'autostart-off-card.png'), png);
+    await testInfo.attach('autostart-off-card', { body: png, contentType: 'image/png' });
+  });
 });

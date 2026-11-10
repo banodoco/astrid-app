@@ -1,20 +1,32 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
-import { ASTRID_COMMANDS, installCommand } from './copy.ts';
+import { ASTRID_COMMANDS, installCommand, LOCAL_UPDATE_COMMAND } from './copy.ts';
 import { registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import type { InstallerUpdateView } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/client.ts';
+
+// '' is a locally served App (same-origin); a non-empty origin is hosted astrid.haus.
+const runtime = vi.hoisted(() => ({ origin: '' }));
+vi.mock('@/integrations/runtime/connection.ts', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/integrations/runtime/connection.ts')>()),
+  runtimeOrigin: () => runtime.origin,
+}));
+
+const HOSTED_ORIGIN = 'https://astrid.test';
 
 const installerResolutions = [
   ['Update now', resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'installer', updateNowAvailable: true })],
   ['Update', resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: true })],
 ] as const;
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  runtime.origin = '';
+});
 
 function installerOperation(start = vi.fn(async () => undefined)): InstallerUpdateView {
   return { available: true, pending: false, start } as unknown as InstallerUpdateView;
@@ -39,9 +51,25 @@ describe('update resolution after an in-app update ends', () => {
 
   it('offers the plain install line as the next action after a failed update, not --update', () => {
     render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={finished('failed')} />);
-    expect(screen.getByText('The update did not complete. Check diagnostics before trying again.')).toBeInTheDocument();
+    expect(screen.getByText('The update did not complete. Download diagnostics to see why.')).toBeInTheDocument();
     expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
     expect(screen.getByRole('code').textContent).not.toContain('--update');
+  });
+
+  it('a failed update offers both ways to repair and points to the full story', () => {
+    const failed = finished('failed');
+    const operation = { ...failed, status: { ...failed.status, log_path: '/Users/me/Library/Logs/Astrid Runtime/install.log' } } as unknown as InstallerUpdateView;
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 })} operation={operation} />);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.getAllByRole('code')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    expect(screen.getByText('Details: /Users/me/Library/Logs/Astrid Runtime/install.log')).toBeInTheDocument();
+  });
+
+  it('Settings keeps its own Diagnostics row, so a failed update there adds no second button', () => {
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', installedRelease: 3, servedRelease: 3 }, 'settings')} operation={finished('failed')} context="settings" />);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Download diagnostics' })).toBeNull();
   });
 
   it('does not offer the install line after an update that finished', () => {
@@ -59,14 +87,16 @@ describe('update resolution Settings actions', () => {
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 
-  it('shows the plain install line, not --update, when Update Now is refused for autostart off', () => {
+  it('shows the strict update line, with no choice flags, when Update Now is refused for autostart off', () => {
+    runtime.origin = HOSTED_ORIGIN;
     const resolution = resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' });
     render(<UpdateResolutionActions resolution={resolution} />);
-    expect(screen.getByText('Run this command, then start Astrid:')).toBeInTheDocument();
-    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinux);
-    expect(screen.getByRole('code').textContent).not.toContain('--update');
+    expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off'])).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(screen.getByRole('code').textContent).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
     expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Copy instructions for your agent' })).not.toBeInTheDocument();
+    // The autostart-off card offers the agent brief too: it runs the same strict line in a terminal, never the in-app update.
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
   });
 
   it('routes a soft update nudge to the expanded Updates destination and preserves the URL hash', () => {
@@ -96,12 +126,14 @@ describe('update resolution Settings actions', () => {
   });
 
   it('shows the install update command for fully-local installs', () => {
+    runtime.origin = HOSTED_ORIGIN;
     mountWithEventCapture(resolveUpdate({ compatibility: { kind: 'schema', detail: 'Update required' }, installType: 'fully-local' }), 'fully-local');
     expect(screen.getByRole('code')).toHaveTextContent(installCommand('update'));
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
   });
 
   it.each(installerResolutions)('flushes registered drafts before starting the explicit installer %s action', async (label, resolution) => {
+    runtime.origin = HOSTED_ORIGIN;
     const events: string[] = [];
     const flush = vi.fn(async () => { events.push('flush'); });
     const start = vi.fn(async () => { events.push('start'); });
@@ -162,10 +194,114 @@ describe('update resolution in-app availability', () => {
 
   it('hides Update now and shows the one-line reason with the command when Astrid cannot update itself', () => {
     const operation = { available: false, pending: false, start: vi.fn(), updateReason: undefined } as unknown as InstallerUpdateView;
-    const resolution = resolveUpdate({ installType: 'installer', releaseBehind: true, installedRelease: 3, servedRelease: 4 }, 'settings');
+    const resolution = resolveUpdate({ installType: 'installer', releaseBehind: true, installedRelease: 10, servedRelease: 11 }, 'settings');
     render(<UpdateResolutionActions resolution={resolution} operation={operation} />);
     expect(screen.queryByRole('button', { name: 'Update now' })).not.toBeInTheDocument();
     expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable'])).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+  });
+});
+
+describe('autostart-off card', () => {
+  it('shows the new copy, the strict update command, the agent action, and no Update now', () => {
+    runtime.origin = HOSTED_ORIGIN;
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    expect(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off']).toBe('Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.');
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    expect(screen.getByText(INSTALLER_UPDATE_REASON_MESSAGES['autostart-off'])).toBeInTheDocument();
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(document.body.textContent).not.toContain('then start Astrid');
+  });
+
+  it('a locally served App with autostart off gets the npm run update line, not the curl line', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    runtime.origin = '';
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    expect(screen.getByRole('code')).toHaveTextContent(installCommand('update', undefined, false, true));
+    expect(screen.getByRole('code')).toHaveTextContent(LOCAL_UPDATE_COMMAND);
+    expect(document.body.textContent).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
+  });
+
+  it('a hosted App with autostart off keeps the curl update line', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    runtime.origin = HOSTED_ORIGIN;
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    expect(screen.getByRole('code')).toHaveTextContent(ASTRID_COMMANDS.macLinuxUpdate);
+    expect(document.body.textContent).not.toContain(LOCAL_UPDATE_COMMAND);
+  });
+
+  it('the agent brief for a locally served App names npm run update, not the curl line', async () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
+    const clipboard = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: clipboard } });
+    runtime.origin = '';
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'autostart-off' })} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy instructions for your agent' }));
+    await waitFor(() => expect(clipboard).toHaveBeenCalledOnce());
+    expect(clipboard.mock.calls[0][0]).toContain(`Run exactly this command: ${LOCAL_UPDATE_COMMAND}.`);
+    expect(clipboard.mock.calls[0][0]).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
+  });
+});
+
+describe('windows-upgrade-unsupported', () => {
+  // The Windows test spies on navigator.platform and userAgent; restore them so the next test sees the real platform.
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const resolution =(context: 'page' | 'settings') => resolveUpdate({ installType: 'installer', installedRelease: 10, servedRelease: 11, releaseBehind: true, updateReason: 'windows-upgrade-unsupported', updateNowAvailable: true, selfUpdate: true }, context);
+
+  it('on the page: no Update now; the copy and manual actions sit beside Download diagnostics', () => {
+    render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+    expect(screen.getByRole('code')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Update now' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(INSTALLER_UPDATE_REASON_MESSAGES['self-update-unavailable']);
+  });
+
+  it('on the page: offers Copy instructions for your agent and the manual command, with Download diagnostics', () => {
+    render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(document.body.textContent).toContain('Run it yourself');
+    expect(screen.getByRole('code')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Download diagnostics' })).toBeInTheDocument();
+  });
+
+  it('in Settings: the manual command is offered too; its own Diagnostics row is the pointer', () => {
+    const { container } = render(<UpdateResolutionActions resolution={resolution('settings')} operation={installerOperation()} context="settings" />);
+    expect(screen.getByRole('code')).toBeInTheDocument();
+    expect(container.textContent).not.toContain('Run the command below');
+  });
+
+  it('on Windows, the command is the PowerShell update line, never curl, and there is no in-app Update', () => {
+    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('Win32');
+    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Windows');
+    runtime.origin = HOSTED_ORIGIN;
+    render(<UpdateResolutionActions resolution={resolution('page')} operation={installerOperation()} />);
+    expect(screen.queryByRole('button', { name: /^Update( now)?$/ })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Copy instructions for your agent' })).toBeInTheDocument();
+    expect(screen.getByText(ASTRID_COMMANDS.windowsUpdate, { exact: true })).toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(ASTRID_COMMANDS.macLinuxUpdate);
+  });
+
+  it('the recovery-card fallback for an already-set-up install shows no --yes, only the update line or the plain line', () => {
+    runtime.origin = HOSTED_ORIGIN;
+    // A recovery offers the command options (Copy instructions / Run it yourself) with the update line.
+    const recovery = resolveUpdate({ installType: 'installer', updateReason: 'recovery-needed', updateNowAvailable: false });
+    const { unmount } = render(<UpdateResolutionActions resolution={recovery} />);
+    expect(document.body.textContent).not.toContain('--yes');
+    expect(screen.getByText(ASTRID_COMMANDS.macLinuxUpdate, { exact: true })).toBeInTheDocument();
+    unmount();
+    // A repair of an install that cannot update itself gets the plain line, which for an already set-up install has no --yes.
+    render(<UpdateResolutionActions resolution={resolveUpdate({ installType: 'installer', updateReason: 'needs-repair', updateNowAvailable: false })} />);
+    expect(document.body.textContent).not.toContain('--yes');
+    expect(screen.getByText(ASTRID_COMMANDS.macLinux, { exact: true })).toBeInTheDocument();
   });
 });

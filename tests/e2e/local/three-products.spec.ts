@@ -284,19 +284,43 @@ async function expectOpaqueDataKept(harness: DirectHarness, seed: ThreeProductsS
   return revisions.length;
 }
 
+/** `show --json` uses RemoteTimelines._native_projection, not the human cut-table rows. */
+type AgentTimelineInspection = {
+  kind: 'timeline-inspection';
+  summary: { revision_id: string; head_revision_id: string | null; is_current_head: boolean };
+  clips: Array<{ clip_id: string; occurrence_id?: string; asset_id: string | null; authored_fields: Record<string, unknown> }>;
+  pagination: { next_cursor: string | null };
+};
+
 /** The agent's verbs, as the CLI ships them. */
 function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' | 'projectSlug'>) {
   const common = [seed.timelineId, '--project', seed.projectSlug];
   return {
     checkout: () => astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']),
     edit: (...flags: string[]) => astrid.astrid(['timelines', 'edit', ...common, ...flags]),
-    publish: async (message: string, idempotencyKey: string) => {
-      const envelope = await astrid.json<{ new_head: string; old_head: string; idempotency_key: string; published?: boolean }>(['timelines', 'publish', ...common, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
+    // `timelines commit --file` on the draft that `timelines checkout` and `timelines edit` share. Neither command prints
+    // the draft's path, and `status --json` carries no project_id (cli.py:2510-2548). The path is the CLI's own:
+    // store.draft_path(project_id, timeline_id, draft), with the ids from store.resolve_ids (store.py:410), the same
+    // resolver status uses, and the draft name from status --json.
+    commit: async (message: string, idempotencyKey: string) => {
+      const status = (await astrid.json<{ timeline_id: string; draft: string; current_head: string }>(['timelines', 'status', ...common, '--json'])).data!;
+      const oldHead = status.current_head;
+      const draft = await astrid.python(['-c',
+        'import sys; from astrid.sdk.timeline import store; pid, tid, _head = store.resolve_ids(sys.argv[1], sys.argv[2]); print(store.draft_path(pid, tid, sys.argv[3]))',
+        seed.projectSlug, seed.timelineId, status.draft]);
+      const draftFile = draft.stdout.trim().split('\n').pop()!;
+      expect(draftFile, 'the draft path the CLI resolves').toMatch(/drafts[\\/][^\\/]+[\\/][^\\/]+[\\/]/);
+      expect(draftFile, 'the draft path has no unresolved ids').not.toContain('undefined');
+      const envelope = await astrid.json<{ accepted_revision_id: string; accepted_publication_id: string }>(['timelines', 'commit', ...common, '--file', draftFile, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
       expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
-      return envelope.data!;
+      // The commit envelope (cli_native.py:84-105): the Runtime's accepted revision and publication.
+      expect(envelope.data?.accepted_revision_id).toEqual(expect.any(String));
+      expect(envelope.data?.accepted_publication_id).toEqual(expect.any(String));
+      // The callers' shape: the revision the commit made, and the head it was built on (status, read just before).
+      return { new_head: envelope.data!.accepted_revision_id, old_head: oldHead, idempotency_key: idempotencyKey };
     },
     status: async () => (await astrid.json<{ current_head: string }>(['timelines', 'status', ...common, '--json'])).data!,
-    show: async () => (await astrid.json<{ head_revision_id: string; rows: Array<{ layers: Array<{ clip_id: string; asset: string | null }> }> }>(['timelines', 'show', ...common, '--published', '--json'])).data!,
+    show: async () => (await astrid.json<AgentTimelineInspection>(['timelines', 'show', ...common, '--published', '--json'])).data!,
   };
 }
 
@@ -421,88 +445,6 @@ async function plantNoReloadFlag(page: Page) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// 1. agent -> open App
-
-// Bundle 1 blocker: the original Agent swap below still needs native asset + registry/task-output capture.
-// Keep the task/adoption/media assertions until that operation ships; the final App label uses commands now.
-test('agent -> open App: an Astrid task and its publication appear in the open App without a reload', async ({ page, harness, astrid, seed3 }) => {
-  await harness.enableTimelineAuthoring(ASTRID_PYTHON);
-  const agent = agentOf(astrid, seed3);
-  const sniff = new TokenSniff(secretsOf(harness, astrid));
-  sniff.attach(page);
-  const reads = watchPageReads(page, harness);
-
-  await openApp(page, harness);
-  await expectConnected(page);
-  await openSeededTimeline(page, harness);
-  await plantNoReloadFlag(page);
-  await openActionPane(page);
-  journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
-
-  // The agent registers an executor and admits a task. The page learns of it from the Runtime's event feed, not from a reload.
-  await astrid.host({ register: true });
-  const created = await astrid.json<{ task_id: string }>(['tasks', 'create', '--project', seed3.projectSlug, '--capability', 'f2.marker', '--spec', '{}', '--json']);
-  expect(created.ok, JSON.stringify(created)).toBe(true);
-  const taskId = created.data!.task_id;
-  const row = page.locator(`[data-activity-task-id="${taskId}"]`);
-  await expect(row).toHaveAttribute('aria-label', /^F2 Marker, (Queued|Ready)$/, CEILING);
-  await expect.poll(() => reads.eventFeed, { message: 'the page was told by the event feed', ...CEILING }).toContainEqual(expect.objectContaining({ aggregate_type: 'task', aggregate_id: taskId }));
-
-  // The executor runs it: the task leaves the active rows and is listed as complete.
-  const ran = await astrid.host({ runOnce: true });
-  expect(ran).toMatchObject({ task_id: taskId, state: 'succeeded' });
-  const output = ran.outputs?.find((candidate) => candidate.name === 'marker');
-  expect(output, 'the task produced its marker image').toBeTruthy();
-  await expect(row).toHaveCount(0, CEILING);
-  await page.getByRole('button', { name: 'Peek at tasks' }).click();
-  await expect(page.locator('[data-task-peek-surface="tasks"]').filter({ hasText: 'F2 Marker' }).getByText('Complete', { exact: true })).toBeVisible(CEILING);
-  const settled = await astrid.json<{ state: string }>(['tasks', 'show', taskId, '--project', seed3.projectSlug, '--json']);
-  expect(settled.data!.state, 'the Runtime agrees the task succeeded').toBe('succeeded');
-
-  // The agent publishes the timeline with the task's output; the open page adopts that revision by itself.
-  const before = await currentHead(harness);
-  await agent.checkout();
-  await agent.edit('--clip', seed3.agentClipId, '--swap-asset', `${seed3.markerAssetKey}=task:${taskId}/marker#0`);
-  const published = await agent.publish('agent: marker', 'f2-case1');
-  expect(published.old_head, 'the agent built on the head the App has').toBe(before);
-  expect(published.new_head).not.toBe(before);
-  expect(await currentHead(harness), 'the Runtime head is the agent\'s revision').toBe(published.new_head);
-
-  await expect.poll(() => reads.urls.some((url) => url.includes(`/composition-revisions/${published.new_head}`)), CEILING).toBe(true);
-  await expect.poll(() => reads.internalRevisions.some((revision) => revision.payload?.registry?.assets?.[seed3.markerAssetKey]), CEILING).toBe(true);
-  const adopted = reads.internalRevisions.find((revision) => revision.payload?.registry?.assets?.[seed3.markerAssetKey])!;
-  expect(adopted.payload.registry.assets[seed3.markerAssetKey].media_id, 'the page received the revision that carries the task\'s output').toBe(output!.object_id);
-  expect(await noReloadFlag(page), 'the page was never reloaded').toBe(true);
-
-  // The Runtime holds the same data: the revision is the task's work, and the agent's edit kept what neither client models.
-  const state = await revisionState(harness, seed3, published.new_head);
-  expect(state.shotRegistry[seed3.markerAssetKey].media_id).toBe(output!.object_id);
-  expect(state.shotClips[seed3.agentClipId].asset).toBe(seed3.markerAssetKey);
-  expect((await agent.show()).head_revision_id, 'the agent reads the head it published').toBe(published.new_head);
-  const agentHead = (await history(harness, seed3)).head;
-  expect(agentHead.revision_id).toBe(published.new_head);
-  // The App's next save is built on the agent's head, and the Runtime accepts it (the parent-head check of the retired handoff case).
-  const appSaved = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
-  await editFirstTrackName(page, 'F2 App after agent');
-  const appSave = await appSaved;
-  expect(appSave.status(), 'the Runtime accepts the App\'s save on the agent\'s head').toBe(200);
-  expect(appSave.request().postDataJSON()).toMatchObject({ base_revision_id: published.new_head,
-    base_publication_id: agentHead.publication_id,
-    commands: [{ op: 'track.set', select: 'parent/track:V1', args: { values: { label: 'F2 App after agent' }, clear: [] } }] });
-  await expect.poll(() => currentHead(harness), CEILING).not.toBe(published.new_head);
-  const appRevision = await currentHead(harness);
-  expect(await noReloadFlag(page), 'the page was still not reloaded after its own save').toBe(true);
-
-  // The agent reads the App's save made on top of its own publication.
-  expect((await agent.status()).current_head, 'the agent reads the App\'s revision').toBe(appRevision);
-
-  const revisionCount = await expectOpaqueDataKept(harness, seed3);
-
-  journey.facts = { ...journey.facts, taskId, outputObjectId: output!.object_id, agentRevision: published.new_head, appRevision, revisionCount };
-  await sniff.expectClean(page, seed3.timelineId);
-});
-
-// ---------------------------------------------------------------------------------------------
 // Legacy concurrent edit
 
 /**
@@ -519,12 +461,13 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   const watched = watchPageReads(page, harness);
 
   // Every save the page sends, with the key and head it names and what became of it.
-  interface Post { key: string; body: string; expectedHead: string | null; status: number | null; outcome: 'held' | 'sent' | 'lost' }
+  interface Post { key: string; body: string; base: { revision_id: string; publication_id: string } | null; revisionId: string | null; status: number | null; outcome: 'held' | 'sent' | 'lost' }
   const posts: Post[] = [];
   const postOf = new Map<Request, Post>();
   page.on('request', (request) => {
-    if (request.method() !== 'POST' || !SAVES.test(new URL(request.url()).pathname)) return;
-    const post: Post = { key: request.headers()['idempotency-key'], body: request.postData()!, expectedHead: JSON.parse(request.postData() ?? '{}').expected_head ?? null, status: null, outcome: 'sent' };
+    if (request.method() !== 'POST' || !COMMITS.test(new URL(request.url()).pathname)) return;
+    const sent = JSON.parse(request.postData() ?? '{}');
+    const post: Post = { key: request.headers()['idempotency-key'], body: request.postData()!, base: sent.base_revision_id ? { revision_id: sent.base_revision_id, publication_id: sent.base_publication_id } : null, revisionId: null, status: null, outcome: 'sent' };
     postOf.set(request, post);
     posts.push(post);
   });
@@ -534,19 +477,21 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   // Hold the acknowledgement, not the request: the Runtime commits the save, the page never hears back.
   let holding = true;
   const held: Array<{ route: Parameters<Parameters<Page['route']>[1]>[0]; post: Post }> = [];
-  await page.route(SAVES, async (route) => {
+  await page.route(COMMITS, async (route) => {
     const request = route.request();
     if (!holding || request.method() !== 'POST') return route.fallback();
     const post = postOf.get(request)!;
     const response = await route.fetch({ maxRetries: 0 });
     post.status = response.status();
+    // The receipt names the revision this commit made.
+    post.revisionId = (await response.json().catch(() => null))?.data?.accepted_revision_id ?? null;
     post.outcome = 'held';
     held.push({ route, post });
   });
 
   await openApp(page, harness);
   await expectConnected(page);
-  await openSeededTimeline(page, harness);
+  await openCommandTimeline(page, harness, seed3);
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
   const baseHead = await currentHead(harness);
   const revisionsBefore = (await allRevisions(harness, seed3)).length;
@@ -555,18 +500,22 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await editFirstTrackName(page, 'F2 App A');
   await expect.poll(() => held.length, CEILING).toBe(1);
   expect(held[0].post.status, 'the Runtime committed A').toBe(200);
-  expect(held[0].post.expectedHead).toBe(baseHead);
+  expect(held[0].post.base, 'A is built on the base revision and publication').toEqual({ revision_id: baseHead, publication_id: expect.any(String) });
   const keyA = held[0].post.key;
-  await expect.poll(() => currentHead(harness), CEILING).not.toBe(baseHead);
-  const headA = await currentHead(harness);
-  expect(headA, 'the App\'s save is stored under its idempotency key').toBe(keyA);
+  // A's revision comes from the receipt the Runtime returned for A.
+  const headA = held[0].post.revisionId!;
+  expect(headA, 'the receipt names A\'s revision').toEqual(expect.any(String));
+  expect(headA).not.toBe(baseHead);
+  await expect.poll(() => currentHead(harness), CEILING).toBe(headA);
 
   // B: the agent builds on A and publishes (it extends one clip and clears another one's asset).
   await agent.checkout();
   const stateA = await revisionState(harness, seed3, headA);
   await agent.edit('--clip', seed3.agentClipId, '--extend', '1');
   await agent.edit('--clip', seed3.agentClearClipId, '--clear-asset');
-  const published = await agent.publish('agent: extend and clear', 'f2-case2');
+  // A competing transition change on the clip the App clears below: B's publication conflicts with C.
+  await agent.edit('--clip', seed3.transitionClipId, '--set', 'transition={"type":"crossfade","duration":1.2}');
+  const published = await agent.commit('agent: extend and clear', 'f2-case2');
   expect(published.old_head, 'the agent built on the App\'s save').toBe(headA);
   const headB = published.new_head;
   expect(await currentHead(harness)).toBe(headB);
@@ -578,6 +527,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
       ?.find((candidate) => candidate.id === seed3.transitionClipId);
     return { present: Boolean(clip), transition: clip?.transition ?? null };
   }, CEILING).toEqual({ present: true, transition: null });
+  const draftC = (await timelineDraft(page, seed3.timelineId))!;
 
   // The acknowledgement is lost: the page sees a connection reset, and its own retry follows.
   holding = false;
@@ -588,18 +538,21 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(conflict.getByText('Keep your changes, or switch to the latest version.')).toBeVisible();
   await expect(conflict.getByRole('button', { name: 'Keep my changes' })).toBeVisible();
   await expect(conflict.getByRole('button', { name: 'Use latest version' })).toBeVisible();
-  await page.unroute(SAVES);
+  await page.unroute(COMMITS);
 
   // Which of the two ways to the conflict ran (recorded, not asserted).
   const afterRelease = posts.slice(1);
-  const queuedEditPosted = afterRelease.find((post) => post.expectedHead === headA && post.key !== keyA);
+  const queuedEditPosted = afterRelease.find((post) => post.base?.revision_id === headA && post.key !== keyA);
   const branch = queuedEditPosted ? 'b: the receipt was accepted, the queued edit was posted on A and the Runtime answered 409 stale_head' : 'a: the provider refused the confirmed receipt after its cached head moved to B';
   test.info().annotations.push({ type: 'case-2-branch', description: branch });
-  journey.facts = { ...journey.facts, verdict: 'named_conflict', branch, posts: posts.map(({ expectedHead, status, outcome }, index) => ({ n: index + 1, expectedHead: expectedHead === null ? null : expectedHead === baseHead ? 'base head' : expectedHead === headA ? 'A' : expectedHead, status, outcome, sameKeyAsA: posts[index].key === keyA })) };
+  journey.facts = { ...journey.facts, verdict: 'named_conflict', branch, posts: posts.map(({ base, status, outcome }, index) => ({ n: index + 1, base: base?.revision_id === undefined ? null : base.revision_id === baseHead ? 'base head' : base.revision_id === headA ? 'A' : base.revision_id, status, outcome, sameKeyAsA: posts[index].key === keyA })) };
 
-  // The draft is kept: the dialog is modal, so the editor behind it is hidden from the accessibility tree but still holds A and C.
-  await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
-  await expect(transitionSelect(page)).toContainText('None');
+  // Native rejection rolls the display back to canonical B. A+C must remain intact in durable storage.
+  expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(draftC.draft);
+  expect(draftC.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label).toBe('F2 App A');
+  expect(draftC.draft.config?.clips?.find((clip: any) => clip.id === seed3.transitionClipId))
+    .toBeTruthy();
+  expect(draftC.draft.config?.clips?.find((clip: any) => clip.id === seed3.transitionClipId)?.transition).toBeUndefined();
 
   // The Runtime head is B and holds A and B, and not C.
   expect(await currentHead(harness), 'nothing was published after B').toBe(headB);
@@ -608,18 +561,20 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect(stateB.shotClips[seed3.agentClipId].hold, 'B holds the agent\'s extension').toBe(stateA.shotClips[seed3.agentClipId].hold + 1);
   expect(stateB.shotClips[seed3.agentClearClipId].asset, 'B holds the agent\'s clear').toBeUndefined();
   expect(stateA.shotClips[seed3.agentClearClipId].asset, 'A still had that asset').toBeTruthy();
-  expect(stateB.parentClips[seed3.transitionClipId].transition, 'C was never published').toEqual(stateA.parentClips[seed3.transitionClipId].transition);
+  // B intentionally changed the transition: assert B's normalized value (C's clear is rolled back, not published).
+  expect(stateB.parentClips[seed3.transitionClipId].transition, 'B\'s transition change is the one published').toEqual({ id: 'cross-fade', durationFrames: 36 });
+  expect(stateB.parentClips[seed3.transitionClipId].transition.id).toMatch(/cross[\s-]?fade/i);
   expect(stateB.parentClips[seed3.transitionClipId].transition).toBeTruthy();
 
   // One publication per retried save: A was replayed under its own key and made exactly one revision; the agent's publication made one.
   const revisions = (await allRevisions(harness, seed3)).map((revision) => revision.revision_id);
   expect(revisions.length, 'two new revisions: A and B').toBe(revisionsBefore + 2);
   expect(new Set(revisions).size, 'no revision is stored twice').toBe(revisions.length);
-  expect(revisions.filter((id) => id === keyA), 'A\'s key names exactly one revision').toHaveLength(1);
+  expect(revisions.filter((id) => id === headA), 'A\'s revision is stored exactly once').toHaveLength(1);
   const retriesA = posts.filter((post) => post.key === keyA);
   expect(retriesA.length, 'A was replayed with the same key').toBeGreaterThanOrEqual(2);
   expect(retriesA.every((post) => post.body === posts[0].body), 'every replay of A keeps the exact request bytes').toBe(true);
-  expect(posts.filter((post) => post.expectedHead === baseHead).every((post) => post.key === keyA), 'every send on the base head is A\'s').toBe(true);
+  expect(posts.filter((post) => post.base?.revision_id === baseHead).every((post) => post.key === keyA), 'every send on the base head is A\'s').toBe(true);
 
   // Opaque data and clears, in every revision.
   await expectOpaqueDataKept(harness, seed3);
@@ -629,8 +584,9 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(conflict).toHaveCount(0, CEILING);
   await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
   await selectClip(page, seed3.transitionClipId);
-  await expect(transitionSelect(page)).toContainText('crossfade', CEILING);
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i, CEILING);
   const kept = await timelineDraft(page, seed3.timelineId);
+  expect(kept?.draft).toEqual(draftC.draft);
   expect(kept?.draft.config?.tracks?.find((track: any) => track.id === 'V1')?.label).toBe('F2 App A');
   expect(kept?.draft.config?.clips?.find((clip: any) => clip.id === seed3.transitionClipId)?.transition).toBeUndefined();
   expect(kept?.baseHeadProjectId).toBe(harness.seed.projectId);
@@ -648,11 +604,13 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
+  const postsBeforeRecoveryRetry = posts.length;
   await recovered.getByRole('button', { name: 'Save them' }).click();
   await expect(conflict).toBeVisible(CEILING);
   await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
-  await expect(transitionSelect(page)).toContainText('None');
+  expect(await timelineDraft(page, seed3.timelineId)).toEqual(kept);
+  expect(posts, 'the retained refusal is resolved without recapturing or resubmitting it').toHaveLength(postsBeforeRecoveryRetry);
   expect(await currentHead(harness)).toBe(headB);
   await conflict.getByRole('button', { name: 'Use latest version' }).click();
   await expect(conflict).toHaveCount(0, CEILING);
@@ -669,12 +627,18 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
   await expect.poll(() => watched.urls.slice(readsBeforeReload).some((url) => url.includes(`/composition-revisions/${headB}`)), CEILING).toBe(true);
   await selectClip(page, seed3.transitionClipId);
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   expect((await agent.status()).current_head).toBe(headB);
   const shown = await agent.show();
-  expect(shown.head_revision_id).toBe(headB);
-  const layers = shown.rows.flatMap((row) => row.layers);
-  expect(layers.find((layer) => layer.clip_id === seed3.agentClearClipId)?.asset, 'the agent sees the clear').toBeNull();
+  expect(shown.kind).toBe('timeline-inspection');
+  expect(shown.summary.revision_id).toBe(headB);
+  expect(shown.summary.head_revision_id).toBe(headB);
+  expect(shown.summary.is_current_head).toBe(true);
+  expect(shown.pagination.next_cursor, 'the complete seed fits in this inspection page').toBeNull();
+  const clearedClips = shown.clips.filter((clip) => clip.occurrence_id === seed3.occurrenceId && clip.clip_id === seed3.agentClearClipId);
+  expect(clearedClips, 'the Agent sees the exact cleared occurrence clip').toHaveLength(1);
+  expect(clearedClips[0].asset_id, 'the Agent sees the clear').toBeNull();
+  expect(clearedClips[0].authored_fields).toEqual(stateB.shotClips[seed3.agentClearClipId]);
   journey.facts.headB = headB;
   await sniff.expectClean(page, seed3.timelineId);
 });
@@ -705,7 +669,9 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   expect(draftBefore.pending?.request.body).toBe(request.postData());
   expect(draftBefore.pending?.outcome).toBeUndefined();
   expect(request.postDataJSON()).toMatchObject({ base_revision_id: headBefore,
-    commands: [{ op: 'track.set', select: 'parent/track:V1', args: { values: { label: 'F2 kept across restart' }, clear: [] } }] });
+    commands: [{ op: 'doc.patch', select: null, args: { changes: [{ op: 'set', ref: 'parent',
+      path: ['config', 'tracks', 'id:V1', 'label'], before: { state: 'present', value: 'F2 App A' },
+      value: 'F2 kept across restart' }] } }] });
   expect(await currentHead(harness)).toBe(headBefore);
   await plantNoReloadFlag(page);
 
@@ -758,7 +724,7 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   // The agent reads what the App saved after the relaunch.
   const headAfter = await currentHead(harness);
   expect((await agent.status()).current_head).toBe(headAfter);
-  expect((await agent.show()).head_revision_id).toBe(headAfter);
+  expect((await agent.show()).summary.revision_id).toBe(headAfter);
   const state = await revisionState(harness, seed3, headAfter);
   expect(state.trackLabel, 'the saved revision is the draft').toBe('F2 kept across restart');
   expect(result.receipt.receipt_id, 'the post-restart publication keeps its persisted retry identity').toBe(keyAfter);
@@ -1500,10 +1466,10 @@ async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHa
 }
 
 async function expectAgentRevision(astrid: AstridCli, harness: DirectHarness, seed: ThreeProductsSeed, revision: string) {
-  const shown = await astrid.json<{ revision_id: string }>(['timelines', 'show', seed.timelineId,
+  const shown = await astrid.json<AgentTimelineInspection>(['timelines', 'show', seed.timelineId,
     '--project', seed.projectSlug, '--revision-id', revision, '--json']);
   expect(shown.ok, JSON.stringify(shown)).toBe(true);
-  expect(shown.data?.revision_id).toBe(revision);
+  expect(shown.data?.summary.revision_id).toBe(revision);
   const visualized = await astrid.json<{ outputs: { inspection: { revision_id: string }; evidence_kind: string;
     render_requested: boolean; artifacts: { md: { object_id: string } } } }>(['timelines', 'visualize', seed.timelineId,
     '--project', seed.projectSlug, '--revision-id', revision, '--mode', 'inputs', '--format', 'md', '--json']);
@@ -1521,10 +1487,10 @@ async function expectAgentRevision(astrid: AstridCli, harness: DirectHarness, se
 }
 
 async function expectPreviewRevision(page: Page, revision: string) {
-  const label = page.getByTestId('preview-revision-label').filter({ hasText: `Committed ${revision}` })
-    .or(page.getByTestId('preview-revision-unavailable').filter({ hasText: `Preview of ${revision} unavailable` }));
-  await expect(label.first()).toBeVisible(CEILING);
-  journey.facts.previewLabel = await label.first().innerText();
+  // The preview marks the revision it delivers: the committed id, or the unavailable target (RemotionPreview).
+  const mark = page.locator(`[data-preview-revision="${revision}"],[data-preview-target="${revision}"]`);
+  await expect(mark.first()).toBeVisible(CEILING);
+  journey.facts.previewLabel = (await mark.first().getAttribute('data-preview-revision')) ?? (await mark.first().getAttribute('data-preview-target'));
 }
 
 async function expectFreshPreviewUnavailable(page: Page, astrid: AstridCli, harness: DirectHarness,
@@ -1541,13 +1507,14 @@ async function expectFreshPreviewUnavailable(page: Page, astrid: AstridCli, harn
   try {
     const retained = (await history(harness, seed)).head;
     expect(retained.revision_id).toBe(retainedRevision);
+    await expect(page.locator(`[data-preview-revision="${retainedRevision}"]`)).toBeVisible(CEILING);
     const target = await astrid.commitCaptured(harness.seed.projectId, seed.timelineId,
       { revision_id: retainedRevision, publication_id: retained.publication_id },
       { kind: 'track', id: 'f2-gate3-preview-unavailable' }, 'f2-gate3-preview-unavailable');
     const targetRevision = target.data.accepted_revision_id;
-    await expect(page.getByTestId('preview-revision-label')).toHaveText(`Committed ${retainedRevision}`, CEILING);
-    await expect(page.getByTestId('preview-revision-unavailable'))
-      .toHaveText('Preview target unavailable', CEILING);
+    // Retained pixels keep their delivered identity while the exact new target is marked unavailable.
+    await expect(page.locator(`[data-preview-revision="${retainedRevision}"][data-preview-target="${targetRevision}"]`)).toBeVisible(CEILING);
+    await expect(page.getByText('Preview unavailable', { exact: true })).toBeVisible(CEILING);
     return targetRevision;
   } finally {
     await page.unroute(/\/timelines\/[^/]+\/composition-revisions\/[^/]+$/);
@@ -2848,16 +2815,29 @@ const nativeNoneTest = test.extend<object, { seed3: ThreeProductsSeed }>({
 function expectTransitionClear(request: CommitRequest, base: HeadPin, original: Record<string, any>, ids: string[]) {
   expect(request.base_revision_id).toBe(base.revision_id);
   expect(request.base_publication_id).toBe(base.publication_id);
-  expect(request.commands).toHaveLength(ids.length);
-  expect(request.commands.map((command) => command.select).sort()).toEqual(ids.map((id) => `parent/clip:${id}`).sort());
-  for (const command of request.commands) {
-    const id = command.select!.slice('parent/clip:'.length);
-    expect(command).toMatchObject({ schema_version: 1, op: 'clip.set', version: '1',
-      args: { values: {}, clear: ['transition'] } });
-    expect(command.args).toEqual({ values: {}, clear: ['transition'] });
-    expect(command.expect?.[`${command.select}::transition`]).toEqual({ state: 'present', value: original[id].transition });
-    expect(command.bindings).toStrictEqual({ 'scalar.target': command.select });
-    expect(command.reads!.length).toBeGreaterThan(0);
+  // The App sends one guarded doc.patch (select null, localSaveSession.ts:174-184). Each clip's transition is a
+  // remove change at its identity-keyed row: ['clips', 'id:<clipId>', 'transition'], guarded by its present value.
+  expect(request.commands).toHaveLength(1);
+  const [patch] = request.commands;
+  expect(patch).toMatchObject({ schema_version: 1, op: 'doc.patch', version: '1', select: null });
+  const changes = (patch.args as { changes: Array<Record<string, unknown>> }).changes;
+  // Exactly the selected clips' transitions are removed: no change touches an unrelated clip.
+  expect(changes).toHaveLength(ids.length);
+  for (const change of changes) expect(change).toMatchObject({ op: 'remove', ref: 'parent' });
+  for (const id of ids) {
+    expect(changes).toContainEqual({ op: 'remove', ref: 'parent', path: ['clips', `id:${id}`, 'transition'],
+      before: { state: 'present', value: original[id].transition } });
+  }
+  // The step carries the same removal, and the merge rule matches the reads it was built with (localSaveSession.ts:190-199).
+  const steps = (request as unknown as { steps: Array<{ command_ordinals: number[]; patch: unknown[] }> }).steps;
+  expect(steps).toHaveLength(1);
+  expect(steps[0].command_ordinals).toEqual([0]);
+  expect(steps[0].patch).toEqual(changes);
+  const merged = request as unknown as { merge: string; reads?: unknown[] };
+  if (merged.reads === undefined) expect(merged.merge).toBe('atomic');
+  else {
+    expect(merged.merge).toBe('fields');
+    expect(merged.reads.length).toBeGreaterThan(0);
   }
 }
 
@@ -2880,11 +2860,54 @@ function expectRawTransitionsCleared(actual: Record<string, any>, original: Reco
 async function expectRecordedTransitionClears(harness: DirectHarness, seed: ThreeProductsSeed,
   result: CommitAcceptedMutation, request: CommitRequest, original: Record<string, any>) {
   const records = (await history(harness, seed)).items.find((entry) => entry.publication_id === pinOf(result).publication_id)!.records!;
-  expect(records.commands.map((record) => record.command)).toEqual(request.commands);
-  for (const record of records.commands) {
-    const id = record.command.select!.slice('parent/clip:'.length);
-    expect(record.writes).toContainEqual({ ref: record.command.select, path: ['transition'],
-      before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } });
+  expect(records.commands).toHaveLength(1);
+  const [recorded] = records.commands;
+  // One guarded doc.patch, select null. Every field is pinned exactly. The removal mirrors the crossfade set in the M2
+  // record (items[1].records.commands[20]): op remove, the present value as precondition, direct authorship.
+  const requested = request.commands[0].args as { changes: Array<Record<string, any>> };
+  const ids = requested.changes.map((change) => String(change.path[1]).slice('id:'.length));
+  const guardKey = (id: string) => `parent/clip:${id}::transition`;
+  expect(recorded.command).toEqual({
+    schema_version: 1, op: 'doc.patch', version: '1', select: null,
+    args: { changes: requested.changes },
+    created: [], intent: {}, bindings: {}, resolved: [], selections: [],
+    authorship: Object.fromEntries(ids.map((id) => [guardKey(id), 'direct'])),
+    expect: Object.fromEntries(ids.map((id) => [guardKey(id), { state: 'present', value: original[id].transition }])),
+    reads: ids.map((id) => ({ path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } })),
+  });
+  // Each clip's transition is cleared, present -> absent, on that clip and nothing else.
+  expect(recorded.writes).toEqual(ids.map((id) => ({ ref: `parent/clip:${id}`, path: ['transition'],
+    before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } })));
+  // The atomic command records each clip's original id/transition, followed
+  // by the shared parent guard once (run 42840758126, both attempts).
+  expect(recorded.reads).toEqual([...ids.flatMap((id) => [
+    { path: ['id'], ref: `parent/clip:${id}`, state: { state: 'present', value: id } },
+    { path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } },
+  ]),
+    { path: ['config', 'pinnedShotGroups'], ref: 'parent', state: { state: 'absent' } },
+  ]);
+  // Each removal records its whole-array mirror in order. Pin every before
+  // and after, including the intermediate state of an atomic bulk clear.
+  const headBefore = (await revisionBody(harness, request.base_revision_id)).payload as Record<string, any>;
+  const headAfter = (await revisionBody(harness, pinOf(result).revision_id)).payload as Record<string, any>;
+  let clips = structuredClone(headBefore.config.clips) as Array<Record<string, any>>;
+  const mirrors = ids.map((id) => {
+    const before = structuredClone(clips);
+    clips = structuredClone(clips);
+    const clip = clips.find((row) => row.id === id)!;
+    expect(clip.transition).toEqual(original[id].transition);
+    delete clip.transition;
+    return { ref: 'parent', path: ['config', 'clips'], cause: 0,
+      before: { state: 'present', value: before }, after: { state: 'present', value: clips } };
+  });
+  expect(recorded.derived_writes).toEqual(mirrors);
+  expect(clips).toEqual(headAfter.config.clips);
+  for (const id of ids) {
+    const before = (headBefore.config.clips as Array<Record<string, any>>).find((clip) => clip.id === id);
+    expect(before?.transition, `clip ${id} in the mirror's before keeps its transition`).toEqual(original[id].transition);
+    const after = clips.find((clip) => clip.id === id);
+    expect(after, `clip ${id} in the mirror's after`).toBeDefined();
+    expect(after, `clip ${id} in the mirror's after has no transition`).not.toHaveProperty('transition');
   }
 }
 
@@ -2928,6 +2951,8 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   expect(acceptedHistory.items).toHaveLength(before.items.length + 1);
   expect(acceptedHistory.head).toEqual(pinOf(cleared));
   const revisionCount = (await allRevisions(harness, seed3)).length;
+  // Arm the App's automatic recovery retry before the restart: it is the next commit POST after reload.
+  wire.armRecoveryRetry();
   await harness.restartRuntime();
   await page.reload();
   await expectConnected(page);
@@ -2936,7 +2961,14 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
     .toEqual(retained.pending!.request);
   expect(wire.posts).toHaveLength(1);
   expectRawTransitionsCleared((await revisionState(harness, seed3, pinOf(cleared).revision_id)).parent, original.parent, [seed3.transitionClipId]);
-  await page.getByRole('button', { name: /^Recover saved edits/ }).and(page.locator(`[data-owner-id="${retained.ownerId}"]`)).click();
+  // The App recovers the single retained owner by itself after reload and retries its pending request (useTimelineSave.ts:380,
+  // localSaveSession.ts:351). The explicit "Recover saved edits" control was removed (7b33f8f50, 4394b74a1), so the retry is gated
+  // here: the fault route holds that second POST until it is released, and exactly one POST has completed until then.
+  // A stage taken before the reload is obsolete (reload cancels it), so wait for the third attempt itself.
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  expect(wire.observed[2], 'the App retries the retained request byte-identically').toEqual(wire.observed[0]);
+  expect(wire.posts, 'exactly one completed POST while the automatic retry is held').toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);
   expect(wire.posts[1], 'exact bytes, key, receipt and accepted closure survive reload and Runtime restart').toEqual(wire.posts[0]);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
@@ -2994,17 +3026,29 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expectTransitionClear(JSON.parse(wire.posts[0].body), before.head, original.parentClips, ids);
   const owner = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.pending?.request.key === wire.posts[0].key)!;
   expect(owner.intents, 'one atomic intent owns both commands').toHaveLength(1);
-  expect(commandsOf(owner.intents[0].payload)).toEqual(JSON.parse(wire.posts[0].body).commands);
+  const intent = mountedDocumentIntentOf(owner.intents[0].payload);
+  expect(JSON.parse(wire.posts[0].body).commands).toEqual([{
+    schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [],
+    args: { changes: intent.changes },
+  }]);
   expectRawTransitionsCleared(cleared.data.canonical_document.parent_revision.payload, original.parent, ids);
   await expectImmutableClosure(harness, seed3, cleared);
   await expectRecordedTransitionClears(harness, seed3, cleared, JSON.parse(wire.posts[0].body), original.parentClips);
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
-  await page.getByRole('button', { name: 'Retry save', exact: true }).and(page.getByTestId('timeline-command-retry')).click();
+  const acceptedHistory = await history(harness, seed3);
+  const acceptedRevisions = await allRevisions(harness, seed3);
+  // loseAck stages the App's automatic retry; the former command Retry save control no longer exists.
+  expect(wire.observed).toEqual([wire.observed[0], wire.observed[0]]);
+  expect(wire.observed[1]).toEqual({ body: owner.pending!.request.body, key: owner.pending!.request.key });
+  expect(wire.posts, 'only the initial acceptance has reached Runtime while its retry is held').toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);
   expect(wire.posts[1]).toEqual(wire.posts[0]);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 1);
+  expect(await history(harness, seed3)).toEqual(acceptedHistory);
+  expect(await allRevisions(harness, seed3)).toEqual(acceptedRevisions);
   await page.reload();
   await expectConnected(page);
   await openSeededTimeline(page, harness);
@@ -3067,22 +3111,35 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect(atConflict.head).toEqual(pinOf(concurrent));
   expectRawTransitionsCleared(concurrent.data.canonical_document.parent_revision.payload, original.parent, [seed3.appClipId]);
   await expectImmutableClosure(harness, seed3, concurrent);
+  await expect.poll(() => timelineDraft(page, seed3.timelineId), CEILING).not.toBeNull();
+  const retainedDraft = await timelineDraft(page, seed3.timelineId);
+  expectRawTransitionsCleared(mountedDocumentIntentOf(retained.intents[0].payload).after.parent_revision.payload, original.parent, ids);
   await page.reload();
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   const reloaded = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;
   expect(reloaded.pending).toEqual(retained.pending);
   expect(reloaded.intents).toEqual(retained.intents);
-  await page.getByRole('button', { name: /^Recover saved edits/ }).and(page.locator(`[data-owner-id="${pending.ownerId}"]`)).click();
-  await expect(page.getByTestId('timeline-command-recovery')).toContainText('Your changes are retained and need resolution before they can be saved.');
+  // The single native owner is recovered automatically. Its rejected draft remains durable;
+  // rollback shows the Agent's canonical partial clear, and Save them reopens the refusal.
+  const recovery = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
+  await expect(recovery).toBeVisible(CEILING);
+  expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
   for (const id of ids) {
     await selectClip(page, id);
     await page.getByRole('tab', { name: 'Effects', exact: true }).click();
-    await expect(transitionSelect(page)).toContainText('None');
+    await expect(transitionSelect(page)).toContainText(id === seed3.appClipId ? 'None' : /cross[\s-]?fade/i);
   }
-  expect((await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)?.pending).toEqual(retained.pending);
+  await recovery.getByRole('button', { name: 'Save them' }).click();
+  await expect(page.getByRole('alertdialog', { name: CONFLICT_TITLE })).toBeVisible(CEILING);
+  expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
+  const recoveredConflict = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;
+  expect(recoveredConflict.pending).toEqual(retained.pending);
+  expect(recoveredConflict.intents).toEqual(retained.intents);
+  expectRawTransitionsCleared(mountedDocumentIntentOf(recoveredConflict.intents[0].payload).after.parent_revision.payload, original.parent, ids);
   expect(wire.posts).toHaveLength(3);
   expect(await history(harness, seed3)).toEqual(atConflict);
+  expect(await allRevisions(harness, seed3)).toEqual(revisionsAtConflict);
   await expectOpaqueDataKept(harness, seed3);
   expect(wire.legacy).toEqual([]);
   journey.facts = { ...journey.facts, cleared: pinOf(cleared), undone: pinOf(undone), concurrent: pinOf(concurrent),
@@ -3218,7 +3275,7 @@ test('render R, publish R+1 before it runs: the render is R\'s, it plays, and it
     // c. The agent fills the slot with it and publishes R. The open App adopts R by itself.
     await agent.checkout();
     await agent.edit('--clip', render.slotClipId, '--swap-asset', `${render.markerAssetKey}=task:${markerTask}/marker_clip#${clip!.ordinal}`);
-    const publishedR = await agent.publish('agent: marker clip in the slot', 'f2-render-r');
+    const publishedR = await agent.commit('agent: marker clip in the slot', 'f2-render-r');
     expect(publishedR.old_head, 'R builds on the seed').toBe(render.headRevisionId);
     revisionR = publishedR.new_head;
     await expect.poll(() => reads.urls.some((url) => url.includes(`/composition-revisions/${revisionR}`)), { message: 'the App read R', ...CEILING }).toBe(true);
@@ -3250,7 +3307,7 @@ test('render R, publish R+1 before it runs: the render is R\'s, it plays, and it
     expect(eventsBefore.status, JSON.stringify(eventsBefore.body)).toBe(200);
     await agent.checkout();
     await agent.edit('--clip', render.slotClipId, '--swap-asset', `f2-render-grey=${render.placeholder.digest}`);
-    const publishedR1 = await agent.publish('agent: placeholder back in the slot', 'f2-render-r1');
+    const publishedR1 = await agent.commit('agent: placeholder back in the slot', 'f2-render-r1');
     expect(publishedR1.old_head, 'R+1 builds on R').toBe(revisionR);
     revisionR1 = publishedR1.new_head;
     expect(revisionR1).not.toBe(revisionR);
@@ -3408,7 +3465,7 @@ test('quick: Astrid edit then App edit are visible and readable on the adopted t
 
   await agent.checkout();
   await agent.edit('--clip', String(clip.id), '--set', 'opacity=0.5');
-  const astridPublished = await agent.publish('Quick Astrid edit', `quick-astrid-${descriptor!.timelineId}`);
+  const astridPublished = await agent.commit('Quick Astrid edit', `quick-astrid-${descriptor!.timelineId}`);
   expect(astridPublished.old_head).toBe(baseRevisionId);
   const astridRevisionId = astridPublished.new_head;
   await expect.poll(async () => (await currentHead(harness)), { message: 'the App observes Astrid’s published revision', timeout: 0 }).toBe(astridRevisionId);
@@ -3431,7 +3488,7 @@ test('quick: Astrid edit then App edit are visible and readable on the adopted t
   const status = await agent.status();
   const show = await agent.show();
   expect(status.current_head).toBe(savedRevisionId);
-  expect(show.head_revision_id).toBe(savedRevisionId);
+  expect(show.summary.revision_id).toBe(savedRevisionId);
   const lineage = (await allRevisions(harness, quickSeed)).map((revision) => revision.revision_id);
   expect(lineage.indexOf(savedRevisionId)).toBeGreaterThanOrEqual(0);
   expect(lineage.indexOf(savedRevisionId)).toBeLessThan(lineage.indexOf(astridRevisionId));

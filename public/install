@@ -7,7 +7,7 @@ PYTHON_VERSION=3.11.13
 case "$(uname -s)" in
     Darwin) data_home="$HOME/.local/share"; log="$HOME/Library/Logs/Astrid Runtime/install.log" ;;
     Linux) data_home=${XDG_DATA_HOME:-$HOME/.local/share}; log="${XDG_STATE_HOME:-$HOME/.local/state}/astrid-runtime/logs/install.log" ;;
-    *) echo 'Use https://astrid.haus/install.ps1 on Windows.' >&2; exit 1 ;; esac
+    *) echo 'Astrid installs on Windows from PowerShell. Open PowerShell and run: irm https://astrid.haus/install.ps1 | iex' >&2; exit 1 ;; esac
 bootstrap="$data_home/astrid/bootstrap"
 mkdir -p "$bootstrap" "$(dirname "$log")"
 chmod 700 "$(dirname "$log")"
@@ -24,7 +24,10 @@ fetch() {
         wget -q "$1" -O "$2"
     fi
 }
-fail() { echo "Astrid couldn't finish. Your work is kept." >&2; echo "Details: $log" >&2; exit 1; }
+# What failed, in one plain line, then where the full story is.
+fail() { echo "Astrid couldn't finish. Your work is kept." >&2; echo "$1" >&2; echo "Details: $log" >&2; exit 1; }
+download_failed="It couldn't download what it needs. Check your internet connection, then run the same command again."
+prepare_failed="It couldn't prepare Python on this computer. Check that the disk has free space, then run the same command again."
 echo 'Getting Astrid ready. The first time takes a few minutes.'
 manifest="$tmp/manifest.json"
 manifest_next=0
@@ -47,7 +50,7 @@ if [ "$manifest_next" -eq 1 ] || [ -z "$manifest" ]; then
 fi
 if [ "$manifest_provided" -ne 1 ]; then
     manifest_url=${ASTRID_INSTALL_MANIFEST_URL:-https://astrid.haus/install-manifest.json}
-    fetch "$manifest_url" "$manifest" 2>>"$log" || fail
+    fetch "$manifest_url" "$manifest" 2>>"$log" || fail "$download_failed"
 fi
 uv="$bootstrap/uv"
 uv_matches=0
@@ -58,12 +61,12 @@ if [ -x "$uv" ]; then
     esac
 fi
 if [ "$uv_matches" -ne 1 ]; then
-    fetch "https://astral.sh/uv/$UV_VERSION/install.sh" "$tmp/uv.sh" 2>>"$log" || fail
-    UV_UNMANAGED_INSTALL="$bootstrap" UV_NO_MODIFY_PATH=1 sh "$tmp/uv.sh" >>"$log" 2>&1 || fail
+    fetch "https://astral.sh/uv/$UV_VERSION/install.sh" "$tmp/uv.sh" 2>>"$log" || fail "$download_failed"
+    UV_UNMANAGED_INSTALL="$bootstrap" UV_NO_MODIFY_PATH=1 sh "$tmp/uv.sh" >>"$log" 2>&1 || fail "$download_failed"
 fi
 export UV_PYTHON_INSTALL_DIR="$bootstrap/python"
 export ASTRID_INSTALL_UV="$uv"
-"$uv" python install "$PYTHON_VERSION" --no-bin >>"$log" 2>&1 || fail
+"$uv" python install "$PYTHON_VERSION" --no-bin >>"$log" 2>&1 || fail "$prepare_failed"
 # With curl | sh, uv would inherit the script pipe and forward a second
 # SIGINT after the terminal already delivered one. Keep interactive stdin.
 if (: </dev/tty) 2>/dev/null; then exec 3</dev/tty; else exec 3</dev/null; fi
@@ -118,7 +121,9 @@ os.execv(args[0], args)
 ' "$tmp/bootstrap-venv" "$manifest" "$@" <&3 >"$tmp/progress" 2>>"$log"; then status=0; else status=$?; fi
 wait "$progress_pid"
 if [ "$status" -ne 0 ]; then
-    if ! grep -Fq "Astrid couldn't finish. Your work is kept." "$tmp/core.out"; then
+    # The installer's own failure paragraph, or its run receipt (which ends with a
+    # Details line), already said what happened; only a silent exit gets this one.
+    if ! grep -Fq "Astrid couldn't finish. Your work is kept." "$tmp/core.out" && ! grep -q '^Details: ' "$tmp/core.out"; then
         echo "Astrid couldn't finish. Your work is kept." >&2
         echo "Details: $log" >&2
     fi

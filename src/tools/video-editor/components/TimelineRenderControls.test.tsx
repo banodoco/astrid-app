@@ -90,8 +90,10 @@ describe('TimelineRenderControls', () => {
     }));
     render(<TimelineRenderControls previewActionButtonClass="" />);
     fireEvent.click(screen.getByText('Details'));
-    expect(screen.getByText(/Source image is unavailable/)).toBeTruthy();
-    expect(screen.getByText(/Unknown blur effect/)).toBeTruthy();
+    // The inline detail repeats the log lines, so assert on the Details block that carries the full diagnostic.
+    const diagnostic = screen.getByText('Details').closest('details')?.querySelector('pre');
+    expect(diagnostic?.textContent).toContain('[missing-resource] Source image is unavailable');
+    expect(diagnostic?.textContent).toContain('[unknown-effect] Unknown blur effect');
   });
 
   it('dismisses the render error on an outside pointer-down', () => {

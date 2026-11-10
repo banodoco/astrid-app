@@ -55,6 +55,8 @@ browser's normal rules, including same-origin policy and browser permission
 prompts. The extension runtime does not mediate general network requests or
 provide per-extension DOM, storage, or network isolation.
 
+There is no sandbox for extension code: extension modules run same-thread, in the App's realm and origin, and no Worker or iframe isolates them. The App imports extension modules only from the Runtime's admitted asset URL, after the local integrity and Runtime-inventory checks described in this section. There is no CDN, third-party, or arbitrary remote code loading.
+
 ## Trust and admission
 
 Treat every executable extension as trusted code. Review its source and
@@ -86,6 +88,8 @@ The SDK gives extensions structured host services, and the host controls
 those service interfaces. That does not remove the browser privileges of
 extension JavaScript executing in the page. Cleanup of host-owned service
 registrations on disposal is lifecycle management, not a security boundary.
+
+There is no permission enforcement: manifest permissions are descriptive and the loader does not enforce them. There is no permission broker that mediates extension access to browser capabilities. There is no marketplace, and there is no update enforcement: nothing checks that installed extensions are the latest versions. The loader does enforce dependency version ranges and identity: it checks each declared dependency range against the loaded version, blocks a required dependency whose version does not match, and requires the admitted manifest version to match the pack metadata.
 
 ## Failure handling is not isolation
 

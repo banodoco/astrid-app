@@ -24,7 +24,7 @@ describe('installerUpdateStatusMessage', () => {
     [{ state: 'recovery-needed', self_update: true, result: 'repair_required' }, 'Astrid needs recovery. Select Update to check the previous operation before continuing.'],
     [{ state: 'recovery-needed', result: 'repair_required' }, 'Astrid needs repair before it can update.'],
     [{ state: 'none', reason: 'busy' }, 'Astrid is busy. Wait for the current operation to finish before trying again.'],
-    [{ state: 'none', reason: 'autostart-off' }, 'Automatic startup is off. Turn it on before updating Astrid here.'],
+    [{ state: 'none', reason: 'autostart-off' }, 'Start at sign-in is off, so update from a terminal. This command updates Astrid and starts it; your choice stays off.'],
     [{ state: 'none', reason: 'unsupported-service-manager' }, 'In-app updates require user systemd 254 or newer on Linux.'],
     [{ state: 'none', reason: 'source' }, 'This Astrid runs from source, so update those checkouts to their main branches and restart Astrid.'],
     [{ state: 'none', reason: 'updater-unavailable' }, GENERIC_LINE],
@@ -41,6 +41,9 @@ describe('canStartInstallerUpdate', () => {
     expect(canStartInstallerUpdate({ available: false, self_update: true, state: 'none' })).toBe(true);
     expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'none', reason: 'busy' })).toBe(false);
     expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed' })).toBe(true);
+    // A recovery the Runtime refuses (reason busy, or any policy reason) must not start an in-app update.
+    expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed', reason: 'busy' })).toBe(false);
+    expect(canStartInstallerUpdate({ available: true, self_update: true, state: 'recovery-needed', reason: 'autostart-off' })).toBe(false);
     expect(canStartInstallerUpdate(null)).toBe(false);
   });
 });
@@ -236,6 +239,17 @@ describe('UpdateOperation', () => {
   });
 });
 
+describe('mirrored Runtime reasons', () => {
+  it.each([
+    ['legacy-update-record', "This update was started by an older Astrid, so this one can't continue it. Next: run the update command from a terminal to start a fresh update."],
+    ['acknowledgement-unknown', "The update was started, but Astrid can't confirm yet that it was accepted. Next: wait a minute, then run the same update command again. It checks the earlier attempt before starting a new one."],
+  ])('%s renders its own line, not the generic self-update line', (reason, line) => {
+    const message = installerUpdateStatusMessage({ available: true, state: 'none', reason } as InstallerUpdateStatus);
+    expect(message).toBe(line);
+    expect(message).not.toBe("Astrid can't update itself on this computer. Run the command below to update it.");
+  });
+});
+
 describe('LocalPageUpdate', () => {
   const TARGET = { url: 'http://127.0.0.1:5000/page-update', token: 'ef'.repeat(32) };
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status });
@@ -259,6 +273,17 @@ describe('LocalPageUpdate', () => {
     expect(JSON.parse(init.body as string).requestId).toMatch(/^[0-9a-f]{32}$/);
   });
 
+  it('shows the warning lines of a success that has warnings, not only Astrid updated', async () => {
+    const lines = [
+      'Astrid updated: Release 4 → Release 5, but skills did not refresh.',
+      'Next: Restart your coding agent so it loads the refreshed skills.',
+      'Details: /home/user/.astrid/install.log',
+    ];
+    const { update } = make(() => json(200, { result: { status: 'updated', lines } }));
+    const outcome = await update.start();
+    expect(outcome).toEqual({ phase: 'done', status: 'updated', message: lines.join('\n') });
+  });
+
   it.each(['update_busy', 'non_fast_forward', 'dirty'] as const)('maps the 409 %s refusal', async (refusal) => {
     const { update } = make(() => json(409, { refusal, code: 'x' }));
     expect(await update.start()).toEqual({ phase: 'refused', refusal, message: LOCAL_PAGE_REFUSAL_MESSAGES[refusal] });
@@ -266,7 +291,17 @@ describe('LocalPageUpdate', () => {
 
   it('treats a replay 409 and other 4xx/422 as failures, not refusals', async () => {
     expect((await make(() => json(409, { error: 'used', code: 'replay' })).update.start()).phase).toBe('failed');
-    expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
+    expect(await make(() => json(422, { error: 'build failed' })).update.start()).toEqual({ phase: 'failed', message: 'The update did not complete. Download diagnostics to see why.' });
+  });
+
+  it('shows the Agent lines, Next and Details included, for a not-updated or failed run', async () => {
+    const next = 'Next: open astrid.haus > Settings > Updates > Download diagnostics, and send the file to support.';
+    const details = 'Details: /home/me/.local/state/astrid/install.log';
+    const notUpdated = ['Astrid did NOT update. It is still Release 13; Release 14 is available.', 'Why: an earlier update was interrupted.', next, details];
+    const skipped = await make(() => json(200, { result: { status: 'not-updated', exitCode: 3, lines: notUpdated, message: notUpdated.join('\n') } })).update.start();
+    expect(skipped).toEqual({ phase: 'failed', message: notUpdated.join('\n') });
+    const failed = await make(() => json(422, { error: 'busy', lines: ['Astrid did NOT update: busy.', next, details], exitCode: 1 })).update.start();
+    expect(failed.phase === 'failed' && failed.message.split('\n').slice(-2)).toEqual([next, details]);
   });
 
   it('reports recovered (rollback) as a completed outcome', async () => {

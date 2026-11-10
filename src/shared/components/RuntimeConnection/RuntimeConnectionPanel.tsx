@@ -358,7 +358,7 @@ function UpdateNeededCard({ connection, onBack }: { readonly connection: Runtime
   const { updateNeeded } = COPY;
   // The sentence follows the same install type as the actions, so a Pinokio Astrid is never told to hand over instructions.
   const resolution = resolveUpdate({ ...operation.releaseStatus?.resolution, pageStale, compatibility: { kind: 'schema', detail: updateNeededSentence(operation.installType === 'pinokio') }, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason });
-  return <Card title={resolution.card === 'newer' ? 'Astrid on this computer is newer' : resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} operation={operation} />} status={COPY.waiting} help={<HelpLink />} />;
+  return <Card title={resolution.card === 'newer' ? 'Astrid on this computer is newer' : resolution.title ?? updateNeeded.title} sentence={resolution.body ?? updateNeeded.sentence} onBack={onBack} action={<UpdateResolutionActions resolution={resolution} operation={operation} reasonLineShown />} status={COPY.waiting} help={<HelpLink />} />;
 }
 
 function RestartReloadButton() {

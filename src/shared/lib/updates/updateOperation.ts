@@ -1,8 +1,11 @@
-import { AstridRuntimeClient, INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateOutcome, type InstallerUpdateReason, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
+import { AstridRuntimeClient, type InstallerUpdateOutcome, type InstallerUpdateStatus, type InstallerUpdateHealth } from '@/integrations/runtime/client.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES, type InstallerUpdateReason } from '@/integrations/runtime/installerUpdateReasons.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { UpdateStatus } from './updateStatus.ts';
-import { checkHostedUpdate } from './updateStatus.ts';
+import { checkHostedUpdate, checkLocalUpdate } from './updateStatus.ts';
+import { localUpdateStatus } from './pageUpdateStatus.ts';
 import { installedReleaseOf } from './installedRelease.ts';
+import { activeTransition, noteRelease, type UpdatedTransition } from './liveUpdate.ts';
 
 export interface UpdateOperationSnapshot {
   readonly health: InstallerUpdateHealth | null;
@@ -14,16 +17,18 @@ export interface UpdateOperationSnapshot {
   readonly restartRequired: boolean;
   /** The Runtime's refusal code from the last definite POST refusal, kept for diagnostics. */
   readonly refusalCode: string | null;
+  /** Astrid was just updated under this page (a new instance on a higher release); shown briefly, then cleared. */
+  readonly updated: UpdatedTransition | null;
 }
 
 /** Runtime refusal codes with a line of their own. Any other code reads as self-update-unavailable. */
-const RUNTIME_REFUSAL_REASONS: ReadonlySet<string> = new Set(['busy', 'autostart-off', 'unsupported-service-manager', 'source']);
+const RUNTIME_REFUSAL_REASONS: ReadonlySet<string> = new Set(['busy', 'autostart-off', 'unsupported-service-manager', 'source', 'windows-upgrade-unsupported', 'legacy-update-record', 'acknowledgement-unknown']);
 /** A 409's details.kind reports how an earlier update ended. It is an outcome, never a refusal reason. */
 const CONFLICT_OUTCOMES: ReadonlySet<string> = new Set(['updated', 'rolled_back', 'failed']);
 const OUTCOME_MESSAGES: Readonly<Record<InstallerUpdateOutcome, string>> = {
   updated: 'Astrid updated. Reload to continue.',
   rolled_back: 'The update did not finish. Astrid was restored to its previous version.',
-  failed: 'The update did not complete. Check diagnostics before trying again.',
+  failed: 'The update did not complete. Download diagnostics to see why.',
 };
 
 function installerReasonOf(code: string): InstallerUpdateReason {
@@ -42,7 +47,9 @@ export function installerUpdateReasonOf(status: InstallerUpdateStatus | null | u
 /** Only a Runtime that reports self_update can run an in-app update; a refusal reason keeps it from starting. */
 export function canStartInstallerUpdate(status: InstallerUpdateStatus | null | undefined): boolean {
   if (!status || status.self_update !== true) return false;
-  return status.state === 'recovery-needed' || installerUpdateReasonOf(status) === null;
+  // A recovery is an in-app update only when the Runtime gives no refusal reason; a busy or policy reason refuses it.
+  if (status.state === 'recovery-needed') return !status.reason || status.reason === 'none';
+  return installerUpdateReasonOf(status) === null;
 }
 
 /** The Runtime's refusal code: details.reason only. */
@@ -87,6 +94,15 @@ export function installerUpdateStatusMessage(status: InstallerUpdateStatus | nul
   return null;
 }
 
+/**
+ * The operation's line for a surface that already resolved a reason. The generic self-update-unavailable line never
+ * stands in for a real reason: when the resolution has one, the generic line is dropped and the resolution speaks.
+ */
+export function installerUpdateLine(status: InstallerUpdateStatus | null | undefined, resolvedReason?: InstallerUpdateReason): string | null {
+  if (resolvedReason && resolvedReason !== 'self-update-unavailable' && installerUpdateReasonOf(status) === 'self-update-unavailable') return null;
+  return installerUpdateStatusMessage(status);
+}
+
 /** A finished in-app update that did not complete: the one state whose next action is the plain install line. */
 export function installerUpdateFailed(snapshot: Pick<UpdateOperationSnapshot, 'fresh' | 'pending' | 'error' | 'status'> | null | undefined): boolean {
   return !!snapshot && snapshot.fresh && !snapshot.pending && !snapshot.error && snapshot.status?.state === 'terminal' && snapshot.status.outcome === 'failed';
@@ -97,7 +113,8 @@ const UPDATE_START_UNAVAILABLE = 'Astrid could not start the update. Check its s
 
 /** Page-owned operation, independent of any mounted notice or Settings panel. */
 export class UpdateOperation {
-  private snapshot: UpdateOperationSnapshot = { health: null, status: null, releaseStatus: null, pending: false, error: null, fresh: false, restartRequired: false, refusalCode: null };
+  private snapshot: UpdateOperationSnapshot = { health: null, status: null, releaseStatus: null, pending: false, error: null, fresh: false, restartRequired: false, refusalCode: null, updated: null };
+  private updatedTimer: ReturnType<typeof setTimeout> | null = null;
   private listeners = new Set<() => void>();
   private reading: Promise<void> | null = null;
   private posting = false;
@@ -106,7 +123,16 @@ export class UpdateOperation {
   private releaseIdentity: string | null = null;
   private acknowledgementBaseline: string | undefined;
   private refusal: string | null = null;
-  constructor(private readonly client = new AstridRuntimeClient()) {}
+  constructor(private readonly client = new AstridRuntimeClient()) {
+    // A transition recorded just before this page reloaded itself onto the updated Astrid is still shown.
+    const carried = typeof window === 'undefined' ? null : activeTransition();
+    if (carried) this.showUpdated(carried);
+  }
+  private showUpdated(transition: UpdatedTransition) {
+    if (this.updatedTimer) clearTimeout(this.updatedTimer);
+    this.snapshot = { ...this.snapshot, updated: transition };
+    this.updatedTimer = setTimeout(() => { this.updatedTimer = null; this.publish({ updated: null }); }, Math.max(0, transition.until - Date.now()));
+  }
   getSnapshot = () => this.snapshot;
   subscribe = (listener: () => void) => { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; };
   private publish(patch: Partial<UpdateOperationSnapshot>) {
@@ -120,6 +146,7 @@ export class UpdateOperation {
     return this.reading;
   };
   private async read() {
+    if (localUpdateStatus()) return this.readLocal();
     try {
       const [healthRead, statusRead] = await Promise.allSettled([this.client.readInstallerUpdateHealth(), this.client.readInstallerUpdateStatus()]);
       if (healthRead.status === 'rejected') throw healthRead.reason;
@@ -135,6 +162,9 @@ export class UpdateOperation {
         try {
           const releaseStatus = await checkHostedUpdate(health);
           this.releaseIdentity = identity;
+          // A new instance on a higher release is an update that finished, however it was run.
+          const transition = noteRelease(health.runtime_instance_id, releaseStatus.release);
+          if (transition) this.showUpdated(transition);
           this.publish({ releaseStatus });
         } catch {
           // Release checks cannot manufacture a success or an executable action.
@@ -160,6 +190,31 @@ export class UpdateOperation {
       this.publish({ health, status, pending, fresh: true, error: this.refusal });
     } catch {
       this.publish({ fresh: false, error: UPDATE_STATUS_UNAVAILABLE });
+    }
+  }
+  /**
+   * A fully local page: the launcher's status names the releases, and the Runtime's health names the instance. The
+   * Runtime's installer status is not read, because this page updates through its launcher, never the installer route.
+   * The instance is the Runtime's and the checkout's together, so an update that moved either one is noticed.
+   */
+  private async readLocal() {
+    try {
+      // No restartRequired here: a local editor reloads itself onto the updated Astrid, and its launcher owns restarts.
+      const health = await this.client.readInstallerUpdateHealth();
+      this.publish({ health });
+      const identity = JSON.stringify([health.runtime_instance_id, installedReleaseOf(health)]);
+      if (this.releaseIdentity === identity && this.snapshot.releaseStatus) return;
+      try {
+        const releaseStatus = await checkLocalUpdate();
+        this.releaseIdentity = identity;
+        const transition = noteRelease(health.runtime_instance_id && `${health.runtime_instance_id}:${releaseStatus.app}`, releaseStatus.release);
+        if (transition) this.showUpdated(transition);
+        this.publish({ releaseStatus });
+      } catch {
+        this.publish({ releaseStatus: null });
+      }
+    } catch {
+      // The editor's own status line speaks for a local page; an unreadable Runtime adds no line of its own here.
     }
   }
   start = async (validateDrafts: () => boolean): Promise<void> => {
@@ -224,6 +279,12 @@ export type LocalPageUpdateState =
 const JSON_HEADERS = { Accept: 'application/json', 'Content-Type': 'application/json' } as const;
 const REFUSALS = new Set<string>(['update_busy', 'non_fast_forward', 'dirty']);
 
+function agentLines(value: unknown): readonly string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const lines = value.filter((line): line is string => typeof line === 'string' && line.length > 0);
+  return lines.length ? lines : undefined;
+}
+
 async function readJson(response: Response): Promise<Record<string, unknown>> {
   const parsed: unknown = await response.json().catch(() => null);
   return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
@@ -271,9 +332,15 @@ export class LocalPageUpdate {
       }
       const result = body.result as { status?: unknown; message?: unknown } | undefined;
       if (response.ok && result && (result.status === 'updated' || result.status === 'up-to-date' || result.status === 'recovered')) {
-        return this.set({ phase: 'done', status: result.status, message: result.status === 'updated' ? 'Astrid updated.' : result.status === 'up-to-date' ? 'Astrid is up to date.' : 'The update did not finish. Astrid was restored to its previous version.' });
+        // A success with warnings carries the receipt's own lines (its headline, warning Next lines and Details); a plain success has one headline line.
+        const receiptLines = result.status === 'updated' ? agentLines(body.lines) ?? agentLines((result as { lines?: unknown }).lines) : undefined;
+        const updated = receiptLines && receiptLines.length > 1 ? receiptLines.join('\n') : 'Astrid updated.';
+        return this.set({ phase: 'done', status: result.status, message: result.status === 'updated' ? updated : result.status === 'up-to-date' ? 'Astrid is up to date.' : 'The update did not finish. Astrid was restored to its previous version.' });
       }
-      return this.set({ phase: 'failed', message: 'The update did not complete. Check diagnostics before trying again.' });
+      // A settled run that did not update (or failed) carries the Agent's own
+      // plain lines, its reason and the Next and Details lines included.
+      const lines = agentLines(body.lines) ?? agentLines((result as { lines?: unknown } | undefined)?.lines);
+      return this.set({ phase: 'failed', message: lines ? lines.join('\n') : 'The update did not complete. Download diagnostics to see why.' });
     } catch {
       return this.set({ phase: 'failed', message: 'The update result could not be confirmed. Check for updates before trying again.' });
     }

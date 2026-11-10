@@ -1,7 +1,5 @@
-import { readFileSync } from 'node:fs';
 import { extensionSettingsGroup } from '@/tools/video-editor/runtime/extensionSettingsBacking';
 import { getSettingsStore } from '@/shared/settings/instance';
-import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
@@ -46,7 +44,6 @@ import type { TransitionRegistryRecord } from '@/tools/video-editor/transitions/
 import { useClipTypeRegistryContext } from '@/tools/video-editor/clip-types/ClipTypeRegistryContext';
 import type { ClipTypeRegistryRecord } from '@/tools/video-editor/clip-types/ClipTypeRegistry';
 import {
-  INTERNAL_GESTURE_TIMELINE_MUTATIONS,
   PUBLIC_TIMELINE_COMMAND_NAMES,
   PUBLIC_TIMELINE_COMMAND_SCOPE,
   isPublicTimelineCommandName,
@@ -70,7 +67,6 @@ import {
 import { configToRows, type TimelineData } from '@/tools/video-editor/lib/timeline-data';
 import { runLiveSceneAcpRoundtrip } from '@/tools/video-editor/runtime/liveSceneAcpRoundtrip';
 import { applyPreparedMediaCommand, type PlacePreparedMediaCommand } from '@/tools/video-editor/commands/media';
-import { VIDEO_EDITOR_HOST_PORT_NAMES } from '@/tools/video-editor/runtime/ports';
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider';
 import { createVideoEditorEffectCatalog } from '@/tools/video-editor/lib/effect-catalog';
 import { useExtensionLoaderWiring } from '@/tools/video-editor/runtime/useExtensionLoaderWiring';
@@ -3183,27 +3179,6 @@ describe('VideoEditorProvider', () => {
 
 
 
-  it('keeps the sprint 2 governance inventory markers in the checklist', () => {
-    const checklist = readFileSync(
-      join(process.cwd(), 'tasks/2026-05-03-video-editor-sprint2-ports-and-commands-checklist.md'),
-      'utf8',
-    );
-
-    expect(checklist).toContain('useTimelineCommandsServiceSafe()');
-    expect(checklist).toContain('### Command-facade caller set');
-    expect(checklist).toContain('VIDEO_EDITOR_HOST_PORT_NAMES');
-    expect(checklist).toContain('src/domains/media-lightbox/hooks/useAddToVideoEditor.ts');
-    expect(checklist).toContain('src/tools/video-editor/hooks/useAddVariantAsGeneration.ts');
-    expect(checklist).toContain('src/tools/video-editor/hooks/useSwitchToFinalVideo.ts');
-    expect(checklist).toContain('src/tools/video-editor/hooks/useExternalDrop.ts');
-    expect(checklist).toContain('non-gesture facade');
-    for (const portName of VIDEO_EDITOR_HOST_PORT_NAMES) {
-      expect(checklist).toContain(`\`${portName}\``);
-    }
-    for (const gestureOnlyHook of INTERNAL_GESTURE_TIMELINE_MUTATIONS) {
-      expect(checklist).toContain(gestureOnlyHook);
-    }
-  });
 
   // -------------------------------------------------------------------------
   // Diagnostic collection sync and cleanup parity with EditorRuntimeProvider

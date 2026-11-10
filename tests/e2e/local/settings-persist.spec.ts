@@ -52,7 +52,11 @@ test('a changed Tasks pane lock holds after clearing the browser and reloading (
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   expect(await page.evaluate((key) => localStorage.getItem(key), SNAPSHOT_KEY)).toBeNull();
 
+  // This browser forgot its onboarding progress (welcomeProgress.ts is local), so it is shown the setup page.
+  // The real way through is "I've already set up Astrid" and Continue; that reconnects to the same Runtime.
   await page.reload();
+  await page.getByRole('checkbox', { name: "I've already set up Astrid" }).check();
+  await page.getByRole('button', { name: 'Continue to Astrid' }).click();
   await expectConnected(page);
 
   // Same choice: the value came back from the Runtime.

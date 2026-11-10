@@ -473,14 +473,15 @@ test.describe('core journey', () => {
     const direct = await harness.runtimeFetch(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     expect(read.text).toBe(await direct.text());
 
-    const head = await currentHead(harness);
-    const publication = compositionPublication(harness.seed, head, 'Main (edited through the door)', 24);
-    const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify(publication),
+    const pin = json(await call(`/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).head;
+    const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
+      body: JSON.stringify({ api_version: 1, project_id: projectId, timeline_id: timelineId, base_revision_id: pin.revision_id, base_publication_id: pin.publication_id,
+        commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: 'Main (edited through the door)' }, clear: [] } }] }),
     });
     expect(saved.status, saved.text).toBe(200);
-    const newHead: string = json(saved).data.new_head;
-    expect(newHead).not.toBe(head);
+    const newHead: string = json(saved).data.accepted_revision_id;
+    expect(newHead).not.toBe(pin.revision_id);
 
     const revisionPath = `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions/${newHead}`;
     const beforeReload = await call(revisionPath);
@@ -1281,8 +1282,8 @@ test('speed table: each step through the door against the Runtime directly', asy
       expect((await call(`/v1/projects/${projectId}/timelines/${timelineId}/inspect`, { method: 'POST', headers: jsonHeaders, body: '{}' })).status).toBe(200);
     });
     await speed.time('save timeline (publish revision)', via, SMALL, async () => {
-      const head = await currentHead(harness);
-      const response = await call(`/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, { method: 'POST', headers: { ...jsonHeaders, 'Idempotency-Key': idem() }, body: JSON.stringify(compositionPublication(harness.seed, head, `speed ${via}`, 30)) });
+      const pin = json(await call(`/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).head;
+      const response = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, { method: 'POST', headers: { ...jsonHeaders, 'Idempotency-Key': idem() }, body: JSON.stringify({ api_version: 1, project_id: projectId, timeline_id: timelineId, base_revision_id: pin.revision_id, base_publication_id: pin.publication_id, commands: [{ schema_version: 1, op: 'track.set', version: '1', select: 'parent/track:V1', args: { values: { label: `speed ${via}` }, clear: [] } }] }) });
       expect(response.status, response.text).toBe(200);
     });
     await speed.time('image GET (small)', via, SMALL, async () => {

@@ -1,4 +1,4 @@
-import { expect, type Page, type Request, type Route } from '@playwright/test';
+import { expect, type Frame, type Page, type Request, type Route } from '@playwright/test';
 import { commandOutboxes } from './app.ts';
 
 type Capture = { label: string; state: string; pending: boolean; failed?: boolean; request?: Request };
@@ -12,8 +12,9 @@ export class TokenSniff {
   private readonly leaks: string[] = [];
   private readonly admissions = new Map<Request, Admission>();
   private changed: (() => void) | undefined;
+  private generation = 0;
 
-  private signal() { this.changed?.(); }
+  private signal() { this.generation++; this.changed?.(); }
 
   private isApi(request: Request) { return new URL(request.url()).pathname.startsWith('/api/'); }
 
@@ -71,15 +72,16 @@ export class TokenSniff {
     });
   }
 
-  private async drain(include: (capture: Capture) => boolean, waiting: () => boolean = () => false) {
-    const deadline = Date.now() + this.drainMs;
+  private async drain(include: (capture: Capture) => boolean, waiting: () => boolean = () => false,
+    deadline = Date.now() + this.drainMs, assertValid: () => void = () => {}) {
     while (true) {
+      assertValid();
       const captures = this.captures.filter(include);
       const failed = captures.filter(item => item.failed);
       if (failed.length) throw new Error(`Incomplete credential scan: ${failed.map(item => `${item.label} (${item.state}; capture failed)`).join(', ')}`);
-      if (!waiting() && !captures.some(item => item.pending)) return;
       const remaining = deadline - Date.now();
       if (remaining <= 0) throw new Error(`Incomplete credential scan: ${captures.filter(item => item.pending).map(item => `${item.label} (${item.state})`).join(', ')}; requests still in flight`);
+      if (!waiting() && !captures.some(item => item.pending)) return;
       await new Promise<void>(resolve => {
         const timer = setTimeout(() => { this.changed = undefined; resolve(); }, remaining);
         this.changed = () => { clearTimeout(timer); this.changed = undefined; resolve(); };
@@ -114,15 +116,72 @@ export class TokenSniff {
   }
 
   async expectClean(page: Page, timelineId?: string) {
-    await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal));
-    const inPage = await page.evaluate(() => JSON.stringify({
-      dom: document.documentElement.outerHTML,
-      local: Object.fromEntries(Object.entries(window.localStorage)),
-      session: Object.fromEntries(Object.entries(window.sessionStorage)),
-      cookie: document.cookie,
-    }));
-    this.scan('the page (DOM, storage, cookies)', inPage);
-    if (timelineId) this.scan('native command outboxes', JSON.stringify(await commandOutboxes(page, timelineId)));
-    expect(this.leaks, 'no credential reached the page').toEqual([]);
+    const deadline = Date.now() + this.drainMs;
+    let invalid: Error | undefined;
+    let rejectInvalid!: (error: Error) => void;
+    const invalidated = new Promise<never>((_resolve, reject) => { rejectInvalid = reject; });
+    // A lifecycle event can arrive while drain is waiting rather than snapshot.
+    void invalidated.catch(() => {});
+    const invalidate = () => {
+      invalid ??= new Error('Incomplete credential scan: page navigated, closed or crashed during scan');
+      rejectInvalid(invalid);
+      this.signal();
+    };
+    const navigated = (frame: Frame) => { if (frame === page.mainFrame()) invalidate(); };
+    const assertValid = () => {
+      if (invalid) throw invalid;
+      if (page.isClosed()) throw new Error('Incomplete credential scan: page closed');
+    };
+    const snapshot = async <T>(read: () => Promise<T>, label: string): Promise<T> => {
+      assertValid();
+      if (Date.now() >= deadline) throw new Error('Incomplete credential scan: scan deadline exceeded');
+      let timer!: ReturnType<typeof setTimeout>;
+      try {
+        return await Promise.race([
+          read(), invalidated,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(() => reject(new Error()), Math.max(0, deadline - Date.now()));
+          }),
+        ]);
+      } catch {
+        throw invalid ?? new Error(`Incomplete credential scan: ${label} unavailable before scan deadline`);
+      } finally { clearTimeout(timer); }
+    };
+    page.on('framenavigated', navigated);
+    page.on('close', invalidate);
+    page.on('crash', invalidate);
+    try {
+      // Requests can start inside either snapshot. Repeat until a full snapshot
+      // and its final drain observe no capture/lifecycle changes. Every pass and
+      // read shares one deadline; a busy page cannot extend the scan forever.
+      while (true) {
+        await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline, assertValid);
+        assertValid();
+        const generation = this.generation;
+        const inPage = await snapshot(() => page.evaluate(() => JSON.stringify({
+          dom: document.documentElement.outerHTML,
+          local: Object.fromEntries(Object.entries(window.localStorage)),
+          session: Object.fromEntries(Object.entries(window.sessionStorage)),
+          cookie: document.cookie,
+        })), 'page snapshot');
+        assertValid();
+        this.scan('the page (DOM, storage, cookies)', inPage);
+        if (timelineId) {
+          const outboxes = await snapshot(() => commandOutboxes(page, timelineId), 'native command outboxes');
+          assertValid();
+          this.scan('native command outboxes', JSON.stringify(outboxes));
+        }
+        await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline, assertValid);
+        assertValid();
+        if (generation === this.generation) {
+          expect(this.leaks, 'no credential reached the page').toEqual([]);
+          return;
+        }
+      }
+    } finally {
+      page.off('framenavigated', navigated);
+      page.off('close', invalidate);
+      page.off('crash', invalidate);
+    }
   }
 }

@@ -1,13 +1,14 @@
 import { EventEmitter } from 'node:events';
 import { createServer } from 'node:http';
-import { expect, test, type Page, type Request } from '@playwright/test';
+import { expect, test, type Page, type Request, type Route } from '@playwright/test';
 import { TokenSniff } from './tokenSniff.ts';
 
 const secret = 'credential-sentinel-unique';
 
 function fakePage(contents = '{}', outboxes = '[]') {
   const events = new EventEmitter();
-  return Object.assign(events, { route: async () => {}, evaluate: async (_fn: unknown, id?: string) => id ? outboxes : contents }) as unknown as Page & EventEmitter;
+  const frame = {};
+  return Object.assign(events, { route: async () => {}, isClosed: () => false, mainFrame: () => frame, evaluate: async (_fn: unknown, id?: string) => id ? outboxes : contents }) as unknown as Page & EventEmitter;
 }
 
 test('Chromium captures reload cancellation, held acknowledgement and retry', async ({ page }) => {
@@ -189,3 +190,199 @@ test('navigation failure releases the gate', async ({ page }) => {
     await sniff.expectClean(page);
   } finally { server.close(); }
 });
+
+for (const phase of ['DOM', 'outbox'] as const) {
+  for (const capture of ['unresolved headers', 'rejected headers', 'delayed headers', 'unresolved body', 'rejected body', 'delayed body'] as const) {
+    test(`${capture} starting during ${phase} inspection cannot pass clean`, async () => {
+      const page = fakePage();
+      const sniff = new TokenSniff({ secret }, 150);
+      await sniff.attach(page);
+      let started = false;
+      page.evaluate = (async (_fn: unknown, id?: string) => {
+        if (!started && Boolean(id) === (phase === 'outbox')) {
+          started = true;
+          const req = request(undefined, '', {}, async () => {
+            if (capture === 'unresolved headers') return new Promise(() => {});
+            if (capture === 'rejected headers') throw new Error(secret);
+            if (capture === 'delayed headers') return new Promise(resolve => setTimeout(() => resolve({ 'x-secret': secret }), 20));
+            return {};
+          });
+          page.emit('request', req);
+          if (capture.endsWith('body')) page.emit('response', {
+            headers: () => ({ 'content-type': 'application/json' }), url: () => req.url(), request: () => req,
+            text: async () => {
+              if (capture === 'unresolved body') return new Promise(() => {});
+              if (capture === 'rejected body') throw new Error(secret);
+              return new Promise(resolve => setTimeout(() => resolve(secret), 20));
+            },
+          });
+          page.emit('requestfinished', req);
+        }
+        return id ? '[]' : '{}';
+      }) as Page['evaluate'];
+      const error = await sniff.expectClean(page, 'timeline').then(() => '', (failure: Error) => failure.message);
+      expect(started).toBe(true);
+      expect(error).toContain(capture.startsWith('delayed') ? 'no credential reached the page' : 'Incomplete credential scan');
+      expect(error).not.toContain(secret);
+    });
+  }
+
+  test(`a response completing after ${phase} inspection requires a fresh page snapshot`, async () => {
+    const page = fakePage();
+    const sniff = new TokenSniff({ secret });
+    await sniff.attach(page);
+    let started = false;
+    let contents = '{}';
+    page.evaluate = (async (_fn: unknown, id?: string) => {
+      if (!started && Boolean(id) === (phase === 'outbox')) {
+        started = true;
+        const req = request();
+        page.emit('request', req);
+        page.emit('response', {
+          headers: () => ({ 'content-type': 'application/json' }), url: () => req.url(), request: () => req,
+          text: () => new Promise(resolve => setTimeout(() => { contents = secret; resolve('{}'); }, 20)),
+        });
+        page.emit('requestfinished', req);
+      }
+      return id ? '[]' : contents;
+    }) as Page['evaluate'];
+    await expect(sniff.expectClean(page, 'timeline')).rejects.toThrow('no credential reached the page');
+  });
+
+  for (const event of ['navigation', 'close', 'crash'] as const) {
+    test(`${event} during ${phase} inspection fails closed`, async () => {
+      const page = fakePage();
+      const sniff = new TokenSniff({ secret }, 150);
+      await sniff.attach(page);
+      page.evaluate = (async (_fn: unknown, id?: string) => {
+        if (Boolean(id) === (phase === 'outbox')) {
+          if (event === 'navigation') page.emit('framenavigated', page.mainFrame());
+          else page.emit(event);
+          return new Promise(() => {});
+        }
+        return id ? '[]' : '{}';
+      }) as Page['evaluate'];
+      await expect(sniff.expectClean(page, 'timeline')).rejects.toThrow('page navigated, closed or crashed during scan');
+      expect(page.listenerCount('framenavigated')).toBe(0);
+      expect(page.listenerCount('close')).toBe(0);
+      expect(page.listenerCount('crash')).toBe(0);
+    });
+  }
+
+  test(`unresolved ${phase} inspection uses the scan deadline`, async () => {
+    const page = fakePage();
+    const sniff = new TokenSniff({ secret }, 50);
+    await sniff.attach(page);
+    page.evaluate = (async (_fn: unknown, id?: string) => Boolean(id) === (phase === 'outbox') ? new Promise(() => {}) : '{}') as Page['evaluate'];
+    await expect(sniff.expectClean(page, 'timeline')).rejects.toThrow('unavailable before scan deadline');
+  });
+}
+
+test('continuous new captures share one overall scan deadline', async () => {
+  const page = fakePage();
+  const sniff = new TokenSniff({ secret }, 100);
+  await sniff.attach(page);
+  let reads = 0;
+  page.evaluate = (async () => {
+    reads++;
+    const req = request();
+    page.emit('request', req);
+    await new Promise(resolve => setTimeout(resolve, 10));
+    page.emit('requestfinished', req);
+    return '{}';
+  }) as Page['evaluate'];
+  const start = Date.now();
+  await expect(sniff.expectClean(page)).rejects.toThrow('Incomplete credential scan');
+  expect(reads).toBeGreaterThan(1);
+  expect(Date.now() - start).toBeLessThan(1000);
+});
+
+for (const event of ['navigation', 'close'] as const) {
+  test(`${event} during capture drain fails closed`, async () => {
+    const page = fakePage();
+    const sniff = new TokenSniff({ secret }, 1000);
+    await sniff.attach(page);
+    page.emit('request', request(undefined, '', {}, () => new Promise(() => {})));
+    const clean = sniff.expectClean(page);
+    if (event === 'navigation') page.emit('framenavigated', page.mainFrame());
+    else page.emit(event);
+    await expect(clean).rejects.toThrow('page navigated, closed or crashed during scan');
+  });
+}
+
+test('Chromium drains a response that starts during the final DOM evaluation', async ({ page }) => {
+  let finish!: () => void;
+  const heldBody = new Promise<void>(resolve => { finish = resolve; });
+  const server = createServer(async (req, res) => {
+    if (req.url === '/api/race') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('{"value":"');
+      await heldBody;
+      res.end(`${secret}"}`);
+    } else { res.writeHead(200, { 'content-type': 'text/html' }); res.end('<html></html>'); }
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('test server did not bind');
+  const evaluate = page.evaluate.bind(page);
+  try {
+    const sniff = new TokenSniff({ secret });
+    await sniff.attach(page);
+    await page.goto(`http://127.0.0.1:${address.port}`);
+    let read!: () => void;
+    const snapshotRead = new Promise<void>(resolve => { read = resolve; });
+    let first = true;
+    page.evaluate = (async (...args: Parameters<Page['evaluate']>) => {
+      if (first) {
+        first = false;
+        const response = page.waitForResponse('**/api/race');
+        await evaluate(() => { void fetch('/api/race').then(res => res.text()).catch(() => {}); });
+        await response;
+      }
+      const value = await evaluate(...args);
+      read();
+      return value;
+    }) as Page['evaluate'];
+    let settled = false;
+    const clean = sniff.expectClean(page).then(() => { settled = true; return ''; }, (failure: Error) => { settled = true; return failure.message; });
+    await snapshotRead;
+    await evaluate(() => 0); // Let the scanner consume the completed DOM snapshot.
+    expect(settled).toBe(false);
+    finish();
+    expect(await clean).toContain('no credential reached the page');
+  } finally { page.evaluate = evaluate; finish(); server.close(); }
+});
+
+for (const headers of ['complete', 'reject', 'unresolved'] as const) {
+  test(`navigation excludes its own queued capture then checks ${headers} headers after release`, async () => {
+    const page = fakePage();
+    const sniff = new TokenSniff({ secret }, 150);
+    await sniff.attach(page);
+    let handler!: (route: Route) => Promise<void>;
+    page.route = (async (_pattern, callback) => { handler = callback as typeof handler; }) as Page['route'];
+    page.unroute = async () => {};
+    let resolveHeaders!: (value: Record<string, string>) => void;
+    let rejectHeaders!: (error: Error) => void;
+    const rawHeaders = new Promise<Record<string, string>>((resolve, reject) => { resolveHeaders = resolve; rejectHeaders = reject; });
+    const req = request(undefined, '', {}, () => rawHeaders);
+    let released = false;
+    let navigated = false;
+    const navigation = sniff.navigate(page, async () => {
+      expect(released).toBe(false);
+      navigated = true;
+    });
+    page.emit('request', req);
+    const routed = handler({ request: () => req, fallback: async () => {
+      released = true;
+      if (headers === 'complete') resolveHeaders({});
+      if (headers === 'reject') rejectHeaders(new Error(secret));
+      page.emit('requestfinished', req);
+    } } as unknown as Route);
+    await navigation;
+    await routed;
+    expect(navigated).toBe(true);
+    expect(released).toBe(true);
+    if (headers === 'complete') await sniff.expectClean(page);
+    else await expect(sniff.expectClean(page)).rejects.toThrow('Incomplete credential scan');
+  });
+}

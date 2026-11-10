@@ -63,7 +63,7 @@ jobs:
           fetch-depth: 0
       # Browser-backed unit tests launch Playwright's Chromium from the default cache.
       - name: Install Playwright Chromium
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install chromium
       - run: npm test
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent

@@ -24,13 +24,13 @@ describe('public vision hierarchy', () => {
     const entries = currentGapsForSubject(content, { kind: 'pillar', id: 'art' });
     expect(entries.map(({ gap }) => gap.title)).toEqual(['First gap', 'Second gap']);
     expect(entries.map(({ projects }) => projects.map(project => project.id)))
-      .toEqual([['P1', 'P2'], ['P1']]);
+      .toEqual([['P1', 'P2'], []]);
   });
 
-  it('handles cross-cutting principle relationships, blocked work and gaps with no projects', () => {
+  it('uses only primary gap and subject relationships, keeping secondary connections out of repeated cards', () => {
     const entries = currentGapsForSubject(content, { kind: 'principle', id: 'open' });
-    expect(entries.map(({ gap }) => gap.id)).toEqual(['G1', 'G4']);
-    expect(entries[1].projects.map(project => project.id)).toEqual(['P5', 'P6']);
+    expect(entries.map(({ gap }) => gap.id)).toEqual(['G4']);
+    expect(entries[0].projects.map(project => project.id)).toEqual(['P6']);
     expect(currentGapsForSubject(content, { kind: 'pillar', id: 'missing' })).toEqual([]);
     const withoutProjects = { ...content, projects: [] } as PublicVisionContent;
     expect(currentGapsForSubject(withoutProjects, { kind: 'pillar', id: 'art' })[0].projects).toEqual([]);

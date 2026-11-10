@@ -8,8 +8,8 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
   const content = await response.json() as {
     pillars: { id: string; title: string }[];
     principles: { id: string; title: string }[];
-    gaps: { id: string; title: string; assessment: string; appliesTo: string[]; githubUrl: string }[];
-    projects: { id: string; title: string; status: string; gapIds: string[]; githubUrl: string }[];
+    gaps: { id: string; title: string; assessment: string; appliesTo: string[]; primaryAppliesTo?: string; githubUrl: string }[];
+    projects: { id: string; title: string; status: string; gapIds: string[]; primaryGapId?: string | null; githubUrl: string }[];
   };
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
@@ -26,7 +26,7 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
       const modal = page.getByRole('dialog', { name: entry.title });
       await expect(modal).toBeVisible();
       const expectedGaps = content.gaps.filter(gap =>
-        gap.assessment !== 'closed' && gap.appliesTo.includes(kind + ':' + entry.id));
+        gap.assessment !== 'closed' && (gap.primaryAppliesTo ?? gap.appliesTo[0]) === kind + ':' + entry.id);
       await expect(modal.locator('.astrid-vision-details-gap h4')).toHaveText(expectedGaps.map(gap => gap.title));
 
       for (const gap of expectedGaps) {
@@ -34,7 +34,7 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
           .filter({ has: page.getByRole('link', { name: gap.title }) });
         await expect(row.locator('h4 a')).toHaveAttribute('href', gap.githubUrl);
         const plans = content.projects.filter(project =>
-          project.status !== 'done' && project.status !== 'cancelled' && project.gapIds.includes(gap.id));
+          project.status !== 'done' && project.status !== 'cancelled' && (project.primaryGapId ?? project.gapIds[0]) === gap.id);
         await expect(row.locator('.astrid-vision-details-project-heading a'))
           .toHaveCount(plans.length);
         for (const [index, plan] of plans.entries()) {

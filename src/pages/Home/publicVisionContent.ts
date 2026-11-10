@@ -33,6 +33,8 @@ export interface PublicVisionGap {
   assessment: string;
   assessmentDetail: string;
   appliesTo: string[];
+  /** Primary relationship is explicit in new feeds; first appliesTo is the legacy fallback. */
+  primaryAppliesTo?: string;
   desiredMarkdown: string;
   currentMarkdown: string;
   missingMarkdown: string;
@@ -49,6 +51,8 @@ export interface PublicVisionProject {
   waitingOn: string;
   priorityOrder: number;
   gapIds: string[];
+  /** Null for foundational enablers without a gap; first gap is the legacy fallback. */
+  primaryGapId?: string | null;
   githubUrl: string;
 }
 export interface PublicVisionContent {
@@ -96,13 +100,18 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
         (validUrl(g.githubUrl, sourceBlob + 'vision/gaps/') ||
          validUrl(g.githubUrl, sourceBlob + 'visions/gaps/')) &&
         Array.isArray(g.appliesTo) && g.appliesTo.length > 0 &&
-        g.appliesTo.every(nonempty)) ||
+        g.appliesTo.every(nonempty) &&
+        (g.primaryAppliesTo === undefined ||
+         (nonempty(g.primaryAppliesTo) && g.primaryAppliesTo === g.appliesTo[0]))) ||
       !Array.isArray(projects) || projects.length < 1 ||
       !projects.every((p, index) => isRecord(p) && nonempty(p.id) &&
         nonempty(p.title) && nonempty(p.goalMarkdown) &&
         statuses.has(String(p.status)) && p.priorityOrder === index + 1 &&
         validUrl(p.githubUrl, sourceBlob + 'plans/' + p.id + '/plan.md') &&
-        Array.isArray(p.gapIds) && p.gapIds.every(nonempty))) {
+        Array.isArray(p.gapIds) && p.gapIds.every(nonempty) &&
+        (p.primaryGapId === undefined ||
+         (p.primaryGapId === null ? p.gapIds.length === 0 :
+          nonempty(p.primaryGapId) && p.primaryGapId === p.gapIds[0])))) {
     throw new Error('Invalid public vision feed content');
   }
   const subjectsAll = [...pillars, ...principles];

@@ -15,14 +15,14 @@ const fixture = () => ({
   gaps: [{
     id: 'AA-001', title: 'Missing outcome', assessment: 'open',
     assessmentDetail: 'Open (evidence under review)',
-    appliesTo: ['pillar:art'], desiredMarkdown: 'The target', currentMarkdown: 'Current reality',
+    appliesTo: ['pillar:art'], primaryAppliesTo: 'pillar:art', desiredMarkdown: 'The target', currentMarkdown: 'Current reality',
     missingMarkdown: 'What is missing', closureEvidenceMarkdown: 'Proof',
     githubUrl: blob + 'vision/gaps/AA-001-creative.md',
   }],
   projects: [{
     id: '01-example', title: 'An open project', goalMarkdown: 'A bounded improvement',
     status: 'queued', owner: 'Unassigned', estimate: 'TBD', waitingOn: '—',
-    priorityOrder: 1, gapIds: ['AA-001'],
+    priorityOrder: 1, gapIds: ['AA-001'], primaryGapId: 'AA-001',
     githubUrl: blob + 'plans/01-example/plan.md',
   }],
 });
@@ -99,6 +99,16 @@ describe('public vision live data contract', () => {
   it('rejects incompatible schema or invalid origin', () => {
     expect(() => parsePublicVisionContent({ ...fixture(), schemaVersion: 2 })).toThrow();
     expect(() => parsePublicVisionContent({ ...fixture(), source: { repository: 'other/repo', revision: sha } })).toThrow();
+  });
+  it('rejects inconsistent primary gap and subject relationships', () => {
+    const value = fixture();
+    value.gaps[0].primaryAppliesTo = 'principle:open';
+    expect(() => parsePublicVisionContent(value)).toThrow();
+    value.gaps[0].primaryAppliesTo = 'pillar:art';
+    value.projects[0].primaryGapId = 'XX-999';
+    expect(() => parsePublicVisionContent(value)).toThrow();
+    value.projects[0].primaryGapId = 'AA-001';
+    expect(parsePublicVisionContent(value).projects).toHaveLength(1);
   });
   it('rejects missing evidence and broken relationships', () => {
     const value = fixture();

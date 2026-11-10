@@ -123,7 +123,7 @@ function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevisio
 function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: PublicVisionProject[] }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const plans = openProjects.filter(project => project.gapIds.includes(gap.id)).slice(0, 3);
+  const plans = openProjects.filter(project => (project.primaryGapId ?? project.gapIds[0]) === gap.id).slice(0, 3);
   return (
     <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={open || undefined}>
       <h3>

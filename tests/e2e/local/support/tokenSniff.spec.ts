@@ -151,10 +151,23 @@ test('navigation drains a delayed response while holding new API dispatch', asyn
     await page.goto(origin);
     await page.evaluate(() => { void fetch('/api/slow').catch(() => {}); });
     await expect.poll(() => began).toBe(true);
+    let bypassedGate = false;
+    await page.route('**/api/queued', route => { bypassedGate = true; return route.fallback(); });
+    const originalRoute = page.route.bind(page);
+    let gateReady!: () => void;
+    const installed = new Promise<void>(resolve => { gateReady = resolve; });
+    (page as any).route = async (...args: Parameters<Page['route']>) => {
+      await originalRoute(...args);
+      if (args[0] === '**/api/**') gateReady();
+    };
     let navigated = false;
     const navigation = sniff.navigate(page, async () => { navigated = true; await page.goto(`${origin}/blank`, { waitUntil: 'commit' }); });
+    await installed;
+    const queued = page.waitForRequest('**/api/queued');
     await page.evaluate(() => { void fetch('/api/queued').catch(() => {}); });
-    await expect.poll(() => queuedReachedServer).toBe(false);
+    await queued;
+    expect(queuedReachedServer).toBe(false);
+    expect(bypassedGate).toBe(false);
     expect(navigated).toBe(false);
     finish();
     await navigation;

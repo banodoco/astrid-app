@@ -2856,11 +2856,23 @@ function expectTransitionClear(request: CommitRequest, base: HeadPin, original: 
   const [patch] = request.commands;
   expect(patch).toMatchObject({ schema_version: 1, op: 'doc.patch', version: '1', select: null });
   const changes = (patch.args as { changes: Array<Record<string, unknown>> }).changes;
+  // Exactly the selected clips' transitions are removed: no change touches an unrelated clip.
   expect(changes).toHaveLength(ids.length);
+  for (const change of changes) expect(change).toMatchObject({ op: 'remove', ref: 'parent' });
   for (const id of ids) {
     expect(changes).toContainEqual({ op: 'remove', ref: 'parent', path: ['clips', `id:${id}`, 'transition'],
       before: { state: 'present', value: original[id].transition } });
   }
+  // The step carries the same removal, and the merge rule matches the reads it was built with (localSaveSession.ts:190-199).
+  const steps = (request as unknown as { steps: Array<{ command_ordinals: number[]; patch: unknown[] }> }).steps;
+  expect(steps).toHaveLength(1);
+  expect(steps[0].command_ordinals).toEqual([0]);
+  expect(steps[0].patch).toEqual(changes);
+  const merged = request as unknown as { merge: string; reads?: unknown[] };
+  if (merged.reads === undefined) expect(merged.merge).toBe('atomic');
+  else {
+    expect(merged.merge).toBe('fields');
+    expect(merged.reads.length).toBeGreaterThan(0);
   }
 }
 
@@ -2884,12 +2896,17 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
   result: CommitAcceptedMutation, request: CommitRequest, original: Record<string, any>) {
   const records = (await history(harness, seed)).items.find((entry) => entry.publication_id === pinOf(result).publication_id)!.records!;
   expect(records.commands.map((record) => record.command)).toEqual(request.commands);
-  // KNOWN MISMATCH (unresolved): this writes check is the clip.set-era shape. The App now sends a guarded doc.patch with
-  // select null, so record.command.select is null and the slice below does not match it. Kept unchanged, not weakened.
-  for (const record of records.commands) {
-    const id = record.command.select!.slice('parent/clip:'.length);
-    expect(record.writes).toContainEqual({ ref: record.command.select, path: ['transition'],
-      before: { state: 'present', value: original[id].transition }, after: { state: 'absent' } });
+  // The Runtime recorded exactly one guarded doc.patch for the App's commit: select null, with the same removal changes.
+  // Each recorded change still targets the selected clips' transitions and nothing else.
+  expect(records.commands).toHaveLength(1);
+  const [recorded] = records.commands;
+  expect(recorded.command).toMatchObject({ op: 'doc.patch', select: null });
+  const requested = request.commands[0].args as { changes: unknown[] };
+  expect((recorded.command.args as { changes: unknown[] }).changes).toEqual(requested.changes);
+  // The recorded removals still carry their original-value guards: each guard is the transition the clip had before.
+  for (const change of requested.changes as Array<Record<string, any>>) {
+    const id = String(change.path[1]).slice('id:'.length);
+    expect(change.before).toEqual({ state: 'present', value: original[id].transition });
   }
 }
 

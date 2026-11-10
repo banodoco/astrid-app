@@ -476,7 +476,7 @@ test.describe('core journey', () => {
     const pin = json(await call(`/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=1`)).head;
     // The composition name is a field of the parent: read its current value from the head document, and guard the set with it.
     const headDoc = await revisionBody(harness, pin.revision_id);
-    const currentName = headDoc.parent_composition?.name;
+    const currentName = headDoc.payload?.name;
     const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() },
       body: JSON.stringify({ api_version: 1, project_id: projectId, timeline_id: timelineId, base_revision_id: pin.revision_id, base_publication_id: pin.publication_id,
@@ -491,7 +491,7 @@ test.describe('core journey', () => {
     const beforeReload = await call(revisionPath);
     expect(beforeReload.status).toBe(200);
     // The composition name, read from the Runtime after the save: exactly the value the guarded doc.patch set.
-    expect(json(beforeReload).parent_composition?.name).toBe('Main (edited through the door)');
+    expect(json(beforeReload).payload?.name).toBe('Main (edited through the door)');
     const afterReadInspect = await call(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
 
     await page.reload();

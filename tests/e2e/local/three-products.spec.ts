@@ -290,15 +290,19 @@ function agentOf(astrid: AstridCli, seed: Pick<ThreeProductsSeed, 'timelineId' |
   return {
     checkout: () => astrid.astrid(['timelines', 'checkout', ...common, '--fresh', '--json']),
     edit: (...flags: string[]) => astrid.astrid(['timelines', 'edit', ...common, ...flags]),
-    // `timelines commit --file` on the draft that `timelines checkout` and `timelines edit` share. The draft path is
-    // store.draft_path(project_id, timeline_id, draft) (cli.py:2521; cli.py:2369-2376), and `status --json` gives those inputs.
+    // `timelines commit --file` on the draft that `timelines checkout` and `timelines edit` share. Neither command prints
+    // the draft's path, and `status --json` carries no project_id (cli.py:2510-2548). The path is the CLI's own:
+    // store.draft_path(project_id, timeline_id, draft), with the ids from store.resolve_ids (store.py:410), the same
+    // resolver status uses, and the draft name from status --json.
     commit: async (message: string, idempotencyKey: string) => {
-      const status = (await astrid.json<{ project_id: string; timeline_id: string; draft: string; current_head: string }>(['timelines', 'status', ...common, '--json'])).data!;
+      const status = (await astrid.json<{ timeline_id: string; draft: string; current_head: string }>(['timelines', 'status', ...common, '--json'])).data!;
       const oldHead = status.current_head;
       const draft = await astrid.python(['-c',
-        'import sys; from astrid.sdk.timeline import store; print(store.draft_path(sys.argv[1], sys.argv[2], sys.argv[3]))',
-        status.project_id, status.timeline_id, status.draft]);
+        'import sys; from astrid.sdk.timeline import store; pid, tid, _head = store.resolve_ids(sys.argv[1], sys.argv[2]); print(store.draft_path(pid, tid, sys.argv[3]))',
+        seed.projectSlug, seed.timelineId, status.draft]);
       const draftFile = draft.stdout.trim().split('\n').pop()!;
+      expect(draftFile, 'the draft path the CLI resolves').toMatch(/drafts[\\/][^\\/]+[\\/][^\\/]+[\\/]/);
+      expect(draftFile, 'the draft path has no unresolved ids').not.toContain('undefined');
       const envelope = await astrid.json<{ accepted_revision_id: string; accepted_publication_id: string }>(['timelines', 'commit', ...common, '--file', draftFile, '-m', message, '--idempotency-key', idempotencyKey, '--json']);
       expect(envelope.ok, JSON.stringify(envelope)).toBe(true);
       // The commit envelope (cli_native.py:84-105): the Runtime's accepted revision and publication.
@@ -2932,8 +2936,20 @@ async function expectRecordedTransitionClears(harness: DirectHarness, seed: Thre
     { path: ['transition'], ref: `parent/clip:${id}`, state: { state: 'present', value: original[id].transition } },
     { path: ['config', 'pinnedShotGroups'], ref: 'parent', state: { state: 'absent' } },
   ]));
-  // The whole-array mirror of the clips, as in the crossfade set's record.
-  expect(recorded.derived_writes).toEqual([{ ref: 'parent', path: ['config', 'clips'] }]);
+  // The whole-array mirror of the clips, as in the crossfade set's record: exactly one derived write, at parent config.clips.
+  // Its before is the clips as the clear found them (each cleared clip still carries its transition), and its after is the
+  // head document's clips read after the save, so the mirror reflects the cleared state exactly.
+  expect(recorded.derived_writes).toHaveLength(1);
+  const [mirror] = recorded.derived_writes;
+  const headAfter = (await revisionBody(harness, pinOf(result).revision_id)).payload as Record<string, any>;
+  expect(mirror).toEqual({ ref: 'parent', path: ['config', 'clips'], before: expect.any(Array), after: headAfter.config.clips });
+  for (const id of ids) {
+    const before = (mirror.before as Array<Record<string, any>>).find((clip) => clip.id === id);
+    expect(before?.transition, `clip ${id} in the mirror's before keeps its transition`).toEqual(original[id].transition);
+    const after = (mirror.after as Array<Record<string, any>>).find((clip) => clip.id === id);
+    expect(after, `clip ${id} in the mirror's after`).toBeDefined();
+    expect(after, `clip ${id} in the mirror's after has no transition`).not.toHaveProperty('transition');
+  }
 }
 
 async function bulkTransitionNone(page: Page, seed: ThreeProductsSeed) {

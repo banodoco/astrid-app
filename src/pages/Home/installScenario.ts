@@ -8,10 +8,19 @@ import {
 /** Which explainer to show: Chrome and Edge install, other desktop browsers can't, and phones can't yet. */
 export type InstallScenario = 'chromium' | 'unsupported' | 'mobile';
 
+/**
+ * Android Chrome's "Desktop site" sends a Linux desktop user agent, so only the input gives the phone away: a touch
+ * screen whose primary pointer is coarse and cannot hover. (iOS's desktop mode is caught by `detectPlatform`.)
+ */
+function isTouchOnlyLinux(platform: string): boolean {
+  if (platform !== 'linux' || typeof window === 'undefined' || typeof window.matchMedia !== 'function') return false;
+  return navigator.maxTouchPoints > 0 && window.matchMedia('(pointer: coarse)').matches && window.matchMedia('(hover: none)').matches;
+}
+
 export function detectInstallScenario(): InstallScenario {
   const platform = detectPlatform();
   const browser = detectBrowser();
-  if (detectDeviceType(platform) !== 'desktop') return 'mobile';
+  if (detectDeviceType(platform) !== 'desktop' || isTouchOnlyLinux(platform)) return 'mobile';
   if (!isDesktopPlatform(platform)) return 'unsupported';
   if (browser === 'chrome' || browser === 'edge') return 'chromium';
   return 'unsupported';

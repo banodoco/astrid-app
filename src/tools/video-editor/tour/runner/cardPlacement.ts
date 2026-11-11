@@ -15,6 +15,8 @@ export interface CardPlacementOptions {
   gap?: number;
   /** Take the spot below the spotlit area whenever it fits, before the roomiest side (the chat's reply: the card stays in its panel). */
   preferBelow?: boolean;
+  /** Take the spot above the spotlit area whenever it fits (a touch card over the chat's actions, which sit at the bottom). */
+  preferAbove?: boolean;
   /**
    * Parts of the screen the card keeps out of when it can (the desktop chat pane while the chat is not lit). A column along
    * the left or right edge narrows the space the card is placed in; if nothing fits there, the whole viewport is used.
@@ -55,19 +57,19 @@ export function placeCard(
   rects: readonly SpotlightRect[],
   card: { width: number; height: number },
   viewport: { width: number; height: number },
-  { edge = EDGE, gap = GAP, preferBelow = false, avoid = [] }: CardPlacementOptions = {},
+  { edge = EDGE, gap = GAP, preferBelow = false, preferAbove = false, avoid = [] }: CardPlacementOptions = {},
 ): CardPosition {
   if (rects.length === 0) return { left: (viewport.width - card.width) / 2, top: (viewport.height - card.height) / 2 };
   const full = { left: 0, top: 0, right: viewport.width, bottom: viewport.height };
   const narrowed = boundsWithout(viewport, avoid);
   if (narrowed.right - narrowed.left < full.right) {
-    const inside = placeWithin(rects, card, narrowed, edge, gap, preferBelow);
+    const inside = placeWithin(rects, card, narrowed, edge, gap, preferBelow, preferAbove);
     if (overlapArea(inside, card, rects) === 0) return inside;
   }
-  return placeWithin(rects, card, full, edge, gap, preferBelow);
+  return placeWithin(rects, card, full, edge, gap, preferBelow, preferAbove);
 }
 
-function placeWithin(rects: readonly SpotlightRect[], card: { width: number; height: number }, bounds: Bounds, edge: number, gap: number, preferBelow: boolean): CardPosition {
+function placeWithin(rects: readonly SpotlightRect[], card: { width: number; height: number }, bounds: Bounds, edge: number, gap: number, preferBelow: boolean, preferAbove: boolean): CardPosition {
   const clamp = (value: number, size: number, low: number, high: number) => Math.max(low + edge, Math.min(value, high - size - edge));
   const at = (left: number, top: number): CardPosition => ({ left: clamp(left, card.width, bounds.left, bounds.right), top: clamp(top, card.height, bounds.top, bounds.bottom) });
   const sidesOf = (area: readonly SpotlightRect[]) => {
@@ -87,7 +89,8 @@ function placeWithin(rects: readonly SpotlightRect[], card: { width: number; hei
 
   const sides = sidesOf(rects);
   const below = sides[2];
-  const fitting = preferBelow && below.room >= below.need ? below : sides.filter((side) => side.room >= side.need).sort((a, b) => b.room - a.room)[0];
+  const above = sides[3];
+  const fitting = preferAbove && above.room >= above.need ? above : preferBelow && below.room >= below.need ? below : sides.filter((side) => side.room >= side.need).sort((a, b) => b.room - a.room)[0];
   if (fitting) return at(fitting.left, fitting.top);
 
   const candidates = [at(bounds.right, bounds.bottom), ...rects.flatMap((rect) => sidesOf([rect]).map((side) => at(side.left, side.top))), at(bounds.left, bounds.bottom), at(bounds.right, bounds.top), at(bounds.left, bounds.top)];

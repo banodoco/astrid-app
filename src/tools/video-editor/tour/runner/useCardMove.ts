@@ -30,8 +30,6 @@ interface CardMoveOptions {
   motion: boolean;
   /** The store has moved on and the card still shows the previous step: its content leaves where it stands. */
   pending: boolean;
-  /** Whether a watch shows the card's counter row (true) or nothing (false): what the explainer unfolds from. */
-  pill?: boolean;
 }
 
 function clearStyles(element: HTMLElement | null, properties: readonly string[]) {
@@ -74,7 +72,7 @@ async function moveFinished(elements: readonly (Element | null)[]): Promise<void
   ]);
 }
 
-export function useCardMove(hostRef: RefObject<HTMLElement | null>, { key, animate, motion, pending, pill = true }: CardMoveOptions): { size: CardSize | null; arrivedKey: string | null; moving: () => boolean } {
+export function useCardMove(hostRef: RefObject<HTMLElement | null>, { key, animate, motion, pending }: CardMoveOptions): { size: CardSize | null; arrivedKey: string | null; moving: () => boolean } {
   const [size, setSize] = useState<CardSize | null>(null);
   const [arrivedKey, setArrivedKey] = useState<string | null>(null);
   /** The shown card's box (border-box), the morph's starting size. */
@@ -125,12 +123,12 @@ export function useCardMove(hostRef: RefObject<HTMLElement | null>, { key, anima
     }
     if (unfolds) {
       // The watch is over: the same card, where it already is. Its counter row stays put; the box unfolds downward from
-      // it and the rest fades up, as arriving content does. (With no bar shown, the runner fades the whole card in.)
+      // it and the rest fades up, as arriving content does.
       const rest = section.querySelector<HTMLElement>(REST);
-      if (pill) Object.assign(section.style, { transition: 'none', overflow: 'hidden', height: `${from.height}px` });
+      Object.assign(section.style, { transition: 'none', overflow: 'hidden', height: `${from.height}px` });
       if (rest) Object.assign(rest.style, { transition: 'none', opacity: '0', transform: `translateY(${ARRIVE_RISE_PX}px)` });
       void section.offsetWidth;
-      if (pill) Object.assign(section.style, { transition: `height ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}`, height: `${natural.height}px` });
+      Object.assign(section.style, { transition: `height ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}`, height: `${natural.height}px` });
       if (rest) {
         Object.assign(rest.style, {
           transition: `opacity ${TOUR_ARRIVE_MS}ms ease-out ${TOUR_ARRIVE_DELAY_MS}ms, transform ${TOUR_ARRIVE_MS}ms ${TOUR_MOVE_EASE} ${TOUR_ARRIVE_DELAY_MS}ms`,

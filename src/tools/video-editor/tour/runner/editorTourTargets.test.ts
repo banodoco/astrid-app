@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { editorTourTargets, phoneSpotlight } from './EditorTourRunner';
+import { cardHidden, editorTourTargets, phoneLandPosition } from './EditorTourRunner';
 
 describe('editorTourTargets', () => {
   it('spotlights the act’s new row with the preview on land', () => {
@@ -13,10 +13,10 @@ describe('editorTourTargets', () => {
     }
   });
 
-  it('lights the whole transcript on respond, and on a phone the reply and its actions alone', () => {
-    expect(editorTourTargets(1, 'respond')).toEqual(['[data-editor-tour="chat-transcript"]']);
-    expect(editorTourTargets(1, 'respond', 'tablet')).toEqual(['[data-editor-tour="chat-transcript"]']);
-    expect(editorTourTargets(1, 'respond', 'phone')).toEqual(['[data-editor-tour="chat-reply"]']);
+  it('lights only the act’s actions on respond, on every device', () => {
+    for (const device of ['desktop', 'tablet', 'phone'] as const) {
+      expect(editorTourTargets(1, 'respond', device)).toEqual(['[data-editor-tour="chat-actions"]']);
+    }
   });
 
   it('lights nothing on the welcome, finale and feedback cards, which sit in the middle', () => {
@@ -24,15 +24,25 @@ describe('editorTourTargets', () => {
   });
 });
 
-describe('phoneSpotlight', () => {
+describe('phoneLandPosition', () => {
   const track = { x: 0, y: 440, width: 393, height: 44 };
   const preview = { x: 6, y: 150, width: 381, height: 216 };
 
-  it('keeps the new row lit when the sheet fits under it', () => {
-    expect(phoneSpotlight([track, preview], 300, 852)).toEqual([track, preview]);
+  it('puts a phone’s land card above the preview, so the preview and the rows under it stay in view', () => {
+    expect(phoneLandPosition([track, preview], { height: 120 })).toEqual({ left: 12, top: 150 - 8 - 120 });
   });
 
-  it('lets the row give way on a short phone, keeping the preview lit', () => {
-    expect(phoneSpotlight([track, preview], 300, 667)).toEqual([preview]);
+  it('starts at the top edge when the card is taller than the space there, never lower', () => {
+    expect(phoneLandPosition([track, preview], { height: 160 })).toEqual({ left: 12, top: 12 });
+  });
+});
+
+describe('cardHidden', () => {
+  it('shows no card on touch while the reply comes in; desktop keeps its quiet card, and a watch its bar', () => {
+    expect(cardHidden('phone', 'working')).toBe(true);
+    expect(cardHidden('tablet', 'working')).toBe(true);
+    expect(cardHidden('desktop', 'working')).toBe(false);
+    expect(cardHidden('phone', 'watch')).toBe(false);
+    expect(cardHidden('phone', undefined)).toBe(false);
   });
 });

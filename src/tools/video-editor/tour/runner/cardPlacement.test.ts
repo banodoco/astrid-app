@@ -180,3 +180,13 @@ describe.each(Object.entries(DESKTOP))('placeCard on the desktop tour at %s', (_
     expect(covers(position, card, chat)).toBe(false);
   });
 });
+
+describe('placeCard on touch respond', () => {
+  it('prefers the spot above the actions at the foot of the chat', () => {
+    const phone = { width: 375, height: 667 };
+    const actions: SpotlightRect = { x: 10, y: 380, width: 355, height: 150 };
+    const card = { width: 351, height: 170 };
+    const position = placeCard([actions], card, phone, { edge: 12, gap: 8, preferAbove: true });
+    expect(position).toEqual({ left: 12, top: 380 - 8 - 170 });
+  });
+});

@@ -13,9 +13,17 @@ import { SetupBlock } from '@/shared/components/RuntimeConnection/SetupBlock.tsx
 // Even module initialization for connection/identity stays outside the browser-only tour.
 const WelcomeConnection = lazy(() => import('./WelcomeConnection.tsx'));
 export function WelcomeFlow({ entry, localBuild = false }: { entry: WelcomeEntry; localBuild?: boolean }) {
+  // A phone or tablet on the hosted site cannot run Astrid: nothing it can do is a setup step. Finishing or skipping the
+  // tour, a stale `setup`/`choose`/`local` record, and a shared work link all land on the connection screen, whose
+  // phone card says to open Astrid on a computer and offers to send the link there.
+  const [onlyPhoneCard] = useState(() => !localBuild && detectInstallScenario() === 'mobile');
   const [queryClient] = useState(() => new QueryClient({ defaultOptions: { queries: { retry: false } } }));
   const [phase, setPhase] = useState<WelcomeEntry>(() => {
     const savedPhase = readWelcomePhase();
+    if (onlyPhoneCard && entry !== 'editor' && entry !== 'tour' && entry !== 'complete' && savedPhase !== 'complete') {
+      writeWelcomePhase('connection');
+      return 'connection';
+    }
     // An installer handoff must not change a fully local setup into the hosted route.
     if (entry === 'connection' && savedPhase !== 'complete' && (savedPhase === 'local' || readWelcomeRunMode() === 'local')) return 'local';
     if (entry !== 'editor' && savedPhase !== 'complete') writeWelcomePhase(entry);
@@ -30,9 +38,9 @@ export function WelcomeFlow({ entry, localBuild = false }: { entry: WelcomeEntry
     writeWelcomePhase(next);
     setPhase(next);
   }, []);
-  // A phone or local build has no run-mode choice: the tour leads straight to connecting, and Back returns to the tour.
+  // A phone has no run-mode choice and no setup: the tour leads straight to connecting (its phone card). A local build skips only the choice. Back returns to the tour.
   const skipsChoice = localBuild || detectInstallScenario() === 'mobile';
-  const finishTour = useCallback(() => enter(skipsChoice ? 'setup' : 'choose'), [enter, skipsChoice]);
+  const finishTour = useCallback(() => enter(onlyPhoneCard ? 'connection' : skipsChoice ? 'setup' : 'choose'), [enter, onlyPhoneCard, skipsChoice]);
   const finishSetup = useCallback(() => {
     if (entry === 'setup') {
       const url = new URL(window.location.href);

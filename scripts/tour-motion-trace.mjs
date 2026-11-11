@@ -2,7 +2,7 @@
 /**
  * node scripts/tour-motion-trace.mjs [--out test-results/tour-motion/<ts>] [--theme dark|light]
  *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--no-screencast]
- *   [--viewport 1440x900] [--react] [--skip] [--reanalyse test-results/tour-motion/<name>] [--help]
+ *   [--viewport 1440x900] [--react] [--skip] [--device iphone-15] [--reanalyse test-results/tour-motion/<name>] [--help]
  *
  * Measures MOTION of the first-run tour on desktop (1440x900 unless --viewport, reducedMotion: no-preference). The sibling
  * tour-screenshots.mjs only takes settled stills with motion off; this walks the same beats with motion on and,
@@ -21,6 +21,7 @@
  * respond, its two phases), never changes destination mid-flight or reverses, cutouts start within a frame of the card,
  * no lit cutout passes through the page corner (0,0,0,0), and the new step's content is only whole near rest.
  *
+ * --device walks one of tour-screenshots' device profiles (touch, its viewport and user agent) instead of desktop.
  * --skip also traces act 2's land with Enter pressed 1.5 s into its watch (the explainer must then come at once).
  * --reanalyse re-scores an earlier run from its samples.json files with this version's analyser (no browser).
  * --react installs a React DevTools-style commit hook and reports, per transition (and for a beat that had to be nudged,
@@ -40,7 +41,7 @@ import { chromium } from '@playwright/test';
 import { buildFakeRuntimeEnv } from '../tests/e2e/fake-runtime/launch.mjs';
 import { terminateProcessTree } from './terminate-process-tree.mjs';
 import { readTourSteps } from './tour-shot-metadata.mjs';
-import { chromiumExecutable, freePort, waitServer } from './tour-screenshots.mjs';
+import { chromiumExecutable, DEVICE_PROFILES, freePort, waitServer } from './tour-screenshots.mjs';
 
 const STORE = '/src/shared/state/editorTourStore.ts';
 const BEATS = '/src/tools/video-editor/tour/runner/tourBeats.ts';
@@ -488,7 +489,7 @@ export function parseOptions(args) {
   for (let i = 0; i < args.length; i++) {
     const [key, inline] = args[i].split('=');
     if (key === '--back' || key === '--help' || key === '--no-screencast' || key === '--react' || key === '--skip') { o[key.slice(2)] = true; continue; }
-    if (!['--out', '--theme', '--base-url', '--transitions', '--viewport', '--reanalyse'].includes(key)) throw new Error(`Unknown flag: ${key}`);
+    if (!['--out', '--theme', '--base-url', '--transitions', '--viewport', '--reanalyse', '--device'].includes(key)) throw new Error(`Unknown flag: ${key}`);
     o[key.slice(2)] = inline ?? args[++i];
     if (!o[key.slice(2)] || o[key.slice(2)].startsWith('--')) throw new Error(`${key} needs a value`);
   }
@@ -498,6 +499,8 @@ export function parseOptions(args) {
   const [width, height] = (o.viewport ?? '1440x900').split('x').map(Number);
   if (!(width >= 320 && height >= 320)) throw new Error(`--viewport needs WIDTHxHEIGHT, got ${o.viewport}`);
   o.viewport = { width, height };
+  if (o.device && !DEVICE_PROFILES[o.device]) throw new Error(`Unknown device: ${o.device} (one of ${Object.keys(DEVICE_PROFILES).join(', ')})`);
+  if (o.device) o.viewport = DEVICE_PROFILES[o.device].viewport;
   return o;
 }
 
@@ -534,7 +537,7 @@ export async function run(options) {
 
     browser = await chromium.launch({ headless: true, executablePath: chromiumExecutable(), args: ['--no-sandbox'] });
     report.browser = browser.version();
-    const context = await browser.newContext({ viewport: report.viewport, screen: report.viewport, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: options.theme, reducedMotion: 'no-preference', serviceWorkers: 'block' });
+    const context = await browser.newContext({ ...(options.device ? DEVICE_PROFILES[options.device] : {}), viewport: report.viewport, screen: report.viewport, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: options.theme, reducedMotion: 'no-preference', serviceWorkers: 'block' });
     await context.addInitScript(({ theme }) => {
       let seed = 0x12345678;
       Math.random = () => { seed = (Math.imul(1664525, seed) + 1013904223) >>> 0; return seed / 4294967296; };

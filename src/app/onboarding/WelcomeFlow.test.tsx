@@ -130,26 +130,49 @@ it('does not let a stale onboarding tab overwrite completed setup', () => {
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('complete');
 });
 
-it.each([['local editor', { localBuild: true }], ['phone', { localBuild: false }]])('%s goes from the tour to setup before connection', async (_name, props) => {
-  if (_name === 'phone') {
-    vi.spyOn(navigator, 'platform', 'get').mockReturnValue('iPhone');
-    vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)');
-  }
-  render(<WelcomeFlow entry="tour" {...props} />);
+it('a local editor goes from the tour to setup before connection', async () => {
+  render(<WelcomeFlow entry="tour" localBuild />);
   fireEvent.click(screen.getByText('Done'));
-  if (_name === 'local editor') {
-    expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
-    expect(screen.getByText('npm run dev:local')).toBeInTheDocument();
-  } else {
-    expect(await screen.findByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
-  }
+  expect(await screen.findByText('Have your agent set it up')).toBeInTheDocument();
+  expect(screen.getByText('npm run dev:local')).toBeInTheDocument();
   fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
   expect(await screen.findByText('Connect your machine')).toBeInTheDocument();
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('connection');
-  expect(screen.queryByText('How do you want to run the app?')).not.toBeInTheDocument();
   // Back returns to where the user came from (the tour's last card), never to the skipped run-mode choice.
   fireEvent.click(screen.getByText('Back'));
   expect(await screen.findByText('Last card')).toBeInTheDocument();
-  expect(screen.queryByText('How do you want to run the app?')).not.toBeInTheDocument();
   expect(localStorage.getItem('astrid:welcome-v1')).toBe('tour');
+});
+
+function usePhone() {
+  vi.spyOn(navigator, 'platform', 'get').mockReturnValue('iPhone');
+  vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)');
+}
+
+for (const action of ['Done', 'Skip']) it(`on a phone ${action} goes straight to connection (the phone card), never setup or the run-mode choice`, async () => {
+  usePhone();
+  render(<WelcomeFlow entry="tour" />);
+  fireEvent.click(screen.getByText(action));
+  expect(await screen.findByText('Connect your machine')).toBeInTheDocument();
+  expect(screen.queryByRole('main', { name: 'Set up Astrid' })).not.toBeInTheDocument();
+  expect(screen.queryByText('How do you want to run the app?')).not.toBeInTheDocument();
+  expect(localStorage.getItem('astrid:welcome-v1')).toBe('connection');
+  fireEvent.click(screen.getByText('Back'));
+  expect(await screen.findByText('Last card')).toBeInTheDocument();
+  expect(localStorage.getItem('astrid:welcome-v1')).toBe('tour');
+});
+
+it.each(['setup', 'choose', 'local'] as const)('a phone with a stale %s record resumes at connection', async phase => {
+  usePhone();
+  localStorage.setItem('astrid:welcome-v1', phase);
+  render(<WelcomeFlow entry={phase} />);
+  expect(await screen.findByText('Connect your machine')).toBeInTheDocument();
+  expect(localStorage.getItem('astrid:welcome-v1')).toBe('connection');
+});
+
+it('a phone opening a shared work link before welcome lands on connection, not setup', async () => {
+  usePhone();
+  window.history.replaceState({}, '', '/tools/video-editor?project=p1&timeline=t1');
+  render(<WelcomeFlow entry="setup" />);
+  expect(await screen.findByText('Connect your machine')).toBeInTheDocument();
 });

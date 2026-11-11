@@ -6,7 +6,7 @@ import { TourVisual } from './TourVisual';
 import { TOUR_COMPARE_ENTRANCE_MS } from './TourCompare';
 import { TOUR_CARD_ENTRANCE_MS, useTourCardEntrance } from './useTourCardEntrance';
 import { EDITOR_TOUR_GALLERY_ACT, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
-import { ChevronLeft, Send } from 'lucide-react';
+import { ChevronLeft } from 'lucide-react';
 import { DiscordMark } from '@/pages/Home/PublicAstridSocialLinks';
 import { DISCORD_URL } from '@/pages/Home/publicAstridLinks';
 import { Button } from '@/shared/components/ui/button.tsx';
@@ -92,7 +92,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
         className={cn(
           rise && 'editor-tour-rise',
           'max-w-[calc(100vw-24px)] max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card text-card-foreground shadow-xl',
-          phone ? cn('w-[calc(100vw-24px)] rounded-2xl', explains ? 'p-5' : 'px-5 py-4') : tablet ? cn(
+          phone ? cn('w-[calc(100vw-24px)] rounded-2xl', explains && beat !== 'land' ? 'p-5' : 'px-5 py-4') : tablet ? cn(
             beat === 'welcome' && 'w-[460px] p-7',
             (beat === 'land' || beat === 'gallery') && 'w-[580px] p-6',
             beat === 'finale' && 'w-[540px] p-7',
@@ -207,8 +207,9 @@ function Explainer({ act, playing, entering, waiting, watching = false, onPrimar
       <CounterRow act={act} part={part} onBack={onBack} onSkip={onSkip} fit={fit} />
       <Rest folded={watching}>
       <h2 className={cn('mt-3', TOUCH_HEADING)}>{title}</h2>
-      <p className={cn('mt-1.5 text-pretty text-muted-foreground', tablet ? 'text-[15px] leading-6' : 'text-sm leading-[1.4rem]')}>{body}</p>
-      <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : undefined}>
+      {/* A phone's explainer sits above the preview, so it is compact: the title alone, no body. */}
+      {tablet && <p className="mt-1.5 text-pretty text-[15px] leading-6 text-muted-foreground">{body}</p>}
+      <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : 'mt-3'}>
         {tablet && <div className="min-w-0 flex-1"><TourStrip filled={act} labels={SCRIPT.strip} size="medium" /></div>}
         {next}
       </NavRow>
@@ -342,8 +343,8 @@ function FeedbackTitle() {
 }
 
 /**
- * Compose: send the prompt (the chat's Send, or Enter). Respond (act 1 only): the reply's Next. On touch the card carries
- * its own Send as the primary action, the same press as the chat's.
+ * Compose: send the prompt (the chat's Send, or Enter). Respond (act 1 only): the reply's Next. The chat's own Send is the
+ * one way to send on every device: a touch compose card has no button of its own beside Back.
  */
 function Hint({ act, beat, working, onPrimary, onBack, onSkip, fit }: TourCardProps & { fit: Fit }) {
   const compose = beat === 'compose';
@@ -365,11 +366,11 @@ function Hint({ act, beat, working, onPrimary, onBack, onSkip, fit }: TourCardPr
         <CounterRow act={act} onBack={onBack} onSkip={onSkip} fit={fit} />
         <h2 className={cn('mt-3', TOUCH_HEADING)}>{compose ? header ?? SCRIPT.hints.composeTouch : SCRIPT.hints.respond}</h2>
         {compose && header && <p className={cn('mt-1.5 text-muted-foreground', fit.device === 'tablet' ? 'text-[15px]' : 'text-sm')}>{SCRIPT.hints.composeTouch}</p>}
-        <NavRow secondary={<BackControl onBack={onBack} touch />}>
-          {compose
-            ? <PrimaryButton label={SCRIPT.controls.send} icon={<Send className="h-4 w-4" aria-hidden />} onPrimary={onPrimary} fit={fit} />
-            : <PrimaryButton label={SCRIPT.controls.next} onPrimary={onPrimary} fit={fit} />}
-        </NavRow>
+        {(!compose || onBack) && (
+          <NavRow secondary={<BackControl onBack={onBack} touch />} className={compose ? 'mt-2' : undefined}>
+            {compose ? <span /> : <PrimaryButton label={SCRIPT.controls.next} onPrimary={onPrimary} fit={fit} />}
+          </NavRow>
+        )}
       </>
     );
   }

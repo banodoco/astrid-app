@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  abortOnNavigation,
   DocumentNavigatingError,
   documentNavigationPhase,
   inflightRuntimeRequests,
@@ -11,27 +12,41 @@ import {
 } from './documentNavigation';
 import { SettingsStore, type AppStateApi } from '@/shared/settings/settingsStore';
 
-/** A fake global whose fetch answers only when the test says so, with a body that streams until it is ended. */
+/**
+ * A fake global whose fetch answers only when the test says so, with a body that streams until it is ended. Like the
+ * browser, an abort rejects a request still waiting for its answer and errors a body still arriving; a body cancelled
+ * by whoever reads it stops arriving (`cancelled`).
+ */
 function fakeGlobal() {
   const calls: string[] = [];
-  const pending: Array<{ url: string; respond: () => void; end: () => void }> = [];
+  const signals: Array<AbortSignal | undefined> = [];
+  const pending: Array<{ url: string; respond: (type?: string) => void; end: () => void; cancelled: () => boolean; aborted: () => boolean }> = [];
   const target = {
-    fetch: vi.fn((input: RequestInfo | URL) => {
+    fetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
       calls.push(url);
-      return new Promise<Response>((resolve) => {
+      signals.push(init?.signal ?? undefined);
+      return new Promise<Response>((resolve, reject) => {
         let controller!: ReadableStreamDefaultController<Uint8Array>;
-        const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; } });
+        let cancelled = false;
+        let ended = false;
+        const body = new ReadableStream<Uint8Array>({ start(c) { controller = c; }, cancel() { cancelled = true; } });
+        init?.signal?.addEventListener('abort', () => {
+          reject(init.signal!.reason);
+          if (!ended && !cancelled) { try { controller.error(init.signal!.reason); } catch { /* Already closed. */ } }
+        }, { once: true });
         pending.push({
           url,
-          respond: () => { controller.enqueue(new TextEncoder().encode('{"ok":')); resolve(new Response(body, { headers: { 'content-type': 'application/json' } })); },
-          end: () => { controller.enqueue(new TextEncoder().encode('true}')); controller.close(); },
+          respond: (type = 'application/json') => { controller.enqueue(new TextEncoder().encode('{"ok":')); resolve(new Response(body, { headers: { 'content-type': type } })); },
+          end: () => { ended = true; controller.enqueue(new TextEncoder().encode('true}')); controller.close(); },
+          cancelled: () => cancelled,
+          aborted: () => init?.signal?.aborted === true,
         });
       });
     }),
     addEventListener: vi.fn(),
   } as unknown as typeof globalThis;
-  return { target, calls, pending };
+  return { target, calls, pending, signals };
 }
 
 const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -89,6 +104,61 @@ describe('document navigation preparation', () => {
     void target.fetch('/api/runtime/v1/projects/p-1/timelines/t-1/commit', { method: 'POST' });
     await expect(prepareDocumentNavigation({ timeoutMs: 20 })).rejects.toThrow('POST api/runtime/v1/projects');
     expect(documentNavigationPhase()).toBe('open');
+  });
+
+  it('leaves a byte body to its caller, so the caller cancelling it stops the transfer', async () => {
+    const { target, pending } = fakeGlobal();
+    installDocumentRequestRegistry(target);
+    const downloading = target.fetch('/api/runtime/v1/objects/sha256-render');
+    pending[0].respond('video/mp4');
+    const response = await downloading;
+    // `render-download.ts`: a render over the browser download limit is refused from its headers.
+    await response.body!.cancel();
+    expect(pending[0].cancelled(), 'the network body stops, not only the caller\'s copy').toBe(true);
+    expect(inflightRuntimeRequests()).toEqual([]);
+  });
+
+  it('cancels a byte body still arriving when a navigation is prepared, without waiting for it', async () => {
+    const { target, pending } = fakeGlobal();
+    installDocumentRequestRegistry(target);
+    const media = await (async () => { const started = target.fetch('/api/runtime/v1/objects/sha256-video'); pending[0].respond('video/mp4'); return started; })();
+    const reading = media.arrayBuffer();
+    await prepareDocumentNavigation({ timeoutMs: 5_000 });
+    expect(pending[0].aborted(), 'cancelled through the page\'s own signal, while the page is still here').toBe(true);
+    await expect(reading).rejects.toMatchObject({ name: 'AbortError' });
+    expect(documentNavigationPhase()).toBe('sealed');
+  });
+
+  it('cancels a request with no deadline (an agent turn) at preparation, and prepares at once', async () => {
+    const { target } = fakeGlobal();
+    installDocumentRequestRegistry(target);
+    const turn = target.fetch('/api/astrid/acp/c-1/rpc', abortOnNavigation({ method: 'POST', body: '{"method":"session/prompt"}' }));
+    const startedAt = Date.now();
+    await prepareDocumentNavigation();
+    expect(Date.now() - startedAt, 'not the 10 s preparation cap').toBeLessThan(1_000);
+    await expect(turn).rejects.toMatchObject({ name: 'AbortError' });
+    expect(documentNavigationPhase()).toBe('sealed');
+  });
+
+  it('keeps the caller\'s own abort working through the page\'s signal', async () => {
+    const { target } = fakeGlobal();
+    installDocumentRequestRegistry(target);
+    const caller = new AbortController();
+    const request = target.fetch('/api/runtime/v1/health', { signal: caller.signal });
+    caller.abort(new DOMException('caller stopped', 'AbortError'));
+    await expect(request).rejects.toMatchObject({ message: 'caller stopped' });
+    await flush();
+    expect(inflightRuntimeRequests()).toEqual([]);
+  });
+
+  it('cancels what is still on the wire when preparation runs out of time, so nothing outlives the page', async () => {
+    const { target, pending } = fakeGlobal();
+    installDocumentRequestRegistry(target);
+    const commit = target.fetch('/api/runtime/v1/projects/p-1/timelines/t-1/commit', { method: 'POST' });
+    await expect(prepareDocumentNavigation({ timeoutMs: 20 })).rejects.toThrow('POST api/runtime/v1/projects');
+    expect(pending[0].aborted()).toBe(true);
+    await expect(commit).rejects.toMatchObject({ name: 'AbortError' });
+    expect(inflightRuntimeRequests()).toEqual([]);
   });
 
   it('release resumes owners after a navigation that did not happen', async () => {

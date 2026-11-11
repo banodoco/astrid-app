@@ -18,6 +18,7 @@
  *    and requests stay same-origin relative paths so the proxy sees them.
  */
 
+import { abortOnNavigation } from '@/shared/lib/navigation/documentNavigation';
 import {
   BRIDGE_REQUEST_TIMEOUT_MS,
   bridgeErrorEnvelopeSchema,
@@ -291,14 +292,18 @@ export class AstridBridgeTransport {
       headers['Content-Type'] = 'application/json';
       body = JSON.stringify(request.body);
     }
+    const init: RequestInit = {
+      method: request.method ?? 'GET',
+      headers,
+      body,
+      keepalive: request.keepalive,
+      signal: composeSignals(request.timeoutMs === undefined ? this.timeoutMs : request.timeoutMs, request.signal),
+    };
+    // A request with no deadline (an agent turn, `acpRoutes.ts`) would hold a navigation for its whole length: the
+    // page cancels it instead, and the turn goes on in the agent.
+    if (request.timeoutMs === null) abortOnNavigation(init);
     try {
-      return await fetch(this.url(path), {
-        method: request.method ?? 'GET',
-        headers,
-        body,
-        keepalive: request.keepalive,
-        signal: composeSignals(request.timeoutMs === undefined ? this.timeoutMs : request.timeoutMs, request.signal),
-      });
+      return await fetch(this.url(path), init);
     } catch (cause) {
       throw new BridgeTransportFailure(cause);
     }

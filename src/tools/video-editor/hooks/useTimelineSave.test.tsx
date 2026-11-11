@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { toast as sonnerToast } from '@/shared/components/ui/runtime/sonner.tsx';
 import { AstridElementOperationAdapter, createElementTimelineRoutes } from '../runtime/element-adapter.ts';
 import { ASTRID_EFFECT_CATALOG } from '../runtime/astrid-element-catalog.ts';
 import { buildAstridAgentElementContext } from '../runtime/element-contract.ts';
@@ -466,6 +467,21 @@ describe('useTimelineSave — recovered draft durability', () => {
           await act(async () => { await harness!.hook.result.current.flushPendingSave(); });
           expect(posts).toEqual([]);
           expect((await createCommitOutbox().list(scope))[0].intents).toEqual([]);
+          return;
+        }
+        if (['missing old selection', 'mismatched old selection', 'extra old selection', 'missing old metadata', 'missing selector'].includes(outcome)) {
+          const refusalToast = vi.spyOn(sonnerToast, 'error');
+          // The handoff refuses only this duplicate before it reaches the
+          // outbox, so the editor reverts it and says so; nothing is sent.
+          if (outcome !== 'extra old selection') await vi.waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('source Runtime project media selection. Draft retained'));
+          await vi.waitFor(() => expect(harness!.hook.result.current.dataRef.current!.config.clips).toEqual(data.config.clips));
+          // A missing old selection is refused by the caller before any edit.
+          if (outcome !== 'missing old selection') await vi.waitFor(() => expect(refusalToast).toHaveBeenCalledWith(expect.stringMatching(/^Not saved: video duplication needs both exact Runtime project media selections\. That change was undone; your other edits are kept\.$/)));
+          await act(async () => { await harness!.hook.result.current.flushPendingSave(); });
+          const [draft] = await createCommitOutbox().list(scope);
+          expect(draft.intents).toEqual([]);
+          expect(draft.pending).toBeUndefined();
+          expect(posts).toEqual([]);
           return;
         }
         await vi.waitFor(() => expect(harness!.hook.result.current.dataRef.current!.config.clips).toHaveLength(mode === 'video' ? 4 : 1));

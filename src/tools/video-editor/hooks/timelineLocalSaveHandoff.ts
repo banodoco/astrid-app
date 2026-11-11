@@ -89,8 +89,17 @@ function authoredJson(value: unknown): OutboxJson {
   return toOutboxJson(value);
 }
 
+// Refusals of one edit by this handoff's authoring guards, before that edit
+// entered the outbox. Owner, conflict and transport failures are not listed.
+const authoringRefusals = new WeakSet<object>();
+/** True when the handoff refused exactly one edit before it reached the outbox. */
+export function isTimelineAuthoringRefusal(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && authoringRefusals.has(error));
+}
+
 function refuse(message: string, reason?: TimelineSaveRejectionCode): never {
   const error = new TimelineSaveError(`Not saved: ${message}`);
+  authoringRefusals.add(error);
   throw reason ? markTimelineSaveRejection(error, reason, 'TimelineSaveError') : error;
 }
 function checkHead(initial: TimelineCommandBasis, value: TimelineSaveSource,
@@ -687,6 +696,9 @@ export function createTimelineLocalSaveHandoff(options: {
       } catch (error) {
         const rejection = error instanceof TimelineVersionConflictError || error instanceof TimelineSaveError ? error
           : new TimelineSaveError(`Not saved: ${error instanceof Error ? error.message : String(error)}`);
+        // Nothing was appended for this edit: an unexpected authoring failure
+        // is still a refusal of this one edit.
+        if (!(error instanceof TimelineVersionConflictError) && !(error instanceof TimelineSaveError)) authoringRefusals.add(rejection);
         return Promise.reject(rejection);
       }
     },

@@ -275,10 +275,10 @@ describe('shot timeline popup persistence', () => {
     render(React.createElement(ShotTimelinePreview, { composition, occurrenceId: 'occ-1' }));
 
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    expect(previewProps.previewRevision).toEqual({
+    await waitFor(() => expect(previewProps.previewRevision).toEqual({
       kind: 'committed',
       revisionId: composition.headRevisionId,
-    });
+    }));
   });
 
   it.each([
@@ -294,9 +294,9 @@ describe('shot timeline popup persistence', () => {
     render(React.createElement(ShotTimelinePreview, { composition, occurrenceId: 'occ-1' }));
 
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    expect(previewProps.previewRevision).toEqual(committed
+    await waitFor(() => expect(previewProps.previewRevision).toEqual(committed
       ? { kind: 'committed', revisionId: composition.headRevisionId }
-      : { kind: 'local', baseRevisionId: composition.headRevisionId });
+      : { kind: 'local', baseRevisionId: composition.headRevisionId }));
   });
 
   it('keeps a conflicted embedded preview local instead of claiming the canonical head', async () => {
@@ -306,10 +306,10 @@ describe('shot timeline popup persistence', () => {
     render(React.createElement(ShotTimelinePreview, { composition, occurrenceId: 'occ-1' }));
 
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    expect(previewProps.previewRevision).toEqual({
+    await waitFor(() => expect(previewProps.previewRevision).toEqual({
       kind: 'local',
       baseRevisionId: composition.headRevisionId,
-    });
+    }));
   });
 
   it('renders recovery controls in the mounted popup surface', async () => {

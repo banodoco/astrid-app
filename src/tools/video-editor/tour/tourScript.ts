@@ -35,10 +35,12 @@ export interface EditorTourScript {
   readonly controls: { readonly next: string; readonly send: string; readonly back: string; readonly skip: string };
   /** Agent → open models → output: the card's strip, one step per act. */
   readonly strip: readonly [string, string, string];
-  readonly finale: { readonly title: string; readonly action: string; readonly recap: readonly [string, string, string] };
+  /** After act 3: the lit chain is the one example; the body opens it out. */
+  readonly finale: { readonly title: string; readonly body: string; readonly action: string; readonly recap: readonly [string, string, string] };
   /** The last card, after the finale: Astrid asks for feedback and points to the Discord. */
   /** `mobileAction` ends the tour on a phone or tablet, where the next screen sends Astrid to a computer. */
-  readonly feedback: { readonly title: string; readonly body: string; readonly shortBody: string; readonly discord: string; readonly action: string; readonly mobileAction: string };
+  /** The title reads `before emphasis after`, joined by spaces; the card underlines `emphasis` once it has arrived. */
+  readonly feedback: { readonly title: { readonly before: string; readonly emphasis: string; readonly after: string }; readonly body: string; readonly shortBody: string; readonly discord: string; readonly action: string; readonly mobileAction: string };
 }
 
 /**
@@ -66,10 +68,10 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
     2: {
       composeHeader: 'Your agent can do anything with open models',
       prompt: 'Can you make me realistic frames for that using Qwen Image 2.1?',
-      reply: 'I made four realistic reference frames with Qwen Image 2.1 through WaveSpeed. They follow the flight from the valley to natural-looking buildings in town.',
+      reply: 'I made four realistic reference frames with Qwen Image 2.1. They follow the flight from the valley to natural-looking buildings in town.',
       toolCards: [
         { name: 'Captured 4 frames', detail: 'Start · mountains · descent · town' },
-        { name: 'Qwen Image 2.1 × 4', detail: 'WaveSpeed · frame → realistic still' },
+        { name: 'Qwen Image 2.1 × 4', detail: 'Frame → realistic still' },
       ],
       card: {
         title: 'Your agent works with open models and the ecosystem’s knowledge',
@@ -95,9 +97,14 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
   hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses community-built creative tools to deliver on this request' },
   controls: { next: 'Next', send: 'Send', back: 'Back', skip: 'Skip tour' },
   strip: ['Agent', 'Open models', 'Output'],
-  finale: { title: 'Do you get it?', action: 'I got it', recap: ['Agent + extensions', 'Open models', 'Finished shot'] },
+  finale: {
+    title: 'And this is just one example',
+    body: 'There are infinite possibilities when you combine code with custom agent tools and custom interfaces.',
+    action: 'Next',
+    recap: ['Agent + extensions', 'Open models', 'Finished shot'],
+  },
   feedback: {
-    title: 'We actually need your feedback',
+    title: { before: 'We', emphasis: 'really', after: 'need your feedback' },
     body: 'We’re aiming for a tool that helps unlock the creative potential of open models and the open‑source community. But Astrid is a very early-stage product, and in many ways it doesn’t get there yet. Feedback on any issue you hit helps us improve it: no problem is too large or too small.',
     /** A phone's version: the same ask in a few lines. */
     shortBody: 'Astrid is very early, and in many ways it doesn’t get there yet. Tell us about any issue you hit: no problem is too large or too small.',

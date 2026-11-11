@@ -100,7 +100,7 @@ describe('TourCard', () => {
     for (const step of SCRIPT.strip) expect(screen.getAllByText(step).length).toBeGreaterThan(0);
     // The strip fills act by act; at rest the video step shows where the flight ends, as a still.
     expect(container.querySelectorAll('ol img, ol video')).toHaveLength(tourAct);
-    if (tourAct === 3) expect(container.querySelectorAll('ol img')[2]).toHaveAttribute('src', EDITOR_TOUR_MEDIA.stills[3].url);
+    if (tourAct === 3) expect(container.querySelectorAll('ol img')[2]).toHaveAttribute('src', EDITOR_TOUR_MEDIA.stills[3].displayUrl);
 
     expect(container.querySelector('.editor-tour-card-playing')).not.toBeNull();
     advance(entranceOf(tourAct) - 1);

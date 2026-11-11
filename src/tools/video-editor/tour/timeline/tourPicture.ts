@@ -31,8 +31,8 @@ export interface TourVideoEngine {
   /** Whether the current source has presented a frame while playing since it was last started or loaded. */
   presenting(): boolean;
   subscribe(listener: () => void): () => void;
-  /** Called with the media time while it plays (at most every `TIME_REPORT_MS`) and once when it ends. */
-  onTime: ((seconds: number) => void) | null;
+  /** Called with the media time while it plays (at most every `TIME_REPORT_MS`) and once, with `ended`, when it ends. */
+  onTime: ((seconds: number, ended: boolean) => void) | null;
   dispose(): void;
 }
 
@@ -87,7 +87,7 @@ export function createTourVideoEngine(): TourVideoEngine {
     const now = performance.now();
     if (now - lastReport >= TIME_REPORT_MS) {
       lastReport = now;
-      engine.onTime?.(seconds);
+      engine.onTime?.(seconds, false);
     }
   };
   // A presented frame is the proof. Where the browser cannot report one, advancing media time is.
@@ -102,7 +102,7 @@ export function createTourVideoEngine(): TourVideoEngine {
     frameHandle = video.requestVideoFrameCallback(onFrame);
   };
   const onTimeUpdate = () => { if (video.currentTime > 0) sawFrame(video.currentTime); };
-  const onEnded = () => { if (wanted) engine.onTime?.(video.duration || video.currentTime); };
+  const onEnded = () => { if (wanted) engine.onTime?.(video.duration || video.currentTime, true); };
   video.addEventListener('timeupdate', onTimeUpdate);
   video.addEventListener('ended', onEnded);
 

@@ -16,7 +16,8 @@ export function buildTourGalleryItems(now: Date = new Date()): GeneratedImageWit
   return EDITOR_TOUR_MEDIA.stills.map((still, index) => ({
     id: `tour-still-${index + 1}`,
     url: still.url,
-    thumbUrl: still.url,
+    // The tile shows the WebP derivative (about a tenth of a megabyte); `url` stays the original.
+    thumbUrl: still.displayUrl ?? still.url,
     // The tile's <img> alt text is the prompt.
     prompt: EDITOR_TOUR_GALLERY_LABELS[index],
     type: 'image/png',

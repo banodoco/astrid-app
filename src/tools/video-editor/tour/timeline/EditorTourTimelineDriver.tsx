@@ -4,12 +4,15 @@ import {
   editorTourStage,
   getEditorTourState,
   markEditorTourReady,
+  subscribeEditorTour,
   useEditorTour,
   type EditorTourStage,
+  type EditorTourState,
 } from '@/shared/state/editorTourStore.ts';
 import {
   useTimelineChromeSelector,
   useTimelineDataSelector,
+  useTimelineMutableAdapters,
   useTimelineOpsFromStore,
   useTimelinePlaybackSelector,
 } from '@/tools/video-editor/hooks/timelineStore.ts';
@@ -24,6 +27,8 @@ import { tourFitScaleWidth } from './tourViewport.ts';
 export const TOUR_ANCHOR_DWELL_MS = 1200;
 /** How long a landing waits for the video's first moving frame before it goes on with the poster (the video may still start). */
 export const TOUR_FIRST_FRAME_DEADLINE_MS = 2500;
+/** How often the editor's timecode (React state) hears the playing video's time; the playhead itself moves every 100 ms. */
+const TOUR_TIMECODE_REPORT_MS = 1000;
 /** How long a phone's landing waits for its full-screen chat to leave before it starts the picture anyway. */
 const CHAT_LEAVE_WAIT_MS = 2500;
 
@@ -35,6 +40,16 @@ function nextFrame(): Promise<void> {
 async function waitFor(check: () => boolean, timeoutMs: number, isCancelled: () => boolean): Promise<void> {
   const deadline = performance.now() + timeoutMs;
   while (!isCancelled() && !check() && performance.now() < deadline) await nextFrame();
+}
+
+/** Resolves when the tour's state satisfies `check`, or after `timeoutMs`. Costs nothing while it waits (no frame loop). */
+function untilTour(check: (state: EditorTourState) => boolean, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (check(getEditorTourState())) return resolve();
+    const finish = () => { clearTimeout(timer); unsubscribe(); resolve(); };
+    const timer = setTimeout(finish, timeoutMs);
+    const unsubscribe = subscribeEditorTour((state) => { if (check(state)) finish(); });
+  });
 }
 
 const LAST_ANCHOR = TOUR_ANCHORS.length - 1;
@@ -98,7 +113,8 @@ function useTourTimelineFraming(loaded: boolean) {
  * - step 2 walks its four stills, then holds the last;
  * - the video keeps playing (to its end, then holds its last frame) through the beats that follow, except behind a
  *   phone's full-screen chat; Back never restarts anything; with reduced motion nothing plays and no video is fetched.
- * The timeline's playhead follows the picture through the preview's own time report (`onPreviewTimeUpdate`).
+ * The timeline's playhead follows the picture: imperatively while the video plays, with the preview's own time report
+ * (`onPreviewTimeUpdate`, which also feeds the timecode) once a second and on every jump.
  */
 export function EditorTourTimelineDriver() {
   const warm = useTourMediaWarmup();
@@ -152,11 +168,22 @@ export function EditorTourTimelineDriver() {
     trailing.current = setTimeout(() => report.current(seconds), 300);
   }).current;
   useEffect(() => () => clearTimeout(trailing.current), []);
+  // While the video plays, the playhead moves imperatively (no React work) ten times a second, and the editor's
+  // timecode state, which re-renders the shell, is told once a second and at the end.
+  const { timelineRef } = useTimelineMutableAdapters();
   useEffect(() => {
     if (!engine) return undefined;
-    engine.onTime = (seconds) => { clearTimeout(trailing.current); report.current(seconds); };
+    let lastState = 0;
+    engine.onTime = (seconds, ended) => {
+      clearTimeout(trailing.current);
+      const now = performance.now();
+      if (ended || now - lastState >= TOUR_TIMECODE_REPORT_MS) {
+        lastState = now;
+        report.current(seconds);
+      } else timelineRef.current?.setTime(seconds);
+    };
     return () => { engine.onTime = null; };
-  }, [engine]);
+  }, [engine, timelineRef]);
 
   const videoSlot = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
@@ -259,12 +286,12 @@ export function EditorTourTimelineDriver() {
     }
     void (async () => {
       // A phone's chat covers the whole screen until the card and spotlight have left it.
-      if (phone) await waitFor(() => getEditorTourState().shownBeat === 'land', CHAT_LEAVE_WAIT_MS, () => isCancelled() || skipped());
+      if (phone) await untilTour((state) => state.shownBeat === 'land' || isCancelled() || skipped(), CHAT_LEAVE_WAIT_MS);
       if (isCancelled()) return;
       reportJump(0);
       await Promise.race([
         engine.start(TOUR_FIRST_FRAME_DEADLINE_MS),
-        waitFor(skipped, TOUR_FIRST_FRAME_DEADLINE_MS + 1000, isCancelled),
+        untilTour(() => isCancelled() || skipped(), TOUR_FIRST_FRAME_DEADLINE_MS + 1000),
       ]);
       done();
     })();

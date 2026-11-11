@@ -60,7 +60,7 @@ function StillToVideo({ labels: [model, length], playing }: { labels: readonly [
     <>
       <TourMedia slot={EDITOR_TOUR_MEDIA.stills[0]} kind="still" />
       <div className="editor-tour-fade absolute inset-0" style={delay(250)}>
-        <TourMedia slot={EDITOR_TOUR_MEDIA.video} kind="video" poster={EDITOR_TOUR_MEDIA.stills[0].url} playing={playing} />
+        <TourMedia slot={EDITOR_TOUR_MEDIA.video} kind="video" poster={EDITOR_TOUR_MEDIA.stills[0].displayUrl ?? EDITOR_TOUR_MEDIA.stills[0].url} playing={playing} />
       </div>
       <Chip className="left-2 bottom-3 flex items-center gap-1">
         <Play className="h-2.5 w-2.5 fill-current" strokeWidth={0} />

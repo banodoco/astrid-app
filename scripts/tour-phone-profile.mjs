@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /**
  * node scripts/tour-phone-profile.mjs [--out test-results/tour-phone/<ts>] [--device iphone-15] [--cpu 4] [--dpr 2]
- *   [--base-url http://127.0.0.1:PORT] [--theme dark|light] [--idle 3000] [--until act2-compose] [--no-throttle] [--help]
+ *   [--base-url http://127.0.0.1:PORT] [--theme dark|light] [--idle 3000] [--until act2-compose|act3-land] [--watch 6000]
+ *   [--net fast4g|slow4g] [--emulate reject-play,...] [--no-throttle] [--help]
  *
  * Profiles the first-run tour on an emulated phone (default iPhone 15 profile, motion ON, CDP CPU throttle 4x,
  * device pixel ratio 2 because this sandbox rasterises in software; --dpr 3 for the profile's own). Walks
@@ -15,6 +16,13 @@
  *     ResizeObserver callbacks (the counts, not the time), per second;
  *   - CDP Performance deltas: task / script / layout / style-recalc seconds and counts;
  *   - WebGL contexts created so far (per frame) and live <canvas>/<iframe>/<video> counts.
+ * With `--until act3-land` the walk goes on through step 2 (stills, gallery) to step 3's landing, and both video landings
+ * (steps 1 and 3) get a picture proof: from the tap, when the poster showed, when the tour's <video> first presented a frame
+ * while playing, and its `currentTime` / presented-frame count once a second for `--watch` ms. `--net fast4g|slow4g` throttles
+ * the network (CDP), and `--emulate` forces a failure the tour must survive:
+ *   reject-play (every play() rejects) · low-power (play() rejects unless inside a user gesture or on an element started in
+ *   one) · no-webcodecs (no VideoDecoder/AudioDecoder) · audio-resume-pending (AudioContext.resume() never settles outside a
+ *   gesture) · stall-video (mp4 requests never answer). Several may be joined with commas.
  * Output: report.json and report.md (+ a settled screenshot per beat). An idle tour beat should commit ~0 times per second.
  * Absolute timings are noisy in a shared 4-core software-GL sandbox: compare runs by the structural columns.
  * The dev server is Vite in test mode (unminified dev React renders several times slower than production).
@@ -162,8 +170,60 @@ function installProbe() {
   });
 }
 
+/* ------------------------------------------------------------------ the tour picture: emulated failures + a sampler */
+function installMediaProbe(emulate) {
+  const E = new Set(emulate);
+  let inGesture = false;
+  for (const type of ['click', 'touchend', 'keydown']) addEventListener(type, (e) => { if (!e.isTrusted) return; inGesture = true; setTimeout(() => { inGesture = false; }, 0); }, true);
+  if (E.has('no-webcodecs')) for (const k of ['VideoDecoder', 'AudioDecoder', 'EncodedVideoChunk']) { try { delete window[k]; } catch { /* ignore */ } window[k] = undefined; }
+  if (E.has('audio-resume-pending') && window.AudioContext) {
+    const unlocked = new WeakSet(), resume = AudioContext.prototype.resume;
+    AudioContext.prototype.resume = function () { if (inGesture) unlocked.add(this); return unlocked.has(this) ? resume.call(this) : new Promise(() => {}); };
+  }
+  const mp = (window.__mp = { on: false, t0: 0, samples: [], frames: new WeakMap(), playCalls: 0, playRejected: 0 });
+  if (E.has('reject-play') || E.has('low-power')) {
+    const blessed = new WeakSet(), play = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function () {
+      mp.playCalls++;
+      if (E.has('low-power') && (inGesture || blessed.has(this))) { blessed.add(this); return play.call(this); }
+      mp.playRejected++;
+      return Promise.reject(new DOMException('emulated autoplay refusal', 'NotAllowedError'));
+    };
+  }
+  const tick = (t) => {
+    if (mp.on) {
+      const video = document.querySelector('video[data-editor-tour-video]') ?? document.querySelector('[data-editor-tour="preview"] video');
+      if (video && !mp.frames.has(video) && video.requestVideoFrameCallback) {
+        const counter = { n: 0 }; mp.frames.set(video, counter);
+        const onFrame = () => { counter.n++; video.requestVideoFrameCallback(onFrame); };
+        video.requestVideoFrameCallback(onFrame);
+      }
+      const picture = document.querySelector('[data-editor-tour-picture]');
+      mp.samples.push({ t: Math.round(t - mp.t0), poster: Boolean(document.querySelector('[data-editor-tour-poster]')), state: picture ? `${picture.dataset.editorTourPicture}${picture.dataset.state ? `:${picture.dataset.state}` : ''}` : null,
+        ct: video ? Math.round(video.currentTime * 100) / 100 : null, paused: video ? video.paused : null, ready: video ? video.readyState : null,
+        presented: video ? (mp.frames.get(video)?.n ?? null) : null, decoded: video?.getVideoPlaybackQuality?.().totalVideoFrames ?? null, src: video ? video.currentSrc.split('/').pop().slice(0, 12) : null });
+    }
+    requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+  mp.begin = () => { mp.samples = []; mp.t0 = performance.now(); mp.on = true; };
+  mp.end = () => {
+    mp.on = false;
+    const S = mp.samples, first = (f) => S.find(f)?.t ?? null;
+    const moving = S.find((x, i) => i > 0 && x.paused === false && x.ct > 0.03 && x.ct > S[i - 1].ct);
+    const everySecond = [];
+    for (let k = 0; k * 1000 <= (S.at(-1)?.t ?? 0); k++) { const x = S.find((y) => y.t >= k * 1000); if (x) everySecond.push([k, x.ct, x.presented, x.paused ? 'paused' : 'playing', x.state]); }
+    const from = moving ?? S[0], last = S.at(-1);
+    return { posterAtMs: first((x) => x.poster), posterGoneAtMs: S.some((x) => x.poster) ? (S.find((x, i) => !x.poster && S.slice(0, i).some((y) => y.poster))?.t ?? null) : null,
+      firstMovingFrameAtMs: moving?.t ?? null, src: last?.src ?? null, end: last ? { state: last.state, poster: last.poster, currentTime: last.ct, paused: last.paused, readyState: last.ready, presentedFrames: last.presented, decodedFrames: last.decoded } : null,
+      // Media seconds played per wall second after the first moving frame: 1 is real time.
+      playbackRate: moving && last.t > from.t + 500 ? Math.round(((last.ct - from.ct) / ((last.t - from.t) / 1000)) * 100) / 100 : null,
+      everySecond, playCalls: mp.playCalls, playRejected: mp.playRejected };
+  };
+}
+
 function parseOptions(argv) {
-  const o = { theme: 'dark', device: 'iphone-15', cpu: 4, dpr: 2, idle: 3000, until: 'act2-compose' };
+  const o = { theme: 'dark', device: 'iphone-15', cpu: 4, dpr: 2, idle: 3000, until: 'act2-compose', watch: 6000, net: 'none', emulate: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--help') o.help = true;
@@ -172,7 +232,7 @@ function parseOptions(argv) {
     else if (a === '--cpuprof') o.cpuprof = true;
     else if (a === '--block-world') o['block-world'] = true;
     else if (a === '--tree') o.tree = true;
-    else if (a.startsWith('--')) { const v = argv[++i]; o[a.slice(2)] = ['cpu', 'dpr', 'idle'].includes(a.slice(2)) ? Number(v) : v; }
+    else if (a.startsWith('--')) { const v = argv[++i]; o[a.slice(2)] = ['cpu', 'dpr', 'idle', 'watch'].includes(a.slice(2)) ? Number(v) : v; }
   }
   return o;
 }
@@ -213,6 +273,9 @@ export async function run(options) {
     const context = await browser.newContext({ ...profile, deviceScaleFactor: options.dpr, locale: 'en-US', timezoneId: 'UTC', colorScheme: options.theme, reducedMotion: 'no-preference', serviceWorkers: 'block' });
     await context.addInitScript(({ theme }) => { try { localStorage.setItem('theme-hour', theme === 'dark' ? '0' : '12'); } catch { /* ignore */ } }, { theme: options.theme });
     await context.addInitScript(installProbe);
+    const emulate = String(options.emulate ?? '').split(',').filter(Boolean);
+    await context.addInitScript(installMediaProbe, emulate);
+    report.emulate = emulate; report.net = options.net; report.picture = {};
     if (options.tree) await context.addInitScript(() => { window.__pp.tree = true; });
     if (options.why) await context.addInitScript(() => { window.__pp.why = true; });
     await fetch(`${runtimeOrigin}/__test/reset`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ seed: 'empty' }) });
@@ -247,6 +310,10 @@ export async function run(options) {
     await cdp.send('Performance.enable');
     if (options.cpuprof) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); }
     if (options.cpu > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: options.cpu });
+    const NETWORKS = { fast4g: [165, 9], slow4g: [400, 1.6] };
+    if (NETWORKS[options.net]) { await cdp.send('Network.enable'); await cdp.send('Network.emulateNetworkConditions', { offline: false, latency: NETWORKS[options.net][0], downloadThroughput: NETWORKS[options.net][1] * 1024 * 1024 / 8, uploadThroughput: 1.5 * 1024 * 1024 / 8 }); }
+    // A request that never answers: the worst network for a landing.
+    if (emulate.includes('stall-video')) await context.route('**/*.mp4', () => {});
     await page.goto(`${baseUrl}/tools/video-editor`, { waitUntil: 'domcontentloaded', timeout: 180_000 });
     await page.waitForFunction(() => document.querySelector('[data-editor-tour-card]'), null, { timeout: 180_000 });
     await page.evaluate(async ({ store, beats }) => {
@@ -363,7 +430,18 @@ export async function run(options) {
     if (options.until === "act1-respond") return await finish();
     // ---- Next -> act 1 land (scene)
     const land1 = { act: 1, beat: 'land' };
-    await transition('Next->land1', cardButton, land1, [['0-800ms', 800], ['scene load until ready', 'ready']]);
+    /** A video landing with its picture proof: sampled from the tap, through ready, for `--watch` ms in all. */
+    const videoLanding = async (key, label, control, dest) => {
+      await page.evaluate(() => window.__mp.begin());
+      const started = Date.now();
+      await transition(label, control, dest, [['0-800ms', 800], ['picture until ready', 'ready']]);
+      const left = options.watch - (Date.now() - started);
+      if (left > 0) await delay(left);
+      report.picture[key] = { ...(await page.evaluate(() => window.__mp.end())), readyAfterTapMs: report.phases.at(-1).readyAfterTapMs };
+      const p = report.picture[key];
+      console.log(`  picture ${key}: poster@${p.posterAtMs}ms, first moving frame@${p.firstMovingFrameAtMs}ms, rate ${p.playbackRate}, end ${JSON.stringify(p.end)}`);
+    };
+    await videoLanding('step1', 'Next->land1', cardButton, land1);
     report.scene.afterLand1 = await sceneProbe();
     await shot('04-land1');
     await idle('land1 (playing)');
@@ -373,6 +451,21 @@ export async function run(options) {
     await transition('Next->compose2', cardButton, compose2, [['0-800ms', 800], ['typing until done', 'ready']]);
     await shot('05-compose2');
     await idle('compose2');
+    if (options.until === 'act3-land') {
+      const send = () => page.locator('[data-editor-tour="chat-send"]');
+      await transition('Send->land2', send, { act: 2, beat: 'land' }, [['0-800ms', 800], ['stills walk until ready', 'ready']]);
+      await shot('06-land2');
+      await idle('land2');
+      await transition('Next->gallery', cardButton, { act: 2, beat: 'gallery' }, [['0-800ms', 800], ['until ready', 'ready']]);
+      await shot('07-gallery');
+      await idle('gallery');
+      await transition('Next->compose3', cardButton, { act: 3, beat: 'compose' }, [['0-800ms', 800], ['typing until done', 'ready']]);
+      await idle('compose3');
+      await videoLanding('step3', 'Send->land3', send, { act: 3, beat: 'land' });
+      await shot('08-land3');
+      await idle('land3 (playing under the card)');
+      report.picture.step3AfterIdle = await page.evaluate(() => { const v = document.querySelector('video[data-editor-tour-video]'); return v ? { currentTime: Math.round(v.currentTime * 100) / 100, paused: v.paused, ended: v.ended } : null; });
+    }
     report.browserErrors = browserErrors;
     report.glContextsTop = await page.evaluate(() => window.__pp.gl.length);
     report.iframesAtEnd = await page.evaluate(() => document.querySelectorAll('iframe').length);
@@ -409,12 +502,24 @@ function renderMarkdown(r) {
       ...(p.animations ? [`- running animations: ${p.animations.join('; ') || 'none'}`, `- will-change/backdrop/filter elements: ${p.layers?.fixedOrWillChange?.join('; ') || 'none'}`] : []),
       `- timers/s: setTimeout ${p.counters.setTimeout ?? 0}, setInterval ${p.counters.setInterval ?? 0}; heap ${p.cdp.heapMB}MB; DOM nodes ${p.cdp.nodes}; WebGL contexts so far ${p.glContexts}; ready after tap ${p.readyAfterTapMs ?? '-'}ms`, '');
   }
+  L.push('## The tour picture (video landings)', '', `Network: ${r.net ?? 'none'}; emulated failures: ${r.emulate?.length ? r.emulate.join(', ') : 'none'}.`, '',
+    '| landing | file | poster shown (ms after tap) | first moving frame (ms after tap) | ready after tap (ms) | playback rate | end: state / currentTime / presented frames | play() calls / rejected |', '|---|---|---|---|---|---|---|---|');
+  for (const key of ['step1', 'step3']) {
+    const p = r.picture?.[key];
+    if (p) L.push(`| ${key} | ${p.src} | ${p.posterAtMs ?? '-'} | ${p.firstMovingFrameAtMs ?? 'never'} | ${p.readyAfterTapMs ?? '-'} | ${p.playbackRate ?? '-'} | ${p.end?.state} / ${p.end?.currentTime} / ${p.end?.presentedFrames} | ${p.playCalls} / ${p.playRejected} |`);
+  }
+  for (const key of ['step1', 'step3']) {
+    const p = r.picture?.[key];
+    if (p) L.push('', `${key}, once a second (s, currentTime, presented frames, state): ${p.everySecond.map((e) => `[${e.join(', ')}]`).join(' ')}`);
+  }
+  if (r.picture?.step3AfterIdle) L.push('', `step 3 after its explainer has been up for the idle window: ${JSON.stringify(r.picture.step3AfterIdle)}`);
+  L.push('');
   L.push('## World / media proof', '', `- requests that look like the world or Three.js code: ${r.worldRequests?.length ? r.worldRequests.join(', ') : 'none'}`, `- WebGL contexts created in the page: ${r.glContextsTop}; iframes at end: ${r.iframesAtEnd}`, `- onboarding media requests: ${(r.mediaRequests ?? []).length}`, '', '## Scene (act 1 land)', '', '```json', JSON.stringify(r.scene, null, 1), '```', '', '## Notes', '', ...(r.notes.length ? r.notes.map((n) => `- ${n}`) : ['- none']), '', '## GL/console messages', '', ...(r.browserErrors?.length ? r.browserErrors.map((n) => `- ${n}`) : ['- none']));
   return `${L.join('\n')}\n`;
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === new URL(import.meta.url).pathname) {
   const options = parseOptions(process.argv.slice(2));
-  if (options.help) console.log(`usage: node scripts/tour-phone-profile.mjs [--out dir] [--device iphone-15|iphone-se|pixel-7] [--cpu 4] [--dpr 2] [--idle 3000] [--until act1-respond|act2-compose] [--no-throttle] [--base-url url]`);
+  if (options.help) console.log(`usage: node scripts/tour-phone-profile.mjs [--out dir] [--device iphone-15|iphone-se|pixel-7] [--cpu 4] [--dpr 2] [--idle 3000] [--until act1-respond|act2-compose|act3-land] [--watch 6000] [--net fast4g|slow4g] [--emulate reject-play,low-power,no-webcodecs,audio-resume-pending,stall-video] [--no-throttle] [--base-url url]`);
   else run(options).catch((e) => { console.error(e.stack ?? e.message); process.exitCode = 1; });
 }

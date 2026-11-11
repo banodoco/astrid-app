@@ -125,12 +125,12 @@ describe('the tour video engine', () => {
   it('reports the end once and releases the element on dispose', async () => {
     engine.load('/a.mp4');
     const times: number[] = [];
-    engine.onTime = (seconds) => times.push(seconds);
+    engine.onTime = (seconds, ended) => times.push(ended ? -seconds : seconds);
     const started = engine.start(1000);
     media.frame(engine.element, 13.9);
     await started;
     media.end(engine.element);
-    expect(times).toEqual([13.9, 13.9]);
+    expect(times).toEqual([13.9, -13.9]);
     engine.dispose();
     expect(engine.element.hasAttribute('src')).toBe(false);
     await expect(engine.start(10)).resolves.toBe('rejected');

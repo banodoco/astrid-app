@@ -45,7 +45,7 @@ describe('EditorTourGenerationsPane', () => {
     const images = Array.from(container.querySelectorAll('img'));
     expect(images).toHaveLength(4);
     images.forEach((img, index) => {
-      expect(img.getAttribute('src')).toBe(EDITOR_TOUR_MEDIA.stills[index].url);
+      expect(img.getAttribute('src')).toBe(EDITOR_TOUR_MEDIA.stills[index].displayUrl);
       expect(img.getAttribute('alt')).toBe(EDITOR_TOUR_GALLERY_LABELS[index]);
       expect(img.closest('[inert]')).not.toBeNull();
     });

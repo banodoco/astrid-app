@@ -61,7 +61,7 @@ function TourGalleryTile({ image, index }: { image: GeneratedImageWithMetadata; 
           <ImageContent
             image={image}
             index={index}
-            actualSrc={image.url}
+            actualSrc={image.thumbUrl ?? image.url}
             imageLoaded={loaded}
             imageLoadError={failed}
             progressiveEnabled={false}

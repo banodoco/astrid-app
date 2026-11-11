@@ -40,11 +40,12 @@ function createHarness() {
   // The editor's own player: the tour must never drive it.
   const previewHandle = { seek: vi.fn(), play: vi.fn(), pause: vi.fn() };
   const times: number[] = [];
+  const setTime = vi.fn();
   const store: TimelineStoreApi = createTimelineStore();
   store.setState((state) => ({
     ...state,
     timelineOps: { apply } as never,
-    data: { ...state.data, isLoading: false, data: {} as never, scaleWidth: 160 },
+    data: { ...state.data, isLoading: false, data: {} as never, scaleWidth: 160, timelineRef: { current: { setTime } } as never },
     playback: { ...state.playback, previewRef: { current: previewHandle } as never, onPreviewTimeUpdate: (time: number) => { times.push(time); } },
     chrome: {
       ...state.chrome,
@@ -58,7 +59,7 @@ function createHarness() {
       <EditorTourTimelineDriver />
     </TimelineStoreProvider>,
   );
-  return { apply, previewHandle, times, store, ...view };
+  return { apply, previewHandle, times, setTime, store, ...view };
 }
 
 const goTo = (act: EditorTourAct, beat: EditorTourBeat) => act_(() => setEditorTourBeat(act, beat));
@@ -211,7 +212,7 @@ describe('EditorTourTimelineDriver', () => {
 
   describe('steps 1 and 3 play a plain muted video', () => {
     it('shows the first frame as a poster at once, plays the guide from 0, and is ready at its first presented frame', async () => {
-      const { times } = createHarness();
+      const { times, setTime } = createHarness();
       await tick();
       // Buffered before its beat: the element already holds the guide.
       expect(tourVideo()).toHaveAttribute('src', EDITOR_TOUR_MEDIA.guide.playback!.large);
@@ -228,8 +229,18 @@ describe('EditorTourTimelineDriver', () => {
       expect(poster()).toBeNull();
       expect(picture()).toHaveAttribute('data-state', 'playing');
       // The playhead follows the picture.
-      act_(() => { vi.spyOn(performance, 'now').mockReturnValue(performance.now() + 500); media.frame(tourVideo()!, 2.5); });
-      expect(times.at(-1)).toBe(2.5);
+      // The playhead follows the picture: imperatively ten times a second, through the editor's time report once a second.
+      const base = performance.now();
+      const clock = vi.spyOn(performance, 'now');
+      const reports = times.length;
+      act_(() => { clock.mockReturnValue(base + 300); media.frame(tourVideo()!, 0.3); });
+      expect(setTime).toHaveBeenLastCalledWith(0.3);
+      expect(times).toHaveLength(reports);
+      act_(() => { clock.mockReturnValue(base + 1500); media.frame(tourVideo()!, 1.5); });
+      expect(times.at(-1)).toBe(1.5);
+      act_(() => { clock.mockReturnValue(base + 1600); media.end(tourVideo()!); });
+      expect(times.at(-1)).toBe(1.5);
+      expect(times).toHaveLength(reports + 2);
     });
 
     it('plays the H3 clip on step 3 over its own first frame, and keeps it playing under the cards that follow', async () => {

@@ -1691,6 +1691,20 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   await sniff.attach(page);
   let c!: CommitAcceptedMutation;
   const preconditionOwner = await openCommandTimeline(page, harness, seed3);
+  // The serial M1 case leaves the worker-scoped seed at 5 after its undo and
+  // same-value Agent publications. Restore the 0 position needed by the
+  // asserted 0→5 precondition gesture through the mounted App when necessary.
+  const startingHead = (await history(harness, seed3)).head;
+  const startingPosition = ((await revisionBody(harness, startingHead.revision_id)).payload.clips as Array<{ id: string; at: number }>)
+    .find((clip) => clip.id === seed3.appClipId)!.at;
+  if (startingPosition !== 0) {
+    expect(startingPosition).toBe(5);
+    const startingResetResponse = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
+    await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 5, 0, THREE_PRODUCTS_REFERENCE_AT);
+    const startingReset = await startingResetResponse;
+    expect(startingReset.status(), await startingReset.text()).toBe(200);
+  }
+  await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
   const preconditionBase = await history(harness, seed3);
   const preGestureDocument = await canonicalDocumentAt(harness, seed3, preconditionBase.head.revision_id);
   const preconditionRequest = page.waitForRequest((request) => {

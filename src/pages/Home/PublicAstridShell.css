@@ -285,24 +285,38 @@
   filter: blur(4px);
   pointer-events: none;
 }
-/* The call to action's note. In a wide button it sits at the far end, just before the arrow; in a
-   narrow one (see the container rule) it drops under the label. */
+/* The call to action's note. In a wide button it follows the label after a thin divider, the two
+   sharing a baseline as one line of text, and the arrow stands alone at the far end; in a narrow button
+   (see the container rule) it drops under the label. */
 .astrid-hero-cta { container-type: inline-size; }
-.astrid-hero-cta > .astrid-button { justify-content: flex-start; gap: 10px; }
+.astrid-hero-cta > .astrid-button { justify-content: flex-start; gap: 11px; }
 .astrid-cta-label { flex: 0 0 auto; white-space: nowrap; }
 .astrid-cta-note {
-  flex: 1 1 auto;
+  position: relative;
+  flex: 0 1 auto;
   min-width: 0;
+  /* Centred in the button, the smaller note would ride a pixel above the label's baseline. */
+  margin-top: 2px;
+  padding-left: 12px;
   overflow: hidden;
   color: color-mix(in srgb, currentColor 72%, transparent);
   font-size: 12.5px;
   font-weight: 400;
   letter-spacing: .01em;
-  text-align: right;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.astrid-hero-cta > .astrid-button > svg { flex: 0 0 auto; }
+/* The divider is centred on the label's line, not on the smaller note's. */
+.astrid-cta-note::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: -.32em;
+  bottom: -.12em;
+  width: 1px;
+  background: color-mix(in srgb, currentColor 45%, transparent);
+}
+.astrid-hero-cta > .astrid-button > svg { flex: 0 0 auto; align-self: center; margin-left: auto; }
 @container (max-width: 268px) {
   .astrid-hero-cta > .astrid-button {
     display: grid;
@@ -312,8 +326,9 @@
     padding-block: 7px;
   }
   .astrid-cta-label { grid-column: 1; grid-row: 1; line-height: 1.2; }
-  .astrid-cta-note { grid-column: 1; grid-row: 2; font-size: 11.5px; line-height: 1.25; text-align: left; }
-  .astrid-hero-cta > .astrid-button > svg { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+  .astrid-cta-note { grid-column: 1; grid-row: 2; margin-top: 0; padding-left: 0; font-size: 11.5px; line-height: 1.25; }
+  .astrid-cta-note::before { content: none; }
+  .astrid-hero-cta > .astrid-button > svg { grid-column: 2; grid-row: 1 / 3; align-self: center; margin-left: 0; }
 }
 /* Keep each action in its own row while the staged hero states fade between them. */
 .astrid-hero-cta > [data-active="true"] { transition-delay: 70ms, 70ms, 70ms, 70ms, 0s; }

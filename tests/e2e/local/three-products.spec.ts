@@ -2354,6 +2354,15 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses the 
   const auditedBeforeCreate = harness.audit().length;
   await openApp(page, harness);
   await expectConnected(page);
+  let catalogCreateBody: { timeline_id?: string } | undefined;
+  let catalogCreateKey: string | null = null;
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (request.method() === 'POST' && url.pathname.endsWith('/v1/projects/' + url.pathname.split('/').at(-2) + '/timelines')) {
+      catalogCreateBody = request.postDataJSON() as { timeline_id?: string };
+      catalogCreateKey = request.headers()['idempotency-key'] ?? null;
+    }
+  });
   await page.getByRole('button', { name: 'New project' }).click();
   const projectName = `Bootstrap actual ${Date.now()}`;
   await page.locator('#project-name').fill(projectName);
@@ -2386,6 +2395,9 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses the 
   await expect(page).toHaveURL(/\/tools\/video-editor\?project=[^&]+&timeline=[^&]+/, CEILING);
   const selectedTimelineId = new URL(page.url()).searchParams.get('timeline');
   expect(selectedTimelineId, 'the production initializer must select the created canonical timeline').toBeTruthy();
+  expect(selectedTimelineId).toBe(catalogCreateBody?.timeline_id);
+  expect(catalogCreateBody?.timeline_id).toEqual(expect.any(String));
+  expect(catalogCreateKey).toBe(`astrid-first-timeline-${projectId}`);
   await expect.poll(async () => {
     const owner = (await commandOutboxes(page, selectedTimelineId!))
       .find((candidate) => candidate.scope.projectId === projectId && candidate.scope.timelineId === selectedTimelineId);
@@ -2421,12 +2433,23 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses the 
   // Runtime's catalog create publishes the one canonical bootstrap (V1 and A1, 8012d6a); nothing follows it.
   expect(bootstrapHistory.items).toHaveLength(1);
   const [bootstrapEntry] = bootstrapHistory.items;
+  expect((bootstrapEntry.receipt.result as { revision_id?: unknown }).revision_id).toBe(bootstrapEntry.revision_id);
   expect(bootstrapEntry).toMatchObject({
     publication_id: bootstrapEntry.receipt.receipt_id,
     previous: null,
     intent: 'bootstrap',
     records: null,
-    receipt: { project_id: expectedScope.projectId, result: { project_id: expectedScope.projectId, timeline_id: expectedScope.timelineId } },
+    receipt: {
+      command_kind: 'parent_composition.publish',
+      idempotency_key: `bootstrap:${expectedScope.timelineId}`,
+      project_id: expectedScope.projectId,
+      result: {
+        project_id: expectedScope.projectId,
+        timeline_id: expectedScope.timelineId,
+        old_head: null,
+        new_head: bootstrapEntry.revision_id,
+      },
+    },
   });
   expect(bootstrapHistory.head).toEqual({ revision_id: bootstrapEntry.revision_id, publication_id: bootstrapEntry.publication_id });
 

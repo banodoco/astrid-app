@@ -58,8 +58,6 @@ interface Props {
   reducedMotion: boolean;
   active: boolean;
   move: MutableRefObject<CalloutMove | null>;
-  /** Called once the new audience is committed, before the cards' destinations are measured. */
-  prepareLayout?: () => void;
   children: ReactNode;
 }
 /** Keep in step with the phone breakpoint in PublicAstridShell.css. */
@@ -181,7 +179,6 @@ export class PublicAstridCalloutLayout extends Component<Props> {
   };
 
   componentDidUpdate(previous: Props, _state: unknown, snapshot: Snapshot | null) {
-    if (previous.audience !== this.props.audience) this.props.prepareLayout?.();
     if (!this.props.active || this.props.reducedMotion) { this.stop(); return; }
     if (previous.audience === this.props.audience || !snapshot) return;
     this.stop(false);
@@ -194,16 +191,15 @@ export class PublicAstridCalloutLayout extends Component<Props> {
     if (!move || move.epoch !== snapshot.epoch) return;
     // Which old card each slot morphs from. Desktop: Agent's visual order enters counterclockwise from App,
     // so App -> Agent pairs Effects -> Community, Models -> Tools, Timeline -> Workflows, and the reverse
-    // keeps the established Agent -> App path. Phones hang the cards over the demo's top and bottom edges
-    // (Agent: Tools on top, Workflows and Community below; App: Timeline and Effects on top, Models below),
-    // so there each slot keeps its own card both ways: Tools <-> Effects shrinks or grows along the top,
-    // Workflows <-> Models stays below. The one slot whose cards sit on opposite sides of the demo
-    // (Community <-> Timeline) never crosses it: the old card fades out where it was while the new one
-    // fades in where it lands.
+    // keeps the established Agent -> App path.
     const phone = typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
-    const sourceOrder = !phone && previous.audience === 'app' && this.props.audience === 'agent'
-      ? [1, 2, 0]
-      : snapshot.boxes.map((_, index) => index);
+    // Phone chips keep their place: left stays left (Effects <-> Community), right stays right
+    // (Timeline <-> Tools), and the bottom chip stays below (Models <-> Workflows).
+    const sourceOrder = phone && snapshot.boxes.length === 3
+      ? [1, 0, 2]
+      : previous.audience === 'app' && this.props.audience === 'agent'
+        ? [1, 2, 0]
+        : snapshot.boxes.map((_, index) => index);
     const sourceBoxes = sourceOrder.map(index => snapshot.boxes[index]);
     const above = (box: DOMRect, stage: DOMRect) => box.top + box.height / 2 < stage.top + stage.height / 2;
     const fadesInPlace = cards.map((_, index) => phone && !!sourceBoxes[index] && !!destinations[index]

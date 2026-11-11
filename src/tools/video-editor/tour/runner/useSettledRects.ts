@@ -42,7 +42,7 @@ interface CommitOptions {
 const isFar = (a: readonly SpotlightRect[], b: readonly SpotlightRect[]) => a.length !== b.length
   || a.some((r, i) => [r.x - b[i].x, r.y - b[i].y, r.width - b[i].width, r.height - b[i].height].some((d) => Math.abs(d) > RECT_DISTANCE));
 
-const signatureOf = (m: SpotlightMeasurement) => `${m.key}|${m.complete}|${m.rects.map((r) => `${r.x},${r.y},${r.width},${r.height}`).join(';')}`;
+const signatureOf = (m: SpotlightMeasurement) => `${m.key}|${m.complete}|${m.still ?? ''}|${m.rects.map((r) => `${r.x},${r.y},${r.width},${r.height}`).join(';')}`;
 
 function useViewportKey(): string {
   const read = () => `${window.innerWidth}x${window.innerHeight}`;
@@ -93,7 +93,8 @@ export function useSettledRects({ key, targetsKey, measurement, motion, moving, 
       run.changedAt = now;
       run.frames = 0;
     } else run.frames += 1;
-    const still = isValid && run.frames >= STILL_FRAMES && now - run.changedAt >= STILL_MS;
+    // The measuring hook says when its rects have come to rest; measurements that carry no such word are timed here.
+    const still = isValid && (m.still === true || (m.still === undefined && run.frames >= STILL_FRAMES && now - run.changedAt >= STILL_MS));
     const again = () => { run.frame = requestAnimationFrame(tick); };
     const done = committed.current;
     const newStep = !done || done.key !== nextKey;

@@ -2,6 +2,9 @@
 
 export const EDITOR_TOUR_ANCHOR_ATTRIBUTE = 'data-editor-tour';
 export const EDITOR_TOUR_TRACK_ATTRIBUTE = 'data-editor-tour-track';
+/** The running tour's own overlay: the card's host and the dimming shield. */
+export const EDITOR_TOUR_CARD_HOST_ATTRIBUTE = 'data-editor-tour-card-host';
+export const EDITOR_TOUR_SHIELD_ATTRIBUTE = 'data-editor-tour-shield';
 
 export const EDITOR_TOUR_ANCHORS = Object.freeze({
   chatComposer: 'chat-composer',

@@ -15,7 +15,7 @@ export function EditorCardFoot({ children }: { readonly children: ReactNode }) {
 export function EditorCard({ title, sentence, children, foot, topLeft, scrollContent = false, icon = true }: { readonly title: ReactNode; readonly sentence?: ReactNode; readonly children?: ReactNode; readonly foot?: ReactNode; readonly topLeft?: ReactNode; readonly scrollContent?: boolean; readonly icon?: boolean }) {
   return <div className={cn('relative overflow-hidden rounded-[18px] border border-border bg-card text-center shadow-[0_24px_60px_-24px_rgb(37_36_31/0.45),0_2px_8px_rgb(37_36_31/0.08)]', scrollContent && 'flex max-h-[calc(100dvh-2rem)] flex-col')}>
     {topLeft && <div className="absolute left-3 top-3">{topLeft}</div>}
-    <div className={cn('space-y-4 p-[22px] pt-[26px]', scrollContent && 'flex min-h-0 flex-col space-y-3 p-4 pt-5 sm:p-5')}>
+    <div className={cn('space-y-4 p-[22px] pt-[26px]', topLeft && !icon && 'pt-[52px]', scrollContent && 'flex min-h-0 flex-col space-y-3 p-4 pt-5 sm:p-5')}>
       <header className="grid shrink-0 justify-items-center gap-3">
         {/* The icon file carries its own rounded tile and shadow, as the install dialog shows it at this size. */}
         {icon && <img src={AVATAR_SRC} alt="" className="-mb-1.5 h-[76px] w-[76px]" />}

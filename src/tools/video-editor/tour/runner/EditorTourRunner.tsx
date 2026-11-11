@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { EDITOR_TOUR_ANCHORS, EDITOR_TOUR_TRACK_IDS, editorTourSelector, editorTourTrackSelector } from '../anchors';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers';
@@ -185,10 +185,29 @@ function RunningTour() {
     shown.current = { rects, position };
   }
   const { rects: spotlit, position } = shown.current;
+  // Stable elements: a new rect or position re-renders this component, not the gallery layer or the card's content.
+  const gallery = useMemo(() => <TourGalleryLayer />, []);
+  const shownActNumber = Number(shownAct) as EditorTourAct;
+  const shownWorking = shownPhase === 'working';
+  const cardRise = rise.current.rise;
+  const card = useMemo(() => (
+    <TourCard
+      act={shownActNumber}
+      beat={shownBeat}
+      working={shownWorking}
+      watching={watchShown}
+      arrived={arrived}
+      rise={cardRise}
+      device={device}
+      onPrimary={runEditorTourPrimary}
+      onBack={backEditorTour}
+      onSkip={finishEditorTour}
+    />
+  ), [shownActNumber, shownBeat, shownWorking, watchShown, arrived, cardRise, device]);
   const moves = motion && commit.animate;
   return (
     <>
-      <TourGalleryLayer />
+      {gallery}
       <TourSpotlight rects={spotlit} clickable={sendRects[0] ?? null} reducedMotion={reducedMotion} animate={commit.animate} />
       <div
         ref={cardRef}
@@ -210,18 +229,7 @@ function RunningTour() {
           pointerEvents: (pending && !unfolding) || !landed || hidden ? 'none' : undefined,
         }}
       >
-        <TourCard
-          act={Number(shownAct) as EditorTourAct}
-          beat={shownBeat}
-          working={shownPhase === 'working'}
-          watching={watchShown}
-          arrived={arrived}
-          rise={rise.current.rise}
-          device={device}
-          onPrimary={runEditorTourPrimary}
-          onBack={backEditorTour}
-          onSkip={finishEditorTour}
-        />
+        {card}
       </div>
     </>
   );

@@ -16,13 +16,18 @@ function replace(anchor, replacement) {
 // All failures in the observer are contained; collision or logging failure invalidates diagnostic evidence.
 const helper = `
 const __r12 = (() => {
-  let n = 0, invalid = false;
+  let n = 0, seq = 0, invalid = false;
   const objects = new WeakMap(), ids = new Map(), guids = new Map();
   const obj = o => { if (!o) return 0; if (!objects.has(o)) objects.set(o, ++n); return objects.get(o); };
   const net = (manager, id) => { let m = ids.get(manager); if (!m) ids.set(manager, m = new Map()); if (!m.has(id)) m.set(id, ++n); return m.get(id); };
-  const emit = (event, fields = {}) => { try { require('fs').writeSync(2, 'PW_R12 ' + JSON.stringify({event, process: process.pid, ...fields}) + '\\n'); } catch { invalid = true; } };
+  const emit = (event, fields = {}) => { const current = ++seq; try { const line = 'PW_R12 ' + JSON.stringify({event, process: process.pid, seq: current, ...fields}) + '\\n'; if (require('fs').writeSync(2, line) !== Buffer.byteLength(line)) invalid = true; } catch { invalid = true; } };
   const guid = g => { const x = parseInt(require('crypto').createHash('sha256').update(g).digest('hex').slice(0, 12), 16); const prior = guids.get(x); if (prior !== undefined && prior !== g) { invalid = true; emit('collision'); } else guids.set(x, g); return x; };
-  return { obj, net, emit, guid, get invalid() { return invalid; } };
+  const fail = () => { invalid = true; };
+  if (process.env.PW_R12_DIAGNOSTICS === '1') {
+    emit('observer-start');
+    try { process.on('exit', () => { emit('observer-end', { invalid: invalid ? 1 : 0 }); }); } catch { invalid = true; }
+  }
+  return { obj, net, emit, guid, fail };
 })();
 `;
 replace('"use strict";\nvar __create', '"use strict";\n' + helper + 'var __create');
@@ -37,5 +42,5 @@ replace('      _onLoadingFailed(sessionInfo, event) {\n        this._responseExt
 replace('          await this._session.send("Fetch.failRequest", {\n            requestId: this._interceptionId,\n            errorReason\n          });', '          __r12.emit("fail-begin", { route: __r12.net(this._session, this._interceptionId), session: __r12.obj(this._session) });\n          try {\n            await this._session.send("Fetch.failRequest", { requestId: this._interceptionId, errorReason });\n            __r12.emit("fail-success", { route: __r12.net(this._session, this._interceptionId), session: __r12.obj(this._session) });\n          } catch (error) {\n            __r12.emit("fail-rejected", { route: __r12.net(this._session, this._interceptionId), session: __r12.obj(this._session) });\n            throw error;\n          }');
 replace('        this._type_Request = true;\n        this._browserContextDispatcher = scope;', '        __r12.emit("dispatcher", { object: __r12.obj(request2), guid: __r12.guid(this._guid) });\n        this._type_Request = true;\n        this._browserContextDispatcher = scope;');
 // Guard argument evaluation too: observer failures must never affect Playwright.
-output = output.replace(/^(\s*)__r12\.emit\(([^\n]+)\);$/gm, '$1if (process.env.PW_R12_DIAGNOSTICS === \"1\") { try { __r12.emit($2); } catch {} }');
+output = output.replace(/^(\s*)__r12\.emit\(([^\n]+)\);$/gm, '$1if (process.env.PW_R12_DIAGNOSTICS === \"1\") { try { __r12.emit($2); } catch { __r12.fail(); } }');
 writeFileSync(bundle, output);

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, mkdirSync, copyFileSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, copyFileSync, cpSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -58,7 +58,7 @@ test('opt-in protocol events join without disclosing request contents', () => {
   assert.ok(created);
   assert.ok(records.some(r => r.event === 'fail-begin' && r.route === created.route));
   assert.ok(records.some(r => r.event === 'loading-failed' && r.request === created.request));
-  assert.ok(records.every(r => Object.keys(r).every(k => ['event','process','session','request','route','object','guid','hit'].includes(k))));
+  assert.ok(records.every(r => Object.keys(r).every(k => ['event','process','seq','invalid','session','request','route','object','guid','hit'].includes(k))));
 });
 
 
@@ -67,18 +67,35 @@ test('diagnostic verifier rejects collisions and missing joins', () => {
   try {
     const file = join(dir, 'log');
     const verify = resolve('scripts/diagnostics/verify-playwright-log.mjs');
-    const rows = [
-      'PW_R12 '+JSON.stringify({event:'dispatcher', process:1, object:2, guid:3}),
+    const scannerRows = [
       'TOKEN_SNIFF '+JSON.stringify({event:'request', process:4, scanner:5, request:6}),
       'TOKEN_SNIFF '+JSON.stringify({event:'protocol-join', process:4, scanner:5, request:6, protocol:3}),
+      'TOKEN_SNIFF '+JSON.stringify({event:'gate-entry', process:4, scanner:5, request:6}),
     ];
-    writeFileSync(file, rows.join('\n'));
-    assert.equal(run(process.execPath, [verify, file]).status, 0);
-    writeFileSync(file, [...rows, 'PW_R12 '+JSON.stringify({event:'collision', process:1})].join('\n'));
-    assert.notEqual(run(process.execPath, [verify, file]).status, 0);
-    writeFileSync(file, rows.slice(0, 2).join('\n'));
-    assert.notEqual(run(process.execPath, [verify, file]).status, 0);
-    writeFileSync(file, [...rows, 'PW_R12 '+JSON.stringify({event:'dispatcher', process:7, object:8, guid:3})].join('\n'));
+    const check = (events, ok) => {
+      const records = events.map((row, i) => 'PW_R12 '+JSON.stringify({ process:1, seq:i + 1, ...row }));
+      writeFileSync(file, [...records, ...scannerRows].join('\n'));
+      assert.equal(run(process.execPath, [verify, file]).status === 0, ok);
+    };
+    const start = {event:'observer-start'}, end = {event:'observer-end', invalid:0};
+    const made = {event:'created', object:2, request:9, route:10, session:11};
+    const dispatcher = {event:'dispatcher', object:2, guid:3};
+    const sent = {event:'will-send', request:9, session:11};
+    const paused = {event:'paused', request:9, route:10, session:11};
+    check([start, sent, paused, made, dispatcher, end], true);
+    check([start, paused, made, dispatcher, end], false);
+    check([start, sent, made, dispatcher, end], false);
+    check([start, sent, paused, {...paused, route:20}, made, dispatcher, end], true);
+    check([start, sent, paused, paused, made, dispatcher, end], false);
+    check([start, dispatcher, end], false);
+    check([start, sent, paused, made, made, dispatcher, end], false);
+    check([start, sent, {...made, route:0}, dispatcher, end], false);
+    check([start, sent, paused, made, dispatcher], false);
+    check([start, sent, paused, made, dispatcher, {...end, invalid:1}], false);
+    check([start, sent, paused, made, dispatcher, {event:'collision'}, end], false);
+    check([start, sent, paused, made, dispatcher, dispatcher, end], false);
+    const gap = [{...start, seq:1}, {...made, seq:3}, {...dispatcher, seq:4}, {...end, seq:5}];
+    writeFileSync(file, [...gap.map(row => 'PW_R12 '+JSON.stringify({process:1, ...row})), ...scannerRows].join('\n'));
     assert.notEqual(run(process.execPath, [verify, file]).status, 0);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -105,4 +122,63 @@ test('navigation-invalidated Fetch.failRequest keeps Playwright abort outcome', 
   assert.equal(off.stdout.trim(), 'ABORT_RESOLVED');
   assert.equal(on.stdout.trim(), off.stdout.trim());
   assert.match(on.stderr, /"event":"fail-rejected"/);
+});
+
+
+test('observer write failure is sticky without changing Playwright outcomes', () => {
+  const executable = process.env.R12_CHROMIUM_EXECUTABLE;
+  assert.ok(executable);
+  const program = `
+    const fs = require('fs'); const original = fs.writeSync; let injected = false;
+    fs.writeSync = function(fd, value, ...rest) {
+      if (!injected && typeof value === 'string' && value.includes('"event":"will-send"')) { injected = true; throw new Error('observer test failure'); }
+      return original.call(this, fd, value, ...rest);
+    };
+    const {chromium} = require(${JSON.stringify(source)});
+    (async () => {
+      const browser = await chromium.launch({headless:true, executablePath:${JSON.stringify(executable)}});
+      const page = await browser.newPage(); await page.route('**/*', route => route.abort());
+      try { await page.goto('http://127.0.0.1:1/'); console.log('UNEXPECTED'); }
+      catch { console.log('EXPECTED_FAILURE'); }
+      await browser.close();
+    })().catch(() => process.exitCode = 1);
+  `;
+  const result = run(process.execPath, ['-e', program], { env: { ...process.env, PW_R12_DIAGNOSTICS: '1' } });
+  assert.equal(result.status, 0);
+  assert.equal(result.stdout.trim(), 'EXPECTED_FAILURE');
+  const records = result.stderr.split('\n').filter(line => line.startsWith('PW_R12 ')).map(line => JSON.parse(line.slice(7)));
+  assert.ok(records.some(r => r.event === 'observer-end' && r.invalid === 1));
+  assert.ok(records.some((r, i) => i > 0 && r.seq !== records[i - 1].seq + 1));
+  assert.ok(!result.stderr.includes('observer test failure'));
+});
+
+
+test('observer mapping failure is sticky without changing Playwright outcomes', () => {
+  const executable = process.env.R12_CHROMIUM_EXECUTABLE;
+  assert.ok(executable);
+  const dir = mkdtempSync(join(tmpdir(), 'r12-observer-'));
+  try {
+    cpSync(source, dir, {recursive:true});
+    const file = join(dir, 'lib/coreBundle.js');
+    const bundle = readFileSync(file, 'utf8');
+    const marker = 'const obj = o => {';
+    assert.equal(bundle.split(marker).length, 2);
+    writeFileSync(file, bundle.replace(marker, marker + ' throw new Error("observer mapping failure");'));
+    const program = `
+      const {chromium} = require(${JSON.stringify(dir)});
+      (async () => {
+        const browser = await chromium.launch({headless:true, executablePath:${JSON.stringify(executable)}});
+        const page = await browser.newPage(); await page.route('**/*', route => route.abort());
+        try { await page.goto('http://127.0.0.1:1/'); console.log('UNEXPECTED'); }
+        catch { console.log('EXPECTED_FAILURE'); }
+        await browser.close();
+      })().catch(() => process.exitCode = 1);
+    `;
+    const result = run(process.execPath, ['-e', program], { env: { ...process.env, PW_R12_DIAGNOSTICS: '1' } });
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), 'EXPECTED_FAILURE');
+    const records = result.stderr.split('\n').filter(line => line.startsWith('PW_R12 ')).map(line => JSON.parse(line.slice(7)));
+    assert.ok(records.some(r => r.event === 'observer-end' && r.invalid === 1));
+    assert.ok(!result.stderr.includes('observer mapping failure'));
+  } finally { rmSync(dir, {recursive:true, force:true}); }
 });

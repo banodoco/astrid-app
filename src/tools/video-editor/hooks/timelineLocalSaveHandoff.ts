@@ -434,9 +434,10 @@ export function createTimelineLocalSaveHandoff(options: {
             && (duplicateVideo || !prepared.removeClipId.startsWith('uploading-')))
             || (!duplicateVideo && prepared.afterClipId) || prepared.replaceClipId || prepared.removeClipIds?.length
             || prepared.pinnedShotGroupsOverride
-            || (!duplicateVideo && prepared.asset.mediaType !== 'image')) {
+            || !['image', 'video', 'audio'].includes(prepared.asset.mediaType)) {
             refuse('prepared media currently supports an ordinary image add on a visual track. Draft retained; reload the timeline, then choose Add media');
           }
+          const laneKind = prepared.asset.mediaType === 'audio' ? 'audio' : 'visual';
           const config = configBefore as Record<string, OutboxJson>;
           const nextConfig = payload.config as Record<string, OutboxJson>;
           const clips = config.clips;
@@ -463,7 +464,7 @@ export function createTimelineLocalSaveHandoff(options: {
             || (newTrack ? duplicateVideo || !same(nextTracks.filter(track => track !== newTrack), tracks)
               : !same(nextTracks, tracks))
             || !visualTrack || visualTrack.length !== 1 || !object(visualTrack[0])
-            || visualTrack[0].kind !== 'visual' || (visualTrack[0].role ?? 'output') !== 'output') {
+            || visualTrack[0].kind !== laneKind || (visualTrack[0].role ?? 'output') !== 'output') {
             refuse('prepared media changes more than one ordinary parent clip. Draft retained; reload the timeline, then choose an existing visual track');
           }
           if (Array.isArray(parent.occurrences) && parent.occurrences.some(occurrence => object(occurrence)
@@ -509,11 +510,21 @@ export function createTimelineLocalSaveHandoff(options: {
               command_ordinals: [0], patch: [], reads: [{ kind: 'field', ref: 'parent', path: ['config', 'clips', `id:${prepared.afterClipId}`],
                 state: { state: 'present', value: authoredJson(anchor) } }] }];
           } else {
+            // The editor previews video/audio by its source window alone. The
+            // native birth requires the literal span too: hold is exactly the
+            // previewed window (to - from), never a rounded or estimated value.
+            const windowed = prepared.asset.mediaType !== 'image' && row.hold === undefined
+              && typeof row.from === 'number' && typeof row.to === 'number'
+              && Number.isFinite(row.from) && Number.isFinite(row.to) && row.to > row.from;
+            if (prepared.asset.mediaType !== 'image' && row.hold === undefined && !windowed) {
+              refuse('prepared media has no source window to place');
+            }
+            const commandRow = windowed ? { ...row, hold: (row.to as number) - (row.from as number) } : row;
             commands = [
               ...(newTrack ? [{ schema_version: 1, op: 'track.create', version: '1', select: 'parent',
                 args: { row: authoredJson(newTrack) }, intent: {}, created: [`parent/track:${row.track}`] } as EditCommand] : []),
               { schema_version: 1, op: 'clip.add-media', version: '1', select: 'parent',
-              args: { row: authoredJson(row), media: authoredJson(media) }, intent: {}, created: [
+              args: { row: authoredJson(commandRow), media: authoredJson(media) }, intent: {}, created: [
                 ...(Object.prototype.hasOwnProperty.call(parent.registry.assets ?? {}, row.asset) ? [] : [`parent/asset:${row.asset}`]),
                 `parent/clip:${row.id}`,
               ] }];

@@ -23,6 +23,7 @@ import { buildTimelineData } from '../lib/timeline-data.ts';
 import { emitTimelineSaveDiagnostic } from '../lib/timeline-diagnostics.ts';
 import { TimelineSaveError, TimelineVersionConflictError } from '../data/DataProvider.ts';
 import type { AssetRegistry, TimelineConfig } from '../types/index.ts';
+import type { EditCommand } from '@/integrations/runtime/timeline-commit-types.ts';
 import { createTimelineLocalSaveHandoff, type TimelineSaveSource } from './timelineLocalSaveHandoff.ts';
 
 vi.mock('@/shared/components/ui/runtime/sonner.tsx', () => ({ toast: { error: vi.fn() } }));
@@ -96,24 +97,59 @@ function preparedImageCommand(removeClipId?: string) {
 }
 
 describe('upstream local document handoff', () => {
-  it('retains the upstream video preview whose row lacks the hold required by Python media add', async () => {
-    const env = await environment();
-    const current = await buildTimelineData(env.source.config, env.source.registry);
-    const command = { type: 'place-prepared-media' as const, payload: { at: 0, trackId: 'V1', asset: {
-      assetKey: 'import-video', mediaType: 'video' as const, durationSeconds: 3, source: 'registered' as const,
-      entry: { file: 'import.mp4', type: 'video/mp4', duration: 3 }, mediaSelection: { asset: 'import-video',
-        generation_id: 'generation', variant_id: 'variant', object_id: `sha256:${'a'.repeat(64)}`, catalog_digest: `sha256:${'b'.repeat(64)}` },
+  function preparedWindowedCommand(mediaType: 'video' | 'audio', trackId: string, removeClipId?: string) {
+    const key = `import-${mediaType}`;
+    return { type: 'place-prepared-media' as const, payload: { at: 0, trackId, ...(removeClipId ? { removeClipId } : {}), asset: {
+      assetKey: key, mediaType, durationSeconds: 3, source: 'registered' as const,
+      entry: { file: `import.${mediaType === 'video' ? 'mp4' : 'mp3'}`, type: mediaType === 'video' ? 'video/mp4' : 'audio/mpeg', duration: 3 },
+      mediaSelection: { asset: key, generation_id: 'generation', variant_id: 'variant',
+        object_id: `sha256:${'a'.repeat(64)}`, catalog_digest: `sha256:${'b'.repeat(64)}` },
     } } };
+  }
+
+  for (const [mediaType, trackId] of [['video', 'V1'], ['audio', 'A1']] as const) {
+    it(`persists a dropped ${mediaType} as one native clip.add-media whose hold is exactly its previewed source window`, async () => {
+      const env = await environment(false, false, ['authored'], undefined, undefined, false, false, false, true);
+      const current = await buildTimelineData(env.source.config, env.source.registry);
+      const skeletonId = `uploading-test-${mediaType}`;
+      const lane = current.rows.findIndex(row => row.id === trackId);
+      current.rows[lane].actions.push({ id: skeletonId, start: 0, end: 5, effectId: `effect-${skeletonId}` });
+      current.meta[skeletonId] = { asset: `uploading:drop.${mediaType}`, track: trackId, clipType: 'hold', hold: 5 };
+      const command = preparedWindowedCommand(mediaType, trackId, skeletonId);
+      const preview = applyPreparedMediaCommand(current, command)!;
+      const row = preview.nextData.config.clips[0];
+      // The editor keeps its upstream preview; only the native command row carries hold.
+      expect(row).toMatchObject({ from: 0, to: 3, asset: `import-${mediaType}`, track: trackId });
+      expect(row.hold).toBeUndefined();
+      await env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry },
+        { kind: 'prepared-media', config: env.source.config, registry: env.source.registry, clipId: row.id, command });
+      const [stored] = await env.outboxes.list(env.scope);
+      expect(stored.intents).toHaveLength(1);
+      const payload = stored.intents[0].payload as { commands: EditCommand[] };
+      expect(payload.commands).toHaveLength(1);
+      expect(payload.commands[0]).toMatchObject({ op: 'clip.add-media', select: 'parent', args: {
+        row: { id: row.id, asset: `import-${mediaType}`, track: trackId, clipType: 'media', at: 0, from: 0, to: 3, hold: 3, speed: 1 },
+        media: command.payload.asset.mediaSelection,
+      } });
+      expect(env.session.getDocument()).toMatchObject({ parent_revision: { payload: { config: { clips: [
+        { id: row.id, asset: `import-${mediaType}`, from: 0, to: 3 },
+      ] } } } });
+      await env.session.dispose();
+    });
+  }
+
+  it('refuses a windowed media drop whose preview has no source window instead of inventing a span', async () => {
+    const env = await environment(false, false, ['authored'], undefined, undefined, false, false, false, true);
+    const current = await buildTimelineData(env.source.config, env.source.registry);
+    const command = preparedWindowedCommand('video', 'V1');
     const preview = applyPreparedMediaCommand(current, command)!;
-    const row = preview.nextData.config.clips[0];
-    expect(row).toMatchObject({ from: 0, to: 3, asset: 'import-video' });
-    expect(row.hold).toBeUndefined();
-    await expect(env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry },
-      { kind: 'prepared-media', config: env.source.config, registry: env.source.registry, clipId: row.id, command }))
-      .rejects.toThrow('ordinary image add');
+    const config = structuredClone(preview.nextData.config);
+    delete (config.clips[0] as Record<string, unknown>).to;
+    await expect(env.handoff.capture({ ...env.source, config, registry: preview.nextData.registry },
+      { kind: 'prepared-media', config: env.source.config, registry: env.source.registry, clipId: config.clips[0].id, command }))
+      .rejects.toThrow('no source window');
     await expect(env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry }))
       .rejects.toThrow('original Runtime project media selection');
-    expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
     expect(env.send).not.toHaveBeenCalled();
     await env.session.dispose();

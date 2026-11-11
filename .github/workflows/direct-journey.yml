@@ -34,6 +34,11 @@ on:
         required: false
         default: false
         type: boolean
+      protocol_diagnostics:
+        description: Capture and verify sanitized Playwright protocol diagnostics for three-products
+        required: false
+        default: false
+        type: boolean
       runtime_ref:
         description: Optional Runtime SHA or ref for both journey jobs; empty uses the App manifest's pin
         required: false
@@ -309,6 +314,22 @@ jobs:
           npx playwright install --with-deps chromium chrome
           sudo apt-get install -y --no-install-recommends ffmpeg
 
+      - name: Prepare protocol diagnostics
+        if: ${{ inputs.protocol_diagnostics }}
+        working-directory: astrid-app
+        run: |
+          mkdir -p "$RUNNER_TEMP/r12-protocol-diagnostics"
+          node scripts/diagnostics/instrument-playwright.mjs node_modules/playwright-core/lib/coreBundle.js
+          app_sha="$(git rev-parse HEAD)"
+          playwright_version="$(node -p 'require("playwright-core/package.json").version')"
+          node_version="$(node --version)"
+          chrome_version="$(google-chrome --version)"
+          chromium_path="$(node -p 'require("playwright-core").chromium.executablePath()')"
+          chromium_version="$("$chromium_path" --version)"
+          printf 'run_id=%s\nrun_attempt=%s\njob=%s\napp_sha=%s\nplaywright_core=%s\nnode=%s\nchrome=%s\nchromium=%s\n' \
+            "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" "$GITHUB_JOB" "$app_sha" "$playwright_version" "$node_version" "$chrome_version" "$chromium_version" \
+            > "$RUNNER_TEMP/r12-protocol-diagnostics/versions.txt"
+
       - name: Run the three-product journey
         working-directory: astrid-app
         env:
@@ -324,9 +345,28 @@ jobs:
           # Written by the JSON reporter itself (the globalSetup prints to stdout, so a shell redirect would corrupt the file).
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
-          TOKEN_SNIFF_DIAGNOSTICS: ${{ inputs.token_sniff_diagnostics && '1' || '0' }}
+          TOKEN_SNIFF_DIAGNOSTICS: ${{ (inputs.token_sniff_diagnostics || inputs.protocol_diagnostics) && '1' || '0' }}
+          PW_R12_DIAGNOSTICS: ${{ inputs.protocol_diagnostics && '1' || '0' }}
           NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+        run: |
+          if [[ "$PW_R12_DIAGNOSTICS" == 1 ]]; then
+            node scripts/diagnostics/capture-journey.mjs "$RUNNER_TEMP/r12-protocol-diagnostics" npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+          else
+            npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+          fi
+
+      - name: Verify protocol diagnostic evidence
+        if: ${{ !cancelled() && inputs.protocol_diagnostics }}
+        working-directory: astrid-app
+        run: node scripts/diagnostics/verify-playwright-log.mjs "$RUNNER_TEMP/r12-protocol-diagnostics/combined.log"
+
+      - name: Upload sanitized protocol diagnostic evidence
+        if: ${{ !cancelled() && inputs.protocol_diagnostics }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: three-products-protocol-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/r12-protocol-diagnostics/
+          if-no-files-found: error
 
       # Pass rule (R-9, same as the direct journey): no quarantined cases exist for this spec, so every case must pass. Durations are
       # written to three-products-summary.json and recorded, never judged (R-10).

@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { TOUR_MOVE_EASE, TOUR_MOVE_MS } from '../runner/useSettledRects';
 import { Images } from 'lucide-react';
 import { GenerationsPaneControls } from '@/features/gallery/components/GenerationsPane/components/GenerationsPaneControls';
 import { GenerationsPaneFrame } from '@/features/gallery/components/GenerationsPane/components/GenerationsPaneFrame';
@@ -23,16 +24,22 @@ import { buildTourGalleryItems, EDITOR_TOUR_GALLERY_RATIO } from './tourGalleryI
 interface EditorTourGenerationsPaneProps {
   /** Slid in. Going false slides it out and then calls `onClosed`. */
   open: boolean;
-  /** Slide with the real pane's transition; false jumps straight to the new state. */
+  /** Slide, with the tour's own move's duration and easing; false jumps straight to the new state. */
   animate: boolean;
   /** The pane has finished sliding out (or was closed without animation). */
   onClosed?: () => void;
   /** Lay the tiles out in this many columns instead of the real pane's geometry (to compare the two by eye). */
   columns?: number;
+  /**
+   * Whether the resting-rect anchor is there for the tour's spotlight to measure. Defaults to `open`; the tour puts it
+   * there as soon as it is heading for the gallery, before the pane opens, because the spotlight decides its move first
+   * and the pane then slides with it.
+   */
+  anchored?: boolean;
 }
 
 /** A touch of margin past the 300ms slide, for a `transitionend` that never comes (a hidden tab). */
-const CLOSE_FALLBACK_MS = 450;
+const CLOSE_FALLBACK_MS = 700;
 const NO_OP = () => undefined;
 
 const NO_SHOTS: never[] = [];
@@ -54,7 +61,7 @@ function TourGalleryTile({ image, index }: { image: GeneratedImageWithMetadata; 
           <ImageContent
             image={image}
             index={index}
-            actualSrc={image.url}
+            actualSrc={image.thumbUrl ?? image.url}
             imageLoaded={loaded}
             imageLoadError={failed}
             progressiveEnabled={false}
@@ -86,7 +93,7 @@ function TourGalleryTile({ image, index }: { image: GeneratedImageWithMetadata; 
  *
  * Mount it a beat before it opens so the four images are decoded by the time it slides in.
  */
-export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: EditorTourGenerationsPaneProps) {
+export function EditorTourGenerationsPane({ open, animate, onClosed, columns, anchored }: EditorTourGenerationsPaneProps) {
   const touch = usePaneControlsHosted();
   const tasksPaneWidth = usePanesStore((state) => state.tasksPaneWidth);
   const generationsPaneCap = usePanesStore((state) => state.generationsPaneHeight);
@@ -119,6 +126,17 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
   const [closing, setClosing] = useState(false);
   const wasOpenRef = useRef(open && !animate);
   const closingRef = useRef(false);
+  // The slide shares the tour move's duration and easing, so the pane and the cutout moving onto it arrive together.
+  // Set on the element itself: the frame's own classes give the real pane's 300 ms.
+  const frameRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    frame.style.transitionDuration = animate ? `${TOUR_MOVE_MS}ms` : '';
+    frame.style.transitionTimingFunction = animate ? TOUR_MOVE_EASE : '';
+  }, [animate]);
+  /** The pane has been on screen, closed, for a frame: a slide can start from where it is at once. */
+  const paintedClosedRef = useRef(false);
   const fallbackRef = useRef<number | undefined>(undefined);
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
@@ -131,7 +149,7 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
     onClosedRef.current?.();
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) {
       wasOpenRef.current = true;
       closingRef.current = false;
@@ -141,7 +159,13 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
         setSlid(true);
         return undefined;
       }
-      // One frame at the closed position first, so the slide has somewhere to start from.
+      // Already painted closed (it mounts a step early): slide now, before this frame paints, so the pane sets off on the
+      // same frame as the spotlight that is moving onto it.
+      if (paintedClosedRef.current) {
+        setSlid(true);
+        return undefined;
+      }
+      // Mounted open: one frame at the closed position first, so the slide has somewhere to start from.
       let second = 0;
       const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setSlid(true)); });
       return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
@@ -158,6 +182,12 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
     fallbackRef.current = window.setTimeout(finishClose, CLOSE_FALLBACK_MS);
     return () => window.clearTimeout(fallbackRef.current);
   }, [open, animate, finishClose]);
+
+  useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { paintedClosedRef.current = true; }); });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, []);
 
   // The controls dim while the pane is arriving, as the real ones do.
   const { isInteractionDisabled } = usePaneInteractionLifecycle({ isOpen: slid, disableInteractionsDuringOpen: true });
@@ -181,6 +211,7 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
           left={0}
           right={reserve}
           transformClass={slid ? 'translate-y-0' : 'translate-y-full'}
+          ref={frameRef}
           className={animate ? undefined : 'transition-none'}
           onTransitionEnd={(event) => {
             if (event.target === event.currentTarget && event.propertyName === 'transform') finishClose();
@@ -269,7 +300,7 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
 
         {/* What the spotlight measures. Not the sliding pane (its rect changes every frame while it arrives): a
             still, invisible box at the rect the pane comes to rest at, so the light settles there at once. */}
-        {open && (
+        {(anchored ?? open) && (
           <div
             {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.generationsPane }}
             data-testid="editor-tour-generations-anchor"

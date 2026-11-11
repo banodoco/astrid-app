@@ -30,6 +30,8 @@ export interface EditorTourScript {
   /** The centred card before act 1: Astrid says hello. */
   readonly welcome: { readonly title: string; readonly body: string; readonly action: string };
   /** The card's quiet line while the chat has the spotlight: before Send, and (act 1 only) while the reply plays. */
+  /** Said to screen readers while a result plays alone, before its explainer appears (nothing is shown). */
+  readonly watching: string;
   readonly hints: { readonly compose: string; readonly composeTouch: string; readonly respond: string; readonly respondWorking: string };
   /** `send` is a touch card's own Send, the same press as the chat's. */
   readonly controls: { readonly next: string; readonly send: string; readonly back: string; readonly skip: string };
@@ -77,7 +79,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
       ],
       card: {
         title: 'Your agent works with open models and the ecosystem’s knowledge',
-        body: 'Use open models locally with ComfyUI or Wan2GP, or through a hosted service.',
+        body: 'Use open models locally to generate right onto your timeline.',
         visual: 'frame-to-still',
         labels: ['Frame', 'Qwen Image 2.1'],
       },
@@ -96,6 +98,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
     },
   },
   welcome: { title: 'Welcome to Astrid', body: 'Explore a completed project in this quick guided demo. The prompts replay its steps; no new generation runs.', action: 'OK' },
+  watching: 'The result is playing. Its explanation follows; press Enter to skip ahead.',
   hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses community-built creative tools to deliver on this request', respondWorking: 'Astrid is working on it…' },
   controls: { next: 'Next', send: 'Send', back: 'Back', skip: 'Skip tour' },
   gallery: {

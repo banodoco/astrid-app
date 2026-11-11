@@ -6,6 +6,7 @@ import { acquirePaneControlsHost } from '@/shared/state/paneControlsHost';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers';
 import { EDITOR_TOUR_ANCHORS, editorTourSelector } from '../anchors';
 import { EDITOR_TOUR_MEDIA } from '../tourMedia';
+import { TOUR_MOVE_EASE, TOUR_MOVE_MS } from '../runner/useSettledRects';
 import { EditorTourGenerationsPane } from './EditorTourGenerationsPane';
 import { EDITOR_TOUR_GALLERY_LABELS } from './tourGalleryItems';
 
@@ -44,7 +45,7 @@ describe('EditorTourGenerationsPane', () => {
     const images = Array.from(container.querySelectorAll('img'));
     expect(images).toHaveLength(4);
     images.forEach((img, index) => {
-      expect(img.getAttribute('src')).toBe(EDITOR_TOUR_MEDIA.stills[index].url);
+      expect(img.getAttribute('src')).toBe(EDITOR_TOUR_MEDIA.stills[index].displayUrl);
       expect(img.getAttribute('alt')).toBe(EDITOR_TOUR_GALLERY_LABELS[index]);
       expect(img.closest('[inert]')).not.toBeNull();
     });
@@ -115,17 +116,16 @@ describe('EditorTourGenerationsPane', () => {
     setItem.mockRestore();
   });
 
-  it('slides up with the real transition, and the anchor sits at the resting rect from the first frame', () => {
+  it('has its anchor at the resting rect before it opens, and slides up at once, with the tour move\'s duration and easing', () => {
     const view = render(<EditorTourGenerationsPane open={false} animate />);
     expect(anchor(view.container)).toBeNull();
     expect(pane(view.container).className).toContain('translate-y-full');
+    frames(3); // painted closed: it mounts a step early
 
-    view.rerender(<EditorTourGenerationsPane open animate />);
-    // First frame after opening: still closed, but the anchor is already where the pane will rest.
+    // The tour is heading for the gallery: the anchor is there to be measured while the pane is still closed.
+    view.rerender(<EditorTourGenerationsPane open={false} anchored animate />);
     const box = anchor(view.container)!;
     expect(pane(view.container).className).toContain('translate-y-full');
-    expect(pane(view.container).className).toContain('duration-300');
-    expect(pane(view.container).className).toContain('ease-smooth');
     expect(box.style.transform).toBe('');
     expect(box.style.height).toBe(pane(view.container).style.height);
     expect(box.style.right).toBe(pane(view.container).style.right);
@@ -134,13 +134,26 @@ describe('EditorTourGenerationsPane', () => {
     expect(box.style.pointerEvents).toBe('none');
     expect(box.closest('[inert]')).not.toBeNull();
 
-    frames(3);
+    // The spotlight commits: the pane sets off in the same render pass, not frames later.
+    view.rerender(<EditorTourGenerationsPane open anchored animate />);
     expect(pane(view.container).className).toContain('translate-y-0');
     expect(pane(view.container).className).not.toContain('translate-y-full');
-    expect(pane(view.container).className).not.toContain('transition-none');
+    expect(pane(view.container).style.transitionDuration).toBe(`${TOUR_MOVE_MS}ms`);
+    expect(pane(view.container).style.transitionTimingFunction).toBe(TOUR_MOVE_EASE);
     // The anchor never moved.
     expect(anchor(view.container)).toBe(box);
     expect(box.style.transform).toBe('');
+
+    // And out again at once.
+    view.rerender(<EditorTourGenerationsPane open={false} anchored={false} animate />);
+    expect(pane(view.container).className).toContain('translate-y-full');
+  });
+
+  it('takes a frame at the closed position first when it is mounted already open', () => {
+    const view = render(<EditorTourGenerationsPane open animate />);
+    expect(pane(view.container).className).toContain('translate-y-full');
+    frames(3);
+    expect(pane(view.container).className).toContain('translate-y-0');
   });
 
   it('jumps in without a transition when it is not animated', () => {

@@ -260,15 +260,20 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
   const hasSourceTracks = deferredConfig.tracks.some((track) => trackRole(track) === 'source');
   const hasPlayableOutput = outputProjection.hasOutputContent;
   const shotsSettling = areShotsSettling(runtime?.shots);
+  // While the onboarding tour runs, the picture over this surface is the tour's own plain <video>/<img>
+  // (EditorTourTimelineDriver), so the player renders the composition's ground and no clips: it fetches and decodes
+  // nothing, and the demo cannot depend on this decoder working on the visitor's browser.
+  const tourIdle = useEditorTourRunning();
+  const renderedConfig = useMemo(() => (tourIdle ? { ...outputConfig, clips: [] } : outputConfig), [outputConfig, tourIdle]);
   const inputProps = useMemo(() => ({
-    config: outputConfig,
+    config: renderedConfig,
     preparing,
     settling: shotsSettling,
     previewRevision: delivery.revision,
     ...(runtime?.astridElementHost ? { astridElementHost: runtime.astridElementHost } : {}),
-  }), [delivery.revision, outputConfig, preparing, shotsSettling, runtime?.astridElementHost]);
+  }), [delivery.revision, renderedConfig, preparing, shotsSettling, runtime?.astridElementHost]);
   // The tour's demo timeline can never be saved, so "Unsaved local" and "Preview unavailable" would only be noise.
-  const touring = useEditorTourRunning();
+  const touring = tourIdle;
   const displayedRevisionLabel = touring ? '' : previewRevisionLabel(delivery.revision);
   const unavailableTarget = touring ? undefined : delivery.revision.unavailableTarget;
   const metadata = useMemo(() => {

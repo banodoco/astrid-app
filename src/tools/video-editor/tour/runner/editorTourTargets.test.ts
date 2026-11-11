@@ -38,11 +38,11 @@ describe('phoneLandPosition', () => {
 });
 
 describe('cardHidden', () => {
-  it('shows no card on touch while the reply comes in; desktop keeps its quiet card, and a watch its bar', () => {
+  it('shows no card on touch while the reply comes in (desktop keeps its quiet card), nor on any device while a result plays alone', () => {
     expect(cardHidden('phone', 'working')).toBe(true);
     expect(cardHidden('tablet', 'working')).toBe(true);
     expect(cardHidden('desktop', 'working')).toBe(false);
-    expect(cardHidden('phone', 'watch')).toBe(false);
+    for (const device of ['desktop', 'tablet', 'phone'] as const) expect(cardHidden(device, 'watch')).toBe(true);
     expect(cardHidden('phone', undefined)).toBe(false);
   });
 });

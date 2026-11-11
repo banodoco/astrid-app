@@ -100,7 +100,7 @@ describe('TourCard', () => {
     for (const step of SCRIPT.strip) expect(screen.getAllByText(step).length).toBeGreaterThan(0);
     // The strip fills act by act; at rest the video step shows where the flight ends, as a still.
     expect(container.querySelectorAll('ol img, ol video')).toHaveLength(tourAct);
-    if (tourAct === 3) expect(container.querySelectorAll('ol img')[2]).toHaveAttribute('src', EDITOR_TOUR_MEDIA.stills[3].url);
+    if (tourAct === 3) expect(container.querySelectorAll('ol img')[2]).toHaveAttribute('src', EDITOR_TOUR_MEDIA.stills[3].displayUrl);
 
     expect(container.querySelector('.editor-tour-card-playing')).not.toBeNull();
     advance(entranceOf(tourAct) - 1);
@@ -568,49 +568,6 @@ describe('TourCard arriving with the runner’s move', () => {
     expect(screen.getByText(SCRIPT.hints.respond)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Next/ })).toBeInTheDocument();
     expect(container.querySelector('[data-editor-tour-card]')).not.toHaveAttribute('data-editor-tour-card-phase');
-  });
-});
-
-describe('TourCard during a land beat’s watch', () => {
-  function renderWatch(tourAct: EditorTourAct) {
-    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: false, media: query } as MediaQueryList));
-    startEditorTour();
-    setEditorTourBeat(tourAct, 'land');
-    const props = { act: tourAct, beat: 'land' as const, onPrimary: vi.fn(), onBack: vi.fn(), onSkip: vi.fn(), rise: false };
-    const view = render(<TourCard {...props} arrived={false} watching />);
-    return { ...view, unfold: () => view.rerender(<TourCard {...props} arrived />) };
-  }
-
-  it('shows only its counter row (Back and Skip tour stay reachable) with the explainer folded away, and is not ready', () => {
-    const { container } = renderWatch(1);
-    const card = container.querySelector('[data-editor-tour-card="land"]')!;
-    expect(card).toHaveAttribute('data-editor-tour-card-watch');
-    expect(screen.getByText('1 of 3')).toBeVisible();
-    expect(screen.getByRole('button', { name: /Back/ })).toBeVisible();
-    expect(screen.getByRole('button', { name: /Skip tour/ })).toBeVisible();
-    const rest = container.querySelector<HTMLElement>('[data-editor-tour-card-rest]')!;
-    expect(rest).toHaveAttribute('data-folded');
-    expect(rest.style.visibility).toBe('hidden');
-    expect(rest).toContainElement(screen.getByText(SCRIPT.acts[1].card.title));
-    expect(screen.queryByRole('button', { name: /Next/ })).toBeNull();
-    advance(TOUR_CARD_ENTRANCE_MS * 3);
-    expect(cardReady()).toBe(false);
-    // Enter during the watch settles the entrance but the card is still not ready: there is no explainer to act on yet.
-    act(() => skipEditorTourAnimation());
-    expect(cardReady()).toBe(false);
-  });
-
-  it('unfolds into the same card (no remount) and only then plays its entrance and reports ready', () => {
-    const { container, unfold } = renderWatch(1);
-    const section = container.querySelector('section');
-    unfold();
-    expect(container.querySelector('section')).toBe(section);
-    const rest = container.querySelector<HTMLElement>('[data-editor-tour-card-rest]')!;
-    expect(rest).not.toHaveAttribute('data-folded');
-    expect(screen.getByRole('button', { name: /Next/ })).toBeInTheDocument();
-    expect(cardReady()).toBe(false);
-    advance(TOUR_CARD_ENTRANCE_MS);
-    expect(cardReady()).toBe(true);
   });
 });
 

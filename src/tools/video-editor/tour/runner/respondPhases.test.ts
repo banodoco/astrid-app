@@ -14,8 +14,8 @@ describe('respond phases', () => {
     expect(respondWorking('land', LIVE)).toBe(false);
   });
 
-  it.each(['desktop', 'tablet', 'phone'] as const)('on %s holds one fixed rect, the whole transcript box, while working, then lights only the act’s actions', (device) => {
-    expect(spotlightTargets(1, 'respond', device, true)).toEqual([{ selector: '[data-editor-tour="chat-transcript"]', whole: true }]);
+  it.each(['desktop', 'tablet', 'phone'] as const)('on %s lights the act’s exchange (the prompt with the thinking line, then with the reply) while working, then only its actions', (device) => {
+    expect(spotlightTargets(1, 'respond', device, true)).toEqual(['[data-editor-tour="chat-exchange"]']);
     expect(spotlightTargets(1, 'respond', device, false)).toEqual(['[data-editor-tour="chat-actions"]']);
     // Two different target lists: the contraction is a new commit, never a drift of the first.
     expect(spotlightTargetKey(spotlightTargets(1, 'respond', device, true))).not.toBe(spotlightTargetKey(spotlightTargets(1, 'respond', device, false)));

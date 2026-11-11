@@ -129,6 +129,16 @@ describe('editor tour timeline stages', () => {
     expect(assets['tour-guide'].type).toBe('video/mp4');
   });
 
+  it('gives every clip a 320 px thumbnail, so the timeline never decodes an original for a 40 px slot', () => {
+    const { assets } = createEditorTourAssetRegistry();
+    for (const [id, entry] of Object.entries(assets)) {
+      expect(entry.thumbnailUrl, id).toMatch(/\.webp$/);
+      expect(entry.thumbnailUrl, id).not.toBe(entry.file);
+    }
+    expect(assets['tour-guide'].thumbnailUrl).toBe(EDITOR_TOUR_MEDIA.guide.thumbUrl);
+    expect(assets['tour-still-end'].thumbnailUrl).toBe(EDITOR_TOUR_MEDIA.stills[3].thumbUrl);
+  });
+
   it('names the media after what it is, not after the files', () => {
     const { assets } = createEditorTourAssetRegistry();
     expect(assets['tour-still-start'].metadata?.filename).toBe('Start frame');

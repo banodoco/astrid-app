@@ -12,6 +12,18 @@ describe('hosted preview cache headers', () => {
     expect(previewCacheControlForPath('/assets/logo.svg')).toBeNull();
   });
 
+  it('caches the SHA-named onboarding release files immutably, but not their manifest', () => {
+    const release = '/astrid/onboarding/lantern-valley-14s-v1/';
+    const digest = '092858dd90f66b0db88233f7ed93aa4aa27c2d064308237f53696ba11e2c518d';
+    for (const extension of ['mp4', 'webp', 'png', 'json']) {
+      expect(previewCacheControlForPath(`${release}${digest}.${extension}`)).toBe('public, max-age=31536000, immutable');
+    }
+    // Media elements may ask with any Accept header.
+    expect(previewCacheControlForPath(`${release}${digest}.mp4`, 'text/html,*/*')).toBe('public, max-age=31536000, immutable');
+    expect(previewCacheControlForPath(`${release}manifest.json`)).toBeNull();
+    expect(previewCacheControlForPath(`${release}${digest.slice(1)}.mp4`)).toBeNull();
+  });
+
   it('sets the request-specific header before Vite Preview serves a response', () => {
     const use = vi.fn();
     const plugin = createPreviewCacheHeadersPlugin();

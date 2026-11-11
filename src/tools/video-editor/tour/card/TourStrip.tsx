@@ -76,7 +76,7 @@ export function TourStrip({ filled, labels, size = 'compact', playing = false, w
                       {node.kind === 'video' && !(large && playing)
                         // At rest the video shows where the flight ends (the town), so it never repeats the still beside it.
                         ? <TourMedia slot={VIDEO_REST} kind="still" />
-                        : <TourMedia slot={node.slot} kind={node.kind} poster={EDITOR_TOUR_MEDIA.stills[0].url} playing={large && playing && node.kind === 'video'} />}
+                        : <TourMedia slot={node.slot} kind={node.kind} poster={EDITOR_TOUR_MEDIA.stills[0].displayUrl ?? EDITOR_TOUR_MEDIA.stills[0].url} playing={large && playing && node.kind === 'video'} />}
                     </span>
                   )}
                 </span>

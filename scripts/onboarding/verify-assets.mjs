@@ -23,7 +23,10 @@ assert.deepEqual(manifest.anchorTimes, [0, 6.5, 10, 13]);
 assert.equal(manifest.anchorCaptureTimes[3], 419 / 30);
 const results = [];
 for (const [name, asset] of Object.entries(manifest.assets)) {
-  assert.match(asset.filename, /^[a-f0-9]{64}\.(png|mp4|json)$/);
+  assert.match(asset.filename, /^[a-f0-9]{64}\.(png|mp4|json|webp)$/);
+  assert.ok(asset.filename.startsWith(asset.sha256), `${name}: named by its SHA-256`);
+  // A playback derivative (scripts/onboarding/build-derivatives.mjs) names the original it was made from.
+  if (asset.derivedFrom) assert.ok(manifest.assets[asset.derivedFrom] && !manifest.assets[asset.derivedFrom].derivedFrom, `${name}: derivedFrom names an original`);
   const bytes = await read(asset.filename);
   assert.equal(bytes.length, asset.size, `${name}: byte length`);
   assert.equal(createHash('sha256').update(bytes).digest('hex'), asset.sha256, `${name}: SHA-256`);

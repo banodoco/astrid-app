@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { EDITOR_TOUR_ANCHORS, EDITOR_TOUR_TRACK_IDS, editorTourSelector, editorTourTrackSelector } from '../anchors';
+import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers';
 import { getEditorTourState, showEditorTourBeat, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
 import { TourCard } from '../card/TourCard';
@@ -10,8 +11,8 @@ import { backEditorTour, finishEditorTour, runEditorTourPrimary, watchEditorTour
 import { placeCard, type CardPosition } from './cardPlacement';
 import { TOUR_LEAVE_MS, TOUR_MOVE_EASE, TOUR_MOVE_MS, useSettledRects } from './useSettledRects';
 import { spotlightTargetKey, useSpotlightMeasurement, useSpotlightRects, type SpotlightRect, type SpotlightTarget } from './useSpotlightRects';
-import { TOUR_ARRIVE_MS, useCardMove, WATCH_SUFFIX } from './useCardMove';
-import { LAND_WATCH_HOLD_MS, LAND_WATCH_PILL, useLandWatch } from './landWatch';
+import { TOUR_ARRIVE_MS, useCardMove } from './useCardMove';
+import { LAND_WATCH_HOLD_MS, useLandWatch, WATCH_SUFFIX } from './landWatch';
 import { useTourKeys } from './useTourKeys';
 import { useEditorDeviceClass } from './useIsDesktopEditor';
 import type { TimelineDeviceClass } from '../../lib/mobile-interaction-model';
@@ -62,15 +63,22 @@ export function respondWorking(beat: EditorTourBeat, { chatReady, instant, reduc
   return beat === 'respond' && !chatReady && !instant && !reducedMotion;
 }
 
-/** `editorTourTargets`, with respond's first phase: the whole transcript box, one fixed rect, while the reply comes in. */
+/** The whole transcript box: what desktop's working card sits beside (so it holds still while the lit exchange expands). */
+const TRANSCRIPT_BOX: SpotlightTarget = { selector: editorTourSelector(EDITOR_TOUR_ANCHORS.chatTranscript), whole: true };
+
+/**
+ * `editorTourTargets`, with respond's working phase, which lights the act's exchange: first the sent prompt with the
+ * thinking line (tight), then, when the reply starts, one expansion to the prompt and the reply (the reply bubble takes its
+ * final size from its first character, so nothing chases it). The chat keeps it scrolled into view.
+ */
 export function spotlightTargets(act: EditorTourAct, beat: EditorTourBeat, device: TimelineDeviceClass, working: boolean): SpotlightTarget[] {
-  if (beat === 'respond' && working) return [{ selector: editorTourSelector(EDITOR_TOUR_ANCHORS.chatTranscript), whole: true }];
+  if (beat === 'respond' && working) return [editorTourSelector(EDITOR_TOUR_ANCHORS.chatExchange)];
   return editorTourTargets(act, beat, device);
 }
 
-/** Steps that show no card at all: a touch layout while the reply comes in, and a land beat's watch when it has no bar. */
+/** Steps that show no card at all: a touch layout while the reply comes in, and a land beat's watch (the result alone). */
 export function cardHidden(device: TimelineDeviceClass, phase: string | undefined): boolean {
-  return (phase === 'working' && device !== 'desktop') || (phase === 'watch' && !LAND_WATCH_PILL);
+  return (phase === 'working' && device !== 'desktop') || phase === 'watch';
 }
 
 /**
@@ -141,15 +149,17 @@ function RunningTour() {
   // The card and spotlight show the step whose targets have all arrived and held still; it trails the store's by the leave.
   const cardMoving = useRef<() => boolean>(() => false);
   const shownStep = useRef('');
-  // The watch ending keeps the card and its counter row: nothing leaves, the explainer unfolds where the card is.
-  const unfolding = shownStep.current === `${stepKey}${WATCH_SUFFIX}`;
-  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current(), leaves: !unfolding });
+  // After a step with no card there is nothing that has to leave before the next step commits.
+  const nothingToLeave = cardHidden(device, shownStep.current.split(':')[3]);
+  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current(), leaves: !nothingToLeave });
   shownStep.current = commit.key;
   const [, shownAct, shownBeat, shownPhase] = commit.key.split(':') as [string, `${EditorTourAct}`, EditorTourBeat, string | undefined];
   const pending = commit.key !== stepKey;
   const watchShown = shownPhase === 'watch';
   // The browser tour's phone chat stays in until the card and spotlight have moved off it.
   useLayoutEffect(() => showEditorTourBeat(shownBeat), [shownBeat]);
+  // Measured from compose on, so it is known by the time the working card needs it.
+  const transcriptBox = useSpotlightRects(device === 'desktop' && (beat === 'compose' || beat === 'respond') ? [TRANSCRIPT_BOX] : []);
   // The Send button is the one thing outside the card the user may press.
   const sendRects = useSpotlightRects(beat === 'compose' ? [editorTourSelector(EDITOR_TOUR_ANCHORS.chatSend)] : []);
   // A step with no card: the card fades out where it stands and takes its next place unseen; the step after it appears
@@ -158,7 +168,7 @@ function RunningTour() {
   const appearance = useRef({ key: '', inPlace: false, lastHidden: false });
   if (appearance.current.key !== commit.key) appearance.current = { key: commit.key, inPlace: appearance.current.lastHidden, lastHidden: hidden };
   const inPlace = appearance.current.inPlace;
-  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate && !hidden && !inPlace, motion, pending: pending && !unfolding });
+  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate && !hidden && !inPlace, motion, pending: pending && !hidden });
   cardMoving.current = moving;
   // `landed`: the card's move is over. `arrived`: the explainer itself is there (never during a watch), so its entrance
   // and its readiness wait for it.
@@ -166,7 +176,7 @@ function RunningTour() {
   const arrived = landed && !watchShown && !hidden;
   // Whether this step's card rose into view by itself (the first card, a jump) or came in with the move; fixed per step.
   const rise = useRef({ key: '', rise: true });
-  if (rise.current.key !== commit.key) rise.current = { key: commit.key, rise: !(motion && commit.animate) };
+  if (rise.current.key !== commit.key) rise.current = { key: commit.key, rise: !(motion && commit.animate) || hidden || inPlace };
 
   // The card and the cutouts take their new places together, on the render that knows the new card's size; until then
   // (the render that mounts the new content, before paint) they hold where they are.
@@ -175,9 +185,11 @@ function RunningTour() {
     const cardSize = size ?? { width: 360, height: 160 };
     const viewport = { width: window.innerWidth, height: window.innerHeight };
     const rects = commit.rects;
+    // Desktop's working card stays beside the transcript as a whole, so it does not hop when the lit exchange expands.
+    const beside = device === 'desktop' && shownPhase === 'working' && transcriptBox.length ? transcriptBox : rects;
     // A phone's card spans the width: in the middle of the screen, or right above or below what it points at; on a land
     // beat always above the preview. On touch the reply's card sits just above the actions it explains, in the chat.
-    const position = device === 'phone' && shownBeat === 'land' && rects.length ? phoneLandPosition(rects, cardSize) : placeCard(rects, cardSize, viewport, {
+    const position = device === 'phone' && shownBeat === 'land' && rects.length ? phoneLandPosition(rects, cardSize) : placeCard(beside, cardSize, viewport, {
       ...(device === 'phone' ? { edge: PHONE_EDGE, gap: PHONE_GAP } : {}),
       preferAbove: device !== 'desktop' && shownBeat === 'respond',
       ...(device === 'desktop' ? { avoid: desktopCardAvoid(shownBeat) } : {}),
@@ -195,7 +207,6 @@ function RunningTour() {
       act={shownActNumber}
       beat={shownBeat}
       working={shownWorking}
-      watching={watchShown}
       arrived={arrived}
       rise={cardRise}
       device={device}
@@ -203,15 +214,20 @@ function RunningTour() {
       onBack={backEditorTour}
       onSkip={finishEditorTour}
     />
-  ), [shownActNumber, shownBeat, shownWorking, watchShown, arrived, cardRise, device]);
+  ), [shownActNumber, shownBeat, shownWorking, arrived, cardRise, device]);
   const moves = motion && commit.animate;
   return (
     <>
       {gallery}
+      {/* While a result plays alone there is no card on screen: say so to those who cannot see it play. */}
+      <div role="status" aria-live="polite" className="sr-only" data-editor-tour-watch-status>{watchShown ? SCRIPT.watching : ''}</div>
       <TourSpotlight rects={spotlit} clickable={sendRects[0] ?? null} reducedMotion={reducedMotion} animate={commit.animate} />
       <div
         ref={cardRef}
         data-editor-tour-card-host
+        data-editor-tour-watch={watchShown || undefined}
+        // No card on this step: nothing in it can be reached by keyboard or assistive technology either.
+        {...(hidden ? { inert: '', 'aria-hidden': true } : {})}
         data-editor-tour-watch-hold={shownBeat === 'land' ? LAND_WATCH_HOLD_MS[Number(shownAct) as EditorTourAct] : undefined}
         // On a phone the card keeps clear of the home indicator of a full-screen web app.
         className={device === 'phone' ? 'fixed left-0 top-0 pb-[env(safe-area-inset-bottom)]' : 'fixed left-0 top-0'}
@@ -225,8 +241,8 @@ function RunningTour() {
             : inPlace ? `opacity ${TOUR_ARRIVE_MS}ms ease-out`
             : `transform ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}`,
           // Between the store's beat changing and the card showing it, the old card's buttons would act on the new beat;
-          // while it travels in, its content is not there yet. A watch's bar (Back, Skip tour) is live once it has landed.
-          pointerEvents: (pending && !unfolding) || !landed || hidden ? 'none' : undefined,
+          // while it travels in, its content is not there yet.
+          pointerEvents: pending || !landed || hidden ? 'none' : undefined,
         }}
       >
         {card}

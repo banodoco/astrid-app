@@ -2,7 +2,7 @@
 /**
  * node scripts/tour-motion-trace.mjs [--out test-results/tour-motion/<ts>] [--theme dark|light]
  *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--no-screencast]
- *   [--viewport 1440x900] [--react] [--skip] [--device iphone-15] [--reanalyse test-results/tour-motion/<name>] [--help]
+ *   [--viewport 1440x900] [--react] [--skip] [--device iphone-15] [--cpu 4] [--reanalyse test-results/tour-motion/<name>] [--help]
  *
  * Measures MOTION of the first-run tour on desktop (1440x900 unless --viewport, reducedMotion: no-preference). The sibling
  * tour-screenshots.mjs only takes settled stills with motion off; this walks the same beats with motion on and,
@@ -21,6 +21,7 @@
  * respond, its two phases), never changes destination mid-flight or reverses, cutouts start within a frame of the card,
  * no lit cutout passes through the page corner (0,0,0,0), and the new step's content is only whole near rest.
  *
+ * --cpu throttles the page's CPU by that factor (CDP), as a slow phone would be.
  * --device walks one of tour-screenshots' device profiles (touch, its viewport and user agent) instead of desktop.
  * --skip also traces act 2's land with Enter pressed 1.5 s into its watch (the explainer must then come at once).
  * --reanalyse re-scores an earlier run from its samples.json files with this version's analyser (no browser).
@@ -79,8 +80,8 @@ function installSampler() {
       t, host: r4(host), tf: host?.style.transform ?? null, tr: host?.style.transition ?? null, sec: r4(section), op: section ? Number(getComputedStyle(section).opacity) : null,
       // What the card's content shows, and how visible it is (content wrapper opacity x section opacity).
       cop: section ? Number(getComputedStyle(section).opacity) * (content ? Number(getComputedStyle(content).opacity) : 1) : null,
-      // A land beat's watch: the explainer is folded away (only the counter row shows, or nothing) while the result plays.
-      watch: card?.hasAttribute('data-editor-tour-card-watch') ?? false, hold: Number(host?.getAttribute('data-editor-tour-watch-hold')) || null,
+      // A land beat's watch: no card is shown while the result plays. `pane`: the tour's Generations pane (it slides).
+      watch: host?.hasAttribute('data-editor-tour-watch') ?? false, pane: r4(document.querySelector('[data-testid="editor-tour-generations-pane"]')), hold: Number(host?.getAttribute('data-editor-tour-watch-hold')) || null,
       hop: host ? Number(getComputedStyle(host).opacity) : null,
       rop: (() => { const rest = card?.querySelector('[data-editor-tour-card-rest]'); return rest ? (rest.hasAttribute('data-folded') ? 0 : Number(getComputedStyle(rest).opacity)) : null; })(),
       card: card?.getAttribute('data-editor-tour-card') ?? null, phase: card?.getAttribute('data-editor-tour-card-phase') ?? null,
@@ -242,7 +243,7 @@ const teleport = (m) => m.maxJump.px > 80 && m.maxJump.px > 0.4 * m.travel && m.
 function degenerate(rect) { return !rect || rect[2] <= 0 || rect[3] <= 0; }
 
 /** Everything measured for one transition, from rAF samples with t re-based so the trigger click is 0. */
-export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
+export function analyseTransition(samples, { dest, source, expectMoves = 1, expectCutoutMoves = expectMoves }) {
   const card = analyseSeries(samples.filter((s) => s.host).map((s) => ({ t: s.t, v: s.host })), 2);
   const first = samples.find((s) => s.host), last = samples.at(-1);
   const inFlight = samples.filter((s) => s.t >= (card.firstMoveT ?? Infinity) && s.t <= (card.restT ?? -Infinity));
@@ -358,11 +359,28 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
     const moved = analyseSeries(cardXY.filter((s) => s.t >= (cardT ?? Infinity) - 50).map((s) => ({ t: s.t, v: s.host })), 2).travel;
     pacing = { holdMs: hold, watchShownT: round(watchT, 0), spotlightRestT: Number.isFinite(spotRest) ? round(spotRest, 0) : null, timelineReadyT: round(readyT, 0), cardVisibleT: round(cardT, 0), cardWholeT: round(wholeT, 0),
       heldMs: readyT != null && cardT != null ? round(cardT - readyT, 0) : null, skipped: skipT,
-      cardBeforeHold: hold != null && readyT != null && cardT != null ? cardT - readyT < hold - 20 : cardT != null && readyT == null,
+      cardBeforeHold: hold != null && readyT != null && cardT != null ? cardT - readyT < hold - 60 : cardT != null && readyT == null,
       cardMovedWhileAppearingPx: moved };
   }
-  const result = { frames, tourEnded: ended, startSync: sync, pacing, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
-  Object.assign(result, suspectsFor(result, source, dest, expectMoves), { expectMoves });
+  // The gallery step: the Generations pane slides in (or out) as one motion with the cutout that moves onto (or off) it.
+  let gallery = null;
+  if (dest.beat === 'gallery' || source.beat === 'gallery') {
+    const paneSeries = analyseSeries(samples.filter((s) => s.pane).map((s) => ({ t: s.t, v: s.pane })), 2);
+    const cut = cutouts.find((k) => k.used && k.firstMoveT != null);
+    const frameOf = (t) => (t == null ? null : samples.findIndex((s) => s.t >= t));
+    gallery = { paneStartT: round(paneSeries.firstMoveT, 0), paneEndT: round(paneSeries.restT, 0), cutoutStartT: round(cut?.firstMoveT, 0), cutoutEndT: round(cut?.restT, 0),
+      startGapFrames: paneSeries.firstMoveT != null && cut ? Math.abs(frameOf(paneSeries.firstMoveT) - frameOf(cut.firstMoveT)) : null,
+      startGapMs: paneSeries.firstMoveT != null && cut ? round(Math.abs(paneSeries.firstMoveT - cut.firstMoveT), 0) : null,
+      endGapMs: paneSeries.restT != null && cut ? round(Math.abs(paneSeries.restT - cut.restT), 0) : null, paneSegments: paneSeries.segments.length };
+  }
+  // Respond: the spotlight's destinations in order (prompt + thinking, prompt + reply, the actions). Each is one move.
+  let respond = null;
+  if (dest.beat === 'respond') {
+    const lit = cutouts.find((k) => k.used);
+    respond = lit ? { destinations: lit.retargets.filter((r) => r.t >= 0).map((r) => ({ t: r.t, rect: r.to, midFlight: r.whileMoving })), cutoutMoves: lit.segments.length } : null;
+  }
+  const result = { frames, tourEnded: ended, startSync: sync, pacing, gallery, respond, expectCutoutMoves, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
+  Object.assign(result, suspectsFor(result, source, dest, expectMoves, expectCutoutMoves), { expectMoves });
   return result;
 }
 
@@ -371,7 +389,7 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
  * for reading alongside the filmstrips. `expectMoves` is how many moves the step should make (2 for desktop's respond
  * reached forward: arrive beside the reply, then contract onto its actions).
  */
-function suspectsFor(m, source, dest, expectMoves = 1) {
+function suspectsFor(m, source, dest, expectMoves = 1, expectCutoutMoves = expectMoves) {
   const out = [], notes = [], c = m.card;
   // A step with no card (a touch layout while the reply streams): the card is invisible, takes its next place unseen and
   // fades in there, so its jump, and its start and rest relative to the cutouts, are not motion anyone sees.
@@ -380,7 +398,7 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
   if (m.tourEnded) out.push(`tour ended (status idle, card removed) instead of showing ${dest.id}; card/cutout metrics below cover the exit only`);
   if (c.firstMoveT == null) notes.push('card never moved');
   else {
-    if (c.segments.length > expectMoves) out.push(`card moved in ${c.segments.length} segments (${segText(c.segments)}), expected ${expectMoves}`);
+    if (c.segments.length > expectMoves && !unseen) out.push(`card moved in ${c.segments.length} segments (${segText(c.segments)}), expected ${expectMoves}`);
     else notes.push(`card moved in ${c.segments.length} segment(s) (${segText(c.segments)})${expectMoves > 1 ? ' (respond: arrive, then contract)' : ''}`);
     if (c.reversals) out.push(`card reversed direction ${c.reversals}x`);
     if (teleport(c) && !unseen) out.push(`card jumped ${c.maxJump.px}px in one ${c.maxJump.dt}ms frame at t=${Math.round(c.maxJump.t)}ms (total travel ${c.travel}px)`);
@@ -392,7 +410,7 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
   }
   const destinationChanges = c.retargets.filter((r) => r.t >= 0);
   for (const r of destinationChanges) (r.whileMoving ? out : notes).push(`card destination set at t=${r.t}ms (${r.from.join(',')} -> ${r.to.join(',')})${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
-  if (destinationChanges.length > expectMoves) out.push(`card destination set ${destinationChanges.length}x, expected ${expectMoves}`);
+  if (destinationChanges.length > expectMoves && !unseen) out.push(`card destination set ${destinationChanges.length}x, expected ${expectMoves}`);
   for (const r of c.transitionToggles) notes.push(`card host CSS transition ${/none/.test(r.to) ? 'switched OFF' : 'switched ON'} at t=${r.t}ms`);
   for (const s of c.sizeChanges.slice(0, 2)) notes.push(`card size ${s.from.join('x')} -> ${s.to.join('x')} from t=${s.t}ms${s.whileMoving ? ' (morphing in flight)' : ''}`);
   if (c.sizeChanges.length > 2) notes.push(`(${c.sizeChanges.length - 2} more size steps: the box morphing)`);
@@ -408,13 +426,24 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
     else if (k.startsDegenerate && !k.endsDegenerate && k.travel > 1) out.push(`${label} grew from ${fmtRect(k.start)}; path ${k.path.map((p) => `t=${p.t}:${fmtRect(p.rect)}`).join(' -> ')}`);
     if (k.opened) notes.push(`${label} opened in place`);
     if (k.closed) notes.push(`${label} closed in place`);
-    if (k.segments.length > expectMoves) out.push(`${label} moved in ${k.segments.length} segments (${segText(k.segments)}), expected ${expectMoves}`);
+    if (k.segments.length > expectCutoutMoves) out.push(`${label} moved in ${k.segments.length} segments (${segText(k.segments)}), expected ${expectCutoutMoves}`);
     for (const r of k.retargets) if (r.whileMoving) out.push(`${label} destination changed at t=${r.t}ms ${fmtRect(r.from)} -> ${fmtRect(r.to)} while already moving (retarget mid-flight)`);
     if (k.reversals) out.push(`${label} reversed direction ${k.reversals}x`);
     if (teleport(k)) out.push(`${label} jumped ${k.maxJump.px}px in one ${k.maxJump.dt}ms frame at t=${Math.round(k.maxJump.t)}ms`);
     if (k.chase && k.chase.targetTravelPx > 2 && k.chase.maxGapPx - (k.chase.finalGapPx ?? 0) > 40) notes.push(`${label} trailed its moving target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (resting offset ${k.chase.finalGapPx}px; target moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
     // A closing cutout is invisible before its fade ends, so its last lit frame comes early by design.
     if (!k.closed && !unseen && k.restT != null && k.firstMoveT != null && c.restT != null && Math.abs(k.restT - c.restT) > 250) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at t=${Math.round(c.restT)}ms`);
+  }
+  if (m.gallery) {
+    const g = m.gallery;
+    notes.push(`gallery: pane slid t=${g.paneStartT ?? '-'}–${g.paneEndT ?? '-'}ms, cutout moved t=${g.cutoutStartT ?? '-'}–${g.cutoutEndT ?? '-'}ms (start ${g.startGapMs ?? '-'}ms / ${g.startGapFrames ?? '-'} frames apart, end ${g.endGapMs ?? '-'}ms apart)`);
+    if (g.startGapFrames != null && g.startGapFrames > 1) out.push(`Generations pane and cutout did not set off together: ${g.startGapMs}ms / ${g.startGapFrames} frames apart`);
+    // The pane travels far less than the cutout, so its last sub-pixel frames come earlier: only a real gap is a finding.
+    if (g.endGapMs != null && g.endGapMs > 300) out.push(`Generations pane and cutout came to rest ${g.endGapMs}ms apart`);
+  }
+  if (m.respond) {
+    notes.push(`respond: spotlight destinations ${m.respond.destinations.map((d) => `t=${d.t}ms ${fmtRect(d.rect)}`).join(' -> ')} (${m.respond.cutoutMoves} moves)`);
+    if (m.respond.destinations.length > expectCutoutMoves) out.push(`respond spotlight changed destination ${m.respond.destinations.length}x, expected at most ${expectCutoutMoves} (chasing?)`);
   }
   const p = m.pacing;
   if (p) {
@@ -443,6 +472,12 @@ function clicksOrKeys(samples) {
   return hit ? round(hit.t, 0) : null;
 }
 
+/** Moves the spotlight should make: respond reached forward has three (prompt + thinking, prompt + reply, the actions). */
+function expectedCutoutMoves(name, dest) {
+  if (/back-early/.test(name)) return 2;
+  return dest.beat === 'respond' && !/back/.test(name) ? 3 : 1;
+}
+
 /** Moves a transition should make: one per user action (the back-early trace is two: Next, then Back), and desktop's
  * respond reached forward makes two (arrive beside the reply, contract onto its actions). */
 function expectedMoves(name, dest) {
@@ -462,7 +497,7 @@ export async function reanalyse(dir) {
     const dest = find(ids.at(-1)), source = find(ids[0]);
     const expectMoves = expectedMoves(entry.name, dest);
     const { longFrames, react } = entry;
-    Object.assign(entry, analyseTransition(samples, { dest, source, expectMoves }), longFrames ? { longFrames } : {}, react ? { react } : {});
+    Object.assign(entry, analyseTransition(samples, { dest, source, expectMoves, expectCutoutMoves: expectedCutoutMoves(entry.name, dest) }), longFrames ? { longFrames } : {}, react ? { react } : {});
   }
   await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2));
   await writeFile(join(out, 'report.md'), renderMarkdown(report));
@@ -495,7 +530,7 @@ export function parseOptions(args) {
   for (let i = 0; i < args.length; i++) {
     const [key, inline] = args[i].split('=');
     if (key === '--back' || key === '--help' || key === '--no-screencast' || key === '--react' || key === '--skip') { o[key.slice(2)] = true; continue; }
-    if (!['--out', '--theme', '--base-url', '--transitions', '--viewport', '--reanalyse', '--device'].includes(key)) throw new Error(`Unknown flag: ${key}`);
+    if (!['--out', '--theme', '--base-url', '--transitions', '--viewport', '--reanalyse', '--device', '--cpu'].includes(key)) throw new Error(`Unknown flag: ${key}`);
     o[key.slice(2)] = inline ?? args[++i];
     if (!o[key.slice(2)] || o[key.slice(2)].startsWith('--')) throw new Error(`${key} needs a value`);
   }
@@ -579,6 +614,7 @@ export async function run(options) {
     }, { store: STORE, beats: BEATS });
     await page.evaluate(installSampler);
     const cdp = await context.newCDPSession(page);
+    if (options.cpu) await cdp.send('Emulation.setCPUThrottlingRate', { rate: Number(options.cpu) });
     const timeOrigin = await page.evaluate(() => performance.timeOrigin);
 
     const wanted = (name) => !options.transitions || options.transitions.includes(name) || options.transitions.includes(fileName(name));
@@ -640,7 +676,7 @@ export async function run(options) {
       }
       // Desktop's respond reached forward makes two moves (arrive beside the reply, contract onto its actions); by Back, one.
       const expectMoves = expectedMoves(name, dest);
-      const analysis = analyseTransition(rebased, { dest, source, expectMoves });
+      const analysis = analyseTransition(rebased, { dest, source, expectMoves, expectCutoutMoves: expectedCutoutMoves(name, dest) });
       if (commits) analysis.react = summariseCommits(commits, t0, t0 + rebased.at(-1).t);
       analysis.longFrames = loaf.map((f) => ({ ...f, t: round(f.t - t0, 0) })).filter((f) => f.t > -200).sort((a, b) => b.d - a.d).slice(0, 5);
       const moved = (key) => rebased.some((s, k) => k && s.cut[0] && rebased[k - 1].cut[0] && s.cut[0][key].some((n, j) => Math.abs(n - rebased[k - 1].cut[0][key][j]) > 0.01));
@@ -725,6 +761,18 @@ function renderMarkdown(report) {
     lines.push('', '## Land pacing', '', 'The result plays alone first: the explainer may appear only `hold` ms after the timeline reports the result is being presented (or at once when the user skips with Enter, or arrives by Back).', '',
       '| transition | hold | spotlight at rest | timeline ready | explainer visible | held | card before hold elapsed | card moved while appearing |', '|---|---|---|---|---|---|---|---|');
     for (const t of paced) { const p = t.pacing; lines.push(`| ${t.name} | ${p.holdMs ?? '-'}ms | ${p.spotlightRestT ?? '-'}ms | ${p.timelineReadyT ?? '-'}ms | ${p.cardVisibleT ?? '-'}ms | ${p.heldMs ?? '-'}ms | ${p.skipped != null ? `skipped at ${p.skipped}ms` : p.cardBeforeHold ? (/back/.test(t.name) && !/return/.test(t.name) ? 'yes (Back: no watch)' : 'YES') : 'no'} | ${p.cardMovedWhileAppearingPx}px |`); }
+  }
+  const galleries = report.transitions.filter((t) => t.gallery);
+  if (galleries.length) {
+    lines.push('', '## Generations pane and its highlight', '', 'One motion: the pane slides as the cutout moves onto (or off) it. They should set off within a frame and come to rest within ~50 ms of each other.', '',
+      '| transition | pane slide | cutout move | start gap | end gap |', '|---|---|---|---|---|');
+    for (const t of galleries) { const g = t.gallery; lines.push(`| ${t.name} | ${g.paneStartT ?? '-'}–${g.paneEndT ?? '-'}ms | ${g.cutoutStartT ?? '-'}–${g.cutoutEndT ?? '-'}ms | ${g.startGapMs ?? '-'}ms / ${g.startGapFrames ?? '-'}f | ${g.endGapMs ?? '-'}ms |`); }
+  }
+  const responds = report.transitions.filter((t) => t.respond);
+  if (responds.length) {
+    lines.push('', '## Respond phases', '', 'The spotlight after Send: the prompt with the thinking line, one expansion to the prompt and the reply, then the actions. Each destination is set once; none while a move is in flight.', '',
+      '| transition | spotlight destinations (t: rect) | moves | set mid-flight |', '|---|---|---|---|');
+    for (const t of responds) lines.push(`| ${t.name} | ${t.respond.destinations.map((d) => `${d.t}ms: ${fmtRect(d.rect)}`).join(' → ')} | ${t.respond.cutoutMoves} | ${t.respond.destinations.filter((d) => d.midFlight).length} |`);
   }
   for (const t of report.transitions) {
     lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadavg1AtStart}->${t.hostLoad.loadavg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',

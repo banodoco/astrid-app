@@ -8,6 +8,12 @@ export function previewCacheControlForPath(pathname: string, accept = ''): strin
   if (/^\/assets\/.+[-.][A-Za-z0-9_-]{8,}\.[^/]+$/.test(pathname)) {
     return HASHED_ASSET_CACHE_CONTROL;
   }
+  // The onboarding release's files are named by their SHA-256 (docs/video-editor/onboarding-lantern-valley.md): a name
+  // can never mean other bytes, so a visit never waits on a revalidation round trip per picture or video range.
+  // Its manifest.json keeps the default.
+  if (/^\/astrid\/onboarding\/[^/]+\/[a-f0-9]{64}\.[a-z0-9]+$/.test(pathname)) {
+    return HASHED_ASSET_CACHE_CONTROL;
+  }
   if (pathname === '/' || pathname === '/sw.js' || pathname.endsWith('.html') || accept.includes('text/html')) {
     return HTML_CACHE_CONTROL;
   }

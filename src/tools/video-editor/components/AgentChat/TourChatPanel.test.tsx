@@ -170,8 +170,15 @@ function transcript(): HTMLElement {
   return document.querySelector<HTMLElement>(editorTourSelector(EDITOR_TOUR_ANCHORS.chatTranscript))!;
 }
 
-function reply(): HTMLElement {
-  return document.querySelector<HTMLElement>(editorTourSelector(EDITOR_TOUR_ANCHORS.chatReply))!;
+function exchange(): HTMLElement {
+  return document.querySelector<HTMLElement>(editorTourSelector(EDITOR_TOUR_ANCHORS.chatExchange))!;
+}
+
+/** The transcript's text as it shows: without the unseen full-reply copy that reserves the streaming bubble's size. */
+function shownTranscript(): string {
+  const copy = transcript().cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('[aria-hidden="true"]').forEach((node) => node.remove());
+  return copy.textContent ?? '';
 }
 
 function advance(ms: number) {
@@ -354,14 +361,21 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(transcript().textContent).not.toContain(ACT1.reply.slice(0, 20));
 
     expect(screen.getByText('Thinking...')).toBeInTheDocument();
-    // A phone lights the act's answer alone: it starts as the indicator, under the prompt and outside it.
-    expect(reply()).toContainElement(screen.getByText('Thinking...'));
-    expect(reply()).not.toContainElement(within(transcript()).getByText(ACT1.prompt));
+    // The spotlight's first hold: the sent prompt with the thinking line under it, and nothing else.
+    expect(exchange()).toContainElement(screen.getByText('Thinking...'));
+    expect(exchange()).toContainElement(within(transcript()).getByText(ACT1.prompt));
+    const thinkingHeightMarker = exchange().children.length;
+    expect(thinkingHeightMarker).toBe(2);
     expect(composer().placeholder).toBe('Type to queue next message...');
     // Thinking lasts 2.5 s, then a few reply characters have streamed in.
     advance(2650);
-    expect(transcript().textContent).toContain(ACT1.reply.slice(0, 20));
-    expect(transcript().textContent).not.toContain(ACT1.reply);
+    expect(shownTranscript()).toContain(ACT1.reply.slice(0, 20));
+    expect(shownTranscript()).not.toContain(ACT1.reply);
+    // The bubble has its final size from the first character: the whole reply is laid out, unseen, under what has
+    // arrived, so the spotlight around the exchange expands once and never chases the stream.
+    const reserved = exchange().querySelector('[aria-hidden="true"]')!;
+    expect(reserved).toHaveClass('invisible');
+    expect(reserved.textContent).toContain(ACT1.reply);
     expect(chatReady()).toBe(false);
     // Like the real chat, the indicator is gone once the reply text starts.
     expect(screen.queryByText('Thinking...')).toBeNull();
@@ -386,10 +400,12 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     for (const card of ACT1.toolCards) {
       expect(transcript().textContent).toContain(card.name);
       expect(transcript().textContent).toContain(card.detail);
-      expect(reply().textContent).toContain(card.name);
+      // The actions are outside the exchange: the spotlight leaves it for them.
+      expect(exchange().textContent).not.toContain(card.name);
     }
-    expect(reply().textContent).toContain(ACT1.reply);
-    expect(reply().textContent).not.toContain(ACT1.prompt);
+    expect(exchange().textContent).toContain(ACT1.reply);
+    expect(exchange().textContent).toContain(ACT1.prompt);
+    expect(exchange().querySelector('[aria-hidden="true"]')).toBeNull();
     expect(screen.queryByText('Thinking...')).toBeNull();
 
     act(() => setEditorTourBeat(2, 'compose'));
@@ -515,7 +531,8 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
 
     const actions = document.querySelectorAll(editorTourSelector(EDITOR_TOUR_ANCHORS.chatActions));
     expect(actions).toHaveLength(1);
-    expect(reply().contains(actions[0])).toBe(true);
+    expect(exchange().contains(actions[0])).toBe(false);
+    expect(transcript().contains(actions[0])).toBe(true);
     expect(actions[0].textContent).toContain('[2 actions]');
     expect(actions[0].textContent).not.toContain(ACT1.reply);
     expect(document.querySelector(editorTourSelector(EDITOR_TOUR_ANCHORS.chatPane))?.contains(transcript())).toBe(true);

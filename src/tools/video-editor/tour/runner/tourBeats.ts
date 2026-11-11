@@ -27,6 +27,26 @@ export function registerBrowserTourFinish(finish: () => void): () => void {
   return () => { if (browserTourFinish === finish) browserTourFinish = null; };
 }
 
+/**
+ * A seam for work that must start inside the user's own tap (iOS only lets `play()` through when it is called from a
+ * gesture's event handler): listeners run synchronously, inside that handler, on every Next / OK / Enter and on the chat's
+ * Send, with the act and beat the user is leaving. Returns the unregister.
+ */
+export type EditorTourGestureListener = (leaving: { act: EditorTourState['act']; beat: EditorTourState['beat'] }) => void;
+const gestureListeners = new Set<EditorTourGestureListener>();
+export function registerEditorTourGesture(listener: EditorTourGestureListener): () => void {
+  gestureListeners.add(listener);
+  return () => { gestureListeners.delete(listener); };
+}
+/** Call synchronously from a user's event handler that moves the tour forward. */
+export function notifyEditorTourGesture(): void {
+  const { status, act, beat } = getEditorTourState();
+  if (status !== 'running') return;
+  for (const listener of [...gestureListeners]) {
+    try { listener({ act, beat }); } catch (error) { console.error('Editor tour: a gesture listener threw.', error); }
+  }
+}
+
 /** Whether the parts that present the current beat have finished animating. */
 export function isEditorTourBeatReady({ beat, ready }: EditorTourState): boolean {
   switch (beat) {
@@ -60,6 +80,7 @@ function advanceBeat(): void {
 export function runEditorTourPrimary(): void {
   const state = getEditorTourState();
   if (state.status !== 'running') return;
+  notifyEditorTourGesture();
   if (!isEditorTourBeatReady(state)) return skipEditorTourAnimation();
   if (state.beat === 'compose') {
     if (!state.sent) markEditorTourSent();

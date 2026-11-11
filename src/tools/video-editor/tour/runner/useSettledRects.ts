@@ -44,15 +44,24 @@ const isFar = (a: readonly SpotlightRect[], b: readonly SpotlightRect[]) => a.le
 
 const signatureOf = (m: SpotlightMeasurement) => `${m.key}|${m.complete}|${m.still ?? ''}|${m.rects.map((r) => `${r.x},${r.y},${r.width},${r.height}`).join(';')}`;
 
+/** A height change up to this, at the same width, is a phone's URL bar or toolbar coming or going, not a resize. */
+const BROWSER_CHROME_PX = 160;
+
+/**
+ * The viewport, as far as "jump, don't glide" is concerned. A phone's browser changes the window's height as its URL bar
+ * collapses and returns; treating that as a resize would re-place the card unanimated in the middle of a step. Those
+ * changes are left to the ordinary rule (a target that really moved is followed once it holds still).
+ */
 function useViewportKey(): string {
-  const read = () => `${window.innerWidth}x${window.innerHeight}`;
-  const [viewport, setViewport] = useState(read);
+  const [viewport, setViewport] = useState(() => ({ width: window.innerWidth, height: window.innerHeight }));
   useEffect(() => {
-    const onResize = () => setViewport(read);
+    const onResize = () => setViewport((previous) => (
+      previous.width === window.innerWidth && Math.abs(previous.height - window.innerHeight) <= BROWSER_CHROME_PX ? previous : { width: window.innerWidth, height: window.innerHeight }
+    ));
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
-  return viewport;
+  return `${viewport.width}x${viewport.height}`;
 }
 
 /**

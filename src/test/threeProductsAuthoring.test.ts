@@ -55,7 +55,10 @@ it.each(selectedCases)('enables authoring before opening %s in a fresh worker', 
     unroute: vi.fn(async () => {}),
     url: () => 'about:blank',
     goto: vi.fn(async () => {}),
-    evaluate: vi.fn(async () => '[]'),
+    // about:blank has no App to prepare (documentElement.dataset.astridNavigation is unset), so the
+    // credential scan's prepare probe answers null as in a real browser; other probes read as empty.
+    evaluate: vi.fn(async (fn: unknown) =>
+      String(fn).includes('astridNavigation') ? null : '[]'),
   };
   const harness = fixtureHarness(enableTimelineAuthoring);
   await expect(run({ page, harness, astrid: {}, seed3: {} })).rejects.toBe(journey.opened);

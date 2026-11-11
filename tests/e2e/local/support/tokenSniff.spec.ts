@@ -472,3 +472,75 @@ test('navigation settles a fixture-held retry under the gate before draining', a
     expect(reachedServer).toBe(false);
   } finally { server.close(); }
 });
+
+test('navigation waits for an observed response body even after its request finishes', async () => {
+  const page = fakePage();
+  page.unroute = async () => {};
+  const sniff = new TokenSniff({ secret }, 500);
+  await sniff.attach(page);
+  let finish!: (body: string) => void;
+  const body = new Promise<string>(resolve => { finish = resolve; });
+  const req = request();
+  page.emit('request', req);
+  page.emit('response', { headers: () => ({ 'content-type': 'application/json' }), url: () => req.url(), request: () => req, text: () => body });
+  page.emit('requestfinished', req);
+  let navigated = false;
+  const navigation = sniff.navigate(page, async () => { navigated = true; });
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(navigated).toBe(false);
+  finish(secret);
+  await navigation;
+  expect(navigated).toBe(true);
+  await expect(sniff.expectClean(page)).rejects.toThrow('no credential reached the page');
+});
+
+test('navigation rejects an unavailable observed response body', async () => {
+  const page = fakePage();
+  page.unroute = async () => {};
+  const sniff = new TokenSniff({ secret }, 50);
+  await sniff.attach(page);
+  const req = request();
+  page.emit('request', req);
+  page.emit('response', { headers: () => ({ 'content-type': 'application/json' }), url: () => req.url(), request: () => req, text: async () => { throw new Error(secret); } });
+  page.emit('requestfinished', req);
+  let navigated = false;
+  await expect(sniff.navigate(page, async () => { navigated = true; })).rejects.toThrow('POST /health body (responded; capture failed)');
+  expect(navigated).toBe(false);
+});
+
+test('diagnostics correlate lifecycle events without exposing request data or errors', async () => {
+  const page = fakePage();
+  page.unroute = async () => {};
+  const events: Array<Record<string, unknown>> = [];
+  const sniff = new TokenSniff({ secret }, 50, event => events.push(event));
+  await sniff.attach(page);
+  const req = request(`http://localhost:1234/api/private/${secret}?token=${secret}`, secret, { authorization: secret }, async () => { throw new Error(secret); });
+  page.emit('request', req);
+  page.emit('response', { headers: () => ({ 'content-type': 'application/json' }), url: () => req.url(), request: () => req, text: async () => { throw new Error(secret); } });
+  page.emit('requestfailed', req);
+  page.emit('framenavigated', page.mainFrame());
+  await expect(sniff.expectClean(page)).rejects.toThrow('Incomplete credential scan');
+  expect(events.map(event => event.event)).toEqual(expect.arrayContaining(['request', 'headers-begin', 'headers-failed', 'body-begin', 'body-failed', 'requestfailed', 'main-frame-committed']));
+  expect(new Set(events.filter(event => event.request).map(event => event.request)).size).toBe(1);
+  expect(events.find(event => event.event === 'main-frame-committed')?.navigation).toBe(1);
+  expect(JSON.stringify(events)).not.toContain(secret);
+});
+
+test('diagnostics record gate abort and a missing terminal without inventing an event', async () => {
+  const page = fakePage();
+  const events: Array<Record<string, unknown>> = [];
+  const sniff = new TokenSniff({ secret }, 50, event => events.push(event));
+  await sniff.attach(page);
+  let handler!: (route: Route) => Promise<void>;
+  page.route = (async (_pattern, callback) => { handler = callback as typeof handler; }) as Page['route'];
+  page.unroute = async () => {};
+  const req = request();
+  const navigation = sniff.navigate(page, async () => {});
+  page.emit('request', req);
+  await handler({ request: () => req, abort: async () => {} } as unknown as Route);
+  await expect(navigation).rejects.toThrow('no terminal event');
+  expect(events.map(event => event.event)).toEqual(expect.arrayContaining(['gate-entry', 'abort-begin', 'abort-end']));
+  expect(events.map(event => event.event)).not.toContain('requestfailed');
+  expect(events.map(event => event.event)).not.toContain('requestfinished');
+});

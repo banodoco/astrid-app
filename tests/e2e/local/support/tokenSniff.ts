@@ -2,6 +2,9 @@ import { expect, type Frame, type Page, type Request, type Route } from '@playwr
 import { commandOutboxes } from './app.ts';
 
 type Capture = { label: string; state: string; pending: boolean; failed?: boolean; request?: Request };
+type Diagnostic = { scanner: number; request?: number; label?: string; event: string; navigation: number; time: number };
+let nextScanner = 0;
+
 type Admission = { state: 'unclassified' | 'dispatched' | 'blocked'; terminal: boolean };
 
 /** A credential never reaches the page, requests, door answers or browser storage. */
@@ -13,12 +16,28 @@ export class TokenSniff {
   private readonly admissions = new Map<Request, Admission>();
   private changed: (() => void) | undefined;
   private generation = 0;
+  private readonly scannerId = ++nextScanner;
+  private nextRequest = 0;
+  private navigation = 0;
+  private readonly requestIds = new WeakMap<Request, number>();
+
+  private diagnostic(event: string, request?: Request) {
+    if (!this.diagnostics) return;
+    const id = request && this.requestIds.get(request);
+    this.diagnostics({ scanner: this.scannerId, ...(id === undefined ? {} : { request: id }),
+      ...(request ? { label: this.label(request.method(), request.url(), 'request') } : {}),
+      event, navigation: this.navigation, time: Date.now() });
+  }
 
   private signal() { this.generation++; this.changed?.(); }
 
   private isApi(request: Request) { return new URL(request.url()).pathname.startsWith('/api/'); }
 
-  constructor(private readonly tokens: Record<string, string>, private readonly drainMs = 10_000) {}
+  // Set TOKEN_SNIFF_DIAGNOSTICS=1 for a sanitized, per-request lifecycle log.
+  // Only fixed event names, route categories, local IDs, generations and times are emitted.
+  constructor(private readonly tokens: Record<string, string>, private readonly drainMs = 10_000,
+    private readonly diagnostics: ((event: Diagnostic) => void) | undefined = process.env.TOKEN_SNIFF_DIAGNOSTICS === '1'
+      ? event => console.log(`TOKEN_SNIFF ${JSON.stringify(event)}`) : undefined) {}
 
   private scan(where: string, text: string | null | undefined) {
     if (!text) return;
@@ -40,6 +59,10 @@ export class TokenSniff {
 
   async attach(page: Page) {
     page.on('request', (request: Request) => {
+      this.requestIds.set(request, ++this.nextRequest);
+      this.diagnostic('request', request);
+      if (this.diagnostics && request.isNavigationRequest?.() && request.frame() === page.mainFrame())
+        this.diagnostic('main-frame-navigation-request', request);
       if (this.isApi(request)) this.admissions.set(request, { state: 'unclassified', terminal: false });
       this.signal();
       const where = this.label(request.method(), request.url(), 'headers');
@@ -48,13 +71,16 @@ export class TokenSniff {
       this.scan(`the URL of ${where}`, request.url());
       this.scan(`the initial headers of ${where}`, JSON.stringify(request.headers()));
       this.scan(`the body of ${where}`, request.postData());
+      this.diagnostic('headers-begin', request);
       this.track(capture, request.allHeaders().then(headers => {
         this.scan(`the headers of ${where}`, JSON.stringify(headers));
-      }));
+        this.diagnostic('headers-end', request);
+      }, error => { this.diagnostic('headers-failed', request); throw error; }));
     });
-    page.on('requestfinished', request => { const capture = this.requests.get(request); if (capture) capture.state = 'finished'; const admission = this.admissions.get(request); if (admission) admission.terminal = true; this.signal(); });
-    page.on('requestfailed', request => { const capture = this.requests.get(request); if (capture) capture.state = 'failed'; const admission = this.admissions.get(request); if (admission) admission.terminal = true; this.signal(); });
+    page.on('requestfinished', request => { this.diagnostic('requestfinished', request); const capture = this.requests.get(request); if (capture) capture.state = 'finished'; const admission = this.admissions.get(request); if (admission) admission.terminal = true; this.signal(); });
+    page.on('requestfailed', request => { this.diagnostic('requestfailed', request); const capture = this.requests.get(request); if (capture) capture.state = 'failed'; const admission = this.admissions.get(request); if (admission) admission.terminal = true; this.signal(); });
     page.on('response', (response) => {
+      this.diagnostic('response', response.request());
       if (this.admissions.get(response.request())?.state === 'blocked') {
         this.captures.push({ label: this.label(response.request().method(), response.url(), 'route'), state: 'response after blocked dispatch', pending: false, failed: true });
         this.signal();
@@ -63,12 +89,20 @@ export class TokenSniff {
       if (!/json|text/.test(type) || !response.url().includes(`:${new URL(response.url()).port}/api/`)) return;
       const capture: Capture = { label: this.label(response.request().method(), response.url(), 'body'), state: 'responded', pending: true, request: response.request() };
       this.signal();
-      this.track(capture, response.text().then(text => this.scan(`the answer to ${capture.label}`, text)));
+      this.diagnostic('body-begin', response.request());
+      this.track(capture, response.text().then(text => {
+        this.scan(`the answer to ${capture.label}`, text);
+        this.diagnostic('body-end', response.request());
+      }, error => { this.diagnostic('body-failed', response.request()); throw error; }));
+    });
+    if (this.diagnostics) page.on('framenavigated', frame => {
+      if (frame === page.mainFrame()) { this.navigation++; this.diagnostic('main-frame-committed'); }
     });
     // Interception stays active through navigations. It preserves the request
     // lifecycle for raw-header capture, while falling through to the browser.
     // Playwright disables HTTP caching while routing is enabled.
     await page.route('**/*', route => {
+      this.diagnostic('route-entry', route.request());
       const admission = this.admissions.get(route.request());
       if (admission) admission.state = 'dispatched';
       this.signal();
@@ -104,6 +138,7 @@ export class TokenSniff {
     const deadline = Date.now() + this.drainMs;
     const aborts: Capture[] = [];
     const handler = async (route: Route) => {
+      this.diagnostic('gate-entry', route.request());
       const admission = this.admissions.get(route.request());
       if (admission) admission.state = 'blocked';
       this.signal();
@@ -112,7 +147,11 @@ export class TokenSniff {
       // In particular, beforeunload requests must not wait for navigation to
       // finish and then fall through from a destroyed document. Abort promptly,
       // but keep requiring real terminal events and every raw-header capture.
-      const task = (async () => { await route.abort('aborted'); capture.state = 'aborted'; })();
+      const task = (async () => {
+        this.diagnostic('abort-begin', route.request());
+        try { await route.abort('aborted'); capture.state = 'aborted'; this.diagnostic('abort-end', route.request()); }
+        catch (error) { this.diagnostic('abort-failed', route.request()); throw error; }
+      })();
       this.track(capture, task);
       await task.catch(() => {}); // The credential ledger retains a failed disposition.
     };
@@ -122,7 +161,9 @@ export class TokenSniff {
       // under the gate so its retry cannot race the old-document drain.
       await settleTestRequests?.();
       await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline);
-      await navigate();
+      this.diagnostic('navigation-begin');
+      try { await navigate(); this.diagnostic('navigation-end'); }
+      catch (error) { this.diagnostic('navigation-failed'); throw error; }
       await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline);
     } finally {
       // Removing a still-running handler can fall through to another route.

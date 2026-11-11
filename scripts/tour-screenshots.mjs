@@ -87,7 +87,7 @@ async function within(promise, timeout, message) {
   finally { clearTimeout(timer); }
 }
 
-async function freePort() {
+export async function freePort() {
   const server = createServer();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done); });
   const { port } = server.address();
@@ -95,7 +95,7 @@ async function freePort() {
   return port;
 }
 
-async function waitServer(url, child, stopped, timeout = 120_000) {
+export async function waitServer(url, child, stopped, timeout = 120_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (stopped()) throw new Error('Screenshot run interrupted');

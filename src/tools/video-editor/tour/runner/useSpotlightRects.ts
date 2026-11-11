@@ -118,12 +118,13 @@ const TRANSCRIPT_PADDING = 12;
 /**
  * Where an element's content ends, when it is shorter than the element: a track row runs the timeline's whole width but
  * its spotlight ends with its last clip, and the chat transcript's ends below its last message. The empty rest stays
- * dimmed and free for the card.
+ * dimmed and free for the card. Null while a track row has no clip yet: the row mounts a moment before its clips do, and
+ * a row measured then would be lit at full width and corrected (a second move) when they arrive.
  */
-function contentExtent(element: Element, box: Box, reading: Reading): Box {
+function contentExtent(element: Element, box: Box, reading: Reading): Box | null {
   if (element.hasAttribute(EDITOR_TOUR_TRACK_ATTRIBUTE)) {
-    const clips = Array.from(element.querySelectorAll(CLIP_BODY_SELECTOR), (clip) => restingRect(clip, reading).right);
-    return clips.length ? { ...box, right: Math.min(box.right, Math.max(...clips)) } : box;
+    const clips = Array.from(element.querySelectorAll(CLIP_BODY_SELECTOR), (clip) => restingRect(clip, reading)).filter((clip) => clip.right - clip.left > 0);
+    return clips.length ? { ...box, right: Math.min(box.right, Math.max(...clips.map((clip) => clip.right))) } : null;
   }
   if (element.getAttribute(EDITOR_TOUR_ANCHOR_ATTRIBUTE) === EDITOR_TOUR_ANCHORS.chatTranscript) {
     const children = Array.from(element.children, (child) => restingRect(child, reading)).filter((rect) => rect.bottom - rect.top > 0);
@@ -157,6 +158,7 @@ function measure(targets: readonly SpotlightTarget[], reading: Reading = { slide
     if (!element) continue;
     const { visible, bounds } = visibleBox(element, reading);
     const extent = typeof target === 'string' ? contentExtent(element, visible, reading) : visible;
+    if (!extent) continue;
     // Only the part on screen: a pane still outside it (and not declared on its way in) has nothing to light yet.
     const box = { left: Math.max(bounds.left, extent.left), top: Math.max(bounds.top, extent.top), right: Math.min(bounds.right, extent.right), bottom: Math.min(bounds.bottom, extent.bottom) };
     if (box.right - box.left <= 0 || box.bottom - box.top <= 0) continue;

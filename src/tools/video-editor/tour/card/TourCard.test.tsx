@@ -514,3 +514,52 @@ describe('TourCard', () => {
     });
   });
 });
+
+describe('TourCard arriving with the runner’s move', () => {
+  function renderTravelling(tourAct: EditorTourAct, beat: EditorTourBeat, props: { arrived: boolean; working?: boolean }) {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: false, media: query } as MediaQueryList));
+    startEditorTour();
+    setEditorTourBeat(tourAct, beat);
+    const onPrimary = vi.fn();
+    const view = render(<TourCard act={tourAct} beat={beat} onPrimary={onPrimary} rise={false} {...props} />);
+    return { ...view, onPrimary, rerenderWith: (next: { arrived: boolean; working?: boolean }) => view.rerender(<TourCard act={tourAct} beat={beat} onPrimary={onPrimary} rise={false} {...next} />) };
+  }
+
+  it('holds its entrance at the start while it travels, and plays it (and only then reports ready) once it has arrived', () => {
+    const { container, rerenderWith } = renderTravelling(1, 'land', { arrived: false });
+    const card = container.querySelector('[data-editor-tour-card]')!;
+    expect(card).toHaveClass('editor-tour-card-playing', 'editor-tour-card-waiting');
+    expect(card).not.toHaveAttribute('data-arrived');
+    // The card's box is the runner's to bring in: no rise of its own.
+    expect(container.querySelector('section')).not.toHaveClass('editor-tour-rise');
+    advance(TOUR_CARD_ENTRANCE_MS * 2);
+    expect(cardReady()).toBe(false);
+    rerenderWith({ arrived: true });
+    expect(card).toHaveClass('editor-tour-card-playing');
+    expect(card).not.toHaveClass('editor-tour-card-waiting');
+    advance(TOUR_CARD_ENTRANCE_MS);
+    expect(cardReady()).toBe(true);
+  });
+
+  it('starts act 2’s comparison sweep only once the card has arrived', () => {
+    const { rerenderWith } = renderTravelling(2, 'land', { arrived: false });
+    const handle = () => screen.getByRole('slider');
+    advance(TOUR_COMPARE_ENTRANCE_MS);
+    expect(Number(handle().getAttribute('aria-valuenow'))).toBe(0);
+    rerenderWith({ arrived: true });
+    for (let elapsed = 0; elapsed < TOUR_COMPARE_ENTRANCE_MS + 100; elapsed += 16) advance(16);
+    expect(Number(handle().getAttribute('aria-valuenow'))).toBe(COMPARE_REST);
+  });
+
+  it('on respond, while the reply comes in, keeps the user company with a quiet line and no Next yet', () => {
+    const { container, rerenderWith } = renderTravelling(1, 'respond', { arrived: true, working: true });
+    expect(screen.getByText(SCRIPT.hints.respondWorking)).toHaveClass('text-muted-foreground');
+    expect(screen.queryByRole('button', { name: /Next/ })).toBeNull();
+    expect(screen.queryByText(SCRIPT.hints.respond)).toBeNull();
+    expect(container.querySelector('[data-editor-tour-card]')).toHaveAttribute('data-editor-tour-card-phase', 'working');
+    rerenderWith({ arrived: true });
+    expect(screen.getByText(SCRIPT.hints.respond)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Next/ })).toBeInTheDocument();
+    expect(container.querySelector('[data-editor-tour-card]')).not.toHaveAttribute('data-editor-tour-card-phase');
+  });
+});

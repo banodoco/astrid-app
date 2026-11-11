@@ -2,7 +2,7 @@
 /**
  * node scripts/tour-motion-trace.mjs [--out test-results/tour-motion/<ts>] [--theme dark|light]
  *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--no-screencast]
- *   [--viewport 1440x900] [--help]
+ *   [--viewport 1440x900] [--react] [--reanalyse test-results/tour-motion/<name>] [--help]
  *
  * Measures MOTION of the first-run tour on desktop (1440x900 unless --viewport, reducedMotion: no-preference). The sibling
  * tour-screenshots.mjs only takes settled stills with motion off; this walks the same beats with motion on and,
@@ -20,6 +20,10 @@
  * The summary table per transition is the motion contract: the card host moves in exactly one segment (two on desktop's
  * respond, its two phases), never changes destination mid-flight or reverses, cutouts start within a frame of the card,
  * no lit cutout passes through the page corner (0,0,0,0), and the new step's content is only whole near rest.
+ *
+ * --reanalyse re-scores an earlier run from its samples.json files with this version's analyser (no browser).
+ * --react installs a React DevTools-style commit hook and reports, per transition (and for a beat that had to be nudged,
+ * the 3 s before the nudge), how many React commits ran and which components re-rendered most: what keeps the page busy.
  *
  * Trust notes: screencast frames are sparse/irregular (Chrome only emits on visual change, and the screencast itself
  * costs a little time); the rAF samples are the precise record. Dates are NOT frozen here (a frozen clock would stall
@@ -142,6 +146,50 @@ function installSampler() {
   });
 }
 
+/** Counts React commits and the components that re-rendered in each (fibers that performed work and had rendered before). */
+function installReactProbe() {
+  const probe = (window.__tmReact = { commits: [], since: performance.now() });
+  const nameOf = (fiber) => { const t = fiber.type; return typeof t === 'function' ? t.displayName || t.name || 'anon' : t && typeof t === 'object' ? t.displayName || t.render?.displayName || t.render?.name || t.type?.name || null : null; };
+  window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
+    renderers: new Map(), supportsFiber: true, isDisabled: false,
+    inject(renderer) { const id = this.renderers.size + 1; this.renderers.set(id, renderer); return id; },
+    checkDCE() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {},
+    onCommitFiberRoot(_id, root, priority) {
+      const counts = {}, origins = {};
+      const stack = [root.current];
+      let visited = 0;
+      while (stack.length && visited < 60000) {
+        const fiber = stack.pop();
+        visited += 1;
+        // PerformedWork (1) on a fiber that existed before this commit: it re-rendered.
+        if ((fiber.flags & 1) && fiber.alternate) {
+          const name = nameOf(fiber);
+          if (name) counts[name] = (counts[name] ?? 0) + 1;
+          // Where a re-render starts: its nearest named ancestor did not re-render (its own state or subscription changed).
+          let up = fiber.return;
+          while (up && !nameOf(up)) up = up.return;
+          if (name && !(up && (up.flags & 1))) origins[name] = (origins[name] ?? 0) + 1;
+        }
+        if (fiber.sibling) stack.push(fiber.sibling);
+        if (fiber.child) stack.push(fiber.child);
+      }
+      probe.commits.push({ t: performance.now(), priority, counts, origins });
+      if (probe.commits.length > 4000) probe.commits.splice(0, 1000);
+    },
+  };
+}
+
+/** The busiest components over a window of commits. */
+function summariseCommits(commits, t0, t1) {
+  const inWindow = commits.filter((c) => c.t >= t0 && c.t <= t1);
+  const totals = {}, origins = {};
+  for (const c of inWindow) for (const [name, n] of Object.entries(c.counts)) totals[name] = (totals[name] ?? 0) + n;
+  for (const c of inWindow) for (const [name, n] of Object.entries(c.origins ?? {})) origins[name] = (origins[name] ?? 0) + n;
+  const priorities = {};
+  for (const c of inWindow) priorities[c.priority] = (priorities[c.priority] ?? 0) + 1;
+  return { commits: inWindow.length, perSecond: round(inWindow.length / Math.max(0.001, (t1 - t0) / 1000), 1), priorities, top: Object.entries(totals).sort((a, b) => b[1] - a[1]).slice(0, 12), origins: Object.entries(origins).sort((a, b) => b[1] - a[1]).slice(0, 12) };
+}
+
 /* ------------------------------------------------------------------ analysis (node) */
 const norm = (v) => Math.hypot(...v);
 const round = (n, d = 1) => (n == null ? n : Math.round(n * 10 ** d) / 10 ** d);
@@ -218,7 +266,7 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
   const dts = samples.slice(1).map((s, k) => s.t - samples[k].t), sorted = [...dts].sort((a, b) => a - b);
   const idle = samples.filter((s) => s.t < -50).slice(1).map((s, k, a) => s.t - (k ? a[k - 1].t : samples[0].t)).sort((a, b) => a - b);
   const worst = dts.indexOf(Math.max(...dts));
-  const frames = { count: samples.length, medianDtMs: round(sorted[Math.floor(sorted.length / 2)]), p95DtMs: round(sorted[Math.floor(sorted.length * 0.95)]), maxDtMs: round(sorted.at(-1)), maxDtAtT: round(samples[worst + 1]?.t, 0), over50ms: dts.filter((d) => d > 50).length, preTriggerMedianDtMs: round(idle[Math.floor(idle.length / 2)]) };
+  const frames = { startFrames: card.firstMoveT == null ? null : samples.filter((s) => s.t >= 0 && s.t <= card.firstMoveT).length, count: samples.length, medianDtMs: round(sorted[Math.floor(sorted.length / 2)]), p95DtMs: round(sorted[Math.floor(sorted.length * 0.95)]), maxDtMs: round(sorted.at(-1)), maxDtAtT: round(samples[worst + 1]?.t, 0), over50ms: dts.filter((d) => d > 50).length, preTriggerMedianDtMs: round(idle[Math.floor(idle.length / 2)]) };
   const xy = (tf) => (tf?.match(/-?[\d.]+px/g) ?? []).slice(0, 2).map(parseFloat);
   // Mid-flight: after the first frame of a motion segment and before its end (a second, separate move is not mid-flight).
   const flight = (t) => card.segments.some((seg) => t > seg.tFirst && t <= seg.t1);
@@ -304,7 +352,10 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
     else notes.push(`card moved in ${c.segments.length} segment(s) (${segText(c.segments)})${expectMoves > 1 ? ' (respond: arrive, then contract)' : ''}`);
     if (c.reversals) out.push(`card reversed direction ${c.reversals}x`);
     if (teleport(c)) out.push(`card jumped ${c.maxJump.px}px in one ${c.maxJump.dt}ms frame at t=${Math.round(c.maxJump.t)}ms (total travel ${c.travel}px)`);
-    if (c.firstMoveT > 300) out.push(`card started moving ${Math.round(c.firstMoveT)}ms after the trigger`);
+    // The design waits for the old content to leave (120 ms) and the new targets to hold still before anything moves, so
+    // a start a few hundred ms after the click is expected; on this machine that is mostly slow frames. Over a second is not.
+    if (c.firstMoveT > 1000) out.push(`card started moving ${Math.round(c.firstMoveT)}ms after the trigger`);
+    else notes.push(`start latency ${Math.round(c.firstMoveT)}ms (${m.frames.startFrames} frames at this page's cadence)`);
     notes.push(`card travelled ${c.travel}px, first move t=${Math.round(c.firstMoveT)}ms, at rest t=${Math.round(c.restT)}ms`);
   }
   const destinationChanges = c.retargets.filter((r) => r.t >= 0);
@@ -330,7 +381,8 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
     if (k.reversals) out.push(`${label} reversed direction ${k.reversals}x`);
     if (teleport(k)) out.push(`${label} jumped ${k.maxJump.px}px in one ${k.maxJump.dt}ms frame at t=${Math.round(k.maxJump.t)}ms`);
     if (k.chase && k.chase.targetTravelPx > 2 && k.chase.maxGapPx - (k.chase.finalGapPx ?? 0) > 40) notes.push(`${label} trailed its moving target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (resting offset ${k.chase.finalGapPx}px; target moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
-    if (k.restT != null && k.firstMoveT != null && c.restT != null && Math.abs(k.restT - c.restT) > 250) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at t=${Math.round(c.restT)}ms`);
+    // A closing cutout is invisible before its fade ends, so its last lit frame comes early by design.
+    if (!k.closed && k.restT != null && k.firstMoveT != null && c.restT != null && Math.abs(k.restT - c.restT) > 250) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at t=${Math.round(c.restT)}ms`);
   }
   if (m.frames.maxDtMs > 100 || m.frames.over50ms > 5) out.push(`environment: page frame cadence median ${m.frames.medianDtMs}ms, p95 ${m.frames.p95DtMs}ms, worst ${m.frames.maxDtMs}ms at t=${m.frames.maxDtAtT}ms, ${m.frames.over50ms} frames > 50ms (idle before trigger: median ${m.frames.preTriggerMedianDtMs}ms)`);
   if (m.previewUnavailable) out.push(`"Preview unavailable" text present in the preview for ${m.previewUnavailable.frames} frames, t=${m.previewUnavailable.firstT}–${m.previewUnavailable.lastT}ms`);
@@ -345,6 +397,32 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
     return [...merged].map(([line, slots]) => (slots ? `cutout${slots.length > 1 ? 's' : ''} #${slots.join(',#')} ${line.slice(2)}` : line));
   };
   return { suspects: merge(out), notes: merge(notes) };
+}
+
+/** Moves a transition should make: one per user action (the back-early trace is two: Next, then Back), and desktop's
+ * respond reached forward makes two (arrive beside the reply, contract onto its actions). */
+function expectedMoves(name, dest) {
+  if (/back-early/.test(name)) return 2;
+  return dest.beat === 'respond' && !/back/.test(name) ? 2 : 1;
+}
+
+/** Re-scores a finished run (its samples.json files) with this analyser and rewrites its report: old runs become comparable. */
+export async function reanalyse(dir) {
+  const out = resolve(dir);
+  const report = JSON.parse(await readFile(join(out, 'report.json'), 'utf8'));
+  const steps = readTourSteps();
+  for (const entry of report.transitions) {
+    const samples = JSON.parse(await readFile(join(out, entry.dir, 'samples.json'), 'utf8'));
+    const ids = entry.name.split('__')[0].split('→');
+    const find = (id) => steps.find((step) => step.id === id) ?? { id, act: Number(id.slice(3, 4)), beat: id.split('-')[1], targets: [] };
+    const dest = find(ids.at(-1)), source = find(ids[0]);
+    const expectMoves = expectedMoves(entry.name, dest);
+    const { longFrames, react } = entry;
+    Object.assign(entry, analyseTransition(samples, { dest, source, expectMoves }), longFrames ? { longFrames } : {}, react ? { react } : {});
+  }
+  await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2));
+  await writeFile(join(out, 'report.md'), renderMarkdown(report));
+  return join(out, 'report.md');
 }
 
 /* ------------------------------------------------------------------ contact sheets */
@@ -372,8 +450,8 @@ export function parseOptions(args) {
   const o = {};
   for (let i = 0; i < args.length; i++) {
     const [key, inline] = args[i].split('=');
-    if (key === '--back' || key === '--help' || key === '--no-screencast') { o[key.slice(2)] = true; continue; }
-    if (!['--out', '--theme', '--base-url', '--transitions', '--viewport'].includes(key)) throw new Error(`Unknown flag: ${key}`);
+    if (key === '--back' || key === '--help' || key === '--no-screencast' || key === '--react') { o[key.slice(2)] = true; continue; }
+    if (!['--out', '--theme', '--base-url', '--transitions', '--viewport', '--reanalyse'].includes(key)) throw new Error(`Unknown flag: ${key}`);
     o[key.slice(2)] = inline ?? args[++i];
     if (!o[key.slice(2)] || o[key.slice(2)].startsWith('--')) throw new Error(`${key} needs a value`);
   }
@@ -441,6 +519,7 @@ export async function run(options) {
       } else if (url.origin === baseUrl && !url.pathname.startsWith('/api/')) await route.continue();
       else await route.abort('blockedbyclient');
     });
+    if (options.react) await context.addInitScript(installReactProbe);
     const page = await context.newPage();
     const browserErrors = (report.browserErrors = []);
     page.on('pageerror', (e) => browserErrors.push(`pageerror: ${e.message}`));
@@ -467,8 +546,16 @@ export async function run(options) {
       while (!await page.evaluate((d) => window.__tm.isSettled(d), dest)) {
         if (!nudged && Date.now() - start > NUDGE_MS) {
           nudged = true;
-          nudges.push({ beat: dest.id, afterMs: Date.now() - start, state: await page.evaluate(() => window.__tm.samples.at(-1)?.st),
-            scene: await page.evaluate(() => [...document.querySelectorAll('[data-editor-tour="preview"] [data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset, box: [e.offsetWidth, e.offsetHeight] }))) });
+          const react = options.react ? await page.evaluate(() => window.__tmReact?.commits ?? []) : null;
+          const now = await page.evaluate(() => performance.now());
+          nudges.push({ react: react && summariseCommits(react, now - 3000, now), beat: dest.id, afterMs: Date.now() - start, state: await page.evaluate(() => window.__tm.samples.at(-1)?.st),
+            scene: await page.evaluate(() => ({
+              entries: [...document.querySelectorAll('[data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset, box: [e.offsetWidth, e.offsetHeight], inPreview: Boolean(e.closest('[data-editor-tour="preview"]')) })),
+              poster: Boolean(document.querySelector('[data-editor-tour-poster]')),
+              notice: document.querySelector('[role="status"], [role="alert"]')?.textContent?.slice(0, 120) ?? null,
+              previewText: document.querySelector('[data-editor-tour="preview"]')?.textContent?.slice(0, 160) ?? null,
+              previewIframes: document.querySelectorAll('[data-editor-tour="preview"] iframe').length,
+            })) });
           await nextButton(dest).click({ timeout: 5000 }).catch(() => {});
         }
         if (Date.now() - start > CAP_MS) throw new Error(`${dest.id} did not settle within ${CAP_MS} ms: ${JSON.stringify(await page.evaluate(() => window.__tm.samples.at(-1)?.st))}; live scene: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset }))))}; browser errors: ${JSON.stringify(browserErrors.filter((e) => !e.includes('serviceWorker')).slice(0, 5))}`);
@@ -479,7 +566,7 @@ export async function run(options) {
 
     /** Record samples + screencast around `action` (which returns the destination step), until the destination settles. */
     const trace = async (source, label, action, nameOverride) => {
-      await page.evaluate((targets) => { window.__tm.samples.length = 0; window.__tm.clicks.length = 0; window.__tm.loaf.length = 0; window.__tm.targets = targets; }, [...new Set(steps.flatMap((s) => s.targets))]);
+      await page.evaluate((targets) => { window.__tm.samples.length = 0; window.__tm.clicks.length = 0; window.__tm.loaf.length = 0; window.__tm.targets = targets; }, [...new Set([...steps.flatMap((s) => s.targets), '[data-editor-tour="chat-pane"]', '[data-editor-tour="chat-actions"]'])]);
       const frames = [];
       const onFrame = (event) => { frames.push({ data: event.data, wall: event.metadata.timestamp * 1000 }); cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {}); };
       cdp.on('Page.screencastFrame', onFrame);
@@ -491,7 +578,7 @@ export async function run(options) {
       await delay(250);
       if (!options['no-screencast']) await cdp.send('Page.stopScreencast');
       cdp.off('Page.screencastFrame', onFrame);
-      const { samples, clicks, loaf } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks, loaf: window.__tm.loaf }));
+      const { samples, clicks, loaf, commits } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks, loaf: window.__tm.loaf, commits: window.__tmReact?.commits ?? null }));
       const name = nameOverride ?? `${source.id}→${dest.id}${label}`;
       if (!wanted(name)) return dest;
       const t0 = clicks[0]?.t ?? samples[0].t;
@@ -505,8 +592,9 @@ export async function run(options) {
         shots.push({ path, t: f.wall - timeOrigin - t0 });
       }
       // Desktop's respond reached forward makes two moves (arrive beside the reply, contract onto its actions); by Back, one.
-      const expectMoves = dest.beat === 'respond' && !/back/.test(name) ? 2 : 1;
+      const expectMoves = expectedMoves(name, dest);
       const analysis = analyseTransition(rebased, { dest, source, expectMoves });
+      if (commits) analysis.react = summariseCommits(commits, t0, t0 + rebased.at(-1).t);
       analysis.longFrames = loaf.map((f) => ({ ...f, t: round(f.t - t0, 0) })).filter((f) => f.t > -200).sort((a, b) => b.d - a.d).slice(0, 5);
       const moved = (key) => rebased.some((s, k) => k && s.cut[0] && rebased[k - 1].cut[0] && s.cut[0][key].some((n, j) => Math.abs(n - rebased[k - 1].cut[0][key][j]) > 0.01));
       analysis.geometrySourcesMoved = { computedStyle: moved('c'), getBBox: moved('b'), attribute: moved('a') };
@@ -516,6 +604,7 @@ export async function run(options) {
       const sparse = Array.from({ length: FILM.cols * FILM.rows }, (_, i) => start + ((Math.min(end, lastT) - start) * i) / (FILM.cols * FILM.rows - 1));
       if (shots.length) { await sheet(shots, dense, join(dir, 'filmstrip-dense.jpg'), runProcess); await sheet(shots, sparse, join(dir, 'filmstrip-whole.jpg'), runProcess); }
       await writeFile(join(dir, 'samples.json'), JSON.stringify(rebased));
+      await writeFile(join(dir, 'frames.json'), JSON.stringify(shots.map((f) => ({ file: relative(dir, f.path), t: round(f.t, 0) }))));
       const entry = { name, dir: relative(out, dir), hostLoad: { cpus: cpus().length, loadavg1AtStart: round(load0, 1), loadavg1AtEnd: round(loadavg()[0], 1) }, clicks: clicks.map((c) => ({ t: round(c.t - t0, 0), text: c.text })), screencast: { frames: shots.length, firstT: round(shots[0]?.t, 0), lastT: round(shots.at(-1)?.t, 0), medianGapMs: round(shots.map((s, k) => k && s.t - shots[k - 1].t).slice(1).sort((a, b) => a - b)[Math.floor((shots.length - 1) / 2)], 0) }, filmstrips: { dense: `${fileName(name)}/filmstrip-dense.jpg (+0..${FILM.denseStep * (FILM.cols * FILM.rows - 1)}ms every ${FILM.denseStep}ms)`, whole: `${fileName(name)}/filmstrip-whole.jpg (${Math.round(start)}..${Math.round(Math.min(end, lastT))}ms)` }, ...analysis };
       report.transitions.push(entry);
       console.log(`  ${name}: card ${analysis.card.travel}px/${analysis.card.segments.length} seg, ${shots.length} frames`);
@@ -571,12 +660,12 @@ export async function run(options) {
 function renderMarkdown(report) {
   const yes = (v) => (v ? 'yes' : 'no');
   const lines = [`# Tour motion trace (${report.theme}, ${report.viewport.width}x${report.viewport.height}, motion on${report.back ? ', with Back' : ''})`, '', `Browser ${report.browser ?? '?'}. t=0 is the trigger click. Frame images: \`<transition>/frames\`, filmstrips read left to right, top to bottom.`, '',
-    'Contract columns: card moves (segments; expected in brackets), mid-flight destination changes, direction reversals, how far apart card and cutouts start (ms / frames), whether a lit cutout touched the page corner, and the most the NEW content shows more than 8 px from rest.', '',
-    '| transition | card moves | mid-flight retargets | reversals | card first move / rest | cutout start gap | corner | new content >8px from rest | suspects |', '|---|---|---|---|---|---|---|---|---|'];
+    'Contract columns: card moves (segments; expected in brackets), how many times its destination was set (expected in brackets), mid-flight destination changes, direction reversals, how far apart card and cutouts start (ms / frames), whether a lit cutout touched the page corner, and the most the NEW content shows more than 8 px from rest.', '',
+    '| transition | card moves | destinations set | mid-flight retargets | reversals | card first move / rest | cutout start gap | corner | new content >8px from rest | suspects |', '|---|---|---|---|---|---|---|---|---|---|'];
   for (const t of report.transitions) {
     const c = t.card;
     const cutoutRetargets = t.cutouts.reduce((n, k) => n + k.retargets.filter((r) => r.whileMoving).length, 0);
-    lines.push(`| ${t.name} | ${c.segments.length} (${t.expectMoves}) | ${c.midFlightRetargets}${cutoutRetargets ? ` (+${cutoutRetargets} cutout)` : ''} | ${c.reversals} | ${c.firstMoveT == null ? '-' : `${Math.round(c.firstMoveT)} / ${Math.round(c.restT)}ms`} | ${t.startSync ? `${t.startSync.maxMs}ms / ${t.startSync.maxFrames}f` : '-'} | ${yes(t.cutouts.some((k) => k.cornerTouchT.length))} | ${c.contentInFlight.maxOpacityAway} | ${t.suspects.length} |`);
+    lines.push(`| ${t.name} | ${c.segments.length} (${t.expectMoves}) | ${c.retargets.filter((r) => r.t >= 0).length} (${t.expectMoves}) | ${c.midFlightRetargets}${cutoutRetargets ? ` (+${cutoutRetargets} cutout)` : ''} | ${c.reversals} | ${c.firstMoveT == null ? '-' : `${Math.round(c.firstMoveT)} / ${Math.round(c.restT)}ms`} | ${t.startSync ? `${t.startSync.maxMs}ms / ${t.startSync.maxFrames}f` : '-'} | ${yes(t.cutouts.some((k) => k.cornerTouchT.length))} | ${c.contentInFlight.maxOpacityAway} | ${t.suspects.length} |`);
   }
   for (const t of report.transitions) {
     lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadavg1AtStart}->${t.hostLoad.loadavg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',
@@ -584,9 +673,10 @@ function renderMarkdown(report) {
     for (const c of t.cutouts) if (c.used) lines.push(`- cutout #${c.slot}: ${fmtRect(c.start)} -> ${fmtRect(c.end)}, travel ${c.travel}px, ${c.segments.length} segment(s)${c.opened ? ', opened in place' : ''}${c.closed ? ', closed in place' : ''}${c.chase ? `, max gap to ${c.chase.selector} ${c.chase.maxGapPx}px (final ${c.chase.finalGapPx}px)` : ''}`);
     lines.push('', '**Suspects**', '', ...(t.suspects.length ? t.suspects.map((s) => `- ${s}`) : ['- none']));
     lines.push('', '**Timeline**', '', ...(t.notes.length ? t.notes.map((s) => `- ${s}`) : ['- nothing moved']));
+    if (t.react) lines.push('', `**React commits**: ${t.react.commits} (${t.react.perSecond}/s; by priority ${JSON.stringify(t.react.priorities)}); most re-rendered: ${t.react.top.map(([n, c]) => `${n} ${c}`).join(', ')}; re-renders started in: ${t.react.origins.map(([n, c]) => `${n} ${c}`).join(', ')}`);
     if (t.longFrames?.length) lines.push('', '**Longest frames** (Long Animation Frames: what ran in them)', '', ...t.longFrames.map((f) => `- t=${f.t}ms ${f.d}ms (style+layout ${f.styleLayoutMs ?? '?'}ms, render ${f.renderMs ?? '?'}ms): ${f.scripts.map((x) => `${x.d}ms ${x.invoker}${x.fn ? ` ${x.fn}` : ''}${x.src ? ` @${x.src}` : ''}`).join('; ') || 'no script attribution'}`));
   }
-  if (report.nudges?.length) lines.push('', '## Beats that did not become ready by themselves', '', ...report.nudges.map((n) => `- ${n.beat}: not ready after ${Math.round(n.afterMs / 1000)}s (ready=${JSON.stringify(n.state?.ready)}); the tool pressed Next once like a user skipping the animation. Its trace contains that extra click.${n.scene ? ` Live scene: ${JSON.stringify(n.scene)}` : ''}`));
+  if (report.nudges?.length) lines.push('', '## Beats that did not become ready by themselves', '', ...report.nudges.map((n) => `- ${n.beat}: not ready after ${Math.round(n.afterMs / 1000)}s (ready=${JSON.stringify(n.state?.ready)}); the tool pressed Next once like a user skipping the animation. Its trace contains that extra click.${n.scene ? ` Live scene: ${JSON.stringify(n.scene)}` : ''}${n.react ? ` React in the 3 s before: ${n.react.commits} commits (${n.react.perSecond}/s, ${JSON.stringify(n.react.priorities)}); most re-rendered: ${n.react.top.map(([name, c]) => `${name} ${c}`).join(', ')}` : ''}`));
   lines.push('', '## Update available notice per settled beat', '', ...Object.entries(report.beats).map(([id, b]) => `- ${id}: ${b.updateAvailable.length ? b.updateAvailable.map((u) => `${fmtRect(u.rect)} centre ${u.centreInCutout ? 'inside' : 'outside'} cutouts`).join('; ') : 'absent'}`));
   return `${lines.join('\n')}\n`;
 }
@@ -595,6 +685,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   try {
     const options = parseOptions(process.argv.slice(2));
     if (options.help) console.log((await readFile(fileURLToPath(import.meta.url), 'utf8')).split('/**')[1].split('*/')[0].replace(/^ \* ?/gm, ''));
+    else if (options.reanalyse) console.log(await reanalyse(options.reanalyse));
     else { const result = await run(options); if (result.failed) process.exitCode = 1; }
   } catch (error) { console.error(error.stack ?? error.message); process.exitCode = 1; }
 }

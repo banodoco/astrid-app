@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { TOUR_LEAVE_MS, TOUR_MOVE_EASE, TOUR_MOVE_MS } from './useSettledRects';
 
 /** The new content fades up over the last part of the move, so it is whole just as the card comes to rest. */
-export const TOUR_ARRIVE_DELAY_MS = 240;
+export const TOUR_ARRIVE_DELAY_MS = 150;
 export const TOUR_ARRIVE_MS = TOUR_MOVE_MS - TOUR_ARRIVE_DELAY_MS;
 /** ...and rises this far into place as it does. */
 const ARRIVE_RISE_PX = 4;

@@ -61,7 +61,7 @@ function createHarness() {
   store.setState((state) => ({
     ...state,
     timelineOps: { apply } as never,
-    data: { ...state.data, isLoading: false, data: {} as never },
+    data: { ...state.data, isLoading: false, data: {} as never, scaleWidth: 160 },
     playback: { ...state.playback, previewRef: { current: previewHandle } as never },
     chrome: {
       ...state.chrome,
@@ -75,7 +75,7 @@ function createHarness() {
       <EditorTourTimelineDriver />
     </TimelineStoreProvider>,
   );
-  return { apply, calls, previewHandle, ...view };
+  return { apply, calls, previewHandle, store, ...view };
 }
 
 const goTo = (act: EditorTourAct, beat: EditorTourBeat) => act_(() => setEditorTourBeat(act, beat));
@@ -602,6 +602,29 @@ describe('EditorTourTimelineDriver', () => {
       await waitFor(() => expect(ready()).toBe(true));
       expect(harness.centered).toEqual([]);
       expect(harness.zooms).toHaveLength(1);
+    } finally {
+      scroller.remove();
+    }
+  });
+
+  it('writes no zoom when the timeline already fits, even as the chrome (and its setter) changes', async () => {
+    // Each write saves a new preferences record and re-renders the editor; with a write per check, and a check per new
+    // setter, the editor re-rendered every frame and starved the preview's first scene frame.
+    const scroller = document.createElement('div');
+    scroller.setAttribute('data-timeline-row-layout', 'managed');
+    scroller.style.setProperty('--label-width', '144px');
+    Object.defineProperty(scroller, 'clientWidth', { value: 1400, configurable: true });
+    document.body.append(scroller);
+    try {
+      const { store } = createHarness();
+      addScene('ready');
+      await act(async () => { await Promise.resolve(); });
+      for (let i = 0; i < 5; i += 1) {
+        act_(() => store.setState((state) => ({ ...state, chrome: { ...state.chrome, setScaleWidth: ((update: number) => { harness.zooms.push(update); }) as never } })));
+      }
+      goTo(1, 'land');
+      await waitFor(() => expect(ready()).toBe(true));
+      expect(harness.zooms).toEqual([]);
     } finally {
       scroller.remove();
     }

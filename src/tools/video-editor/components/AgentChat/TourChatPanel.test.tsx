@@ -507,6 +507,19 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(screen.queryByText('Thinking...')).toBeNull();
   });
 
+  it('anchors the act’s actions (its tool group) for the spotlight to contract onto, and the whole pane for the card to keep clear of', () => {
+    startAtCompose();
+    render(<AgentChatPanel />);
+    act(() => setEditorTourBeat(1, 'respond', true));
+
+    const actions = document.querySelectorAll(editorTourSelector(EDITOR_TOUR_ANCHORS.chatActions));
+    expect(actions).toHaveLength(1);
+    expect(reply().contains(actions[0])).toBe(true);
+    expect(actions[0].textContent).toContain('[2 actions]');
+    expect(actions[0].textContent).not.toContain(ACT1.reply);
+    expect(document.querySelector(editorTourSelector(EDITOR_TOUR_ANCHORS.chatPane))?.contains(transcript())).toBe(true);
+  });
+
   it('on the gallery beat shows act 2 complete with Send disabled, and nothing animating', () => {
     startAtCompose();
     render(<AgentChatPanel />);

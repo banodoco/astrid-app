@@ -118,6 +118,10 @@ const TIMELINE_SCROLLER_SELECTOR = '[data-timeline-row-layout="managed"]';
  */
 function useTourTimelineFraming(loaded: boolean) {
   const setScaleWidth = useTimelineChromeSelector((chrome) => chrome.setScaleWidth);
+  const scaleWidth = useTimelineDataSelector((data) => data.scaleWidth);
+  // Read through refs: the setter is not stable, and an effect re-run per render would frame (and write) once per render.
+  const chrome = useRef({ setScaleWidth, scaleWidth });
+  chrome.current = { setScaleWidth, scaleWidth };
   useEffect(() => {
     if (!loaded) return;
     let observed: Element | null = null;
@@ -128,7 +132,10 @@ function useTourTimelineFraming(loaded: boolean) {
       if (scroller.scrollLeft !== 0) scroller.scrollLeft = 0;
       const startLeft = parseFloat(getComputedStyle(scroller).getPropertyValue('--label-width')) || 0;
       const viewportWidth = scroller.clientWidth;
-      setScaleWidth((current) => tourFitScaleWidth({ viewportWidth, startLeft, scaleWidth: current }) ?? current);
+      // Only a real change is written: the setter saves a new preferences record even for the same zoom, and every save
+      // re-renders the editor (a write per check kept React committing every frame and starved the preview's first frame).
+      const fitted = tourFitScaleWidth({ viewportWidth, startLeft, scaleWidth: chrome.current.scaleWidth });
+      if (fitted !== null) chrome.current.setScaleWidth(fitted);
       if (observed !== scroller) {
         observer?.disconnect();
         observed = scroller;
@@ -140,7 +147,7 @@ function useTourTimelineFraming(loaded: boolean) {
     // The scroller may mount after the data loads.
     const retry = window.setInterval(() => { if (!observed) frame(); else window.clearInterval(retry); }, 100);
     return () => { window.clearInterval(retry); observer?.disconnect(); };
-  }, [loaded, setScaleWidth]);
+  }, [loaded]);
 }
 
 /**

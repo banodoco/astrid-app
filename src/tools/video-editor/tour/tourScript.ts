@@ -73,7 +73,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
       ],
       card: {
         title: 'Your agent works with open models and the ecosystem’s knowledge',
-        body: 'Use open models locally with ComfyUI or Wan2GP, or through a hosted service. These four frames were generated through WaveSpeed.',
+        body: 'Use open models locally with ComfyUI or Wan2GP, or through a hosted service.',
         visual: 'frame-to-still',
         labels: ['Frame', 'Qwen Image 2.1'],
       },
@@ -92,7 +92,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
     },
   },
   welcome: { title: 'Welcome to Astrid', body: 'Explore a completed project in this quick guided demo. The prompts replay its steps; no new generation runs.', action: 'OK' },
-  hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses tools built by the community to deliver this request' },
+  hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses community-built creative tools to deliver on this request' },
   controls: { next: 'Next', send: 'Send', back: 'Back', skip: 'Skip tour' },
   strip: ['Agent', 'Open models', 'Output'],
   finale: { title: 'Do you get it?', action: 'I got it', recap: ['Agent + extensions', 'Open models', 'Finished shot'] },

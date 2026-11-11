@@ -27,6 +27,13 @@ on:
     - cron: "17 3 * * *"
   workflow_dispatch:
     inputs:
+      # Once this reviewed branch is available, an authorized diagnostic dispatch is:
+      # gh workflow run direct-journey.yml --repo banodoco/astrid-app --ref r12-a4-second-repair -f token_sniff_diagnostics=true -f agent_ref=313bbd46f1e24bfe635655d78b27ab0b321145d5 -f runtime_ref=42ae24aff8d2cb854f874ce134161077a3ba3641
+      token_sniff_diagnostics:
+        description: Emit sanitized three-product credential scan lifecycle events
+        required: false
+        default: false
+        type: boolean
       runtime_ref:
         description: Optional Runtime SHA or ref for both journey jobs; empty uses the App manifest's pin
         required: false
@@ -317,6 +324,7 @@ jobs:
           # Written by the JSON reporter itself (the globalSetup prints to stdout, so a shell redirect would corrupt the file).
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
+          TOKEN_SNIFF_DIAGNOSTICS: ${{ inputs.token_sniff_diagnostics && '1' || '0' }}
           NODE_OPTIONS: --max-old-space-size=4096
         run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
 

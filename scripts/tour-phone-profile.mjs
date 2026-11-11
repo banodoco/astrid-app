@@ -169,6 +169,7 @@ function parseOptions(argv) {
     if (a === '--help') o.help = true;
     else if (a === '--no-throttle') o.cpu = 1;
     else if (a === '--why') o.why = true;
+    else if (a === '--cpuprof') o.cpuprof = true;
     else if (a === '--block-world') o['block-world'] = true;
     else if (a === '--tree') o.tree = true;
     else if (a.startsWith('--')) { const v = argv[++i]; o[a.slice(2)] = ['cpu', 'dpr', 'idle'].includes(a.slice(2)) ? Number(v) : v; }
@@ -239,11 +240,12 @@ export async function run(options) {
     const mediaRequests = (report.mediaRequests = []);
     page.on('request', (r) => {
       const u = r.url();
-      if (/ca975b68e035|threejs|three\.|SceneSurface|authoring|\.json(\?|$)/i.test(u) && !/runtime-config|\/api\//.test(u)) worldRequests.push(u.replace(/^https?:\/\/[^/]+/, '').slice(0, 140));
+      if (/ca975b68e035|threejs-live-editor|SceneSurface|\/three(\.|\/|-)|node_modules\/(\.vite\/deps\/)?three/i.test(u)) worldRequests.push(u.replace(/^https?:\/\/[^/]+/, '').slice(0, 140));
       if (/\/astrid\/onboarding\//.test(u)) mediaRequests.push(`${Math.round(performance.now?.() ?? 0)} ${u.replace(/^https?:\/\/[^/]+/, '').slice(-60)}`);
     });
     const cdp = await context.newCDPSession(page);
     await cdp.send('Performance.enable');
+    if (options.cpuprof) { await cdp.send('Profiler.enable'); await cdp.send('Profiler.setSamplingInterval', { interval: 500 }); }
     if (options.cpu > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: options.cpu });
     await page.goto(`${baseUrl}/tools/video-editor`, { waitUntil: 'domcontentloaded', timeout: 180_000 });
     await page.waitForFunction(() => document.querySelector('[data-editor-tour-card]'), null, { timeout: 180_000 });
@@ -274,14 +276,28 @@ export async function run(options) {
     const record = async (name, fn) => {
       const m0 = await metrics();
       const load0 = loadavg()[0];
+      if (options.cpuprof) await cdp.send('Profiler.start');
       await page.evaluate(() => window.__pp.begin());
       const t0 = Date.now();
       await fn();
       const wall = Date.now() - t0;
+      let top = null;
+      if (options.cpuprof) {
+        const { profile } = await cdp.send('Profiler.stop');
+        const self = new Map(), byId = new Map(profile.nodes.map((n) => [n.id, n]));
+        profile.samples.forEach((id, i) => self.set(id, (self.get(id) ?? 0) + (profile.timeDeltas[i] ?? 0)));
+        const agg = new Map();
+        for (const [id, us] of self) {
+          const f = byId.get(id).callFrame;
+          const key = `${f.functionName || '(anon)'} ${String(f.url).split('?')[0].split('/').slice(-2).join('/')}:${f.lineNumber + 1}`;
+          agg.set(key, (agg.get(key) ?? 0) + us);
+        }
+        top = [...agg].sort((a, b) => b[1] - a[1]).slice(0, 14).map(([k, us]) => [k, Math.round(us / 1000)]);
+      }
       const inPage = await page.evaluate(() => { const r = window.__pp.end(); r.dbg = window.__dbg; window.__dbg = 0; return r; });
       const m1 = await metrics();
       const d = (k) => Math.round((m1[k] - m0[k]) * (k.endsWith('Duration') ? 1000 : 1));
-      const phase = { name, wallMs: wall, load: Math.round(loadavg()[0] * 10) / 10, ...inPage,
+      const phase = { name, wallMs: wall, cpuTop: top, load: Math.round(loadavg()[0] * 10) / 10, ...inPage,
         cdp: { taskMs: d('TaskDuration'), scriptMs: d('ScriptDuration'), layoutMs: d('LayoutDuration'), styleMs: d('RecalcStyleDuration'), layouts: d('LayoutCount'), styleRecalcs: d('RecalcStyleCount'), nodes: Math.round(m1.Nodes), heapMB: Math.round(m1.JSHeapUsedSize / 1e6), jsListeners: Math.round(m1.JSEventListeners) } };
       void load0; prev = m1;
       report.phases.push(phase);
@@ -380,7 +396,7 @@ function renderMarkdown(r) {
       ...(p.tree ? ['- sample commit tree:', '```', p.tree.split('\n').slice(0, 120).join('\n'), '```'] : []),
       ...(p.why?.length ? [`- why origins re-rendered: ${p.why.map(([n, c]) => `${n} x${c}`).join('; ')}`] : []),
       `- LoAF top scripts (ms): ${p.loaf.topScripts.map(([n, ms]) => `${ms} ${n}`).join('; ') || '-'}`,
-      `- dbg ${p.dbg}`,
+      ...(p.cpuTop ? [`- CPU self time (ms): ${p.cpuTop.map(([k, ms]) => `${ms} ${k}`).join('; ')}`] : []),
       `- timers/s: setTimeout ${p.counters.setTimeout ?? 0}, setInterval ${p.counters.setInterval ?? 0}; heap ${p.cdp.heapMB}MB; DOM nodes ${p.cdp.nodes}; WebGL contexts so far ${p.glContexts}; ready after tap ${p.readyAfterTapMs ?? '-'}ms`, '');
   }
   L.push('## World / media proof', '', `- requests that look like the world or Three.js code: ${r.worldRequests?.length ? r.worldRequests.join(', ') : 'none'}`, `- WebGL contexts created in the page: ${r.glContextsTop}; iframes at end: ${r.iframesAtEnd}`, `- onboarding media requests: ${(r.mediaRequests ?? []).length}`, '', '## Scene (act 1 land)', '', '```json', JSON.stringify(r.scene, null, 1), '```', '', '## Notes', '', ...(r.notes.length ? r.notes.map((n) => `- ${n}`) : ['- none']), '', '## GL/console messages', '', ...(r.browserErrors?.length ? r.browserErrors.map((n) => `- ${n}`) : ['- none']));

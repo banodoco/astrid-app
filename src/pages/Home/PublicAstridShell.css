@@ -1795,7 +1795,8 @@
   .astrid-callout:is([data-callout="models"], [data-callout="tools"]) { bottom: 8px; left: 8px; }
   /* The Models chip stops short of the Agent launcher it points at. */
   .astrid-callout[data-callout="models"] { --astrid-callout-width: calc(100% - 16px - 76px); }
-  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(100% - 16px); }
+  /* Agent's bottom chip is the same width, centred under the conversation. */
+  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(100% - 16px - 76px); left: 46px; }
   .astrid-callout[data-open="true"] { z-index: 2; }
   /* Titles scale with the screen so the half-width chips never cut theirs off. */
   .astrid-callout h2 { font-size: clamp(10.5px, 3.45vw, 13.5px); line-height: 1.2; }
@@ -2118,26 +2119,32 @@
   }
 }
 
+@keyframes astrid-phone-chip-in { from { opacity: 0; translate: 0 5px; } }
 /* On phones, direct entry uses the same slot clock for each card and its connector. */
 @media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
+  /* The chips settle in place: a slow fade with a few pixels of drift, never the desktop cards' rise
+     and scale, which on a small chip reads as a jolt. Each connector draws once its chip has landed. */
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout {
-    animation-duration: 220ms;
-    animation-delay: calc(80ms + var(--astrid-mobile-callout-index, 0) * 60ms);
+    --astrid-phone-chip-start: calc(160ms + var(--astrid-mobile-callout-index, 0) * 110ms);
+    animation: astrid-phone-chip-in 560ms cubic-bezier(.22, .61, .36, 1) var(--astrid-phone-chip-start) backwards;
+  }
+  .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors g {
+    --astrid-phone-chip-start: calc(160ms + var(--astrid-mobile-callout-index, 0) * 110ms);
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors path {
-    animation-duration: 300ms;
-    animation-delay: calc(300ms + var(--astrid-mobile-callout-index, 0) * 60ms);
+    animation-duration: 420ms;
+    animation-delay: calc(var(--astrid-phone-chip-start) + 380ms);
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors .astrid-callout-dot-start {
-    animation-duration: 100ms;
-    animation-delay: calc(300ms + var(--astrid-mobile-callout-index, 0) * 60ms);
+    animation-duration: 140ms;
+    animation-delay: calc(var(--astrid-phone-chip-start) + 380ms);
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors .astrid-callout-dot-end {
-    animation-duration: 180ms;
-    animation-delay: calc(600ms + var(--astrid-mobile-callout-index, 0) * 60ms);
+    animation-duration: 200ms;
+    animation-delay: calc(var(--astrid-phone-chip-start) + 800ms);
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors .astrid-callout-ping {
-    animation: astrid-dot-ping 700ms cubic-bezier(.2, .7, .3, 1) calc(600ms + var(--astrid-mobile-callout-index, 0) * 60ms);
+    animation: astrid-dot-ping 700ms cubic-bezier(.2, .7, .3, 1) calc(var(--astrid-phone-chip-start) + 800ms);
   }
 }
 

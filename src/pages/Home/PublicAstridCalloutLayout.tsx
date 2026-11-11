@@ -25,6 +25,7 @@ export const CALLOUT_VACUUM_RESIDUAL_RATIO = 0.2;
 // large fraction of a recomputed baseline on one compositor frame.
 export const CALLOUT_CURVE_HANDOFF_MS = 480;
 const CALLOUT_CONTENT_FADE_OUT_MS = 360;
+const PHONE_TITLE_SWAP_MS = 460;
 export type CalloutTransitionPhase = 'retracting' | 'waiting-for-layout' | 'extending' | 'canonicalizing';
 export interface CalloutMove {
   epoch: number;
@@ -348,11 +349,17 @@ export class PublicAstridCalloutLayout extends Component<Props> {
         content.style.removeProperty('width');
         outgoing.remove();
       };
-      const fadeIn = content.animate([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], {duration: CALLOUT_MOVE_MS, easing: 'linear'});
-      const fadeOut = outgoing.animate([
-        {opacity: 1, translate: '0 0', scale: '1'},
-        {opacity: 0, translate: '0 -4px', scale: `${outgoingScale}`},
-      ], {duration: CALLOUT_CONTENT_FADE_OUT_MS, easing: 'ease-in', fill: 'forwards'});
+      // A phone chip holds its place and size, so its title simply changes: the old one fades out, then
+      // the new one fades in, with nothing sliding or shrinking inside a box that is not moving.
+      const fadeIn = phone
+        ? content.animate([{opacity: 0}, {opacity: 0, offset: .4}, {opacity: 1}], {duration: PHONE_TITLE_SWAP_MS, easing: 'ease-out'})
+        : content.animate([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], {duration: CALLOUT_MOVE_MS, easing: 'linear'});
+      const fadeOut = phone
+        ? outgoing.animate([{opacity: 1}, {opacity: 0}], {duration: PHONE_TITLE_SWAP_MS * .4, easing: 'ease-in', fill: 'forwards'})
+        : outgoing.animate([
+          {opacity: 1, translate: '0 0', scale: '1'},
+          {opacity: 0, translate: '0 -4px', scale: `${outgoingScale}`},
+        ], {duration: CALLOUT_CONTENT_FADE_OUT_MS, easing: 'ease-in', fill: 'forwards'});
       return [animation, fadeIn, fadeOut];
     });
   }

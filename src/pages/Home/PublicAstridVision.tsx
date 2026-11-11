@@ -160,8 +160,9 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
 const PROJECT_GOAL_LINES = 5;
 
 /**
- * A project's goal shows at most five lines; when there is more, the sixth line is
- * softly blurred and faded so the card reads as a teaser for its GitHub plan.
+ * A project's goal shows at most five lines (one on phones, set by --goal-lines in the stylesheet);
+ * when there is more, the next line is softly blurred and faded so the card reads as a teaser for
+ * its GitHub plan.
  */
 function ProjectGoal({ value }: { value: string }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -171,8 +172,10 @@ function ProjectGoal({ value }: { value: string }) {
     const body = frame?.firstElementChild as HTMLElement | null;
     if (!frame || !body) return undefined;
     const measure = () => {
-      const line = Number.parseFloat(getComputedStyle(frame).lineHeight);
-      setClamped(Number.isFinite(line) && body.offsetHeight > line * PROJECT_GOAL_LINES + 2);
+      const style = getComputedStyle(frame);
+      const line = Number.parseFloat(style.lineHeight);
+      const lines = Number.parseFloat(style.getPropertyValue('--goal-lines')) || PROJECT_GOAL_LINES;
+      setClamped(Number.isFinite(line) && body.offsetHeight > line * lines + 2);
     };
     measure();
     if (typeof ResizeObserver !== 'function') return undefined;

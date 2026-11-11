@@ -214,7 +214,9 @@ describe('bounded stage passes', () => {
       expect([...view.container.querySelectorAll('article')]).toEqual(cards);
       expect([...view.container.querySelectorAll('path')]).toEqual(paths);
       expect(animate).toHaveBeenCalledTimes(9);
-      expect(animate).toHaveBeenCalledWith([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], expect.objectContaining({duration: 720}));
+      // Desktop cards move, so their text drifts in; a phone chip stays put and its title only fades.
+      if (isPhone) expect(animate).toHaveBeenCalledWith([{opacity: 0}, {opacity: 0, offset: .4}, {opacity: 1}], expect.objectContaining({duration: 460}));
+      else expect(animate).toHaveBeenCalledWith([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], expect.objectContaining({duration: 720}));
       expect(view.container.querySelectorAll('article > .astrid-callout-outgoing')).toHaveLength(3);
       sample();
       expect(paths[0].getAttribute('data-connector-target')).toBe('transition');

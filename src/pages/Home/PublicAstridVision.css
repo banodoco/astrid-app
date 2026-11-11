@@ -2104,16 +2104,21 @@
    fade) so long plans read as a teaser; the GitHub link below carries the rest. */
 .astrid-vision .astrid-vision-project-goal {
   --goal-line: calc(14px * 1.55);
+  --goal-lines: 5;
   position: relative;
   font-size: 14px;
   line-height: 1.55;
 }
 .astrid-vision .astrid-vision-project-goal :is(p, li) { line-height: inherit; }
 .astrid-vision .astrid-vision-project-goal[data-clamped] {
-  max-height: calc(var(--goal-line) * 6);
+  max-height: calc(var(--goal-line) * (var(--goal-lines) + 1));
   overflow: hidden;
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * 4.85), rgb(0 0 0 / .45) calc(var(--goal-line) * 5.45), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * 4.85), rgb(0 0 0 / .45) calc(var(--goal-line) * 5.45), transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * (var(--goal-lines) - .15)), rgb(0 0 0 / .45) calc(var(--goal-line) * (var(--goal-lines) + .45)), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * (var(--goal-lines) - .15)), rgb(0 0 0 / .45) calc(var(--goal-line) * (var(--goal-lines) + .45)), transparent);
+}
+/* Phones: one full line and one dissolving, so a column of project cards stays short. */
+@media (max-width: 640px) {
+  .astrid-vision .astrid-vision-project-goal { --goal-lines: 1; }
 }
 .astrid-vision .astrid-vision-project-goal[data-clamped]::after {
   content: "";

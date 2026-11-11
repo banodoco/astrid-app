@@ -102,6 +102,7 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     at: [1, 0.42],
     side: 'left',
     phoneTitle: 'Integrated into open-source tools',
+    phoneBody: 'It works with popular tools, but you can also integrate anything you’d like.',
     // On phones the chip runs full width along the bottom, where its logos have room: its connector
     // rises beside the conversation and turns in to the finished result.
     phoneSide: 'top',
@@ -143,6 +144,7 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
     at: [0.5, 0.5],
     side: 'bottom',
     phoneTitle: 'Live-code effects',
+    phoneBody: 'Your agent codes the effects live.',
     phoneSide: 'bottom',
     // On phones the inspector is a compact strip right under this chip: land on the Effects tab itself,
     // low enough in the strip to stay in view while the chip is unfolded.
@@ -180,6 +182,7 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
     // it rises from the label hanging below the timeline to the launcher's lower edge.
     phoneAt: [0.04, 0.6],
     phoneTitle: 'Your agent runs local models',
+    phoneBody: 'It figures out how to get local models to do the job, and makes the generations run efficiently on your machine.',
     tabletSide: 'top',
     tabletAt: [0.5, 1],
     side: 'bottom',

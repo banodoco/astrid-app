@@ -1541,6 +1541,136 @@
   to { opacity: 1; translate: 0 0; }
 }
 
+/* Tablet and small-laptop widths (641–1099px), upright or on their side: one screen, never scrolled, like
+   the phone. The brand and social links sit in a slim header, the stage takes all the height that is
+   left and is drawn as large as fits it, and the headline, sentence, App/Agent switch and call to action
+   share a bar pinned to the bottom. The demo itself is the full one, with every card written out.
+   Screens under 600px tall (a phone on its side) keep the scrolling stacked page instead: the full demo
+   cannot be drawn legibly in what a pinned bar would leave them. */
+@media (min-width: 641px) and (max-width: 1099px) and (min-height: 600px) {
+  .astrid-public-site { height: 100vh; height: 100dvh; min-height: 0; padding-inline: 28px; }
+  .astrid-landing-grid {
+    position: relative;
+    height: 100%;
+    min-height: 0;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      "brand brand note"
+      "stage stage stage"
+      "title sub switch"
+      "title sub cta";
+    align-items: center;
+    align-content: stretch;
+    column-gap: clamp(20px, 3.4vw, 40px);
+    row-gap: 8px;
+    padding: 10px 0 18px;
+  }
+  /* The bar's panel, drawn behind its two rows, edge to edge. */
+  .astrid-landing-grid::after {
+    content: "";
+    grid-area: 3 / 1 / 5 / -1;
+    align-self: stretch;
+    z-index: 0;
+    margin: 0 -28px -18px;
+    border-top: 1px solid color-mix(in srgb, var(--astrid-ink) 14%, transparent);
+    background: color-mix(in srgb, var(--astrid-paper) 88%, transparent);
+    -webkit-backdrop-filter: blur(10px);
+    backdrop-filter: blur(10px);
+    pointer-events: none;
+  }
+  .astrid-hero-detail { display: contents; }
+  .astrid-hero-copy :is(h1, .astrid-hero-detail > *, .astrid-audience-switch) { position: relative; z-index: 1; }
+  .astrid-hero-copy h1 {
+    grid-area: title;
+    max-width: none;
+    margin: 0;
+    padding-top: 14px;
+    font-size: clamp(30px, 4.3vw, 44px);
+    line-height: 1.02;
+  }
+  .astrid-hero-emphasis { display: block; }
+  .astrid-hero-detail > :first-child { grid-area: sub; padding-top: 14px; }
+  .astrid-hero-subtitle { max-width: 34ch; margin: 0; font-size: clamp(14.5px, 1.75vw, 17px); }
+  .astrid-hero-copy .astrid-audience-switch {
+    grid-area: switch; align-self: end; justify-self: stretch; min-width: 0; margin: 18px 0 0;
+  }
+  /* Beside the orange call to action the switch goes quiet, as on the phone. */
+  .astrid-audience-switch button[aria-pressed="true"],
+  .astrid-public-site[data-dusk] .astrid-audience-switch button[aria-pressed="true"] {
+    background: var(--astrid-ink);
+    color: var(--astrid-paper);
+  }
+  .astrid-hero-actions { grid-area: cta; align-self: start; width: clamp(190px, 24vw, 240px); max-width: none; }
+  .astrid-button { min-height: 46px; }
+  .astrid-hero-note { grid-area: note; justify-self: end; margin: 0; padding: 0; }
+  .astrid-hero-note .astrid-social-links { margin: 0 -8px 0 0; }
+  /* The stage keeps the proportions its panels are laid out for and is as large as the room allows,
+     with space kept for the cards that hang over its sides and foot. */
+  .astrid-showcase {
+    container-type: size;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    align-self: stretch;
+    min-height: 0;
+    padding: 14px 36px 34px;
+  }
+  .astrid-editor-stage {
+    flex: none;
+    width: min(100cqw, 100cqh * 984 / 740);
+    height: auto;
+  }
+  /* The conversation's type does not shrink with the stage, so it is drawn a little smaller here and
+     the whole exchange stays in view. */
+  .astrid-public-site[data-audience] .astrid-scripted-conversation { zoom: .8; }
+}
+/* On its side a tablet is short of height, not width: the bar becomes a single slim row (headline on
+   one line) so the demo keeps every pixel of height it can. */
+@media (min-width: 641px) and (max-width: 1099px) and (min-height: 600px) and (min-aspect-ratio: 1/1) {
+  .astrid-landing-grid {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand brand brand note"
+      "stage stage stage stage"
+      "title sub switch cta";
+    column-gap: clamp(14px, 2vw, 24px);
+    padding: 8px 0 14px;
+  }
+  .astrid-landing-grid::after { grid-area: 3 / 1 / 4 / -1; margin-bottom: -14px; }
+  .astrid-hero-copy h1 { padding-top: 12px; font-size: clamp(21px, 2.7vw, 28px); white-space: nowrap; }
+  .astrid-hero-emphasis { display: inline; }
+  .astrid-hero-detail > :first-child { padding-top: 12px; }
+  .astrid-hero-subtitle { max-width: none; font-size: 13.5px; line-height: 1.3; }
+  .astrid-hero-copy .astrid-audience-switch { align-self: center; justify-self: end; margin: 12px 0 0; }
+  .astrid-audience-switch button { padding-inline: 14px; }
+  .astrid-hero-actions { align-self: center; width: clamp(150px, 17vw, 190px); margin-top: 12px; }
+  .astrid-button { min-height: 42px; }
+  .astrid-showcase { padding: 8px 36px 30px; }
+}
+/* Upright there is height to spare but less width: the sentence sits under a larger headline, with
+   the switch and call to action beside them. */
+@media (min-width: 641px) and (max-width: 1099px) and (min-height: 600px) and (max-aspect-ratio: 1/1) {
+  .astrid-landing-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "brand note"
+      "stage stage"
+      "title switch"
+      "sub cta";
+    row-gap: 10px;
+    padding-bottom: 26px;
+  }
+  .astrid-landing-grid::after { margin-bottom: -26px; }
+  .astrid-hero-copy h1 { align-self: end; padding-top: 22px; font-size: clamp(38px, 5.6vw, 54px); text-wrap: balance; }
+  .astrid-hero-emphasis { display: inline; }
+  .astrid-hero-detail > :first-child { align-self: start; padding-top: 0; }
+  .astrid-hero-subtitle { max-width: none; font-size: clamp(15.5px, 2vw, 18px); }
+  .astrid-hero-copy .astrid-audience-switch { margin-top: 22px; }
+  .astrid-button { min-height: 50px; }
+}
+
 /* Phone (≤640px): the whole page is one screen, never scrolled. A slim header (brand and App/Agent),
    the demo filling whatever height is left, and a footer pinned to the bottom with the headline, the
    call to action and the social links. The labels are one-line chips inside the demo's frame, above and

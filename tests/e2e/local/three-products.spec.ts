@@ -27,12 +27,13 @@
  * route holds, never by sleeping.
  */
 import { expect, type Locator, type Page, type Request, type Route } from '@playwright/test';
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
 import path from 'node:path';
 import { getTimelineLabelWidth } from '../../../src/tools/video-editor/lib/coordinate-utils.ts';
 import { PREVIEW_SURFACE, calibrateRuler, seekRulerToFrame, type RulerSeek } from '../support/previewRuler.ts';
-import { harnessUnavailableReason, startDirectHarness, sha256Hex, THREE_PRODUCTS_REFERENCE_AT, type DirectHarness, type ThreeProductsSeed } from './support/harness.ts';
+import { harnessUnavailableReason, startDirectHarness, sha256Hex, RUNTIME_CHECKOUT, THREE_PRODUCTS_REFERENCE_AT, type DirectHarness, type ThreeProductsSeed } from './support/harness.ts';
 import { APP_ENTRY_ROUTE, commandOutboxes, currentHead, dragTimelineClip, dropFileOnTimeline, editFirstTrackName, expectConnected, firstTrackName, holdCommandRequests, holdTimelineCreation, openApp, openSeededTimeline, revisionBody, test as appTest, timelineDraft, UI, waitForAudit } from './support/app.ts';
 import { allowlistedEvidenceMethod, allowlistedEvidenceStatus, relevantEvidenceRoute, type EvidenceMethod, type EvidenceRoute } from './support/auto-real-proxy-helpers.ts';
 import { timelineBase as runtimeTimelineBase, timelineFromList, type TimelineListPage, type TimelineScope } from './support/timeline-scope.ts';
@@ -711,6 +712,8 @@ interface CommitPost {
   key: string;
   status: number;
   response: any;
+  /** Exact reply text: Runtime's digest depends on its number spelling (5.0 vs 5), which JSON.parse loses. */
+  rawResponse?: string;
 }
 
 async function faultFirstCommit(page: Page) {
@@ -751,10 +754,11 @@ async function faultFirstCommit(page: Page) {
   };
   const forward = async (route: Route, request: Request, identity: Gate5CommitIdentity) => {
     const response = await route.fetch({ maxRetries: 0 });
+    const rawResponse = await response.text();
     const post: CommitPost = {
       method: request.method(), path: new URL(request.url()).pathname.replace(/^\/api\/runtime/, ''),
       body: request.postData()!, key: request.headers()['idempotency-key'],
-      status: response.status(), response: await response.json(),
+      status: response.status(), response: JSON.parse(rawResponse), rawResponse,
     };
     posts.push(post);
     forwarded.push({ identity, response: post.response });
@@ -905,6 +909,15 @@ function expectRecordedDocumentPatchCommand(recorded: EditCommand | undefined, s
   });
 }
 
+/** Runtime's own digests of a raw commit reply: the canonical document and its parent revision payload. */
+function runtimeDigests(rawReply: string): { payload: string; document: string } {
+  const out = execFileSync(ASTRID_PYTHON, ['-c',
+    'import json, sys; sys.path.insert(0, sys.argv[1]); from runtime_protocol.timeline_commit_validation import digest; d = json.load(sys.stdin)["data"]["canonical_document"]; print(json.dumps({"payload": digest(d["parent_revision"]["payload"]), "document": digest(d)}))',
+    RUNTIME_CHECKOUT], { input: rawReply, encoding: 'utf8', env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' }, timeout: 30_000 });
+  return JSON.parse(out);
+}
+const runtimeDocumentDigest = (rawReply: string) => runtimeDigests(rawReply).document;
+
 async function expectV2History(harness: DirectHarness, seed: ThreeProductsSeed, post: CommitPost,
   expectedStatus: 'accepted' | 'merged', expectedUndoOf: string[] = []) {
   const request = JSON.parse(post.body) as CommitRequest;
@@ -964,7 +977,11 @@ async function expectV2History(harness: DirectHarness, seed: ThreeProductsSeed, 
     ? 'atomic' : (request.merge ?? 'fields');
   expect(data.merge_mode).toBe(effectiveMerge);
   expect(data.label).toBe(request.label);
-  expect(data.document_digest).toBe(sha256Hex(Buffer.from(canonical(data.canonical_document))));
+  // Runtime's digest is sha256 over Python json.dumps(sort_keys, compact, ensure_ascii=False) (runtime_protocol/util.py canonical_json,
+  // used by timeline_commit_validation.digest), which keeps float spelling such as 5.0 that JSON.parse + JS canonical() cannot.
+  // Recompute with Runtime's own digest() from the raw reply, the way auto-real-proxy.spec.ts does.
+  expect(post.rawResponse, 'commit reply text is needed to recompute the Runtime digest').toBeTruthy();
+  expect(data.document_digest).toBe(runtimeDocumentDigest(post.rawResponse!));
   expect(data.rebased_onto).toEqual(expectedStatus === 'accepted'
     ? null
     : { revision_id: data.previous_revision_id, publication_id: data.previous_publication_id });
@@ -1638,17 +1655,22 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
     await expectPreviewRevision(reopened, pinOf(inverse).revision_id);
     await expectAgentRevision(astrid, harness, seed3, pinOf(inverse).revision_id);
   }
-  // An intentional same-value write is a new publication of the same immutable revision.
+  // An Agent move declares the clip's placement (app.astrid.fixed_start/for, Agent cdf88d7ec, capture.py move), which the App's
+  // mounted doc.patch gesture and its undo do not write (Direct Journey conversion 9c6715cf7). So the first Agent write at the
+  // unchanged position is a new revision; an intentional same-value write after it is a new publication of that same immutable revision.
+  const declared = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(undone),
+    { kind: 'move', clipId: seed3.appClipId, on: 5 }, 'f2-declared-value');
+  expect(position(declared.data.canonical_document, seed3.appClipId)).toBe(5);
   const revisionCount = (await allRevisions(harness, seed3)).length;
-  const same = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(undone),
+  const same = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(declared),
     { kind: 'move', clipId: seed3.appClipId, on: 5 }, 'f2-same-value');
-  expect(pinOf(same).revision_id).toBe(pinOf(undone).revision_id);
-  expect(pinOf(same).publication_id).not.toBe(pinOf(undone).publication_id);
-  expect(await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(undone),
+  expect(pinOf(same).revision_id).toBe(pinOf(declared).revision_id);
+  expect(pinOf(same).publication_id).not.toBe(pinOf(declared).publication_id);
+  expect(await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(declared),
     { kind: 'move', clipId: seed3.appClipId, on: 5 }, 'f2-same-value')).toEqual(same);
   expect((await allRevisions(harness, seed3)).length).toBe(revisionCount);
   const finalHistory = await history(harness, seed3);
-  expect(finalHistory.items).toHaveLength(before.items.length + 5);
+  expect(finalHistory.items).toHaveLength(before.items.length + 6);
   expect(new Set(finalHistory.items.map((entry) => entry.publication_id)).size).toBe(finalHistory.items.length);
   expect(finalHistory.items.filter((entry) => entry.publication_id === pinOf(a).publication_id)).toHaveLength(1);
   expect(wire.legacy, 'move and inverse must never POST a legacy snapshot').toEqual([]);
@@ -1703,12 +1725,13 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 0, 5, THREE_PRODUCTS_REFERENCE_AT);
   const setupRequest = await preconditionRequest;
   const setupResponse = await preconditionResponse;
-  const setupBody = await setupResponse.json();
+  const setupRawBody = await setupResponse.text();
+  const setupBody = JSON.parse(setupRawBody);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
   const setupPost: CommitPost = {
     method: setupRequest.method(), path: new URL(setupRequest.url()).pathname.replace(/^\/api\/runtime/, ''),
     body: setupRequest.postData()!, key: setupRequest.headers()['idempotency-key'],
-    status: setupResponse.status(), response: setupBody,
+    status: setupResponse.status(), response: setupBody, rawResponse: setupRawBody,
   };
   const setupHistory = await expectV2History(harness, seed3, setupPost, 'accepted');
   const setupData = (setupBody as CommitAcceptedMutation).data;
@@ -1720,6 +1743,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
     expectedBase: { revisionId: preconditionBase.head.revision_id, publicationId: preconditionBase.head.publication_id },
     expectedScope: { projectId: harness.seed.projectId, timelineId: seed3.timelineId },
     expectedOwnerId: preconditionOwner.ownerId, expectedOwnerScope: preconditionOwner.scope, preGestureDocument,
+    runtimeDigests: runtimeDigests(setupRawBody),
     authoritativeHistory: setupHistory,
     clipId: seed3.appClipId, expectedTrackId: 'V1', expectedPreviousPosition: 0, expectedPosition: 5,
     settledOutboxes: (await commandOutboxes(page, seed3.timelineId)).filter((owner) => owner.ownerId === preconditionOwner.ownerId),

@@ -142,6 +142,10 @@ export function isVideoFile(file: File): boolean {
     || ['.mp4', '.mov', '.webm', '.m4v', '.avi'].includes(extension);
 }
 
+export function isAudioFile(file: File): boolean {
+  return file.type.startsWith('audio/') || inferFileDropKind(file) === 'audio';
+}
+
 /**
  * Places an effect-layer clip on a visual track. Shared by the desktop drop
  * handler and the editor's `onAddEffectLayerAt`, which has no drag position to resolve.
@@ -300,7 +304,8 @@ export async function handleFileDrop({
     let compatibleTrackId = forceNewTrack
       ? null
       : getCompatibleTrackId(dataRef.current.tracks, targetTrackId, kind, selectedTrackId);
-    const isImageVideo = isImageFile(file) || isVideoFile(file);
+    // Audio shares the Runtime media-import path (and its media selection) with image/video.
+    const isImageVideo = isImageFile(file) || isVideoFile(file) || isAudioFile(file);
     const managedImageTrackId = directAssetUploadAllFiles && mediaImportForImageVideo
       && files.length === 1 && isImageFile(file)
       ? dropPosition.pointerTrackId
@@ -388,7 +393,7 @@ export async function handleFileDrop({
     // Generic files have no generation-upload fallback. Fail before creating
     // a track or a skeleton when the provider cannot prepare a placement-owned
     // asset, so unsupported preparation stays side-effect free.
-    if (!isImageFile(file) && !isVideoFile(file) && !prepareAssetUpload) {
+    if (!isImageFile(file) && !isVideoFile(file) && !isAudioFile(file) && !prepareAssetUpload) {
       onAssetDropError?.(new Error('This editor backend does not support prepared asset placement'));
       continue;
     }
@@ -475,7 +480,7 @@ export async function handleFileDrop({
           return;
         }
 
-        if (isVideoFile(file)) {
+        if (isVideoFile(file) || isAudioFile(file)) {
           const generationData = await uploadVideoGeneration(file);
           const current = currentDropData();
           if (!current) {

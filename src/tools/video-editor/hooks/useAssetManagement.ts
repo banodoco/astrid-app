@@ -457,8 +457,11 @@ export function useAssetManagement({
       throw new Error('No project selected');
     }
 
+    // Audio drops reuse this Runtime media-import path so they carry the media selection.
+    const isAudio = file.type.startsWith('audio/') || /\.(mp3|wav|aac|m4a)$/i.test(file.name);
     let durationSeconds: number | undefined;
     try {
+      // A media element reports an audio file's duration too; Runtime requires it for a selected audio/video.
       const metadata = await extractVideoMetadata(file);
       durationSeconds = metadata.duration_seconds;
     } catch (error) {
@@ -470,7 +473,7 @@ export function useAssetManagement({
       assertRuntimeMediaImportSize(file);
       const mediaImport = await runtimeMediaImport.call(runtime.provider, file, {
         filename: file.name,
-        mediaType: file.type || 'video/mp4',
+        mediaType: file.type || (isAudio ? 'audio/wav' : 'video/mp4'),
         ...(durationSeconds !== undefined ? { durationSeconds } : {}),
       });
       if (mediaImport.provider !== 'runtime') {
@@ -488,7 +491,7 @@ export function useAssetManagement({
         imageUrl: videoUrl,
         ...(durationSeconds !== undefined ? { durationSeconds } : {}),
         metadata: {
-          content_type: file.type || 'video/mp4',
+          content_type: file.type || (isAudio ? 'audio/wav' : 'video/mp4'),
           original_filename: file.name,
         },
         mediaImport,

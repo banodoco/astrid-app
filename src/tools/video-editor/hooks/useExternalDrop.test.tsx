@@ -768,8 +768,8 @@ describe('useExternalDrop', () => {
     expect(applyEdit).toHaveBeenCalled();
   });
 
-  it('uses the local bridge direct asset flow for non-generation audio without mutating the timeline before bytes and registry succeed', async () => {
-    mockRuntime.provider = { persistenceEnabled: true, supportsDirectAssetUpload: true } as unknown as DataProvider;
+  it('routes a dropped audio file through the Runtime media-import path so the prepared asset carries the media selection', async () => {
+    mockRuntime.provider = { persistenceEnabled: true, supportsDirectAssetUpload: true, prepareMediaImport: vi.fn() } as unknown as DataProvider;
 
     const dataRef = {
       current: makeDropTestData({
@@ -780,15 +780,19 @@ describe('useExternalDrop', () => {
       }),
     } as React.MutableRefObject<DropTestData>;
     const pendingOpsRef = { current: 0 } as React.MutableRefObject<number>;
-    const upload = deferred<{
-      assetId: string;
-      entry: {
-        file: string;
-        type: string;
-        duration: number;
-      };
-    }>();
-    const prepareAssetUpload = vi.fn(async () => upload.promise);
+    const mediaSelection = { asset: 'asset-rt', generation_id: 'gen-a', variant_id: 'var-a', object_id: 'obj-a' };
+    const upload = deferred<{ generationId: string; variantType: 'video'; imageUrl: string; metadata: { content_type: string; original_filename: string } }>();
+    const uploadVideoGeneration = vi.fn(async () => upload.promise);
+    const prepareGenerationAsset = vi.fn((gen: { generationId: string }) => ({
+      assetKey: 'asset-rt',
+      mediaType: 'audio' as const,
+      durationSeconds: 8,
+      entry: { file: 'rt/clip.mp3', type: 'audio/mpeg', duration: 8 },
+      source: 'registered' as const,
+      mediaSelection,
+      generationId: gen.generationId,
+    }));
+    const prepareAssetUpload = vi.fn();
     const uploadAsset = vi.fn();
     const patchRegistry = vi.fn((assetId: string, entry: { file: string; type?: string; duration?: number }) => {
       dataRef.current.registry.assets[assetId] = entry;
@@ -838,7 +842,8 @@ describe('useExternalDrop', () => {
       coordinator,
       registerGenerationAsset: vi.fn(),
       uploadImageGeneration: vi.fn(),
-      uploadVideoGeneration: vi.fn(),
+      uploadVideoGeneration,
+      prepareGenerationAsset,
       handleAssetDrop,
       shots: mockUseShots().shots,
       finalVideoMap: mockUseFinalVideoAvailable().finalVideoMap,
@@ -852,39 +857,27 @@ describe('useExternalDrop', () => {
       await result.current.onTimelineDrop(event);
     });
 
-    expect(prepareAssetUpload).toHaveBeenCalledTimes(1);
-    expect(uploadAsset).not.toHaveBeenCalled();
-    expect(patchRegistry).not.toHaveBeenCalled();
+    expect(uploadVideoGeneration).toHaveBeenCalledTimes(1);
+    expect(prepareAssetUpload).not.toHaveBeenCalled();
     expect(handleAssetDrop).not.toHaveBeenCalled();
 
     upload.resolve({
-      assetId: 'asset-local',
-      entry: {
-        file: 'local-drops/clip.mp3',
-        type: 'audio/mpeg',
-        duration: 8,
-      },
+      generationId: 'gen-a',
+      variantType: 'video',
+      imageUrl: 'rt/clip.mp3',
+      metadata: { content_type: 'audio/mpeg', original_filename: 'clip.mp3' },
     });
     await dropPromise;
 
-    expect(prepareAssetUpload).toHaveBeenCalledTimes(1);
-    expect(uploadAsset).not.toHaveBeenCalled();
-    expect(patchRegistry).not.toHaveBeenCalled();
+    expect(prepareAssetUpload).not.toHaveBeenCalled();
     expect(handleAssetDrop).toHaveBeenCalledWith(
-      'asset-local',
-      'V1',
+      'asset-rt',
+      expect.anything(),
       12,
       false,
       false,
-      expect.objectContaining({
-        assetKey: 'asset-local',
-        mediaType: 'audio',
-        entry: {
-          file: 'local-drops/clip.mp3',
-          type: 'audio/mpeg',
-          duration: 8,
-        },
-      }),
+      expect.objectContaining({ assetKey: 'asset-rt', mediaType: 'audio', mediaSelection }),
+      expect.stringMatching(/^uploading-/),
     );
     expect(pendingOpsRef.current).toBe(0);
   });

@@ -26,5 +26,5 @@ export function TourGalleryLayer() {
   useEffect(() => { if (open) setClosing(true); }, [open]);
   const onClosed = useCallback(() => setClosing(false), []);
   if (!open && !awaited && !atLand && !closing) return null;
-  return <EditorTourGenerationsPane open={open} animate={!reducedMotion} onClosed={onClosed} />;
+  return <EditorTourGenerationsPane open={open} anchored={open || awaited} animate={!reducedMotion} onClosed={onClosed} />;
 }

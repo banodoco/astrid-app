@@ -63,6 +63,8 @@ function assetEntry(slot: EditorTourMediaSlot, type: string, label: string, dura
     ...(slot.sha256 ? { content_sha256: slot.sha256, origin: 'immutable-public' } : {}),
     resolution: `${slot.width}x${slot.height}`,
     ...(duration === undefined ? {} : { duration }),
+    // A 320 px picture for the clip's thumbnail on the timeline, so it never decodes the original for a 40 px slot.
+    ...(slot.thumbUrl ? { thumbnailUrl: slot.thumbUrl } : {}),
     metadata: { filename: label },
   } as AssetRegistryEntry;
 }

@@ -9,6 +9,7 @@ import {
 } from '@/shared/state/editorTourStore.ts';
 import { useEditorTourPaneLockHold } from '@/shared/state/paneLockHolds.ts';
 import { EDITOR_TOUR_ANCHOR_ATTRIBUTE, EDITOR_TOUR_ANCHORS } from '@/tools/video-editor/tour/anchors.ts';
+import { notifyEditorTourGesture } from '@/tools/video-editor/tour/runner/tourBeats.ts';
 import { EDITOR_TOUR_SCRIPT } from '@/tools/video-editor/tour/tourScript.ts';
 import { AgentChatComposer } from './AgentChatComposer';
 import { AgentChatMenu } from './AgentChatMenu';
@@ -249,7 +250,7 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
         </div>
       </div>
       <div className="border-t border-border/70 px-3 py-3">
-        <AgentChatComposer value={composerText} readOnly rows={isExpanded ? 8 : 4} placeholder={busy ? BUSY_PLACEHOLDER : coarsePointer ? COARSE_PLACEHOLDER : IDLE_PLACEHOLDER} voice={CHAT_VOICE_ENABLED ? NO_VOICE : undefined} onSend={() => { if (!getEditorTourState().sent) markEditorTourSent(); }} sendDisabled={sent || beat !== 'compose' || progress.typed < script.prompt.length} />
+        <AgentChatComposer value={composerText} readOnly rows={isExpanded ? 8 : 4} placeholder={busy ? BUSY_PLACEHOLDER : coarsePointer ? COARSE_PLACEHOLDER : IDLE_PLACEHOLDER} voice={CHAT_VOICE_ENABLED ? NO_VOICE : undefined} onSend={() => { if (getEditorTourState().sent) return; notifyEditorTourGesture(); markEditorTourSent(); }} sendDisabled={sent || beat !== 'compose' || progress.typed < script.prompt.length} />
       </div>
     </div>
   );

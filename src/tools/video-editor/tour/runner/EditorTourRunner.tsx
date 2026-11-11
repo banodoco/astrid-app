@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { EDITOR_TOUR_ANCHORS, EDITOR_TOUR_TRACK_IDS, editorTourSelector, editorTourTrackSelector } from '../anchors';
+import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers';
 import { getEditorTourState, showEditorTourBeat, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
 import { TourCard } from '../card/TourCard';
@@ -62,16 +63,16 @@ export function respondWorking(beat: EditorTourBeat, { chatReady, instant, reduc
   return beat === 'respond' && !chatReady && !instant && !reducedMotion;
 }
 
-/** The whole transcript box: what a touch layout lights while the reply comes in, and what desktop's working card sits beside. */
+/** The whole transcript box: what desktop's working card sits beside (so it holds still while the lit exchange expands). */
 const TRANSCRIPT_BOX: SpotlightTarget = { selector: editorTourSelector(EDITOR_TOUR_ANCHORS.chatTranscript), whole: true };
 
 /**
- * `editorTourTargets`, with respond's working phase. Desktop lights the act's exchange: first the sent prompt with the
+ * `editorTourTargets`, with respond's working phase, which lights the act's exchange: first the sent prompt with the
  * thinking line (tight), then, when the reply starts, one expansion to the prompt and the reply (the reply bubble takes its
- * final size from its first character, so nothing chases it). A touch layout holds the whole transcript box instead.
+ * final size from its first character, so nothing chases it). The chat keeps it scrolled into view.
  */
 export function spotlightTargets(act: EditorTourAct, beat: EditorTourBeat, device: TimelineDeviceClass, working: boolean): SpotlightTarget[] {
-  if (beat === 'respond' && working) return device === 'desktop' ? [editorTourSelector(EDITOR_TOUR_ANCHORS.chatExchange)] : [TRANSCRIPT_BOX];
+  if (beat === 'respond' && working) return [editorTourSelector(EDITOR_TOUR_ANCHORS.chatExchange)];
   return editorTourTargets(act, beat, device);
 }
 

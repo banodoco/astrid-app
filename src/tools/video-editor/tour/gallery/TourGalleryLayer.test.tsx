@@ -45,26 +45,27 @@ describe('TourGalleryLayer', () => {
     expect(mounted()).toBe(false);
   });
 
-  it('mounts closed on act 2\'s land, opens on gallery, stays while the shown beat is still gallery, then unmounts after onClosed', () => {
+  it('mounts closed on act 2\'s land, and opens only when the card and spotlight commit to the gallery, not when the store moves', () => {
     render(<TourGalleryLayer />);
     go(2, 'land');
     show('land');
     expect(mounted()).toBe(true);
-    expect(last()).toMatchObject({ open: false, animate: true });
+    expect(last()).toMatchObject({ open: false, anchored: false, animate: true });
 
+    // The store is on gallery; the highlight has not set off. The anchor is there for it to measure; the pane waits.
     go(2, 'gallery');
-    expect(last().open).toBe(true);
+    expect(last()).toMatchObject({ open: false, anchored: true });
     show('gallery');
-    expect(last().open).toBe(true);
+    expect(last()).toMatchObject({ open: true, anchored: true });
 
-    // The store has moved on, but the card and spotlight still show gallery: the pane stays open.
+    // The store has moved on, but the card and spotlight still show gallery: the pane stays open until they leave.
     go(3, 'compose');
     expect(last().open).toBe(true);
     expect(mounted()).toBe(true);
 
     show('compose');
     expect(last().open).toBe(false);
-    expect(mounted()).toBe(true); // slides out first
+    expect(mounted()).toBe(true); // slides out with the highlight
 
     act(() => (last().onClosed as () => void)());
     expect(mounted()).toBe(false);
@@ -72,28 +73,34 @@ describe('TourGalleryLayer', () => {
     expect(pane.unmounts).toBe(1);
   });
 
-  it('on Back from gallery to land stays mounted and closed; back to compose then unmounts it at once', () => {
+  it('on Back from gallery to land slides out as the highlight leaves, stays mounted closed; back to compose then unmounts it', () => {
     render(<TourGalleryLayer />);
     go(2, 'land');
     go(2, 'gallery');
     show('gallery');
     go(2, 'land', true);
+    expect(last().open).toBe(true);
     show('land');
-    expect(last()).toMatchObject({ open: false, animate: false });
+    expect(last()).toMatchObject({ open: false, animate: true });
     act(() => (last().onClosed as () => void)());
     expect(mounted()).toBe(true);
     go(2, 'compose', true);
     expect(mounted()).toBe(false);
   });
 
-  it('animates only without reduced motion and when not arriving by Back', () => {
+  it('slides on Back too (the highlight travels on Back), mounting closed first when returning from act 3', () => {
     render(<TourGalleryLayer />);
     go(2, 'land');
     go(2, 'gallery');
-    expect(last().animate).toBe(true);
+    show('gallery');
     go(3, 'compose');
+    show('compose');
+    act(() => (last().onClosed as () => void)());
+    expect(mounted()).toBe(false);
     go(2, 'gallery', true);
-    expect(last().animate).toBe(false);
+    expect(last()).toMatchObject({ open: false, anchored: true, animate: true });
+    show('gallery');
+    expect(last()).toMatchObject({ open: true, animate: true });
   });
 
   it('never animates under reduced motion', () => {
@@ -103,6 +110,7 @@ describe('TourGalleryLayer', () => {
     render(<TourGalleryLayer />);
     go(2, 'land');
     go(2, 'gallery');
+    show('gallery');
     expect(last()).toMatchObject({ open: true, animate: false });
   });
 
@@ -110,6 +118,7 @@ describe('TourGalleryLayer', () => {
     render(<TourGalleryLayer />);
     go(2, 'land');
     go(2, 'gallery');
+    show('gallery');
     expect(pane.props.every((props) => !('columns' in props))).toBe(true);
   });
 

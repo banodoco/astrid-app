@@ -1,9 +1,11 @@
+import { createHash } from 'node:crypto';
 import { expect, type Frame, type Page, type Request, type Route } from '@playwright/test';
 import { commandOutboxes } from './app.ts';
 
 type Capture = { label: string; state: string; pending: boolean; failed?: boolean; request?: Request };
-type Diagnostic = { scanner: number; request?: number; label?: string; event: string; navigation: number; time: number };
+type Diagnostic = { scanner: number; request?: number; label?: string; event: string; navigation: number; time: number; protocol?: number };
 let nextScanner = 0;
+const protocolIds = new Map<number, string>();
 
 type Admission = { state: 'unclassified' | 'dispatched' | 'blocked'; terminal: boolean };
 
@@ -68,6 +70,20 @@ export class TokenSniff {
       const where = this.label(request.method(), request.url(), 'headers');
       const capture: Capture = { label: where, state: 'requested', pending: true, request };
       this.requests.set(request, capture);
+      if (process.env.PW_R12_DIAGNOSTICS === '1') {
+        // Private Playwright 1.60 GUID: emitted only as a collision-checked numeric digest.
+        const guid = (request as unknown as { _guid?: unknown })._guid;
+        if (typeof guid !== 'string' || !this.diagnostics) capture.failed = true;
+        else {
+          const protocol = parseInt(createHash('sha256').update(guid).digest('hex').slice(0, 12), 16);
+          const prior = protocolIds.get(protocol);
+          if (prior !== undefined && prior !== guid) capture.failed = true;
+          else {
+            protocolIds.set(protocol, guid);
+            this.diagnostics?.({ scanner: this.scannerId, request: this.requestIds.get(request), event: 'protocol-join', navigation: this.navigation, time: Date.now(), protocol });
+          }
+        }
+      }
       this.scan(`the URL of ${where}`, request.url());
       this.scan(`the initial headers of ${where}`, JSON.stringify(request.headers()));
       this.scan(`the body of ${where}`, request.postData());

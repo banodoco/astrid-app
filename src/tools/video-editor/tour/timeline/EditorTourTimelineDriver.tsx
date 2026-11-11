@@ -303,7 +303,8 @@ export function EditorTourTimelineDriver() {
   const showVideo = kind === 'video' && revealed;
   return host && createPortal(
     <div aria-hidden data-editor-tour-picture={kind} data-state={kind === 'video' ? (showVideo ? 'playing' : 'poster') : kind === 'still' ? `still-${stillIndex}` : undefined}
-      className="pointer-events-none absolute inset-0 z-20" style={kind === 'none' ? { visibility: 'hidden' } : undefined}>
+      // Above the idle player, below the editor's own transport (z-10) and header row, which sit on the picture as they do on any clip.
+      className="pointer-events-none absolute inset-0 z-[5]" style={kind === 'none' ? { visibility: 'hidden' } : undefined}>
       <div ref={videoSlot} className="absolute inset-0" style={{ opacity: showVideo ? 1 : 0 }} />
       {kind === 'video' && !showVideo && <img src={display(clip)} alt="" data-editor-tour-poster className={PICTURE_FILL} />}
       {kind === 'still' && EDITOR_TOUR_MEDIA.stills.map((still, index) => (

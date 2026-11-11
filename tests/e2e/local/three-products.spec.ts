@@ -1896,6 +1896,8 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
 
   // The production-mounted Scene Phase Markers extension emits one public patch.
   // Its ordinary members are captured by the host's generic port as one outbox intent.
+  // P39-R12-EXT-BATCH, Plan 39 exception (R12): stale harness, App aa6683590 deleted the Scene Phase Markers extension that drives this step; the earlier steps stay asserted; remove the marker when a replacement driver lands. Issue: https://github.com/banodoco/astrid-app/issues/250
+  test.fail(true, 'Scene Phase Markers extension (scene-markers-summary) was deleted by aa6683590; needs a replacement driver');
   await expect(page.getByTestId('scene-markers-summary')).toContainText('2 markers');
   const tail = page.getByTestId('scene-markers-playhead').locator('..').locator('input[type="number"]');
   await tail.fill('3');

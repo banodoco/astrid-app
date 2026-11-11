@@ -186,7 +186,9 @@ describe('TourCard', () => {
     expect(chain.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(SCRIPT.finale.action).toBe('Next');
     for (const recap of SCRIPT.finale.recap) expect(screen.getByText(recap)).toBeInTheDocument();
-    expect(container.querySelectorAll('ol img, ol video')).toHaveLength(4);
+    // Three pictures, none of them a video: the shot is already playing in the preview.
+    expect(container.querySelectorAll('ol img')).toHaveLength(3);
+    expect(container.querySelector('ol video')).toBeNull();
     expect(screen.queryByRole('button', { name: /Skip tour/ })).toBeNull();
     advance(TOUR_FINALE_ENTRANCE_MS);
     expect(cardReady()).toBe(true);
@@ -403,18 +405,20 @@ describe('TourCard', () => {
     expect(play).not.toHaveBeenCalled();
   });
 
-  it('plays the act-3 video with motion on', () => {
-    renderAt(3, 'land');
-    expect(play).toHaveBeenCalled();
+  it('shows the act-3 shot as pictures under a playhead, never a second video beside the playing preview', () => {
+    const { container } = renderAt(3, 'land');
+    expect(container.querySelector('video')).toBeNull();
+    expect(container.querySelector('.editor-tour-playhead')).not.toBeNull();
+    expect(play).not.toHaveBeenCalled();
   });
 
-  it('plays the act-3 video when the card is reached by Back (instant)', () => {
+  it('is ready at once when the act-3 card is reached by Back (instant), still without a video', () => {
     startEditorTour();
     vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: false, media: query } as MediaQueryList));
     setEditorTourBeat(3, 'land', true);
     expect(getEditorTourState().instant).toBe(true);
-    render(<TourCard act={3} beat="land" onPrimary={vi.fn()} onSkip={vi.fn()} />);
-    expect(play).toHaveBeenCalled();
+    const { container } = render(<TourCard act={3} beat="land" onPrimary={vi.fn()} onSkip={vi.fn()} />);
+    expect(container.querySelector('video')).toBeNull();
     expect(cardReady()).toBe(true);
   });
 

@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import {
@@ -56,18 +56,18 @@ function rowSignature(item: RenderedTurn): string {
     : item.pairs.map(({ call, result }) => `${call.tool_call_id}|${result?.content ?? ''}`).join('\n');
 }
 
-const TourTurnRow = memo(function TourTurnRow({ item, anchored, fadeIn }: { item: RenderedTurn; anchored: boolean; fadeIn: boolean }) {
+/** Each action card after the first fades in as it joins its group (the first comes in with the group's own row). */
+const CARDS_FADE_IN = '[&_[data-agent-tool-call-id]:not(:first-child)]:animate-in [&_[data-agent-tool-call-id]:not(:first-child)]:fade-in [&_[data-agent-tool-call-id]:not(:first-child)]:duration-300';
+
+const TourTurnRow = memo(function TourTurnRow({ item, fadeIn, revealCards = false }: { item: RenderedTurn; fadeIn: boolean; revealCards?: boolean }) {
   return (
-    <div
-      {...(anchored ? { [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatActions } : {})}
-      className={cn(item.kind === 'message' ? 'flex flex-col gap-2.5' : 'space-y-2', fadeIn && 'animate-in fade-in duration-300')}
-    >
+    <div className={cn(item.kind === 'message' ? 'flex flex-col gap-2.5' : 'space-y-2', fadeIn && 'animate-in fade-in duration-300', revealCards && CARDS_FADE_IN)}>
       {item.kind === 'message'
         ? <AgentChatMessage turn={item.turn} />
         : <AgentChatToolGroup pairs={item.pairs} defaultOpen />}
     </div>
   );
-}, (a, b) => a.anchored === b.anchored && a.fadeIn === b.fadeIn && a.item.key === b.item.key && rowSignature(a.item) === rowSignature(b.item));
+}, (a, b) => a.fadeIn === b.fadeIn && a.revealCards === b.revealCards && a.item.key === b.item.key && rowSignature(a.item) === rowSignature(b.item));
 
 /** The chat's title bar never changes during the tour: its popover menu is not re-rendered with the typing. */
 const TourChatHeader = memo(function TourChatHeader() {
@@ -124,7 +124,12 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
         if (done || elapsed - drawnAt >= redrawMs) {
           const next = progressAt(done ? endMs : elapsed);
           const signature = `${next.typed}:${next.replyChars}:${next.cards}`;
-          if (signature !== last) { last = signature; drawnAt = elapsed; update(next); }
+          if (signature !== last) {
+            last = signature; drawnAt = elapsed; update(next);
+            // The first action card is going in, into a group that already has its final size: the highlight sets off
+            // for the group now and travels while the rest appear, instead of waiting for the last one.
+            if ((next.cards ?? 0) > 0) markEditorTourReady('actions');
+          }
         }
         if (done) { markEditorTourReady('chat'); return; }
         frame = window.requestAnimationFrame(tick);
@@ -151,7 +156,7 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
       }
     } else if (beat === 'respond') {
       const { reply, toolCards } = script;
-      const complete = () => finish({ replyChars: reply.length, cards: toolCards.length });
+      const complete = () => { markEditorTourReady('actions'); finish({ replyChars: reply.length, cards: toolCards.length }); };
       finishRef.current = complete;
       if (reducedMotion || instant) complete();
       else {
@@ -180,12 +185,18 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   // The transcript depends on the reply only: typing into the composer must not rebuild (and re-render) every message.
   const replyChars = beat === 'respond' ? progress.replyChars : 0;
   const cards = beat === 'respond' ? progress.cards : 0;
+  // Outside the respond beat (whose exchange the highlight is waiting for) the transcript follows the tour a render
+  // behind: a press then only clears the composer, and the new messages (their markdown, their layout, the scroll to
+  // the end) render right after it, not inside the press where the card and the highlight are waiting to set off.
+  const live = useMemo(() => ({ act, beat, sent }), [act, beat, sent]);
+  const trailing = useDeferredValue(live);
+  const shown = beat === 'respond' ? live : trailing;
   const turns = useMemo(
-    () => buildTourTurns(EDITOR_TOUR_SCRIPT, baseMs, act, beat, sent, { typed: 0, replyChars, cards }),
-    [baseMs, act, beat, sent, replyChars, cards],
+    () => buildTourTurns(EDITOR_TOUR_SCRIPT, baseMs, shown.act, shown.beat, shown.sent, { typed: 0, replyChars, cards }),
+    [baseMs, shown, replyChars, cards],
   );
   const renderedTurns = useMemo(() => buildRenderedTurns(turns), [turns]);
-  const currentActStart = new Date(tourActStartMs(baseMs, act)).toISOString();
+  const currentActStart = new Date(tourActStartMs(baseMs, shown.act)).toISOString();
   const turnAt = (item: RenderedTurn) => (item.kind === 'message' ? item.turn.timestamp : item.pairs[0].call.timestamp);
   // The act's exchange: its prompt (once sent), then the reply, then its actions. Everything before is earlier acts.
   const actFrom = renderedTurns.findIndex((item) => turnAt(item) >= currentActStart);
@@ -195,15 +206,23 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const said = current.filter((item) => item.kind === 'message');
   const { scrollContainerRef, scrollContentRef, onScroll } = useChatScroll(`tour:${runId}`, true, renderedTurns.length);
 
-  // The act's actions (its last tool group) carry the anchor desktop's respond contracts onto once the reply is in.
+  // The act's actions (its last tool group) carry the anchor the respond beat's highlight ends on.
   const actions = reply.filter((item) => item.kind !== 'message').at(-1);
+  // The same group with every card in it: what the group is sized by while its cards are still arriving.
+  const allActions = useMemo(
+    () => buildRenderedTurns(buildTourTurns(EDITOR_TOUR_SCRIPT, baseMs, shown.act, 'land', true, NO_PROGRESS)).filter((item) => item.kind !== 'message').at(-1),
+    [baseMs, shown.act],
+  );
   const renderTurn = (item: RenderedTurn) => (
-    <TourTurnRow key={item.key} item={item} anchored={item === actions} fadeIn={reducedMotion && turnAt(item) >= currentActStart} />
+    <TourTurnRow key={item.key} item={item} fadeIn={reducedMotion && turnAt(item) >= currentActStart} />
   );
 
   const composerText = beat === 'compose' && !sent ? script.prompt.slice(0, progress.typed) : '';
   const busy = beat === 'respond' && !chatReady;
   const thinking = busy && progress.replyChars === 0;
+  // From the reply's first character the actions group takes its final place and size, unseen, under the reply: the
+  // transcript scrolls once, the cards are then revealed into the group, and nothing moves when they do.
+  const reserveActions = busy && progress.replyChars > 0 && !!allActions && progress.cards < script.toolCards.length;
   // The reply bubble while it is still arriving.
   const streaming = busy && progress.replyChars > 0 && progress.replyChars < script.reply.length ? reply.find((item) => item.kind === 'message') : undefined;
 
@@ -233,7 +252,7 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
                 // part that has arrived, so the bubble (and the spotlight around it) never grows as it streams.
                 <div key={item.key} className="grid">
                   <div className="invisible col-start-1 row-start-1" aria-hidden="true">
-                    <TourTurnRow item={{ ...item, turn: { ...item.turn, content: script.reply } }} anchored={false} fadeIn={false} />
+                    <TourTurnRow item={{ ...item, turn: { ...item.turn, content: script.reply } }} fadeIn={false} />
                   </div>
                   <div className="col-start-1 row-start-1">{renderTurn(item)}</div>
                 </div>
@@ -246,7 +265,21 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
               )}
             </div>
           )}
-          {current.filter((item) => item.kind !== 'message').map(renderTurn)}
+          {current.filter((item) => item.kind !== 'message' && item !== actions).map(renderTurn)}
+          {(actions || reserveActions) && (
+            <div className="grid" {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatActions }}>
+              {reserveActions && allActions && (
+                <div className="invisible col-start-1 row-start-1" aria-hidden="true">
+                  <TourTurnRow item={allActions} fadeIn={false} />
+                </div>
+              )}
+              {actions && (
+                <div className="col-start-1 row-start-1 self-start">
+                  <TourTurnRow item={actions} fadeIn={(beat === 'respond' && !instant) || reducedMotion} revealCards={beat === 'respond' && !instant && !reducedMotion} />
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
       <div className="border-t border-border/70 px-3 py-3">

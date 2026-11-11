@@ -18,6 +18,8 @@ import {
 } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { editorTourSelector } from '@/tools/video-editor/tour/anchors.ts';
 import { useEditorDeviceClass } from '@/tools/video-editor/tour/runner/useIsDesktopEditor.ts';
+import { TOUR_MOVE_MS } from '@/tools/video-editor/tour/runner/useSettledRects.ts';
+import { registerEditorTourGesture } from '@/tools/video-editor/tour/runner/tourBeats.ts';
 import { tourIdle, useTourMediaWarmup } from './useTourMediaWarmup.ts';
 import { EDITOR_TOUR_MEDIA, tourPlaybackUrl, tourSaveData } from '../tourMedia.ts';
 import { createTourVideoEngine, type TourVideoEngine } from './tourPicture.ts';
@@ -31,6 +33,8 @@ export const TOUR_FIRST_FRAME_DEADLINE_MS = 2500;
 const TOUR_TIMECODE_REPORT_MS = 1000;
 /** How long a phone's landing waits for its full-screen chat to leave before it starts the picture anyway. */
 const CHAT_LEAVE_WAIT_MS = 2500;
+/** How long after a phone's chat has set off to cover the screen its act's rows may be laid in behind it (the slide, and a breath). */
+const BEHIND_CHAT_AFTER_MS = TOUR_MOVE_MS + 240;
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -53,6 +57,7 @@ function untilTour(check: (state: EditorTourState) => boolean, timeoutMs: number
 }
 
 const LAST_ANCHOR = TOUR_ANCHORS.length - 1;
+const inChat = (beat: EditorTourState['beat']) => beat === 'compose' || beat === 'respond';
 const PICTURE_FILL = 'absolute inset-0 h-full w-full object-contain';
 const display = (slot: { displayUrl?: string; url: string }) => slot.displayUrl ?? slot.url;
 const noEngine = { subscribe: () => () => undefined, presenting: () => false };
@@ -135,22 +140,50 @@ export function EditorTourTimelineDriver() {
   const reducedMotion = useEditorTour((state) => state.reducedMotion);
   const phone = useEditorDeviceClass() === 'phone';
 
+  // A phone's chat covers the whole editor while its prompt is typed. The act's rows are laid in behind it then, in an
+  // idle moment, rather than inside the Send press: applying a stage re-renders the editor (about 110 ms of main-thread
+  // work on a 4x-throttled phone profile), and everything the press sets off (the card leaving, the highlight moving to
+  // the new row, the chat sliding away) had to wait behind it. Back takes the rows out again, as it does after a landing.
+  const chatCovers = useEditorTour((state) => phone && inChat(state.beat) && inChat(state.shownBeat));
+  const [behindChat, setBehindChat] = useState<string | null>(null);
+  const actKey = `${runId}:${act}`;
+  useEffect(() => {
+    if (!chatCovers) {
+      setBehindChat(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => void tourIdle().then(() => { if (!cancelled) setBehindChat(actKey); }), BEHIND_CHAT_AFTER_MS);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [chatCovers, actKey]);
+  /** The rows the timeline should hold: the tour's stage, or the coming one while a phone's chat hides the editor. */
+  const rowStage = chatCovers && behindChat === actKey ? act : stage;
+
   useLayoutEffect(() => {
     setHost(document.querySelector('[data-testid="video-editor-preview-surface"]')
       ?? document.querySelector(editorTourSelector('preview')));
   }, [runId, act, beat, appliedStage]);
 
+  /** The file the picture engine should hold for the tour's stage (the stage's clip, or the next one's while stills show). */
+  const wantedClip = useRef<string | null>(null);
   // ---- the picture engine: one <video> per run, none with reduced motion
   const [engine, setEngine] = useState<TourVideoEngine | null>(null);
   useEffect(() => {
     if (reducedMotion) return undefined;
     const created = createTourVideoEngine();
     setEngine(created);
-    // Every press of the tour (Next, Send, Enter) is a chance to start the video inside a user gesture.
-    const prime = () => created.prime();
+    // Every press of the tour (Next, Send, Enter) is a chance to start the video inside a user gesture. The clip the
+    // tour shows next is assigned first, in case a quick advance cancelled the idle moment that would have buffered it.
+    const prime = () => {
+      if (wantedClip.current) created.load(wantedClip.current);
+      created.prime();
+    };
     const gestures = ['click', 'keydown', 'touchend'] as const;
     gestures.forEach((type) => document.addEventListener(type, prime, { capture: true, passive: true }));
+    // The tour's own keys never reach the document (`useTourKeys` takes them on the window): its gesture seam does.
+    const unregister = registerEditorTourGesture(prime);
     return () => {
+      unregister();
       gestures.forEach((type) => document.removeEventListener(type, prime, { capture: true }));
       created.dispose();
       setEngine(null);
@@ -197,7 +230,7 @@ export function EditorTourTimelineDriver() {
 
   useEffect(() => {
     if (!loaded || !ops || applying.current) return;
-    if (appliedStage > stage) {
+    if (appliedStage > rowStage) {
       // Back: the later acts' rows leave at once, one stage at a time (a move back is never more than one).
       applying.current = true;
       try {
@@ -211,7 +244,7 @@ export function EditorTourTimelineDriver() {
       }
       return;
     }
-    if (appliedStage >= stage) return;
+    if (appliedStage >= rowStage) return;
     applying.current = true;
     const next = (appliedStage + 1) as 1 | 2 | 3;
     try {
@@ -223,9 +256,9 @@ export function EditorTourTimelineDriver() {
     } finally {
       applying.current = false;
     }
-  }, [loaded, ops, stage, appliedStage, retry]);
+  }, [loaded, ops, rowStage, appliedStage, retry]);
 
-  // The picture never waits for the timeline: it follows the tour's stage, not the applied patch.
+  // The picture never waits for the timeline: it follows the tour's stage, not the applied patch (or rows laid in early).
   const running = useEditorTour((state) => state.status === 'running');
   useEffect(() => {
     if (!running) {
@@ -245,6 +278,16 @@ export function EditorTourTimelineDriver() {
     // The element holds the clip of this stage or the next one, buffered in idle time: the guide until the stills land.
     const clip = stage <= 1 ? EDITOR_TOUR_MEDIA.guide : EDITOR_TOUR_MEDIA.video;
     const load = () => engine?.load(tourPlaybackUrl(clip, small), tourSaveData() && !forward ? 'metadata' : 'auto');
+    // (Not when the browser asks to save data: buffering then stays with the beats, which fetch metadata only.)
+    wantedClip.current = tourSaveData() ? null : tourPlaybackUrl(clip, small);
+    // A phone's chat covers the whole screen until the card and spotlight have left it, and then takes the length of
+    // their move to slide away: the result starts (and its watch is timed) once it can be seen, and nothing starts
+    // decoding on the frames of that move.
+    const chatGone = async () => {
+      if (!phone) return;
+      await untilTour((state) => state.shownBeat === 'land' || isCancelled() || skipped(), CHAT_LEAVE_WAIT_MS);
+      await untilTour(() => isCancelled() || skipped(), TOUR_MOVE_MS);
+    };
 
     if (stage === 0 || stage === 2) {
       engine?.hold();
@@ -256,6 +299,7 @@ export function EditorTourTimelineDriver() {
       }
       void (async () => {
         if (forward) {
+          await chatGone();
           for (let index = 0; index <= LAST_ANCHOR; index++) {
             if (isCancelled() || skipped()) break;
             setStillIndex(index);
@@ -285,8 +329,7 @@ export function EditorTourTimelineDriver() {
       return () => { cancelled = true; };
     }
     void (async () => {
-      // A phone's chat covers the whole screen until the card and spotlight have left it.
-      if (phone) await untilTour((state) => state.shownBeat === 'land' || isCancelled() || skipped(), CHAT_LEAVE_WAIT_MS);
+      await chatGone();
       if (isCancelled()) return;
       reportJump(0);
       await Promise.race([
@@ -305,8 +348,10 @@ export function EditorTourTimelineDriver() {
     <div aria-hidden data-editor-tour-picture={kind} data-state={kind === 'video' ? (showVideo ? 'playing' : 'poster') : kind === 'still' ? `still-${stillIndex}` : undefined}
       // Above the idle player, below the editor's own transport (z-10) and header row, which sit on the picture as they do on any clip.
       className="pointer-events-none absolute inset-0 z-[5]" style={kind === 'none' ? { visibility: 'hidden' } : undefined}>
+      {/* The poster stays under the video once it plays: the first composited frame of a video that has just become
+          visible can be empty, and what shows through it must be the clip's first frame, not the black behind it. */}
+      {kind === 'video' && <img src={display(clip)} alt="" {...(showVideo ? { 'data-editor-tour-poster-under': '' } : { 'data-editor-tour-poster': '' })} className={PICTURE_FILL} />}
       <div ref={videoSlot} className="absolute inset-0" style={{ opacity: showVideo ? 1 : 0 }} />
-      {kind === 'video' && !showVideo && <img src={display(clip)} alt="" data-editor-tour-poster className={PICTURE_FILL} />}
       {kind === 'still' && EDITOR_TOUR_MEDIA.stills.map((still, index) => (
         <img key={still.url} src={display(still)} alt="" data-editor-tour-still={index} className={PICTURE_FILL}
           style={index === stillIndex ? undefined : { visibility: 'hidden' }} />

@@ -10,6 +10,9 @@ export function tourIdle(): Promise<void> {
   });
 }
 
+/** The longest one picture's decode holds up the ones after it. */
+export const TOUR_WARM_DECODE_CAP_MS = 4000;
+
 const display = (slot: { displayUrl?: string; url: string }) => slot.displayUrl ?? slot.url;
 
 /**
@@ -51,15 +54,21 @@ export function useTourMediaWarmup(): boolean {
     let cancelled = false;
     void (async () => {
       for (const url of tourWarmupPictures(act, landed)) {
+        // An idle moment before each picture, the first included: no fetch or decode starts on a card move.
+        await tourIdle();
         if (cancelled) return;
         if (images.current.has(url)) continue;
         const image = new Image();
         images.current.set(url, image);
         image.decoding = 'async';
         image.src = url;
-        // A failed image must not prevent later media warming.
-        await image.decode?.().catch(() => undefined);
-        await tourIdle();
+        // A failed or stalled image must not prevent later media warming: it is forgotten (a later pass tries it again)
+        // and the pass moves on.
+        const decoded = await Promise.race([
+          (image.decode?.() ?? Promise.resolve()).then(() => true, () => false),
+          new Promise<boolean>((resolve) => setTimeout(() => resolve(false), TOUR_WARM_DECODE_CAP_MS)),
+        ]);
+        if (!decoded && images.current.get(url) === image) images.current.delete(url);
       }
     })();
     return () => { cancelled = true; };

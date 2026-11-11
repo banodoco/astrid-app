@@ -72,6 +72,7 @@ function BrowserTourEditorSurface() {
 }
 
 function BrowserTourFrame() {
+  (window as any).__dbg = ((window as any).__dbg ?? 0) + 1; // TEMP
   const tasksPaneWidth = usePanesStore(state => state.tasksPaneWidth);
   const touchPane = usePaneControlsHosted();
   // One flag, not the beats themselves: the frame (and the editor inside it) re-renders only when the chat comes or goes,

@@ -613,3 +613,32 @@ describe('TourCard during a land beat’s watch', () => {
     expect(cardReady()).toBe(true);
   });
 });
+
+describe('TourCard on touch', () => {
+  function renderTouch(tourAct: EditorTourAct, beat: EditorTourBeat, device: 'phone' | 'tablet') {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: query === '(pointer: coarse)', media: query } as MediaQueryList));
+    startEditorTour();
+    setEditorTourBeat(tourAct, beat);
+    return render(<TourCard act={tourAct} beat={beat} device={device} onPrimary={vi.fn()} onBack={vi.fn()} onSkip={vi.fn()} />);
+  }
+
+  it.each(['phone', 'tablet'] as const)('has no Send of its own on a %s compose card: the chat’s Send is the one way to send', (device) => {
+    renderTouch(2, 'compose', device);
+    expect(screen.getByText(SCRIPT.hints.composeTouch)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: new RegExp(`^${SCRIPT.controls.send}`) })).toBeNull();
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([SCRIPT.controls.skip, SCRIPT.controls.back]);
+  });
+
+  it('keeps a phone’s land explainer compact, to sit above the preview: the title, Back and Next, no body', () => {
+    renderTouch(1, 'land', 'phone');
+    expect(screen.getByRole('heading')).toHaveTextContent(SCRIPT.acts[1].card.title);
+    expect(screen.queryByText(SCRIPT.acts[1].card.body)).toBeNull();
+    expect(screen.getByRole('button', { name: /Next/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Back/ })).toBeInTheDocument();
+  });
+
+  it('keeps the body on a tablet’s land explainer', () => {
+    renderTouch(1, 'land', 'tablet');
+    expect(screen.getByText(SCRIPT.acts[1].card.body)).toBeInTheDocument();
+  });
+});

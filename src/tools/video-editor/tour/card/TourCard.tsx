@@ -92,7 +92,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
         className={cn(
           rise && 'editor-tour-rise',
           'max-w-[calc(100vw-24px)] max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card text-card-foreground shadow-xl',
-          phone ? cn('w-[calc(100vw-24px)] rounded-2xl', explains && beat !== 'land' ? 'p-5' : 'px-5 py-4') : tablet ? cn(
+          phone ? cn('w-[calc(100vw-24px)] rounded-2xl', beat === 'land' ? 'px-5 py-3' : explains ? 'p-5' : 'px-5 py-4') : tablet ? cn(
             beat === 'welcome' && 'w-[460px] p-7',
             (beat === 'land' || beat === 'gallery') && 'w-[580px] p-6',
             beat === 'finale' && 'w-[540px] p-7',
@@ -206,10 +206,10 @@ function Explainer({ act, playing, entering, waiting, watching = false, onPrimar
     <>
       <CounterRow act={act} part={part} onBack={onBack} onSkip={onSkip} fit={fit} />
       <Rest folded={watching}>
-      <h2 className={cn('mt-3', TOUCH_HEADING)}>{title}</h2>
+      <h2 className={cn(tablet ? 'mt-3' : 'mt-2', TOUCH_HEADING)}>{title}</h2>
       {/* A phone's explainer sits above the preview, so it is compact: the title alone, no body. */}
       {tablet && <p className="mt-1.5 text-pretty text-[15px] leading-6 text-muted-foreground">{body}</p>}
-      <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : 'mt-3'}>
+      <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : 'mt-2'}>
         {tablet && <div className="min-w-0 flex-1"><TourStrip filled={act} labels={SCRIPT.strip} size="medium" /></div>}
         {next}
       </NavRow>

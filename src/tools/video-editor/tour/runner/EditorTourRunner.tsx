@@ -18,6 +18,8 @@ import type { TimelineDeviceClass } from '../../lib/mobile-interaction-model';
 
 /** Matches the phone card's `w-[calc(100vw-24px)]`. */
 const PHONE_EDGE = 12;
+/** How close to the top of the screen a phone's land card may sit, to stay off the preview on the shortest phones. */
+const PHONE_LAND_TOP = 6;
 /** The gap between a phone's card and what it points at. */
 const PHONE_GAP = 8;
 
@@ -77,7 +79,7 @@ export function cardHidden(device: TimelineDeviceClass, phase: string | undefine
  */
 export function phoneLandPosition(rects: readonly SpotlightRect[], card: { height: number }): CardPosition {
   const top = Math.min(...rects.map((r) => r.y));
-  return { left: PHONE_EDGE, top: Math.max(PHONE_EDGE, top - PHONE_GAP - card.height) };
+  return { left: PHONE_EDGE, top: Math.max(PHONE_LAND_TOP, top - PHONE_GAP - card.height) };
 }
 
 /**

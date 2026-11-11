@@ -33,7 +33,7 @@ describe('phoneLandPosition', () => {
   });
 
   it('starts at the top edge when the card is taller than the space there, never lower', () => {
-    expect(phoneLandPosition([track, preview], { height: 160 })).toEqual({ left: 12, top: 12 });
+    expect(phoneLandPosition([track, preview], { height: 160 })).toEqual({ left: 12, top: 6 });
   });
 });
 

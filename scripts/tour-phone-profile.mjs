@@ -82,16 +82,57 @@ function installProbe() {
             counts[name] = (counts[name] ?? 0) + 1;
             let up = f.return;
             while (up && !nameOf(up)) up = up.return;
-            if (!(up && (up.flags & 1))) origins[name] = (origins[name] ?? 0) + 1;
+            if (!(up && (up.flags & 1))) {
+              origins[name] = (origins[name] ?? 0) + 1;
+              if (pp.why) {
+                // Why this component rendered although its parent did not: changed props, a changed state/ref/memo hook, or context.
+                const alt = f.alternate, reasons = [];
+                if (alt.memoizedProps !== f.memoizedProps) reasons.push('props');
+                let a = f.memoizedState, b = alt.memoizedState, i = 0;
+                while (a && b && typeof a === 'object' && 'next' in a) {
+                  const effect = a.memoizedState && typeof a.memoizedState === 'object' && ('create' in a.memoizedState || 'inst' in a.memoizedState);
+                  if (!effect && !Object.is(a.memoizedState, b.memoizedState)) {
+                    const v = a.memoizedState, p = b.memoizedState;
+                    const brief = (x) => { try { return x && typeof x === 'object' ? (Array.isArray(x) ? `[${x.length}]` : `{${Object.keys(x).slice(0, 5)}}`) : typeof x === 'function' ? 'fn' : String(x).slice(0, 20); } catch { return '?'; } };
+                    reasons.push(`hook${i}:${brief(p)}->${brief(v)}`);
+                  }
+                  a = a.next; b = b.next; i++;
+                }
+                if (f.dependencies?.firstContext) for (let c = f.dependencies.firstContext; c; c = c.next) { const ca = alt.dependencies?.firstContext; if (!ca || ca.memoizedValue !== c.memoizedValue) { reasons.push('context'); break; } }
+                const key = `${name}: ${reasons.join(' | ') || 'parent-bailout?'}`;
+                pp.whyCounts[key] = (pp.whyCounts[key] ?? 0) + 1;
+              }
+            }
           }
         }
         if (f.sibling) stack.push(f.sibling);
-        if (f.child) stack.push(f.child);
+        // A fiber whose child list is the one it had last commit was bailed out: its subtree was not visited, and its
+        // descendants still carry the PerformedWork flag of whenever they last rendered (counting those overstates renders).
+        if (f.child && !(f.alternate && f.child === f.alternate.child)) stack.push(f.child);
+      }
+      if (pp.tree && pp.commits.length === 12 && !pp.treeOut) {
+        const lines = [];
+        const walk = (f, depth) => {
+          for (let c = f; c; c = c.sibling) {
+            const name = nameOf(c), did = (c.flags & 1) && c.alternate;
+            if (name && did) { lines.push(`${'  '.repeat(depth)}${name}`); }
+            if (c.child && !(c.alternate && c.child === c.alternate.child)) walk(c.child, name && did ? depth + 1 : depth);
+          }
+        };
+        walk(root.current, 0);
+        // The ancestor chain of the first origin named AppMainContent / TimeOfDaySky, with whether each rendered.
+        const find = (f, wanted) => { for (let c = f; c; c = c.sibling) { if (nameOf(c) === wanted && c.alternate) return c; const r = c.child && find(c.child, wanted); if (r) return r; } return null; };
+        for (const wanted of ['AppMainContent', 'TimeOfDaySky']) {
+          const hit = find(root.current, wanted);
+          if (hit) { const chain = []; for (let u = hit; u; u = u.return) chain.push(`${nameOf(u) ?? (typeof u.type === 'string' ? u.type : u.tag)}${(u.flags & 1) ? '*' : ''}`); lines.push(`chain ${wanted}: ${chain.join(' < ')}`); }
+        }
+        pp.treeOut = lines.join('\n');
       }
       pp.commits.push({ ms: root.current.actualDuration ?? 0, counts, origins });
     },
   };
-  pp.begin = () => { pp.c = {}; pp.frames = []; pp.loaf = []; pp.longtasks = []; pp.commits = []; pp.lastRaf = 0; pp.t0 = performance.now(); pp.on = true; };
+  pp.whyCounts = {};
+  pp.begin = () => { pp.treeOut = undefined; pp.whyCounts = {}; pp.c = {}; pp.frames = []; pp.loaf = []; pp.longtasks = []; pp.commits = []; pp.lastRaf = 0; pp.t0 = performance.now(); pp.on = true; };
   pp.end = () => {
     pp.on = false;
     const secs = Math.max(0.001, (performance.now() - pp.t0) / 1000);
@@ -110,6 +151,8 @@ function installProbe() {
       react: { commits: pp.commits.length, perSec: Math.round((pp.commits.length / secs) * 10) / 10, renderMs: Math.round(pp.commits.reduce((a, c) => a + c.ms, 0)), top: top(totals), origins: top(origins) },
       counters: Object.fromEntries(Object.entries(pp.c).map(([k, v]) => [k, Math.round(v / secs)])),
       glContexts: pp.gl.length,
+      why: top(pp.whyCounts, 14),
+      tree: pp.treeOut,
     };
   };
   pp.dom = () => ({
@@ -125,6 +168,8 @@ function parseOptions(argv) {
     const a = argv[i];
     if (a === '--help') o.help = true;
     else if (a === '--no-throttle') o.cpu = 1;
+    else if (a === '--why') o.why = true;
+    else if (a === '--tree') o.tree = true;
     else if (a.startsWith('--')) { const v = argv[++i]; o[a.slice(2)] = ['cpu', 'dpr', 'idle'].includes(a.slice(2)) ? Number(v) : v; }
   }
   return o;
@@ -166,6 +211,8 @@ export async function run(options) {
     const context = await browser.newContext({ ...profile, deviceScaleFactor: options.dpr, locale: 'en-US', timezoneId: 'UTC', colorScheme: options.theme, reducedMotion: 'no-preference', serviceWorkers: 'block' });
     await context.addInitScript(({ theme }) => { try { localStorage.setItem('theme-hour', theme === 'dark' ? '0' : '12'); } catch { /* ignore */ } }, { theme: options.theme });
     await context.addInitScript(installProbe);
+    if (options.tree) await context.addInitScript(() => { window.__pp.tree = true; });
+    if (options.why) await context.addInitScript(() => { window.__pp.why = true; });
     await fetch(`${runtimeOrigin}/__test/reset`, { method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ seed: 'empty' }) });
     await context.routeWebSocket('**/*', (socket) => socket.close());
     await context.route('**/*', async (route) => {
@@ -219,7 +266,7 @@ export async function run(options) {
       const t0 = Date.now();
       await fn();
       const wall = Date.now() - t0;
-      const inPage = await page.evaluate(() => window.__pp.end());
+      const inPage = await page.evaluate(() => { const r = window.__pp.end(); r.dbg = window.__dbg; window.__dbg = 0; return r; });
       const m1 = await metrics();
       const d = (k) => Math.round((m1[k] - m0[k]) * (k.endsWith('Duration') ? 1000 : 1));
       const phase = { name, wallMs: wall, load: Math.round(loadavg()[0] * 10) / 10, ...inPage,
@@ -276,7 +323,7 @@ export async function run(options) {
     await transition('Send->respond', () => page.locator('[data-editor-tour="chat-send"]'), respond1, [['0-800ms', 800], ['thinking 0.8-2.6s', 2600], ['streaming+actions', 'ready']]);
     await shot('03-respond');
     await idle('respond1');
-    if (options.until === 'act1-respond') return finish();
+    if (options.until === "act1-respond") return await finish();
     // ---- Next -> act 1 land (scene)
     const land1 = { act: 1, beat: 'land' };
     await transition('Next->land1', cardButton, land1, [['0-800ms', 800], ['scene load until ready', 'ready']]);
@@ -290,7 +337,7 @@ export async function run(options) {
     await shot('05-compose2');
     await idle('compose2');
     report.browserErrors = browserErrors;
-    return finish();
+    return await finish();
 
     async function finish() {
       report.finalState = await state();
@@ -316,7 +363,10 @@ function renderMarkdown(r) {
   L.push('', '## Per phase detail', '');
   for (const p of r.phases) {
     L.push(`### ${p.name}`, `- React: ${p.react.commits} commits; re-rendered: ${fmtTop(p.react.top)}; re-renders start in: ${fmtTop(p.react.origins)}`,
+      ...(p.tree ? ['- sample commit tree:', '```', p.tree.split('\n').slice(0, 120).join('\n'), '```'] : []),
+      ...(p.why?.length ? [`- why origins re-rendered: ${p.why.map(([n, c]) => `${n} x${c}`).join('; ')}`] : []),
       `- LoAF top scripts (ms): ${p.loaf.topScripts.map(([n, ms]) => `${ms} ${n}`).join('; ') || '-'}`,
+      `- dbg ${p.dbg}`,
       `- timers/s: setTimeout ${p.counters.setTimeout ?? 0}, setInterval ${p.counters.setInterval ?? 0}; heap ${p.cdp.heapMB}MB; DOM nodes ${p.cdp.nodes}; WebGL contexts so far ${p.glContexts}; ready after tap ${p.readyAfterTapMs ?? '-'}ms`, '');
   }
   L.push('## Scene (act 1 land)', '', '```json', JSON.stringify(r.scene, null, 1), '```', '', '## Notes', '', ...(r.notes.length ? r.notes.map((n) => `- ${n}`) : ['- none']), '', '## GL/console messages', '', ...(r.browserErrors?.length ? r.browserErrors.map((n) => `- ${n}`) : ['- none']));

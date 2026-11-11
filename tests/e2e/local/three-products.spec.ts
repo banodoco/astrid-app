@@ -2198,6 +2198,11 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   });
   await dropFileOnTimeline(page, file, seed3.appClipId, seed3.transitionClipId, 0, THREE_PRODUCTS_REFERENCE_AT, manualDropPointerAt);
   await wrongImportResponse;
+  // The import above succeeds. The verified-selection read below is the first step that depends on the missing behaviour:
+  // the mounted handoff refuses prepared video before native placement reads its verified media
+  // (timelineLocalSaveHandoff.ts, "prepared media currently supports an ordinary image add"), so the read is never made.
+  // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/252; owner decision 11 Nov moved the video-drop save fix to Plan 39, making this eligible despite the earlier Release 12 ruling.
+  test.fail(true, 'Dropped video is not saved (image-only guard); see #252');
   const wrongVerified = await wrongVerifiedResponse;
   expect(wrongVerified.status()).toBe(404);
   await expect(wrongVerified.json()).resolves.toEqual({
@@ -2246,8 +2251,6 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   expect(verifiedRequest!.searchParams.get('object_id')).toBe(selected.object_id);
   expect(verifiedRequest!.searchParams.get('catalog_digest')).toBe(selected.catalog_digest);
 
-  // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/252; owner decision 11 Nov moved the video-drop save fix to Plan 39, making this eligible despite the earlier Release 12 ruling.
-  test.fail(true, 'Dropped video is not saved (image-only guard); see #252');
   // A sent request and a fetched response are different milestones.
   await expect.poll(async () => ({
     attempts: wire.attempts,

@@ -1784,7 +1784,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
       .find((candidate) => candidate.ownerId === retryOwnerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
   });
   const recordedA = await expectV2History(harness, seed3, wire.posts[0], 'accepted');
-  const seedState = await revisionState(harness, seed3, seed3.headRevisionId);
+  const seedState = await revisionState(harness, seed3, startingHead.revision_id);
   const seededTransition = seedState.parentClips[seed3.transitionClipId].transition;
   expect(c.data.canonical_document.parent_revision.payload.clips)
     .toEqual(expect.arrayContaining([expect.objectContaining({ id: seed3.transitionClipId, transition: seededTransition })]));

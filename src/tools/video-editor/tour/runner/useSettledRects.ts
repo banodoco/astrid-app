@@ -184,7 +184,6 @@ export function useSettledRects({ key, targetsKey, measurement, motion, moving, 
   }, [key, targetsKey, signatureOf(measurement), viewport, motion]);
 
   useEffect(() => () => {
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     const run = loop.current;
     if (run.frame) cancelAnimationFrame(run.frame);
     clearTimeout(run.capTimer);

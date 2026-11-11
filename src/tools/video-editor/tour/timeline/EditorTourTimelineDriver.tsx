@@ -348,8 +348,10 @@ export function EditorTourTimelineDriver() {
     <div aria-hidden data-editor-tour-picture={kind} data-state={kind === 'video' ? (showVideo ? 'playing' : 'poster') : kind === 'still' ? `still-${stillIndex}` : undefined}
       // Above the idle player, below the editor's own transport (z-10) and header row, which sit on the picture as they do on any clip.
       className="pointer-events-none absolute inset-0 z-[5]" style={kind === 'none' ? { visibility: 'hidden' } : undefined}>
+      {/* The poster stays under the video once it plays: the first composited frame of a video that has just become
+          visible can be empty, and what shows through it must be the clip's first frame, not the black behind it. */}
+      {kind === 'video' && <img src={display(clip)} alt="" {...(showVideo ? { 'data-editor-tour-poster-under': '' } : { 'data-editor-tour-poster': '' })} className={PICTURE_FILL} />}
       <div ref={videoSlot} className="absolute inset-0" style={{ opacity: showVideo ? 1 : 0 }} />
-      {kind === 'video' && !showVideo && <img src={display(clip)} alt="" data-editor-tour-poster className={PICTURE_FILL} />}
       {kind === 'still' && EDITOR_TOUR_MEDIA.stills.map((still, index) => (
         <img key={still.url} src={display(still)} alt="" data-editor-tour-still={index} className={PICTURE_FILL}
           style={index === stillIndex ? undefined : { visibility: 'hidden' }} />

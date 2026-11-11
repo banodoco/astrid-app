@@ -291,4 +291,41 @@ describe('returnToEditorTourEnd', () => {
     returnToEditorTourEnd();
     expect(getEditorTourState()).toMatchObject({ act: 3, beat: 'feedback', instant: true });
   });
+
+  describe('one press of Next', () => {
+    it('leaves an explainer as soon as its card is there, while its entrance and the result are still playing', () => {
+      readyChat();
+      runEditorTourPrimary();
+      readyChat();
+      runEditorTourPrimary();
+      expect(getEditorTourState()).toMatchObject({ act: 1, beat: 'land' });
+      // The result's watch: no card yet. A press only ends the watch.
+      const skips = getEditorTourState().skipAnimation;
+      runEditorTourPrimary();
+      expect(getEditorTourState()).toMatchObject({ beat: 'land', skipAnimation: skips + 1 });
+      // The explainer has arrived; its entrance has not finished and the timeline has not reported.
+      markEditorTourReady('arrived');
+      runEditorTourPrimary();
+      expect(getEditorTourState()).toMatchObject({ act: 2, beat: 'compose', skipAnimation: skips + 1 });
+    });
+
+    it('leaves the reply once its actions are appearing and its card is there, not while it is still streaming', () => {
+      readyChat();
+      runEditorTourPrimary();
+      expect(getEditorTourState().beat).toBe('respond');
+      const skips = getEditorTourState().skipAnimation;
+      markEditorTourReady('arrived'); // desktop's working card is never counted; were it, the reply still has to finish
+      runEditorTourPrimary();
+      expect(getEditorTourState()).toMatchObject({ beat: 'respond', skipAnimation: skips + 1 });
+      markEditorTourReady('actions');
+      runEditorTourPrimary();
+      expect(getEditorTourState().beat).toBe('land');
+    });
+
+    it('never sends an unfinished prompt', () => {
+      markEditorTourReady('arrived');
+      runEditorTourPrimary();
+      expect(getEditorTourState()).toMatchObject({ beat: 'compose', sent: false });
+    });
+  });
 });

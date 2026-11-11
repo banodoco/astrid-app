@@ -135,4 +135,43 @@ describe('the tour video engine', () => {
     expect(engine.element.hasAttribute('src')).toBe(false);
     await expect(engine.start(10)).resolves.toBe('rejected');
   });
+
+  it('lets a later gesture prime again when the first prime was refused', async () => {
+    engine.load('/a.mp4');
+    media.refuse = true;
+    engine.prime();
+    await settle();
+    media.refuse = false;
+    engine.prime();
+    expect(media.play).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps an older start\'s late refusal from settling a newer start', async () => {
+    engine.load('/a.mp4');
+    let refuse!: (error: unknown) => void;
+    media.play.mockImplementationOnce(() => new Promise<void>((_, reject) => { refuse = reject; }));
+    const first = engine.start(5000);
+    engine.hold();
+    await expect(first).resolves.toBe('timeout');
+    let second: string | undefined;
+    void engine.start(5000).then((value) => { second = value; });
+    refuse(new DOMException('interrupted', 'AbortError'));
+    await settle();
+    expect(second).toBeUndefined();
+    media.frame(engine.element, 0.05);
+    await settle();
+    expect(second).toBe('playing');
+  });
+
+  it('keeps an old prime from pausing a source loaded after it', async () => {
+    engine.load('/a.mp4');
+    let allow!: () => void;
+    media.play.mockImplementationOnce(() => new Promise<void>((resolve) => { allow = resolve; }));
+    engine.prime();
+    engine.load('/b.mp4');
+    media.pause.mockClear();
+    allow();
+    await settle();
+    expect(media.pause).not.toHaveBeenCalled();
+  });
 });

@@ -2310,18 +2310,22 @@
 @keyframes astrid-phone-chip-in { from { opacity: 0; translate: 0 5px; } }
 /* On phones, direct entry uses the same slot clock for each card and its connector. */
 @media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
-  /* The chips settle in place: a slow fade with a few pixels of drift, never the desktop cards' rise
-     and scale, which on a small chip reads as a jolt. Each connector then draws at an unhurried pace,
-     one after another, about as fast as it reconnects when switching sides, and its end dot lands
-     as the line arrives. */
+  /* Everything arrives together: the panels, the conversation, the launcher and all three chips share
+     one short fade with a few pixels of drift, so no part of the demo shows before another (in Agent,
+     the editor never appears ahead of the conversation in front of it). Only then do the connectors
+     draw, one after another, each out of its own chip, with the end dot landing as the line arrives. */
   .astrid-public-site[data-astrid-direct-entry] :is(.astrid-callout, .astrid-callout-connectors g) {
-    /* One chip at a time, a clear beat apart; each line sets off as its own chip finishes arriving. */
-    --astrid-phone-chip-start: calc(220ms + var(--astrid-mobile-callout-index, 0) * 320ms);
-    --astrid-phone-line-start: calc(var(--astrid-phone-chip-start) + 520ms);
+    --astrid-phone-arrive: 520ms;
+    --astrid-phone-line-start: calc(var(--astrid-phone-arrive) + 60ms + var(--astrid-mobile-callout-index, 0) * 260ms);
     --astrid-phone-line-duration: 900ms;
   }
-  .astrid-public-site[data-astrid-direct-entry] .astrid-callout {
-    animation: astrid-phone-chip-in 640ms cubic-bezier(.22, .61, .36, 1) var(--astrid-phone-chip-start) backwards;
+  .astrid-public-site[data-astrid-direct-entry] .astrid-callout,
+  .astrid-public-site[data-astrid-direct-entry] .astrid-editor-stage[data-revealed="true"] :is(.astrid-surface, .astrid-player-surface, .astrid-timeline-surface, .astrid-inspector-surface, .astrid-chat-surface),
+  .astrid-public-site[data-astrid-direct-entry] .astrid-agent-launcher {
+    animation: astrid-phone-chip-in 520ms cubic-bezier(.22, .61, .36, 1) 0ms backwards;
+  }
+  .astrid-public-site[data-astrid-direct-entry] .astrid-editor-stage[data-revealed="true"] .astrid-preview-transport-outlet {
+    transition: opacity 520ms ease;
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors path {
     animation-duration: var(--astrid-phone-line-duration);

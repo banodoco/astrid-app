@@ -1094,9 +1094,20 @@
 .astrid-vision-skeleton-line-short { width: 62%; }
 .astrid-vision-skeleton-label { width: 25%; height: 12px; }
 .astrid-vision-skeleton-section-title { width: min(45%, 440px); height: 35px; margin-bottom: 24px; }
-.astrid-vision-skeleton-hero { display: grid; gap: 18px; max-width: 720px; }
-.astrid-vision-skeleton-hero .astrid-vision-skeleton-line { height: clamp(35px, 4vw, 62px); }
-.astrid-vision-skeleton-hero .astrid-vision-skeleton-line:last-child { height: 20px; margin-top: 8px; }
+/* The hero skeleton is the real headline and intro with invisible text; every wrapped line shows as a
+   bar a little shorter than its line box, so it has the text's own shape at any width. */
+.astrid-vision-skeleton-text {
+  color: transparent;
+  border-radius: 6px;
+  background: linear-gradient(
+    transparent 14%,
+    color-mix(in oklab, var(--astrid-ink) 10%, var(--astrid-paper)) 14% 86%,
+    transparent 86%);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  user-select: none;
+  animation: astrid-vision-skeleton-pulse 2.2s ease-in-out infinite;
+}
 .astrid-vision-loading-group { margin-top: clamp(70px, 10vw, 124px); }
 .astrid-vision-loading-pillars, .astrid-vision-loading-projects, .astrid-vision-loading-principles {
   display: grid; gap: 16px;
@@ -1236,7 +1247,7 @@
   .astrid-vision .astrid-vision-project-list .astrid-vision-project-more { min-height: 0; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .astrid-vision-skeleton-line { animation: none; }
+  .astrid-vision-skeleton-line, .astrid-vision-skeleton-text { animation: none; }
 }
 
 

@@ -157,6 +157,11 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
   );
 }
 
+/** Stand-ins for the loading skeleton: never shown, only measured, so they match the usual copy's length. */
+const SKELETON_TITLE = 'A tool to unlock the collective artistic ambition of the open-source AI community';
+const SKELETON_LEAD = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
+const SKELETON_ATTRIBUTION = 'This vision is drawn from the Astrid Dev repository.';
+
 const PROJECT_GOAL_LINES = 5;
 
 /**
@@ -400,9 +405,12 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                     </p>
                   </>
                 : <div className="astrid-vision-skeleton-hero" role="status" aria-label="Loading Astrid's vision">
-                    <div className="astrid-vision-skeleton-line" />
-                    <div className="astrid-vision-skeleton-line" />
-                    <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+                    {/* The real headline and intro elements, holding invisible stand-in text of about the
+                        usual length: each wrapped line is drawn as a bar, so the skeleton has the shape
+                        the text will have at this width and nothing shifts when the text arrives. */}
+                    <h1 aria-hidden="true"><span className="astrid-vision-skeleton-text">{SKELETON_TITLE}</span></h1>
+                    <div className="astrid-vision-lead" aria-hidden="true"><p><span className="astrid-vision-skeleton-text">{SKELETON_LEAD}</span></p></div>
+                    <p className="astrid-vision-source-attribution" aria-hidden="true"><span className="astrid-vision-skeleton-text">{SKELETON_ATTRIBUTION}</span></p>
                   </div>}
           </div>
           <Juggler />

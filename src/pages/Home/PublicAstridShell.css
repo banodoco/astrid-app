@@ -285,6 +285,36 @@
   filter: blur(4px);
   pointer-events: none;
 }
+/* The call to action's note. In a wide button it sits at the far end, just before the arrow; in a
+   narrow one (see the container rule) it drops under the label. */
+.astrid-hero-cta { container-type: inline-size; }
+.astrid-hero-cta > .astrid-button { justify-content: flex-start; gap: 10px; }
+.astrid-cta-label { flex: 0 0 auto; font-weight: 600; white-space: nowrap; }
+.astrid-cta-note {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: 12.5px;
+  font-weight: 500;
+  letter-spacing: .01em;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.astrid-hero-cta > .astrid-button > svg { flex: 0 0 auto; }
+@container (max-width: 268px) {
+  .astrid-hero-cta > .astrid-button {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: center;
+    gap: 1px 10px;
+    padding-block: 7px;
+  }
+  .astrid-cta-label { grid-column: 1; grid-row: 1; line-height: 1.2; }
+  .astrid-cta-note { grid-column: 1; grid-row: 2; font-size: 11.5px; line-height: 1.25; text-align: left; }
+  .astrid-hero-cta > .astrid-button > svg { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+}
 /* Keep each action in its own row while the staged hero states fade between them. */
 .astrid-hero-cta > [data-active="true"] { transition-delay: 70ms, 70ms, 70ms, 70ms, 0s; }
 .astrid-hero-cta-secondary {
@@ -1553,18 +1583,22 @@
     position: relative;
     height: 100%;
     min-height: 0;
-    grid-template-columns: auto minmax(0, 1fr) auto;
+    /* The bar: headline over its sentence on the left; switch and call to action on the right, the
+       same size and shape, centred as one block against the text. */
+    --astrid-bar-control: 48px;
+    --astrid-bar-gap: 10px;
+    grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "brand brand note"
-      "stage stage stage"
-      "title sub switch"
-      "title sub cta";
+      "brand note"
+      "stage stage"
+      "title actions"
+      "sub actions";
     align-items: center;
     align-content: stretch;
     column-gap: clamp(20px, 3.4vw, 40px);
-    row-gap: 8px;
-    padding: 10px 0 18px;
+    row-gap: 6px;
+    padding: 10px 0 22px;
   }
   /* The bar's panel, drawn behind its two rows, edge to edge. */
   .astrid-landing-grid::after {
@@ -1572,7 +1606,7 @@
     grid-area: 3 / 1 / 5 / -1;
     align-self: stretch;
     z-index: 0;
-    margin: 0 -28px -18px;
+    margin: 0 -28px -22px;
     border-top: 1px solid color-mix(in srgb, var(--astrid-ink) 14%, transparent);
     background: color-mix(in srgb, var(--astrid-paper) 88%, transparent);
     -webkit-backdrop-filter: blur(10px);
@@ -1583,26 +1617,43 @@
   .astrid-hero-copy :is(h1, .astrid-hero-detail > *, .astrid-audience-switch) { position: relative; z-index: 1; }
   .astrid-hero-copy h1 {
     grid-area: title;
+    align-self: end;
     max-width: none;
     margin: 0;
-    padding-top: 14px;
-    font-size: clamp(30px, 4.3vw, 44px);
+    padding-top: 20px;
+    font-size: clamp(34px, 5.2vw, 50px);
     line-height: 1.02;
+    text-wrap: balance;
   }
-  .astrid-hero-emphasis { display: block; }
-  .astrid-hero-detail > :first-child { grid-area: sub; padding-top: 14px; }
-  .astrid-hero-subtitle { max-width: 34ch; margin: 0; font-size: clamp(14.5px, 1.75vw, 17px); }
+  .astrid-hero-emphasis { display: inline; }
+  .astrid-hero-detail > :first-child { grid-area: sub; align-self: start; }
+  .astrid-hero-subtitle { max-width: none; margin: 0; font-size: clamp(15px, 1.9vw, 17.5px); }
+  /* Both controls share the right-hand cell: equal heights, pushed apart from its centre line, so the
+     pair sits centred on the text however the headline wraps. */
+  .astrid-hero-copy .astrid-audience-switch,
+  .astrid-hero-actions {
+    grid-area: actions;
+    align-self: center;
+    justify-self: stretch;
+    width: clamp(200px, 27vw, 250px);
+    max-width: none;
+    margin-top: 20px;
+  }
   .astrid-hero-copy .astrid-audience-switch {
-    grid-area: switch; align-self: end; justify-self: stretch; min-width: 0; margin: 18px 0 0;
+    min-width: 0;
+    height: var(--astrid-bar-control);
+    margin-bottom: calc(var(--astrid-bar-control) + var(--astrid-bar-gap));
+    border-radius: 12px;
   }
+  .astrid-audience-switch button { min-height: 0; height: 100%; border-radius: 9px; }
   /* Beside the orange call to action the switch goes quiet, as on the phone. */
   .astrid-audience-switch button[aria-pressed="true"],
   .astrid-public-site[data-dusk] .astrid-audience-switch button[aria-pressed="true"] {
     background: var(--astrid-ink);
     color: var(--astrid-paper);
   }
-  .astrid-hero-actions { grid-area: cta; align-self: start; width: clamp(190px, 24vw, 240px); max-width: none; }
-  .astrid-button { min-height: 46px; }
+  .astrid-hero-actions { margin-top: calc(20px + var(--astrid-bar-control) + var(--astrid-bar-gap)); }
+  .astrid-button { min-height: var(--astrid-bar-control); border-radius: 12px; }
   .astrid-hero-note { grid-area: note; justify-self: end; margin: 0; padding: 0; }
   .astrid-hero-note .astrid-social-links { margin: 0 -8px 0 0; }
   /* The stage keeps the proportions its panels are laid out for and is as large as the room allows,
@@ -1625,50 +1676,35 @@
      the whole exchange stays in view. */
   .astrid-public-site[data-audience] .astrid-scripted-conversation { zoom: .8; }
 }
-/* On its side a tablet is short of height, not width: the bar becomes a single slim row (headline on
-   one line) so the demo keeps every pixel of height it can. */
+@media (min-width: 641px) and (max-width: 780px) and (min-height: 600px) {
+  .astrid-public-site[data-audience] .astrid-scripted-conversation { zoom: .68; }
+}
+/* On its side a tablet is short of height, not width: the headline takes one line and the two
+   controls sit side by side, so the bar stays slim and the demo keeps the height. */
 @media (min-width: 641px) and (max-width: 1099px) and (min-height: 600px) and (min-aspect-ratio: 1/1) {
   .astrid-landing-grid {
-    grid-template-columns: auto minmax(0, 1fr) auto auto;
-    grid-template-rows: auto minmax(0, 1fr) auto;
+    --astrid-bar-control: 46px;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     grid-template-areas:
-      "brand brand brand note"
-      "stage stage stage stage"
-      "title sub switch cta";
-    column-gap: clamp(14px, 2vw, 24px);
-    padding: 8px 0 14px;
+      "brand brand note"
+      "stage stage stage"
+      "title switch cta"
+      "sub switch cta";
+    column-gap: 12px;
+    row-gap: 4px;
+    padding: 8px 0 16px;
   }
-  .astrid-landing-grid::after { grid-area: 3 / 1 / 4 / -1; margin-bottom: -14px; }
-  .astrid-hero-copy h1 { padding-top: 12px; font-size: clamp(21px, 2.7vw, 28px); white-space: nowrap; }
-  .astrid-hero-emphasis { display: inline; }
-  .astrid-hero-detail > :first-child { padding-top: 12px; }
-  .astrid-hero-subtitle { max-width: none; font-size: 13.5px; line-height: 1.3; }
-  .astrid-hero-copy .astrid-audience-switch { align-self: center; justify-self: end; margin: 12px 0 0; }
-  .astrid-audience-switch button { padding-inline: 14px; }
-  .astrid-hero-actions { align-self: center; width: clamp(150px, 17vw, 190px); margin-top: 12px; }
-  .astrid-button { min-height: 42px; }
+  .astrid-landing-grid::after { margin-bottom: -16px; }
+  .astrid-hero-copy h1 { padding-top: 14px; font-size: clamp(22px, 2.9vw, 30px); white-space: nowrap; }
+  .astrid-hero-subtitle { font-size: 14px; line-height: 1.3; }
+  .astrid-hero-copy .astrid-audience-switch { grid-area: switch; width: clamp(150px, 17vw, 180px); margin: 14px 0 0 12px; }
+  .astrid-hero-actions { grid-area: cta; width: clamp(180px, 23vw, 240px); margin-top: 14px; }
   .astrid-showcase { padding: 8px 36px 30px; }
 }
-/* Upright there is height to spare but less width: the sentence sits under a larger headline, with
-   the switch and call to action beside them. */
-@media (min-width: 641px) and (max-width: 1099px) and (min-height: 600px) and (max-aspect-ratio: 1/1) {
-  .astrid-landing-grid {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-areas:
-      "brand note"
-      "stage stage"
-      "title switch"
-      "sub cta";
-    row-gap: 10px;
-    padding-bottom: 26px;
-  }
-  .astrid-landing-grid::after { margin-bottom: -26px; }
-  .astrid-hero-copy h1 { align-self: end; padding-top: 22px; font-size: clamp(38px, 5.6vw, 54px); text-wrap: balance; }
-  .astrid-hero-emphasis { display: inline; }
-  .astrid-hero-detail > :first-child { align-self: start; padding-top: 0; }
-  .astrid-hero-subtitle { max-width: none; font-size: clamp(15.5px, 2vw, 18px); }
-  .astrid-hero-copy .astrid-audience-switch { margin-top: 22px; }
-  .astrid-button { min-height: 50px; }
+/* Narrow and on its side (a small tablet, a split screen): the sentence gives its room to the controls. */
+@media (min-width: 641px) and (max-width: 819px) and (min-height: 600px) and (min-aspect-ratio: 1/1) {
+  .astrid-hero-detail > :first-child { display: none; }
+  .astrid-hero-copy h1 { grid-row: 3 / 5; align-self: center; }
 }
 
 /* Phone (≤640px): the whole page is one screen, never scrolled. A slim header (brand and App/Agent),

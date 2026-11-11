@@ -165,7 +165,7 @@ test('A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion'
   await page.emulateMedia({ reducedMotion: 'no-preference' });
 });
 
-test('A03/A08/A11/A12 Get Started entry, route focus and transition fallback', async ({ page }, info) => {
+test('A03/A08/A11/A12 Visit demo entry, route focus and transition fallback', async ({ page }, info) => {
   await page.addInitScript(() => Object.defineProperty(document, 'startViewTransition', { configurable: true, value: undefined }));
   await page.emulateMedia({ reducedMotion: 'reduce' });
   // Enter Home as App, leave for Vision and return through history, which restores App.
@@ -178,7 +178,7 @@ test('A03/A08/A11/A12 Get Started entry, route focus and transition fallback', a
   await surface(page, 'home');
   await expect(page.locator('main.astrid-public-site')).toHaveAttribute('data-audience', 'app');
   await expect(page.locator('.astrid-editor-stage')).toHaveAttribute('data-astrid-readiness', 'settled', { timeout: 30_000 });
-  await expect(page.getByRole('link', { name: 'Get Started', exact: true })).toHaveAttribute('href', '/tools/video-editor');
+  await expect(page.getByRole('link', { name: 'Visit demo Free to run locally', exact: true })).toHaveAttribute('href', '/tools/video-editor');
   await expect(page.getByRole('button', { name: 'Get the app', exact: true })).toHaveCount(0);
   await expect(page.locator('dialog')).toHaveCount(0);
   await shot(page, info, 'get-started-entry');

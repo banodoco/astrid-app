@@ -145,6 +145,26 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
 // page, and a failed refresh never discards the last validated content.
 let lastGood: PublicVisionContent | null = null;
 
+let preloading = false;
+
+/**
+ * Fetches the vision ahead of need (Home calls this once it has settled), so opening the Vision page
+ * shows its text at once instead of a loading skeleton. Failures are silent: the page fetches for
+ * itself, with its own error state, when it opens.
+ */
+export function preloadPublicVisionContent() {
+  if (lastGood || preloading || typeof fetch !== 'function') return;
+  preloading = true;
+  void fetch(PUBLIC_VISION_URL, { credentials: 'omit', mode: 'cors', cache: 'default' })
+    .then(async response => {
+      if (!response.ok) throw new Error('Vision feed unavailable');
+      return parsePublicVisionContent(await response.json());
+    })
+    .then(next => { lastGood ??= next; })
+    .catch(() => {})
+    .finally(() => { preloading = false; });
+}
+
 export function usePublicVisionContent() {
   const [content, setContent] = useState<PublicVisionContent | null>(() => lastGood);
   const [error, setError] = useState(false);

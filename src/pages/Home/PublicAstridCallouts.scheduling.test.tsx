@@ -90,8 +90,16 @@ beforeEach(() => {
   for (const name of ['clientWidth', 'clientLeft', 'clientTop', 'offsetWidth'] as const) {
     vi.spyOn(HTMLElement.prototype, name, 'get').mockImplementation(() => { events.push('read'); return name.endsWith('Width') ? 100 : 0; });
   }
+  // jsdom assembles a computed style by calling setProperty on a fresh declaration. That is a read of
+  // the document, so those calls are not counted as writes.
+  const computedStyle = window.getComputedStyle.bind(window);
+  let readingComputedStyle = false;
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((...args) => {
+    readingComputedStyle = true;
+    try { return computedStyle(...args); } finally { readingComputedStyle = false; }
+  });
   const styleWrite = CSSStyleDeclaration.prototype.setProperty;
-  vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty').mockImplementation(function (this: CSSStyleDeclaration, ...args) { events.push('write'); return styleWrite.apply(this, args); });
+  vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty').mockImplementation(function (this: CSSStyleDeclaration, ...args) { if (!readingComputedStyle) events.push('write'); return styleWrite.apply(this, args); });
   const attributeWrite = Element.prototype.setAttribute;
   vi.spyOn(Element.prototype, 'setAttribute').mockImplementation(function (this: Element, ...args) { events.push('write'); return attributeWrite.apply(this, args); });
 });
@@ -167,7 +175,9 @@ describe('bounded stage passes', () => {
       expect(view.container.querySelector('.justify-end')).toBeNull();
       now = arrivalAt;
       paint();
-      const beforeArrival = path.getAttribute('d');
+      // On phones the connector that lands on Astrid's reply belongs to the tools chip.
+      const replyPath = view.container.querySelector('path[data-callout="tools"]')!;
+      const beforeArrival = replyPath.getAttribute('d');
       if (arrivalAt > 1240) {
         now = 2600;
         settle();
@@ -179,17 +189,18 @@ describe('bounded stage passes', () => {
       Object.defineProperty(message, 'getBoundingClientRect', { value: () => new DOMRect(130, 120, targetWidth, 30), configurable: true });
       act(() => mutationCallbacks.at(-1)!([], {} as MutationObserver));
       paint();
-      expect(path.getAttribute('d')).not.toBe(beforeArrival);
+      expect(replyPath.getAttribute('d')).not.toBe(beforeArrival);
       expect(animate).toHaveBeenCalledTimes(9);
       now = 1700;
       settle();
-      const endpoint = view.container.querySelector('.astrid-callout-dot-end[data-callout="community"]')!;
-      expect(Number(endpoint.getAttribute('cx'))).toBe(170);
+      const endpoint = view.container.querySelector('.astrid-callout-dot-end[data-callout="tools"]')!;
+      // Phones land on the left edge of Astrid's reply, so the endpoint holds while the bubble widens.
+      expect(Number(endpoint.getAttribute('cx'))).toBe(130);
       targetWidth = 55;
       act(() => resizeObservers.at(-1)!.callback([], resizeObservers.at(-1)! as unknown as ResizeObserver));
       settle();
-      expect(Number(endpoint.getAttribute('cx'))).toBe(185);
-      expect(path.getAttribute('data-connector-target')).toBe('community');
+      expect(Number(endpoint.getAttribute('cx'))).toBe(130);
+      expect(replyPath.getAttribute('data-connector-target')).toBe('tools');
     } finally { HTMLElement.prototype.animate = original; }
   });
 
@@ -213,7 +224,9 @@ describe('bounded stage passes', () => {
       expect([...view.container.querySelectorAll('article')]).toEqual(cards);
       expect([...view.container.querySelectorAll('path')]).toEqual(paths);
       expect(animate).toHaveBeenCalledTimes(9);
-      expect(animate).toHaveBeenCalledWith([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], expect.objectContaining({duration: 720}));
+      // Desktop cards move, so their text drifts in; a phone chip stays put and its title only fades.
+      if (isPhone) expect(animate).toHaveBeenCalledWith([{opacity: 0}, {opacity: 0, offset: .4}, {opacity: 1}], expect.objectContaining({duration: 460}));
+      else expect(animate).toHaveBeenCalledWith([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], expect.objectContaining({duration: 720}));
       expect(view.container.querySelectorAll('article > .astrid-callout-outgoing')).toHaveLength(3);
       sample();
       expect(paths[0].getAttribute('data-connector-target')).toBe('transition');
@@ -297,7 +310,7 @@ describe('bounded stage passes', () => {
       const view = render(<Stage />);
       settle();
       view.rerender(<Stage audience="agent" />);
-      const firstCallout = isPhone ? 'tools' : 'community';
+      const firstCallout = 'community';
       const path = view.container.querySelector(`path[data-callout="${firstCallout}"]`)!;
       const ping = view.container.querySelector<SVGCircleElement>(`circle[data-callout-ping="${firstCallout}"]`)!;
       const retractUntil = isPhone ? CALLOUT_VACUUM_PHONE_RETRACT_MS : CALLOUT_VACUUM_RETRACT_MS;
@@ -326,7 +339,7 @@ describe('bounded stage passes', () => {
       const view = render(<Stage />);
       settle();
       view.rerender(<Stage audience="agent" />);
-      const firstCallout = isPhone ? 'tools' : 'community';
+      const firstCallout = 'community';
       const path = view.container.querySelector<SVGPathElement>(`path[data-callout="${firstCallout}"]`)!;
       const retractUntil = isPhone ? CALLOUT_VACUUM_PHONE_RETRACT_MS : CALLOUT_VACUUM_RETRACT_MS;
       const extendDuration = isPhone ? CALLOUT_VACUUM_PHONE_EXTEND_MS : CALLOUT_VACUUM_EXTEND_MS;
@@ -363,7 +376,7 @@ describe('bounded stage passes', () => {
       const view = render(<Stage />);
       settle();
       view.rerender(<Stage audience="agent" />);
-      const firstCallout = isPhone ? 'tools' : 'community';
+      const firstCallout = 'community';
       const path = view.container.querySelector<SVGPathElement>(`path[data-callout="${firstCallout}"]`)!;
       const start = view.container.querySelector<SVGCircleElement>(`.astrid-callout-dot-start[data-callout="${firstCallout}"]`)!;
       const end = view.container.querySelector<SVGCircleElement>(`.astrid-callout-dot-end[data-callout="${firstCallout}"]`)!;
@@ -409,7 +422,7 @@ describe('bounded stage passes', () => {
 
   it.each([
     [false, 'agent', ['community', 'tools', 'workflows']],
-    [true, 'agent', ['tools', 'community', 'workflows']],
+    [true, 'agent', ['community', 'workflows', 'tools']],
     [false, 'app', ['timeline', 'effects', 'models']],
     [true, 'app', ['effects', 'timeline', 'models']],
   ] as const)('staggers reconnect pulses in the %s %s introduction order', (isPhone, audience, order) => {
@@ -492,7 +505,7 @@ describe('bounded stage passes', () => {
     }
   });
 
-  it.each([false, true])('connects to the empty Inspector card when visible: its centre, or its top edge on phones (phone: %s)', (isPhone) => {
+  it.each([false, true])('connects to the centre of the empty Inspector card when visible (phone: %s)', (isPhone) => {
     phone = isPhone;
     const view = render(<Stage inspectorHidden />);
     settle();
@@ -511,9 +524,9 @@ describe('bounded stage passes', () => {
     expect(path.getAttribute('data-connector-target')).toBe('effects');
     settle();
     const endpoint = view.container.querySelector('.astrid-callout-dot-end[data-callout="effects"]')!;
-    // Phones drop straight down from the Effects card onto the inspector's top edge, ~76% across it.
-    expect(Number(endpoint.getAttribute('cx'))).toBe(isPhone ? 176 : 150);
-    expect(Number(endpoint.getAttribute('cy'))).toBe(isPhone ? 100 : 140);
+    // With no clip selected there is no Effects tab for the phone connector, so it uses the card too.
+    expect(Number(endpoint.getAttribute('cx'))).toBe(150);
+    expect(Number(endpoint.getAttribute('cy'))).toBe(140);
     expect(frames.size).toBe(0);
   });
 

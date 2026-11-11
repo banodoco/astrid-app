@@ -32,6 +32,7 @@ describe('createEditorTourDataProvider', () => {
     const provider = createEditorTourDataProvider();
     const registry = await provider.loadAssetRegistry(EDITOR_TOUR_TIMELINE_ID);
     expect(Object.keys(registry.assets).sort()).toEqual([
+      'tour-guide',
       'tour-still-end',
       'tour-still-mid-1',
       'tour-still-mid-2', 'tour-still-start', 'tour-video',

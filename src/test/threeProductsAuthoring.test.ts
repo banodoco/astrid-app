@@ -51,6 +51,8 @@ it.each(selectedCases)('enables authoring before opening %s in a fresh worker', 
   const enableTimelineAuthoring = vi.fn(async () => {});
   const page = {
     on: vi.fn(),
+    route: vi.fn(async () => {}),
+    unroute: vi.fn(async () => {}),
     url: () => 'about:blank',
     goto: vi.fn(async () => {}),
     evaluate: vi.fn(async () => '[]'),
@@ -67,7 +69,12 @@ it('does not open the editor when authoring startup refuses the cohort', async (
   const run = [...journey.cases].find(([name]) => name.startsWith('M2 real gate 5'))![1];
   const refused = new Error('authoring provider interface/contract mismatch');
   const enableTimelineAuthoring = vi.fn().mockRejectedValue(refused);
-  const page = { on: vi.fn(), url: () => 'about:blank' };
+  const page = {
+    on: vi.fn(),
+    route: vi.fn(async () => {}),
+    unroute: vi.fn(async () => {}),
+    url: () => 'about:blank',
+  };
   await expect(run({ page, harness: fixtureHarness(enableTimelineAuthoring),
     astrid: {}, seed3: {} })).rejects.toBe(refused);
   expect(journey.openApp).not.toHaveBeenCalled();

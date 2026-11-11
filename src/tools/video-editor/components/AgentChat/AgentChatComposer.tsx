@@ -54,7 +54,9 @@ export function AgentChatComposer({
           readOnly={readOnly}
           rows={rows}
           placeholder={placeholder}
-          className={`min-h-10 w-full resize-none rounded-xl border border-border/70 bg-card px-3 py-2 ${onStop ? 'pr-20 [@media(pointer:coarse)]:pr-28' : 'pr-12 [@media(pointer:coarse)]:pr-14'} [@media(pointer:coarse)]:min-h-[3.25rem] text-sm leading-5 [@media(pointer:coarse)]:text-base [@media(max-height:500px)]:max-h-[4.75rem] outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/50`}
+          // `block`: an inline textarea leaves a line's descender gap under it, so the buttons laid over it (inset from this
+          // wrapper) hung past the box's bottom edge.
+          className={`block min-h-10 w-full resize-none rounded-xl border border-border/70 bg-card px-3 py-2 ${onStop ? 'pr-20 [@media(pointer:coarse)]:pr-28' : 'pr-12 [@media(pointer:coarse)]:pr-14'} [@media(pointer:coarse)]:min-h-[3.25rem] text-sm leading-5 [@media(pointer:coarse)]:text-base [@media(max-height:500px)]:max-h-[4.75rem] outline-none transition-colors placeholder:text-muted-foreground/70 focus:border-primary/50`}
           disabled={inputDisabled}
           onKeyDown={onKeyDown}
         />

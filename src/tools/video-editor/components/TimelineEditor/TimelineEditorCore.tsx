@@ -487,7 +487,8 @@ function TimelineEditorCoreComponent({
       }
 
       if (clip.assetEntry.type?.startsWith('image')) {
-        acc[clip.id] = clip.assetEntry.src;
+        // A registered thumbnail spares a 40 px slot from decoding the full picture.
+        acc[clip.id] = clip.assetEntry.thumbnailUrl ?? clip.assetEntry.src;
       } else if (clip.assetEntry.type?.startsWith('video') && clip.assetEntry.thumbnailUrl) {
         acc[clip.id] = clip.assetEntry.thumbnailUrl;
       }

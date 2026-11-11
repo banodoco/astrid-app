@@ -11,8 +11,9 @@
  * --base-url reuses a loopback Vite server; API calls still go only to this run's fake.
  * Each device/theme owns a fresh browser process, so live scene GPU contexts cannot accumulate.
  * Owned Vite runs in test mode with a hosted origin so the run-mode screen is reachable.
- * The connection fixture returns 503 health checks to keep its setup card on screen;
- * phones/tablets naturally show the phone card. Local setup is reached through Back.
+ * The connection fixture returns 503 health checks to keep its install card on screen;
+ * phones/tablets naturally show the phone card (no run-mode choice, no local setup).
+ * On a computer, local setup is reached through Back from connection and the local run mode.
  * Skips include the app's explanation/source. Issues are design findings, not command
  * failures. Unreachable beats fail after 20 s and one retry, save evidence and continue
  * with the next device. A nonzero exit means captures failed. report.json records fixtures,
@@ -87,7 +88,7 @@ async function within(promise, timeout, message) {
   finally { clearTimeout(timer); }
 }
 
-async function freePort() {
+export async function freePort() {
   const server = createServer();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done); });
   const { port } = server.address();
@@ -95,7 +96,7 @@ async function freePort() {
   return port;
 }
 
-async function waitServer(url, child, stopped, timeout = 120_000) {
+export async function waitServer(url, child, stopped, timeout = 120_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (stopped()) throw new Error('Screenshot run interrupted');
@@ -141,7 +142,8 @@ async function settled(page, step, remaining, pending) {
     const elements = selectors.map(selector => document.querySelector(selector));
     if (elements.some(element => !element || !element.getBoundingClientRect().width || !element.getBoundingClientRect().height || getComputedStyle(element).visibility === 'hidden')) return false;
     const cutouts = [...document.querySelectorAll('#editor-tour-dim rect[fill="black"]')];
-    if (targetCount && cutouts.slice(0, targetCount).some(rect => Number(rect.getAttribute('width')) <= 0 || Number(rect.getAttribute('height')) <= 0)) return false;
+    // A short phone lights fewer cutouts than the beat has targets (the row gives way to the card), so one open cutout is enough.
+    if (targetCount && !cutouts.some(rect => Number(rect.getAttribute('width')) > 0 && Number(rect.getAttribute('height')) > 0)) return false;
     if (compose && getComputedStyle(document.querySelector('[data-editor-tour-shield]')).clipPath === 'none') return false;
     const animations = elements.flatMap(element => element.getAnimations({ subtree: true }));
     if (animations.some(animation => animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity)) return false;
@@ -270,7 +272,9 @@ export async function run(options) {
       report.results.push(...rows);
       let failed = false;
       let scenario;
-      const reasonForChoice = () => scenario?.mobile ? { text: scenario.phoneReason, source: 'src/app/onboarding/WelcomeFlow.tsx:30; src/shared/components/RuntimeConnection/copy.ts (phone)' } : { text: 'This local build goes straight from the tour to connection.', source: 'src/app/onboarding/WelcomeFlow.tsx:30' };
+      // Phones and tablets have no run-mode choice and no local setup: the tour leads to the connection screen's phone card.
+      const phoneReason = () => ({ text: scenario.phoneReason, source: 'src/app/onboarding/WelcomeFlow.tsx (finishTour); src/shared/components/RuntimeConnection/copy.ts (phone)' });
+      const localReason = text => ({ text, source: 'src/app/onboarding/WelcomeFlow.tsx (finishTour)' });
       const perform = async (step, index, prepare, move) => {
         const row = rows[index];
         const selected = !options.steps || options.steps.includes(step.id);
@@ -381,22 +385,26 @@ export async function run(options) {
         }
         if (!failed && lastSelected >= steps.length - FOLLOWUP.length) {
           const index = steps.length - FOLLOWUP.length;
-          if (scenario.mobile || scenario.local) {
-            rows[index].status = 'skipped';
-            rows[index].reason = reasonForChoice().text;
-            rows[index].reasonSource = reasonForChoice().source;
-          } else await perform(steps[index], index, remaining => page.getByRole('heading', { name: /^How do you want to run (Astrid|the app)\?$/ }).waitFor({ timeout: remaining() }), remaining => activate(page.getByRole('button', { name: /Continue in this tab|^Continue$/ }), device.profile.hasTouch, remaining));
-          if (!failed && lastSelected >= index + 1) await perform(steps[index + 1], index + 1, remaining => page.locator('[data-testid="runtime-not-connected"] h1').waitFor({ timeout: remaining() }));
-          if (!failed && lastSelected >= index + 2 && (scenario.mobile || scenario.local)) {
-            rows[index + 2].status = 'skipped';
-            rows[index + 2].reason = reasonForChoice().text;
-            rows[index + 2].reasonSource = reasonForChoice().source;
-          } else if (!failed && lastSelected >= index + 2) await perform(steps[index + 2], index + 2, async remaining => {
-            if (await page.getByRole('heading', { name: 'Have your agent set it up', exact: true }).isVisible()) return;
-            if (await page.locator('[data-testid="runtime-not-connected"]').isVisible()) await activate(page.getByRole('button', { name: 'Back', exact: true }), device.profile.hasTouch, remaining);
-            await activate(page.getByText(/^(Run everything on your computer|Run app on your computer)$/), device.profile.hasTouch, remaining);
-            await activate(page.getByRole('button', { name: 'Set up with your agent', exact: true }), device.profile.hasTouch, remaining);
-          });
+          const skip = (row, reason) => { row.status = 'skipped'; row.reason = reason.text; row.reasonSource = reason.source; };
+          // run-mode: only on a computer's hosted build. Continue leads to the connection screen.
+          if (scenario.mobile) skip(rows[index], phoneReason());
+          else if (scenario.local) skip(rows[index], localReason('A local build has no run-mode choice: the tour leads straight to local setup.'));
+          else await perform(steps[index], index, remaining => page.getByRole('heading', { name: 'How do you want to run Astrid?' }).waitFor({ timeout: remaining() }), remaining => activate(page.getByRole('button', { name: /Continue in this tab|^Continue$/ }), device.profile.hasTouch, remaining));
+          // connection: the phone card on phones; the install/permission card on a computer's hosted build.
+          if (!failed && lastSelected >= index + 1) {
+            if (scenario.local) skip(rows[index + 1], localReason('A local build sets up locally first; connection follows local setup\'s Continue.'));
+            else await perform(steps[index + 1], index + 1, remaining => page.locator('[data-testid="runtime-not-connected"] h1').waitFor({ timeout: remaining() }));
+          }
+          // local-setup: reached from the run-mode choice (Back from connection), or directly on a local build.
+          if (!failed && lastSelected >= index + 2) {
+            if (scenario.mobile) skip(rows[index + 2], phoneReason());
+            else await perform(steps[index + 2], index + 2, async remaining => {
+              if (await page.getByRole('heading', { name: 'Have your agent set it up', exact: true }).isVisible()) return;
+              if (await page.locator('[data-testid="runtime-not-connected"]').isVisible()) await activate(page.getByRole('button', { name: 'Back', exact: true }), device.profile.hasTouch, remaining);
+              await activate(page.getByText(/^Run Astrid on your computer$/), device.profile.hasTouch, remaining);
+              await activate(page.getByRole('button', { name: 'Set up with your agent', exact: true }), device.profile.hasTouch, remaining);
+            });
+          }
         }
       } catch (error) {
         failed = true;

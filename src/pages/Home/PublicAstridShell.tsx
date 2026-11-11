@@ -29,6 +29,7 @@ import {
 } from './PublicAstridSky.tsx';
 import type { PublicAstridSkySession } from './publicAstridSkySession';
 import { usePublicAstridSkySession } from './usePublicAstridSkySession';
+import { preloadPublicVisionContent } from './publicVisionContent';
 
 const EDITOR_RELOAD_PENDING_KEY = 'astrid-public-editor-reload-pending';
 /** The editor stays hidden until its first frame and side panel are ready, so it assembles in one piece. */
@@ -578,6 +579,14 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
     }
     window.location.reload();
   }, []);
+
+  // Once the demo has settled, fetch the Vision page's text in the background so it opens without a
+  // loading skeleton.
+  useEffect(() => {
+    if (!visualActive || readiness.phase !== 'settled') return undefined;
+    const timer = window.setTimeout(preloadPublicVisionContent, 1_200);
+    return () => window.clearTimeout(timer);
+  }, [readiness.phase, visualActive]);
 
   // Before callouts mount, size the preview for readiness. Once revealed, their stage pass owns it.
   usePublicAstridPlayerHeight(editorStageRef, visualActive && !editorRevealed);

@@ -9,41 +9,19 @@ import { getEditorTourState, setEditorTourBeat } from '@/shared/state/editorTour
 import { finishEditorTour } from '@/tools/video-editor/tour/runner/tourBeats';
 import { useTimelineEditorData, useTimelineOpsFromStoreSafe } from '@/tools/video-editor/hooks/timelineStore';
 import { useVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext';
-import { useClipTypeRegistryContext } from '@/tools/video-editor/clip-types/ClipTypeRegistryContext';
-import type { ClipRendererProps } from '@/tools/video-editor/clip-types/ClipTypeRegistry';
-import type { ComponentType } from 'react';
 import { TOUR_CLIP_IDS } from '@/tools/video-editor/tour/timeline/tourStages';
 
 let captured: ReturnType<typeof useTimelineEditorData>;
 let operations: ReturnType<typeof useTimelineOpsFromStoreSafe>;
 let runtime: ReturnType<typeof useVideoEditorRuntime>;
-// Keep the actual provider, extension activation and driver operations. Browser media and layout
-// are outside jsdom: the preview boundary records the real resolved composition instead.
+// Keep the actual provider and driver operations. Browser media and layout are outside jsdom: the preview boundary
+// records the real resolved composition instead.
 vi.mock('@/tools/video-editor/components/PreviewPanel/RemotionPreview.tsx', () => ({ RemotionPreview: () => {
   captured = useTimelineEditorData(); operations = useTimelineOpsFromStoreSafe(); runtime = useVideoEditorRuntime();
-  const { registry } = useClipTypeRegistryContext();
-  const scene = captured.resolvedConfig?.clips.find(clip => clip.clipType === 'haus.astrid.liveScene');
-  const record = registry.resolve('haus.astrid.liveScene');
-  if (!scene || record?.status !== 'active' || typeof record.renderer !== 'function') return <div data-testid="captured-preview" />;
-  const Renderer = record.renderer as ComponentType<ClipRendererProps>;
-  return <div data-testid="captured-preview"><Renderer clipId={scene.id} clipTypeId={scene.clipType!}
-    time={0} sourceTime={2.5} source={scene.app as Record<string, unknown>} params={{}}
-    width={1280} height={720} live={{bindings: [], diagnostics: [], getSource: () => undefined,
-      getChannelMetadata: () => undefined, readLatestSample: () => undefined, readSampleAt: () => undefined,
-      readSamples: () => [], getSampleCount: () => 0, resolveChannelId: () => undefined}} /></div>;
+  return <div data-testid="captured-preview" />;
 } }));
 vi.mock('@/tools/video-editor/components/TimelineEditor/TimelineEditorCoreBody.tsx', () => ({ TimelineEditorCoreBody: () => null }));
 vi.mock('@/tools/video-editor/tour/runner/EditorTourRunner.tsx', () => ({ EditorTourRunner: () => null }));
-// A real iframe/Three.js frame cannot be driven in jsdom. Keep the shipped
-// extension and its registered renderer real; stub only the iframe boundary.
-vi.mock('@astrid/packs/rendering/ui/threejs-live-editor/SceneSurface', async () => {
-  const React = await import('react');
-  return { SceneSurface: ({ source, sourceTime, onReady }: { source?: unknown; sourceTime: number; onReady?: (reported?: unknown) => void }) => {
-    React.useEffect(() => onReady?.({ events: [], shots: [], explore: null }), []);
-    return <div data-testid="scene-renderer-ready" data-phase="ready" data-source-time={sourceTime}
-      data-has-source={String(!!source)} />;
-  } };
-});
 import { BrowserTourEditor } from './BrowserTourEditor';
 import { EDITOR_TOUR_MEDIA } from '@/tools/video-editor/tour/tourMedia';
 const requests: string[] = [];
@@ -59,7 +37,7 @@ beforeEach(() => {
   }));
 });
 afterEach(() => vi.unstubAllGlobals());
-it('admits the bundled world and applies all three stages with only shipped asset fetches', async () => {
+it('applies all three stages as ordinary media clips, with no world, extension or scene iframe', async () => {
   const onFinish = vi.fn();
   render(<QueryClientProvider client={new QueryClient({defaultOptions:{queries:{retry:false}}})}><TooltipProvider><MemoryRouter>
     <BrowserTourEditor onFinish={onFinish} />
@@ -95,12 +73,16 @@ it('admits the bundled world and applies all three stages with only shipped asse
   expect(document.querySelectorAll('[data-editor-tour="chat-composer"]')).toHaveLength(1);
   await waitFor(() => expect(operations).toBeTruthy());
   act(() => setEditorTourBeat(1, 'land', true));
-  await waitFor(() => expect(captured.resolvedConfig?.clips.some(clip => clip.clipType === 'haus.astrid.liveScene')).toBe(true));
-  expect(within(extensionsDock).getByRole('tab', { name: 'Extensions' })).toHaveAttribute('aria-selected', 'true');
-  expect(await within(extensionsDock).findByRole('region', { name: 'World Explorer' })).toBeInTheDocument();
-  await waitFor(() => expect(document.querySelector('[data-testid="scene-renderer-ready"][data-phase="ready"]')).not.toBeNull());
-  expect(document.querySelector('[data-testid="scene-renderer-ready"]')).toHaveAttribute('data-has-source', 'true');
-  expect(document.querySelector('[data-testid="scene-renderer-ready"]')).toHaveAttribute('data-source-time', '2.5');
+  await waitFor(() => expect(captured.resolvedConfig?.clips.some(clip => clip.id === TOUR_CLIP_IDS.scene)).toBe(true));
+  // Step 1 is the bundled guide video: a plain muted media clip, nothing for an extension to render.
+  const guide = captured.resolvedConfig!.clips.find(clip => clip.id === TOUR_CLIP_IDS.scene)!;
+  expect(guide).toMatchObject({ clipType: 'media', asset: 'tour-guide', from: 0, to: 14, volume: 0, label: 'Lantern Valley Three.js visualization' });
+  expect(guide.app).toBeUndefined();
+  expect(captured.resolvedConfig!.clips.some(clip => clip.clipType === 'haus.astrid.liveScene')).toBe(false);
+  // The right panel stays on the Inspector and shows no World Explorer.
+  expect(within(extensionsDock).getByRole('tab', { name: 'Inspector' })).toHaveAttribute('aria-selected', 'true');
+  expect(screen.queryByRole('region', { name: 'World Explorer' })).not.toBeInTheDocument();
+  expect(document.querySelector('iframe')).toBeNull();
   expect(runtime.provider.persistenceEnabled).toBe(false);
   expect(runtime.livePermissionService).toBeUndefined();
   act(() => setEditorTourBeat(2, 'land', true));
@@ -109,8 +91,9 @@ it('admits the bundled world and applies all three stages with only shipped asse
   ))).toHaveLength(4));
   act(() => setEditorTourBeat(3, 'land', true));
   await waitFor(() => expect(captured.resolvedConfig?.clips.some(clip => clip.id === TOUR_CLIP_IDS.video && clip.clipType === 'media')).toBe(true));
-  expect(requests.length).toBeGreaterThan(0);
   expect(requests.every(url => url.startsWith('/astrid/onboarding/'))).toBe(true);
+  expect(requests.some(url => url.endsWith('.json'))).toBe(false);
+  expect(document.querySelector('iframe')).toBeNull();
   expect(EDITOR_TOUR_MEDIA.video).toBeTruthy();
   // The runner's visual interaction is outside this fixture; the real finish operation must
   // still invoke the callback registered by BrowserTourEditor and stop the tour exactly once.

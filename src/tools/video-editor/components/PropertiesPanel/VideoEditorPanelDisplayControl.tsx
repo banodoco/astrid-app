@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import { PanelsTopLeft } from 'lucide-react';
 import { useTimelineEditorData, useTimelineEditorOps } from '@/tools/video-editor/hooks/timelineStore';
-import { defaultPreferences } from '@/tools/video-editor/hooks/useEditorPreferences';
+import { defaultPreferences, type RightPanelLayoutSlot } from '@/tools/video-editor/hooks/useEditorPreferences';
+import { useEditorTourRunning } from '@/shared/state/editorTourStore';
 import { getPanelKey } from '@/tools/video-editor/runtime/ExtensionPanelHost';
 import { useVideoEditorAssetPanels } from '@/tools/video-editor/runtime/useVideoEditorRenderContext';
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLabel, DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@/shared/components/ui/dropdown-menu';
@@ -9,6 +10,18 @@ import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuLab
 export const HOST_PROPERTIES_PANEL_KEY = 'host:properties';
 /** The Extensions tab when no extension panel exists to select: the dock stays open. */
 export const HOST_EXTENSIONS_PANEL_KEY = 'host:extensions';
+
+/**
+ * The right panel's display mode. The host slot is the shared placement for Inspector and Extensions; per-panel values
+ * remain as a migration fallback. While the first-run/replayed tour runs the panel is always Compact, so the tall
+ * Extensions content stays a small card in the preview's column instead of a full-height column behind the tour's
+ * card. This is an override only: nothing is written to the saved preferences, so the user's own mode is untouched.
+ */
+export function useRightPanelLayout(slots: Readonly<Record<string, RightPanelLayoutSlot>> | undefined, fallbackKey: string | null): RightPanelLayoutSlot {
+  const touring = useEditorTourRunning();
+  if (touring) return 'compact';
+  return slots?.[HOST_PROPERTIES_PANEL_KEY] ?? (fallbackKey ? slots?.[fallbackKey] : undefined) ?? 'dock';
+}
 
 /** One display menu for the open dock and its closed toolbar affordance. */
 export function VideoEditorPanelDisplayControl({ className = '', visible = true }: { className?: string; visible?: boolean }) {
@@ -22,9 +35,7 @@ export function VideoEditorPanelDisplayControl({ className = '', visible = true 
   const tool = panels.find((panel) => getPanelKey(panel) === selected) ?? remembered;
   const toolKey = tool ? getPanelKey(tool) : null;
   const currentKey = tab === 'inspector' ? HOST_PROPERTIES_PANEL_KEY : toolKey ?? HOST_PROPERTIES_PANEL_KEY;
-  const layout = preferences.rightPanelLayoutSlotsByPanelId[HOST_PROPERTIES_PANEL_KEY]
-    ?? preferences.rightPanelLayoutSlotsByPanelId[currentKey]
-    ?? 'dock';
+  const layout = useRightPanelLayout(preferences.rightPanelLayoutSlotsByPanelId, currentKey);
   const open = selected !== null;
   const [menuOpen, setMenuOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);

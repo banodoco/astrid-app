@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { Check, ChevronLeft, Copy, Link2 } from 'lucide-react';
+import { Check, Copy, Link2 } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { MinkRunner } from '@/shared/components/MinkRunner/MinkRunner.tsx';
@@ -10,7 +10,7 @@ import { ASTRID_HELP_URL } from '@/integrations/astrid/help.ts';
 import { useSendLinkToComputer } from '@/pages/Home/useSendLinkToComputer.ts';
 import { CopyFallback, useCopyAction } from './CopyInstallCommand.tsx';
 import { SetupBlock } from './SetupBlock.tsx';
-import { CardDisclosure, EditorCard, EditorCardFoot } from './EditorCard.tsx';
+import { BackButton, CardDisclosure, EditorCard, EditorCardFoot } from './EditorCard.tsx';
 import { EditorCardLayer } from './EditorCardLayer.tsx';
 import { CopyRefusedInstructions } from './CopyRefusedInstructions.tsx';
 import { PINOKIO_INSTALL_COPY, pinokioReconnectInstructions, RUNTIME_CONNECTION_COPY as COPY, updateNeededSentence, withBrowser, withOrigin } from './copy.ts';
@@ -173,11 +173,6 @@ function Card({ title, sentence, action, children, status, pointer, help, onBack
     </EditorCard>
     {pointer && !connected && <ToolbarPointer label={pointer} corner="top-left" tone="page" />}
   </>;
-}
-
-/** On a touch screen its hit area grows to 44 px (up and out, so the card's layout does not move). */
-function BackButton({ onBack }: { readonly onBack: () => void }) {
-  return <Button type="button" variant="ghost" className="inline-flex h-auto items-center gap-0.5 rounded-md py-1 pl-1 pr-2 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground [@media(pointer:coarse)]:-mt-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:pr-3 [@media(pointer:coarse)]:text-sm" onClick={onBack}><ChevronLeft aria-hidden="true" className="h-4 w-4" />Back</Button>;
 }
 
 /**

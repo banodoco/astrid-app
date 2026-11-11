@@ -25,6 +25,7 @@ export const CALLOUT_VACUUM_RESIDUAL_RATIO = 0.2;
 // large fraction of a recomputed baseline on one compositor frame.
 export const CALLOUT_CURVE_HANDOFF_MS = 480;
 const CALLOUT_CONTENT_FADE_OUT_MS = 360;
+const PHONE_TITLE_SWAP_MS = 460;
 export type CalloutTransitionPhase = 'retracting' | 'waiting-for-layout' | 'extending' | 'canonicalizing';
 export interface CalloutMove {
   epoch: number;
@@ -58,8 +59,6 @@ interface Props {
   reducedMotion: boolean;
   active: boolean;
   move: MutableRefObject<CalloutMove | null>;
-  /** Called once the new audience is committed, before the cards' destinations are measured. */
-  prepareLayout?: () => void;
   children: ReactNode;
 }
 /** Keep in step with the phone breakpoint in PublicAstridShell.css. */
@@ -181,7 +180,6 @@ export class PublicAstridCalloutLayout extends Component<Props> {
   };
 
   componentDidUpdate(previous: Props, _state: unknown, snapshot: Snapshot | null) {
-    if (previous.audience !== this.props.audience) this.props.prepareLayout?.();
     if (!this.props.active || this.props.reducedMotion) { this.stop(); return; }
     if (previous.audience === this.props.audience || !snapshot) return;
     this.stop(false);
@@ -194,16 +192,15 @@ export class PublicAstridCalloutLayout extends Component<Props> {
     if (!move || move.epoch !== snapshot.epoch) return;
     // Which old card each slot morphs from. Desktop: Agent's visual order enters counterclockwise from App,
     // so App -> Agent pairs Effects -> Community, Models -> Tools, Timeline -> Workflows, and the reverse
-    // keeps the established Agent -> App path. Phones hang the cards over the demo's top and bottom edges
-    // (Agent: Tools on top, Workflows and Community below; App: Timeline and Effects on top, Models below),
-    // so there each slot keeps its own card both ways: Tools <-> Effects shrinks or grows along the top,
-    // Workflows <-> Models stays below. The one slot whose cards sit on opposite sides of the demo
-    // (Community <-> Timeline) never crosses it: the old card fades out where it was while the new one
-    // fades in where it lands.
+    // keeps the established Agent -> App path.
     const phone = typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
-    const sourceOrder = !phone && previous.audience === 'app' && this.props.audience === 'agent'
+    // Phone chips keep their place both ways: left stays left (Effects <-> Community), right stays right
+    // (Timeline <-> Workflows), and the bottom chip stays below (Models <-> Tools).
+    const sourceOrder = previous.audience === 'app' && this.props.audience === 'agent'
       ? [1, 2, 0]
-      : snapshot.boxes.map((_, index) => index);
+      : phone && snapshot.boxes.length === 3
+        ? [2, 0, 1]
+        : snapshot.boxes.map((_, index) => index);
     const sourceBoxes = sourceOrder.map(index => snapshot.boxes[index]);
     const above = (box: DOMRect, stage: DOMRect) => box.top + box.height / 2 < stage.top + stage.height / 2;
     const fadesInPlace = cards.map((_, index) => phone && !!sourceBoxes[index] && !!destinations[index]
@@ -352,11 +349,17 @@ export class PublicAstridCalloutLayout extends Component<Props> {
         content.style.removeProperty('width');
         outgoing.remove();
       };
-      const fadeIn = content.animate([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], {duration: CALLOUT_MOVE_MS, easing: 'linear'});
-      const fadeOut = outgoing.animate([
-        {opacity: 1, translate: '0 0', scale: '1'},
-        {opacity: 0, translate: '0 -4px', scale: `${outgoingScale}`},
-      ], {duration: CALLOUT_CONTENT_FADE_OUT_MS, easing: 'ease-in', fill: 'forwards'});
+      // A phone chip holds its place and size, so its title simply changes: the old one fades out, then
+      // the new one fades in, with nothing sliding or shrinking inside a box that is not moving.
+      const fadeIn = phone
+        ? content.animate([{opacity: 0}, {opacity: 0, offset: .4}, {opacity: 1}], {duration: PHONE_TITLE_SWAP_MS, easing: 'ease-out'})
+        : content.animate([{opacity: 0, translate: '0 4px'}, {opacity: 1, translate: '0 0'}], {duration: CALLOUT_MOVE_MS, easing: 'linear'});
+      const fadeOut = phone
+        ? outgoing.animate([{opacity: 1}, {opacity: 0}], {duration: PHONE_TITLE_SWAP_MS * .4, easing: 'ease-in', fill: 'forwards'})
+        : outgoing.animate([
+          {opacity: 1, translate: '0 0', scale: '1'},
+          {opacity: 0, translate: '0 -4px', scale: `${outgoingScale}`},
+        ], {duration: CALLOUT_CONTENT_FADE_OUT_MS, easing: 'ease-in', fill: 'forwards'});
       return [animation, fadeIn, fadeOut];
     });
   }

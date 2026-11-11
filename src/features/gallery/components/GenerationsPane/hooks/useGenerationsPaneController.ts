@@ -11,10 +11,7 @@ import { useSlidingPane } from '@/shared/hooks/useSlidingPane';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { TOOL_ROUTES } from '@/shared/lib/tooling/toolRoutes';
 import { type GalleryFilterState } from '@/shared/components/MediaGallery';
-import { useContainerWidth } from '@/shared/components/MediaGallery/hooks/useContainerWidth';
-import { calculateGalleryLayout } from '@/shared/components/MediaGallery/utils';
 import { useGalleryPageState } from '@/features/gallery/hooks/useGalleryPageState';
-import { useIsMobile } from '@/shared/hooks/mobile';
 import { useCurrentShot } from '@/shared/state/selectionStore';
 import { usePanesStore } from '@/shared/state/panesStore';
 import { useLightboxOpenState } from '@/shared/state/lightboxOpenState';
@@ -26,12 +23,8 @@ import {
 import { useStableObject } from '@/shared/hooks/useStableObject';
 import { usePaneInteractionLifecycle } from '@/shared/components/panes/usePaneInteractionLifecycle';
 import { SHOT_FILTER, isSpecialFilter } from '@/shared/constants/filterConstants';
-import {
-  computePaneLayout,
-  parseProjectRatio,
-  type PaneLayout,
-  type PaneLayoutInput,
-} from '../lib/paneGridLayout';
+import { computePaneLayout } from '../lib/paneGridLayout';
+import { resolvePaneDisplay, usePaneGeometry } from '../lib/paneGeometry';
 import { describeEmptyState, type EmptyStateShotScope } from '../lib/emptyState';
 import { useAppEventListener } from '@/shared/lib/typedEvents';
 import { withRuntimeDocumentParams } from '@/app/runtime/runtimeDocument';
@@ -43,10 +36,6 @@ import {
   ADD_GENERATION_TIMELINE_PARAM,
   ADD_GENERATION_QUERY_PARAM,
 } from '@/domains/media-lightbox/hooks/addToVideoEditorConstants';
-
-// Fallback rows for pane (smaller than full page galleries)
-const PANE_ROWS = 2;
-const PANE_ROWS_EXPANDED = 3;
 
 type MediaTypeFilter = 'all' | 'image' | 'video' | 'audio';
 const MEDIA_TYPE_SESSION_KEY = 'astrid.generationsPane.mediaType';
@@ -72,7 +61,6 @@ function saveSessionMediaType(value: MediaTypeFilter): void {
 
 type BooleanStateSetter = (value: boolean) => void;
 type GalleryPageState = ReturnType<typeof useGalleryPageState>;
-type ProjectAspectRatio = ReturnType<typeof useProjectCrudContext>['projects'][number]['aspectRatio'];
 
 interface GenerationDataParams {
   itemsPerPage: number;
@@ -280,109 +268,6 @@ const usePaneLifecycle = ({
       toggleLock(force);
     },
     transformClass,
-  };
-};
-
-// Pixels the gallery surface adds around its grid (see the container classes in GenerationsPaneGallery).
-/** The controls bar above the grid: `py-2` (16px) around an `h-7` (28px) row. */
-const PANE_BAR_HEIGHT = 44;
-/** The pane's `border-t`, counted in its border-box height. */
-const PANE_BORDER_HEIGHT = 1;
-const PANE_CHROME_HEIGHT = PANE_BAR_HEIGHT + PANE_BORDER_HEIGHT;
-/**
- * Tile model of MediaGalleryItem: the image box has padding-bottom = clamp(100 / ratio, 60%, 200%) of the tile
- * width and min-height 120px, inside a 1px border top and bottom. Audio tiles use 160px instead.
- */
-const TILE_PADDING_MIN_PERCENT = 60;
-const TILE_PADDING_MAX_PERCENT = 200;
-const TILE_MIN_HEIGHT = 120;
-const TILE_BORDER_HEIGHT = 2;
-/** Gallery container `pt-2`. */
-const PANE_GRID_TOP_PADDING = 8;
-/** Gallery container `pb-2`. */
-const PANE_GRID_BOTTOM_PADDING = 8;
-/** Breakpoint for the grid gap (`sm`). */
-const MOBILE_BREAKPOINT_PX = 640;
-/** Grid gap: `gap-2` below the `sm` breakpoint, `sm:gap-4` from it. */
-const MOBILE_GRID_GAP = 8;
-const DESKTOP_GRID_GAP = 16;
-
-type PaneGeometry = Omit<PaneLayoutInput, 'itemCount'>;
-
-interface PaneDisplayLayout {
-  cols: number;
-  rows: number;
-  /** Page size. Always cols * maxRows, so a page fills the grid exactly. */
-  itemsPerPage: number;
-  /** Grid width when the tiles were shrunk to fit the cap; undefined means the full container width. */
-  gridWidth: number | undefined;
-  /** Pane content height (controls bar, padding and grid) in px. */
-  paneHeight: number;
-}
-
-/**
- * Stage 2 of the layout: rows follow the item count, columns and tile sizes stay those of stage 1.
- * Page size never depends on the item count, so only the rows change between pages of one set.
- */
-function resolvePaneDisplay(
-  geometry: PaneGeometry,
-  stage1: PaneLayout,
-  cols: number,
-  itemCount: number,
-): PaneDisplayLayout {
-  const itemsPerPage = cols * geometry.maxRows;
-  const final = computePaneLayout({ ...geometry, baseCols: cols, itemCount });
-  // Tiles were shrunk to fit the cap, so keep stage 1's tile size for the final row count.
-  const imageHeight = stage1.constrained ? stage1.cellHeight : final.cellHeight;
-  const rowHeight = Math.max(imageHeight, TILE_MIN_HEIGHT) + TILE_BORDER_HEIGHT;
-  const gridHeight = final.rows * rowHeight + (final.rows - 1) * geometry.gap;
-  return {
-    cols,
-    rows: final.rows,
-    itemsPerPage,
-    gridWidth: stage1.constrained ? stage1.gridWidth : undefined,
-    paneHeight: geometry.chromeHeight + geometry.topPadding + geometry.bottomPadding + gridHeight,
-  };
-}
-
-/** Width / height of a tile's image box, as MediaGalleryItem renders it (the padding is clamped). */
-function tileRatio(projectAspectRatio: string | undefined): number {
-  const percent = 100 / parseProjectRatio(projectAspectRatio);
-  const clamped = Math.min(Math.max(percent, TILE_PADDING_MIN_PERCENT), TILE_PADDING_MAX_PERCENT);
-  return 100 / clamped;
-}
-
-const usePaneGeometry = (
-  projectAspectRatio: ProjectAspectRatio | undefined,
-  expandedRows: boolean,
-  cap: number,
-) => {
-  const isMobile = useIsMobile();
-  const [galleryContainerRef, containerWidth] = useContainerWidth();
-  const maxRows = expandedRows ? PANE_ROWS_EXPANDED : PANE_ROWS;
-
-  const geometry = useMemo((): PaneGeometry => {
-    const narrow = window.innerWidth < MOBILE_BREAKPOINT_PX;
-    return {
-      // useContainerWidth reports the content box, so the gallery padding is already excluded.
-      width: containerWidth,
-      ratio: tileRatio(projectAspectRatio),
-      gap: narrow ? MOBILE_GRID_GAP : DESKTOP_GRID_GAP,
-      baseCols: calculateGalleryLayout(projectAspectRatio, isMobile, containerWidth, undefined, true).columns,
-      maxRows,
-      cap,
-      chromeHeight: PANE_CHROME_HEIGHT,
-      topPadding: PANE_GRID_TOP_PADDING,
-      bottomPadding: PANE_GRID_BOTTOM_PADDING,
-    };
-  }, [projectAspectRatio, isMobile, containerWidth, maxRows, cap]);
-
-  return {
-    galleryContainerRef,
-    geometry,
-    isMobile,
-    /** False until the container has been measured. */
-    measured: containerWidth > 0,
   };
 };
 

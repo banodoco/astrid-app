@@ -155,8 +155,8 @@ function chooseHosted() {
   expect(fetch).not.toHaveBeenCalled();
   expect(permissions.query).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole('button', { name: 'Continue in this tab' }));
-  expect(screen.getByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
+  // Straight to the connection screen: no setup page between the choice and connecting.
+  expect(screen.queryByRole('main', { name: 'Set up Astrid' })).not.toBeInTheDocument();
 }
 
 function destination() {
@@ -221,43 +221,42 @@ it('keeps an absent Runtime in setup, and Back returns to the real chooser so lo
   expect(readWelcomePhase()).toBe('connection');
 
   fireEvent.click(screen.getByRole('button', { name: 'Back' }));
-  expect(await screen.findByRole('heading', { name: 'How do you want to run the app?' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'How do you want to run Astrid?' })).toBeInTheDocument();
   expect(screen.getByRole('radio', { name: 'Use the hosted version' })).toBeChecked();
   expect(readWelcomePhase()).toBe('choose');
   expect(permission.onchange).toBeNull();
   const readsBeforeLocalSetup = door.requests.length;
-  fireEvent.click(screen.getByRole('radio', { name: 'Run app on your computer' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Run Astrid on your computer' }));
   fireEvent.click(screen.getByRole('button', { name: 'Set up with your agent' }));
   expect(await screen.findByRole('heading', { name: 'Have your agent set it up' })).toBeInTheDocument();
-  expect(readWelcomePhase()).toBe('setup');
+  expect(readWelcomePhase()).toBe('local');
   expect(door.requests).toHaveLength(readsBeforeLocalSetup);
   expect(navigate).not.toHaveBeenCalled();
   expect(door.unexpected).toEqual([]);
 });
 
-it('carries all-off and copies-on choices plus the checked state from Welcome into the real Not-running handoff', async () => {
+it('keeps all-off and copies-on choices plus the checked state from the Not-running card across a reload of the connection screen', async () => {
   permission.state = 'granted';
   const door = runtimeDoor({ unavailable: true });
   render(<WelcomeFlow entry="choose" />);
   fireEvent.click(screen.getByRole('button', { name: 'Continue in this tab' }));
+  await waitFor(() => expect(door.requests).toHaveLength(1));
+  fireEvent.focus(window);
+  expect(await screen.findByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
+
   fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Start Astrid at sign-in' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Add the `astrid` terminal command' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Install skills for coding agents' }));
   fireEvent.click(screen.getByRole('checkbox', { name: 'Use copies for skills' }));
-  const checkbox = screen.getByRole('checkbox', { name: "I've already set up Astrid" });
-  fireEvent.click(checkbox);
+  fireEvent.click(screen.getByRole('checkbox', { name: "I've already set up Astrid" }));
   // Set up already: the plain install line; the saved choices are not sent as flags.
   const setupCommand = screen.getByText('curl -fsSL https://astrid.haus/install | sh', { exact: true }).textContent;
-  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
-  await waitFor(() => expect(door.requests).toHaveLength(1));
-  fireEvent.focus(window);
-
-  expect(await screen.findByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
   expect(screen.getByRole('checkbox', { name: "I've already set up Astrid" })).toBeChecked();
   expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
   expect(screen.getByText('curl -fsSL https://astrid.haus/install | sh', { exact: true }).textContent).toBe(setupCommand);
   expect(localStorage.getItem('astrid:pending-setup-v1')).toContain('"alreadySetUp":true');
+  expect(readWelcomePhase()).toBe('connection');
   expect(door.unexpected).toEqual([]);
 });
 

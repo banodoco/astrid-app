@@ -84,7 +84,7 @@ it('keeps the separate-window handoff card in the original tab without probing',
   fireEvent.click(screen.getByRole('button', { name: 'Install and continue' }));
   expect(await screen.findByText('Astrid opened in its own window')).toBeInTheDocument();
   expect(prompt).toHaveBeenCalledOnce();
-  expect(localStorage.getItem('astrid:welcome-v1')).toBe('setup');
+  expect(localStorage.getItem('astrid:welcome-v1')).toBe('connection');
   expect(fetch).not.toHaveBeenCalled();
   expect(permissions.query).not.toHaveBeenCalled();
   onboardingTab.unmount();
@@ -94,12 +94,11 @@ it('keeps the separate-window handoff card in the original tab without probing',
   expect(sessionStorage.getItem('astrid.runtime.autoConnect')).toBeNull();
 
   const appWindowEntry = entryFor(new URL('/tools/video-editor', window.location.origin), readWelcomePhase());
-  expect(appWindowEntry).toBe('setup');
+  expect(appWindowEntry).toBe('connection');
   render(<WelcomeFlow entry={appWindowEntry} />);
 
-  // Setup choices are required before the gate starts its probe.
+  // The app window opens straight on the connection screen and its gate starts the probe.
   expect(autoConnectRequested()).toBe(false);
-  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   expect(screen.getByTestId('runtime-not-connected')).toHaveAttribute('data-state', 'pending');
   expect(permissions.query).toHaveBeenCalled();
@@ -117,8 +116,7 @@ it('continues straight into connection when the accepted install reparents this 
   install.standalone = true;
   view.rerender(<WelcomeFlow entry="choose" />);
 
-  expect(await screen.findByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
+  expect(screen.queryByRole('main', { name: 'Set up Astrid' })).not.toBeInTheDocument();
 
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(screen.getByTestId('runtime-not-connected')).toHaveAttribute('data-state', 'pending'));
@@ -155,8 +153,7 @@ it('starts the hosted permission probe in the same tab after Continue in this ta
   fireEvent.click(screen.getByRole('radio', { name: 'Stay in browser' }));
   fireEvent.click(screen.getByRole('button', { name: 'Continue in this tab' }));
 
-  expect(await screen.findByRole('main', { name: 'Set up Astrid' })).toBeInTheDocument();
-  fireEvent.click(screen.getByRole('button', { name: 'Continue to Astrid' }));
+  expect(screen.queryByRole('main', { name: 'Set up Astrid' })).not.toBeInTheDocument();
 
   await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
   expect(screen.getByTestId('runtime-not-connected')).toHaveAttribute('data-state', 'pending');
@@ -166,11 +163,11 @@ it('starts the hosted permission probe in the same tab after Continue in this ta
 it('keeps the full local choice outside the hosted Runtime permission gate', async () => {
   render(<WelcomeFlow entry="choose" />);
 
-  fireEvent.click(screen.getByRole('radio', { name: 'Run app on your computer' }));
+  fireEvent.click(screen.getByRole('radio', { name: 'Run Astrid on your computer' }));
   fireEvent.click(screen.getByRole('button', { name: 'Set up with your agent' }));
 
   expect(await screen.findByRole('heading', { name: 'Have your agent set it up' })).toBeInTheDocument();
-  expect(screen.getByRole('button', { name: 'Continue to Astrid' })).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
   expect(autoConnectRequested()).toBe(false);
   expect(loopbackFetchCalls()).toHaveLength(0);
   expect(permissions.query).not.toHaveBeenCalled();

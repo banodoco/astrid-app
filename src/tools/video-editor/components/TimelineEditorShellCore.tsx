@@ -63,7 +63,8 @@ import { TimelineExportMenu } from './TimelineExportMenu.tsx';
 import { TimelineLoadErrorCard } from './TimelineLoadErrorCard.tsx';
 import { useOnRecoveryCardCleared, useRecoveryCardShowing } from '@/integrations/runtime/recoveryCard.ts';
 import { TimelineRenderControls } from './TimelineRenderControls.tsx';
-import { VideoEditorPanelDisplayControl } from './PropertiesPanel/VideoEditorPanelDisplayControl.tsx';
+import { VideoEditorPanelDisplayControl, useRightPanelLayout } from './PropertiesPanel/VideoEditorPanelDisplayControl.tsx';
+import { useEditorTourRunning } from '@/shared/state/editorTourStore.ts';
 import {
   CHROME_OVERHEAD,
   MIN_PREVIEW_HEIGHT,
@@ -265,6 +266,7 @@ function TimelineEditorShellCoreComponent({
   showHeader = true,
 }: TimelineEditorShellCoreProps) {
   const previewControls = previewNavigationControls ?? navigationControls;
+  const touring = useEditorTourRunning();
   useRenderDiagnostic('TimelineEditorShellCore');
   const [previewRowRef, previewRowWidth] = useElementWidth<HTMLDivElement>();
   const renderIconOnly = previewRowWidth !== null && previewRowWidth < RENDER_ICON_ONLY_BELOW_PX;
@@ -577,9 +579,7 @@ function TimelineEditorShellCoreComponent({
   // The host slot is the shared placement for the whole right-panel surface.
   // Per-panel values remain as a migration fallback for older saved settings,
   // but switching between Inspector and Extensions must not change the mode.
-  const rightPanelLayout = rightPanelLayoutSlots[HOST_PROPERTIES_PANEL_KEY]
-    ?? (savedPanelId ? rightPanelLayoutSlots[savedPanelId] : undefined)
-    ?? 'dock';
+  const rightPanelLayout = useRightPanelLayout(rightPanelLayoutSlots, savedPanelId);
   const hasCustomRightPanelSlot = Boolean(rightPanelSlot || inspectorPanelSlot);
   const hostPaneClosed = !hasCustomRightPanelSlot && !rightPanelOpen;
   const showFullHeightHostDock = !hasCustomRightPanelSlot
@@ -754,15 +754,20 @@ function TimelineEditorShellCoreComponent({
       ref={previewRowRef}
       className={cn(
         'pointer-events-none absolute inset-x-0 top-0 z-20 flex items-start justify-between gap-2 px-3 py-3',
+        // The tour's still poster (z-20, later in the DOM) would otherwise cover this row on the land beats.
+        touring && 'z-30',
         // Keep Render clear of the app's pane tab in the touch sidebar.
         sidebarVideo && touchChrome && 'pr-10',
       )}
       data-shell-interaction="true"
     >
+      {/* The tour's header band: the tour's picture is a still or a scene, so the row gets a quiet scrim in the panel's own colour, so it reads as a header in either theme. */}
+      {touring && <div aria-hidden data-testid="video-editor-tour-header-scrim" className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-card/75 via-card/30 to-transparent" />}
       <div className="pointer-events-auto flex min-w-0 max-w-[min(75%,32rem)] flex-col items-start gap-1">
         {previewControls && (
           <div
-            className="flex min-w-0 max-w-full items-center gap-2"
+            // The tour's picker is disabled (it opens nothing), but it is part of the lit picture: full contrast, not dimmed.
+            className={cn('flex min-w-0 max-w-full items-center gap-2', touring && '[&_button:disabled]:opacity-100')}
             data-testid="video-editor-editor-navigation-controls"
           >
             {previewControls}

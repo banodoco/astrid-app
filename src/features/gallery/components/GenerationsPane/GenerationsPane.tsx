@@ -5,6 +5,7 @@ import { ImageGenerationModal } from '@/shared/components/modals/ImageGeneration
 import { PaneControlTab } from '@/shared/components/PaneControlTab';
 import { GenerationsPaneControls } from './components/GenerationsPaneControls';
 import { GenerationsPaneGallery } from './components/GenerationsPaneGallery';
+import { GenerationsPaneFrame } from './components/GenerationsPaneFrame';
 import { GenerationsDropChip } from './components/GenerationsDropChip';
 import { useGenerationsPaneController } from './hooks/useGenerationsPaneController';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers';
@@ -108,19 +109,13 @@ function GenerationsPaneSurface({ controller }: { controller: GenerationsPaneCon
   }
 
   return (
-    <div
+    <GenerationsPaneFrame
       {...pane.paneProps}
       data-testid="generations-pane"
-      style={{
-        height: `${effectiveGenerationsPaneHeight}px`,
-        left: pane.isShotsPaneLocked ? `${pane.shotsPaneWidth}px` : 0,
-        right: pane.isTasksPaneLocked ? `${pane.tasksPaneWidth}px` : 0,
-        zIndex: UI_Z_LAYERS.GENERATIONS_PANE,
-      }}
-      className={cn(
-        'fixed bottom-0 bg-zinc-900/95 border-t border-zinc-700 shadow-xl transform transition-[transform,left,right] duration-300 ease-smooth flex flex-col pointer-events-auto',
-        pane.transformClass,
-      )}
+      height={effectiveGenerationsPaneHeight}
+      left={pane.isShotsPaneLocked ? pane.shotsPaneWidth : 0}
+      right={pane.isTasksPaneLocked ? pane.tasksPaneWidth : 0}
+      transformClass={pane.transformClass}
     >
       <div
         className={cn(
@@ -199,7 +194,7 @@ function GenerationsPaneSurface({ controller }: { controller: GenerationsPaneCon
           }}
         />
       </div>
-    </div>
+    </GenerationsPaneFrame>
   );
 }
 

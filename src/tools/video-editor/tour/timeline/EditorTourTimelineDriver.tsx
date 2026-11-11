@@ -1,35 +1,36 @@
-import { Suspense, lazy, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import {
   editorTourStage,
   getEditorTourState,
   markEditorTourReady,
-  startEditorTour,
+  subscribeEditorTour,
   useEditorTour,
   type EditorTourStage,
+  type EditorTourState,
 } from '@/shared/state/editorTourStore.ts';
 import {
+  useTimelineChromeSelector,
   useTimelineDataSelector,
   useTimelineMutableAdapters,
   useTimelineOpsFromStore,
+  useTimelinePlaybackSelector,
 } from '@/tools/video-editor/hooks/timelineStore.ts';
-import { requestCenterTimelineClip } from '@/tools/video-editor/lib/timeline-viewport-events.ts';
-import { editorTourSelector, editorTourTrackSelector } from '@/tools/video-editor/tour/anchors.ts';
-import { useTourMediaWarmup } from './useTourMediaWarmup.ts';
-import { EDITOR_TOUR_MEDIA, tourSaveData } from '../tourMedia.ts';
-import { loadTourLiveScene, TOUR_SCENE_SOURCE_FROM } from './tourSceneSource.ts';
-import { createEditorTourStagePatch, createEditorTourStageRemovalPatch, tourStageFocusClipId, tourTrackOrder, TOUR_ANCHORS, TOUR_CLIP_IDS } from './tourStages.ts';
+import { editorTourSelector } from '@/tools/video-editor/tour/anchors.ts';
+import { useEditorDeviceClass } from '@/tools/video-editor/tour/runner/useIsDesktopEditor.ts';
+import { tourIdle, useTourMediaWarmup } from './useTourMediaWarmup.ts';
+import { EDITOR_TOUR_MEDIA, tourPlaybackUrl, tourSaveData } from '../tourMedia.ts';
+import { createTourVideoEngine, type TourVideoEngine } from './tourPicture.ts';
+import { createEditorTourStagePatch, createEditorTourStageRemovalPatch, TOUR_ANCHORS } from './tourStages.ts';
+import { tourFitScaleWidth } from './tourViewport.ts';
 
-const SceneSurface = lazy(() => import('@astrid/packs/rendering/ui/threejs-live-editor/SceneSurface')
-  .then((module) => ({ default: module.SceneSurface })));
-
-const RENDER_WAIT_MS = 3000;
 export const TOUR_ANCHOR_DWELL_MS = 1200;
-const WARMUP_GIVE_UP_MS = 8000;
-/** A slow first frame gets recovery UI, never permission to advance an unpainted scene. */
-const SCENE_PREPARING_NOTICE_MS = 8000;
-/** The visible live scene reports its phase on this element (the warm-up's `onReady` is the same signal). */
-const SCENE_SELECTOR = '[data-testid="astrid-live-scene-entry"]';
+/** How long a landing waits for the video's first moving frame before it goes on with the poster (the video may still start). */
+export const TOUR_FIRST_FRAME_DEADLINE_MS = 2500;
+/** How often the editor's timecode (React state) hears the playing video's time; the playhead itself moves every 100 ms. */
+const TOUR_TIMECODE_REPORT_MS = 1000;
+/** How long a phone's landing waits for its full-screen chat to leave before it starts the picture anyway. */
+const CHAT_LEAVE_WAIT_MS = 2500;
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -41,115 +42,158 @@ async function waitFor(check: () => boolean, timeoutMs: number, isCancelled: () 
   while (!isCancelled() && !check() && performance.now() < deadline) await nextFrame();
 }
 
-/** Only the real preview's acknowledged opening frame can release stage 1 playback.
- * The warm-up and timeline thumbnails own separate iframes/GPU contexts, and cannot vouch for it. */
-async function waitForTourSceneFrame(
-  revision: unknown,
-  isCancelled: () => boolean,
-  onPreparing: (state: 'waiting' | 'error') => void,
-): Promise<boolean> {
-  const noticeAt = performance.now() + SCENE_PREPARING_NOTICE_MS;
-  const openingTime = TOUR_SCENE_SOURCE_FROM.toFixed(3);
-  while (!isCancelled()) {
-    const preview = document.querySelector(editorTourSelector('preview'));
-    const scene = [...(preview?.querySelectorAll<HTMLElement>(SCENE_SELECTOR) ?? [])]
-      .find(element => element.dataset.desiredRevision === revision);
-    if (scene?.dataset.phase === 'ready'
-      && scene.dataset.displayedRevision === revision
-      && scene.dataset.desiredTime === openingTime
-      && scene.dataset.sourceTime === openingTime) return true;
-    if (scene?.dataset.phase === 'error') onPreparing('error');
-    else if (performance.now() >= noticeAt) onPreparing('waiting');
-    await nextFrame();
-  }
-  return false;
+/** Resolves when the tour's state satisfies `check`, or after `timeoutMs`. Costs nothing while it waits (no frame loop). */
+function untilTour(check: (state: EditorTourState) => boolean, timeoutMs: number): Promise<void> {
+  return new Promise((resolve) => {
+    if (check(getEditorTourState())) return resolve();
+    const finish = () => { clearTimeout(timer); unsubscribe(); resolve(); };
+    const timer = setTimeout(finish, timeoutMs);
+    const unsubscribe = subscribeEditorTour((state) => { if (check(state)) finish(); });
+  });
 }
 
-/** A timeline row may mount before the paused player's debounced composition and decoder. */
-async function waitForTourVideoFrame(frame: number | undefined, isCancelled: () => boolean): Promise<boolean> {
-  const expectedSrc = new URL(EDITOR_TOUR_MEDIA.video.url, document.baseURI).href;
-  while (!isCancelled()) {
-    const preview = document.querySelector(editorTourSelector('preview'));
-    const ready = [...(preview?.querySelectorAll<HTMLElement>('[data-preview-decoded-frame="true"]') ?? [])].some((element) => {
-      const src = element.dataset.previewMediaSrc;
-      return src && new URL(src, document.baseURI).href === expectedSrc
-        && (frame === undefined || element.dataset.previewPresentedFrame === String(frame));
-    });
-    if (ready) return true;
-    // No timeout fallthrough: playing an unready composition exposes the world underneath.
-    // The decoder owns load errors/retry. Back, Skip and leaving the tour cancel this wait.
-    await nextFrame();
-  }
-  return false;
-}
+const LAST_ANCHOR = TOUR_ANCHORS.length - 1;
+const PICTURE_FILL = 'absolute inset-0 h-full w-full object-contain';
+const display = (slot: { displayUrl?: string; url: string }) => slot.displayUrl ?? slot.url;
+const noEngine = { subscribe: () => () => undefined, presenting: () => false };
+
+/** The timeline's scroll container, which publishes its label column width as `--label-width`. */
+const TIMELINE_SCROLLER_SELECTOR = '[data-timeline-row-layout="managed"]';
 
 /**
- * Before the first land, boot the world and render its opening frame in a composited iframe.
- * This warms its assets/code/shaders; the real preview still acknowledges its own first frame.
+ * Frames the timeline once for the whole tour: scrolled to 0 s, with all 14 s in view (zooming out only when the
+ * viewport is too narrow for the default zoom). After this nothing in the tour scrolls or zooms the timeline, so the
+ * spotlight on a row holds still and only the playhead moves; Back never touches it either. Re-checked if the
+ * timeline is resized (the chat pane opening), before any row has landed to be lit.
  */
-function SceneWarmup({ liveScene, onWarm }: { liveScene: Record<string, unknown>; onWarm: () => void }) {
-  return (
-    <div
-      aria-hidden
-      className="pointer-events-none fixed bottom-0 right-0 -z-10 h-[180px] w-[320px] overflow-hidden opacity-0"
-    >
-      <Suspense fallback={null}>
-        <SceneSurface
-          source={liveScene}
-          sourceTime={TOUR_SCENE_SOURCE_FROM}
-          width={320}
-          height={180}
-          onReady={onWarm}
-        />
-      </Suspense>
-    </div>
-  );
+function useTourTimelineFraming(loaded: boolean) {
+  const setScaleWidth = useTimelineChromeSelector((chrome) => chrome.setScaleWidth);
+  const scaleWidth = useTimelineDataSelector((data) => data.scaleWidth);
+  // Read through refs: the setter is not stable, and an effect re-run per render would frame (and write) once per render.
+  const chrome = useRef({ setScaleWidth, scaleWidth });
+  chrome.current = { setScaleWidth, scaleWidth };
+  useEffect(() => {
+    if (!loaded) return;
+    let observed: Element | null = null;
+    let observer: ResizeObserver | null = null;
+    const frame = () => {
+      const scroller = document.querySelector<HTMLElement>(TIMELINE_SCROLLER_SELECTOR);
+      if (!scroller) return;
+      if (scroller.scrollLeft !== 0) scroller.scrollLeft = 0;
+      const startLeft = parseFloat(getComputedStyle(scroller).getPropertyValue('--label-width')) || 0;
+      const viewportWidth = scroller.clientWidth;
+      // Only a real change is written: the setter saves a new preferences record even for the same zoom, and every save
+      // re-renders the editor (a write per check kept React committing every frame and starved the preview's first frame).
+      const fitted = tourFitScaleWidth({ viewportWidth, startLeft, scaleWidth: chrome.current.scaleWidth });
+      if (fitted !== null) chrome.current.setScaleWidth(fitted);
+      if (observed !== scroller) {
+        observer?.disconnect();
+        observed = scroller;
+        observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(frame);
+        observer?.observe(scroller);
+      }
+    };
+    frame();
+    // The scroller may mount after the data loads.
+    const retry = window.setInterval(() => { if (!observed) frame(); else window.clearInterval(retry); }, 100);
+    return () => { window.clearInterval(retry); observer?.disconnect(); };
+  }, [loaded]);
 }
 
 /**
- * Lives inside the tour's editor and takes the demo timeline to the tour's stage through the editor's
- * own ops (`track.add`, `clip.add`, `clip.update`), then presents it: scroll the new row into view,
- * and on each `land` beat play the 14 s from the start (act 2 presents each reference frame, then holds the last).
- * With reduced motion nothing plays: acts 1 and 3 keep their poster and act 2 holds its last frame.
- * Reports `ready.timeline` per beat.
+ * Lives inside the tour's editor and takes the demo timeline to the tour's stage through the editor's own ops
+ * (`track.add`, `clip.add`, `clip.update`). The timeline is framed once (0-14 s) and never scrolls or zooms again.
+ *
+ * The picture is the tour's own, layered over the editor's preview surface (whose player stays idle while the tour runs:
+ * `RemotionPreview` renders no clips then): a plain muted `<video>` for steps 1 and 3 (`tourPicture.ts`) and plain
+ * `<img>`s for step 2's four stills. Nothing here waits on the editor's decoder, so a landing cannot stall on it:
+ * - a forward `land` on steps 1 and 3 shows the clip's first frame as a poster at once, plays from 0 and reports
+ *   `ready.timeline` at the first presented frame of the playing video, or when `play()` is refused, or after
+ *   `TOUR_FIRST_FRAME_DEADLINE_MS`: then the poster stays (and gives way if the video starts late);
+ * - step 2 walks its four stills, then holds the last;
+ * - the video keeps playing (to its end, then holds its last frame) through the beats that follow, except behind a
+ *   phone's full-screen chat; Back never restarts anything; with reduced motion nothing plays and no video is fetched.
+ * The timeline's playhead follows the picture: imperatively while the video plays, with the preview's own time report
+ * (`onPreviewTimeUpdate`, which also feeds the timecode) once a second and on every jump.
  */
 export function EditorTourTimelineDriver() {
-  const warmupStarted = useTourMediaWarmup();
+  const warm = useTourMediaWarmup();
   const runId = useEditorTour((state) => state.runId);
   const act = useEditorTour((state) => state.act);
   const beat = useEditorTour((state) => state.beat);
   const stage = editorTourStage(act, beat);
   const ops = useTimelineOpsFromStore();
-  const { previewRef } = useTimelineMutableAdapters();
+  const reportPreviewTime = useTimelinePlaybackSelector((playback) => playback.onPreviewTimeUpdate);
   const loaded = useTimelineDataSelector((data) => !data.isLoading && data.data !== null);
+  useTourTimelineFraming(loaded);
   const [appliedStage, setAppliedStage] = useState<EditorTourStage>(0);
-  const [liveScene, setLiveScene] = useState<Record<string, unknown> | null>(null);
-  const [warm, setWarm] = useState(false);
-  const [sceneLoadAttempt, setSceneLoadAttempt] = useState(0);
-  const [sceneLoadError, setSceneLoadError] = useState(false);
-  const [scenePreparing, setScenePreparing] = useState<'waiting' | 'error' | null>(null);
   const [retry, setRetry] = useState(0);
-  const [presented, setPresented] = useState(false);
-  const [posterHost, setPosterHost] = useState<Element | null>(null);
+  const [stillIndex, setStillIndex] = useState(LAST_ANCHOR);
+  const [host, setHost] = useState<Element | null>(null);
   const applying = useRef(false);
-
-  // Start the world and its lazy authoring chunk after first paint, before any Send.
-  useEffect(() => {
-    if (!warmupStarted) return;
-    let active = true;
-    setSceneLoadError(false);
-    loadTourLiveScene().then(
-      (scene) => { if (active) setLiveScene(scene); },
-      () => { if (active) setSceneLoadError(true); },
-    );
-    return () => { active = false; };
-  }, [sceneLoadAttempt, warmupStarted]);
+  const instant = useEditorTour((state) => state.instant);
+  const reducedMotion = useEditorTour((state) => state.reducedMotion);
+  const phone = useEditorDeviceClass() === 'phone';
 
   useLayoutEffect(() => {
-    setPresented(false);
-    setPosterHost(document.querySelector('[data-testid="video-editor-preview-surface"]')
+    setHost(document.querySelector('[data-testid="video-editor-preview-surface"]')
       ?? document.querySelector(editorTourSelector('preview')));
   }, [runId, act, beat, appliedStage]);
+
+  // ---- the picture engine: one <video> per run, none with reduced motion
+  const [engine, setEngine] = useState<TourVideoEngine | null>(null);
+  useEffect(() => {
+    if (reducedMotion) return undefined;
+    const created = createTourVideoEngine();
+    setEngine(created);
+    // Every press of the tour (Next, Send, Enter) is a chance to start the video inside a user gesture.
+    const prime = () => created.prime();
+    const gestures = ['click', 'keydown', 'touchend'] as const;
+    gestures.forEach((type) => document.addEventListener(type, prime, { capture: true, passive: true }));
+    return () => {
+      gestures.forEach((type) => document.removeEventListener(type, prime, { capture: true }));
+      created.dispose();
+      setEngine(null);
+    };
+  }, [runId, reducedMotion]);
+  const revealed = useSyncExternalStore((engine ?? noEngine).subscribe, (engine ?? noEngine).presenting, () => false);
+
+  // The playhead and the timecode follow the picture. The editor throttles its timecode to 4 Hz, so a jump is said twice.
+  const report = useRef(reportPreviewTime);
+  report.current = reportPreviewTime;
+  const trailing = useRef<ReturnType<typeof setTimeout>>();
+  const reportJump = useRef((seconds: number) => {
+    report.current(seconds);
+    clearTimeout(trailing.current);
+    trailing.current = setTimeout(() => report.current(seconds), 300);
+  }).current;
+  useEffect(() => () => clearTimeout(trailing.current), []);
+  // While the video plays, the playhead moves imperatively (no React work) ten times a second, and the editor's
+  // timecode state, which re-renders the shell, is told once a second and at the end.
+  const { timelineRef } = useTimelineMutableAdapters();
+  useEffect(() => {
+    if (!engine) return undefined;
+    let lastState = 0;
+    engine.onTime = (seconds, ended) => {
+      clearTimeout(trailing.current);
+      const now = performance.now();
+      if (ended || now - lastState >= TOUR_TIMECODE_REPORT_MS) {
+        lastState = now;
+        report.current(seconds);
+      } else timelineRef.current?.setTime(seconds);
+    };
+    return () => { engine.onTime = null; };
+  }, [engine, timelineRef]);
+
+  const videoSlot = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const slot = videoSlot.current;
+    if (!engine || !slot || engine.element.parentElement === slot) return;
+    // Moving a playing media element pauses it: start it again where it was.
+    const wasPlaying = !engine.element.paused;
+    slot.append(engine.element);
+    if (wasPlaying) void engine.element.play()?.catch(() => undefined);
+  }, [engine, host]);
 
   useEffect(() => {
     if (!loaded || !ops || applying.current) return;
@@ -167,11 +211,11 @@ export function EditorTourTimelineDriver() {
       }
       return;
     }
-    if (!liveScene || appliedStage >= stage) return;
+    if (appliedStage >= stage) return;
     applying.current = true;
     const next = (appliedStage + 1) as 1 | 2 | 3;
     try {
-      ops.apply(createEditorTourStagePatch(next, liveScene));
+      ops.apply(createEditorTourStagePatch(next));
       setAppliedStage(next);
     } catch (error) {
       console.error('Editor tour: could not apply the demo timeline stage; retrying.', error);
@@ -179,115 +223,95 @@ export function EditorTourTimelineDriver() {
     } finally {
       applying.current = false;
     }
-  }, [loaded, ops, liveScene, stage, appliedStage, retry]);
+  }, [loaded, ops, stage, appliedStage, retry]);
 
-  const instant = useEditorTour((state) => state.instant);
-  const reducedMotion = useEditorTour((state) => state.reducedMotion);
-  const warming = warmupStarted && act === 1 && appliedStage === 0 && !instant
-    && (!tourSaveData() || beat !== 'welcome');
+  // The picture never waits for the timeline: it follows the tour's stage, not the applied patch.
+  const running = useEditorTour((state) => state.status === 'running');
   useEffect(() => {
-    if (!warming) return;
-    const timer = window.setTimeout(() => setWarm(true), WARMUP_GIVE_UP_MS);
-    return () => window.clearTimeout(timer);
-  }, [warming]);
-
-  useEffect(() => {
-    if (!loaded || appliedStage !== stage) return;
+    if (!running) {
+      engine?.hold();
+      return undefined;
+    }
     let cancelled = false;
     const skippedAtStart = getEditorTourState().skipAnimation;
     const isCancelled = () => {
       const current = getEditorTourState();
       return cancelled || current.status !== 'running' || current.runId !== runId || current.act !== act || current.beat !== beat;
     };
-    void (async () => {
-      if (beat === 'respond' && act === 1 && !instant) await waitFor(() => warm, WARMUP_GIVE_UP_MS, isCancelled);
-      if (beat === 'land') {
-        const topTrack = tourTrackOrder(stage)[0];
-        await waitFor(
-          () => document.querySelector(editorTourTrackSelector(topTrack)) !== null,
-          RENDER_WAIT_MS,
-          isCancelled,
-        );
-        if (isCancelled()) return;
-        await waitFor(() => previewRef.current !== null, RENDER_WAIT_MS, isCancelled);
-        if (isCancelled()) return;
-        // Pause before seeking so an earlier act's playback cannot overwrite the new position.
-        previewRef.current?.pause();
-        if (act === 2) {
-          const skipped = getEditorTourState().skipAnimation;
-          const anchors = instant || reducedMotion ? [TOUR_ANCHORS.length - 1] : TOUR_ANCHORS.map((_, index) => index);
-          for (const index of anchors) {
-            if (isCancelled() || getEditorTourState().skipAnimation !== skipped) break;
-            requestCenterTimelineClip(TOUR_CLIP_IDS.stills[index]);
-            previewRef.current?.seek(TOUR_ANCHORS[index].at);
-            if (!instant && !reducedMotion) await waitFor(
-              () => getEditorTourState().skipAnimation !== skipped,
-              TOUR_ANCHOR_DWELL_MS,
-              isCancelled,
-            );
-          }
-        } else {
-          const focusClipId = tourStageFocusClipId(stage);
-          if (focusClipId) requestCenterTimelineClip(focusClipId);
-          if (reducedMotion) {
-            // The poster stays over the paused preview: the still is the whole presentation.
-            previewRef.current?.seek(0);
-            if (!isCancelled()) markEditorTourReady('timeline');
-            return;
-          }
-          if (act === 3) {
-            const videoWaitCancelled = () => isCancelled() || getEditorTourState().skipAnimation !== skippedAtStart;
-            // Keep the last reference frame underneath while H3 mounts and draws at the current
-            // playhead. Only then seek the new composition, whose canvas retains its last picture.
-            if (await waitForTourVideoFrame(undefined, videoWaitCancelled) && !videoWaitCancelled()) {
-              previewRef.current?.seek(0);
-              if (await waitForTourVideoFrame(0, videoWaitCancelled) && !videoWaitCancelled()) {
-                setPresented(true);
-                previewRef.current?.play();
-              }
-            }
-            if (!isCancelled()) markEditorTourReady('timeline');
-            return;
-          }
-          previewRef.current?.seek(0);
-          if (act === 1) {
-            setScenePreparing(null);
-            const sceneWaitCancelled = () => isCancelled() || getEditorTourState().skipAnimation !== skippedAtStart;
-            const painted = await waitForTourSceneFrame(liveScene?.revision, sceneWaitCancelled, setScenePreparing);
-            // Skipping an animation may advance the card, but must not run an unready scene clock.
-            // Back/instant entry still needs the actual opening frame before it can autoplay.
-            if (painted && !sceneWaitCancelled()) {
-              setPresented(true);
-              previewRef.current?.play();
-            }
-            if (!isCancelled()) setScenePreparing(null);
-          } else if (!isCancelled()) previewRef.current?.play();
-        }
+    const skipped = () => getEditorTourState().skipAnimation !== skippedAtStart;
+    const done = () => { if (!isCancelled()) markEditorTourReady('timeline'); };
+    const forward = beat === 'land' && !instant && !reducedMotion;
+    const small = phone || tourSaveData();
+    // The element holds the clip of this stage or the next one, buffered in idle time: the guide until the stills land.
+    const clip = stage <= 1 ? EDITOR_TOUR_MEDIA.guide : EDITOR_TOUR_MEDIA.video;
+    const load = () => engine?.load(tourPlaybackUrl(clip, small), tourSaveData() && !forward ? 'metadata' : 'auto');
+
+    if (stage === 0 || stage === 2) {
+      engine?.hold();
+      if (stage === 0) {
+        if (warm) void tourIdle().then(() => { if (!cancelled) load(); });
+        reportJump(0);
+        done();
+        return () => { cancelled = true; };
       }
-      if (!isCancelled()) markEditorTourReady('timeline');
+      void (async () => {
+        if (forward) {
+          for (let index = 0; index <= LAST_ANCHOR; index++) {
+            if (isCancelled() || skipped()) break;
+            setStillIndex(index);
+            reportJump(TOUR_ANCHORS[index].at);
+            await waitFor(skipped, TOUR_ANCHOR_DWELL_MS, isCancelled);
+          }
+        }
+        if (cancelled) return;
+        // Skipped, entered by Back, reduced motion, or a later beat of this stage: the last frame.
+        setStillIndex(LAST_ANCHOR);
+        if (!isCancelled()) reportJump(TOUR_ANCHORS[LAST_ANCHOR].at);
+        done();
+        // The stills hide the video element: time to buffer step 3's clip.
+        await tourIdle();
+        if (!cancelled) load();
+      })();
+      return () => { cancelled = true; };
+    }
+
+    load();
+    if (!engine || !forward) {
+      // Reduced motion: the poster is the whole presentation. Back, or a later beat of this stage: the picture stays
+      // as it is (playing, ended, or its poster), except behind a phone's full-screen chat, where nobody sees it.
+      if (engine && phone && (beat === 'compose' || beat === 'respond')) engine.hold();
+      reportJump(engine?.presenting() ? engine.element.currentTime : 0);
+      done();
+      return () => { cancelled = true; };
+    }
+    void (async () => {
+      // A phone's chat covers the whole screen until the card and spotlight have left it.
+      if (phone) await untilTour((state) => state.shownBeat === 'land' || isCancelled() || skipped(), CHAT_LEAVE_WAIT_MS);
+      if (isCancelled()) return;
+      reportJump(0);
+      await Promise.race([
+        engine.start(TOUR_FIRST_FRAME_DEADLINE_MS),
+        untilTour(() => isCancelled() || skipped(), TOUR_FIRST_FRAME_DEADLINE_MS + 1000),
+      ]);
+      done();
     })();
     return () => { cancelled = true; };
-  }, [runId, act, beat, stage, appliedStage, loaded, warm, instant, reducedMotion, previewRef, liveScene]);
+  }, [running, runId, act, beat, stage, instant, reducedMotion, engine, phone, warm, reportJump]);
 
-  const notice = sceneLoadError ? (
-    <div role="alert" className="fixed bottom-6 left-1/2 z-[2147483647] flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-background p-4 text-sm text-foreground shadow-lg">
-      <span>The Lantern Valley demo could not load. Check your connection and try again.</span>
-      <button type="button" className="shrink-0 rounded-md bg-primary px-3 py-2 text-primary-foreground" onClick={() => setSceneLoadAttempt((count) => count + 1)}>Retry demo</button>
-    </div>
-  ) : scenePreparing && act === 1 && beat === 'land' ? (
-    <div role={scenePreparing === 'error' ? 'alert' : 'status'} className="fixed bottom-6 left-1/2 z-[2147483647] flex -translate-x-1/2 items-center gap-3 rounded-lg border bg-background p-4 text-sm text-foreground shadow-lg">
-      <span>{scenePreparing === 'error' ? 'The 3D world could not render.' : 'Preparing the 3D world. Playback will start when its first frame is ready.'}</span>
-      <button type="button" className="shrink-0 rounded-md bg-primary px-3 py-2 text-primary-foreground" onClick={() => { setScenePreparing(null); startEditorTour(); }}>Restart demo</button>
-    </div>
-  ) : null;
-  return <>
-    {notice}
-    {warming && liveScene && <SceneWarmup liveScene={liveScene} onWarm={() => setWarm(true)} />}
-    {posterHost && beat === 'land' && act !== 2 && !presented && createPortal(
-      <img src={act === 1 ? EDITOR_TOUR_MEDIA.frames[0].url : EDITOR_TOUR_MEDIA.stills[0].url}
-        alt="" aria-hidden data-editor-tour-poster
-        className="pointer-events-none absolute inset-0 z-20 h-full w-full bg-black object-contain" />,
-      posterHost,
-    )}
-  </>;
+  const kind = stage === 0 ? 'none' : stage === 2 ? 'still' : 'video';
+  const clip = stage === 1 ? EDITOR_TOUR_MEDIA.guide : EDITOR_TOUR_MEDIA.video;
+  const showVideo = kind === 'video' && revealed;
+  return host && createPortal(
+    <div aria-hidden data-editor-tour-picture={kind} data-state={kind === 'video' ? (showVideo ? 'playing' : 'poster') : kind === 'still' ? `still-${stillIndex}` : undefined}
+      // Above the idle player, below the editor's own transport (z-10) and header row, which sit on the picture as they do on any clip.
+      className="pointer-events-none absolute inset-0 z-[5]" style={kind === 'none' ? { visibility: 'hidden' } : undefined}>
+      <div ref={videoSlot} className="absolute inset-0" style={{ opacity: showVideo ? 1 : 0 }} />
+      {kind === 'video' && !showVideo && <img src={display(clip)} alt="" data-editor-tour-poster className={PICTURE_FILL} />}
+      {kind === 'still' && EDITOR_TOUR_MEDIA.stills.map((still, index) => (
+        <img key={still.url} src={display(still)} alt="" data-editor-tour-still={index} className={PICTURE_FILL}
+          style={index === stillIndex ? undefined : { visibility: 'hidden' }} />
+      ))}
+    </div>,
+    host,
+  );
 }

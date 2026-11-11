@@ -289,14 +289,14 @@
    narrow one (see the container rule) it drops under the label. */
 .astrid-hero-cta { container-type: inline-size; }
 .astrid-hero-cta > .astrid-button { justify-content: flex-start; gap: 10px; }
-.astrid-cta-label { flex: 0 0 auto; font-weight: 600; white-space: nowrap; }
+.astrid-cta-label { flex: 0 0 auto; white-space: nowrap; }
 .astrid-cta-note {
   flex: 1 1 auto;
   min-width: 0;
   overflow: hidden;
   color: color-mix(in srgb, currentColor 72%, transparent);
   font-size: 12.5px;
-  font-weight: 500;
+  font-weight: 400;
   letter-spacing: .01em;
   text-align: right;
   text-overflow: ellipsis;
@@ -1807,7 +1807,7 @@
   }
   .astrid-hero-cta > .astrid-button[data-active="false"] > :not(.astrid-visually-hidden) { translate: 0 4px; }
   .astrid-hero-cta > .astrid-button:focus-visible { outline: 2px solid var(--astrid-ink); outline-offset: 3px; }
-  .astrid-button { min-height: 48px; font-size: 15px; font-weight: 600; }
+  .astrid-button { min-height: 48px; font-size: 15px; }
   .astrid-hero-note { align-self: center; justify-self: end; width: auto; margin: 0; padding: 0; }
   .astrid-hero-note .astrid-social-links { margin: 0 -7px 0 0; gap: 2px; }
 

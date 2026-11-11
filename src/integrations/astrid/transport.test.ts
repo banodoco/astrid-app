@@ -348,7 +348,7 @@ describe('Astrid bridge transport and a prepared navigation', () => {
     vi.unstubAllGlobals();
   });
 
-  it('lets the page cancel a request with no deadline (an agent turn), and waits for one with a deadline', async () => {
+  it('lets the page skip and then cancel a request with no deadline (an agent turn), and waits for one with a deadline', async () => {
     const navigation = await import('@/shared/lib/navigation/documentNavigation');
     navigation.resetDocumentNavigationForTests();
     const answers: Array<() => void> = [];
@@ -362,15 +362,16 @@ describe('Astrid bridge transport and a prepared navigation', () => {
     const schema = z.object({ ok: z.boolean() });
     const turn = transport.requestJson('/acp/c-1/rpc', { method: 'POST', timeoutMs: null, body: { method: 'session/prompt' } }, schema, 'ACP session/prompt');
     const rename = transport.requestJson('/acp/projects/p-1/chat', { method: 'PATCH', body: {} }, schema, 'Rename');
-    const settled = expect(turn).rejects.toBeInstanceOf(BridgeTransportFailure);
     let prepared = false;
     const preparing = navigation.prepareDocumentNavigation().then(() => { prepared = true; });
-    await settled;
-    expect(aborted).toEqual(['http://bridge.test/api/astrid/acp/c-1/rpc']);
     await new Promise((resolve) => setTimeout(resolve, 10));
     expect(prepared, 'an ordinary request is waited for').toBe(false);
     answers[1]!();
     await preparing;
+    expect(aborted, 'the turn is not waited for, nor cancelled while the page may stay').toEqual([]);
+    navigation.cancelUnwaitedRequests();
+    await expect(turn).rejects.toBeInstanceOf(BridgeTransportFailure);
+    expect(aborted).toEqual(['http://bridge.test/api/astrid/acp/c-1/rpc']);
     await expect(rename).resolves.toEqual({ ok: true });
   });
 });

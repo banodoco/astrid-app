@@ -1,6 +1,7 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  abortOnNavigation,
   documentNavigationPhase,
   installDocumentRequestRegistry,
   resetDocumentNavigationForTests,
@@ -74,5 +75,54 @@ describe('useGuardedReload', () => {
     expect(reloadImpl).toHaveBeenCalledOnce();
     expect(result.current.error).toBeNull();
     unregister();
+  });
+});
+
+describe('useGuardedReload and requests a navigation does not wait for', () => {
+  beforeEach(() => { resetDocumentNavigationForTests(); resetDraftReloadGuardsForTest(); });
+  afterEach(() => { resetDocumentNavigationForTests(); resetDraftReloadGuardsForTest(); });
+
+  /** A fetch whose requests answer only when told, and record whether they were cancelled. */
+  function runtime() {
+    const requests: Array<{ url: string; answer: () => void; aborted: () => boolean }> = [];
+    const target = {
+      fetch: vi.fn((input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(init.signal!.reason), { once: true });
+        requests.push({ url: String(input), answer: () => resolve(Response.json({ ok: true })), aborted: () => init?.signal?.aborted === true });
+      })),
+      addEventListener: vi.fn(),
+    } as unknown as typeof globalThis;
+    installDocumentRequestRegistry(target);
+    return { target, requests };
+  }
+
+  it('keeps an agent turn running when a draft changed during the wait and the page stays', async () => {
+    const { target, requests } = runtime();
+    const turn = target.fetch('/api/astrid/acp/c-1/rpc', abortOnNavigation({ method: 'POST' }));
+    void target.fetch('/api/runtime/v1/projects');
+    const reloadImpl = vi.fn();
+    const unregister = registerDraftSafeReloadGuard({ label: 'Agent chat', flush: async () => {}, isDirty: () => false });
+    const { result } = renderHook(() => useGuardedReload(reloadImpl));
+    let reloading!: Promise<void>;
+    act(() => { reloading = result.current.reload(); });
+    await act(tick);
+    invalidateDraftReload();
+    requests[1].answer();
+    await act(() => reloading);
+    expect(reloadImpl).not.toHaveBeenCalled();
+    expect(requests[0].aborted(), 'the turn the person is waiting for goes on').toBe(false);
+    requests[0].answer();
+    await expect(turn).resolves.toBeInstanceOf(Response);
+    unregister();
+  });
+
+  it('cancels an agent turn\'s wait right before a reload that happens', async () => {
+    const { target, requests } = runtime();
+    const turn = target.fetch('/api/astrid/acp/c-1/rpc', abortOnNavigation({ method: 'POST' }));
+    const reloadImpl = vi.fn(() => { expect(requests[0].aborted(), 'cancelled while the page is still here').toBe(true); });
+    const { result } = renderHook(() => useGuardedReload(reloadImpl));
+    await act(() => result.current.reload());
+    expect(reloadImpl).toHaveBeenCalledOnce();
+    await expect(turn).rejects.toMatchObject({ name: 'AbortError' });
   });
 });

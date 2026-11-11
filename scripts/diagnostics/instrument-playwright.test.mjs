@@ -60,3 +60,49 @@ test('opt-in protocol events join without disclosing request contents', () => {
   assert.ok(records.some(r => r.event === 'loading-failed' && r.request === created.request));
   assert.ok(records.every(r => Object.keys(r).every(k => ['event','process','session','request','route','object','guid','hit'].includes(k))));
 });
+
+
+test('diagnostic verifier rejects collisions and missing joins', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'r12-pw-log-'));
+  try {
+    const file = join(dir, 'log');
+    const verify = resolve('scripts/diagnostics/verify-playwright-log.mjs');
+    const rows = [
+      'PW_R12 '+JSON.stringify({event:'dispatcher', process:1, object:2, guid:3}),
+      'TOKEN_SNIFF '+JSON.stringify({event:'request', process:4, scanner:5, request:6}),
+      'TOKEN_SNIFF '+JSON.stringify({event:'protocol-join', process:4, scanner:5, request:6, protocol:3}),
+    ];
+    writeFileSync(file, rows.join('\n'));
+    assert.equal(run(process.execPath, [verify, file]).status, 0);
+    writeFileSync(file, [...rows, 'PW_R12 '+JSON.stringify({event:'collision', process:1})].join('\n'));
+    assert.notEqual(run(process.execPath, [verify, file]).status, 0);
+    writeFileSync(file, rows.slice(0, 2).join('\n'));
+    assert.notEqual(run(process.execPath, [verify, file]).status, 0);
+    writeFileSync(file, [...rows, 'PW_R12 '+JSON.stringify({event:'dispatcher', process:7, object:8, guid:3})].join('\n'));
+    assert.notEqual(run(process.execPath, [verify, file]).status, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('navigation-invalidated Fetch.failRequest keeps Playwright abort outcome', () => {
+  const executable = process.env.R12_CHROMIUM_EXECUTABLE;
+  assert.ok(executable);
+  const program = `
+    const {chromium} = require(${JSON.stringify(source)});
+    (async () => {
+      const browser = await chromium.launch({headless:true, executablePath:${JSON.stringify(executable)}});
+      const page = await browser.newPage(); await page.goto('data:text/html,ok');
+      let held, ready; const gate = new Promise(resolve => ready = resolve);
+      await page.route('**/api/**', route => { held = route; ready(); });
+      await page.evaluate(() => { void fetch('http://127.0.0.1:1/api/held').catch(() => {}); });
+      await gate; await page.goto('data:text/html,other');
+      await held.abort().then(() => console.log('ABORT_RESOLVED'), () => console.log('ABORT_REJECTED'));
+      await browser.close();
+    })().catch(() => process.exitCode = 1);
+  `;
+  const off = run(process.execPath, ['-e', program], { env: { ...process.env, PW_R12_DIAGNOSTICS: '0' } });
+  const on = run(process.execPath, ['-e', program], { env: { ...process.env, PW_R12_DIAGNOSTICS: '1' } });
+  assert.equal(off.status, 0); assert.equal(on.status, 0);
+  assert.equal(off.stdout.trim(), 'ABORT_RESOLVED');
+  assert.equal(on.stdout.trim(), off.stdout.trim());
+  assert.match(on.stderr, /"event":"fail-rejected"/);
+});

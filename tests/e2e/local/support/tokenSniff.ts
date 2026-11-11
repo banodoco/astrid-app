@@ -3,7 +3,7 @@ import { expect, type Frame, type Page, type Request, type Route } from '@playwr
 import { commandOutboxes } from './app.ts';
 
 type Capture = { label: string; state: string; pending: boolean; failed?: boolean; request?: Request };
-type Diagnostic = { scanner: number; request?: number; label?: string; event: string; navigation: number; time: number; protocol?: number };
+type Diagnostic = { process: number; scanner: number; request?: number; label?: string; event: string; navigation: number; time: number; protocol?: number };
 let nextScanner = 0;
 const protocolIds = new Map<number, string>();
 
@@ -26,7 +26,7 @@ export class TokenSniff {
   private diagnostic(event: string, request?: Request) {
     if (!this.diagnostics) return;
     const id = request && this.requestIds.get(request);
-    this.diagnostics({ scanner: this.scannerId, ...(id === undefined ? {} : { request: id }),
+    this.diagnostics({ process: process.pid, scanner: this.scannerId, ...(id === undefined ? {} : { request: id }),
       ...(request ? { label: this.label(request.method(), request.url(), 'request') } : {}),
       event, navigation: this.navigation, time: Date.now() });
   }
@@ -80,7 +80,7 @@ export class TokenSniff {
           if (prior !== undefined && prior !== guid) capture.failed = true;
           else {
             protocolIds.set(protocol, guid);
-            this.diagnostics?.({ scanner: this.scannerId, request: this.requestIds.get(request), event: 'protocol-join', navigation: this.navigation, time: Date.now(), protocol });
+            this.diagnostics?.({ process: process.pid, scanner: this.scannerId, request: this.requestIds.get(request), event: 'protocol-join', navigation: this.navigation, time: Date.now(), protocol });
           }
         }
       }

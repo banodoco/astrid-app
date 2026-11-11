@@ -5,7 +5,7 @@
  * this spec only and put back to the demo seed afterwards).
  *
  * Keys are the driver (Enter is the tour's primary action on every beat), so the spec holds for any card
- * that offers "Next" / "I got it". Beats are awaited on the tour store and the card's `data-settled`, never
+ * that offers "Next". Beats are awaited on the tour store and the card's `data-settled`, never
  * on fixed sleeps. Set EDITOR_TOUR_SHOTS_DIR to save one 2x full-page screenshot per step.
  *
  * Run: PLAYWRIGHT_TIMELINE_DEVICES=1 npx playwright test --project=timeline-devices --workers=1 tests/e2e/timeline/editor-tour.spec.ts
@@ -283,7 +283,7 @@ test.describe('editor tour', () => {
     // The demo leaves nothing behind in storage: no preferences blob for its timeline id.
     expect(await page.evaluate(() => Object.keys(window.localStorage).filter((key) => key.includes('tour-timeline')))).toEqual([]);
     await shot(page, '11-finale');
-    await pressPrimary(page, { act: 3, beat: 'finale' }); // I got it
+    await pressPrimary(page, { act: 3, beat: 'finale' }); // Next
     await waitSettled(page, 3, 'feedback');
     await pressPrimary(page, { act: 3, beat: 'feedback' }); // Start creating
 

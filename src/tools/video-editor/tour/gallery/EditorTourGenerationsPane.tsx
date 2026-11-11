@@ -226,12 +226,17 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
               ref={galleryContainerRef}
               className="flex-grow px-1 sm:px-3 pt-2 pb-2 overflow-y-auto overscroll-contain flex flex-col"
             >
-              <div className="relative" style={{ width: layout.gridWidth, marginInline: 'auto' }}>
-                <div
-                  className="grid gap-2 sm:gap-4 mb-0"
-                  style={{ gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))` }}
-                >
-                  {items.map((image, index) => <TourGalleryTile key={image.id} image={image} index={index} />)}
+              {/* The wrapper is a flex item that stretches; the surface inside it centres at the grid's own width. */}
+              <div>
+                <div className="relative" style={{ width: layout.gridWidth, marginInline: 'auto' }}>
+                  <div>
+                    <div
+                      className="grid gap-2 sm:gap-4 mb-0"
+                      style={{ gridTemplateColumns: `repeat(${layout.cols}, minmax(0, 1fr))` }}
+                    >
+                      {items.map((image, index) => <TourGalleryTile key={image.id} image={image} index={index} />)}
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>

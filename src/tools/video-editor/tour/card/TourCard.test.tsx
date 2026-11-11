@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TourCard } from './TourCard';
 import { TOUR_CARD_ENTRANCE_MS } from './useTourCardEntrance';
 import { TOUR_FINALE_ENTRANCE_MS } from './TourStrip';
+import { COMPARE_REST, TOUR_COMPARE_ENTRANCE_MS } from './TourCompare';
 import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
 import { EDITOR_TOUR_MEDIA } from '../tourMedia';
 import { DISCORD_URL } from '@/pages/Home/publicAstridLinks';
@@ -31,6 +32,8 @@ function renderAt(tourAct: EditorTourAct, beat: EditorTourBeat, options: { reduc
 }
 
 const advance = (ms: number) => act(() => { vi.advanceTimersByTime(ms); });
+const entranceOf = (tourAct: EditorTourAct) => (SCRIPT.acts[tourAct].card.visual === 'frame-to-still' ? TOUR_COMPARE_ENTRANCE_MS : TOUR_CARD_ENTRANCE_MS);
+const FEEDBACK_TITLE = [SCRIPT.feedback.title.before, SCRIPT.feedback.title.emphasis, SCRIPT.feedback.title.after].join(' ');
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -100,7 +103,7 @@ describe('TourCard', () => {
     if (tourAct === 3) expect(container.querySelectorAll('ol img')[2]).toHaveAttribute('src', EDITOR_TOUR_MEDIA.stills[3].url);
 
     expect(container.querySelector('.editor-tour-card-playing')).not.toBeNull();
-    advance(TOUR_CARD_ENTRANCE_MS - 1);
+    advance(entranceOf(tourAct) - 1);
     expect(cardReady()).toBe(false);
     advance(1);
     expect(cardReady()).toBe(true);
@@ -113,9 +116,16 @@ describe('TourCard', () => {
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
 
-  it('asks "Do you get it?" at the finale with the whole strip', () => {
+  it('says "And this is just one example" at the finale: title, then the whole lit chain, then the body, then Next', () => {
     const { onPrimary, container } = renderAt(3, 'finale');
-    expect(screen.getByRole('heading')).toHaveTextContent(SCRIPT.finale.title);
+    const heading = screen.getByRole('heading');
+    expect(heading).toHaveTextContent('And this is just one example');
+    expect(container.querySelector('section')).toHaveAttribute('aria-label', SCRIPT.finale.title);
+    const body = screen.getByText(SCRIPT.finale.body);
+    const chain = container.querySelector('ol')!;
+    expect(heading.compareDocumentPosition(chain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(chain.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(SCRIPT.finale.action).toBe('Next');
     for (const recap of SCRIPT.finale.recap) expect(screen.getByText(recap)).toBeInTheDocument();
     expect(container.querySelectorAll('ol img, ol video')).toHaveLength(4);
     expect(screen.queryByRole('button', { name: /Skip tour/ })).toBeNull();
@@ -216,8 +226,9 @@ describe('TourCard', () => {
   });
 
   it('asks for feedback at the end, with a Discord link that opens in a new tab', () => {
-    const { onPrimary } = renderAt(3, 'feedback');
-    expect(screen.getByRole('heading')).toHaveTextContent(SCRIPT.feedback.title);
+    const { onPrimary, container } = renderAt(3, 'feedback');
+    expect(screen.getByRole('heading')).toHaveTextContent('We really need your feedback');
+    expect(container.querySelector('section')).toHaveAttribute('aria-label', FEEDBACK_TITLE);
     expect(screen.getByText(SCRIPT.feedback.body)).toBeInTheDocument();
     const link = screen.getByRole('link', { name: SCRIPT.feedback.discord });
     expect(link).toHaveAttribute('href', DISCORD_URL);
@@ -228,6 +239,71 @@ describe('TourCard', () => {
     expect(cardReady()).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: new RegExp(`^${SCRIPT.feedback.action}`) }));
     expect(onPrimary).toHaveBeenCalledTimes(1);
+  });
+
+  describe('the feedback title\'s underline', () => {
+    const emphasis = (root: Element) => root.querySelector('[data-tour-emphasis]') as HTMLElement;
+    const stroke = (root: Element) => emphasis(root).querySelector('path.editor-tour-underline') as SVGPathElement;
+
+    it('underlines the script\'s emphasised word, drawn in once the card has arrived and then kept', () => {
+      const { container } = renderAt(3, 'feedback');
+      expect(emphasis(container)).toHaveTextContent(new RegExp(`^${SCRIPT.feedback.title.emphasis}$`));
+      expect(emphasis(container)).toHaveClass('whitespace-nowrap');
+      // Drawn as a dash of the whole path: hidden by the playing entrance's offset, whole at rest.
+      expect(stroke(container)).toHaveAttribute('pathLength', '1');
+      expect(stroke(container)).toHaveAttribute('stroke-dasharray', '1');
+      expect(parseInt(stroke(container).style.getPropertyValue('--tour-delay'), 10)).toBeGreaterThan(0);
+      // The stroke hangs out of flow, never part of the title's line box.
+      expect(stroke(container).closest('svg')).toHaveClass('absolute', 'pointer-events-none');
+      expect(stroke(container).closest('svg')).toHaveAttribute('aria-hidden', 'true');
+      expect(container.querySelector('.editor-tour-card-playing')).not.toBeNull();
+      advance(TOUR_CARD_ENTRANCE_MS);
+      expect(container.querySelector('.editor-tour-card-playing')).toBeNull();
+      expect(stroke(container)).toBeInTheDocument();
+    });
+
+    it('is already drawn under reduced motion and when reached by Back', () => {
+      const { container, unmount } = renderAt(3, 'feedback', { reducedMotion: true });
+      expect(container.querySelector('.editor-tour-card-playing')).toBeNull();
+      expect(stroke(container)).toBeInTheDocument();
+      unmount();
+      exitEditorTour();
+      vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: false, media: query } as MediaQueryList));
+      startEditorTour();
+      setEditorTourBeat(3, 'feedback', true);
+      const view = render(<TourCard act={3} beat="feedback" onPrimary={vi.fn()} onBack={vi.fn()} />);
+      expect(view.container.querySelector('.editor-tour-card-playing')).toBeNull();
+      expect(stroke(view.container)).toBeInTheDocument();
+    });
+  });
+
+  describe('act 2\'s comparison', () => {
+    it('is a slider that sweeps in from the left while the card plays', () => {
+      renderAt(2, 'land');
+      const slider = screen.getByRole('slider', { name: /Compare/ });
+      expect(slider).toHaveAttribute('aria-valuenow', '0');
+      expect(slider.closest('[aria-hidden="true"]')).toBeNull();
+      advance(TOUR_COMPARE_ENTRANCE_MS);
+      expect(slider).toHaveAttribute('aria-valuenow', String(COMPARE_REST));
+    });
+
+    it('rests at once under reduced motion, and still moves', () => {
+      const { container } = renderAt(2, 'land', { reducedMotion: true });
+      const slider = screen.getByRole('slider', { name: /Compare/ });
+      expect(slider).toHaveAttribute('aria-valuenow', String(COMPARE_REST));
+      fireEvent.keyDown(slider, { key: 'Home' });
+      expect(slider).toHaveAttribute('aria-valuenow', '0');
+      expect(container.querySelector('.editor-tour-card-playing')).toBeNull();
+    });
+
+    it('rests at once when reached by Back', () => {
+      vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: false, media: query } as MediaQueryList));
+      startEditorTour();
+      setEditorTourBeat(2, 'land', true);
+      render(<TourCard act={2} beat="land" onPrimary={vi.fn()} onBack={vi.fn()} />);
+      expect(screen.getByRole('slider', { name: /Compare/ })).toHaveAttribute('aria-valuenow', String(COMPARE_REST));
+      expect(cardReady()).toBe(true);
+    });
   });
 
   it('settles at once on a skipAnimation bump', () => {
@@ -248,7 +324,7 @@ describe('TourCard', () => {
     advance(TOUR_CARD_ENTRANCE_MS);
     expect(cardReady()).toBe(false); // still showing act 1: the runner has not moved the card on yet
     view.rerender(<TourCard act={2} beat="land" onPrimary={view.onPrimary} onSkip={view.onSkip} />);
-    advance(TOUR_CARD_ENTRANCE_MS);
+    advance(TOUR_COMPARE_ENTRANCE_MS);
     expect(cardReady()).toBe(true);
   });
 

@@ -153,8 +153,7 @@ async function importAdmittedExtension(
       throw moduleError('loader/shared-modules', `Singleton binding mismatch for ${specifier}. Rebuild against this host release.`);
     }
   }
-  let releaseLease = () => {};
-  {
+  const acquireLease = async (): Promise<string> => {
     const leased = await fetch(`${runtimeApiBase()}/packs/leases/${artifact.packId}/${artifact.digest}`, {
       method: 'POST', credentials: 'same-origin',
     });
@@ -163,21 +162,68 @@ async function importAdmittedExtension(
     if (lease.version !== 1 || typeof lease.lease !== 'string' || !SHA256.test(lease.lease)) {
       throw moduleError('loader/not-admitted', 'Runtime returned an invalid artifact lease.');
     }
-    let released = false;
-    let forgetOwner = () => {};
-    const release = (): Promise<void> => {
-      if (released) return Promise.resolve();
-      released = true;
-      window.removeEventListener('pagehide', releaseLease);
-      forgetOwner();
-      return fetch(`${runtimeApiBase()}/packs/leases/${lease.lease}`, { method: 'DELETE',
-        credentials: 'same-origin', keepalive: true }).then(() => undefined, () => undefined);
-    };
-    releaseLease = () => { void release(); };
-    window.addEventListener('pagehide', releaseLease, { once: true });
+    return lease.lease;
+  };
+  const deleteLease = (id: string): Promise<void> => fetch(`${runtimeApiBase()}/packs/leases/${id}`, { method: 'DELETE',
+    credentials: 'same-origin', keepalive: true }).then(() => undefined, () => undefined);
+  // `handed-back` while a prepared navigation (or the page hiding) has returned the lease and the page may yet stay.
+  let state: 'held' | 'handed-back' | 'disposed' = 'held';
+  let held: string | null = await acquireLease();
+  // Lease work in order, so a hand-back always hears the answer to a resume still on the wire.
+  let turn: Promise<void> = Promise.resolve();
+  let forgetOwner = () => {};
+  // The extension's own handles of the activations still running, so a lost lease can stop them.
+  const activations = new Set<{ dispose?: () => void } | undefined | void>();
+  const stopActivations = () => {
+    for (const handle of [...activations]) {
+      activations.delete(handle);
+      try { handle?.dispose?.(); } catch (error) { console.warn('[extensions] Stopping an extension failed', error); }
+    }
+    releaseLease();
+  };
+  const handBack = (next: 'handed-back' | 'disposed'): Promise<void> => {
+    state = next;
+    const id = held;
+    held = null;
+    if (id) { const deleted = deleteLease(id); turn = turn.then(() => deleted); }
+    return turn;
+  };
+  // No navigation followed and the extension still runs: retain its revision again.
+  const resume = () => {
+    if (state !== 'handed-back') return;
+    state = 'held';
+    turn = turn.then(async () => {
+      if (state !== 'held' || held) return;
+      try {
+        const id = await acquireLease();
+        if (state === 'held') held = id;
+        else await deleteLease(id);
+      } catch (error) {
+        // No extension runs on a revision the Runtime no longer retains for it: it stops until the next load.
+        console.warn('[extensions] The extension stopped: its revision could not be retained again after the page stayed', error);
+        stopActivations();
+      }
+    });
+  };
+  // A navigation nobody prepared (the browser's own reload, closing the tab) hands the lease back as the page goes,
+  // and a page restored from the back/forward cache retains it again.
+  const onPageHide = () => { if (state === 'held') void handBack('handed-back'); };
+  const onPageShow = (event: PageTransitionEvent) => { if (event.persisted) resume(); };
+  const releaseLease = () => {
+    if (state === 'disposed') return;
+    window.removeEventListener('pagehide', onPageHide);
+    window.removeEventListener('pageshow', onPageShow);
+    forgetOwner();
+    void handBack('disposed');
+  };
+  window.addEventListener('pagehide', onPageHide);
+  window.addEventListener('pageshow', onPageShow);
+  forgetOwner = registerNavigationOwner({
+    label: 'extension lease',
     // A prepared navigation hands the lease back (and hears the answer) before the page goes.
-    forgetOwner = registerNavigationOwner({ label: 'extension lease', prepare: release });
-  }
+    prepare: () => (state === 'disposed' ? Promise.resolve() : handBack('handed-back')),
+    release: resume,
+  });
   let namespace: any;
   try {
     namespace = await import(/* @vite-ignore */ new URL(entryUrl, location.origin).href);
@@ -194,7 +240,11 @@ async function importAdmittedExtension(
   const retained = { ...extension, activate(context: ExtensionContext) {
     try {
       const handle = extension.activate(context);
-      return { dispose() { try { handle?.dispose(); } finally { releaseLease(); } } };
+      activations.add(handle);
+      return { dispose() {
+        if (!activations.delete(handle)) { releaseLease(); return; }
+        try { handle?.dispose(); } finally { releaseLease(); }
+      } };
     } catch (error) { releaseLease(); throw error; }
   } } as AstridExtension;
   moduleLeases.set(retained, releaseLease);

@@ -2356,9 +2356,12 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses the 
   await expectConnected(page);
   let catalogCreateBody: { timeline_id?: string } | undefined;
   let catalogCreateKey: string | null = null;
+  let catalogCreateProject: string | undefined;
   page.on('request', (request) => {
     const url = new URL(request.url());
-    if (request.method() === 'POST' && url.pathname.endsWith('/v1/projects/' + url.pathname.split('/').at(-2) + '/timelines')) {
+    const projectMatch = url.pathname.match(/^(?:\/api\/runtime)?\/v1\/projects\/([^/]+)\/timelines$/);
+    if (request.method() === 'POST' && projectMatch) {
+      catalogCreateProject = projectMatch[1];
       catalogCreateBody = request.postDataJSON() as { timeline_id?: string };
       catalogCreateKey = request.headers()['idempotency-key'] ?? null;
     }
@@ -2398,6 +2401,7 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses the 
   expect(selectedTimelineId).toBe(catalogCreateBody?.timeline_id);
   expect(catalogCreateBody?.timeline_id).toEqual(expect.any(String));
   expect(catalogCreateKey).toBe(`astrid-first-timeline-${projectId}`);
+  expect(catalogCreateProject).toBe(projectId);
   await expect.poll(async () => {
     const owner = (await commandOutboxes(page, selectedTimelineId!))
       .find((candidate) => candidate.scope.projectId === projectId && candidate.scope.timelineId === selectedTimelineId);
@@ -2623,9 +2627,9 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   const shotLabel = page.locator('[data-shot-group-key]').first();
   await expect(shotLabel, 'the real canonical occurrence is rendered as a shot group').toHaveCount(1);
   await shotLabel.click({ button: 'right' });
+  await page.getByRole('button', { name: 'Duplicate shot', exact: true }).click();
   // P39-R12-DUP-SHOT, Plan 39 exception (R12): "Duplicate shot" saves nothing since 7b33f8f50 removed the native duplicate mount; shared with R10 and R11; remove the marker when the save is restored. Issue: https://github.com/banodoco/astrid-app/issues/249
   test.fail(true, 'Duplicate shot saves nothing since 7b33f8f50 removed the native duplicate mount');
-  await page.getByRole('button', { name: 'Duplicate shot', exact: true }).click();
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
 
   const duplicatePost = wire.posts[0];
@@ -2905,10 +2909,19 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
     conflicts: [expect.objectContaining({ kind: 'intervening_write', ref: 'parent/track:f2-mixed-independent' })] } });
   // The refusal response and its visible notice are observed before checking the wire and outbox state.
   await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
-  await expect.poll(async () => ({
-    posts: wire.posts.length, observed: wire.observed.length,
-    outboxes: (await commandOutboxes(page, seed3.timelineId)).map((owner) => ({ pending: owner.pending, intents: owner.intents })),
-  }), CEILING).toMatchObject({ posts: 3, observed: observedBeforeUndo + 1 });
+  const refusedOwner = (await commandOutboxes(page, seed3.timelineId))
+    .find((owner) => owner.pending?.request.key === wire.posts[2].key)!;
+  expect(refusedOwner.pending?.request).toEqual({ method: 'POST', path: `${timelineBase(harness, seed3)}/commit`,
+    body: wire.posts[2].body, key: wire.posts[2].key });
+  expect(refusedOwner.pending?.outcome?.kind).toBe('rejected');
+  expect(refusedOwner.intents.length).toBeGreaterThan(0);
+  expect(refusedOwner.intents.map((intent) => intent.conflict))
+    .toEqual(refusedOwner.intents.map(() => refusedOwner.pending?.outcome?.error));
+  for (const deadline = Date.now() + 1_500; Date.now() < deadline;) {
+    expect(wire.posts).toHaveLength(3);
+    expect(wire.observed).toHaveLength(observedBeforeUndo + 1);
+    await page.waitForTimeout(100);
+  }
   expect(wire.posts).toHaveLength(3);
   expect(wire.observed).toHaveLength(observedBeforeUndo + 1);
   const finalHistory = await history(harness, seed3);

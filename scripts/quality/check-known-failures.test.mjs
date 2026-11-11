@@ -129,7 +129,7 @@ describe('expected-failure marker ban', () => {
 
   it('passes for this repository and exits 0 from its CLI entry point', () => {
     const result = checkKnownFailures({ repoRoot });
-    assert.deepEqual(result.allowedEntries.map((entry) => entry.exceptionId), ['P39-R12-DUP-SHOT']);
+    assert.deepEqual(result.allowedEntries.map((entry) => entry.exceptionId).sort(), DIRECT_JOURNEY_EXCEPTIONS.map((item) => item.id).sort());
     assert.deepEqual(result.forbiddenEntries, []);
     assert.deepEqual(result.problems, []);
     const proc = spawnSync(process.execPath, [gateScript], { cwd: repoRoot, encoding: 'utf8' });

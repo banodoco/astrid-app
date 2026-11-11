@@ -180,7 +180,7 @@ describe('PublicAstridShell route announcements', () => {
       expect(screen.getByRole('main')).toHaveAttribute('data-audience', 'agent');
     }
     expect(screen.getByText('For example:')).toBeInTheDocument();
-    expect(screen.getByText('And you or others in the community can integrate anything.')).toBeInTheDocument();
+    expect(screen.getByText('It works with popular tools, but you can also integrate anything you’d like.')).toBeInTheDocument();
   });
 
   it('cancels a stale announcement when a switch is reversed mid-motion', async () => {

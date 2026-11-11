@@ -97,12 +97,11 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
   {
     id: 'tools',
     title: 'Integrated into many open-source tools',
-    body: 'And you or others in the community can integrate anything.',
+    body: 'It works with popular tools, but you can also integrate anything you’d like.',
     target: '.astrid-chat-surface',
     at: [1, 0.42],
     side: 'left',
     phoneTitle: 'Integrated into open-source tools',
-    phoneBody: 'It works with popular tools, but you can also integrate anything you’d like.',
     // On phones the chip runs full width along the bottom, where its logos have room: its connector
     // rises beside the conversation and turns in to the finished result.
     phoneSide: 'top',
@@ -138,13 +137,12 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
   {
     id: 'effects',
     title: 'Live vibe code effects and visuals',
-    body: 'Describe a look; its code is edited live.',
+    body: 'Your agent codes the effects live.',
     // Target the whole card so the connector also works with no clip selected.
     target: '.astrid-inspector-surface',
     at: [0.5, 0.5],
     side: 'bottom',
     phoneTitle: 'Live-code effects',
-    phoneBody: 'Your agent codes the effects live.',
     phoneSide: 'bottom',
     // On phones the inspector is a compact strip right under this chip: land on the Effects tab itself,
     // low enough in the strip to stay in view while the chip is unfolded.
@@ -175,14 +173,13 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
   {
     id: 'models',
     title: 'Your agent runs your local models',
-    body: 'It figures out how to get local models to do the job and gets it running on your machine.',
+    body: 'It figures out how to get local models to do the job, and makes the generations run efficiently on your machine.',
     target: '[data-astrid-agent-launcher]',
     at: [0.5, 0],
     // On phones the chip sits to the launcher's lower left and reaches across to its edge; on tablets
     // it rises from the label hanging below the timeline to the launcher's lower edge.
     phoneAt: [0.04, 0.6],
     phoneTitle: 'Your agent runs local models',
-    phoneBody: 'It figures out how to get local models to do the job, and makes the generations run efficiently on your machine.',
     tabletSide: 'top',
     tabletAt: [0.5, 1],
     side: 'bottom',

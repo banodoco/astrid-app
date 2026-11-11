@@ -1,20 +1,24 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { ArrowRight, Blocks, Play, Sparkles } from 'lucide-react';
+import { ArrowRight, Blocks, Play } from 'lucide-react';
 import type { EditorTourVisual } from '../tourScript';
 import { EDITOR_TOUR_MEDIA } from '../tourMedia';
 import { TourMedia } from './TourMedia';
+import { TourCompare } from './TourCompare';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 
 const delay = (ms: number) => ({ '--tour-delay': `${ms}ms` }) as CSSProperties;
-/** Where the frame → still wipe comes to rest: the frame on the left, its realistic still on the right. */
-const WIPE_REST = '50%';
 
-/** One small picture per act, played once as the card arrives and then left at rest. */
-export function TourVisual({ visual, labels, playing }: { visual: EditorTourVisual; labels: readonly [string, string]; playing: boolean }) {
+/**
+ * One small picture per act, played once as the card arrives and then left at rest. `playing` is motion allowed (a video
+ * plays); `entering` is the entrance itself playing (the comparison's sweep). Act 2's comparison is a control, so it is the one
+ * picture assistive technology reaches, and it is a little taller so both halves read.
+ */
+export function TourVisual({ visual, labels, playing, entering = playing }: { visual: EditorTourVisual; labels: readonly [string, string]; playing: boolean; entering?: boolean }) {
+  const compare = visual === 'frame-to-still';
   return (
-    <div className="relative h-32 overflow-hidden rounded-lg bg-muted ring-1 ring-border/70" aria-hidden="true">
+    <div className={cn('relative overflow-hidden rounded-lg bg-muted ring-1 ring-border/70', compare ? 'h-40' : 'h-32')} aria-hidden={compare ? undefined : 'true'}>
       {visual === 'extension' && <ExtensionToClip labels={labels} />}
-      {visual === 'frame-to-still' && <FrameToStill labels={labels} />}
+      {compare && <TourCompare labels={labels} sweep={entering} />}
       {visual === 'still-to-video' && <StillToVideo labels={labels} playing={playing} />}
     </div>
   );
@@ -40,25 +44,6 @@ function ExtensionToClip({ labels: [name, kind] }: { labels: readonly [string, s
         <div className="editor-tour-grow mt-1.5 h-1.5 origin-left rounded-full bg-primary/70" style={delay(860)} />
       </div>
     </div>
-  );
-}
-
-/** The realistic start frame wipes in over the Three.js one and stops halfway, so both stay in view. */
-function FrameToStill({ labels: [source, model] }: { labels: readonly [string, string] }) {
-  return (
-    <>
-      <TourMedia slot={EDITOR_TOUR_MEDIA.frames[0]} kind="frame" />
-      <div className="editor-tour-wipe absolute inset-0" style={{ ...delay(300), clipPath: `inset(0 0 0 ${WIPE_REST})` }}>
-        <TourMedia slot={EDITOR_TOUR_MEDIA.stills[0]} kind="still" />
-      </div>
-      <div className="editor-tour-wipe-handle absolute inset-y-0 w-px -translate-x-1/2 bg-card/90" style={{ ...delay(300), left: WIPE_REST }}>
-        <span className="absolute left-1/2 top-1/2 flex h-6 w-6 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-card text-primary shadow-sm">
-          <Sparkles className="h-3 w-3" strokeWidth={2} />
-        </span>
-      </div>
-      <Chip className="left-2">{source}</Chip>
-      <Chip className="right-2">{model}</Chip>
-    </>
   );
 }
 

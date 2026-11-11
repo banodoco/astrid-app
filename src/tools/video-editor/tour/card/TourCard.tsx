@@ -1,8 +1,9 @@
-import type { ReactNode } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import './TourCard.css';
 import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
 import { TOUR_FINALE_ENTRANCE_MS, TourStrip } from './TourStrip';
 import { TourVisual } from './TourVisual';
+import { TOUR_COMPARE_ENTRANCE_MS } from './TourCompare';
 import { TOUR_CARD_ENTRANCE_MS, useTourCardEntrance } from './useTourCardEntrance';
 import { useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
 import { ChevronLeft, Send } from 'lucide-react';
@@ -17,7 +18,7 @@ export interface TourCardProps {
   /** The beat to show: the runner's settled beat, which trails the store's while the card is about to move. */
   act: EditorTourAct;
   beat: EditorTourBeat;
-  /** Next, "I got it", or (while the reply plays) finish it: the runner decides, as for Enter. */
+  /** Next, Start creating, or (while the reply plays) finish it: the runner decides, as for Enter. */
   onPrimary: () => void;
   /** Go back to the previous place the user acted. Without it the card shows no Back. */
   onBack?: () => void;
@@ -42,7 +43,7 @@ const ACT_COUNT = 3;
 /**
  * The tour's card, for whatever beat the store is on. It opens with Astrid's welcome; while the chat has
  * the spotlight it is a quiet line (and the Next for the reply); on each `land` it explains the act with a
- * visual and the Agent → open models → output strip; at the end it asks "Do you get it?". Presentational: the runner positions it and owns the
+ * visual and the Agent → open models → output strip; at the end it says this was one example, then asks for feedback. Presentational: the runner positions it and owns the
  * actions. It marks itself ready once its entrance has played (at once on reduced motion or a skip).
  */
 export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'desktop' }: TourCardProps) {
@@ -55,8 +56,11 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
   const phone = device === 'phone';
   const tablet = device === 'tablet';
   // A card still showing the previous beat never reports ready for the new one.
-  // The finale's entrance runs on until its chain has lit.
-  const { settled, reducedMotion } = useTourCardEntrance(key, explains && live, beat === 'finale' ? TOUR_FINALE_ENTRANCE_MS : TOUR_CARD_ENTRANCE_MS);
+  // The finale's entrance runs on until its chain has lit, and act 2's until its comparison has swept to rest.
+  const entranceMs = beat === 'finale' ? TOUR_FINALE_ENTRANCE_MS
+    : beat === 'land' && SCRIPT.acts[act].card.visual === 'frame-to-still' ? TOUR_COMPARE_ENTRANCE_MS
+    : TOUR_CARD_ENTRANCE_MS;
+  const { settled, reducedMotion } = useTourCardEntrance(key, explains && live, entranceMs);
 
   return (
     <div
@@ -66,7 +70,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
       className={cn('editor-tour-card', reducedMotion ? 'editor-tour-card-reduced' : !settled && 'editor-tour-card-playing')}
     >
       <section
-        aria-label={beat === 'welcome' ? SCRIPT.welcome.title : beat === 'finale' ? SCRIPT.finale.title : beat === 'feedback' ? SCRIPT.feedback.title : `Tour, step ${act} of ${ACT_COUNT}`}
+        aria-label={beat === 'welcome' ? SCRIPT.welcome.title : beat === 'finale' ? SCRIPT.finale.title : beat === 'feedback' ? feedbackTitle() : `Tour, step ${act} of ${ACT_COUNT}`}
         className={cn(
           'editor-tour-rise max-w-[calc(100vw-24px)] max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card text-card-foreground shadow-xl',
           phone ? cn('w-[calc(100vw-24px)] rounded-2xl', explains ? 'p-5' : 'px-5 py-4') : tablet ? cn(
@@ -85,7 +89,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
         )}
       >
         {beat === 'welcome' && <Welcome onPrimary={onPrimary} onSkip={onSkip} fit={fit} />}
-        {beat === 'land' && <Explainer act={act} playing={!reducedMotion} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
+        {beat === 'land' && <Explainer act={act} playing={!reducedMotion} entering={!reducedMotion && !settled} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
         {beat === 'finale' && <Finale playing={!reducedMotion} onPrimary={onPrimary} onBack={onBack} fit={fit} />}
         {beat === 'feedback' && <Feedback onPrimary={onPrimary} onBack={onBack} fit={fit} />}
         {!explains && <Hint act={act} beat={beat} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
@@ -123,7 +127,7 @@ function NavRow({ secondary, children, className }: { secondary?: ReactNode; chi
 /** One heading style for every card's title on touch (Astrid's own cards keep the larger mink title). */
 const TOUCH_HEADING = 'text-pretty font-serif font-theme-heading text-xl leading-tight text-foreground';
 
-function Explainer({ act, playing, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
+function Explainer({ act, playing, entering, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; entering: boolean; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
   const { title, body, visual, labels } = SCRIPT.acts[act].card;
   const next = <PrimaryButton label={SCRIPT.controls.next} onPrimary={onPrimary} fit={fit} />;
   if (!fit.touch) {
@@ -131,7 +135,7 @@ function Explainer({ act, playing, onPrimary, onBack, onSkip, fit }: { act: Edit
       <>
         <CounterRow act={act} onBack={onBack} onSkip={onSkip} fit={fit} />
         <div className="mt-3">
-          <TourVisual visual={visual} labels={labels} playing={playing} />
+          <TourVisual visual={visual} labels={labels} playing={playing} entering={entering} />
         </div>
         <h2 className="mt-4 text-pretty font-serif font-theme-heading text-lg leading-tight text-foreground">{title}</h2>
         <p className="mt-1.5 text-pretty text-sm leading-6 text-muted-foreground">{body}</p>
@@ -181,6 +185,7 @@ function Welcome({ onPrimary, onSkip, fit }: Omit<TourCardProps, 'act' | 'beat'>
   );
 }
 
+/** "And this is just one example": the lit chain is the example, and the line under it opens it out. */
 function Finale({ playing, onPrimary, onBack, fit }: { playing: boolean; onPrimary: () => void; onBack?: () => void; fit: Fit }) {
   return (
     <>
@@ -188,7 +193,8 @@ function Finale({ playing, onPrimary, onBack, fit }: { playing: boolean; onPrima
       <div className="mt-6">
         <TourStrip filled={3} labels={SCRIPT.finale.recap} size="large" playing={playing} wrapLabels={fit.device === 'phone'} />
       </div>
-      <div className="mt-7 flex items-center justify-between gap-3">
+      <p className="mt-6 text-pretty text-[15px] leading-6 text-muted-foreground">{SCRIPT.finale.body}</p>
+      <div className="mt-6 flex items-center justify-between gap-3">
         <BackControl onBack={onBack} touch={fit.touch} />
         <PrimaryButton label={SCRIPT.finale.action} onPrimary={onPrimary} size="default" fit={fit} />
       </div>
@@ -201,7 +207,7 @@ function Feedback({ onPrimary, onBack, fit }: { onPrimary: () => void; onBack?: 
   const action = detectInstallScenario() === 'mobile' ? SCRIPT.feedback.mobileAction : SCRIPT.feedback.action;
   return (
     <>
-      <MinkTitle>{SCRIPT.feedback.title}</MinkTitle>
+      <MinkTitle><FeedbackTitle /></MinkTitle>
       <p className="mt-3 text-pretty text-[15px] leading-6 text-muted-foreground">{fit.device === 'phone' ? SCRIPT.feedback.shortBody : SCRIPT.feedback.body}</p>
       <Button asChild variant="outline" className={cn('mt-4 gap-2', fit.touch && 'h-11')}>
         <a href={DISCORD_URL} target="_blank" rel="noopener noreferrer">
@@ -213,6 +219,45 @@ function Feedback({ onPrimary, onBack, fit }: { onPrimary: () => void; onBack?: 
         <BackControl onBack={onBack} touch={fit.touch} />
         <PrimaryButton label={action} onPrimary={onPrimary} size="default" fit={fit} />
       </div>
+    </>
+  );
+}
+
+const feedbackTitle = () => [SCRIPT.feedback.title.before, SCRIPT.feedback.title.emphasis, SCRIPT.feedback.title.after].join(' ');
+
+/**
+ * "We really need your feedback", with the emphasised word underlined by a pen stroke that draws in once the card has landed
+ * (TourCard.css) and then stays; at rest, under reduced motion and on Back it is simply there. The stroke hangs just under the
+ * baseline, outside the line box's flow, so the title neither moves nor grows, and it stays with its word when the title wraps.
+ */
+function FeedbackTitle() {
+  const { before, emphasis, after } = SCRIPT.feedback.title;
+  return (
+    <>
+      {before}{' '}
+      <span data-tour-emphasis className="relative whitespace-nowrap">
+        {emphasis}
+        <svg
+          aria-hidden="true"
+          className="pointer-events-none absolute -left-[0.06em] top-[calc(100%-0.16em)] h-[0.32em] w-[calc(100%+0.12em)] overflow-visible text-primary"
+          viewBox="0 0 100 10"
+          preserveAspectRatio="none"
+        >
+          {/* A slight rise and dip, like a pen's, never a ruler's line. */}
+          <path
+            className="editor-tour-underline"
+            style={{ '--tour-delay': '650ms' } as CSSProperties}
+            d="M1 6.2 C 18 4.6, 40 4.2, 60 5 S 88 6.4, 99 4.4"
+            pathLength={1}
+            strokeDasharray={1}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={2.6}
+            strokeLinecap="round"
+          />
+        </svg>
+      </span>{' '}
+      {after}
     </>
   );
 }

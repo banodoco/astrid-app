@@ -106,6 +106,25 @@ describe('document navigation preparation', () => {
     expect(documentNavigationPhase()).toBe('open');
   });
 
+  it('waits for a poll started while owners were sending, before new requests were refused', async () => {
+    const { target, pending } = fakeGlobal();
+    installDocumentRequestRegistry(target);
+    let poll!: Promise<string>;
+    // A health poll fires while the settings owner is still writing: the page is open, so it goes out.
+    registerNavigationOwner({ label: 'settings', prepare: async () => { poll = target.fetch('/api/runtime/v1/health').then((response) => response.text()); } });
+    let prepared = false;
+    const preparing = prepareDocumentNavigation().then(() => { prepared = true; });
+    await flush();
+    expect(documentNavigationPhase()).toBe('settling');
+    expect(inflightRuntimeRequests()).toEqual(['GET api/runtime/v1/health']);
+    pending[0].respond();
+    await flush();
+    expect(prepared, 'its answer has not been read to the end').toBe(false);
+    pending[0].end();
+    await preparing;
+    expect(await poll).toBe('{"ok":true}');
+  });
+
   it('leaves a byte body to its caller, so the caller cancelling it stops the transfer', async () => {
     const { target, pending } = fakeGlobal();
     installDocumentRequestRegistry(target);

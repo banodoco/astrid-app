@@ -104,13 +104,16 @@ export function useSettledRects({ key, targetsKey, measurement, motion, moving, 
     began.current = { key, at: performance.now() };
     mark('step', key);
   }
-  const loop = useRef({ frame: 0, since: null as number | null, sinceKey: '', seenTargets: '', seenStill: '', signature: '', changedAt: 0, frames: 0, jump: false });
+  const loop = useRef({ frame: 0, since: null as number | null, sinceKey: '', capTimer: undefined as ReturnType<typeof setTimeout> | undefined, seenTargets: '', seenStill: '', signature: '', changedAt: 0, frames: 0, jump: false });
 
   // `inFrame`: called from an animation frame, where the commit can render at once and so paint in this very frame (the
   // move starts a frame sooner than a scheduled render would start it).
-  const commit = (animate: boolean, at: number, inFrame = false) => {
+  // `capped`: the wait ran out with the targets still moving; what is committed is where they are now, not the reading
+  // React last heard of (which, during a long slide, is where the slide began).
+  const commit = (animate: boolean, at: number, inFrame = false, capped = false) => {
     const { key: nextKey, measurement: m, viewport: vp } = latest.current;
-    const next = { key: nextKey, rects: m.rects, animate, serial: (committed.current?.serial ?? 0) + 1 };
+    const rects = capped && !m.still ? m.latest?.() ?? m.rects : m.rects;
+    const next = { key: nextKey, rects, animate, serial: (committed.current?.serial ?? 0) + 1 };
     committed.current = { ...next, at, viewport: vp };
     loop.current.since = null;
     mark('commit', nextKey);
@@ -153,7 +156,7 @@ export function useSettledRects({ key, targetsKey, measurement, motion, moving, 
     }
     const left = !moves || !mustLeave || !newStep || !done || now - run.since >= TOUR_LEAVE_GATE_MS;
     const landed = newStep || !moves || (now - done.at >= TOUR_MOVE_MS && !inFlight?.());
-    if (isValid && landed && ((still && m.complete && left) || capped)) commit(!!done, now, inFrame);
+    if (isValid && landed && ((still && m.complete && left) || capped)) commit(!!done, now, inFrame, capped && !(still && m.complete));
     else again();
   };
 
@@ -171,13 +174,21 @@ export function useSettledRects({ key, targetsKey, measurement, motion, moving, 
     if (done && done.key !== key && run.sinceKey !== key) {
       run.sinceKey = key;
       run.since = began.current.at;
+      // The cap is a wall-clock bound: where frames are not coming (a throttled or stalled page) a timer still ends the wait.
+      clearTimeout(run.capTimer);
+      run.capTimer = setTimeout(() => tick(performance.now(), false), TOUR_SETTLE_CAP_MS + 20);
     }
     // Looked at now, not on the next frame: a measurement that has just come to rest can commit at once.
     tick(performance.now(), false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, targetsKey, signatureOf(measurement), viewport, motion]);
 
-  useEffect(() => () => { if (loop.current.frame) cancelAnimationFrame(loop.current.frame); }, []);
+  useEffect(() => () => {
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    const run = loop.current;
+    if (run.frame) cancelAnimationFrame(run.frame);
+    clearTimeout(run.capTimer);
+  }, []);
 
   return state ?? { key, rects: valid ? measurement.rects : [], animate: false, serial: 0 };
 }

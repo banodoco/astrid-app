@@ -76,16 +76,35 @@ function advanceBeat(): void {
   finishEditorTour();
 }
 
-/** Enter, and the card's OK / Next button: finish the animation first, then act. */
+/**
+ * Whether one press of Next may leave the beat now. What is still playing must be decoration the user is already looking
+ * at, never something they have not seen:
+ *  - welcome, land, gallery, finale, feedback: as soon as the beat's card is there and at rest (`arrived`). Its entrance
+ *    (the visual, the strip, the chain lighting up, 1.5 s or more) may still be playing; so may the result behind it;
+ *  - respond: once the reply is whole and its actions have begun to appear, with the card beside them;
+ *  - compose never leaves by Next (only by Send, once the prompt is typed).
+ * Before that a press finishes what is still arriving (the prompt being typed, the reply streaming, a result's watch
+ * before its explainer) and a second one moves on.
+ */
+export function canEditorTourAdvance(state: EditorTourState): boolean {
+  if (isEditorTourBeatReady(state)) return true;
+  const { beat, ready } = state;
+  if (beat === 'compose') return false;
+  if (beat === 'respond') return ready.actions && ready.arrived;
+  return ready.arrived;
+}
+
+/** Enter, and the card's OK / Next button: act if the beat can be left (`canEditorTourAdvance`), else finish what is arriving. */
 export function runEditorTourPrimary(): void {
   const state = getEditorTourState();
   if (state.status !== 'running') return;
   notifyEditorTourGesture();
-  if (!isEditorTourBeatReady(state)) return skipEditorTourAnimation();
   if (state.beat === 'compose') {
+    if (!isEditorTourBeatReady(state)) return skipEditorTourAnimation();
     if (!state.sent) markEditorTourSent();
     return;
   }
+  if (!canEditorTourAdvance(state)) return skipEditorTourAnimation();
   advanceBeat();
 }
 

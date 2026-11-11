@@ -19,6 +19,7 @@ import {
 import { editorTourSelector } from '@/tools/video-editor/tour/anchors.ts';
 import { useEditorDeviceClass } from '@/tools/video-editor/tour/runner/useIsDesktopEditor.ts';
 import { TOUR_MOVE_MS } from '@/tools/video-editor/tour/runner/useSettledRects.ts';
+import { registerEditorTourGesture } from '@/tools/video-editor/tour/runner/tourBeats.ts';
 import { tourIdle, useTourMediaWarmup } from './useTourMediaWarmup.ts';
 import { EDITOR_TOUR_MEDIA, tourPlaybackUrl, tourSaveData } from '../tourMedia.ts';
 import { createTourVideoEngine, type TourVideoEngine } from './tourPicture.ts';
@@ -163,17 +164,26 @@ export function EditorTourTimelineDriver() {
       ?? document.querySelector(editorTourSelector('preview')));
   }, [runId, act, beat, appliedStage]);
 
+  /** The file the picture engine should hold for the tour's stage (the stage's clip, or the next one's while stills show). */
+  const wantedClip = useRef<string | null>(null);
   // ---- the picture engine: one <video> per run, none with reduced motion
   const [engine, setEngine] = useState<TourVideoEngine | null>(null);
   useEffect(() => {
     if (reducedMotion) return undefined;
     const created = createTourVideoEngine();
     setEngine(created);
-    // Every press of the tour (Next, Send, Enter) is a chance to start the video inside a user gesture.
-    const prime = () => created.prime();
+    // Every press of the tour (Next, Send, Enter) is a chance to start the video inside a user gesture. The clip the
+    // tour shows next is assigned first, in case a quick advance cancelled the idle moment that would have buffered it.
+    const prime = () => {
+      if (wantedClip.current) created.load(wantedClip.current);
+      created.prime();
+    };
     const gestures = ['click', 'keydown', 'touchend'] as const;
     gestures.forEach((type) => document.addEventListener(type, prime, { capture: true, passive: true }));
+    // The tour's own keys never reach the document (`useTourKeys` takes them on the window): its gesture seam does.
+    const unregister = registerEditorTourGesture(prime);
     return () => {
+      unregister();
       gestures.forEach((type) => document.removeEventListener(type, prime, { capture: true }));
       created.dispose();
       setEngine(null);
@@ -268,6 +278,16 @@ export function EditorTourTimelineDriver() {
     // The element holds the clip of this stage or the next one, buffered in idle time: the guide until the stills land.
     const clip = stage <= 1 ? EDITOR_TOUR_MEDIA.guide : EDITOR_TOUR_MEDIA.video;
     const load = () => engine?.load(tourPlaybackUrl(clip, small), tourSaveData() && !forward ? 'metadata' : 'auto');
+    // (Not when the browser asks to save data: buffering then stays with the beats, which fetch metadata only.)
+    wantedClip.current = tourSaveData() ? null : tourPlaybackUrl(clip, small);
+    // A phone's chat covers the whole screen until the card and spotlight have left it, and then takes the length of
+    // their move to slide away: the result starts (and its watch is timed) once it can be seen, and nothing starts
+    // decoding on the frames of that move.
+    const chatGone = async () => {
+      if (!phone) return;
+      await untilTour((state) => state.shownBeat === 'land' || isCancelled() || skipped(), CHAT_LEAVE_WAIT_MS);
+      await untilTour(() => isCancelled() || skipped(), TOUR_MOVE_MS);
+    };
 
     if (stage === 0 || stage === 2) {
       engine?.hold();
@@ -279,6 +299,7 @@ export function EditorTourTimelineDriver() {
       }
       void (async () => {
         if (forward) {
+          await chatGone();
           for (let index = 0; index <= LAST_ANCHOR; index++) {
             if (isCancelled() || skipped()) break;
             setStillIndex(index);
@@ -308,8 +329,7 @@ export function EditorTourTimelineDriver() {
       return () => { cancelled = true; };
     }
     void (async () => {
-      // A phone's chat covers the whole screen until the card and spotlight have left it.
-      if (phone) await untilTour((state) => state.shownBeat === 'land' || isCancelled() || skipped(), CHAT_LEAVE_WAIT_MS);
+      await chatGone();
       if (isCancelled()) return;
       reportJump(0);
       await Promise.race([

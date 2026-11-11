@@ -188,6 +188,11 @@ export interface SpotlightMeasurement {
   complete: boolean;
   /** The rects have held for a couple of frames: nothing is sliding, so whoever waits for stillness need wait no longer. */
   still?: boolean;
+  /**
+   * The rects as they are this frame, for whoever cannot wait any longer (the settle cap): React only hears of the first
+   * reading and of readings at rest, so during a long slide the published rects are where the slide began.
+   */
+  latest?: () => readonly SpotlightRect[];
 }
 
 const sameMeasurement = (a: SpotlightMeasurement, b: SpotlightMeasurement) => a.key === b.key && a.complete === b.complete && sameRects(a.rects, b.rects);
@@ -255,6 +260,12 @@ export function useSpotlightMeasurement(targets: readonly SpotlightTarget[]): Sp
 
   useEffect(() => {
     const list = parseTargetKey(key);
+    // Nothing to measure (a step with no spotlight, a helper measurement that is off): no observers, no listeners.
+    if (list.length === 0) {
+      setMeasurement((previous) => (previous.key === '' && previous.rects.length === 0 && previous.still ? previous : { key: '', rects: [], complete: true, still: true }));
+      return undefined;
+    }
+    const latest = () => last?.rects ?? [];
     const resizeObserver = new ResizeObserver(() => schedule());
     let observed = new Set<Element>();
     let found: Array<{ target: SpotlightTarget; element: Element }> = [];
@@ -266,7 +277,7 @@ export function useSpotlightMeasurement(targets: readonly SpotlightTarget[]): Sp
 
     const publish = (next: SpotlightMeasurement): void => {
       published = next;
-      setMeasurement((previous) => (sameMeasurement(previous, next) && !!previous.still === !!next.still ? previous : next));
+      setMeasurement((previous) => (sameMeasurement(previous, next) && !!previous.still === !!next.still ? previous : { ...next, latest }));
     };
 
     function update(now: number = performance.now()) {

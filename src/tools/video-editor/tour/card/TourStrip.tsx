@@ -33,11 +33,11 @@ export const TOUR_FINALE_ENTRANCE_MS = lightAt(NODES.length - 1) + LIGHT_MS;
  * card (its connector draws in, then the thumbnail fades up); later steps wait as empty frames (`medium` is the same at the large strip's size, for a tablet's card). The large strip
  * (the finale) is the whole chain lit in the accent, played in by the card's entrance and at rest once it settles.
  */
-export function TourStrip({ filled, labels, size = 'compact', playing = false, wrapLabels = false }: {
+export function TourStrip({ filled, labels, size = 'compact', wrapLabels = false }: {
   filled: 1 | 2 | 3;
   labels: readonly [string, string, string];
   size?: 'compact' | 'medium' | 'large';
-  /** The video step plays once and holds its final frame (large strip only). */
+  /** Whether the chain's entrance is playing (large strip only); the pictures themselves are always stills. */
   playing?: boolean;
   /** Let long labels take two lines (a phone's finale), instead of running past their node. */
   wrapLabels?: boolean;
@@ -73,10 +73,9 @@ export function TourStrip({ filled, labels, size = 'compact', playing = false, w
                 >
                   {reached && (
                     <span className={cn('absolute inset-0', newest && 'editor-tour-fade')} style={delay(800)}>
-                      {node.kind === 'video' && !(large && playing)
-                        // At rest the video shows where the flight ends (the town), so it never repeats the still beside it.
-                        ? <TourMedia slot={VIDEO_REST} kind="still" />
-                        : <TourMedia slot={node.slot} kind={node.kind} poster={EDITOR_TOUR_MEDIA.stills[0].displayUrl ?? EDITOR_TOUR_MEDIA.stills[0].url} playing={large && playing && node.kind === 'video'} />}
+                      {/* The video step is a still of where the flight ends (the town), so it never repeats the still
+                          beside it; the shot itself is playing in the preview, and is not decoded a second time here. */}
+                      {node.kind === 'video' ? <TourMedia slot={VIDEO_REST} kind="still" /> : <TourMedia slot={node.slot} kind={node.kind} />}
                     </span>
                   )}
                 </span>

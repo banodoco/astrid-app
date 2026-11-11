@@ -20,7 +20,9 @@ export function TourMedia({ slot, kind, className, playing = false, poster }: {
   const fill = cn('absolute inset-0 h-full w-full object-cover', className);
   if (!slot.url) return <ValleyArt faceted={kind === 'frame'} className={fill} />;
   // The card is small: it shows the slot's WebP derivative and plays its 540p rendition, never the multi-megabyte original.
-  if (kind === 'video') return <TourVideo key={slot.url} end={slot.previewDurationSeconds} url={slot.playback?.small ?? slot.url} poster={poster} playing={playing} className={fill} />;
+  // With `playing` false no video element is mounted at all (reduced motion, a card at rest): nothing is fetched to sit paused.
+  if (kind === 'video' && playing) return <TourVideo key={slot.url} end={slot.previewDurationSeconds} url={slot.playback?.small ?? slot.url} poster={poster} playing={playing} className={fill} />;
+  if (kind === 'video') return <img className={fill} src={poster ?? slot.displayUrl ?? slot.url} alt="" draggable={false} decoding="async" />;
   return <img className={fill} src={slot.displayUrl ?? slot.url} alt="" draggable={false} decoding="async" />;
 }
 

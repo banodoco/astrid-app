@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { EDITOR_TOUR_ANCHORS, EDITOR_TOUR_TRACK_IDS, editorTourSelector, editorTourTrackSelector } from '../anchors';
 import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
@@ -23,6 +23,9 @@ const PHONE_EDGE = 12;
 const PHONE_LAND_TOP = 6;
 /** The gap between a phone's card and what it points at. */
 const PHONE_GAP = 8;
+
+/** How long into a step with no card its unseen card takes that step's own content: once the spotlight's move is over. */
+const HIDDEN_CARD_SWAP_MS = TOUR_MOVE_MS + 140;
 
 const ACT_TRACK: Record<EditorTourAct, string> = {
   1: EDITOR_TOUR_TRACK_IDS.scene,
@@ -209,11 +212,18 @@ function RunningTour() {
   const { rects: spotlit, position } = shown.current;
   // Stable elements: a new rect or position re-renders this component, not the gallery layer or the card's content.
   const gallery = useMemo(() => <TourGalleryLayer />, []);
-  // A step with no card keeps the last card's content while its host fades out where it stands (and unseen after that):
-  // the next card's content arrives with the step that shows it, never inside a box that is on its way out.
+  // A step with no card keeps the last card's content while its host fades out where it stands: the next card's content
+  // never shows inside a box that is on its way out. Once the spotlight's move is over the unseen card takes the step's
+  // own content, so its size and place are final long before it fades in (and mounting it never lands on the move).
+  const [hiddenReady, setHiddenReady] = useState<string | null>(null);
+  useEffect(() => {
+    if (!hidden) return undefined;
+    const timer = setTimeout(() => setHiddenReady(commit.key), HIDDEN_CARD_SWAP_MS);
+    return () => clearTimeout(timer);
+  }, [hidden, commit.key]);
   const stepOfCard = () => ({ act: Number(shownAct) as EditorTourAct, beat: shownBeat, working: shownPhase === 'working', rise: rise.current.rise });
   const cardStep = useRef(stepOfCard());
-  if (!hidden) cardStep.current = stepOfCard();
+  if (!hidden || hiddenReady === commit.key) cardStep.current = stepOfCard();
   const { act: shownActNumber, beat: cardBeat, working: shownWorking, rise: cardRise } = cardStep.current;
   const card = useMemo(() => (
     <TourCard

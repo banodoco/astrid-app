@@ -114,11 +114,16 @@ export function createTourVideoEngine(): TourVideoEngine {
     }
   };
 
+  // Every load, start and hold begins a new generation: a `play()` promise that settles late (an old start's rejection,
+  // an old prime's fulfilment) acts only if its own generation is still the current one.
+  let generation = 0;
+
   const engine: TourVideoEngine = {
     element: video,
     onTime: null,
     load(url, preload = 'auto') {
       if (disposed || video.getAttribute('src') === url) return;
+      generation += 1;
       wanted = false;
       primedSrc = null;
       settleStart('timeout');
@@ -128,23 +133,30 @@ export function createTourVideoEngine(): TourVideoEngine {
       video.load();
     },
     prime() {
-      if (disposed || !video.getAttribute('src')) return;
+      const src = video.getAttribute('src');
+      if (disposed || !src) return;
       if (wanted) {
         // A start the browser refused (or that has not begun): this press may be what it was waiting for.
         if (video.paused && !video.ended) void play().catch(() => undefined);
         return;
       }
-      if (!video.paused || primedSrc === video.getAttribute('src')) return;
-      primedSrc = video.getAttribute('src');
+      if (!video.paused || primedSrc === src) return;
+      primedSrc = src;
+      const mine = generation;
       void play().then(() => {
-        if (wanted || disposed) return;
+        if (mine !== generation || wanted || disposed) return;
         video.pause();
         if (video.currentTime > 0) video.currentTime = 0;
-      }, () => undefined);
+      }, () => {
+        // Refused: the next press may try again.
+        if (mine === generation && primedSrc === src) primedSrc = null;
+      });
     },
     start(deadlineMs) {
       if (disposed) return Promise.resolve('rejected');
       settleStart('timeout');
+      generation += 1;
+      const mine = generation;
       wanted = true;
       primedSrc = video.getAttribute('src');
       setPresenting(false);
@@ -153,13 +165,14 @@ export function createTourVideoEngine(): TourVideoEngine {
         if (video.ended || video.currentTime > 0.05) video.currentTime = 0;
       } catch { /* not seekable yet: it starts at 0 anyway */ }
       return new Promise<TourVideoStart>((resolve) => {
-        const timer = setTimeout(() => settleStart('timeout'), deadlineMs);
+        const timer = setTimeout(() => { if (mine === generation) settleStart('timeout'); }, deadlineMs);
         pendingStart = (result) => { clearTimeout(timer); resolve(result); };
         watchFrames();
-        void play().catch(() => settleStart('rejected'));
+        void play().catch(() => { if (mine === generation) settleStart('rejected'); });
       });
     },
     hold() {
+      generation += 1;
       wanted = false;
       settleStart('timeout');
       if (!video.paused) video.pause();
@@ -172,6 +185,7 @@ export function createTourVideoEngine(): TourVideoEngine {
     dispose() {
       if (disposed) return;
       disposed = true;
+      generation += 1;
       wanted = false;
       settleStart('timeout');
       if (frameHandle !== null) video.cancelVideoFrameCallback?.(frameHandle);

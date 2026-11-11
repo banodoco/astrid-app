@@ -8,7 +8,10 @@ import { useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared
  * so a slow load never eats the hold. Act 2's walk is itself the watch, so its hold is only a breath.
  */
 export const LAND_WATCH_HOLD_MS: Record<EditorTourAct, number> = { 1: 2000, 2: 300, 3: 3000 };
-/** If the result never reports that it is playing, the explainer comes anyway (its Next still waits for the timeline). */
+/**
+ * The longest a watch lasts, from the moment the beat begins, whatever the result does: if it never reports that it is
+ * playing, or reports it late, the explainer comes by then (a hold that starts late is cut short, never added on top).
+ */
 export const LAND_WATCH_CAP_MS = 9000;
 /** A watch step's key is its explainer step's key plus this. */
 export const WATCH_SUFFIX = ':watch';
@@ -35,13 +38,17 @@ export function useLandWatch(beatKey: string, act: EditorTourAct, beat: EditorTo
     if (!eligible) setReleased(null);
   }, [eligible]);
 
+  const began = useRef({ visit, at: performance.now() });
+  if (began.current.visit !== visit) began.current = { visit, at: performance.now() };
+
   useEffect(() => {
     if (!eligible) return undefined;
     if (skipped) {
       setReleased(beatKey);
       return undefined;
     }
-    const timer = setTimeout(() => setReleased(beatKey), presented ? LAND_WATCH_HOLD_MS[act] : LAND_WATCH_CAP_MS);
+    const capLeft = Math.max(0, LAND_WATCH_CAP_MS - (performance.now() - began.current.at));
+    const timer = setTimeout(() => setReleased(beatKey), presented ? Math.min(LAND_WATCH_HOLD_MS[act], capLeft) : capLeft);
     return () => clearTimeout(timer);
   }, [eligible, presented, skipped, beatKey, act]);
 

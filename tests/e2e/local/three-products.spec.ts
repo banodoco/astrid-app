@@ -658,8 +658,12 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   // The App reloads itself once per restart, after its drafts are safe (RuntimeConnectionPill.tsx; draftSafeReload.ts; a1ce3d6ce,
   // a6c1e429a). The test-owned hold is not a socket to the stopped Runtime: it stays pending forever unless aborted (723025f60), so
   // abort the old page's held commit and let the guarded reload preserve it. Recovery delivery stays held by the same gate.
+  // Armed before the abort that lets the reload start: `load` fires only for a new document, so the probe below reads the
+  // reloaded page, never the old one while it is being navigated away.
+  const reloaded = page.waitForEvent('load', CEILING);
   await hold.abortHeld();
-  await expect.poll(() => noReloadFlag(page), CEILING).toBeFalsy();
+  await reloaded;
+  expect(await noReloadFlag(page), 'the App reloaded itself: the new document does not carry the old page\'s flag').toBeUndefined();
   await expectConnected(page);
   await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toHaveCount(0);
   await openSeededTimeline(page, harness);
@@ -1387,7 +1391,7 @@ async function ownerWithTwoMountedDocuments(page: Page, seed: ThreeProductsSeed)
   return owner;
 }
 
-async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, sniff?: TokenSniff) {
+async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, sniff = TokenSniff.attachedTo(page)) {
   // A case selected alone must establish its own verified authoring baseline.
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   // The hosted blank page establishes the storage origin without mounting an

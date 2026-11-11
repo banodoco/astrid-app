@@ -340,3 +340,37 @@ describe('Astrid bridge transport quiet retry', () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('Astrid bridge transport and a prepared navigation', () => {
+  afterEach(async () => {
+    const navigation = await import('@/shared/lib/navigation/documentNavigation');
+    navigation.resetDocumentNavigationForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it('lets the page cancel a request with no deadline (an agent turn), and waits for one with a deadline', async () => {
+    const navigation = await import('@/shared/lib/navigation/documentNavigation');
+    navigation.resetDocumentNavigationForTests();
+    const answers: Array<() => void> = [];
+    const aborted: string[] = [];
+    vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((resolve, reject) => {
+      answers.push(() => resolve(Response.json({ ok: true })));
+      init?.signal?.addEventListener('abort', () => { aborted.push(String(input)); reject(init.signal!.reason); }, { once: true });
+    })));
+    navigation.installDocumentRequestRegistry(globalThis);
+    const transport = new AstridBridgeTransport({ baseUrl: 'http://bridge.test/api/astrid' });
+    const schema = z.object({ ok: z.boolean() });
+    const turn = transport.requestJson('/acp/c-1/rpc', { method: 'POST', timeoutMs: null, body: { method: 'session/prompt' } }, schema, 'ACP session/prompt');
+    const rename = transport.requestJson('/acp/projects/p-1/chat', { method: 'PATCH', body: {} }, schema, 'Rename');
+    const settled = expect(turn).rejects.toBeInstanceOf(BridgeTransportFailure);
+    let prepared = false;
+    const preparing = navigation.prepareDocumentNavigation().then(() => { prepared = true; });
+    await settled;
+    expect(aborted).toEqual(['http://bridge.test/api/astrid/acp/c-1/rpc']);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(prepared, 'an ordinary request is waited for').toBe(false);
+    answers[1]!();
+    await preparing;
+    await expect(rename).resolves.toEqual({ ok: true });
+  });
+});

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { prepareDocumentNavigation } from '@/shared/lib/navigation/documentNavigation';
+import { prepareDocumentNavigation, releaseDocumentNavigation } from '@/shared/lib/navigation/documentNavigation';
 
 export type DraftSafeReloadGuard = {
   label: string;
@@ -99,6 +99,8 @@ export function useDraftSafeReload(label: string, flush: () => Promise<void>, en
   }, [enabled, label]);
 }
 
+export const DRAFTS_CHANGED_BEFORE_RELOAD = 'Drafts changed before reload. Try again.';
+
 /** Run a caller's reload only after every registered draft has reached durable storage. */
 export function useGuardedReload(reloadImpl: () => void = () => window.location.reload()): {
   flush: () => Promise<false | (() => boolean)>;
@@ -131,9 +133,15 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
     setError(null);
     try {
       const validate = await flushDraftsBeforeReload('reload');
-      if (!validate()) throw new Error('Drafts changed before reload. Try again.');
+      if (!validate()) throw new Error(DRAFTS_CHANGED_BEFORE_RELOAD);
       // Every Runtime request ends before the page goes; a request that will not end does not keep the page.
       await prepareDocumentNavigation().catch(() => undefined);
+      // The final check runs again after the wait, with nothing awaited before the reload: a draft edited while
+      // requests settled keeps the page, which opens again so that draft can be saved.
+      if (!validate()) {
+        releaseDocumentNavigation();
+        throw new Error(DRAFTS_CHANGED_BEFORE_RELOAD);
+      }
       reloadImpl();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

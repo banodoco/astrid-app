@@ -3390,3 +3390,104 @@ describe('ExtensionLoader.load — pack routes use runtimeApiBase()', () => {
     }
   });
 });
+
+// ---------------------------------------------------------------------------
+// Prepared navigations hand the lease back, and a page that stays retains it again
+// ---------------------------------------------------------------------------
+
+describe('ExtensionLoader.load — artifact lease across a prepared navigation', () => {
+  it('hands the lease back when a navigation is prepared and retains the revision again when none follows', async () => {
+    const navigation = await import('@/shared/lib/navigation/documentNavigation');
+    navigation.resetDocumentNavigationForTests();
+    const bundleContent = 'lease across navigation';
+    const packRecord = await makePackRecord('com.test.lease-navigation', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent,
+      "export default { manifest, activate() { return { dispose() {} }; } };");
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    let leases = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/runtime/packs/leases/')) {
+        calls.push(`${init?.method ?? 'GET'} ${url}`);
+        const lease = String(init?.method === 'POST' ? ++leases : leases).repeat(64);
+        return { ok: true, redirected: false, json: async () => ({ version: 1, lease, released: true }) } as Response;
+      }
+      return originalFetch(input, init);
+    }));
+    try {
+      const loader = createExtensionLoader();
+      const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+      const result = await loader.load([validation.entries[0].validatedPackage!]);
+      expect(result.allLoaded).toBe(true);
+      const leaseRoute = `/api/runtime/packs/leases/${artifactManifest.packId}/${artifactManifest.digest}`;
+      expect(calls).toEqual([`POST ${leaseRoute}`]);
+
+      await navigation.prepareDocumentNavigation();
+      expect(calls, 'the lease is handed back before the page could go').toEqual([`POST ${leaseRoute}`, `DELETE /api/runtime/packs/leases/${'1'.repeat(64)}`]);
+
+      // The host asked to prepare, but the person stayed: the extension still runs, so its revision is retained again.
+      navigation.releaseDocumentNavigation();
+      await vi.waitFor(() => expect(calls).toHaveLength(3));
+      expect(calls[2]).toBe(`POST ${leaseRoute}`);
+
+      // The retained lease is the one a later disposal hands back.
+      const { releaseAdmittedExtensionAssets } = await import('@/tools/video-editor/runtime/extensionLoader');
+      releaseAdmittedExtensionAssets(result.loadedExtensions[0]);
+      await vi.waitFor(() => expect(calls).toHaveLength(4));
+      expect(calls[3]).toBe(`DELETE /api/runtime/packs/leases/${'2'.repeat(64)}`);
+
+      // A disposed extension is not retained again by a later navigation that does not happen.
+      await navigation.prepareDocumentNavigation();
+      navigation.releaseDocumentNavigation();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      expect(calls).toHaveLength(4);
+    } finally {
+      navigation.resetDocumentNavigationForTests();
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+});
+
+describe('ExtensionLoader.load — a revision that cannot be retained again', () => {
+  it('stops the extension when the page stays but its lease cannot be taken again', async () => {
+    const navigation = await import('@/shared/lib/navigation/documentNavigation');
+    navigation.resetDocumentNavigationForTests();
+    const bundleContent = 'lease lost after navigation';
+    const packRecord = await makePackRecord('com.test.lease-lost', '1.0.0', bundleContent);
+    const artifactManifest = artifactFixture(packRecord, bundleContent,
+      "export default { manifest, activate() { return { dispose() { globalThis.__leaseLostStops = (globalThis.__leaseLostStops ?? 0) + 1; } }; } };");
+    const calls: string[] = [];
+    const originalFetch = globalThis.fetch;
+    let posts = 0;
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.startsWith('/api/runtime/packs/leases/')) {
+        calls.push(`${init?.method ?? 'GET'} ${url}`);
+        if (init?.method === 'POST' && ++posts > 1) return { ok: false, status: 404, redirected: false, json: async () => ({}) } as Response;
+        return { ok: true, redirected: false, json: async () => ({ version: 1, lease: 'a'.repeat(64), released: true }) } as Response;
+      }
+      return originalFetch(input, init);
+    }));
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const stops = () => (globalThis as { __leaseLostStops?: number }).__leaseLostStops ?? 0;
+    try {
+      const loader = createExtensionLoader();
+      const validation = loader.validate([{ kind: 'installed', packRecord, bundleContent, artifactManifest }]);
+      const result = await loader.load([validation.entries[0].validatedPackage!]);
+      const handle = result.loadedExtensions[0].activate({} as never) as { dispose(): void };
+      await navigation.prepareDocumentNavigation();
+      navigation.releaseDocumentNavigation();
+      await vi.waitFor(() => expect(stops(), 'the extension no longer runs without a lease').toBe(1));
+      expect(calls.filter((call) => call.startsWith('POST'))).toHaveLength(2);
+      // The host disposing it later neither stops it twice nor sends anything more.
+      handle.dispose();
+      expect(stops()).toBe(1);
+      expect(calls).toHaveLength(3);
+    } finally {
+      warn.mockRestore();
+      navigation.resetDocumentNavigationForTests();
+      vi.stubGlobal('fetch', originalFetch);
+    }
+  });
+});

@@ -655,29 +655,32 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   expect((await agent.status()).current_head, 'the draft is not saved').toBe(headBefore);
   expect(await currentHead(harness)).toBe(headBefore);
 
-  // The page reconnects after Reload, offers the draft back, and saves it once the hold is released.
-  await page.getByRole('button', { name: UI.reload }).click();
+  // The App reloads itself once per restart, after its drafts are safe (RuntimeConnectionPill.tsx; draftSafeReload.ts; a1ce3d6ce,
+  // a6c1e429a). The test-owned hold is not a socket to the stopped Runtime: it stays pending forever unless aborted (723025f60), so
+  // abort the old page's held commit and let the guarded reload preserve it. Recovery delivery stays held by the same gate.
+  await hold.abortHeld();
+  await expect.poll(() => noReloadFlag(page), CEILING).toBeFalsy();
   await expectConnected(page);
   await expect(page.getByRole('heading', { name: 'Astrid restarted' })).toHaveCount(0);
   await openSeededTimeline(page, harness);
   journey.facts.sameRealmAfterRestart = await expectSameRealm(page, harness, astrid);
-  const recovered = page.getByRole('button', { name: /^Recover saved edits/ })
-    .and(page.locator(`[data-owner-id="${draftBefore.ownerId}"]`));
-  await expect(recovered).toBeEnabled(CEILING);
+  // Recovery is the App's own native delivery of the retained outbox, with no button: it sends only the bytes and key the old page
+  // sent, and the same gate holds it, so nothing reaches the Runtime before they are verified (723025f60).
+  await expect.poll(() => hold.requests.length, CEILING).toBeGreaterThan(1);
+  expect(hold.requests.slice(1).every((held) => held.postData() === draftBefore.pending!.request.body
+    && held.headers()['idempotency-key'] === draftBefore.pending!.request.key), 'recovery sends only the retained bytes and key').toBe(true);
   const persisted = (await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === draftBefore.ownerId)!;
   expect(persisted.intents).toEqual(draftBefore.intents);
   expect(persisted.pending?.request).toEqual(draftBefore.pending!.request);
   expect(await currentHead(harness), 'reconnection alone never sends the draft').toBe(headBefore);
-  await hold.release();
   const recoveredSave = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
-  await recovered.click();
+  await hold.release(true);
   const saved = await recoveredSave;
   expect(saved.status(), 'the Runtime accepts the recovered draft').toBe(200);
   expect(saved.request().postData()).toBe(draftBefore.pending!.request.body);
   expect(saved.request().headers()['idempotency-key']).toBe(draftBefore.pending!.request.key);
   const result = await saved.json() as CommitAcceptedMutation;
   const keyAfter = saved.request().headers()['idempotency-key'];
-  await expect(recovered).toHaveCount(0, CEILING);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
   await expect.poll(() => currentHead(harness), CEILING).not.toBe(headBefore);
   await expect(firstTrackName(page)).toHaveValue('F2 kept across restart');
@@ -688,7 +691,7 @@ test('Runtime restart with the App open: the draft survives, saves after the rel
   expect((await agent.show()).summary.revision_id).toBe(headAfter);
   const state = await revisionState(harness, seed3, headAfter);
   expect(state.trackLabel, 'the saved revision is the draft').toBe('F2 kept across restart');
-  expect(result.receipt.receipt_id, 'the post-restart publication keeps its persisted retry identity').toBe(keyAfter);
+  expect(result.receipt.idempotency_key, 'the post-restart publication keeps its persisted retry identity (receipt_id is the Runtime txn id)').toBe(keyAfter);
   expect(headAfter).toBe(result.data.accepted_revision_id);
   expect((await allRevisions(harness, seed3)).length, 'recover/save creates exactly one revision').toBe(revisionsBefore + 1);
   await expectImmutableClosure(harness, seed3, result);
@@ -1494,13 +1497,13 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
   expect(position(c.data.canonical_document, seed3.appClipId)).toBe(5);
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   const afterReload = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
   expect(afterReload.pending?.request).toEqual(owner.pending!.request);
   expect(afterReload.intents).toEqual(owner.intents);
   expect(wire.posts, 'reload requires explicit owner recovery before retry').toHaveLength(1);
-  await page.close();
+  await sniff.close(page);
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
@@ -1690,8 +1693,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   const realmBefore = await expectSameRealm(page, harness, astrid);
   const originalARequest = { body: wire.posts[0].body, key: wire.posts[0].key };
   wire.armRecoveryRetry();
-  await wire.abortStagedRetry();
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry());
   await expectConnected(page);
   const afterReload = (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)!;
   expect(afterReload.pending?.request).toEqual(owner.pending!.request);
@@ -1699,7 +1701,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   expect(wire.posts, 'reload does not send queued B or retry A').toHaveLength(1);
   await expect.poll(() => wire.observed.length, CEILING).toBe(3);
   await wire.abortStagedRetry('connectionclosed');
-  await page.close();
+  await sniff.close(page, () => wire.abortStagedRetry('connectionclosed'));
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
@@ -1896,14 +1898,14 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
 
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   const afterReload = (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)!;
   expect(afterReload.pending?.request).toEqual(owner.pending?.request);
   expect(afterReload.intents).toEqual(owner.intents);
   expect(wire.posts).toHaveLength(1);
-  await page.close();
+  await sniff.close(page);
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
@@ -2158,14 +2160,14 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId))
     .find((owner) => owner.ownerId === ownerBeforeLoss.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   expect((await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === ownerBeforeLoss.ownerId)?.pending?.request)
     .toEqual(ownerBeforeLoss.pending!.request);
   expect(wire.posts).toHaveLength(1);
 
-  await page.close();
+  await sniff.close(page);
   await harness.restartRuntime();
   const reopened = await context.newPage();
   captureBoundedBrowserEvidence(reopened);
@@ -2365,11 +2367,11 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   await expect.poll(async () => (await commandOutboxes(page, expectedScope.timelineId)).find((owner) => owner.pending)?.pending?.outcome?.kind, CEILING).toBe('retry');
 
   const beforeRestart = await expectSameRealm(page, harness, astrid);
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await expect(firstTrackName(page)).toHaveValue('Bootstrap actual consumer edit', CEILING);
   expect(wire.posts).toHaveLength(1);
-  await page.close();
+  await sniff.close(page);
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(beforeRestart.runtimeInstanceId);
@@ -2442,7 +2444,7 @@ test('M1 real dependency conflict retains B original guards and pending identity
   expect(wire.posts[2].key).not.toBe(wire.posts[0].key);
   expect((await history(harness, seed3)).head.revision_id).toBe(pinOf(c).revision_id);
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 2);
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
   await expectConnected(page);
   const reloaded = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
   expect(reloaded.pending).toEqual(retained.pending);
@@ -2546,14 +2548,14 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   })]);
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   const afterReload = (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)!;
   expect(afterReload.pending?.request).toEqual(owner.pending?.request);
   expect(afterReload.intents).toEqual(owner.intents);
   expect(wire.posts).toHaveLength(1);
-  await page.close();
+  await sniff.close(page);
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
@@ -2706,7 +2708,7 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   expect(renamed.items).toHaveLength(moved.items.length + 1);
   expect(await allRevisions(harness, seed3)).toHaveLength(revisions.length + 1);
 
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   const reloaded = (await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === kept.ownerId)!;
@@ -2729,7 +2731,7 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
 
   const independent = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(rename),
     { kind: 'track', id: 'f2-mixed-independent' }, 'f2-mixed-independent');
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   await expect(firstTrackName(page)).toHaveValue(trackLabel);

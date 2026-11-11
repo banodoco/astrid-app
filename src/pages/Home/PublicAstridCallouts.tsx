@@ -75,11 +75,11 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     at: [0, 0.2],
     side: 'right',
     phoneTitle: 'Open knowledge',
-    // On phones: down beside the conversation window and in to the left edge of Astrid's reply.
+    // On phones: straight down onto Astrid's own avatar at the head of the conversation, low enough to
+    // stay in view while the chip is unfolded.
     phoneSide: 'bottom',
-    phoneTarget: '.astrid-chat-surface .justify-start > .rounded-2xl',
-    phoneAt: [0, 0.5],
-    phoneSwing: 0.3,
+    phoneTarget: '.astrid-chat-surface [data-conversation-presentation] > div:first-child img',
+    phoneAt: [0.5, 1],
   },
   {
     id: 'workflows',
@@ -102,12 +102,13 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     at: [1, 0.42],
     side: 'left',
     phoneTitle: 'Integrated into open-source tools',
-    // On phones the chip runs full width along the bottom, where its logos have room: its connector
-    // rises beside the conversation and turns in to the finished result.
+    // On phones the chip sits along the bottom, where its logos have room. Its connector rises beside
+    // the conversation and turns in to Astrid's reply, which stays clear of the chip when it unfolds
+    // upwards over the result and composer.
     phoneSide: 'top',
-    phoneTarget: '.astrid-chat-surface .astrid-example-result',
-    phoneAt: [0, 0.5],
-    phoneSwing: 0.022,
+    phoneTarget: '.astrid-chat-surface .justify-start > .rounded-2xl',
+    phoneAt: [0, 0.6],
+    phoneSwing: 0.03,
   },
 ];
 

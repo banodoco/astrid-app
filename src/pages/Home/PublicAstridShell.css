@@ -1720,7 +1720,8 @@
   .astrid-brand-name { font-size: 22px; }
   /* Beside the orange call to action the switch goes quiet: the chosen side is marked in ink, so the
      footer has one orange button, not two. */
-  .astrid-hero-copy .astrid-audience-switch { align-self: start; min-width: 0; margin-top: 13px; }
+  /* Centred on the headline's two lines (its margin matches the headline's top padding). */
+  .astrid-hero-copy .astrid-audience-switch { align-self: center; min-width: 0; margin-top: 12px; }
   .astrid-audience-switch button { min-height: 34px; padding-inline: 14px; }
   .astrid-audience-switch button[aria-pressed="true"],
   .astrid-public-site[data-dusk] .astrid-audience-switch button[aria-pressed="true"] {
@@ -1787,7 +1788,8 @@
   }
   .astrid-editor-stage {
     --astrid-phone-chip: 38px;
-    --astrid-phone-gap: 20px;
+    /* Deep enough that an unfolded top chip stops short of the tab its connector lands on. */
+    --astrid-phone-gap: 24px;
     --astrid-phone-rail: calc(8px + var(--astrid-phone-chip) + var(--astrid-phone-gap));
     /* The demo is a miniature: laid out at full size, then drawn at this scale and narrower than the
        frame, so it reads as a whole editor (or a whole chat window) rather than a few oversized
@@ -1895,9 +1897,13 @@
   .astrid-example-result strong { font-size: 11px; }
   .astrid-example-result span { font-size: 10px; }
   .astrid-composer-field { padding: 3px 3px 3px 8px; }
-  .astrid-composer input { min-height: 28px; font-size: 10px; line-height: 1.2; letter-spacing: 0; }
+  /* In the miniature the composer is a prop: it takes the conversation's type size (overriding the
+     touch-device floor that keeps real fields from zooming) and cannot be tapped into. */
+  .astrid-public-site .astrid-composer input {
+    min-width: 0; min-height: 28px; font-size: 12px !important; line-height: 1.2; letter-spacing: 0;
+    pointer-events: none;
+  }
   .astrid-composer button { flex: 0 0 28px; width: 28px; height: 28px; }
-  .astrid-composer input { min-width: 0; }
   .astrid-conversation-footer > .astrid-example-result p { display: none; }
   .astrid-scripted-conversation [data-conversation-presentation] > div:first-child { padding-block: 8px; }
   .astrid-scripted-conversation [data-conversation-presentation] > div:nth-child(2) { padding: 8px 12px; }
@@ -2003,14 +2009,14 @@
    footer and slimmer panels, so the demo keeps its room and nothing scrolls. */
 @media (max-width: 640px) and (max-height: 700px) {
   .astrid-hero-copy h1 { padding-top: 9px; font-size: clamp(19px, 5.6vw, 22px); line-height: 1.15; }
-  .astrid-hero-copy .astrid-audience-switch { margin-top: 8px; }
+  .astrid-hero-copy .astrid-audience-switch { margin-top: 9px; }
   .astrid-hero-subtitle { font-size: 13px; }
   .astrid-mobile-hero-subtitles { margin: 4px 0 8px; }
   .astrid-button { min-height: 44px; }
   .astrid-landing-grid { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   .astrid-landing-grid::after { margin-bottom: calc(-1 * max(10px, env(safe-area-inset-bottom))); }
   .astrid-showcase { padding: 6px 0 8px; }
-  .astrid-editor-stage { --astrid-phone-chip: 36px; --astrid-phone-gap: 16px; }
+  .astrid-editor-stage { --astrid-phone-chip: 36px; --astrid-phone-gap: 22px; }
 }
 /* The smallest screens keep headline and action only, and trim every panel a little more. */
 @media (max-width: 640px) and (max-height: 600px) {
@@ -2019,12 +2025,12 @@
   .astrid-brand { min-height: 36px; }
   .astrid-audience-switch button { min-height: 30px; }
   .astrid-showcase { padding: 4px 0 6px; }
-  .astrid-editor-stage { --astrid-phone-chip: 34px; --astrid-phone-gap: 14px; --astrid-phone-scale: .68; --astrid-phone-inset: 11%; }
+  .astrid-editor-stage { --astrid-phone-chip: 34px; --astrid-phone-gap: 20px; --astrid-phone-scale: .68; --astrid-phone-inset: 11%; }
 }
 /* Tall screens have room to spare: give it to the headline, the chips and the panels. */
 @media (max-width: 640px) and (min-height: 780px) {
   .astrid-hero-copy h1 { padding-top: 16px; font-size: clamp(28px, 8.4vw, 36px); }
-  .astrid-hero-copy .astrid-audience-switch { margin-top: 18px; }
+  .astrid-hero-copy .astrid-audience-switch { margin-top: 16px; }
   .astrid-hero-subtitle { font-size: 15.5px; }
   .astrid-mobile-hero-subtitles { margin: 10px 0 16px; }
   .astrid-button { min-height: 52px; }

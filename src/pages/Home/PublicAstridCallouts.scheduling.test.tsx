@@ -167,7 +167,9 @@ describe('bounded stage passes', () => {
       expect(view.container.querySelector('.justify-end')).toBeNull();
       now = arrivalAt;
       paint();
-      const beforeArrival = path.getAttribute('d');
+      // On phones the connector that lands on Astrid's reply belongs to the tools chip.
+      const replyPath = view.container.querySelector('path[data-callout="tools"]')!;
+      const beforeArrival = replyPath.getAttribute('d');
       if (arrivalAt > 1240) {
         now = 2600;
         settle();
@@ -179,18 +181,18 @@ describe('bounded stage passes', () => {
       Object.defineProperty(message, 'getBoundingClientRect', { value: () => new DOMRect(130, 120, targetWidth, 30), configurable: true });
       act(() => mutationCallbacks.at(-1)!([], {} as MutationObserver));
       paint();
-      expect(path.getAttribute('d')).not.toBe(beforeArrival);
+      expect(replyPath.getAttribute('d')).not.toBe(beforeArrival);
       expect(animate).toHaveBeenCalledTimes(9);
       now = 1700;
       settle();
-      const endpoint = view.container.querySelector('.astrid-callout-dot-end[data-callout="community"]')!;
+      const endpoint = view.container.querySelector('.astrid-callout-dot-end[data-callout="tools"]')!;
       // Phones land on the left edge of Astrid's reply, so the endpoint holds while the bubble widens.
       expect(Number(endpoint.getAttribute('cx'))).toBe(130);
       targetWidth = 55;
       act(() => resizeObservers.at(-1)!.callback([], resizeObservers.at(-1)! as unknown as ResizeObserver));
       settle();
       expect(Number(endpoint.getAttribute('cx'))).toBe(130);
-      expect(path.getAttribute('data-connector-target')).toBe('community');
+      expect(replyPath.getAttribute('data-connector-target')).toBe('tools');
     } finally { HTMLElement.prototype.animate = original; }
   });
 

@@ -33,7 +33,7 @@ import path from 'node:path';
 import { getTimelineLabelWidth } from '../../../src/tools/video-editor/lib/coordinate-utils.ts';
 import { PREVIEW_SURFACE, calibrateRuler, seekRulerToFrame, type RulerSeek } from '../support/previewRuler.ts';
 import { harnessUnavailableReason, startDirectHarness, sha256Hex, THREE_PRODUCTS_REFERENCE_AT, type DirectHarness, type ThreeProductsSeed } from './support/harness.ts';
-import { APP_ENTRY_ROUTE, commandOutboxes, currentHead, dragTimelineClip, dropFileOnTimeline, editFirstTrackName, expectConnected, firstTrackName, holdCommandRequests, holdTimelineCreation, openApp, openSeededTimeline, revisionBody, test as appTest, timelineDraft, UI, waitForAudit } from './support/app.ts';
+import { APP_ENTRY_ROUTE, commandOutboxes, currentHead, dragTimelineClip, dropFileOnTimeline, editFirstTrackName, expectConnected, firstTrackName, holdCommandRequests, openApp, openSeededTimeline, revisionBody, test as appTest, timelineDraft, UI, waitForAudit } from './support/app.ts';
 import { allowlistedEvidenceMethod, allowlistedEvidenceStatus, relevantEvidenceRoute, type EvidenceMethod, type EvidenceRoute } from './support/auto-real-proxy-helpers.ts';
 import { timelineBase as runtimeTimelineBase, timelineFromList, type TimelineListPage, type TimelineScope } from './support/timeline-scope.ts';
 import type { CanonicalDocument, CommitAcceptedMutation, CommitRequest, EditCommand, HeadPin, HistoryEntry, HistoryPage } from '../../../src/integrations/runtime/timeline-commit-types.ts';
@@ -2288,7 +2288,7 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await sniff.expectClean(reopened, seed3.timelineId);
 });
 
-test('M2 real gate 5 bootstrap actual consumer: production initializer uses native create/init, exact retry, restart and guarded undo', async ({ page, context, harness, astrid, seed3 }) => {
+test('M2 real gate 5 bootstrap actual consumer: production initializer uses the catalog create, exact retry, restart and guarded undo', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
   await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
@@ -2296,32 +2296,27 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   const auditedBeforeCreate = harness.audit().length;
   await openApp(page, harness);
   await expectConnected(page);
-  const createHold = await holdTimelineCreation(page);
-  const initHold = await holdCommandRequests(page);
   await page.getByRole('button', { name: 'New project' }).click();
   const projectName = `Bootstrap actual ${Date.now()}`;
   await page.locator('#project-name').fill(projectName);
+  // 07931fe88: the production first-timeline create is the catalog create (createCanonicalTimeline, stable timeline id and
+  // idempotency key, no user content), not a command-outbox owner; Runtime installs the bootstrap atomically (8012d6a), so
+  // there is no timeline.init commit. Durability starts at the user's first edit, which the outbox below covers.
   const creating = page.getByRole('button', { name: 'Create Project' }).click();
-  await expect.poll(() => createHold.requests.length, CEILING).toBe(1);
-  const bootstrapCreateRequest = createHold.requests[0];
-  const createPathFromRequest = new URL(bootstrapCreateRequest.url()).pathname.replace(/^\/api\/runtime/, '');
-  const createBody = JSON.parse(bootstrapCreateRequest.postData() ?? '{}') as { timeline_id?: string };
-  const createProjectMatch = createPathFromRequest.match(/^\/v1\/projects\/([^/]+)\/timelines$/);
-  expect(createProjectMatch, 'bootstrap create must use the canonical project timeline route').toBeTruthy();
-  expect(createBody.timeline_id, 'bootstrap create must reserve its timeline identity in the request').toBeTruthy();
-  const createScope = { realmId: harness.realmId, projectId: decodeURIComponent(createProjectMatch![1]), timelineId: createBody.timeline_id! };
-  await expect.poll(async () => (await commandOutboxes(page, createScope.timelineId))
-    .find((owner) => owner.scope.projectId === createScope.projectId && owner.scope.timelineId === createScope.timelineId
-      && owner.pending?.request.path === createPathFromRequest)?.scope, CEILING)
-    .toMatchObject(createScope);
-  await createHold.release(true);
-  await expect.poll(() => initHold.requests.length, CEILING).toBe(1);
-  await expect.poll(async () => (await commandOutboxes(page, createScope.timelineId))
-    .find((owner) => owner.scope.projectId === createScope.projectId && owner.scope.timelineId === createScope.timelineId
-      && owner.pending?.request.path === new URL(initHold.requests[0].url()).pathname.replace(/^\/api\/runtime/, '')),
-  CEILING).toMatchObject({ scope: createScope, pending: { request: { method: 'POST' } }, intents: [{ payload: { kind: 'timeline-init' } }] });
-  await initHold.release(true);
   await creating;
+  // The editor was already open on the seeded project, so wait for the URL to move to the created project and its timeline.
+  let createdProjectId: string | undefined;
+  await expect.poll(async () => {
+    const projects = await harness.runtimeJson<any>('GET', '/v1/projects?limit=100');
+    const items = (projects.body?.items ?? projects.body?.data?.items ?? []) as Array<{ project_id: string; name: string }>;
+    createdProjectId = items.find((project) => project.name === projectName)?.project_id;
+    return createdProjectId;
+  }, CEILING).toBeTruthy();
+  expect(createdProjectId, 'the production project creator must return a Runtime project ID').toBeTruthy();
+  await expect.poll(() => {
+    const url = new URL(page.url());
+    return url.searchParams.get('project') === createdProjectId && Boolean(url.searchParams.get('timeline'));
+  }, CEILING).toBe(true);
   await expect(page).toHaveURL(/\/tools\/video-editor\?project=/, CEILING);
 
   const createdProjectUrl = new URL(page.url());
@@ -2333,7 +2328,6 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   await expect(page).toHaveURL(/\/tools\/video-editor\?project=[^&]+&timeline=[^&]+/, CEILING);
   const selectedTimelineId = new URL(page.url()).searchParams.get('timeline');
   expect(selectedTimelineId, 'the production initializer must select the created canonical timeline').toBeTruthy();
-  expect({ realmId: harness.realmId, projectId, timelineId: selectedTimelineId }).toEqual(createScope);
   await expect.poll(async () => {
     const owner = (await commandOutboxes(page, selectedTimelineId!))
       .find((candidate) => candidate.scope.projectId === projectId && candidate.scope.timelineId === selectedTimelineId);
@@ -2356,71 +2350,27 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   const expectedScope = { realmId: harness.realmId, projectId: projectId!, timelineId: selectedTimelineId! };
   const createPath = `/v1/projects/${expectedScope.projectId}/timelines`;
   const commitPath = `/v1/projects/${expectedScope.projectId}/timelines/${expectedScope.timelineId}/commit`;
-  await waitForAudit(harness, () => {
-    const requests = harness.audit().slice(auditedBeforeCreate);
-    return requests.some((request) => request.method === 'POST' && request.path === createPath)
-      && requests.some((request) => request.method === 'POST' && request.path === commitPath);
-  }, CEILING.timeout);
+  await waitForAudit(harness, () => harness.audit().slice(auditedBeforeCreate).some((request) => request.method === 'POST' && request.path === createPath), CEILING.timeout);
   const runtimeRequests = harness.audit().slice(auditedBeforeCreate);
-  const createIndex = runtimeRequests.findIndex((request) => request.method === 'POST' && request.path === createPath);
-  const initIndex = runtimeRequests.findIndex((request) => request.method === 'POST' && request.path === commitPath);
-  const createRequest = runtimeRequests[createIndex];
+  const createRequest = runtimeRequests.find((request) => request.method === 'POST' && request.path === createPath);
   expect(createRequest, 'production bootstrap must create the timeline through Runtime /v1').toBeDefined();
   expect(createRequest?.status).toBe(201);
-  const initRequest = runtimeRequests[initIndex];
-  expect(initRequest, 'production bootstrap must submit timeline.init through Runtime /v1 commit').toBeDefined();
-  expect(initRequest?.status).toBe(200);
-  expect(createIndex, 'timeline creation must precede native initialization').toBeLessThan(initIndex);
+  expect(runtimeRequests.filter((request) => request.method === 'POST' && request.path === createPath), 'the timeline is created exactly once').toHaveLength(1);
+  expect(runtimeRequests.filter((request) => request.method === 'POST' && request.path === commitPath), 'no timeline.init (or any) commit before the user edits').toEqual([]);
   expect(runtimeRequests.filter((request) => request.method === 'POST' && SAVES.test(request.path)), 'bootstrap must emit zero legacy snapshot traffic').toEqual([]);
 
   const bootstrapHistory = await history(harness, seed3, expectedScope);
-  // The audit deliberately records only the door's method/path/status. The
-  // accepted Runtime history is the authoritative record of the init body.
-  // Main's create_timeline publishes one normal empty baseline before the
-  // native initialization commit. The former total=1 assertion represented
-  // only the native entry; keep that contract one-to-one as baseline=1 plus
-  // native-init=1, without filtering either accepted record from history.
-  expect(bootstrapHistory.items).toHaveLength(2);
-  const [bootstrapEntry, initEntry] = bootstrapHistory.items;
-  expect((bootstrapEntry.receipt.result as { revision_id?: unknown }).revision_id).toBe(bootstrapEntry.revision_id);
+  // Runtime's catalog create publishes the one canonical bootstrap (V1 and A1, 8012d6a); nothing follows it.
+  expect(bootstrapHistory.items).toHaveLength(1);
+  const [bootstrapEntry] = bootstrapHistory.items;
   expect(bootstrapEntry).toMatchObject({
     publication_id: bootstrapEntry.receipt.receipt_id,
     previous: null,
     intent: 'bootstrap',
     records: null,
-    receipt: {
-      command_kind: 'parent_composition.publish',
-      idempotency_key: `bootstrap:${expectedScope.timelineId}`,
-      project_id: expectedScope.projectId,
-      result: {
-        project_id: expectedScope.projectId,
-        timeline_id: expectedScope.timelineId,
-        old_head: null,
-        new_head: bootstrapEntry.revision_id,
-      },
-    },
+    receipt: { project_id: expectedScope.projectId, result: { project_id: expectedScope.projectId, timeline_id: expectedScope.timelineId } },
   });
-  expect(initEntry).toMatchObject({
-    publication_id: initEntry.receipt.receipt_id,
-    previous: { revision_id: bootstrapEntry.revision_id, publication_id: bootstrapEntry.publication_id },
-    intent: 'recorded',
-    receipt: {
-      command_kind: 'timeline.commit',
-      project_id: expectedScope.projectId,
-      result: {
-        canonical_document: { project_id: expectedScope.projectId, timeline_id: expectedScope.timelineId },
-      },
-    },
-  });
-  expect(bootstrapHistory.items.map((entry) => entry.receipt.command_kind)).toEqual([
-    'parent_composition.publish', 'timeline.commit',
-  ]);
-  expect(bootstrapHistory.head).toEqual({ revision_id: initEntry.revision_id, publication_id: initEntry.publication_id });
-  expect(initEntry.records?.commands.map((record) => [record.command.op, record.command.version, record.command.select])).toEqual([
-    ['timeline.init', '1', 'parent'],
-    ['track.create', '1', 'parent'],
-    ['track.create', '1', 'parent'],
-  ]);
+  expect(bootstrapHistory.head).toEqual({ revision_id: bootstrapEntry.revision_id, publication_id: bootstrapEntry.publication_id });
 
   const originalTrackName = await firstTrackName(page).inputValue();
   const wire = await faultFirstCommit(page);
@@ -2429,7 +2379,10 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   accepted(wire.posts[0]);
   expect(JSON.parse(wire.posts[0].body)).toMatchObject({
     base_revision_id: bootstrapHistory.head.revision_id,
-    commands: [expect.objectContaining({ op: 'track.update' })],
+    // The mounted-document save (9c6715cf7): one guarded doc.patch of the V1 track label, from the bootstrap's V1.
+    commands: [{ op: 'doc.patch', select: null, args: { changes: [{ op: 'set', ref: 'parent',
+      path: ['config', 'tracks', 'id:V1', 'label'], before: { state: 'present', value: originalTrackName },
+      value: 'Bootstrap actual consumer edit' }] } }],
   });
   await expect.poll(async () => (await commandOutboxes(page, expectedScope.timelineId))
     .find((owner) => owner.pending?.request.key === wire.posts[0].key)?.scope, CEILING).toMatchObject(expectedScope);
@@ -3633,8 +3586,17 @@ test('empty bootstrap: creating the first timeline in a fresh project then dropp
   expect(initialRevision.status, JSON.stringify(initialRevision.body)).toBe(200);
   const initialPayload = initialRevision.body.payload;
   expect(initialPayload.clips ?? initialPayload.config?.clips).toEqual([]);
-  expect(initialPayload.tracks ?? initialPayload.config?.tracks).toEqual([]);
-  await expect(page.getByRole('textbox', { name: 'Track name' })).toHaveCount(0);
+  // Runtime 8012d6a ("bootstrap canonical video and audio tracks", timeline_commit_baseline.default_bootstrap_document):
+  // every catalog timeline creator now gets V1 (visual) then A1 (audio); the earlier track-less bootstrap is retained only for adoption.
+  expect(initialPayload.tracks ?? initialPayload.config?.tracks).toEqual([
+    { id: 'V1', kind: 'visual', label: 'V1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
+    { id: 'A1', kind: 'audio', label: 'A1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
+  ]);
+  // The editor shows exactly the bootstrap's two tracks, V1 then A1 (no longer track-less).
+  const trackNames = page.getByRole('textbox', { name: 'Track name' });
+  await expect(trackNames).toHaveCount(2);
+  await expect(trackNames.nth(0)).toHaveValue('V1');
+  await expect(trackNames.nth(1)).toHaveValue('A1');
   await expect(page.locator('.timeline-wrapper')).toBeVisible();
 
   const file = {
@@ -3679,11 +3641,19 @@ test('empty bootstrap: creating the first timeline in a fresh project then dropp
   expect(clip).toMatchObject({ clipType: 'hold', hold: 5 });
   expect(typeof clip.asset).toBe('string');
   expect(typeof clip.track).toBe('string');
-  expect(tracks).toEqual([expect.objectContaining({ id: clip.track, kind: 'visual' })]);
+  // The bootstrap now has V1 and A1 (Runtime 8012d6a); the drop lands below them, so the App adds visual track V2 for it
+  // (68a7c6259, "save image drops onto empty and new tracks") and the clip lives on V2, not on the default V1.
+  expect(clip.track).toBe('V2');
+  expect(tracks).toEqual([
+    { id: 'V1', kind: 'visual', label: 'V1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
+    { id: 'A1', kind: 'audio', label: 'A1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
+    { id: 'V2', kind: 'visual', label: 'V2', app: { scaleAppliesToPositionedClips: true } },
+  ]);
 
   const assets = payload.registry?.assets ?? payload.config?.registry?.assets;
   const asset = assets?.[clip.asset];
-  expect(asset).toMatchObject({ type: 'image/png' });
+  // The registry entry carries the media kind ('image') from the Runtime media-import entry, not the MIME type; the object's PNG bytes are checked below.
+  expect(asset).toMatchObject({ type: 'image' });
   expect(typeof asset.media_id).toBe('string');
   const object = await harness.runtimeFetch(`/v1/objects/${encodeURIComponent(asset.media_id)}`);
   expect(object.status).toBe(200);

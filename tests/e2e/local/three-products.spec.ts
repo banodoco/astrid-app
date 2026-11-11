@@ -1662,8 +1662,10 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
   // An Agent move declares the clip's placement (app.astrid.fixed_start/for, Agent cdf88d7ec, capture.py move), which the App's
   // mounted doc.patch gesture and its undo do not write (Direct Journey conversion 9c6715cf7). So the first Agent write at the
   // unchanged position is a new revision; an intentional same-value write after it is a new publication of that same immutable revision.
-  const declared = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(undone),
+  const headBeforeDeclaredMove = pinOf(undone);
+  const declared = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, headBeforeDeclaredMove,
     { kind: 'move', clipId: seed3.appClipId, on: 5 }, 'f2-declared-value');
+  expect(pinOf(declared).revision_id).not.toBe(headBeforeDeclaredMove.revision_id);
   expect(position(declared.data.canonical_document, seed3.appClipId)).toBe(5);
   const revisionCount = (await allRevisions(harness, seed3)).length;
   const same = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(declared),
@@ -2214,8 +2216,6 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   const wire = await faultFirstCommit(page);
   const importResponse = page.waitForResponse((response) => response.request().method() === 'POST' && /\/media-imports$/.test(new URL(response.url()).pathname), CEILING);
   const selectionResponse = page.waitForResponse((response) => response.request().method() === 'GET' && /\/media-selection\?/.test(new URL(response.url()).pathname + new URL(response.url()).search), CEILING);
-  // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/252; owner decision 11 Nov moved the video-drop save fix to Plan 39, making this eligible despite the earlier Release 12 ruling.
-  test.fail(true, 'Dropped video is not saved (image-only guard); see #252');
   const verifiedResponse = page.waitForResponse((response) => response.request().method() === 'GET' && /\/media-selection\/verified\?/.test(new URL(response.url()).pathname + new URL(response.url()).search), CEILING);
   await dropFileOnTimeline(page, file, seed3.appClipId, seed3.transitionClipId, 0, THREE_PRODUCTS_REFERENCE_AT, manualDropPointerAt);
   const imported = await importResponse;
@@ -2246,6 +2246,8 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   expect(verifiedRequest!.searchParams.get('object_id')).toBe(selected.object_id);
   expect(verifiedRequest!.searchParams.get('catalog_digest')).toBe(selected.catalog_digest);
 
+  // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/252; owner decision 11 Nov moved the video-drop save fix to Plan 39, making this eligible despite the earlier Release 12 ruling.
+  test.fail(true, 'Dropped video is not saved (image-only guard); see #252');
   // A sent request and a fetched response are different milestones.
   await expect.poll(async () => ({
     attempts: wire.attempts,
@@ -2570,8 +2572,6 @@ test('M1 real dependency conflict retains B original guards and pending identity
 });
 
 test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restart, exact retry and guarded undo', async ({ page, context, harness, astrid, seed3 }) => {
-  // P39-R12-DUP-SHOT, Plan 39 exception (R12): "Duplicate shot" saves nothing since 7b33f8f50 removed the native duplicate mount; shared with R10 and R11; remove the marker when the save is restored. Issue: https://github.com/banodoco/astrid-app/issues/249
-  test.fail(true, 'Duplicate shot saves nothing since 7b33f8f50 removed the native duplicate mount');
   const sniff = new TokenSniff(secretsOf(harness, astrid));
   await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
@@ -2600,6 +2600,8 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   const shotLabel = page.locator('[data-shot-group-key]').first();
   await expect(shotLabel, 'the real canonical occurrence is rendered as a shot group').toHaveCount(1);
   await shotLabel.click({ button: 'right' });
+  // P39-R12-DUP-SHOT, Plan 39 exception (R12): "Duplicate shot" saves nothing since 7b33f8f50 removed the native duplicate mount; shared with R10 and R11; remove the marker when the save is restored. Issue: https://github.com/banodoco/astrid-app/issues/249
+  test.fail(true, 'Duplicate shot saves nothing since 7b33f8f50 removed the native duplicate mount');
   await page.getByRole('button', { name: 'Duplicate shot', exact: true }).click();
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
 
@@ -2878,8 +2880,12 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   expect(refusal.status, JSON.stringify(refusal.response)).toBe(409);
   expect(refusal.response).toMatchObject({ code: 'conflict', details: { code: 'intervening_write',
     conflicts: [expect.objectContaining({ kind: 'intervening_write', ref: 'parent/track:f2-mixed-independent' })] } });
-  // Nothing else was written: no further commit attempt, Runtime head and history are exactly the Agent's commit.
-  await page.waitForTimeout(1500);
+  // The refusal response and its visible notice are observed before checking the wire and outbox state.
+  await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
+  await expect.poll(async () => ({
+    posts: wire.posts.length, observed: wire.observed.length,
+    outboxes: (await commandOutboxes(page, seed3.timelineId)).map((owner) => ({ pending: owner.pending, intents: owner.intents })),
+  }), CEILING).toMatchObject({ posts: 3, observed: observedBeforeUndo + 1 });
   expect(wire.posts).toHaveLength(3);
   expect(wire.observed).toHaveLength(observedBeforeUndo + 1);
   const finalHistory = await history(harness, seed3);

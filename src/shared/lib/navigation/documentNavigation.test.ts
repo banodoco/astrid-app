@@ -188,7 +188,7 @@ describe('document navigation preparation', () => {
     expect(inflightRuntimeRequests()).toEqual([]);
   });
 
-  it('keeps an agent turn and a byte body when the host prepares and then releases the page', async () => {
+  it('cancels an agent turn when the host prepares the page, and after release a self-prepared navigation cancels nothing', async () => {
     const { target, pending } = fakeGlobal();
     installDocumentRequestRegistry(target);
     const host = Object.assign(new EventTarget(), { document }) as unknown as Window;

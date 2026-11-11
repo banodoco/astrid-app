@@ -79,7 +79,7 @@ const test = appTest.extend<object, { seed3: ThreeProductsSeed; astrid: AstridCl
   }, { scope: 'worker', timeout: 0 }],
 });
 
-test.describe.configure({ mode: 'serial' });
+test.describe.configure({ mode: 'default' }); // DIAGNOSTIC ONLY (was serial)
 test.beforeAll(() => {
   const reason = harnessUnavailableReason() ?? astridUnavailableReason();
   if (reason) throw new Error(`the three-products journey cannot run: ${reason}`);

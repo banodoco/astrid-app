@@ -126,7 +126,7 @@ describe('tour beat machine', () => {
     expect(getEditorTourState()).toMatchObject({ beat: 'finale', status: 'running' });
 
     markEditorTourReady('card');
-    runEditorTourPrimary(); // I got it
+    runEditorTourPrimary(); // Next
     expect(getEditorTourState()).toMatchObject({ act: 3, beat: 'feedback', status: 'running' });
     markEditorTourReady('card');
     runEditorTourPrimary(); // Start creating

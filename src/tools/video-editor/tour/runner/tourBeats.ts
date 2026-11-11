@@ -11,7 +11,7 @@ import {
 
 /**
  * The beat machine, and the only writer of `act`/`beat`.
- *   welcome -(OK)-> compose -(sent)-> respond -(Next)-> land -(Next)-> next act's compose ... -> finale -(I got it)-> feedback -(Start creating)-> exit
+ *   welcome -(OK)-> compose -(sent)-> respond -(Next)-> land -(Next)-> next act's compose ... -> finale -(Next)-> feedback -(Start creating)-> exit
  * Act 1 stops on respond to explain the reply; on acts 2 and 3, Send goes straight to land.
  * Back returns to the previous place where the user acted (see `backEditorTour`).
  */
@@ -52,7 +52,7 @@ function advanceBeat(): void {
   finishEditorTour();
 }
 
-/** Enter, and the card's OK / Next / "I got it" button: finish the animation first, then act. */
+/** Enter, and the card's OK / Next button: finish the animation first, then act. */
 export function runEditorTourPrimary(): void {
   const state = getEditorTourState();
   if (state.status !== 'running') return;

@@ -181,7 +181,7 @@ export function TourCompare({ labels: [source, model], sweep }: { labels: readon
         data-editor-tour-keys="own"
         onKeyDown={onKeyDown}
         className={cn(
-          'absolute top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-card text-primary shadow-md ring-1 ring-black/10',
+          'absolute top-1/2 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-md ring-1 ring-black/10',
           'transition-transform duration-150 ease-out hover:scale-105 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
           dragging && 'scale-110',
         )}

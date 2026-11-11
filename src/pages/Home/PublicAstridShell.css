@@ -2123,28 +2123,32 @@
 /* On phones, direct entry uses the same slot clock for each card and its connector. */
 @media (max-width: 640px) and (prefers-reduced-motion: no-preference) {
   /* The chips settle in place: a slow fade with a few pixels of drift, never the desktop cards' rise
-     and scale, which on a small chip reads as a jolt. Each connector draws once its chip has landed. */
-  .astrid-public-site[data-astrid-direct-entry] .astrid-callout {
+     and scale, which on a small chip reads as a jolt. Each connector then draws at an unhurried pace,
+     one after another, about as fast as it reconnects when switching sides, and its end dot lands
+     as the line arrives. */
+  .astrid-public-site[data-astrid-direct-entry] :is(.astrid-callout, .astrid-callout-connectors g) {
     --astrid-phone-chip-start: calc(160ms + var(--astrid-mobile-callout-index, 0) * 110ms);
+    --astrid-phone-line-start: calc(640ms + var(--astrid-mobile-callout-index, 0) * 320ms);
+    --astrid-phone-line-duration: 900ms;
+  }
+  .astrid-public-site[data-astrid-direct-entry] .astrid-callout {
     animation: astrid-phone-chip-in 560ms cubic-bezier(.22, .61, .36, 1) var(--astrid-phone-chip-start) backwards;
   }
-  .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors g {
-    --astrid-phone-chip-start: calc(160ms + var(--astrid-mobile-callout-index, 0) * 110ms);
-  }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors path {
-    animation-duration: 420ms;
-    animation-delay: calc(var(--astrid-phone-chip-start) + 380ms);
+    animation-duration: var(--astrid-phone-line-duration);
+    animation-timing-function: cubic-bezier(.5, 0, .5, 1);
+    animation-delay: var(--astrid-phone-line-start);
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors .astrid-callout-dot-start {
-    animation-duration: 140ms;
-    animation-delay: calc(var(--astrid-phone-chip-start) + 380ms);
+    animation-duration: 180ms;
+    animation-delay: calc(var(--astrid-phone-line-start) - 60ms);
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors .astrid-callout-dot-end {
-    animation-duration: 200ms;
-    animation-delay: calc(var(--astrid-phone-chip-start) + 800ms);
+    animation-duration: 260ms;
+    animation-delay: calc(var(--astrid-phone-line-start) + var(--astrid-phone-line-duration) - 80ms);
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors .astrid-callout-ping {
-    animation: astrid-dot-ping 700ms cubic-bezier(.2, .7, .3, 1) calc(var(--astrid-phone-chip-start) + 800ms);
+    animation: astrid-dot-ping 800ms cubic-bezier(.2, .7, .3, 1) calc(var(--astrid-phone-line-start) + var(--astrid-phone-line-duration) - 40ms);
   }
 }
 

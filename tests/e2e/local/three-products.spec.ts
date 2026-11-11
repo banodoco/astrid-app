@@ -2486,10 +2486,18 @@ test('M1 real dependency conflict retains B original guards and pending identity
     if (request.method() === 'POST' && SAVES.test(new URL(request.url()).pathname)) legacy.push(request.url());
   });
   await openCommandTimeline(page, harness, seed3);
-  const resetResponse = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
-  await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 5, 0, THREE_PRODUCTS_REFERENCE_AT);
-  const reset = await resetResponse;
-  expect(reset.status(), await reset.text()).toBe(200);
+  // The worker-scoped seed carries whatever position the previous case left. A reset drag from 5 is only a real
+  // gesture when the clip is at 5; at 0 there is nothing to reset (a no-op drag sends no commit).
+  const startHead = (await history(harness, seed3)).head;
+  const startAt = ((await revisionBody(harness, startHead.revision_id)).payload.clips as Array<{ id: string; at: number }>)
+    .find((clip) => clip.id === seed3.appClipId)!.at;
+  if (startAt !== 0) {
+    expect(startAt).toBe(5);
+    const resetResponse = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
+    await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 5, 0, THREE_PRODUCTS_REFERENCE_AT);
+    const reset = await resetResponse;
+    expect(reset.status(), await reset.text()).toBe(200);
+  }
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
   let c!: CommitAcceptedMutation;
   const { wire, before, owner } = await prepareDependentMountedDocuments(page, harness, seed3, async (a) => {

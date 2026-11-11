@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { prepareDocumentNavigation } from '@/shared/lib/navigation/documentNavigation';
 
 export type DraftSafeReloadGuard = {
   label: string;
@@ -131,6 +132,8 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
     try {
       const validate = await flushDraftsBeforeReload('reload');
       if (!validate()) throw new Error('Drafts changed before reload. Try again.');
+      // Every Runtime request ends before the page goes; a request that will not end does not keep the page.
+      await prepareDocumentNavigation().catch(() => undefined);
       reloadImpl();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

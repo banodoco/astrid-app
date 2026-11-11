@@ -99,8 +99,46 @@ export class TokenSniff {
     }
   }
 
+  /**
+   * Ask the App to settle its own Runtime requests before the page is navigated (documentNavigation.ts): it sends what
+   * it holds, refuses new requests, and waits for every request already on the wire to end. A document without the App
+   * (about:blank, the hosted blank page) has nothing to prepare. Returns whether the App took the request.
+   * `settleTestRequests` releases what a test fixture deliberately holds, once only requests on the wire remain.
+   */
+  private async prepareApp(page: Page, settleTestRequests?: () => Promise<void>): Promise<boolean> {
+    const id = await page.evaluate(() => {
+      if (document.documentElement.dataset.astridNavigation !== 'ready') return null;
+      const key = `prepare-${Math.random().toString(36).slice(2)}`;
+      const state: { settling: boolean; result?: { ok: boolean; error?: string } } = { settling: false };
+      const store = ((window as unknown as { __tokenSniffPreparations?: Record<string, typeof state> }).__tokenSniffPreparations ??= {});
+      store[key] = state;
+      addEventListener('astrid:navigation-settling', (event) => { if ((event as CustomEvent).detail?.id === key) state.settling = true; });
+      addEventListener('astrid:navigation-prepared', (event) => {
+        const detail = (event as CustomEvent).detail;
+        if (detail?.id === key) state.result = { ok: detail.ok === true, error: typeof detail.error === 'string' ? detail.error : undefined };
+      });
+      dispatchEvent(new CustomEvent('astrid:prepare-navigation', { detail: { id: key } }));
+      return key;
+    });
+    if (!id) return false;
+    const reached = (key: string, field: 'settling' | 'result') => page.waitForFunction(({ key, field }) => {
+      const state = (window as unknown as { __tokenSniffPreparations: Record<string, { settling: boolean; result?: unknown }> }).__tokenSniffPreparations[key];
+      return field === 'settling' ? state.settling || Boolean(state.result) : Boolean(state.result);
+    }, { key, field }, { timeout: this.drainMs }).catch(() => {
+      throw new Error(`Incomplete credential scan: the App did not ${field === 'settling' ? 'begin' : 'finish'} settling its requests before navigation`);
+    });
+    await reached(id, 'settling');
+    await settleTestRequests?.();
+    await reached(id, 'result');
+    const result = await page.evaluate((key) => (window as unknown as { __tokenSniffPreparations: Record<string, { result: { ok: boolean; error?: string } }> }).__tokenSniffPreparations[key].result, id);
+    if (!result.ok) throw new Error(`Incomplete credential scan: the App could not settle its requests before navigation (${result.error ?? 'no reason'})`);
+    return true;
+  }
+
   /** Stop new API dispatch while old-document requests and bodies are captured. */
   async navigate(page: Page, navigate: () => Promise<unknown>, settleTestRequests?: () => Promise<void>) {
+    // The App settles its requests first, so nothing of the old document is left in flight when it goes away.
+    const prepared = await this.prepareApp(page, settleTestRequests);
     const deadline = Date.now() + this.drainMs;
     const aborts: Capture[] = [];
     const handler = async (route: Route) => {
@@ -120,7 +158,7 @@ export class TokenSniff {
     try {
       // A fault fixture may own a deliberately held request. Settle that hold
       // under the gate so its retry cannot race the old-document drain.
-      await settleTestRequests?.();
+      if (!prepared) await settleTestRequests?.();
       await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline);
       await navigate();
       await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal), deadline);
@@ -129,6 +167,13 @@ export class TokenSniff {
       // A failed/stalled abort therefore leaves the gate installed, fail-closed.
       if (aborts.every(capture => !capture.pending && !capture.failed)) await page.unroute('**/api/**', handler);
     }
+  }
+
+  /** Close a page the same way: the App settles its requests, nothing is left in flight, then the page closes. */
+  async close(page: Page, settleTestRequests?: () => Promise<void>) {
+    if (!await this.prepareApp(page, settleTestRequests)) await settleTestRequests?.();
+    await this.drain(() => true, () => [...this.admissions.values()].some(item => !item.terminal));
+    await page.close();
   }
 
   async expectClean(page: Page, timelineId?: string) {

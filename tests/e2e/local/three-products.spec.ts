@@ -3016,7 +3016,8 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 1);
   expect(await history(harness, seed3)).toEqual(acceptedHistory);
   expect(await allRevisions(harness, seed3)).toEqual(acceptedRevisions);
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
+  await page.waitForLoadState('load');
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   for (const id of ids) {
@@ -3081,7 +3082,8 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   await expect.poll(() => timelineDraft(page, seed3.timelineId), CEILING).not.toBeNull();
   const retainedDraft = await timelineDraft(page, seed3.timelineId);
   expectRawTransitionsCleared(mountedDocumentIntentOf(retained.intents[0].payload).after.parent_revision.payload, original.parent, ids);
-  await page.reload();
+  await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
+  await page.waitForLoadState('load');
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   const reloaded = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;

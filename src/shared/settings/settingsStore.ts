@@ -43,6 +43,11 @@ export interface SettingsStoreOptions {
    * request (its permission prompt comes first). Reads use the snapshot and changes wait. Defaults to true.
    */
   connected?: boolean;
+  /**
+   * True while the page is preparing to navigate away (`documentNavigation.ts`): nothing new is sent or read, changes
+   * stay pending in the snapshot for the next page, and `refresh()` picks them up if the page stays.
+   */
+  isNavigating?: () => boolean;
 }
 
 /** The Runtime refuses records over 16 KiB of JSON. */
@@ -103,9 +108,11 @@ export class SettingsStore {
   private readonly deviceCache = new Map<string, { raw: string | null; value: unknown }>();
   private detach: (() => void) | null = null;
   private connected: boolean;
+  private readonly isNavigating: () => boolean;
 
   constructor(options: SettingsStoreOptions) {
     this.api = options.api;
+    this.isNavigating = options.isNavigating ?? (() => false);
     this.storage = options.storage === undefined ? safeLocalStorage() : options.storage;
     this.connected = options.connected ?? true;
   }
@@ -217,7 +224,7 @@ export class SettingsStore {
 
   private load(g: Group): Promise<void> {
     if (g.loading) return g.loading;
-    if (!this.connected) return Promise.resolve();
+    if (!this.connected || this.isNavigating()) return Promise.resolve();
     g.status = g.status === 'loaded' ? 'loaded' : 'loading';
     g.loading = (async () => {
       try {
@@ -237,7 +244,7 @@ export class SettingsStore {
 
   private flushGroup(g: Group): Promise<void> {
     if (g.timer) { clearTimeout(g.timer); g.timer = null; }
-    if (g.blocked || !this.connected) return Promise.resolve();
+    if (g.blocked || !this.connected || this.isNavigating()) return Promise.resolve();
     // A write already in flight: this call resolves after the changes made meanwhile have been sent too.
     if (g.flushing) { g.flushAgain = true; return g.flushing.then(() => (g.pending.size > 0 ? this.flushGroup(g) : undefined)); }
     // A load in flight may import legacy values: wait for it, then send what it left pending.

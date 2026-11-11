@@ -1,3 +1,4 @@
+import { isDocumentNavigating, registerNavigationOwner } from '@/shared/lib/navigation/documentNavigation';
 import { SettingsStore, type AppStateApi } from './settingsStore';
 
 /** Unit tests run without a Runtime: every read is "unreachable" until a test installs its own store. */
@@ -24,7 +25,15 @@ let store: SettingsStore | null = null;
 /** The one settings store of this page. */
 export function getSettingsStore(): SettingsStore {
   // In the app the store stays off the Runtime until the connection provider says it answered.
-  store ??= new SettingsStore(import.meta.env.MODE === 'test' ? { api: unreachableApi } : { api: lazyRuntimeApi, connected: false });
+  if (!store) {
+    if (import.meta.env.MODE === 'test') store = new SettingsStore({ api: unreachableApi });
+    else {
+      const created = new SettingsStore({ api: lazyRuntimeApi, connected: false, isNavigating: isDocumentNavigating });
+      // Before the page navigates away its settings are sent and acknowledged, instead of being sent as it unloads.
+      registerNavigationOwner({ label: 'settings', prepare: () => created.flush(), release: () => { void created.refresh(); } });
+      store = created;
+    }
+  }
   return store;
 }
 

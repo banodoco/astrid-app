@@ -28,6 +28,7 @@ import type {
   ExtensionEnablementState,
 } from '@/tools/video-editor/runtime/extensionStateRepository';
 import { createLifecycleEvent } from '@/tools/video-editor/runtime/extensionStateRepository';
+import { registerNavigationOwner } from '@/shared/lib/navigation/documentNavigation';
 import type {
   PackageValidationResult,
   ValidatedPackage,
@@ -163,14 +164,19 @@ async function importAdmittedExtension(
       throw moduleError('loader/not-admitted', 'Runtime returned an invalid artifact lease.');
     }
     let released = false;
-    releaseLease = () => {
-      if (released) return;
+    let forgetOwner = () => {};
+    const release = (): Promise<void> => {
+      if (released) return Promise.resolve();
       released = true;
       window.removeEventListener('pagehide', releaseLease);
-      void fetch(`${runtimeApiBase()}/packs/leases/${lease.lease}`, { method: 'DELETE',
-        credentials: 'same-origin', keepalive: true }).catch(() => {});
+      forgetOwner();
+      return fetch(`${runtimeApiBase()}/packs/leases/${lease.lease}`, { method: 'DELETE',
+        credentials: 'same-origin', keepalive: true }).then(() => undefined, () => undefined);
     };
+    releaseLease = () => { void release(); };
     window.addEventListener('pagehide', releaseLease, { once: true });
+    // A prepared navigation hands the lease back (and hears the answer) before the page goes.
+    forgetOwner = registerNavigationOwner({ label: 'extension lease', prepare: release });
   }
   let namespace: any;
   try {

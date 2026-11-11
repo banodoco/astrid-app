@@ -6,6 +6,7 @@ import {
   resolveReturningAppEntry,
 } from '@/app/entryClassification.ts';
 import { runtimeOrigin, setRuntimeOrigin } from '@/integrations/runtime/connection.ts';
+import { installDocumentRequestRegistry, installNavigationPreparationProtocol } from '@/shared/lib/navigation/documentNavigation.ts';
 import { releaseBootLayerWhenReady } from '@/app/bootLayer.ts';
 import { migrateAstridBrowserStorage } from '@/migrations/astridRenameBrowserMigration.ts';
 
@@ -13,6 +14,10 @@ async function main(): Promise<void> {
   // First, before any module that can build a Runtime client or media URL is imported: the hosted
   // build points every Runtime and Astrid base at the loopback gateway (`connection.ts`).
   setRuntimeOrigin(import.meta.env);
+  // Next, before any Runtime request: the page knows each one until it has ended, so it can settle them before it
+  // navigates away (`documentNavigation.ts`).
+  installDocumentRequestRegistry();
+  installNavigationPreparationProtocol();
 
   const rootElement = document.getElementById('root');
   if (!rootElement) {

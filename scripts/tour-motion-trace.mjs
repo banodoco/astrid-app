@@ -35,7 +35,8 @@ import { chromiumExecutable, freePort, waitServer } from './tour-screenshots.mjs
 const STORE = '/src/shared/state/editorTourStore.ts';
 const BEATS = '/src/tools/video-editor/tour/runner/tourBeats.ts';
 const SETTLE_QUIET_MS = 500; // geometry unchanged this long
-const CAP_MS = 240_000; // per-transition cap
+const CAP_MS = 90_000;
+const NUDGE_MS = 25_000; // a beat still not ready after this gets one user-style Next (skip animation) // per-transition cap
 const SPOT_PADDING = 6; // useSpotlightRects PADDING: cutouts are the target rect outset by this (then clipped)
 const EPS = 0.5; // px per frame below which something counts as still
 const STILL_GAP = 3; // still frames that split two motion segments
@@ -148,9 +149,11 @@ const ranges = (flags, key = 't') => {
   return list.map(({ t0, t1 }) => ({ t0: round(t0, 0), t1: round(t1, 0) }));
 };
 const segText = (segments) => segments.map((s) => `t=${Math.round(s.t0)}–${Math.round(s.t1)}ms`).join(', ');
-// A real teleport is a big move inside ONE ordinary frame; a big move across a long frame gap is a stall/low frame rate
-// (see frames.*), which the easing curve alone explains (these curves cover most of the distance in the first ~100ms).
-const teleport = (m) => m.maxJump.px > 80 && m.maxJump.px > 0.4 * m.travel && m.maxJump.dt <= 50;
+// A real teleport is a big move inside ONE ordinary (<= 25ms, i.e. >= 40fps) frame. A big move across a longer frame gap is
+// the easing curve sampled at a low frame rate (these ease-outs cover ~45% of the distance in the first 50ms), not a teleport;
+// the page's frame cadence is reported separately (frames.*). In this container the page often runs at 20-30fps, so
+// teleports usually cannot be told apart from easing here.
+const teleport = (m) => m.maxJump.px > 80 && m.maxJump.px > 0.4 * m.travel && m.maxJump.dt <= 25;
 
 function degenerate(rect) { return !rect || rect[2] <= 0 || rect[3] <= 0; }
 
@@ -243,7 +246,7 @@ function suspectsFor(m, source, dest) {
     out.push(`card travelled ${c.travel}px, first move t=${Math.round(c.firstMoveT)}ms, at rest t=${Math.round(c.restT)}ms`);
   }
   for (const r of c.retargets) out.push(`card destination changed at t=${r.t}ms (${r.from.join(',')} -> ${r.to.join(',')})${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
-  for (const r of c.transitionToggles) out.push(`card host transition became "${r.to}" at t=${r.t}ms`);
+  for (const r of c.transitionToggles) out.push(`card host CSS transition ${/none/.test(r.to) ? 'switched OFF (moves teleport)' : 'switched ON'} at t=${r.t}ms`);
   for (const s of c.sizeChanges) out.push(`card size ${s.from.join('x')} -> ${s.to.join('x')} at t=${s.t}ms${s.whileMoving ? ' (mid-flight)' : ''}`);
   for (const s of c.contentSwaps) out.push(`card content swapped ${s.from} -> ${s.to} at t=${s.t}ms while ${s.distanceToDestinationPx}px from its destination`);
   if (c.opacityBelow1.length) out.push(`card section opacity < 1 (min ${c.minOpacity}) at ${c.opacityBelow1.map((r) => `t=${r.t0}–${r.t1}ms`).join(', ')}`);
@@ -255,13 +258,21 @@ function suspectsFor(m, source, dest) {
     for (const r of k.retargets) out.push(`${label} destination changed at t=${r.t}ms ${fmtRect(r.from)} -> ${fmtRect(r.to)}${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
     if (k.reversals) out.push(`${label} reversed direction ${k.reversals}x`);
     if (teleport(k)) out.push(`${label} jumped ${k.maxJump.px}px in one ${k.maxJump.dt}ms frame at t=${Math.round(k.maxJump.t)}ms`);
-    if (k.chase && k.chase.maxGapPx > 40) out.push(`${label} trailed its target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (final gap ${k.chase.finalGapPx}px; target itself moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
+    if (k.chase && k.chase.targetTravelPx > 2 && k.chase.maxGapPx - (k.chase.finalGapPx ?? 0) > 40) out.push(`${label} trailed its moving target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (resting offset ${k.chase.finalGapPx}px; target moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
+    const swap = c.contentSwaps[0], first = k.retargets.find((r) => r.t >= 0);
+    if (swap && first && first.t - swap.t > 60) out.push(`${label} began moving toward its new target ${first.t - swap.t}ms after the card content swapped (card swap t=${swap.t}ms, cutout retarget t=${first.t}ms)`);
     if (k.restT != null && k.firstMoveT != null && (c.restT == null || Math.abs(k.restT - c.restT) > 250)) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at ${c.restT == null ? 'never moved' : `t=${Math.round(c.restT)}ms`}`);
   }
   if (m.frames.maxDtMs > 100 || m.frames.over50ms > 5) out.push(`page frame cadence: median ${m.frames.medianDtMs}ms, p95 ${m.frames.p95DtMs}ms, worst ${m.frames.maxDtMs}ms at t=${m.frames.maxDtAtT}ms, ${m.frames.over50ms} frames > 50ms (idle before trigger: median ${m.frames.preTriggerMedianDtMs}ms)`);
   if (m.previewUnavailable) out.push(`"Preview unavailable" text present in the preview for ${m.previewUnavailable.frames} frames, t=${m.previewUnavailable.firstT}–${m.previewUnavailable.lastT}ms`);
   void source;
-  return out;
+  // Slots beyond the beat's target count mirror slot 0, so identical lines are merged: "cutout #0" + "cutout #2" -> "cutouts #0,#2".
+  const merged = new Map();
+  for (const line of out) {
+    const hit = /^cutout #(\d+) (.*)$/.exec(line);
+    if (hit) merged.set(`c:${hit[2]}`, [...(merged.get(`c:${hit[2]}`) ?? []), hit[1]]); else merged.set(line, null);
+  }
+  return [...merged].map(([line, slots]) => (slots ? `cutout${slots.length > 1 ? 's' : ''} #${slots.join(',#')} ${line.slice(2)}` : line));
 }
 
 /* ------------------------------------------------------------------ contact sheets */
@@ -356,6 +367,9 @@ export async function run(options) {
       else await route.abort('blockedbyclient');
     });
     const page = await context.newPage();
+    const browserErrors = (report.browserErrors = []);
+    page.on('pageerror', (e) => browserErrors.push(`pageerror: ${e.message}`));
+    page.on('console', (m) => { if (m.type() === 'error' && browserErrors.length < 30) browserErrors.push(m.text().slice(0, 300)); });
     page.setDefaultTimeout(20_000);
     await page.goto(`${baseUrl}/tools/video-editor`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     await page.waitForFunction(() => document.querySelector('[data-editor-tour-card]'), null, { timeout: 120_000 });
@@ -369,10 +383,19 @@ export async function run(options) {
 
     const wanted = (name) => !options.transitions || options.transitions.includes(name) || options.transitions.includes(fileName(name));
     const stepOf = (act, beat) => steps.find((s) => s.act === act && s.beat === beat) ?? { id: `act${act}-${beat}`, act, beat, targets: [] };
+    // If a beat never reports ready by itself (the act-1 live scene sometimes never paints its opening frame in
+    // this container), press Next once after NUDGE_MS exactly as a user would to skip the animation, and note it.
+    const nudges = (report.nudges = []);
     const waitSettled = async (dest) => {
-      const deadline = Date.now() + CAP_MS;
+      const start = Date.now();
+      let nudged = false;
       while (!await page.evaluate((d) => window.__tm.isSettled(d), dest)) {
-        if (Date.now() > deadline) throw new Error(`${dest.id} did not settle within ${CAP_MS} ms: ${JSON.stringify(await page.evaluate(() => window.__tm.samples.at(-1)?.st))}`);
+        if (!nudged && Date.now() - start > NUDGE_MS) {
+          nudged = true;
+          nudges.push({ beat: dest.id, afterMs: Date.now() - start, state: await page.evaluate(() => window.__tm.samples.at(-1)?.st) });
+          await nextButton(dest).click({ timeout: 5000 }).catch(() => {});
+        }
+        if (Date.now() - start > CAP_MS) throw new Error(`${dest.id} did not settle within ${CAP_MS} ms: ${JSON.stringify(await page.evaluate(() => window.__tm.samples.at(-1)?.st))}; live scene: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset }))))}; browser errors: ${JSON.stringify(browserErrors.filter((e) => !e.includes('serviceWorker')).slice(0, 5))}`);
         await delay(50);
       }
     };
@@ -414,7 +437,7 @@ export async function run(options) {
       const sparse = Array.from({ length: FILM.cols * FILM.rows }, (_, i) => start + ((Math.min(end, lastT) - start) * i) / (FILM.cols * FILM.rows - 1));
       if (shots.length) { await sheet(shots, dense, join(dir, 'filmstrip-dense.jpg'), runProcess); await sheet(shots, sparse, join(dir, 'filmstrip-whole.jpg'), runProcess); }
       await writeFile(join(dir, 'samples.json'), JSON.stringify(rebased));
-      const entry = { name, dir: relative(out, dir), hostLoad: { cpus: cpus().length, loadavg1AtStart: round(load0, 1), loadAvg1AtEnd: round(loadavg()[0], 1) }, clicks: clicks.map((c) => ({ t: round(c.t - t0, 0), text: c.text })), screencast: { frames: shots.length, firstT: round(shots[0]?.t, 0), lastT: round(shots.at(-1)?.t, 0), medianGapMs: round(shots.map((s, k) => k && s.t - shots[k - 1].t).slice(1).sort((a, b) => a - b)[Math.floor((shots.length - 1) / 2)], 0) }, filmstrips: { dense: `${fileName(name)}/filmstrip-dense.jpg (+0..${FILM.denseStep * (FILM.cols * FILM.rows - 1)}ms every ${FILM.denseStep}ms)`, whole: `${fileName(name)}/filmstrip-whole.jpg (${Math.round(start)}..${Math.round(Math.min(end, lastT))}ms)` }, ...analysis };
+      const entry = { name, dir: relative(out, dir), hostLoad: { cpus: cpus().length, loadavg1AtStart: round(load0, 1), loadavg1AtEnd: round(loadavg()[0], 1) }, clicks: clicks.map((c) => ({ t: round(c.t - t0, 0), text: c.text })), screencast: { frames: shots.length, firstT: round(shots[0]?.t, 0), lastT: round(shots.at(-1)?.t, 0), medianGapMs: round(shots.map((s, k) => k && s.t - shots[k - 1].t).slice(1).sort((a, b) => a - b)[Math.floor((shots.length - 1) / 2)], 0) }, filmstrips: { dense: `${fileName(name)}/filmstrip-dense.jpg (+0..${FILM.denseStep * (FILM.cols * FILM.rows - 1)}ms every ${FILM.denseStep}ms)`, whole: `${fileName(name)}/filmstrip-whole.jpg (${Math.round(start)}..${Math.round(Math.min(end, lastT))}ms)` }, ...analysis };
       report.transitions.push(entry);
       console.log(`  ${name}: card ${analysis.card.travel}px/${analysis.card.segments.length} seg, ${shots.length} frames`);
       return dest;
@@ -471,11 +494,12 @@ function renderMarkdown(report) {
     '| transition | duration | card travel | card segments | card first move / rest | cutouts (segments) | suspects |', '|---|---|---|---|---|---|---|'];
   for (const t of report.transitions) lines.push(`| ${t.name} | ${t.durationMs}ms | ${t.card.travel}px | ${t.card.segments.length} | ${t.card.firstMoveT == null ? '-' : `${Math.round(t.card.firstMoveT)} / ${Math.round(t.card.restT)}ms`} | ${t.cutouts.map((c) => c.segments.length).join('/')} | ${t.suspects.length} |`);
   for (const t of report.transitions) {
-    lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadAvg1AtStart}->${t.hostLoad.loadAvg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',
+    lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadavg1AtStart}->${t.hostLoad.loadavg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',
       `Filmstrips: ${t.filmstrips.dense}; ${t.filmstrips.whole}`, '');
     for (const c of t.cutouts) lines.push(`- cutout #${c.slot}: ${fmtRect(c.start)} -> ${fmtRect(c.end)}, travel ${c.travel}px, ${c.segments.length} segment(s)${c.chase ? `, max gap to ${c.chase.selector} ${c.chase.maxGapPx}px (final ${c.chase.finalGapPx}px)` : ''}`);
     lines.push('', '**Suspects**', '', ...(t.suspects.length ? t.suspects.map((s) => `- ${s}`) : ['- none']));
   }
+  if (report.nudges?.length) lines.push('', '## Beats that did not become ready by themselves', '', ...report.nudges.map((n) => `- ${n.beat}: not ready after ${Math.round(n.afterMs / 1000)}s (ready=${JSON.stringify(n.state?.ready)}); the tool pressed Next once like a user skipping the animation. Its trace contains that extra click.`));
   lines.push('', '## Update available notice per settled beat', '', ...Object.entries(report.beats).map(([id, b]) => `- ${id}: ${b.updateAvailable.length ? b.updateAvailable.map((u) => `${fmtRect(u.rect)} centre ${u.centreInCutout ? 'inside' : 'outside'} cutouts`).join('; ') : 'absent'}`));
   return `${lines.join('\n')}\n`;
 }

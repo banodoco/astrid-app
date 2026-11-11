@@ -337,13 +337,20 @@ describe('TourCard', () => {
   });
 
   describe('act 2\'s comparison', () => {
-    it('is a slider that sweeps in from the left while the card plays', () => {
-      renderAt(2, 'land');
-      const slider = screen.getByRole('slider', { name: /Compare/ });
+    it('is a slider, frame left and still right, that sweeps in from the left while the card plays', () => {
+      const { container } = renderAt(2, 'land');
+      const [source, model] = SCRIPT.acts[2].card.labels;
+      const slider = screen.getByRole('slider', { name: `Compare the ${source.toLowerCase()} (left) with ${model} (right)` });
+      const still = container.querySelector('[data-tour-compare-still]') as HTMLElement;
       expect(slider).toHaveAttribute('aria-valuenow', '0');
       expect(slider.closest('[aria-hidden="true"]')).toBeNull();
+      // It arrives as the frame alone: the still has yet to wipe in.
+      expect(still.style.maskImage).toContain('transparent 0%');
       advance(TOUR_COMPARE_ENTRANCE_MS);
       expect(slider).toHaveAttribute('aria-valuenow', String(COMPARE_REST));
+      expect(slider).toHaveAttribute('aria-valuetext', `${source} ${COMPARE_REST}%, ${model} ${100 - COMPARE_REST}%`);
+      expect(still.style.maskImage).toBe('');
+      expect(still.style.clipPath).toBe(`inset(0 0 0 ${COMPARE_REST}%)`);
     });
 
     it('rests at once under reduced motion, and still moves', () => {
@@ -561,5 +568,48 @@ describe('TourCard arriving with the runner’s move', () => {
     expect(screen.getByText(SCRIPT.hints.respond)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Next/ })).toBeInTheDocument();
     expect(container.querySelector('[data-editor-tour-card]')).not.toHaveAttribute('data-editor-tour-card-phase');
+  });
+});
+
+describe('TourCard during a land beat’s watch', () => {
+  function renderWatch(tourAct: EditorTourAct) {
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: false, media: query } as MediaQueryList));
+    startEditorTour();
+    setEditorTourBeat(tourAct, 'land');
+    const props = { act: tourAct, beat: 'land' as const, onPrimary: vi.fn(), onBack: vi.fn(), onSkip: vi.fn(), rise: false };
+    const view = render(<TourCard {...props} arrived={false} watching />);
+    return { ...view, unfold: () => view.rerender(<TourCard {...props} arrived />) };
+  }
+
+  it('shows only its counter row (Back and Skip tour stay reachable) with the explainer folded away, and is not ready', () => {
+    const { container } = renderWatch(1);
+    const card = container.querySelector('[data-editor-tour-card="land"]')!;
+    expect(card).toHaveAttribute('data-editor-tour-card-watch');
+    expect(screen.getByText('1 of 3')).toBeVisible();
+    expect(screen.getByRole('button', { name: /Back/ })).toBeVisible();
+    expect(screen.getByRole('button', { name: /Skip tour/ })).toBeVisible();
+    const rest = container.querySelector<HTMLElement>('[data-editor-tour-card-rest]')!;
+    expect(rest).toHaveAttribute('data-folded');
+    expect(rest.style.visibility).toBe('hidden');
+    expect(rest).toContainElement(screen.getByText(SCRIPT.acts[1].card.title));
+    expect(screen.queryByRole('button', { name: /Next/ })).toBeNull();
+    advance(TOUR_CARD_ENTRANCE_MS * 3);
+    expect(cardReady()).toBe(false);
+    // Enter during the watch settles the entrance but the card is still not ready: there is no explainer to act on yet.
+    act(() => skipEditorTourAnimation());
+    expect(cardReady()).toBe(false);
+  });
+
+  it('unfolds into the same card (no remount) and only then plays its entrance and reports ready', () => {
+    const { container, unfold } = renderWatch(1);
+    const section = container.querySelector('section');
+    unfold();
+    expect(container.querySelector('section')).toBe(section);
+    const rest = container.querySelector<HTMLElement>('[data-editor-tour-card-rest]')!;
+    expect(rest).not.toHaveAttribute('data-folded');
+    expect(screen.getByRole('button', { name: /Next/ })).toBeInTheDocument();
+    expect(cardReady()).toBe(false);
+    advance(TOUR_CARD_ENTRANCE_MS);
+    expect(cardReady()).toBe(true);
   });
 });

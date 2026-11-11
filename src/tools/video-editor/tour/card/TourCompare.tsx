@@ -31,6 +31,7 @@ const MAX_FRAME_MS = 100;
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
 /** cubic-bezier(x1, 0, x2, 1) at progress `t`, solved for x by bisection (plenty for one sweep a tour). */
 const bezier = (x1: number, x2: number) => (t: number) => {
+  if (t <= 0 || t >= 1) return t <= 0 ? 0 : 1;
   const at = (a: number, b: number, u: number) => 3 * a * u * (1 - u) ** 2 + 3 * b * u * u * (1 - u) + u ** 3;
   let low = 0;
   let high = 1;
@@ -57,7 +58,8 @@ function poseAt(t: number): Pose {
 /** The still's soft leading edge while it wipes in; once it has crossed, the still is simply there. */
 function wipeMask(front: number | null) {
   if (front === null || front >= 100 + WIPE_FEATHER) return undefined;
-  const mask = `linear-gradient(to right, #000 ${front - WIPE_FEATHER}%, transparent ${front}%)`;
+  const at = Math.round(front * 100) / 100;
+  const mask = `linear-gradient(to right, #000 ${at - WIPE_FEATHER}%, transparent ${at}%)`;
   return { maskImage: mask, WebkitMaskImage: mask };
 }
 

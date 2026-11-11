@@ -443,6 +443,7 @@ export function useTimelineCommit({
     // Re-check runtime permission at the shared commit boundary. Gesture/UI
     // checks can go stale while a canonical shot head is being adopted.
     if (editability?.checkTimeline && !editability.checkTimeline().allowed) {
+      console.error('PROBE applyEdit refused by editability', mutation.type);
       return;
     }
 
@@ -457,6 +458,7 @@ export function useTimelineCommit({
 
     if (mutation.type === 'prepared-media') {
       const prepared = applyPreparedMediaCommand(current, mutation.command);
+      console.error('PROBE applyEdit prepared-media', JSON.stringify({ ok: Boolean(prepared), mediaType: mutation.command.payload.asset.mediaType, assetKnown: Boolean(current.registry.assets[mutation.command.payload.asset.assetKey]), hasSelection: Boolean(mutation.command.payload.asset.mediaSelection), save: options?.save, removeClipId: mutation.command.payload.removeClipId }));
       if (!prepared) {
         eventBus.emit('lostEdit');
         return;

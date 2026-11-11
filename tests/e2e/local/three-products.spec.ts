@@ -3608,7 +3608,7 @@ test('quick: Astrid edit then App edit are visible and readable on the adopted t
 });
 
 test('empty bootstrap: creating the first timeline in a fresh project then dropping an image records one App-source commit', async ({ page, harness }) => {
-  const fresh = await harness.createFreshProject();
+  const fresh = await harness.createFreshProject(`Drop probe ${kind} ${Date.now()}`);
   const catalogPath = `/v1/projects/${fresh.projectId}/timelines`;
   const before = await harness.runtimeJson<any>('GET', `${catalogPath}?limit=50`);
   expect(before.status, JSON.stringify(before.body)).toBe(200);
@@ -3706,4 +3706,213 @@ test('empty bootstrap: creating the first timeline in a fresh project then dropp
   const object = await harness.runtimeFetch(`/v1/objects/${encodeURIComponent(asset.media_id)}`);
   expect(object.status).toBe(200);
   expect(Array.from(new Uint8Array(await object.arrayBuffer()).slice(0, 8))).toEqual([137, 80, 78, 71, 13, 10, 26, 10]);
+});
+
+// ---- LOCAL DROP PROBE (never committed to a shared branch) ----
+async function probeInstrument(page: Page, tag: string) {
+  const t0 = Date.now();
+  const log = (line: string) => console.log(`[${tag} ${((Date.now() - t0) / 1000).toFixed(1)}s] ${line}`);
+  await page.addInitScript(() => {
+    (window as any).__timelineSaveDiagnosticsEnabled = true;
+    (window as any).__diag = [];
+    window.addEventListener('timeline:save-diagnostic', (event: Event) => {
+      const d = (event as CustomEvent).detail;
+      console.error('DIAG ' + JSON.stringify({ phase: d.phase, gestureKind: d.gestureKind, errorCode: d.errorCode, errorClass: d.errorClass, status: d.status, clipId: d.clipId }));
+    });
+    window.addEventListener('unhandledrejection', (event) => console.error('UNHANDLED ' + String((event as PromiseRejectionEvent).reason)));
+  });
+  page.on('console', (message) => { const text = message.text(); if (!/Download the React DevTools|\[vite\]/.test(text)) log(`console.${message.type()}: ${text.slice(0, 400)}`); });
+  page.on('request', (request) => { const url = new URL(request.url()); if (/runtime/.test(url.pathname) && !/handshake|inspect$/.test(url.pathname)) log(`${request.method()} ${url.pathname.replace(/^.*runtime/, '')}`); });
+  page.on('response', (response) => { if (response.status() >= 400) log(`HTTP ${response.status()} ${response.request().method()} ${new URL(response.url()).pathname}`); });
+  page.on('dialog', async (dialog) => { log(`DIALOG ${dialog.type()} ${dialog.message()}`); await dialog.accept(); });
+  return log;
+}
+async function probeState(page: Page, log: (line: string) => void, label: string) {
+  const state = await page.evaluate(async () => {
+    const unload = new Event('beforeunload', { cancelable: true });
+    window.dispatchEvent(unload);
+    return {
+      clips: document.querySelectorAll('.clip-action').length,
+      clipIds: [...document.querySelectorAll('.clip-action')].map((el) => (el as HTMLElement).dataset.clipId),
+      status: [...document.querySelectorAll('[role="status"]')].map((el) => (el as HTMLElement).innerText).filter(Boolean),
+      toasts: [...document.querySelectorAll('[data-sonner-toast]')].map((el) => (el as HTMLElement).innerText),
+      recovery: [...document.querySelectorAll('[data-testid="timeline-command-recovery"]')].map((el) => (el as HTMLElement).innerText),
+      unloadWouldWarn: unload.defaultPrevented,
+      drafts: await new Promise((resolve) => { try { const open = indexedDB.open('astrid.timeline-drafts'); open.onerror = () => resolve('open-error'); open.onsuccess = () => { const db = open.result; if (!db.objectStoreNames.contains('timeline-drafts')) { resolve('no-store'); return; } const req = db.transaction('timeline-drafts').objectStore('timeline-drafts').getAll(); req.onsuccess = () => resolve((req.result as any[]).map((r) => ({ key: r.key, clips: r.draft?.config?.clips?.length, updatedAt: r.updatedAt, baseHead: r.baseHeadRevisionId ?? r.recoveryMetadata?.baseHeadRevisionId }))); req.onerror = () => resolve('get-error'); }; } catch (e) { resolve(String(e)); } }),
+      saveWords: (document.body.innerText.match(/Not saved|Saving…|draft retained|Draft retained|ordinary image add|Local document save retained[^\n]*/g) ?? []).slice(0, 6),
+      badges: [...document.querySelectorAll('[class*="h-5"][class*="px-1.5"]')].map((el) => (el as HTMLElement).innerText).slice(0, 5),
+    };
+  });
+  await page.screenshot({ path: `/home/user/logs/drop-shots/${label}-${Date.now()}.png` }).catch(() => {});
+  log(`STATE ${label} ${JSON.stringify(state)}`);
+  return state;
+}
+async function probeCommits(harness: DirectHarness, projectId: string, timelineId: string) {
+  const response = await harness.runtimeJson<HistoryPage>('GET', `/v1/projects/${projectId}/timelines/${timelineId}/commits?limit=50`);
+  return response.body.items.map((item: any) => `${item.intent ?? item.label ?? '?'}:${item.source?.via ?? '?'}`);
+}
+async function probeVideoFile(harness: DirectHarness) {
+  const mediaObject = await harness.runtimeFetch(`/v1/objects/${encodeURIComponent(harness.seed.video.objectId)}`);
+  const bytes = new Uint8Array(await mediaObject.arrayBuffer());
+  return { name: 'probe-drop.webm', type: harness.seed.video.mediaType, bytesBase64: Buffer.from(bytes).toString('base64') };
+}
+const PROBE_IMAGE = { name: 'probe-drop.png', type: 'image/png', bytesBase64: 'iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAGUlEQVR4nGP4EKDxnxLMMGrAqAGjBgwXAwCCv2cf+oH0twAAAABJRU5ErkJggg==' };
+
+for (const kind of (process.env.PROBE_KINDS ?? 'video,image').split(',')) {
+  test(`DROP PROBE fresh ${kind}: drop on a fresh project's first timeline, wait, reload`, async ({ page, harness }) => {
+    const log = await probeInstrument(page, `fresh-${kind}`);
+    const fresh = await harness.createFreshProject(`Drop probe ${kind} ${Date.now()}`);
+    const catalogPath = `/v1/projects/${fresh.projectId}/timelines`;
+    await openApp(page, harness);
+    await expectConnected(page);
+    await page.goto(`${harness.origin}${APP_ENTRY_ROUTE}?project=${fresh.projectId}`);
+    const createFirst = page.getByRole('button', { name: 'Create first timeline' });
+    await expect.poll(async () => (await harness.runtimeJson<any>('GET', `${catalogPath}?limit=50`)).body.items.length
+      || (await createFirst.isVisible() ? -1 : 0), CEILING).not.toBe(0);
+    if (await createFirst.isVisible()) await createFirst.click();
+    await expect(page.getByRole('combobox', { name: 'Select timeline' })).toContainText('Main', CEILING);
+    await expect(page.locator('.timeline-wrapper')).toBeVisible();
+    const timelineId = (await harness.runtimeJson<any>('GET', `${catalogPath}?limit=50`)).body.items[0].timeline_id;
+    await page.waitForTimeout(3000);
+    log(`commits before ${JSON.stringify(await probeCommits(harness, fresh.projectId, timelineId))}`);
+    const file = kind === 'video' ? await probeVideoFile(harness) : PROBE_IMAGE;
+    const box = await page.locator('.timeline-wrapper').first().boundingBox();
+    log('DROP');
+    await page.evaluate(({ name, type, bytesBase64, x, y }) => {
+      const target = document.querySelector<HTMLElement>('.timeline-wrapper')!;
+      const bytes = Uint8Array.from(atob(bytesBase64), (character) => character.charCodeAt(0));
+      const transfer = new DataTransfer();
+      transfer.items.add(new File([bytes], name, { type }));
+      for (const eventType of ['dragover', 'drop'] as const) {
+        target.dispatchEvent(new DragEvent(eventType, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: transfer }));
+      }
+    }, { ...file, x: box!.x + Math.min(80, box!.width / 3), y: box!.y + box!.height / 2 });
+    for (const wait of [2000, 5000, 15000]) { await page.waitForTimeout(wait); await probeState(page, log, `after+${wait}`); }
+    log(`commits after ${JSON.stringify(await probeCommits(harness, fresh.projectId, timelineId))}`);
+    await page.reload();
+    await expect(page.getByRole('combobox', { name: 'Select timeline' })).toContainText('Main', CEILING);
+    await page.waitForTimeout(8000);
+    await probeState(page, log, 'after-reload');
+    log(`commits after reload ${JSON.stringify(await probeCommits(harness, fresh.projectId, timelineId))}`);
+    await page.goto(`${harness.origin}/__blank.html`);
+    await page.goto(`${harness.origin}${APP_ENTRY_ROUTE}?project=${fresh.projectId}`);
+    await expect(page.getByRole('combobox', { name: 'Select timeline' })).toContainText('Main', CEILING);
+    await page.waitForTimeout(8000);
+    await probeState(page, log, 'after-renavigate');
+  });
+}
+
+for (const kind of (process.env.PROBE_MOUNTED_KINDS ?? 'video,image').split(',').filter(Boolean)) {
+  test(`DROP PROBE mounted ${kind}: plain drop on the seeded timeline with mounted shots, wait, reload`, async ({ page, harness, seed3 }) => {
+    const log = await probeInstrument(page, `mounted-${kind}`);
+    await openCommandTimeline(page, harness, seed3);
+    const dropClip = page.locator(`.clip-action[data-clip-id="${seed3.appClipId}"]`).first();
+    const referenceClip = page.locator(`.clip-action[data-clip-id="${seed3.transitionClipId}"]`).first();
+    const wrapper = page.locator('.timeline-wrapper').first();
+    for (let zoomClicks = 0; zoomClicks < 6; zoomClicks += 1) {
+      const [d, r, w] = await Promise.all([dropClip.boundingBox(), referenceClip.boundingBox(), wrapper.boundingBox()]);
+      const pps = (r!.x - d!.x) / THREE_PRODUCTS_REFERENCE_AT;
+      if (d!.x + 22.5 * pps <= w!.x + w!.width) break;
+      await page.getByRole('button', { name: 'Zoom out timeline', exact: true }).click();
+    }
+    log(`commits before ${JSON.stringify(await probeCommits(harness, harness.seed.projectId, seed3.timelineId))}`);
+    await probeState(page, log, 'before');
+    const file = kind === 'video' ? await probeVideoFile(harness) : PROBE_IMAGE;
+    log('DROP');
+    await dropFileOnTimeline(page, file, seed3.appClipId, seed3.transitionClipId, 0, THREE_PRODUCTS_REFERENCE_AT, kind === 'video' ? 22.5 : 20);
+    for (const wait of [2000, 5000, 15000]) { await page.waitForTimeout(wait); await probeState(page, log, `after+${wait}`); }
+    log(`commits after ${JSON.stringify(await probeCommits(harness, harness.seed.projectId, seed3.timelineId))}`);
+    await page.reload();
+    await openSeededTimeline(page, harness);
+    await page.waitForTimeout(8000);
+    await probeState(page, log, 'after-reload');
+  });
+}
+
+function probeWavBase64(seconds = 2, rate = 8000) {
+  const samples = seconds * rate; const buffer = Buffer.alloc(44 + samples * 2);
+  buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + samples * 2, 4); buffer.write('WAVE', 8); buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(1, 22); buffer.writeUInt32LE(rate, 24);
+  buffer.writeUInt32LE(rate * 2, 28); buffer.writeUInt16LE(2, 32); buffer.writeUInt16LE(16, 34); buffer.write('data', 36); buffer.writeUInt32LE(samples * 2, 40);
+  for (let i = 0; i < samples; i += 1) buffer.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
+  return buffer.toString('base64');
+}
+
+test('DROP PROBE2 fresh audio: drop a wav on a fresh first timeline, wait, reload', async ({ page, harness }) => {
+  const log = await probeInstrument(page, 'fresh-audio');
+  const fresh = await harness.createFreshProject(`Drop probe audio ${Date.now()}`);
+  const catalogPath = `/v1/projects/${fresh.projectId}/timelines`;
+  await openApp(page, harness);
+  await expectConnected(page);
+  await page.goto(`${harness.origin}${APP_ENTRY_ROUTE}?project=${fresh.projectId}`);
+  const createFirst = page.getByRole('button', { name: 'Create first timeline' });
+  await expect.poll(async () => (await harness.runtimeJson<any>('GET', `${catalogPath}?limit=50`)).body.items.length
+    || (await createFirst.isVisible() ? -1 : 0), CEILING).not.toBe(0);
+  if (await createFirst.isVisible()) await createFirst.click();
+  await expect(page.getByRole('combobox', { name: 'Select timeline' })).toContainText('Main', CEILING);
+  const timelineId = (await harness.runtimeJson<any>('GET', `${catalogPath}?limit=50`)).body.items[0].timeline_id;
+  await page.waitForTimeout(3000);
+  const row = page.locator('[data-row-id="A1"]').first();
+  const box = (await row.count()) ? await row.boundingBox() : await page.locator('.timeline-wrapper').first().boundingBox();
+  log(`DROP on ${(await row.count()) ? 'A1' : 'wrapper'}`);
+  await page.evaluate(({ bytesBase64, x, y }) => {
+    const target = document.querySelector<HTMLElement>('.timeline-wrapper')!;
+    const bytes = Uint8Array.from(atob(bytesBase64), (character) => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'probe-tone.wav', { type: 'audio/wav' }));
+    for (const eventType of ['dragover', 'drop'] as const) target.dispatchEvent(new DragEvent(eventType, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: transfer }));
+  }, { bytesBase64: probeWavBase64(), x: box!.x + Math.min(200, box!.width / 2), y: box!.y + box!.height / 2 });
+  for (const wait of [2000, 8000]) { await page.waitForTimeout(wait); await probeState(page, log, `after+${wait}`); }
+  log(`commits after ${JSON.stringify(await probeCommits(harness, fresh.projectId, timelineId))}`);
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Select timeline' })).toContainText('Main', CEILING);
+  await page.waitForTimeout(8000);
+  await probeState(page, log, 'after-reload');
+});
+
+test('DROP PROBE2 mounted refusal then ordinary edits: refuse a drop on the shot lane, move + rename, reload, Save them', async ({ page, harness, seed3 }) => {
+  const log = await probeInstrument(page, 'refuse-then-edit');
+  await openCommandTimeline(page, harness, seed3);
+  const pid = harness.seed.projectId;
+  log(`commits before ${JSON.stringify(await probeCommits(harness, pid, seed3.timelineId))}`);
+  await probeState(page, log, 'before');
+  const lane = page.locator('[data-row-id="S1"]').first();
+  log(`S1 rows ${await lane.count()} rows ${JSON.stringify(await page.locator('[data-row-id]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.rowId)))}`);
+  const laneBox = await lane.boundingBox();
+  const file = await probeVideoFile(harness);
+  log('DROP on S1');
+  await page.evaluate(({ name, type, bytesBase64, x, y }) => {
+    const target = document.querySelector<HTMLElement>('.timeline-wrapper')!;
+    const bytes = Uint8Array.from(atob(bytesBase64), (character) => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], name, { type }));
+    for (const eventType of ['dragover', 'drop'] as const) target.dispatchEvent(new DragEvent(eventType, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: transfer }));
+  }, { ...file, x: laneBox!.x + laneBox!.width * 0.6, y: laneBox!.y + laneBox!.height / 2 });
+  await page.waitForTimeout(4000);
+  await probeState(page, log, 'after-refused-drop');
+  log('MOVE');
+  await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 0, 5, THREE_PRODUCTS_REFERENCE_AT);
+  await page.waitForTimeout(3000);
+  await probeState(page, log, 'after-move');
+  log('RENAME');
+  await editFirstTrackName(page, 'Probe renamed');
+  await page.waitForTimeout(4000);
+  await probeState(page, log, 'after-rename');
+  log(`commits after edits ${JSON.stringify(await probeCommits(harness, pid, seed3.timelineId))}`);
+  await page.reload();
+  await openSeededTimeline(page, harness).catch((e) => log(`openSeeded after reload: ${String(e).slice(0, 200)}`));
+  await page.waitForTimeout(6000);
+  await probeState(page, log, 'after-reload');
+  const saveThem = page.getByRole('button', { name: 'Save them' });
+  if (await saveThem.count()) {
+    log('CLICK Save them');
+    await saveThem.click();
+    await page.waitForTimeout(8000);
+    await probeState(page, log, 'after-save-them');
+  } else log('no Save them button');
+  log(`commits final ${JSON.stringify(await probeCommits(harness, pid, seed3.timelineId))}`);
+  const head = await harness.runtimeJson<any>('GET', `/v1/projects/${pid}/timelines/${seed3.timelineId}/commits?limit=1`);
+  const rev = await harness.runtimeJson<any>('GET', `/v1/projects/${pid}/timelines/${seed3.timelineId}/composition-revisions/${head.body.head.revision_id}`);
+  const payload = rev.body.payload; const clips = payload.clips ?? payload.config?.clips; const tracks = payload.tracks ?? payload.config?.tracks;
+  log(`canonical clips ${JSON.stringify(clips.map((c: any) => [c.id, c.track, c.at]))} tracks ${JSON.stringify(tracks.map((t: any) => [t.id, t.label]))}`);
 });

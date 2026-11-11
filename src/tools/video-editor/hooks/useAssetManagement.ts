@@ -302,7 +302,7 @@ export function useAssetManagement({
         || identities.some(identity => identity.projectId !== composition.projectId
           || identity.parentDocumentId !== composition.parentDocumentId || identity.occurrenceId !== composition.occurrenceIds![0])
         || (current.head && (current.head.projectId !== composition.projectId
-          || current.head.timelineId !== composition.parentDocumentId || current.head.headRevisionId !== composition.headRevisionId)))) return false;
+          || current.head.timelineId !== composition.parentDocumentId || current.head.headRevisionId !== composition.headRevisionId)))) { console.error('PROBE image drop composition guard', JSON.stringify({ composition, identities: identities.length, selectedProjectId, head: current.head })); return false; }
       const tracks = current.tracks.filter(track => track.id === trackId);
       if (forceNewTrack || insertAtTop || tracks.length !== 1 || tracks[0].kind !== 'visual'
         || tracks[0].role === 'source' || current.rows.filter(row => row.id === trackId).length !== 1
@@ -315,12 +315,12 @@ export function useAssetManagement({
         || !/^sha256:[0-9a-f]{64}$/.test(media.catalog_digest)
         || prepared.entry.media_id !== media.object_id || prepared.entry.generationId !== media.generation_id
         || prepared.entry.variantId !== media.variant_id
-        || (existing && canonicalJsonStringify(existing) !== canonicalJsonStringify(prepared.entry))) return false;
+        || (existing && canonicalJsonStringify(existing) !== canonicalJsonStringify(prepared.entry))) { console.error('PROBE image drop target guard', JSON.stringify({ trackId, forceNewTrack, insertAtTop, tracks: tracks.map(t => ({ id: t.id, kind: t.kind, role: t.role })), rows: current.rows.filter(row => row.id === trackId).length, time, existing: Boolean(existing) })); return false; }
       if (!removeClipId.startsWith('uploading-')
         || current.config.clips.some(clip => clip.id === removeClipId)
         || !current.meta[removeClipId]?.asset?.startsWith('uploading:')
         || current.meta[removeClipId]?.track !== trackId
-        || current.rows.flatMap(row => row.actions).filter(action => action.id === removeClipId).length !== 1) return false;
+        || current.rows.flatMap(row => row.actions).filter(action => action.id === removeClipId).length !== 1) { console.error('PROBE image drop skeleton guard'); return false; }
       // Use the mounted editor's row preview. Whole-config prepared-media
       // validation cannot validate retained opaque or projected child fields.
       // A2 still owns the semantic command, original basis and durable save.
@@ -328,7 +328,7 @@ export function useAssetManagement({
         rows: current.rows.map(row => ({ ...row, actions: row.actions.filter(action => action.id !== removeClipId) })) };
       const target = planAssetDropTarget({ current: local, assetKind: 'visual', trackId,
         selectedTrackId: getSelectedTrackId(), time, duration: 5 });
-      if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) return false;
+      if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) { console.error('PROBE image drop plan guard', JSON.stringify(target.ok ? { trackId: target.trackId, want: trackId, same: target.preparedCurrent === local } : target)); return false; }
       const edit = buildAssetDropEdit({ current: local, assetKey: prepared.assetKey, assetEntry: prepared.entry,
         trackId: target.trackId, time: target.snappedTime ?? time });
       if (!edit) return false;

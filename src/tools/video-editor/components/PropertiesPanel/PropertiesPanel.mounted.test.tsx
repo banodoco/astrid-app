@@ -207,7 +207,7 @@ it.each(['valid', 'dependent', 'conflict', 'missing', 'copied', 'forged', 'wrong
           ? 'Element parameter ownership changed or is unavailable; reload the timeline before editing.'
           : control === 'closed'
             ? 'The captured editor was closed or replaced. Reopen the current timeline and recover the draft before applying it.'
-            : 'Element parameter editor owner changed or is unavailable; draft retained'));
+            : 'Not saved: element parameter editor owner changed or is unavailable'));
         expect(send).not.toHaveBeenCalled();
         const [stored] = await createCommitOutbox().list(scope);
         expect(stored.intents).toEqual([]);

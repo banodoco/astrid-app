@@ -251,6 +251,15 @@ export interface UseTimelinePersistenceResult {
   loadedBundleRef: MutableRefObject<TimelineBundleEnvelope | null>;
 }
 
+/** The user-facing refusal: the reason, then what was and was not kept. */
+export function timelineSaveRefusalMessage(reason: string, keptInBrowser: boolean): string {
+  const text = /^Not saved\b/i.test(reason) ? reason : `Not saved: ${reason}`;
+  const sentence = /[.!?]$/.test(text) ? text : `${text}.`;
+  return keptInBrowser
+    ? `${sentence} This change, and any edit after it, is not on the timeline; it is kept only in this browser. After a reload you can try saving it again or discard it.`
+    : `${sentence} This change, and any edit after it, is not on the timeline and could not be kept in this browser; it will be lost when this page is closed or reloaded.`;
+}
+
 export function useTimelinePersistence({
   store,
   provider,
@@ -706,6 +715,7 @@ export function useTimelinePersistence({
     setSaveStatus('saving');
 
     attempt.session.activeAttempts.add(attempt);
+    console.error('PROBE doSave attempt', attempt.seq);
     try {
       await Promise.all([...(attempt.session.captures ?? [])]);
       if (attempt.session.captureFailure) throw attempt.session.captureFailure;
@@ -809,6 +819,7 @@ export function useTimelinePersistence({
         },
       );
     } catch (error) {
+      console.error('PROBE doSave error', error instanceof Error ? `${error.name}: ${error.message}` : String(error), isMountedRef.current, activeTargetRef.current === attempt.session);
       recordDraftReloadFailure();
       // An obsolete request may settle after replacement/unmount. It cannot
       // reject a new session's waiters, update its state, or start a retry.
@@ -870,8 +881,12 @@ export function useTimelinePersistence({
         cancelErrorRetryTimer();
         disarmWatchdog();
         setSaveStatus('error');
-        toast.error(persistenceError.message);
         rejectFlushWaiters(persistenceError, attempt, true);
+        // Say exactly what was kept. The refusal is sticky for this editor
+        // session, and only the browser recovery slot (offered after a reload)
+        // still holds the change; nothing reached the timeline.
+        const kept = await attempt.draftWrite.then(() => !attempt.session.storageFailure, () => false);
+        toast.error(timelineSaveRefusalMessage(persistenceError.message, kept));
         return;
       }
 
@@ -1091,6 +1106,7 @@ export function useTimelinePersistence({
         }, gestureBasis);
       } catch (error) { localCapture = Promise.reject(error); }
       localCapture = localCapture.catch((error: unknown) => {
+        console.error('PROBE capture rejected', error instanceof Error ? error.message : String(error));
         session.captureFailure = error;
         recordDraftReloadFailure();
         throw error;
@@ -1120,6 +1136,7 @@ export function useTimelinePersistence({
     // keep the edit in memory and resume it after that decision. The previous
     // ordering silently replaced the old recovery record and then returned,
     // leaving the UI looking saved even though no POST had happened.
+    console.error('PROBE scheduleSave', JSON.stringify({ gesture: options?.gestureBasis?.kind, recoveryPending: recoveryPendingRef?.current, recoveryActive: recoveryActiveRef?.current, reload: reloadInProgressRef.current, persistenceEnabled, interaction: isInteractionActive(getInteractionStateRef()), conflict: isConflictExhausted, saving: isSavingRef.current, hasLocal: Boolean(session.localDocumentSave) }));
     if (recoveryPendingRef?.current || recoveryActiveRef?.current) {
       deferredDuringRecoveryRef.current = {
         data: nextData,
@@ -1236,6 +1253,7 @@ export function useTimelinePersistence({
   }, [scheduleSaveWithCapture]);
 
   const resumeDeferredRecoverySave = useCallback(() => {
+    console.error('PROBE resumeDeferredRecoverySave', recoveryPendingRef?.current, recoveryActiveRef?.current, Boolean(deferredDuringRecoveryRef.current));
     if (recoveryPendingRef?.current || recoveryActiveRef?.current) return;
     const deferred = deferredDuringRecoveryRef.current;
     if (!deferred) return;

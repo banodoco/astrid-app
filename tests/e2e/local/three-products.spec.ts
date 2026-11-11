@@ -2524,6 +2524,9 @@ test('M1 real dependency conflict retains B original guards and pending identity
   expect(wire.posts[2].key).not.toBe(wire.posts[0].key);
   expect((await history(harness, seed3)).head.revision_id).toBe(pinOf(c).revision_id);
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 2);
+  const observedBeforeReload = wire.observed.length;
+  const postsBeforeReload = wire.posts.map((post) => ({ body: post.body, key: post.key, status: post.status }));
+  expect(postsBeforeReload).toHaveLength(3);
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
   await expectConnected(page);
   const reloaded = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
@@ -2534,7 +2537,15 @@ test('M1 real dependency conflict retains B original guards and pending identity
   const recoveredConflict = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
   expect(recoveredConflict.intents).toEqual(retained.intents);
   expect(recoveredConflict.pending).toEqual(retained.pending);
-  expect(wire.posts).toHaveLength(3);
+  // Nothing may be sent for a bounded quiet period after the reload: every request the wire saw (not only the
+  // forwarded posts) must stay exactly where it was before the reload.
+  for (const deadline = Date.now() + 5_000; Date.now() < deadline;) {
+    expect(wire.observed.length, 'the reloaded rejected owner attempts no commit request at all').toBe(observedBeforeReload);
+    expect(wire.posts).toHaveLength(3);
+    await page.waitForTimeout(250);
+  }
+  expect(wire.observed.length).toBe(observedBeforeReload);
+  expect(wire.posts.map((post) => ({ body: post.body, key: post.key, status: post.status }))).toEqual(postsBeforeReload);
   expect(wire.legacy).toEqual([]);
   expect(legacy, 'the reset move must also use the commit path exclusively').toEqual([]);
   await expectOpaqueDataKept(harness, seed3);

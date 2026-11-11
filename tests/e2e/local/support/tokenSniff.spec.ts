@@ -544,3 +544,27 @@ test('diagnostics record gate abort and a missing terminal without inventing an 
   expect(events.map(event => event.event)).not.toContain('requestfailed');
   expect(events.map(event => event.event)).not.toContain('requestfinished');
 });
+
+test('workflow diagnostic flag emits only sanitized lifecycle records', async () => {
+  const previous = process.env.TOKEN_SNIFF_DIAGNOSTICS;
+  const originalLog = console.log;
+  const lines: string[] = [];
+  process.env.TOKEN_SNIFF_DIAGNOSTICS = '1';
+  console.log = (...args: unknown[]) => { lines.push(args.join(' ')); };
+  try {
+    const page = fakePage();
+    const sniff = new TokenSniff({ secret });
+    await sniff.attach(page);
+    const req = request(`http://localhost:1234/api/${secret}?value=${secret}`, secret, { authorization: secret }, async () => { throw new Error(secret); });
+    page.emit('request', req);
+    page.emit('requestfailed', req);
+    await expect(sniff.expectClean(page)).rejects.toThrow('Incomplete credential scan');
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.every(line => line.startsWith('TOKEN_SNIFF '))).toBe(true);
+    expect(lines.join('\n')).not.toContain(secret);
+  } finally {
+    console.log = originalLog;
+    if (previous === undefined) delete process.env.TOKEN_SNIFF_DIAGNOSTICS;
+    else process.env.TOKEN_SNIFF_DIAGNOSTICS = previous;
+  }
+});

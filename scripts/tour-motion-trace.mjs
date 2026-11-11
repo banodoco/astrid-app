@@ -59,7 +59,8 @@ function installSampler() {
   const r4 = (el) => { if (!el) return null; const b = el.getBoundingClientRect(); return [b.x, b.y, b.width, b.height]; };
   const px = (v) => parseFloat(v);
   const tm = (window.__tm = { samples: [], clicks: [], targets: [], lastChange: performance.now(), sig: '' });
-  document.addEventListener('click', (e) => tm.clicks.push({ t: performance.now(), text: (e.target.closest?.('button')?.textContent ?? '').trim() }), true);
+  // `ts`: when the browser received the input; `t`: when its handler ran (the difference is time queued behind other work).
+  document.addEventListener('click', (e) => tm.clicks.push({ t: performance.now(), ts: e.timeStamp, text: (e.target.closest?.('button')?.textContent ?? '').trim() }), true);
   const geometry = (el) => {
     // SVG <rect> x/y/width/height are CSS geometry properties here, so the CSS transition animates the *computed
     // style*; the attribute is just the destination. `c` = getComputedStyle (in flight), `a` = attribute (target),
@@ -90,6 +91,9 @@ function installSampler() {
       beatReady: Boolean(state && window.__tourShotsBeats.isEditorTourBeatReady(state)),
       cut: [...document.querySelectorAll('#editor-tour-dim rect[fill="black"]')].map(geometry),
       ring: [...document.querySelectorAll('[data-editor-tour-ring]')].map(geometry),
+      // Action cards on show in the act's actions group (the group's unseen sizer does not count), and the chat pane.
+      ac: [...document.querySelectorAll('[data-editor-tour="chat-actions"] [data-agent-tool-call-id]')].filter((el) => !el.closest('[aria-hidden="true"]')).length,
+      chat: r4(document.querySelector('[data-tasks-pane="true"]')),
       tg, pu: Boolean(document.querySelector('[data-editor-tour="preview"]')?.textContent?.includes('Preview unavailable')),
     };
     const sig = JSON.stringify([s.host, s.cut.map((g) => g.c), tg]).replace(/-?\d+\.\d+/g, (n) => Math.round(Number(n) * 2) / 2);
@@ -243,7 +247,7 @@ const teleport = (m) => m.maxJump.px > 80 && m.maxJump.px > 0.4 * m.travel && m.
 function degenerate(rect) { return !rect || rect[2] <= 0 || rect[3] <= 0; }
 
 /** Everything measured for one transition, from rAF samples with t re-based so the trigger click is 0. */
-export function analyseTransition(samples, { dest, source, expectMoves = 1, expectCutoutMoves = expectMoves }) {
+export function analyseTransition(samples, { dest, source, expectMoves = 1, expectCutoutMoves = expectMoves, marks = [], tap = null, longFrames = [] }) {
   const card = analyseSeries(samples.filter((s) => s.host).map((s) => ({ t: s.t, v: s.host })), 2);
   const first = samples.find((s) => s.host), last = samples.at(-1);
   const inFlight = samples.filter((s) => s.t >= (card.firstMoveT ?? Infinity) && s.t <= (card.restT ?? -Infinity));
@@ -379,9 +383,79 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1, expe
     const lit = cutouts.find((k) => k.used);
     respond = lit ? { destinations: lit.retargets.filter((r) => r.t >= 0).map((r) => ({ t: r.t, rect: r.to, midFlight: r.whileMoving })), cutoutMoves: lit.segments.length } : null;
   }
-  const result = { frames, tourEnded: ended, startSync: sync, pacing, gallery, respond, expectCutoutMoves, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
+  const latency = latencyOf(samples, { card, cutouts, marks, tap, longFrames, label });
+  if (respond) Object.assign(respond, actionsOf(samples, cutouts, label));
+  const result = { latency, frames, tourEnded: ended, startSync: sync, pacing, gallery, respond, expectCutoutMoves, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
   Object.assign(result, suspectsFor(result, source, dest, expectMoves, expectCutoutMoves), { expectMoves });
   return result;
+}
+
+/**
+ * How long the tour takes to answer a press (t=0 is the press's handler): when the card's content first changes, when the
+ * spotlight first changes (a cutout moving, opening or closing) and comes to rest, and where the time before that first
+ * change went. The app marks each stage (User Timing, `useSettledRects`): the step seen by the runner, its targets all
+ * measured, the measurement still, the commit. `deadMs` is how long nothing at all was changing after the old content
+ * had gone (faded below 5%) and before the spotlight, the card or a pane set off.
+ */
+function latencyOf(samples, { card, cutouts, marks, tap, longFrames, label }) {
+  const pre = samples.filter((s) => s.t < 0).at(-1) ?? samples[0];
+  const after = samples.filter((s) => s.t >= 0);
+  const shown = (s) => (s.cop ?? 1) * (s.hop ?? 1);
+  const contentT = after.find((s) => label(s) !== label(pre) || shown(s) < shown(pre) - 0.03 || shown(s) > shown(pre) + 0.03)?.t ?? null;
+  const goneT = after.find((s) => label(s) !== label(pre) || shown(s) <= 0.05)?.t ?? null;
+  let spotFirstT = null, spotRestT = null;
+  for (let k = 1; k < samples.length; k++) {
+    if (samples[k].t < 0) continue;
+    const a = samples[k - 1].cut, b = samples[k].cut;
+    const changed = b.some((g, i) => a[i] && (Math.abs((g.o ?? 1) - (a[i].o ?? 1)) > 0.01 || ((g.o ?? 1) > 0.01 && norm(g.c.map((n, j) => n - a[i].c[j])) >= EPS)));
+    if (changed) { spotFirstT ??= samples[k].t; spotRestT = samples[k].t; }
+  }
+  const series = (key) => analyseSeries(samples.filter((s) => s[key]).map((s) => ({ t: s.t, v: s[key] })), 2);
+  const paneT = Math.min(series('chat').firstMoveT ?? Infinity, series('pane').firstMoveT ?? Infinity);
+  const firstMotionT = Math.min(spotFirstT ?? Infinity, card.firstMoveT ?? Infinity, paneT);
+  // Frames between the old content going and the spotlight setting off in which nothing else (the card's host, a pane) moved either.
+  const dead = (from, to) => {
+    let total = 0;
+    for (let k = 1; k < samples.length; k++) {
+      const a = samples[k - 1], b = samples[k];
+      if (b.t <= from || b.t > to) continue;
+      const moved = ['host', 'chat', 'pane'].some((name) => a[name] && b[name] && Math.hypot(b[name][0] - a[name][0], b[name][1] - a[name][1]) >= EPS);
+      if (!moved) total += b.t - Math.max(a.t, from);
+    }
+    return total;
+  };
+  const key = marks.find((m) => m.name === 'editor-tour:step' && m.t >= -5)?.detail ?? null;
+  const at = (name) => marks.find((m) => m.name === `editor-tour:${name}` && m.detail === key && m.t >= -5)?.t ?? null;
+  const step = at('step'), targets = at('targets'), still = at('still'), commit = at('commit');
+  const until = spotFirstT ?? firstMotionT;
+  const gaps = samples.slice(1).map((s, k) => ({ t: s.t, dt: s.t - samples[k].t })).filter((g) => g.t > 0 && g.t - g.dt < (Number.isFinite(until) ? until : 0));
+  const worst = gaps.reduce((best, g) => (g.dt > best.dt ? g : best), { t: null, dt: 0 });
+  const span = (a, b) => (a == null || b == null ? null : round(b - a, 0));
+  // Frame cadence while the highlight is actually moving: what the eye reads as the box "sticking".
+  const moving = samples.slice(1).map((s, k) => ({ t: s.t, dt: s.t - samples[k].t })).filter((g) => spotFirstT != null && g.t > spotFirstT && g.t <= spotFirstT + 520);
+  return {
+    stepKey: key, inputDelayMs: tap?.ts != null ? round(tap.t - tap.ts, 0) : null,
+    contentChangeT: round(contentT, 0), contentGoneT: round(goneT, 0), spotlightFirstT: round(spotFirstT, 0), spotlightRestT: round(spotRestT, 0),
+    cardFirstT: round(card.firstMoveT, 0), paneFirstT: Number.isFinite(paneT) ? round(paneT, 0) : null,
+    deadMs: goneT == null || spotFirstT == null ? null : round(dead(goneT, spotFirstT), 0),
+    before: { stepSeenMs: round(step, 0), targetsMs: span(step, targets), stillMs: span(targets, still), leaveMs: span(still, commit), paintMs: span(commit, Number.isFinite(until) ? until : null) },
+    worstFrameBeforeMoveMs: round(worst.dt, 0), worstFrameBeforeMoveAtT: round(worst.t, 0),
+    longFramesBeforeMove: longFrames.filter((f) => f.t + f.d > 0 && f.t < (Number.isFinite(until) ? until : 0)).map((f) => ({ t: f.t, d: f.d, top: f.scripts[0] ? `${f.scripts[0].d}ms ${f.scripts[0].invoker}` : null })),
+    moveFrames: moving.length ? { count: moving.length, worstDtMs: round(Math.max(...moving.map((g) => g.dt)), 0), over34ms: moving.filter((g) => g.dt > 34).length } : null,
+  };
+}
+
+/** Respond's last phase: the action cards appearing, and the spotlight's move onto their group (it should travel as they appear). */
+function actionsOf(samples, cutouts, label) {
+  const after = samples.filter((s) => s.t >= 0);
+  const most = Math.max(0, ...after.map((s) => s.ac ?? 0));
+  const firstCardT = after.find((s) => (s.ac ?? 0) > 0)?.t ?? null;
+  const lastCardT = most ? after.find((s) => s.ac === most)?.t ?? null : null;
+  const lit = cutouts.find((k) => k.used);
+  const move = lit?.segments.at(-1) ?? null;
+  const card = after.find((s) => label(s) === 'respond' && (s.cop ?? 1) * (s.hop ?? 1) >= 0.99);
+  return { actions: { cards: most, firstCardT: round(firstCardT, 0), lastCardT: round(lastCardT, 0), moveStartT: move?.t0 ?? null, moveEndT: move?.t1 ?? null, cardWholeT: round(card?.t, 0),
+    startsAfterFirstCardMs: move && firstCardT != null ? round(move.t0 - firstCardT, 0) : null, endsAfterLastCardMs: move && lastCardT != null ? round(move.t1 - lastCardT, 0) : null } };
 }
 
 /**
@@ -497,7 +571,7 @@ export async function reanalyse(dir) {
     const dest = find(ids.at(-1)), source = find(ids[0]);
     const expectMoves = expectedMoves(entry.name, dest);
     const { longFrames, react } = entry;
-    Object.assign(entry, analyseTransition(samples, { dest, source, expectMoves, expectCutoutMoves: expectedCutoutMoves(entry.name, dest) }), longFrames ? { longFrames } : {}, react ? { react } : {});
+    Object.assign(entry, analyseTransition(samples, { dest, source, expectMoves, expectCutoutMoves: expectedCutoutMoves(entry.name, dest), marks: entry.marks ?? [], tap: entry.tap ?? null, longFrames: entry.allLongFrames ?? longFrames ?? [] }), longFrames ? { longFrames } : {}, react ? { react } : {});
   }
   await writeFile(join(out, 'report.json'), JSON.stringify(report, null, 2));
   await writeFile(join(out, 'report.md'), renderMarkdown(report));
@@ -608,9 +682,11 @@ export async function run(options) {
     page.setDefaultTimeout(20_000);
     await page.goto(`${baseUrl}/tools/video-editor`, { waitUntil: 'domcontentloaded', timeout: 120_000 });
     await page.waitForFunction(() => document.querySelector('[data-editor-tour-card]'), null, { timeout: 120_000 });
+    // A production build has no source modules to import: the running tour offers the same two readers itself.
     await page.evaluate(async ({ store, beats }) => {
-      window.__tourShotsStore = await import(/* @vite-ignore */ store);
-      window.__tourShotsBeats = await import(/* @vite-ignore */ beats);
+      const own = window.__astridEditorTour;
+      window.__tourShotsStore = own ?? await import(/* @vite-ignore */ store);
+      window.__tourShotsBeats = own ?? await import(/* @vite-ignore */ beats);
     }, { store: STORE, beats: BEATS });
     await page.evaluate(installSampler);
     const cdp = await context.newCDPSession(page);
@@ -661,7 +737,8 @@ export async function run(options) {
       await delay(250);
       if (!options['no-screencast']) await cdp.send('Page.stopScreencast');
       cdp.off('Page.screencastFrame', onFrame);
-      const { samples, clicks, loaf, commits } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks, loaf: window.__tm.loaf, commits: window.__tmReact?.commits ?? null }));
+      const { samples, clicks, loaf, commits, allMarks } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks, loaf: window.__tm.loaf, commits: window.__tmReact?.commits ?? null,
+        allMarks: performance.getEntriesByType('mark').filter((m) => m.name.startsWith('editor-tour:')).map((m) => ({ name: m.name, t: m.startTime, detail: m.detail })) }));
       const name = nameOverride ?? `${source.id}→${dest.id}${label}`;
       if (!wanted(name)) return dest;
       const t0 = clicks[0]?.t ?? samples[0].t;
@@ -676,9 +753,13 @@ export async function run(options) {
       }
       // Desktop's respond reached forward makes two moves (arrive beside the reply, contract onto its actions); by Back, one.
       const expectMoves = expectedMoves(name, dest);
-      const analysis = analyseTransition(rebased, { dest, source, expectMoves, expectCutoutMoves: expectedCutoutMoves(name, dest) });
+      const marks = allMarks.filter((m) => m.t >= samples[0].t).map((m) => ({ ...m, t: round(m.t - t0, 1) }));
+      const tap = clicks[0] ? { t: 0, ts: round(clicks[0].ts - t0, 1) } : null;
+      const allLongFrames = loaf.map((f) => ({ ...f, t: round(f.t - t0, 0) })).filter((f) => f.t > -200);
+      const analysis = analyseTransition(rebased, { dest, source, expectMoves, expectCutoutMoves: expectedCutoutMoves(name, dest), marks, tap, longFrames: allLongFrames });
+      Object.assign(analysis, { marks, tap, allLongFrames });
       if (commits) analysis.react = summariseCommits(commits, t0, t0 + rebased.at(-1).t);
-      analysis.longFrames = loaf.map((f) => ({ ...f, t: round(f.t - t0, 0) })).filter((f) => f.t > -200).sort((a, b) => b.d - a.d).slice(0, 5);
+      analysis.longFrames = [...allLongFrames].sort((a, b) => b.d - a.d).slice(0, 5);
       const moved = (key) => rebased.some((s, k) => k && s.cut[0] && rebased[k - 1].cut[0] && s.cut[0][key].some((n, j) => Math.abs(n - rebased[k - 1].cut[0][key][j]) > 0.01));
       analysis.geometrySourcesMoved = { computedStyle: moved('c'), getBBox: moved('b'), attribute: moved('a') };
       const lastT = rebased.at(-1).t;
@@ -756,6 +837,17 @@ function renderMarkdown(report) {
     const cutoutRetargets = t.cutouts.reduce((n, k) => n + k.retargets.filter((r) => r.whileMoving).length, 0);
     lines.push(`| ${t.name} | ${c.segments.length} (${t.expectMoves}) | ${c.retargets.filter((r) => r.t >= 0).length} (${t.expectMoves}) | ${c.midFlightRetargets}${cutoutRetargets ? ` (+${cutoutRetargets} cutout)` : ''} | ${c.reversals} | ${c.firstMoveT == null ? '-' : `${Math.round(c.firstMoveT)} / ${Math.round(c.restT)}ms`} | ${t.startSync ? `${t.startSync.maxMs}ms / ${t.startSync.maxFrames}f` : '-'} | ${yes(t.cutouts.some((k) => k.cornerTouchT.length))} | ${c.contentInFlight.maxOpacityAway} | ${t.suspects.length} |`);
   }
+  const cell = (v, unit = 'ms') => (v == null ? '-' : `${v}${unit}`);
+  if (report.transitions.some((t) => t.latency)) {
+    lines.push('', '## Latency after the press', '', 'From the press (its handler, t=0) to: the card\'s content first changing, the spotlight first changing (a cutout moving, opening or closing), and the spotlight at rest. "before the first move" is where that time went, from the app\'s own marks: the runner seeing the new step, all of its targets measured, the measurement holding still, the commit (the rest of the old content\'s leave), and the commit reaching the screen. "dead" is time with the old content gone and nothing moving yet. "move frames" is the page\'s frame cadence during the 520 ms after the spotlight sets off.', '',
+      '| transition | input delay | content changes | spotlight first move | spotlight at rest | step seen | + targets exist | + still | + leave / gate | + to screen | worst frame before move | dead | move frames (worst / >34ms) |', '|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+    for (const t of report.transitions) {
+      const l = t.latency;
+      if (!l) continue;
+      const b = l.before;
+      lines.push(`| ${t.name} | ${cell(l.inputDelayMs)} | ${cell(l.contentChangeT)} | ${cell(l.spotlightFirstT)} | ${cell(l.spotlightRestT)} | ${cell(b.stepSeenMs)} | ${cell(b.targetsMs)} | ${cell(b.stillMs)} | ${cell(b.leaveMs)} | ${cell(b.paintMs)} | ${cell(l.worstFrameBeforeMoveMs)}${l.worstFrameBeforeMoveAtT != null ? ` @${l.worstFrameBeforeMoveAtT}` : ''} | ${cell(l.deadMs)} | ${l.moveFrames ? `${l.moveFrames.worstDtMs}ms / ${l.moveFrames.over34ms}` : '-'} |`);
+    }
+  }
   const paced = report.transitions.filter((t) => t.pacing);
   if (paced.length) {
     lines.push('', '## Land pacing', '', 'The result plays alone first: the explainer may appear only `hold` ms after the timeline reports the result is being presented (or at once when the user skips with Enter, or arrives by Back).', '',
@@ -773,6 +865,11 @@ function renderMarkdown(report) {
     lines.push('', '## Respond phases', '', 'The spotlight after Send: the prompt with the thinking line, one expansion to the prompt and the reply, then the actions. Each destination is set once; none while a move is in flight.', '',
       '| transition | spotlight destinations (t: rect) | moves | set mid-flight |', '|---|---|---|---|');
     for (const t of responds) lines.push(`| ${t.name} | ${t.respond.destinations.map((d) => `${d.t}ms: ${fmtRect(d.rect)}`).join(' → ')} | ${t.respond.cutoutMoves} | ${t.respond.destinations.filter((d) => d.midFlight).length} |`);
+    if (responds.some((t) => t.respond.actions)) {
+      lines.push('', 'The last phase: the spotlight should travel onto the actions group WHILE its cards appear (setting off with the first, arriving about as the last is there), with the card whole as it lands.', '',
+        '| transition | action cards | first card | last card | spotlight move | move starts after first card | move ends after last card | card whole |', '|---|---|---|---|---|---|---|---|');
+      for (const t of responds) { const a = t.respond.actions; if (a) lines.push(`| ${t.name} | ${a.cards} | ${cell(a.firstCardT)} | ${cell(a.lastCardT)} | ${a.moveStartT ?? '-'}–${a.moveEndT ?? '-'}ms | ${cell(a.startsAfterFirstCardMs)} | ${cell(a.endsAfterLastCardMs)} | ${cell(a.cardWholeT)} |`); }
+    }
   }
   for (const t of report.transitions) {
     lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadavg1AtStart}->${t.hostLoad.loadavg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',

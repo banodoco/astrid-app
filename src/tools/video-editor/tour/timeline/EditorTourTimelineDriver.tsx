@@ -18,6 +18,7 @@ import {
 } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { editorTourSelector } from '@/tools/video-editor/tour/anchors.ts';
 import { useEditorDeviceClass } from '@/tools/video-editor/tour/runner/useIsDesktopEditor.ts';
+import { TOUR_MOVE_MS } from '@/tools/video-editor/tour/runner/useSettledRects.ts';
 import { tourIdle, useTourMediaWarmup } from './useTourMediaWarmup.ts';
 import { EDITOR_TOUR_MEDIA, tourPlaybackUrl, tourSaveData } from '../tourMedia.ts';
 import { createTourVideoEngine, type TourVideoEngine } from './tourPicture.ts';
@@ -31,6 +32,8 @@ export const TOUR_FIRST_FRAME_DEADLINE_MS = 2500;
 const TOUR_TIMECODE_REPORT_MS = 1000;
 /** How long a phone's landing waits for its full-screen chat to leave before it starts the picture anyway. */
 const CHAT_LEAVE_WAIT_MS = 2500;
+/** How long after a phone's chat has set off to cover the screen its act's rows may be laid in behind it (the slide, and a breath). */
+const BEHIND_CHAT_AFTER_MS = TOUR_MOVE_MS + 240;
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -53,6 +56,7 @@ function untilTour(check: (state: EditorTourState) => boolean, timeoutMs: number
 }
 
 const LAST_ANCHOR = TOUR_ANCHORS.length - 1;
+const inChat = (beat: EditorTourState['beat']) => beat === 'compose' || beat === 'respond';
 const PICTURE_FILL = 'absolute inset-0 h-full w-full object-contain';
 const display = (slot: { displayUrl?: string; url: string }) => slot.displayUrl ?? slot.url;
 const noEngine = { subscribe: () => () => undefined, presenting: () => false };
@@ -135,6 +139,25 @@ export function EditorTourTimelineDriver() {
   const reducedMotion = useEditorTour((state) => state.reducedMotion);
   const phone = useEditorDeviceClass() === 'phone';
 
+  // A phone's chat covers the whole editor while its prompt is typed. The act's rows are laid in behind it then, in an
+  // idle moment, rather than inside the Send press: applying a stage re-renders the editor (about 110 ms of main-thread
+  // work on a 4x-throttled phone profile), and everything the press sets off (the card leaving, the highlight moving to
+  // the new row, the chat sliding away) had to wait behind it. Back takes the rows out again, as it does after a landing.
+  const chatCovers = useEditorTour((state) => phone && inChat(state.beat) && inChat(state.shownBeat));
+  const [behindChat, setBehindChat] = useState<string | null>(null);
+  const actKey = `${runId}:${act}`;
+  useEffect(() => {
+    if (!chatCovers) {
+      setBehindChat(null);
+      return undefined;
+    }
+    let cancelled = false;
+    const timer = setTimeout(() => void tourIdle().then(() => { if (!cancelled) setBehindChat(actKey); }), BEHIND_CHAT_AFTER_MS);
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [chatCovers, actKey]);
+  /** The rows the timeline should hold: the tour's stage, or the coming one while a phone's chat hides the editor. */
+  const rowStage = chatCovers && behindChat === actKey ? act : stage;
+
   useLayoutEffect(() => {
     setHost(document.querySelector('[data-testid="video-editor-preview-surface"]')
       ?? document.querySelector(editorTourSelector('preview')));
@@ -197,7 +220,7 @@ export function EditorTourTimelineDriver() {
 
   useEffect(() => {
     if (!loaded || !ops || applying.current) return;
-    if (appliedStage > stage) {
+    if (appliedStage > rowStage) {
       // Back: the later acts' rows leave at once, one stage at a time (a move back is never more than one).
       applying.current = true;
       try {
@@ -211,7 +234,7 @@ export function EditorTourTimelineDriver() {
       }
       return;
     }
-    if (appliedStage >= stage) return;
+    if (appliedStage >= rowStage) return;
     applying.current = true;
     const next = (appliedStage + 1) as 1 | 2 | 3;
     try {
@@ -223,9 +246,9 @@ export function EditorTourTimelineDriver() {
     } finally {
       applying.current = false;
     }
-  }, [loaded, ops, stage, appliedStage, retry]);
+  }, [loaded, ops, rowStage, appliedStage, retry]);
 
-  // The picture never waits for the timeline: it follows the tour's stage, not the applied patch.
+  // The picture never waits for the timeline: it follows the tour's stage, not the applied patch (or rows laid in early).
   const running = useEditorTour((state) => state.status === 'running');
   useEffect(() => {
     if (!running) {

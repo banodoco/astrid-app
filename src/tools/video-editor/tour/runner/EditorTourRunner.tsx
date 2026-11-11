@@ -7,7 +7,7 @@ import { getEditorTourState, showEditorTourBeat, useEditorTour, type EditorTourA
 import { TourCard } from '../card/TourCard';
 import { TourGalleryLayer } from '../gallery/TourGalleryLayer';
 import { TourSpotlight } from './TourSpotlight';
-import { backEditorTour, finishEditorTour, runEditorTourPrimary, watchEditorTourSend } from './tourBeats';
+import { backEditorTour, finishEditorTour, isEditorTourBeatReady, runEditorTourPrimary, watchEditorTourSend } from './tourBeats';
 import { placeCard, type CardPosition } from './cardPlacement';
 import { TOUR_LEAVE_MS, TOUR_MOVE_EASE, TOUR_MOVE_MS, useSettledRects } from './useSettledRects';
 import { spotlightTargetKey, useSpotlightMeasurement, useSpotlightRects, type SpotlightRect, type SpotlightTarget } from './useSpotlightRects';
@@ -54,13 +54,14 @@ export function editorTourTargets(act: EditorTourAct, beat: EditorTourBeat, _dev
 
 /**
  * The respond beat comes in two phases, with no beat of its own between them: while the reply streams in (`working`) the
- * spotlight holds still over the whole transcript; once the chat is ready it makes one move onto the act's actions, with
- * the card beside them (above them on touch) carrying the reply's line and Next. On desktop the card waits beside the
- * transcript with a quiet line meanwhile; on a phone or tablet there is no card at all until the actions are there.
- * Arriving by Back, or with reduced motion, the reply is already there: straight to the actions.
+ * spotlight lights the exchange; as the reply's actions begin to appear (`actionsShowing`: their group already has its
+ * final size) it makes one move onto them, travelling while they appear, with the card beside them (above them on touch)
+ * carrying the reply's line and Next. On desktop the card waits beside the transcript with a quiet line meanwhile; on a
+ * phone or tablet there is no card at all until then. Arriving by Back, or with reduced motion, the reply is already
+ * there: straight to the actions.
  */
-export function respondWorking(beat: EditorTourBeat, { chatReady, instant, reducedMotion }: { chatReady: boolean; instant: boolean; reducedMotion: boolean }): boolean {
-  return beat === 'respond' && !chatReady && !instant && !reducedMotion;
+export function respondWorking(beat: EditorTourBeat, { actionsShowing, instant, reducedMotion }: { actionsShowing: boolean; instant: boolean; reducedMotion: boolean }): boolean {
+  return beat === 'respond' && !actionsShowing && !instant && !reducedMotion;
 }
 
 /** The whole transcript box: what desktop's working card sits beside (so it holds still while the lit exchange expands). */
@@ -107,6 +108,13 @@ function desktopCardAvoid(beat: EditorTourBeat): SpotlightRect[] {
  */
 export function EditorTourRunner() {
   useEffect(() => watchEditorTourSend(), []);
+  useEffect(() => {
+    // Read-only, while a tour runs: what `scripts/tour-motion-trace.mjs` reads the tour's state from on a production build.
+    const readers = { getEditorTourState, isEditorTourBeatReady };
+    const host = window as Window & { __astridEditorTour?: typeof readers };
+    host.__astridEditorTour = readers;
+    return () => { if (host.__astridEditorTour === readers) delete host.__astridEditorTour; };
+  }, []);
   useEndTourOnUnmount();
   useTourKeys(true);
   // On <body>, not inside the page: the page's own stacking context sits below the panes (the Tasks pane chat).
@@ -134,12 +142,12 @@ function RunningTour() {
   const beat = useEditorTour((s) => s.beat);
   const reducedMotion = useEditorTour((s) => s.reducedMotion);
   const runId = useEditorTour((s) => s.runId);
-  const chatReady = useEditorTour((s) => s.ready.chat);
+  const actionsShowing = useEditorTour((s) => s.ready.actions || s.ready.chat);
   const instant = useEditorTour((s) => s.instant);
   const device = useEditorDeviceClass();
   const motion = !reducedMotion;
   // Respond has two phases: the reply coming in, then its actions (`respondWorking`).
-  const working = respondWorking(beat, { chatReady, instant, reducedMotion });
+  const working = respondWorking(beat, { actionsShowing, instant, reducedMotion });
   // A land beat first lets its result play alone (`useLandWatch`), then shows its explainer: two steps, one beat.
   const watching = useLandWatch(`${runId}:${act}:${beat}`, act, beat);
   const stepKey = `${runId}:${act}:${beat}${working ? ':working' : ''}${watching ? WATCH_SUFFIX : ''}`;
@@ -149,9 +157,11 @@ function RunningTour() {
   // The card and spotlight show the step whose targets have all arrived and held still; it trails the store's by the leave.
   const cardMoving = useRef<() => boolean>(() => false);
   const shownStep = useRef('');
-  // After a step with no card there is nothing that has to leave before the next step commits.
+  // After a step with no card there is nothing that has to leave before the next step commits. Before one, nothing either:
+  // the card fades out where it stands on the very frame the spotlight sets off (after Send, the result's watch).
   const nothingToLeave = cardHidden(device, shownStep.current.split(':')[3]);
-  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current(), leaves: !nothingToLeave });
+  const noCardNext = cardHidden(device, stepKey.split(':')[3]);
+  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current(), leaves: !nothingToLeave && !noCardNext });
   shownStep.current = commit.key;
   const [, shownAct, shownBeat, shownPhase] = commit.key.split(':') as [string, `${EditorTourAct}`, EditorTourBeat, string | undefined];
   const pending = commit.key !== stepKey;
@@ -168,7 +178,7 @@ function RunningTour() {
   const appearance = useRef({ key: '', inPlace: false, lastHidden: false });
   if (appearance.current.key !== commit.key) appearance.current = { key: commit.key, inPlace: appearance.current.lastHidden, lastHidden: hidden };
   const inPlace = appearance.current.inPlace;
-  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate && !hidden && !inPlace, motion, pending: pending && !hidden });
+  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate && !hidden && !inPlace, motion, pending: pending && !hidden && !noCardNext });
   cardMoving.current = moving;
   // `landed`: the card's move is over. `arrived`: the explainer itself is there (never during a watch), so its entrance
   // and its readiness wait for it.
@@ -199,13 +209,16 @@ function RunningTour() {
   const { rects: spotlit, position } = shown.current;
   // Stable elements: a new rect or position re-renders this component, not the gallery layer or the card's content.
   const gallery = useMemo(() => <TourGalleryLayer />, []);
-  const shownActNumber = Number(shownAct) as EditorTourAct;
-  const shownWorking = shownPhase === 'working';
-  const cardRise = rise.current.rise;
+  // A step with no card keeps the last card's content while its host fades out where it stands (and unseen after that):
+  // the next card's content arrives with the step that shows it, never inside a box that is on its way out.
+  const stepOfCard = () => ({ act: Number(shownAct) as EditorTourAct, beat: shownBeat, working: shownPhase === 'working', rise: rise.current.rise });
+  const cardStep = useRef(stepOfCard());
+  if (!hidden) cardStep.current = stepOfCard();
+  const { act: shownActNumber, beat: cardBeat, working: shownWorking, rise: cardRise } = cardStep.current;
   const card = useMemo(() => (
     <TourCard
       act={shownActNumber}
-      beat={shownBeat}
+      beat={cardBeat}
       working={shownWorking}
       arrived={arrived}
       rise={cardRise}
@@ -214,7 +227,7 @@ function RunningTour() {
       onBack={backEditorTour}
       onSkip={finishEditorTour}
     />
-  ), [shownActNumber, shownBeat, shownWorking, arrived, cardRise, device]);
+  ), [shownActNumber, cardBeat, shownWorking, arrived, cardRise, device]);
   const moves = motion && commit.animate;
   return (
     <>

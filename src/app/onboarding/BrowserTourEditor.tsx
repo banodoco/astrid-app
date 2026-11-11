@@ -21,6 +21,8 @@ import { createEditorTourDataProvider } from '@/tools/video-editor/tour/timeline
 import { EDITOR_TOUR_TIMELINE_ID } from '@/tools/video-editor/tour/timeline/tourStages.ts';
 import { EditorTourTimelineDriver } from '@/tools/video-editor/tour/timeline/EditorTourTimelineDriver.tsx';
 import { EditorTourRunner } from '@/tools/video-editor/tour/runner/EditorTourRunner.tsx';
+import { EDITOR_TOUR_REST_ATTRIBUTE } from '@/tools/video-editor/tour/anchors.ts';
+import { TOUR_MOVE_EASE, TOUR_MOVE_MS } from '@/tools/video-editor/tour/runner/useSettledRects.ts';
 import { registerBrowserTourFinish, returnToEditorTourEnd } from '@/tools/video-editor/tour/runner/tourBeats.ts';
 import { useEditorDeviceClass } from '@/tools/video-editor/tour/runner/useIsDesktopEditor.ts';
 import { TourChatPanel } from '@/tools/video-editor/components/AgentChat/TourChatPanel.tsx';
@@ -70,9 +72,15 @@ function BrowserTourEditorSurface() {
 function BrowserTourFrame() {
   const tasksPaneWidth = usePanesStore(state => state.tasksPaneWidth);
   const touchPane = usePaneControlsHosted();
-  // One flag, not the beats themselves: the frame (and the editor inside it) re-renders only when the chat comes or goes,
+  // Two flags, not the beats themselves: the frame (and the editor inside it) re-renders only when the chat comes or goes,
   // not on every step, so nothing heavy runs on the frame where the card and spotlight start to move.
-  const chatInPlay = useEditorTour(state => inChat(state.beat) || inChat(state.shownBeat));
+  // A touch chat slides with the step the card and spotlight SHOW (as the tour's Generations pane does): in on the frame
+  // they set off for it, out on the frame they leave it, with their duration and easing. One motion, both ways.
+  const chatShown = useEditorTour(state => inChat(state.shownBeat));
+  // On its way in (the store is on a chat beat the highlight has not set off for yet) or there: the spotlight measures
+  // what is inside it where it will rest, so it never has to wait for the slide to end.
+  const chatHeadingIn = useEditorTour(state => inChat(state.beat) || inChat(state.shownBeat));
+  const reducedMotion = useEditorTour(state => state.reducedMotion);
   // The demo editor is a picture behind the tour: the spotlight already takes every pointer, so keep focus and
   // assistive tech on the card (and the chat's Send) too.
   const touring = useEditorTour(state => state.status === 'running');
@@ -82,9 +90,7 @@ function BrowserTourFrame() {
   // narrows the editor to a sliver.
   const { orientation } = useDeviceInfo();
   const sheet = device === 'tablet' && orientation === 'portrait';
-  // A touch chat comes in with its beat and goes once the card and spotlight have moved off it, so they never frame the
-  // editor it uncovers.
-  const chatVisible = !touchPane || chatInPlay;
+  const chatVisible = !touchPane || chatShown;
   const tasksPaneReserve = touchPane ? '0px' : `${tasksPaneWidth}px`;
   const surface = useMemo(() => <BrowserTourEditorSurface />, []);
   const contentStyle = { marginRight: tasksPaneReserve, willChange: 'margin, padding' } as CSSProperties;
@@ -125,6 +131,8 @@ function BrowserTourFrame() {
     }}>
       <TasksPaneSurface role="complementary" aria-label="Task and chat pane" aria-hidden={!chatVisible}
         {...(!chatVisible ? { inert: '' } : {})}
+        {...{ [EDITOR_TOUR_REST_ATTRIBUTE]: !touchPane || chatHeadingIn ? 'in' : 'out' }}
+        style={touchPane && !reducedMotion ? { transitionDuration: `${TOUR_MOVE_MS}ms`, transitionTimingFunction: TOUR_MOVE_EASE } : undefined}
         className={cn('absolute right-0 transform transition-transform duration-300 ease-smooth',
           sheet ? cn('bottom-0 rounded-t-2xl border-l-0 border-t', chatVisible ? 'translate-y-0' : 'translate-y-full') : cn('top-0', chatVisible ? 'translate-x-0' : 'translate-x-full'))}>
         <TasksPaneChatSlot><TourChatPanel /></TasksPaneChatSlot>

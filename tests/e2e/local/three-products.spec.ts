@@ -2745,7 +2745,7 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
 });
 
 // Complements track-label-command.spec.ts: Unicode + disjoint undo there; exact retained-label recovery here.
-test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reload, exact recovery and guarded undo', async ({ page, harness, astrid, seed3 }) => {
+test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reload, exact recovery; guarded undo of the rename refuses visibly after an Agent track-add', async ({ page, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
   await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
@@ -2847,37 +2847,44 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   await expect(firstTrackName(page)).toHaveValue(trackLabel);
+  const observedBeforeUndo = wire.observed.length;
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect.poll(() => wire.posts.length, CEILING).toBe(3);
   expect(JSON.parse(wire.posts[2].body).commands).toEqual([{
     schema_version: 1, op: 'timeline.inverse', version: '1', select: null,
     args: { publications: [pinOf(rename).publication_id] },
   }]);
-  const undone = accepted(wire.posts[2]);
-  expect(position(undone.data.canonical_document, seed3.appClipId)).toBe(to);
-  expect(undone.data.canonical_document.parent_revision.payload.config).toMatchObject({
-    x_f2_opaque: seed3.opaque.config,
-    tracks: expect.arrayContaining([
-      expect.objectContaining({ id: 'V1', label: original.trackLabel }),
-      expect.objectContaining({ id: 'f2-mixed-independent' }),
-    ]),
-  });
-  expect(undone.data.canonical_document.shot_revisions).toEqual(independent.data.canonical_document.shot_revisions);
-  expect(undone.data.canonical_document.internal_timeline_revisions).toEqual(independent.data.canonical_document.internal_timeline_revisions);
-  expect(undone.data.canonical_document.dependency_manifest).toEqual(independent.data.canonical_document.dependency_manifest);
-  await expect(firstTrackName(page)).toHaveValue(original.trackLabel!);
+  // Documented Runtime behaviour, not drift in the App: the rename is routed through the mounted handoff
+  // as an atomic doc.patch (5ae358a1f), and "Later independent parent work would therefore also guard this
+  // undo" (Runtime contract/commit-v2.md:1705; Agent c5370a86 astrid/sdk/timeline/inverse.py:681-697).
+  // The Agent's unrelated add-track therefore makes the guarded undo of the rename refuse visibly.
+  const refusal = wire.posts[2];
+  expect(refusal.status, JSON.stringify(refusal.response)).toBe(409);
+  expect(refusal.response).toMatchObject({ code: 'conflict', details: { code: 'intervening_write',
+    conflicts: [expect.objectContaining({ kind: 'intervening_write', ref: 'parent/track:f2-mixed-independent' })] } });
+  // Nothing else was written: no further commit attempt, Runtime head and history are exactly the Agent's commit.
+  await page.waitForTimeout(1500);
+  expect(wire.posts).toHaveLength(3);
+  expect(wire.observed).toHaveLength(observedBeforeUndo + 1);
   const finalHistory = await history(harness, seed3);
-  expect(finalHistory.head).toEqual(pinOf(undone));
-  expect(finalHistory.items).toHaveLength(before.items.length + 4);
-  expect(finalHistory.items.find((entry) => entry.publication_id === pinOf(undone).publication_id)?.records?.undo_of)
-    .toEqual([pinOf(rename).publication_id]);
+  expect(finalHistory.head).toEqual(pinOf(independent));
+  expect(finalHistory.items).toHaveLength(before.items.length + 3);
+  expect(finalHistory.items.some((entry) => (entry.records?.undo_of ?? []).length > 0)).toBe(false);
+  const headState = await revisionState(harness, seed3, pinOf(independent).revision_id);
+  expect(headState.trackLabel).toBe(trackLabel);
+  expect((headState.parent.config.tracks as Array<{ id: string }>).map((track) => track.id)).toContain('f2-mixed-independent');
+  expect(position(independent.data.canonical_document, seed3.appClipId)).toBe(to);
   await expectImmutableClosure(harness, seed3, independent);
-  await expectImmutableClosure(harness, seed3, undone);
-  await expectAgentRevision(astrid, harness, seed3, pinOf(undone).revision_id);
+  await expectAgentRevision(astrid, harness, seed3, pinOf(independent).revision_id);
+  // The App names the refusal and makes no false claim: the rename stays displayed and nothing reads "Saved".
+  await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
+  await expect(page.getByText('conflict: an intervening publication wrote a guarded address')).toBeVisible();
+  await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
+  await expect(firstTrackName(page)).toHaveValue(trackLabel);
   await expectOpaqueDataKept(harness, seed3);
   expect(wire.legacy).toEqual([]);
   journey.facts = { ...journey.facts, acceptedMove: pinOf(move), acceptedRename: pinOf(rename),
-    retainedOwner: kept.ownerId, retryKey: wire.posts[0].key, guardedUndo: pinOf(undone), renderer: 'not started' };
+    retainedOwner: kept.ownerId, retryKey: wire.posts[0].key, refusedUndo: { status: 409, reason: 'intervening_write' }, renderer: 'not started' };
   await sniff.expectClean(page, seed3.timelineId);
 });
 

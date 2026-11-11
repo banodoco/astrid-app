@@ -1055,7 +1055,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           : { revision_id: response.data.previous_revision_id, publication_id: response.data.previous_publication_id },
         receipt: response.receipt, intent: response.receipt.receipt_id === 'p0' ? 'bootstrap' : 'recorded',
         records: { schema_version: 1, commands: [], steps: response.data.steps, undo_of: undoOf, undo_steps: null, restored_from: null },
-        publisher: response.data.publisher, provider_version: response.data.provider_version,
+        publisher: 'actor', provider_version: response.data.provider_version,
         compiler_version: response.data.compiler_version, label: response.data.label,
       });
       const items = [entry(bootstrap)];

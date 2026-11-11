@@ -327,6 +327,8 @@ export async function createLocalSaveSession(options: Options) {
   }
 
   return {
+    /** The actor whose edits this session's Undo/Redo may target. */
+    actorId: options.scope.actorId,
     getState: () => clone(state),
     getDocument: () => clone(document),
     /** Verified physical images with locally authored payloads; still an unsent intent. */

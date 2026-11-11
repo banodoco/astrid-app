@@ -68,7 +68,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
       },
     },
     2: {
-      composeHeader: 'Your agent can do anything with open models',
+      composeHeader: 'Your agent can do anything open models can do',
       prompt: 'Can you make me realistic frames for that using Qwen Image 2.1?',
       reply: 'I made four realistic reference frames with Qwen Image 2.1. They follow the flight from the valley to natural-looking buildings in town.',
       toolCards: [
@@ -105,7 +105,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
   strip: ['Agent', 'Open models', 'Output'],
   finale: {
     title: 'And this is just one example',
-    body: 'There are infinite possibilities when you combine code with custom agent tools and custom interfaces.',
+    body: 'There are infinite possibilities when you combine open models with custom agent tools and human interfaces.',
     action: 'Next',
     recap: ['Agent + extensions', 'Open models', 'Finished shot'],
   },

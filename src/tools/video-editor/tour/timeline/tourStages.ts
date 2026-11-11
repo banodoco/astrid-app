@@ -131,7 +131,7 @@ export function createEditorTourStagePatch(
           from: TOUR_SCENE_SOURCE_FROM,
           to: TOUR_SCENE_SOURCE_TO,
           speed: 1,
-          label: 'Lantern Valley',
+          label: 'Lantern Valley Three.js visualization',
           app: { liveScene },
         },
       },

@@ -30,10 +30,10 @@ const NO_PROGRESS: TourChatProgress = { typed: 0, replyChars: 0, cards: 0 };
 const NO_VOICE = { isRecording: false, onToggle: () => undefined, onCancel: () => undefined, micDisabled: true };
 
 const TYPING_START_MS = 250;
-const THINKING_MS = 300;
+const THINKING_MS = 2500;
 const STREAM_STEP_MS = 16;
-const STREAM_CHARS_PER_STEP = 6;
-const CARD_STEP_MS = 220;
+const STREAM_CHARS_PER_STEP = 3;
+const CARD_STEP_MS = 400;
 
 function typingDelayMs(typed: number, previous: string): number {
   const pause = /[,.?!]/.test(previous) ? 45 : previous === ' ' ? 6 : 0;

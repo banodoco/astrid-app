@@ -48,7 +48,7 @@ it.each(['forged', 'provider', 'timeline', 'projection'] as const)(
     try {
       act(() => { hook.result.current.scheduleSave(data); });
       await act(async () => {
-        await expect(hook.result.current.flushPendingSave()).rejects.toThrow('Scoped timeline save binding');
+        await expect(hook.result.current.flushPendingSave()).rejects.toThrow('the timeline save binding');
       });
       expect(capture).not.toHaveBeenCalled();
       expect(flush).not.toHaveBeenCalled();

@@ -69,9 +69,10 @@ describe('TimelineEditorShellToolbar', () => {
   });
 
   describe('the save badge', () => {
-    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', isConflictExhausted = false) => {
+    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', isConflictExhausted = false,
+      recoveryDraft: { updatedAt: string; baseVersion: number; retryAllowed: boolean } | null = null) => {
       const store = createTimelineStore();
-      store.setState((state) => ({ chrome: { ...state.chrome, saveStatus, isConflictExhausted } }));
+      store.setState((state) => ({ chrome: { ...state.chrome, saveStatus, isConflictExhausted, recoveryDraft } }));
       return render(
         <TimelineStoreProvider store={store}>
           <TimelineEditorShellToolbar
@@ -88,6 +89,21 @@ describe('TimelineEditorShellToolbar', () => {
         </TimelineStoreProvider>,
       );
     };
+
+    it('reads Not saved, never Saved, while a refused change is still offered as a browser draft', () => {
+      // After a refused save and a reload the editor shows the saved timeline,
+      // but the refused change is only in this browser's recovery slot.
+      renderToolbar('saved', false, { updatedAt: '2026-11-11T21:59:52.755Z', baseVersion: 0, retryAllowed: true });
+      expect(screen.queryByText('saved')).toBeNull();
+      const badge = screen.getByText('Not saved');
+      expect(badge.className).toContain('text-muted-foreground');
+    });
+
+    it('reads Saved once no draft is offered and the timeline is saved', () => {
+      renderToolbar('saved');
+      expect(screen.queryByText('Not saved')).toBeNull();
+      expect(screen.getByText('saved')).toBeTruthy();
+    });
 
     it('reads Error in red when a save fails with no recovery card up', () => {
       renderToolbar('error');

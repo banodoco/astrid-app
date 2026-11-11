@@ -733,13 +733,13 @@ describe('useTimelineSave — recovered draft durability', () => {
           .toEqual({ ...displayed.config.clips.find((clip) => clip.id === rightId), from: 3 });
         if (boundary === 'during original read') {
           await act(async () => { finishRead!(); });
-          await expect(capture.mock.results[0].value).rejects.toThrow('Local edits preceded the original verified read');
+          await expect(capture.mock.results[0].value).rejects.toThrow('Not saved: local edits preceded the original verified read');
           await act(async () => {
-            await expect(harness.hook.result.current.flushPendingSave()).rejects.toThrow('Local edits preceded the original verified read');
+            await expect(harness.hook.result.current.flushPendingSave()).rejects.toThrow('Not saved: local edits preceded the original verified read');
           });
           expect(harness.hook.result.current.originalLocalSaveBasis).toMatchObject({ status: 'unavailable', reason: expect.stringContaining('Local edits preceded completion') });
           expect(harness.hook.result.current.localSaveState).toMatchObject({ status: 'error', error: {
-            message: 'Local edits preceded the original verified read; draft retained' } });
+            message: 'Not saved: local edits preceded the original verified read' } });
           expect((await createCommitOutbox().list(scope)).every((owner) => !owner.intents.length && !owner.pending)).toBe(true);
           expect(send).toHaveBeenCalledTimes(1);
           expect((await loadTimelineDraft(scope.timelineId))?.draft.config.clips.find((clip) => clip.id === rightId)?.from).toBe(3);
@@ -2142,7 +2142,7 @@ describe('useTimelineSave mounted save diagnostics', () => {
       const captured = capture.mock.results[0].value as Promise<void>;
       if (outcome === 'rejected') {
         await act(async () => { completeRead(initial); });
-        await expect(captured).rejects.toThrow('Local edits preceded the original verified read');
+        await expect(captured).rejects.toThrow('Not saved: local edits preceded the original verified read');
         expect(send).not.toHaveBeenCalled();
         expect(records.find((record) => record.phase === 'capture-rejected')).toMatchObject({
           errorCode: 'owner-original-read-invalidated', errorClass: 'TimelineSaveError', errorStage: 'capture' });
@@ -2290,7 +2290,7 @@ it.each(['valid', 'wrong source', 'stale head'] as const)('forwards parameter ge
         config: { ...current.config, clips: [{ ...current.config.clips[0], params }] },
       })]);
     } else {
-      await vi.waitFor(() => expect(harness.toast.error).toHaveBeenCalledWith('Element parameter owner changed; draft retained'));
+      await vi.waitFor(() => expect(harness.toast.error).toHaveBeenCalledWith('Not saved: element parameter owner changed'));
       expect(harness.toast.error).toHaveBeenCalledTimes(1);
       expect(saved).not.toHaveBeenCalled();
     }

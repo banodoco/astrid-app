@@ -296,7 +296,7 @@ describe('upstream local document handoff', () => {
       const reject = vi.spyOn(Promise, 'reject');
       const error = await handoff.capture(next, gesture).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(kind === 'head' ? TimelineVersionConflictError : TimelineSaveError);
-      expect(error).toHaveProperty('message', `Local document save retained: ${message}`);
+      expect(error).toHaveProperty('message', `Not saved: ${message}`);
       // This is the exact error passed to the existing Promise.reject boundary.
       expect(reject.mock.calls.some(([original]) => original === error)).toBe(true);
       reject.mockRestore();
@@ -962,7 +962,7 @@ it.each(['valid', 'missing owner', 'wrong owner', 'stale selection', 'child sele
   act(() => fireEvent.change(screen.getByLabelText('Selected Segment Index'), { target: { value: '1' } }));
   if (control === 'stale head') {
     expect(captured).toBeDefined();
-    await expect(captured).rejects.toThrow('Element parameter owner changed');
+    await expect(captured).rejects.toThrow('Not saved: element parameter owner changed');
     expect(env.session.getDocument()).toEqual(beforeGesture);
     expect((await env.outboxes.list(env.scope))[0].intents).toHaveLength(1);
     form.unmount(); hook.unmount();

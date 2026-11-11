@@ -1,0 +1,21 @@
+{
+  "direct": [],
+  "three-products": [
+    {
+      "id": "P39-R12-DUP-SHOT",
+      "file": "tests/e2e/local/three-products.spec.ts",
+      "title": "M2 native occurrence duplicate: lost ACK, Agent label, local label, restart, exact retry and guarded undo",
+      "issue": "https://github.com/banodoco/astrid-app/issues/249",
+      "owner": "Plan 39 manager",
+      "expiry": "2026-11-25"
+    },
+    {
+      "id": "P39-R12-EXT-BATCH",
+      "file": "tests/e2e/local/three-products.spec.ts",
+      "title": "M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart, exact retry and guarded undo",
+      "issue": "https://github.com/banodoco/astrid-app/issues/250",
+      "owner": "Plan 39 manager",
+      "expiry": "2026-11-25"
+    }
+  ]
+}

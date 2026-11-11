@@ -7,8 +7,7 @@
 # banodoco/astrid-agent. When either secret is not set, that checkout falls back to github.token, which only
 # works if its repo is readable by this repository. Pull requests from forks get no secrets.
 #
-# Pass rule (a skip means a missing harness, R-9): exactly M tests expected to fail (M is the journey
-# file's budget in scripts/quality/check-known-failures.mjs), none unexpected, none flaky, none skipped.
+# Pass rule (a skip means a missing harness, R-9): exactly the tests named for this job in config/testing/direct-journey-expected-failures.json expected to fail (the same list scripts/quality/check-known-failures.mjs enforces), none unexpected, none flaky, none skipped.
 name: Direct Journey
 
 on:
@@ -153,22 +152,7 @@ jobs:
         working-directory: astrid-app
         env:
           REPORT: ${{ runner.temp }}/direct-journey.json
-        run: |
-          jq '
-            [.. | objects | select(has("expectedStatus") and has("results"))] as $tests
-            | {
-                total: ($tests | length),
-                expected_failures: ($tests | map(select(.expectedStatus == "failed")) | length),
-                expected_failures_that_failed: ($tests | map(select(.expectedStatus == "failed" and .status == "expected")) | length),
-                unexpected: .stats.unexpected,
-                flaky: .stats.flaky,
-                skipped: .stats.skipped
-              }
-            | . as $r | $r, (
-                if $r.total > 0 and $r.expected_failures == 0 and $r.expected_failures_that_failed == 0
-                   and $r.unexpected == 0 and $r.flaky == 0 and $r.skipped == 0
-                then empty else error("direct journey: want 0 expected failures, 0 unexpected, 0 flaky, 0 skipped; got \($r)") end)
-          ' "$REPORT"
+        run: jq -f config/testing/direct-journey-outcome.jq --arg job direct --slurpfile allow config/testing/direct-journey-expected-failures.json "$REPORT"
 
       - name: Collect artifacts
         if: ${{ !cancelled() }}
@@ -322,29 +306,14 @@ jobs:
           NODE_OPTIONS: --max-old-space-size=4096
         run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
 
-      # Pass rule (R-9, same as the direct journey): no quarantined cases exist for this spec, so every case must pass. Durations are
+      # Pass rule (R-9, same as the direct journey): every case must pass except the named expected failures in config/testing/direct-journey-expected-failures.json (exactly those, each failing as expected). Durations are
       # written to three-products-summary.json and recorded, never judged (R-10).
       - name: Check the outcome counts
         if: ${{ !cancelled() }}
         working-directory: astrid-app
         env:
           REPORT: ${{ runner.temp }}/three-products.json
-        run: |
-          jq '
-            [.. | objects | select(has("expectedStatus") and has("results"))] as $tests
-            | {
-                total: ($tests | length),
-                expected_failures: ($tests | map(select(.expectedStatus == "failed")) | length),
-                expected_failures_that_failed: ($tests | map(select(.expectedStatus == "failed" and .status == "expected")) | length),
-                unexpected: .stats.unexpected,
-                flaky: .stats.flaky,
-                skipped: .stats.skipped
-              }
-            | . as $r | $r, (
-                if $r.total > 0 and $r.expected_failures == 0 and $r.expected_failures_that_failed == 0
-                   and $r.unexpected == 0 and $r.flaky == 0 and $r.skipped == 0
-                then empty else error("three-product journey: want cases, 0 expected failures, 0 unexpected, 0 flaky, 0 skipped; got \($r)") end)
-          ' "$REPORT"
+        run: jq -f config/testing/direct-journey-outcome.jq --arg job three-products --slurpfile allow config/testing/direct-journey-expected-failures.json "$REPORT"
 
       - name: Collect artifacts
         if: ${{ !cancelled() }}

@@ -91,14 +91,6 @@ export function tourTrackOrder(stage: EditorTourStage): string[] {
   ];
 }
 
-/** The clip a stage brings in first: what to scroll to once the stage has landed. */
-export function tourStageFocusClipId(stage: EditorTourStage): string | null {
-  if (stage === 1) return TOUR_CLIP_IDS.scene;
-  if (stage === 2) return TOUR_CLIP_IDS.stills[0];
-  if (stage === 3) return TOUR_CLIP_IDS.video;
-  return null;
-}
-
 /**
  * The edit that takes the demo timeline back from `stage` to `stage - 1` (the user pressed Back): drops the
  * rows the stage added (a removed track takes its clips with it), or for stage 1 the scene clip on the base row.

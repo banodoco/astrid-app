@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * node scripts/tour-motion-trace.mjs [--out test-results/tour-motion/<ts>] [--theme dark|light]
- *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--help]
+ *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--no-screencast] [--help]
  *
  * Measures MOTION of the first-run tour on desktop (1440x900, reducedMotion: no-preference). The sibling
  * tour-screenshots.mjs only takes settled stills with motion off; this walks the same beats with motion on and,
@@ -11,6 +11,7 @@
  *   - real pixels via CDP Page.startScreencast, written as frames/NNNN.jpg plus two ffmpeg contact sheets;
  *   - metrics + plain-language "suspects" (report.json / report.md). Jank is reported, never an exit code:
  *     the process exits non-zero only when the walk itself fails.
+ * --no-screencast skips the CDP screencast (no frames/filmstrips) to see how much it costs the frame rate.
  * --back also traces: respond -> land -> Back as early as possible (before the beat is ready), and Back from every
  * settled land beat (plus the forward "return"). --transitions filters which traces are written; the walk still
  * visits every beat. Same launch machinery as tour-screenshots.mjs (isolated fake runtime, owned Vite in test mode).
@@ -59,7 +60,7 @@ function installSampler() {
     const tg = {};
     for (const sel of tm.targets) tg[sel] = r4(document.querySelector(sel));
     const s = {
-      t, host: r4(host), sec: r4(section), op: section ? Number(getComputedStyle(section).opacity) : null,
+      t, host: r4(host), tf: host?.style.transform ?? null, tr: host?.style.transition ?? null, sec: r4(section), op: section ? Number(getComputedStyle(section).opacity) : null,
       card: card?.getAttribute('data-editor-tour-card') ?? null, cardSettled: card?.hasAttribute('data-settled') ?? false,
       st: state && { status: state.status, act: state.act, beat: state.beat, shownBeat: state.shownBeat, ready: state.ready, instant: state.instant },
       beatReady: Boolean(state && window.__tourShotsBeats.isEditorTourBeatReady(state)),
@@ -121,7 +122,7 @@ const ms = (t) => `${Math.round(t)}ms`;
 
 /** Motion statistics of a series of {t, v:[x,y,w,h]}. `dims` = how many components count as motion (2 = x,y only). */
 export function analyseSeries(points, dims = 4) {
-  const out = { travel: 0, segments: [], reversals: 0, maxJump: { px: 0, t: null }, firstMoveT: null, restT: null, movedBeforeTrigger: false, frames: points.length };
+  const out = { travel: 0, segments: [], reversals: 0, maxJump: { px: 0, t: null, dt: null }, firstMoveT: null, restT: null, movedBeforeTrigger: false, frames: points.length };
   let seg = null, still = 0, prev = null;
   for (let i = 1; i < points.length; i++) {
     const d = points[i].v.slice(0, dims).map((n, k) => n - points[i - 1].v[k]);
@@ -132,11 +133,11 @@ export function analyseSeries(points, dims = 4) {
       seg ??= { t0: points[i - 1].t, t1: points[i].t, dist: 0 };
       seg.t1 = points[i].t; seg.dist += pos; still = 0; prev = d; out.travel += pos;
       if (points[i].t >= 0) { out.firstMoveT ??= points[i].t; out.restT = points[i].t; }
-      if (mag > out.maxJump.px) out.maxJump = { px: mag, t: points[i].t };
+      if (mag > out.maxJump.px) out.maxJump = { px: mag, t: points[i].t, dt: points[i].t - points[i - 1].t };
     } else if (seg && ++still >= STILL_GAP) { out.segments.push(seg); seg = null; prev = null; }
   }
   if (seg) out.segments.push(seg);
-  out.travel = round(out.travel); out.maxJump.px = round(out.maxJump.px);
+  out.travel = round(out.travel); out.maxJump.px = round(out.maxJump.px); out.maxJump.dt = round(out.maxJump.dt, 0);
   return out;
 }
 
@@ -146,7 +147,9 @@ const ranges = (flags, key = 't') => {
   return list.map(({ t0, t1 }) => ({ t0: round(t0, 0), t1: round(t1, 0) }));
 };
 const segText = (segments) => segments.map((s) => `t=${Math.round(s.t0)}–${Math.round(s.t1)}ms`).join(', ');
-const teleport = (m) => m.maxJump.px > 80 && m.maxJump.px > 0.4 * m.travel;
+// A real teleport is a big move inside ONE ordinary frame; a big move across a long frame gap is a stall/low frame rate
+// (see frames.*), which the easing curve alone explains (these curves cover most of the distance in the first ~100ms).
+const teleport = (m) => m.maxJump.px > 80 && m.maxJump.px > 0.4 * m.travel && m.maxJump.dt <= 50;
 
 function degenerate(rect) { return !rect || rect[2] <= 0 || rect[3] <= 0; }
 
@@ -167,10 +170,21 @@ export function analyseTransition(samples, { dest, source }) {
   }
   const dim = ranges(samples.filter((s) => s.t >= 0).map((s) => ({ t: s.t, on: s.op != null && s.op < 0.99 })));
   const ended = last.st?.status !== 'running';
+  const dts = samples.slice(1).map((s, k) => s.t - samples[k].t), sorted = [...dts].sort((a, b) => a - b);
+  const idle = samples.filter((s) => s.t < -50).slice(1).map((s, k, a) => s.t - (k ? a[k - 1].t : samples[0].t)).sort((a, b) => a - b);
+  const worst = dts.indexOf(Math.max(...dts));
+  const frames = { count: samples.length, medianDtMs: round(sorted[Math.floor(sorted.length / 2)]), p95DtMs: round(sorted[Math.floor(sorted.length * 0.95)]), maxDtMs: round(sorted.at(-1)), maxDtAtT: round(samples[worst + 1]?.t, 0), over50ms: dts.filter((d) => d > 50).length, preTriggerMedianDtMs: round(idle[Math.floor(idle.length / 2)]) };
+  const xy = (tf) => (tf?.match(/-?[\d.]+px/g) ?? []).slice(0, 2).map(parseFloat);
+  const flight = (t) => t >= (card.firstMoveT ?? Infinity) && t <= (card.restT ?? -Infinity);
+  const retargets = [], transitionToggles = [];
+  for (let i = 1; i < samples.length; i++) {
+    if (samples[i].tf !== samples[i - 1].tf && samples[i].tf && samples[i - 1].tf) retargets.push({ t: round(samples[i].t, 0), from: xy(samples[i - 1].tf), to: xy(samples[i].tf), whileMoving: flight(samples[i].t) });
+    if (samples[i].tr !== samples[i - 1].tr && samples[i].tr != null && samples[i - 1].tr != null) transitionToggles.push({ t: round(samples[i].t, 0), to: samples[i].tr.slice(0, 30) || '(empty)' });
+  }
   const cardOut = {
     start: rr(first?.host), end: rr(last.host), startXY: rr(first?.host?.slice(0, 2)), endXY: rr(last.host?.slice(0, 2)),
     ...card, segments: card.segments.map((s) => ({ t0: round(s.t0, 0), t1: round(s.t1, 0), dist: round(s.dist) })),
-    sizeChanges, contentSwaps: swaps, opacityBelow1: dim, minOpacity: round(Math.min(...samples.filter((s) => s.t >= 0 && s.op != null).map((s) => s.op)), 2),
+    retargets, transitionToggles, sizeChanges, contentSwaps: swaps, opacityBelow1: dim, minOpacity: round(Math.min(...samples.filter((s) => s.t >= 0 && s.op != null).map((s) => s.op)), 2),
   };
   void inFlight;
 
@@ -186,17 +200,21 @@ export function analyseTransition(samples, { dest, source }) {
     const selector = destTargets[i] ?? destTargets[0];
     let chase = null;
     if (selector) {
-      let worst = { px: 0, t: null };
-      for (const s of samples) if (s.t >= 100 && s.cut[i] && s.tg[selector]) {
+      let worst = { px: 0, t: null }, shownAt = null;
+      // Only frames where the spotlight is already meant to show the destination beat (st.shownBeat), so the gap is real chasing, not waiting.
+      for (const s of samples) if (s.t >= 100 && s.st?.shownBeat === dest.beat && s.st.act === dest.act && s.cut[i] && s.tg[selector]) {
+        shownAt ??= s.t;
         const [x, y, w, h] = s.cut[i].c, [tx, ty, tw, th] = s.tg[selector];
         const gap = Math.max(Math.abs(x - (tx - SPOT_PADDING)), Math.abs(y - (ty - SPOT_PADDING)), Math.abs(x + w - (tx + tw + SPOT_PADDING)), Math.abs(y + h - (ty + th + SPOT_PADDING)));
         if (gap > worst.px) worst = { px: gap, t: s.t };
       }
       const tgt = analyseSeries(samples.filter((s) => s.tg[selector]).map((s) => ({ t: s.t, v: s.tg[selector] })), 4);
       const lastT = last.tg[selector], lastC = last.cut[i]?.c;
-      chase = { selector, maxGapPx: round(worst.px), atT: round(worst.t, 0), finalGapPx: lastT && lastC ? round(Math.max(Math.abs(lastC[0] - (lastT[0] - SPOT_PADDING)), Math.abs(lastC[1] - (lastT[1] - SPOT_PADDING)), Math.abs(lastC[0] + lastC[2] - (lastT[0] + lastT[2] + SPOT_PADDING)), Math.abs(lastC[1] + lastC[3] - (lastT[1] + lastT[3] + SPOT_PADDING)))) : null, targetTravelPx: tgt.travel, targetSegments: tgt.segments.length };
+      chase = { selector, shownAtT: round(shownAt, 0), maxGapPx: round(worst.px), atT: round(worst.t, 0), finalGapPx: lastT && lastC ? round(Math.max(Math.abs(lastC[0] - (lastT[0] - SPOT_PADDING)), Math.abs(lastC[1] - (lastT[1] - SPOT_PADDING)), Math.abs(lastC[0] + lastC[2] - (lastT[0] + lastT[2] + SPOT_PADDING)), Math.abs(lastC[1] + lastC[3] - (lastT[1] + lastT[3] + SPOT_PADDING)))) : null, targetTravelPx: tgt.travel, targetSegments: tgt.segments.length };
     }
-    cutouts.push({ slot: i, ...m, segments: m.segments.map((s) => ({ t0: round(s.t0, 0), t1: round(s.t1, 0), dist: round(s.dist) })), start: rr(startRect), end: rr(endRect), startsDegenerate: degenerate(startRect), endsDegenerate: degenerate(endRect), path, chase });
+    const cutRetargets = [];
+    for (let k = 1; k < samples.length; k++) { const a = samples[k - 1].cut[i]?.a, b = samples[k].cut[i]?.a; if (a && b && a.some((n, j) => Math.abs(n - b[j]) > 0.01)) cutRetargets.push({ t: round(samples[k].t, 0), from: rr(a), to: rr(b), whileMoving: m.firstMoveT != null && samples[k].t > m.firstMoveT && samples[k].t < m.restT }); }
+    cutouts.push({ slot: i, ...m, retargets: cutRetargets, segments: m.segments.map((s) => ({ t0: round(s.t0, 0), t1: round(s.t1, 0), dist: round(s.dist) })), start: rr(startRect), end: rr(endRect), startsDegenerate: degenerate(startRect), endsDegenerate: degenerate(endRect), path, chase });
   }
   const ringCount = (s) => s.ring.length;
   const rings = samples.filter((s, k) => k && ringCount(s) !== ringCount(samples[k - 1])).map((s) => ({ t: round(s.t, 0), count: ringCount(s) }));
@@ -207,7 +225,7 @@ export function analyseTransition(samples, { dest, source }) {
   }
   const unavailable = samples.filter((s) => s.pu).map((s) => s.t);
   const previewUnavailable = unavailable.length ? { firstT: round(unavailable[0], 0), lastT: round(unavailable.at(-1), 0), frames: unavailable.length } : null;
-  const result = { tourEnded: ended, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
+  const result = { frames, tourEnded: ended, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
   result.suspects = suspectsFor(result, source, dest);
   return result;
 }
@@ -219,10 +237,12 @@ function suspectsFor(m, source, dest) {
   else {
     if (c.segments.length > 1) out.push(`card moved in ${c.segments.length} segments (${segText(c.segments)})`);
     if (c.reversals) out.push(`card reversed direction ${c.reversals}x`);
-    if (teleport(c)) out.push(`card jumped ${c.maxJump.px}px in one frame at t=${Math.round(c.maxJump.t)}ms (total travel ${c.travel}px)`);
+    if (teleport(c)) out.push(`card jumped ${c.maxJump.px}px in one ${c.maxJump.dt}ms frame at t=${Math.round(c.maxJump.t)}ms (total travel ${c.travel}px)`);
     if (c.firstMoveT > 150) out.push(`card started moving ${Math.round(c.firstMoveT)}ms after the trigger`);
     out.push(`card travelled ${c.travel}px, first move t=${Math.round(c.firstMoveT)}ms, at rest t=${Math.round(c.restT)}ms`);
   }
+  for (const r of c.retargets) out.push(`card destination changed at t=${r.t}ms (${r.from.join(',')} -> ${r.to.join(',')})${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
+  for (const r of c.transitionToggles) out.push(`card host transition became "${r.to}" at t=${r.t}ms`);
   for (const s of c.sizeChanges) out.push(`card size ${s.from.join('x')} -> ${s.to.join('x')} at t=${s.t}ms${s.whileMoving ? ' (mid-flight)' : ''}`);
   for (const s of c.contentSwaps) out.push(`card content swapped ${s.from} -> ${s.to} at t=${s.t}ms while ${s.distanceToDestinationPx}px from its destination`);
   if (c.opacityBelow1.length) out.push(`card section opacity < 1 (min ${c.minOpacity}) at ${c.opacityBelow1.map((r) => `t=${r.t0}–${r.t1}ms`).join(', ')}`);
@@ -231,11 +251,13 @@ function suspectsFor(m, source, dest) {
     if (k.startsDegenerate && !k.endsDegenerate) out.push(`${label} grew from ${fmtRect(k.start)}; path ${k.path.map((p) => `t=${p.t}:${fmtRect(p.rect)}`).join(' -> ')}`);
     if (!k.startsDegenerate && k.endsDegenerate) out.push(`${label} collapsed to ${fmtRect(k.end)}; path ${k.path.map((p) => `t=${p.t}:${fmtRect(p.rect)}`).join(' -> ')}`);
     if (k.segments.length > 1) out.push(`${label} moved in ${k.segments.length} segments (${segText(k.segments)})`);
+    for (const r of k.retargets) out.push(`${label} destination changed at t=${r.t}ms ${fmtRect(r.from)} -> ${fmtRect(r.to)}${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
     if (k.reversals) out.push(`${label} reversed direction ${k.reversals}x`);
-    if (k.maxJump.px > 80 && k.maxJump.px > 0.4 * k.travel) out.push(`${label} jumped ${k.maxJump.px}px in one frame at t=${Math.round(k.maxJump.t)}ms`);
+    if (teleport(k)) out.push(`${label} jumped ${k.maxJump.px}px in one ${k.maxJump.dt}ms frame at t=${Math.round(k.maxJump.t)}ms`);
     if (k.chase && k.chase.maxGapPx > 40) out.push(`${label} trailed its target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (final gap ${k.chase.finalGapPx}px; target itself moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
     if (k.restT != null && k.firstMoveT != null && (c.restT == null || Math.abs(k.restT - c.restT) > 250)) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at ${c.restT == null ? 'never moved' : `t=${Math.round(c.restT)}ms`}`);
   }
+  if (m.frames.maxDtMs > 100 || m.frames.over50ms > 5) out.push(`page frame cadence: median ${m.frames.medianDtMs}ms, p95 ${m.frames.p95DtMs}ms, worst ${m.frames.maxDtMs}ms at t=${m.frames.maxDtAtT}ms, ${m.frames.over50ms} frames > 50ms (idle before trigger: median ${m.frames.preTriggerMedianDtMs}ms)`);
   if (m.previewUnavailable) out.push(`"Preview unavailable" text present in the preview for ${m.previewUnavailable.frames} frames, t=${m.previewUnavailable.firstT}–${m.previewUnavailable.lastT}ms`);
   void source;
   return out;
@@ -266,7 +288,7 @@ export function parseOptions(args) {
   const o = {};
   for (let i = 0; i < args.length; i++) {
     const [key, inline] = args[i].split('=');
-    if (key === '--back' || key === '--help') { o[key.slice(2)] = true; continue; }
+    if (key === '--back' || key === '--help' || key === '--no-screencast') { o[key.slice(2)] = true; continue; }
     if (!['--out', '--theme', '--base-url', '--transitions'].includes(key)) throw new Error(`Unknown flag: ${key}`);
     o[key.slice(2)] = inline ?? args[++i];
     if (!o[key.slice(2)] || o[key.slice(2)].startsWith('--')) throw new Error(`${key} needs a value`);
@@ -361,12 +383,12 @@ export async function run(options) {
       const frames = [];
       const onFrame = (event) => { frames.push({ data: event.data, wall: event.metadata.timestamp * 1000 }); cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {}); };
       cdp.on('Page.screencastFrame', onFrame);
-      await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, everyNthFrame: 1, maxWidth: 1440, maxHeight: 900 });
+      if (!options['no-screencast']) await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, everyNthFrame: 1, maxWidth: 1440, maxHeight: 900 });
       await delay(300);
       const dest = await action();
       await waitSettled(dest);
       await delay(250);
-      await cdp.send('Page.stopScreencast');
+      if (!options['no-screencast']) await cdp.send('Page.stopScreencast');
       cdp.off('Page.screencastFrame', onFrame);
       const { samples, clicks } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks }));
       const name = `${source.id}→${dest.id}${label}`;

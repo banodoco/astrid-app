@@ -19,8 +19,20 @@ const PAGE_STEP = 20;
 const FADE_PORTION = 0.12;
 
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
-/** Ease in and out (sine): a slow start, an even middle and a soft landing. */
-const ease = (t: number) => (1 - Math.cos(Math.PI * t)) / 2;
+/** cubic-bezier(x1, 0, x2, 1) at progress `t`, solved for x by bisection (plenty for one sweep a tour). */
+const bezier = (x1: number, x2: number) => (t: number) => {
+  const at = (a: number, b: number, u: number) => 3 * a * u * (1 - u) ** 2 + 3 * b * u * u * (1 - u) + u ** 3;
+  let low = 0;
+  let high = 1;
+  for (let i = 0; i < 24; i++) {
+    const mid = (low + high) / 2;
+    if (at(x1, x2, mid) < t) low = mid;
+    else high = mid;
+  }
+  return at(0, 1, (low + high) / 2);
+};
+/** A gentle start that gets going soon, and a long, soft landing: cubic-bezier(0.4, 0, 0.2, 1). */
+const ease = bezier(0.4, 0.2);
 
 /**
  * The frame → still comparison: the realistic still on the left, the Three.js frame it was made from on the right. As the

@@ -27,6 +27,7 @@ const fakeLiveScene = { kind: 'fake-live-scene', revision: 'sha256:tour-world' }
 const harness = vi.hoisted(() => ({
   warmups: [] as Array<{ sourceTime: number; onReady?: (info: unknown) => void }>,
   centered: [] as string[],
+  zooms: [] as number[],
 }));
 
 vi.mock('./tourSceneSource.ts', async (importOriginal) => ({
@@ -62,6 +63,12 @@ function createHarness() {
     timelineOps: { apply } as never,
     data: { ...state.data, isLoading: false, data: {} as never },
     playback: { ...state.playback, previewRef: { current: previewHandle } as never },
+    chrome: {
+      ...state.chrome,
+      setScaleWidth: ((update: number | ((value: number) => number)) => {
+        harness.zooms.push(typeof update === 'function' ? update(160) : update);
+      }) as never,
+    },
   }));
   const view = render(
     <TimelineStoreProvider store={store}>
@@ -103,6 +110,7 @@ describe('EditorTourTimelineDriver', () => {
   beforeEach(() => {
     harness.warmups.length = 0;
     harness.centered.length = 0;
+    harness.zooms.length = 0;
     // The landed row the driver waits for before it scrolls and plays.
     trackRow = document.createElement('div');
     trackRow.setAttribute(EDITOR_TOUR_TRACK_ATTRIBUTE, EDITOR_TOUR_TRACK_IDS.scene);
@@ -169,7 +177,8 @@ describe('EditorTourTimelineDriver', () => {
     expect(ready()).toBe(false);
     await dwell();
     expect(ready()).toBe(true);
-    expect(harness.centered).toEqual([...TOUR_CLIP_IDS.stills]);
+    // The timeline never scrolls between the reference frames: only the playhead and the preview move.
+    expect(harness.centered).toEqual([]);
     expect(previewHandle.pause).toHaveBeenCalledTimes(1);
     expect(previewHandle.play).not.toHaveBeenCalled();
     await dwell();
@@ -284,7 +293,7 @@ describe('EditorTourTimelineDriver', () => {
     expect(apply).not.toHaveBeenCalled();
   });
 
-  it('lands each stage through ops.apply, scrolls to its first clip, then seeks 0 and plays (act 2 holds its last frame when entered instantly)', async () => {
+  it('lands each stage through ops.apply, then seeks 0 and plays (act 2 holds its last frame when entered instantly)', async () => {
     const { apply, calls, previewHandle } = createHarness();
     addScene('ready');
 
@@ -293,7 +302,7 @@ describe('EditorTourTimelineDriver', () => {
     expect(apply).toHaveBeenCalledTimes(1);
     expect(apply.mock.calls[0][0]).toMatchObject({ source: 'editor-tour', version: 0 });
     expect(apply.mock.calls[0][0].operations.map((operation: { op: string }) => operation.op)).toEqual(['track.update', 'clip.add', 'clip.update']);
-    expect(harness.centered).toEqual([TOUR_CLIP_IDS.scene]);
+    expect(harness.centered).toEqual([]);
     expect(previewHandle.seek).toHaveBeenCalledWith(0);
     expect(previewHandle.play).toHaveBeenCalledTimes(1);
     expect(calls.indexOf('seek:0')).toBeGreaterThan(calls.indexOf('apply:clip.add'));
@@ -316,7 +325,7 @@ describe('EditorTourTimelineDriver', () => {
     expect(apply).toHaveBeenCalledTimes(2);
     expect(apply.mock.calls[1][0].operations[0].op).toBe('track.add');
     expect(apply.mock.calls[1][0].operations[0].payload).toMatchObject({ before: EDITOR_TOUR_TRACK_IDS.scene });
-    expect(harness.centered).toEqual([TOUR_CLIP_IDS.scene, TOUR_CLIP_IDS.stills[3]]);
+    expect(harness.centered).toEqual([]);
     // An instant arrival skips the presentation and holds the last reference frame.
     expect(previewHandle.seek).toHaveBeenCalledTimes(2);
     expect(previewHandle.play).toHaveBeenCalledTimes(1);
@@ -330,7 +339,7 @@ describe('EditorTourTimelineDriver', () => {
     await waitFor(() => expect(ready()).toBe(true));
     expect(apply).toHaveBeenCalledTimes(3);
     expect(apply.mock.calls[2][0].operations[0].payload).toMatchObject({ before: EDITOR_TOUR_TRACK_IDS.stills });
-    expect(harness.centered.at(-1)).toBe(TOUR_CLIP_IDS.video);
+    expect(harness.centered).toEqual([]);
     expect(previewHandle.play).toHaveBeenCalledTimes(2);
   });
 
@@ -525,5 +534,27 @@ describe('EditorTourTimelineDriver', () => {
     goTo(1, 'land');
     await waitFor(() => expect(ready()).toBe(true), { timeout: 3000 });
     expect(apply).toHaveBeenCalledTimes(2);
+  });
+
+  it('frames the timeline once at 0 s with 14 s in view, and never scrolls or zooms it again', async () => {
+    const scroller = document.createElement('div');
+    scroller.setAttribute('data-timeline-row-layout', 'managed');
+    scroller.style.setProperty('--label-width', '144px');
+    Object.defineProperty(scroller, 'clientWidth', { value: 560, configurable: true });
+    scroller.scrollLeft = 7;
+    document.body.append(scroller);
+    try {
+      createHarness();
+      addScene('ready');
+      await waitFor(() => expect(harness.zooms).toEqual([Math.floor(((560 - 144 - 16) / 14) * 5)]));
+      expect(scroller.scrollLeft).toBe(0);
+
+      goTo(1, 'land');
+      await waitFor(() => expect(ready()).toBe(true));
+      expect(harness.centered).toEqual([]);
+      expect(harness.zooms).toHaveLength(1);
+    } finally {
+      scroller.remove();
+    }
   });
 });

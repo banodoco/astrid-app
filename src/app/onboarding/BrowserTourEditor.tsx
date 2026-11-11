@@ -52,9 +52,8 @@ function BrowserTourEditorSurface() {
   ) ?? false);
 
   useLayoutEffect(() => {
-    // The in-memory demo starts with the Inspector and switches to the world extension when it lands.
-    opsRef.current.setRightPanelLayoutSlot(HOST_PROPERTIES_PANEL_KEY, 'dock');
-    opsRef.current.setRightPanelLayoutSlot(HOST_EXTENSIONS_PANEL_KEY, 'dock');
+    // The in-memory demo starts with the Inspector and switches to the world extension when it lands. The panel's
+    // Compact layout while the tour runs is the shell's own override (`useRightPanelLayout`), not a saved choice.
     opsRef.current.setSelectedRightPanelId(hasWorld ? HOST_EXTENSIONS_PANEL_KEY : HOST_PROPERTIES_PANEL_KEY);
   }, [hasWorld]);
 

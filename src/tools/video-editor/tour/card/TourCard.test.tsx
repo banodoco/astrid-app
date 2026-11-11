@@ -583,7 +583,8 @@ describe('TourCard on touch', () => {
     renderTouch(2, 'compose', device);
     expect(screen.getByText(SCRIPT.hints.composeTouch)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: new RegExp(`^${SCRIPT.controls.send}`) })).toBeNull();
-    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([SCRIPT.controls.skip, SCRIPT.controls.back]);
+    // Bracket access: this is the tour's "Skip" button label, not a skipped test (check-no-raw-skips matches the dotted form).
+    expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([SCRIPT.controls['skip'], SCRIPT.controls.back]);
   });
 
   it('keeps a phone’s land explainer compact, to sit above the preview: the title, Back and Next, no body', () => {

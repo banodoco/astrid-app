@@ -251,12 +251,41 @@ it('keeps all-off and copies-on choices plus the checked state from the Not-runn
   fireEvent.click(screen.getByRole('checkbox', { name: 'Use copies for skills' }));
   fireEvent.click(screen.getByRole('checkbox', { name: "I've already set up Astrid" }));
   // Set up already: the plain install line; the saved choices are not sent as flags.
-  const setupCommand = screen.getByText('curl -fsSL https://astrid.haus/install | sh', { exact: true }).textContent;
+  const plainLine = 'curl -fsSL https://astrid.haus/install | sh';
+  expect(screen.getByText(plainLine, { exact: true })).toBeInTheDocument();
   expect(screen.getByRole('checkbox', { name: "I've already set up Astrid" })).toBeChecked();
   expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
-  expect(screen.getByText('curl -fsSL https://astrid.haus/install | sh', { exact: true }).textContent).toBe(setupCommand);
-  expect(localStorage.getItem('astrid:pending-setup-v1')).toContain('"alreadySetUp":true');
+  const stored = localStorage.getItem('astrid:pending-setup-v1');
+  expect(stored).toContain('"alreadySetUp":true');
   expect(readWelcomePhase()).toBe('connection');
+
+  // A real reload: discard the mounted tree and render again from the persisted storage alone.
+  cleanup();
+  expect(screen.queryByRole('checkbox', { name: "I've already set up Astrid" })).not.toBeInTheDocument();
+  expect(localStorage.getItem('astrid:pending-setup-v1')).toBe(stored);
+  const url = new URL(window.location.href);
+  expect(entryFor(url, readWelcomePhase())).toBe('connection');
+  const requestsBeforeReload = door.requests.length;
+  render(<WelcomeFlow entry={entryFor(url, readWelcomePhase())} />);
+  await waitFor(() => expect(door.requests.length).toBeGreaterThan(requestsBeforeReload));
+  fireEvent.focus(window);
+  expect(await screen.findByRole('heading', { name: "Astrid isn't answering on this computer" })).toBeInTheDocument();
+  // The fresh render derives the checked state and the command from the persisted choice, not from the first render's state.
+  expect(screen.getByRole('checkbox', { name: "I've already set up Astrid" })).toBeChecked();
+  expect(screen.getByText(plainLine, { exact: true })).toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: 'Customize' })).not.toBeInTheDocument();
+
+  // Un-ticking it on the fresh render reveals the persisted per-choice state: all off except copies.
+  fireEvent.click(screen.getByRole('checkbox', { name: "I've already set up Astrid" }));
+  expect(screen.getByRole('checkbox', { name: "I've already set up Astrid" })).not.toBeChecked();
+  expect(localStorage.getItem('astrid:pending-setup-v1')).toContain('"alreadySetUp":false');
+  fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
+  expect(screen.getByRole('checkbox', { name: 'Start Astrid at sign-in' })).not.toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Add the `astrid` terminal command' })).not.toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Install skills for coding agents' })).not.toBeChecked();
+  expect(screen.getByRole('checkbox', { name: 'Use copies for skills' })).toBeChecked();
+  expect(screen.queryByText(plainLine, { exact: true })).not.toBeInTheDocument();
+  expect(screen.getByText(/curl -fsSL https:\/\/astrid\.haus\/install \| sh -s -- --yes/)).toBeInTheDocument();
   expect(door.unexpected).toEqual([]);
 });
 

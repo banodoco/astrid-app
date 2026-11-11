@@ -75,11 +75,10 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     at: [0, 0.2],
     side: 'right',
     phoneTitle: 'Open knowledge',
-    // On phones: straight down onto Astrid's own avatar at the head of the conversation, low enough to
-    // stay in view while the chip is unfolded.
+    // On phones: straight down onto the top edge of the conversation window, above Astrid's avatar.
     phoneSide: 'bottom',
-    phoneTarget: '.astrid-chat-surface [data-conversation-presentation] > div:first-child img',
-    phoneAt: [0.5, 1],
+    phoneTarget: '.astrid-chat-surface [data-conversation-presentation] > div:first-child',
+    phoneAt: [0.075, 0],
   },
   {
     id: 'workflows',
@@ -145,9 +144,10 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
     side: 'bottom',
     phoneTitle: 'Live-code effects',
     phoneSide: 'bottom',
-    // On phones the inspector is a compact strip of tabs right under this chip: land on its lower edge
-    // just past the Effects tab, which stays in view while the chip is unfolded over the strip.
-    phoneAt: [0.21, 1],
+    // On phones the inspector is a compact strip of tabs right under this chip: land inside the Effects
+    // tab, in the middle of the clear space to the left of its label.
+    phoneTarget: '.astrid-inspector-surface [role="tablist"].grid-cols-4 > [role="tab"]:first-child',
+    phoneAt: [0.15, 0.5],
     // Tablets draw the inspector small and zoomed out, with the label just above it: land on its top
     // edge there too, instead of on the clip title in the middle of the card.
     tabletAt: [0.5, 0],
@@ -162,13 +162,13 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
     // The middle of the first track sits ~57px below the panel's top at every desktop and tablet size.
     at: [0.27, 0.2],
     atTop: 57,
-    // On phones the chip sits top-right: its connector runs down the gutter beside the miniature and
-    // turns in to the timeline's right edge, clear of the player.
-    phoneAt: [1, 0.3],
+    // On phones the chip sits top-right: its connector runs down beside the miniature and comes in to
+    // the timeline's top edge, just inside its top right corner.
+    phoneAt: [0.955, 0],
     side: 'top',
     phoneTitle: 'Agent editing',
     phoneSide: 'bottom',
-    phoneSwing: 0.93,
+    phoneAnchor: 0.93,
   },
   {
     id: 'models',
@@ -398,8 +398,10 @@ function connectorGeometry(stage: HTMLElement, callout: CalloutDefinition, phone
   // Surface-relative fallback coordinates are already inside the panel, even if
   // an empty mobile conversation has not acquired its content height yet.
   const clampBox = !chatFallback && phone && callout.phoneTarget ? resolved.element.closest(PHONE_CLAMP_SELECTOR)?.getBoundingClientRect() : undefined;
-  // A message scrolled out of a short conversation keeps its connector at the conversation's edge.
-  if (clampBox) end.y = Math.max(clampBox.top + 10, Math.min(clampBox.bottom - 16, end.y));
+  // A message scrolled out of a short conversation keeps its connector just inside the conversation's
+  // edge; a target on the window's own edge is left exactly there.
+  if (clampBox && end.y < clampBox.top - 1) end.y = clampBox.top + 10;
+  else if (clampBox && end.y > clampBox.bottom - 16) end.y = clampBox.bottom - 16;
   return { end, side, swing: phone ? callout.phoneSwing : undefined };
 }
 

@@ -505,7 +505,7 @@ describe('bounded stage passes', () => {
     }
   });
 
-  it.each([false, true])('connects to the empty Inspector card when visible: its centre, or its lower edge on phones (phone: %s)', (isPhone) => {
+  it.each([false, true])('connects to the centre of the empty Inspector card when visible (phone: %s)', (isPhone) => {
     phone = isPhone;
     const view = render(<Stage inspectorHidden />);
     settle();
@@ -524,9 +524,9 @@ describe('bounded stage passes', () => {
     expect(path.getAttribute('data-connector-target')).toBe('effects');
     settle();
     const endpoint = view.container.querySelector('.astrid-callout-dot-end[data-callout="effects"]')!;
-    // Phones land on the strip's lower edge, a fifth of the way across, clear of an unfolded chip.
-    expect(Number(endpoint.getAttribute('cx'))).toBe(isPhone ? 121 : 150);
-    expect(Number(endpoint.getAttribute('cy'))).toBe(isPhone ? 180 : 140);
+    // With no clip selected there is no Effects tab for the phone connector, so it uses the card too.
+    expect(Number(endpoint.getAttribute('cx'))).toBe(150);
+    expect(Number(endpoint.getAttribute('cy'))).toBe(140);
     expect(frames.size).toBe(0);
   });
 

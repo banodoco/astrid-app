@@ -31,7 +31,7 @@ function setup(saveData = false) {
 
 afterEach(() => { delete (navigator as Navigator & { connection?: unknown }).connection; });
 
-it('yields first paint, decodes the next guide frame first, then warms remaining images and buffers H3 once', async () => {
+it('yields first paint, decodes the next guide frame first, then warms remaining images and buffers the guide clip once', async () => {
   const { images, decode, loads, pause, paint } = setup();
   let decoded!: () => void;
   decode.mockImplementationOnce(() => new Promise<void>(resolve => { decoded = resolve; }));
@@ -48,7 +48,8 @@ it('yields first paint, decodes the next guide frame first, then warms remaining
     EDITOR_TOUR_MEDIA.frames[0], ...EDITOR_TOUR_MEDIA.stills, EDITOR_TOUR_MEDIA.frames[1],
   ].map(slot => slot.url));
   const video = loads[0];
-  expect(video.getAttribute('src')).toBe(EDITOR_TOUR_MEDIA.video.url);
+  // Act 1's clip is the guide video; the H3 clip is not buffered until act 2.
+  expect(video.getAttribute('src')).toBe(EDITOR_TOUR_MEDIA.guide.url);
   expect(video.preload).toBe('auto');
   expect(video.paused).toBe(true);
   view.rerender();
@@ -71,6 +72,7 @@ it('limits Save Data to the current act and upgrades video metadata to buffering
   await waitFor(() => expect(images).toHaveLength(5));
   expect(loads).toHaveLength(1);
   expect(loads[0].preload).toBe('metadata');
+  expect(loads[0].getAttribute('src')).toBe(EDITOR_TOUR_MEDIA.video.url);
   act(() => setEditorTourBeat(3, 'compose'));
   await waitFor(() => expect(loads).toHaveLength(2));
   expect(loads[0]).toBe(loads[1]);

@@ -9,6 +9,10 @@ const ARRIVE_RISE_PX = 4;
 
 const SECTION = 'section';
 const CONTENT = '[data-editor-tour-card-content]';
+/** The part of a land card under its counter row; `data-folded` while the result plays alone (the watch). */
+const REST = '[data-editor-tour-card-rest]';
+/** A watch step's key is its explainer step's key plus this. */
+export const WATCH_SUFFIX = ':watch';
 
 export interface CardSize {
   /** The step this size was measured for. */
@@ -77,13 +81,15 @@ export function useCardMove(hostRef: RefObject<HTMLElement | null>, { key, anima
   const left = useRef<HTMLElement | null>(null);
   const keyRef = useRef(key);
   keyRef.current = key;
+  const shownKey = useRef<string | null>(null);
 
   const readSize = (forKey: string) => {
     const host = hostRef.current;
     if (!host) return;
     // Read now: the updater runs at the next render, after the morph has given the box its starting size.
     const width = host.offsetWidth;
-    const height = host.offsetHeight;
+    // During a watch the card is placed for the size it will unfold to, so it then unfolds without moving.
+    const height = host.offsetHeight + (host.querySelector<HTMLElement>(`${REST}[data-folded]`)?.scrollHeight ?? 0);
     setSize((previous) => (previous && previous.key === forKey && previous.width === width && previous.height === height ? previous : { key: forKey, width, height }));
   };
 
@@ -108,9 +114,36 @@ export function useCardMove(hostRef: RefObject<HTMLElement | null>, { key, anima
     const natural = { width: section.offsetWidth, height: section.offsetHeight };
     box.current = natural;
     left.current = null;
+    const unfolds = shownKey.current === `${key}${WATCH_SUFFIX}`;
+    shownKey.current = key;
     readSize(key);
     if (!motion || !animate || !from) {
       setArrivedKey(key);
+      return;
+    }
+    if (unfolds) {
+      // The watch is over: the same card, where it already is. Its counter row stays put; the box unfolds downward from
+      // it and the rest fades up, as arriving content does.
+      const rest = section.querySelector<HTMLElement>(REST);
+      Object.assign(section.style, { transition: 'none', overflow: 'hidden', height: `${from.height}px` });
+      if (rest) Object.assign(rest.style, { transition: 'none', opacity: '0', transform: `translateY(${ARRIVE_RISE_PX}px)` });
+      void section.offsetWidth;
+      Object.assign(section.style, { transition: `height ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}`, height: `${natural.height}px` });
+      if (rest) {
+        Object.assign(rest.style, {
+          transition: `opacity ${TOUR_ARRIVE_MS}ms ease-out ${TOUR_ARRIVE_DELAY_MS}ms, transform ${TOUR_ARRIVE_MS}ms ${TOUR_MOVE_EASE} ${TOUR_ARRIVE_DELAY_MS}ms`,
+          opacity: '1',
+          transform: 'translateY(0)',
+        });
+      }
+      const unfolding = { section, content: rest };
+      morph.current = unfolding;
+      void moveFinished([host, section, rest]).then(() => {
+        if (morph.current !== unfolding) return;
+        endMorph();
+        readSize(key);
+        setArrivedKey(key);
+      });
       return;
     }
     const contentWidth = content?.offsetWidth ?? 0;

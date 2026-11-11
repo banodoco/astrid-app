@@ -1,6 +1,4 @@
-import { ChevronLeft } from 'lucide-react';
-import { Button } from '@/shared/components/ui/button.tsx';
-import { EditorCard, EditorCardFoot } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
+import { BackButton, EditorCard, EditorCardFoot } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
 import { EditorCardLayer } from '@/shared/components/RuntimeConnection/EditorCardLayer.tsx';
 import { detectInstallScenario } from '@/pages/Home/installScenario.ts';
 import { LOCAL_SETUP, PINOKIO_INSTALL_COPY, localSetupSteps } from '@/shared/components/RuntimeConnection/copy.ts';
@@ -16,11 +14,11 @@ export function WelcomeLocalSetup({ onBack, initiallySetUp = false, onContinue }
         scrollContent
         title="Have your agent set it up"
         sentence={<>Paste these instructions into Claude Code, Codex or another agent. It installs Astrid, gets the editor from <a className="underline underline-offset-4 hover:text-foreground" href={LOCAL_SETUP.repoUrl} target="_blank" rel="noreferrer">GitHub</a> and starts both on your computer.</>}
-        topLeft={<Button type="button" variant="ghost" className="inline-flex h-auto items-center gap-0.5 rounded-md py-1 pl-1 pr-2 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground" onClick={onBack}><ChevronLeft aria-hidden="true" className="h-4 w-4" />Back</Button>}
+        topLeft={<BackButton onBack={onBack} />}
         foot={<EditorCardFoot>When it&apos;s done, Astrid opens from your own computer.</EditorCardFoot>}
       >
         <div className="space-y-2">
-          <SetupBlock initiallySetUp={initiallySetUp} localSetup localBuild onContinue={onContinue} continueLabel="Continue to Astrid" />
+          <SetupBlock initiallySetUp={initiallySetUp} localSetup localBuild onContinue={onContinue} continueLabel="Continue" />
         </div>
         <section className="min-w-0 space-y-1.5 text-left">
           <p className="text-[13px] font-medium text-muted-foreground">Run it yourself</p>

@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { COMPARE_REST, COMPARE_SWEEP_DELAY_MS, COMPARE_SWEEP_MS, TourCompare } from './TourCompare';
 import { exitEditorTour, skipEditorTourAnimation, startEditorTour } from '@/shared/state/editorTourStore';
@@ -29,12 +29,26 @@ afterEach(() => {
 });
 
 describe('TourCompare', () => {
-  it('without the sweep (reduced motion, Back) rests at once, still on the left and frame on the right', () => {
-    const { value, still, slider } = renderCompare(false);
+  it('without the sweep (reduced motion, Back) rests at once near the middle, frame on the left and still on the right', () => {
+    const { value, still, slider, container } = renderCompare(false);
     expect(value()).toBe(COMPARE_REST);
-    expect(still.style.clipPath).toBe(`inset(0 ${100 - COMPARE_REST}% 0 0)`);
+    expect(COMPARE_REST).toBeGreaterThanOrEqual(45);
+    expect(COMPARE_REST).toBeLessThanOrEqual(55);
+    // The still is cut away left of the divider and whole (no wipe) right of it.
+    expect(still.style.clipPath).toBe(`inset(0 0 0 ${COMPARE_REST}%)`);
+    expect(still.style.maskImage).toBe('');
+    // Each label lives in its own picture's layer, on that picture's side.
     expect(still).toHaveTextContent(LABELS[1]);
     expect(still).not.toHaveTextContent(LABELS[0]);
+    expect(within(still).getByText(LABELS[1])).toHaveClass('right-2');
+    const frame = still.previousElementSibling as HTMLElement;
+    expect(frame).toHaveTextContent(LABELS[0]);
+    expect(frame).not.toHaveTextContent(LABELS[1]);
+    expect(within(frame).getByText(LABELS[0])).toHaveClass('left-2');
+    expect(frame.querySelector('img, svg')).not.toBeNull();
+    expect(container.querySelector('[data-tour-compare-divider]')).toHaveStyle({ left: `${COMPARE_REST}%` });
+    expect(slider).toHaveAccessibleName(`Compare the frame (left) with ${LABELS[1]} (right)`);
+    expect(slider).toHaveAttribute('aria-valuetext', `${LABELS[0]} ${COMPARE_REST}%, ${LABELS[1]} ${100 - COMPARE_REST}%`);
     expect(slider).toHaveAttribute('aria-valuemin', '0');
     expect(slider).toHaveAttribute('aria-valuemax', '100');
     expect(slider).toHaveAttribute('tabindex', '0');
@@ -55,6 +69,46 @@ describe('TourCompare', () => {
     expect(seen).toEqual([...seen].sort((a, b) => a - b));
     expect(seen.some((v) => v > 0 && v < COMPARE_REST)).toBe(true);
     expect(value()).toBe(COMPARE_REST);
+  });
+
+  it('starts as the frame alone, wipes the still in from left to right ahead of the divider, and leaves it whole', () => {
+    const { value, still } = renderCompare(true);
+    // The wipe's front: everything right of it is still the frame.
+    const front = () => { const match = /transparent (-?[\d.]+)%/.exec(still.style.maskImage); return match ? Number(match[1]) : null; };
+    expect(front()).toBe(0);
+    advance(COMPARE_SWEEP_DELAY_MS - 50);
+    expect(front()).toBe(0);
+    const fronts: number[] = [];
+    let crossedAt: number | null = null;
+    for (let t = 0; t < COMPARE_SWEEP_MS + 200; t += 50) {
+      advance(50);
+      const at = front();
+      if (at === null) crossedAt ??= value();
+      else {
+        expect(crossedAt).toBeNull(); // once whole, it stays whole
+        fronts.push(at);
+        expect(at).toBeGreaterThanOrEqual(value()); // the wipe leads, the divider follows
+      }
+    }
+    expect(fronts.length).toBeGreaterThan(5);
+    expect(fronts).toEqual([...fronts].sort((a, b) => a - b));
+    // The still has covered the picture while the divider is still on its way in.
+    expect(crossedAt).not.toBeNull();
+    expect(crossedAt!).toBeLessThan(COMPARE_REST);
+    expect(still.style.maskImage).toBe('');
+    expect(still.style.clipPath).toBe(`inset(0 0 0 ${COMPARE_REST}%)`);
+  });
+
+  it('a grab during the wipe takes the divider at once and lets the wipe finish', () => {
+    const { box, value, xAt, still } = renderCompare(true);
+    advance(COMPARE_SWEEP_DELAY_MS + 200);
+    expect(still.style.maskImage).not.toBe('');
+    fireEvent.pointerDown(box, { pointerId: 1, pointerType: 'mouse', button: 0, clientX: xAt(40) });
+    expect(value()).toBe(40);
+    expect(still.style.maskImage).not.toBe('');
+    advance(COMPARE_SWEEP_MS);
+    expect(value()).toBe(40);
+    expect(still.style.maskImage).toBe('');
   });
 
   it('yields to a grab mid-sweep without jumping, then follows the pointer', () => {
@@ -82,7 +136,7 @@ describe('TourCompare', () => {
     expect(value()).toBe(20);
     fireEvent.pointerMove(box, { pointerId: 7, pointerType: 'touch', clientX: BOX.left - 80 });
     expect(value()).toBe(0);
-    expect(still.style.clipPath).toBe('inset(0 100% 0 0)');
+    expect(still.style.clipPath).toBe('inset(0 0 0 0%)');
     fireEvent.pointerMove(box, { pointerId: 7, pointerType: 'touch', clientX: BOX.left + BOX.width + 80 });
     expect(value()).toBe(100);
     // Another pointer does not move it.
@@ -120,7 +174,7 @@ describe('TourCompare', () => {
     expect(value()).toBe(0);
     fireEvent.keyDown(slider, { key: 'ArrowLeft' });
     expect(value()).toBe(0);
-    expect(slider).toHaveAttribute('aria-valuetext', `0% ${LABELS[1]}`);
+    expect(slider).toHaveAttribute('aria-valuetext', `${LABELS[0]} 0%, ${LABELS[1]} 100%`);
     // Enter and Escape are the tour's: the handle lets them through.
     expect(fireEvent.keyDown(slider, { key: 'Enter' })).toBe(true);
     expect(slider).toHaveAttribute('data-editor-tour-keys', 'own');

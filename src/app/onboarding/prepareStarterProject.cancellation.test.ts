@@ -28,8 +28,9 @@ describe('prepareStarterProject cancellation recovery', () => {
       }),
       listTimelines: vi.fn(async (id: string) => timelines.get(id) ?? []),
       getProject: vi.fn(async (id: string) => projects.find(row => row.project_id === id)!),
-      publishParentComposition: vi.fn(async (id: string, timelineId: string) => {
-        timelines.set(id, [{ timeline_id: timelineId, head_revision_id: 'head', slug: 'main' }]);
+      // The real contract: Runtime's catalog creation installs the empty canonical bootstrap (its head) atomically.
+      createTimeline: vi.fn(async (id: string, timelineId: string, _key: string, name?: string) => {
+        timelines.set(id, [{ timeline_id: timelineId, head_revision_id: 'head', slug: 'main', name }]);
         return { revision_id: 'head' };
       }),
       updateProject: vi.fn(async (id: string, _key: string, _version: number, _name: string | undefined,

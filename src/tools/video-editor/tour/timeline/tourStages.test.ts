@@ -7,7 +7,6 @@ import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { EDITOR_TOUR_TRACK_IDS } from '@/tools/video-editor/tour/anchors.ts';
 import { EDITOR_TOUR_MEDIA } from '@/tools/video-editor/tour/tourMedia.ts';
 import {
-  EDITOR_TOUR_LIVE_SCENE_CLIP_TYPE,
   EDITOR_TOUR_TIMELINE_ID,
   TOUR_CLIP_IDS,
   TOUR_ANCHOR_SECONDS,
@@ -17,8 +16,6 @@ import {
   createEditorTourStageRemovalPatch,
   createEditorTourTimeline,
 } from './tourStages.ts';
-
-const fakeLiveScene = { kind: 'fake-live-scene', version: 1 };
 
 /** Builds the demo's starting TimelineData through the same path the editor uses to load a timeline. */
 const buildStartData = (): Promise<TimelineData> =>
@@ -50,9 +47,9 @@ describe('editor tour timeline stages', () => {
     expect(data.config.tracks?.[0].label).toBe('V1');
   });
 
-  it('stage 1 places the live scene clip on the scene track', async () => {
+  it('stage 1 places the muted 14 s guide video on the scene track', async () => {
     const start = await buildStartData();
-    const data = applyStage(start, createEditorTourStagePatch(1, fakeLiveScene));
+    const data = applyStage(start, createEditorTourStagePatch(1));
 
     expect(trackIdsTopFirst(data)).toEqual([EDITOR_TOUR_TRACK_IDS.scene]);
     expect(data.config.clips).toHaveLength(1);
@@ -61,15 +58,13 @@ describe('editor tour timeline stages', () => {
     const clip = data.config.clips[0];
     expect(clip.id).toBe(TOUR_CLIP_IDS.scene);
     expect(clip.track).toBe(EDITOR_TOUR_TRACK_IDS.scene);
-    expect(clip.clipType).toBe(EDITOR_TOUR_LIVE_SCENE_CLIP_TYPE);
-    expect(clip.at).toBe(0);
-    expect(clip.from).toBe(2.5);
-    expect(clip.to).toBe(16.5);
-    expect(clip.app?.liveScene).toEqual(fakeLiveScene);
+    expect(clip).toMatchObject({ clipType: 'media', asset: 'tour-guide', at: 0, from: 0, to: 14, speed: 1, volume: 0, label: 'Lantern Valley Three.js visualization' });
+    // An ordinary media clip: no live scene, no extension payload.
+    expect(clip.app).toBeUndefined();
   });
 
   it('the stage 1 removal patch takes the scene clip off and restores the base label', async () => {
-    const landed = applyStage(await buildStartData(), createEditorTourStagePatch(1, fakeLiveScene));
+    const landed = applyStage(await buildStartData(), createEditorTourStagePatch(1));
     const data = applyStage(landed, createEditorTourStageRemovalPatch(1));
 
     expect(data.config.clips).toEqual([]);
@@ -78,8 +73,8 @@ describe('editor tour timeline stages', () => {
 
   it('stage 2 places all four reference frames above the scene at their guide times', async () => {
     const start = await buildStartData();
-    const stage1 = applyStage(start, createEditorTourStagePatch(1, fakeLiveScene));
-    const data = applyStage(stage1, createEditorTourStagePatch(2, fakeLiveScene));
+    const stage1 = applyStage(start, createEditorTourStagePatch(1));
+    const data = applyStage(stage1, createEditorTourStagePatch(2));
 
     expect(trackIdsTopFirst(data)).toEqual([EDITOR_TOUR_TRACK_IDS.stills, EDITOR_TOUR_TRACK_IDS.scene]);
     expect(clipIdsOn(data, EDITOR_TOUR_TRACK_IDS.scene)).toEqual([TOUR_CLIP_IDS.scene]);
@@ -96,9 +91,9 @@ describe('editor tour timeline stages', () => {
 
   it('stage 3 adds the video row on top with one muted 14 s MiniMax H3 clip', async () => {
     const start = await buildStartData();
-    const stage1 = applyStage(start, createEditorTourStagePatch(1, fakeLiveScene));
-    const stage2 = applyStage(stage1, createEditorTourStagePatch(2, fakeLiveScene));
-    const data = applyStage(stage2, createEditorTourStagePatch(3, fakeLiveScene));
+    const stage1 = applyStage(start, createEditorTourStagePatch(1));
+    const stage2 = applyStage(stage1, createEditorTourStagePatch(2));
+    const data = applyStage(stage2, createEditorTourStagePatch(3));
 
     expect(trackIdsTopFirst(data)).toEqual([
       EDITOR_TOUR_TRACK_IDS.videos,
@@ -121,6 +116,7 @@ describe('editor tour timeline stages', () => {
       'tour-still-mid-1': EDITOR_TOUR_MEDIA.stills[1].url,
       'tour-still-mid-2': EDITOR_TOUR_MEDIA.stills[2].url,
       'tour-still-end': EDITOR_TOUR_MEDIA.stills[3].url,
+      'tour-guide': EDITOR_TOUR_MEDIA.guide.url,
       'tour-video': EDITOR_TOUR_MEDIA.video.url,
     };
     for (const [id, url] of Object.entries(expected)) {
@@ -129,6 +125,8 @@ describe('editor tour timeline stages', () => {
       expect(assets[id].file.startsWith('data:'), id).toBe(false);
     }
     expect(assets['tour-video'].duration).toBe(14.375);
+    expect(assets['tour-guide'].duration).toBe(14);
+    expect(assets['tour-guide'].type).toBe('video/mp4');
   });
 
   it('names the media after what it is, not after the files', () => {
@@ -140,8 +138,8 @@ describe('editor tour timeline stages', () => {
 
   it('gives an empty media slot a non-empty neutral url', () => {
     const empty = { url: '', width: 1280, height: 720, durationSeconds: 10 };
-    const { assets } = createEditorTourAssetRegistry({ frames: [empty, empty], stills: [empty, empty, empty, empty], video: empty });
-    for (const id of ['tour-still-start', 'tour-still-end', 'tour-video']) {
+    const { assets } = createEditorTourAssetRegistry({ frames: [empty, empty], stills: [empty, empty, empty, empty], video: empty, guide: empty });
+    for (const id of ['tour-still-start', 'tour-still-end', 'tour-guide', 'tour-video']) {
       expect(assets[id].file.startsWith('data:'), id).toBe(true);
     }
   });

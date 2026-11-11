@@ -57,7 +57,7 @@ describe('main welcome routing', () => {
     vi.stubEnv('VITE_RUNTIME_ORIGIN', '');
     localStorage.setItem('astrid:welcome-v1', 'choose');
     await enter();
-    expect(boot.welcomeEntry).toBe('setup');
+    expect(boot.welcomeEntry).toBe('local');
   });
 
   it('renders welcome on a fresh unselected editor visit before importing any Runtime or app bootstrap', async () => {
@@ -101,10 +101,11 @@ describe('main welcome routing', () => {
     const before = window.location.href;
     await enter();
     expect(window.location.href).toBe(before);
-    // A fresh explicit entry is still consent-gated: it opens welcome's setup step first.
-    expect(boot.steps).toContain('import welcome');
-    expect(boot.welcomeEntry).toBe('setup');
-    expect(boot.steps).not.toContain('render app');
+    // A work link opens the editor, whose Runtime gate connects (or, on a phone, sends the link to a computer);
+    // it is never answered with a setup page or the demo, and it marks welcome complete.
+    expect(boot.steps).toContain('render app');
+    expect(boot.steps).not.toContain('import welcome');
+    expect(localStorage.getItem('astrid:welcome-v1')).toBe('complete');
   });
 
   it('ignores unrelated query keys and resumes the bare welcome by phase', async () => {

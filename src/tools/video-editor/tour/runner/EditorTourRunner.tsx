@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { EDITOR_TOUR_ANCHORS, EDITOR_TOUR_TRACK_IDS, editorTourSelector, editorTourTrackSelector } from '../anchors';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers';
@@ -8,29 +8,20 @@ import { TourGalleryLayer } from '../gallery/TourGalleryLayer';
 import { TourSpotlight } from './TourSpotlight';
 import { backEditorTour, finishEditorTour, runEditorTourPrimary, watchEditorTourSend } from './tourBeats';
 import { placeCard, type CardPosition } from './cardPlacement';
-import { TOUR_MOVE_EASE, TOUR_MOVE_MS, useSettledRects } from './useSettledRects';
+import { TOUR_LEAVE_MS, TOUR_MOVE_EASE, TOUR_MOVE_MS, useSettledRects } from './useSettledRects';
 import { spotlightTargetKey, useSpotlightMeasurement, useSpotlightRects, type SpotlightRect, type SpotlightTarget } from './useSpotlightRects';
-import { useCardMove } from './useCardMove';
+import { TOUR_ARRIVE_MS, useCardMove, WATCH_SUFFIX } from './useCardMove';
+import { LAND_WATCH_HOLD_MS, LAND_WATCH_PILL, useLandWatch } from './landWatch';
 import { useTourKeys } from './useTourKeys';
 import { useEditorDeviceClass } from './useIsDesktopEditor';
 import type { TimelineDeviceClass } from '../../lib/mobile-interaction-model';
 
 /** Matches the phone card's `w-[calc(100vw-24px)]`. */
 const PHONE_EDGE = 12;
-/** Close enough that the card covers the playback row under the preview, rather than leaving its controls peeking out. */
+/** How close to the top of the screen a phone's land card may sit, to stay off the preview on the shortest phones. */
+const PHONE_LAND_TOP = 6;
+/** The gap between a phone's card and what it points at. */
 const PHONE_GAP = 8;
-
-/**
- * A phone's card sits under everything spotlit when it fits there. On a short phone it cannot fit under both the preview
- * and the act's new row, so the row gives way (it would sit under the card) and the preview alone stays lit, clear of it.
- */
-export function phoneSpotlight(rects: readonly SpotlightRect[], cardHeight: number, viewportHeight: number): readonly SpotlightRect[] {
-  if (rects.length < 2) return rects;
-  const room = (lit: readonly SpotlightRect[]) => viewportHeight - Math.max(...lit.map((r) => r.y + r.height)) - PHONE_GAP - PHONE_EDGE;
-  if (room(rects) >= cardHeight) return rects;
-  const preview = rects[rects.length - 1];
-  return [preview];
-}
 
 const ACT_TRACK: Record<EditorTourAct, string> = {
   1: EDITOR_TOUR_TRACK_IDS.scene,
@@ -40,15 +31,15 @@ const ACT_TRACK: Record<EditorTourAct, string> = {
 
 /**
  * What each beat spotlights: chat composer and Send, the transcript, the act's new row with the preview, or nothing (the welcome,
- * the finale and the feedback card). A phone's full-screen chat has no room for the card beside the whole transcript, so there
- * the reply and its actions alone are lit, with the card just above them.
+ * the finale and the feedback card). On respond it is the act's actions, the beat's settled state (while the reply is
+ * still coming in the runner holds the whole transcript instead: `spotlightTargets`).
  */
-export function editorTourTargets(act: EditorTourAct, beat: EditorTourBeat, device: TimelineDeviceClass = 'desktop'): string[] {
+export function editorTourTargets(act: EditorTourAct, beat: EditorTourBeat, _device: TimelineDeviceClass = 'desktop'): string[] {
   switch (beat) {
     case 'compose':
       return [editorTourSelector(EDITOR_TOUR_ANCHORS.chatComposer)];
     case 'respond':
-      return [editorTourSelector(device === 'phone' ? EDITOR_TOUR_ANCHORS.chatReply : EDITOR_TOUR_ANCHORS.chatTranscript)];
+      return [editorTourSelector(EDITOR_TOUR_ANCHORS.chatActions)];
     case 'land':
       return [editorTourTrackSelector(ACT_TRACK[act]), editorTourSelector(EDITOR_TOUR_ANCHORS.preview)];
     case 'gallery':
@@ -61,21 +52,34 @@ export function editorTourTargets(act: EditorTourAct, beat: EditorTourBeat, devi
 }
 
 /**
- * Desktop's respond beat comes in two phases, with no beat of its own between them: while the reply streams in (`working`)
- * the spotlight holds still over the whole transcript and the card waits beside it with a quiet line; once the chat is
- * ready it contracts onto the act's actions and the card moves beside them with the reply's line and Next. Arriving by
- * Back, or with reduced motion, the reply is already there: straight to the actions. Phones and tablets keep one phase.
+ * The respond beat comes in two phases, with no beat of its own between them: while the reply streams in (`working`) the
+ * spotlight holds still over the whole transcript; once the chat is ready it makes one move onto the act's actions, with
+ * the card beside them (above them on touch) carrying the reply's line and Next. On desktop the card waits beside the
+ * transcript with a quiet line meanwhile; on a phone or tablet there is no card at all until the actions are there.
+ * Arriving by Back, or with reduced motion, the reply is already there: straight to the actions.
  */
-export function respondWorking(device: TimelineDeviceClass, beat: EditorTourBeat, { chatReady, instant, reducedMotion }: { chatReady: boolean; instant: boolean; reducedMotion: boolean }): boolean {
-  return device === 'desktop' && beat === 'respond' && !chatReady && !instant && !reducedMotion;
+export function respondWorking(beat: EditorTourBeat, { chatReady, instant, reducedMotion }: { chatReady: boolean; instant: boolean; reducedMotion: boolean }): boolean {
+  return beat === 'respond' && !chatReady && !instant && !reducedMotion;
 }
 
-/** `editorTourTargets`, with desktop's respond phases: the whole transcript box while the reply comes in, then its actions. */
+/** `editorTourTargets`, with respond's first phase: the whole transcript box, one fixed rect, while the reply comes in. */
 export function spotlightTargets(act: EditorTourAct, beat: EditorTourBeat, device: TimelineDeviceClass, working: boolean): SpotlightTarget[] {
-  if (device === 'desktop' && beat === 'respond') {
-    return working ? [{ selector: editorTourSelector(EDITOR_TOUR_ANCHORS.chatTranscript), whole: true }] : [editorTourSelector(EDITOR_TOUR_ANCHORS.chatActions)];
-  }
+  if (beat === 'respond' && working) return [{ selector: editorTourSelector(EDITOR_TOUR_ANCHORS.chatTranscript), whole: true }];
   return editorTourTargets(act, beat, device);
+}
+
+/** Steps that show no card at all: a touch layout while the reply comes in, and a land beat's watch when it has no bar. */
+export function cardHidden(device: TimelineDeviceClass, phase: string | undefined): boolean {
+  return (phase === 'working' && device !== 'desktop') || (phase === 'watch' && !LAND_WATCH_PILL);
+}
+
+/**
+ * A phone's land card sits above the preview, over the editor's dimmed header, so the preview and the timeline rows under
+ * it stay in view. When it is taller than the space there it starts at the top edge and overlaps the preview's top a little.
+ */
+export function phoneLandPosition(rects: readonly SpotlightRect[], card: { height: number }): CardPosition {
+  const top = Math.min(...rects.map((r) => r.y));
+  return { left: PHONE_EDGE, top: Math.max(PHONE_LAND_TOP, top - PHONE_GAP - card.height) };
 }
 
 /**
@@ -126,24 +130,40 @@ function RunningTour() {
   const instant = useEditorTour((s) => s.instant);
   const device = useEditorDeviceClass();
   const motion = !reducedMotion;
-  // Respond has two phases on desktop: the reply coming in, then its actions (`respondWorking`).
-  const working = respondWorking(device, beat, { chatReady, instant, reducedMotion });
-  const stepKey = `${runId}:${act}:${beat}${working ? ':working' : ''}`;
+  // Respond has two phases: the reply coming in, then its actions (`respondWorking`).
+  const working = respondWorking(beat, { chatReady, instant, reducedMotion });
+  // A land beat first lets its result play alone (`useLandWatch`), then shows its explainer: two steps, one beat.
+  const watching = useLandWatch(`${runId}:${act}:${beat}`, act, beat);
+  const stepKey = `${runId}:${act}:${beat}${working ? ':working' : ''}${watching ? WATCH_SUFFIX : ''}`;
   const cardRef = useRef<HTMLDivElement>(null);
   const targets = spotlightTargets(act, beat, device, working);
   const measurement = useSpotlightMeasurement(targets);
   // The card and spotlight show the step whose targets have all arrived and held still; it trails the store's by the leave.
   const cardMoving = useRef<() => boolean>(() => false);
-  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current() });
+  const shownStep = useRef('');
+  // The watch ending keeps the card and its counter row: nothing leaves, the explainer unfolds where the card is.
+  const unfolding = shownStep.current === `${stepKey}${WATCH_SUFFIX}`;
+  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current(), leaves: !unfolding });
+  shownStep.current = commit.key;
   const [, shownAct, shownBeat, shownPhase] = commit.key.split(':') as [string, `${EditorTourAct}`, EditorTourBeat, string | undefined];
   const pending = commit.key !== stepKey;
+  const watchShown = shownPhase === 'watch';
   // The browser tour's phone chat stays in until the card and spotlight have moved off it.
   useLayoutEffect(() => showEditorTourBeat(shownBeat), [shownBeat]);
   // The Send button is the one thing outside the card the user may press.
   const sendRects = useSpotlightRects(beat === 'compose' ? [editorTourSelector(EDITOR_TOUR_ANCHORS.chatSend)] : []);
-  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate, motion, pending });
+  // A step with no card: the card fades out where it stands and takes its next place unseen; the step after it appears
+  // in place (a fade, no travel, no morph).
+  const hidden = cardHidden(device, shownPhase);
+  const appearance = useRef({ key: '', inPlace: false, lastHidden: false });
+  if (appearance.current.key !== commit.key) appearance.current = { key: commit.key, inPlace: appearance.current.lastHidden, lastHidden: hidden };
+  const inPlace = appearance.current.inPlace;
+  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate && !hidden && !inPlace, motion, pending: pending && !unfolding });
   cardMoving.current = moving;
-  const arrived = !motion || arrivedKey === commit.key;
+  // `landed`: the card's move is over. `arrived`: the explainer itself is there (never during a watch), so its entrance
+  // and its readiness wait for it.
+  const landed = !motion || arrivedKey === commit.key;
+  const arrived = landed && !watchShown && !hidden;
   // Whether this step's card rose into view by itself (the first card, a jump) or came in with the move; fixed per step.
   const rise = useRef({ key: '', rise: true });
   if (rise.current.key !== commit.key) rise.current = { key: commit.key, rise: !(motion && commit.animate) };
@@ -154,48 +174,62 @@ function RunningTour() {
   if (size?.key === commit.key || !shown.current) {
     const cardSize = size ?? { width: 360, height: 160 };
     const viewport = { width: window.innerWidth, height: window.innerHeight };
-    const rects = device === 'phone' && shownBeat === 'land' ? phoneSpotlight(commit.rects, cardSize.height, viewport.height) : commit.rects;
-    // A phone's card spans the width: in the middle of the screen, or right above or below what it points at.
-    // On touch the reply's card sits under the reply, in the chat's own space, rather than over the editor beside it.
-    const position = placeCard(rects, cardSize, viewport, {
+    const rects = commit.rects;
+    // A phone's card spans the width: in the middle of the screen, or right above or below what it points at; on a land
+    // beat always above the preview. On touch the reply's card sits just above the actions it explains, in the chat.
+    const position = device === 'phone' && shownBeat === 'land' && rects.length ? phoneLandPosition(rects, cardSize) : placeCard(rects, cardSize, viewport, {
       ...(device === 'phone' ? { edge: PHONE_EDGE, gap: PHONE_GAP } : {}),
-      preferBelow: device !== 'desktop' && shownBeat === 'respond',
+      preferAbove: device !== 'desktop' && shownBeat === 'respond',
       ...(device === 'desktop' ? { avoid: desktopCardAvoid(shownBeat) } : {}),
     });
     shown.current = { rects, position };
   }
   const { rects: spotlit, position } = shown.current;
+  // Stable elements: a new rect or position re-renders this component, not the gallery layer or the card's content.
+  const gallery = useMemo(() => <TourGalleryLayer />, []);
+  const shownActNumber = Number(shownAct) as EditorTourAct;
+  const shownWorking = shownPhase === 'working';
+  const cardRise = rise.current.rise;
+  const card = useMemo(() => (
+    <TourCard
+      act={shownActNumber}
+      beat={shownBeat}
+      working={shownWorking}
+      watching={watchShown}
+      arrived={arrived}
+      rise={cardRise}
+      device={device}
+      onPrimary={runEditorTourPrimary}
+      onBack={backEditorTour}
+      onSkip={finishEditorTour}
+    />
+  ), [shownActNumber, shownBeat, shownWorking, watchShown, arrived, cardRise, device]);
   const moves = motion && commit.animate;
   return (
     <>
-      <TourGalleryLayer />
+      {gallery}
       <TourSpotlight rects={spotlit} clickable={sendRects[0] ?? null} reducedMotion={reducedMotion} animate={commit.animate} />
       <div
         ref={cardRef}
         data-editor-tour-card-host
+        data-editor-tour-watch-hold={shownBeat === 'land' ? LAND_WATCH_HOLD_MS[Number(shownAct) as EditorTourAct] : undefined}
         // On a phone the card keeps clear of the home indicator of a full-screen web app.
         className={device === 'phone' ? 'fixed left-0 top-0 pb-[env(safe-area-inset-bottom)]' : 'fixed left-0 top-0'}
         style={{
           zIndex: UI_Z_LAYERS.EDITOR_TOUR_CARD,
           transform: `translate3d(${position.left}px, ${position.top}px, 0)`,
           willChange: 'transform',
-          transition: moves ? `transform ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}` : 'none',
+          opacity: hidden ? 0 : 1,
+          transition: !moves ? 'none'
+            : hidden ? `opacity ${TOUR_LEAVE_MS}ms ease-out, transform 0s linear ${TOUR_LEAVE_MS}ms`
+            : inPlace ? `opacity ${TOUR_ARRIVE_MS}ms ease-out`
+            : `transform ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}`,
           // Between the store's beat changing and the card showing it, the old card's buttons would act on the new beat;
-          // while it travels in, its content is not there yet.
-          pointerEvents: pending || !arrived ? 'none' : undefined,
+          // while it travels in, its content is not there yet. A watch's bar (Back, Skip tour) is live once it has landed.
+          pointerEvents: (pending && !unfolding) || !landed || hidden ? 'none' : undefined,
         }}
       >
-        <TourCard
-          act={Number(shownAct) as EditorTourAct}
-          beat={shownBeat}
-          working={shownPhase === 'working'}
-          arrived={arrived}
-          rise={rise.current.rise}
-          device={device}
-          onPrimary={runEditorTourPrimary}
-          onBack={backEditorTour}
-          onSkip={finishEditorTour}
-        />
+        {card}
       </div>
     </>
   );

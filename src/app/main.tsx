@@ -197,7 +197,7 @@ async function startApp(rootElement: HTMLElement): Promise<void> {
   }
 
   const localBuild = runtimeOrigin() === '';
-  const welcomeEntry = entryFor(new URL(window.location.href), readWelcomePhase(), localBuild);
+  const welcomeEntry = entryFor(new URL(window.location.href), readWelcomePhase(localBuild), localBuild);
   if (welcomeEntry !== 'editor') {
     const { renderWelcome } = await import('@/app/onboarding/welcomeBootstrap.tsx');
     clearPreloadReloadAfterRender(rootElement);

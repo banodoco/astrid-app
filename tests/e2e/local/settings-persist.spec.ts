@@ -8,7 +8,7 @@
 import { expect, type Page } from '@playwright/test';
 import { EDITOR_TOUR_VERSION } from '../../../src/shared/lib/editorTourVersion.ts';
 import { skipWhen } from '../support/declaredSkip.ts';
-import { expectConnected, openApp, test } from './support/app.ts';
+import { APP_ENTRY_ROUTE, expectConnected, openApp, test } from './support/app.ts';
 
 /** The Tasks pane's edge tab: "Unlock pane" while the pane is locked open, "Lock pane" while it is not. */
 function tasksPaneLock(page: Page) {
@@ -52,11 +52,12 @@ test('a changed Tasks pane lock holds after clearing the browser and reloading (
   await page.evaluate(() => { localStorage.clear(); sessionStorage.clear(); });
   expect(await page.evaluate((key) => localStorage.getItem(key), SNAPSHOT_KEY)).toBeNull();
 
-  // This browser forgot its onboarding progress (welcomeProgress.ts is local), so it is shown the setup page.
-  // The real way through is "I've already set up Astrid" and Continue; that reconnects to the same Runtime.
-  await page.reload();
-  await page.getByRole('checkbox', { name: "I've already set up Astrid" }).check();
-  await page.getByRole('button', { name: 'Continue to Astrid' }).click();
+  // This browser forgot its onboarding progress (welcomeProgress.ts is local), so a bare visit would start the welcome
+  // tour again. The bare "Set up Astrid" page and its "I've already set up Astrid" checkbox are retired (main commit
+  // 1ca25bd18); a person who is already set up reaches the editor by a work link, `?entry=editor` (the tour's explicit
+  // Open editor, see isWorkLink/entryFor), which marks welcome complete and lets the editor's own Runtime gate reconnect
+  // to the same Runtime.
+  await page.goto(`${harness.origin}${APP_ENTRY_ROUTE}?entry=editor`);
   await expectConnected(page);
 
   // Same choice: the value came back from the Runtime.

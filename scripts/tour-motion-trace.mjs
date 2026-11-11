@@ -35,7 +35,7 @@ import { chromiumExecutable, freePort, waitServer } from './tour-screenshots.mjs
 const STORE = '/src/shared/state/editorTourStore.ts';
 const BEATS = '/src/tools/video-editor/tour/runner/tourBeats.ts';
 const SETTLE_QUIET_MS = 500; // geometry unchanged this long
-const CAP_MS = 90_000; // per-transition cap
+const CAP_MS = 240_000; // per-transition cap
 const SPOT_PADDING = 6; // useSpotlightRects PADDING: cutouts are the target rect outset by this (then clipped)
 const EPS = 0.5; // px per frame below which something counts as still
 const STILL_GAP = 3; // still frames that split two motion segments

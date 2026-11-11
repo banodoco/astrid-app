@@ -67,6 +67,7 @@ test('diagnostic verifier rejects collisions and missing joins', () => {
   try {
     const file = join(dir, 'log');
     const verify = resolve('scripts/diagnostics/verify-playwright-log.mjs');
+    writeFileSync(join(dir, 'collector-status.json'), JSON.stringify({complete:true, invalid:false}));
     const scannerRows = [
       'TOKEN_SNIFF '+JSON.stringify({event:'request', process:4, scanner:5, request:6}),
       'TOKEN_SNIFF '+JSON.stringify({event:'protocol-join', process:4, scanner:5, request:6, protocol:3}),

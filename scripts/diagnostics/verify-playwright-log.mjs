@@ -1,5 +1,8 @@
 // Reject incomplete or ambiguous diagnostic joins; print counts only.
 import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+const status = JSON.parse(readFileSync(join(dirname(process.argv[2]), 'collector-status.json'), 'utf8'));
+if (status?.complete !== true || status?.invalid !== false || Object.keys(status).sort().join(',') !== 'complete,invalid') throw new Error('Incomplete or invalid diagnostic collector');
 const text = readFileSync(process.argv[2], 'utf8');
 const protocol = [], scanner = [];
 for (const line of text.split('\n')) {

@@ -1,7 +1,7 @@
 // Preserve only validated diagnostic records in artifacts, separately by stream,
 // while forwarding the unmodified journey output to the existing job log.
 import { spawn } from 'node:child_process';
-import { openSync, writeSync, closeSync, mkdirSync } from 'node:fs';
+import { openSync, writeSync, closeSync, mkdirSync, writeFileSync, renameSync } from 'node:fs';
 import { StringDecoder } from 'node:string_decoder';
 import { join } from 'node:path';
 
@@ -57,6 +57,13 @@ for (const [index, stream] of [child.stdout, child.stderr].entries()) {
 child.on('error', () => { invalid = true; });
 child.on('close', (code, signal) => {
   for (const fd of outputs) { try { closeSync(fd); } catch { invalid = true; } }
+  // Publish only after both streams and output files have closed. A missing or
+  // invalid status is never evidence, including interruption or a write error.
+  try {
+    const temporary = join(directory, 'collector-status.tmp');
+    writeFileSync(temporary, JSON.stringify({ complete: true, invalid }), { flag: 'wx' });
+    renameSync(temporary, join(directory, 'collector-status.json'));
+  } catch { invalid = true; }
   if (invalid) process.stderr.write('Diagnostic capture incomplete or invalid\n');
   // Never turn a failing journey into a pass. Evidence errors fail a passing journey.
   process.exitCode = code && code > 0 ? code : signal ? 1 : invalid ? 1 : 0;

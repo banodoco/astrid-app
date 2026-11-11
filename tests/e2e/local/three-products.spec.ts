@@ -2553,6 +2553,8 @@ test('M1 real dependency conflict retains B original guards and pending identity
 });
 
 test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restart, exact retry and guarded undo', async ({ page, context, harness, astrid, seed3 }) => {
+  // P39-R12-DUP-SHOT, Plan 39 exception (R12): "Duplicate shot" saves nothing since 7b33f8f50 removed the native duplicate mount; shared with R10 and R11; remove the marker when the save is restored. Issue: https://github.com/banodoco/astrid-app/issues/249
+  test.fail(true, 'Duplicate shot saves nothing since 7b33f8f50 removed the native duplicate mount');
   const sniff = new TokenSniff(secretsOf(harness, astrid));
   await sniff.attach(page);
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);

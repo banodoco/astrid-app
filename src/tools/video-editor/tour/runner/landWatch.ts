@@ -26,9 +26,16 @@ export function useLandWatch(beatKey: string, act: EditorTourAct, beat: EditorTo
   const skipAnimation = useEditorTour((s) => s.skipAnimation);
   const [released, setReleased] = useState<string | null>(null);
   const eligible = beat === 'land' && !instant && !reducedMotion;
-  const skipAtStart = useRef({ beatKey, skipAnimation });
-  if (skipAtStart.current.beatKey !== beatKey) skipAtStart.current = { beatKey, skipAnimation };
+  // One visit of the beat: leaving it (Back makes it `instant`, any other beat is not land) ends the visit, so landing
+  // again later, forward, watches again.
+  const visit = `${beatKey}:${eligible}`;
+  const skipAtStart = useRef({ visit, skipAnimation });
+  if (skipAtStart.current.visit !== visit) skipAtStart.current = { visit, skipAnimation };
   const skipped = skipAnimation !== skipAtStart.current.skipAnimation;
+
+  useEffect(() => {
+    if (!eligible) setReleased(null);
+  }, [eligible]);
 
   useEffect(() => {
     if (!eligible) return undefined;

@@ -25,6 +25,8 @@ export interface EditorTourMedia {
   stills: readonly [EditorTourMediaSlot, EditorTourMediaSlot, EditorTourMediaSlot, EditorTourMediaSlot];
   /** Native H3 source; the timeline trims it to the 14-second guide. */
   video: EditorTourMediaSlot;
+  /** The Three.js motion guide render: step 1's clip, an ordinary media clip. */
+  guide: EditorTourMediaSlot;
 }
 
 export function editorTourAssetUrl(filename: string): string {
@@ -40,4 +42,5 @@ export const EDITOR_TOUR_MEDIA: EditorTourMedia = Object.freeze({
   frames: [slot('frame1'), slot('frame4')] as const,
   stills: [slot('still1'), slot('still2'), slot('still3'), slot('still4')] as const,
   video: { ...slot('video'), previewDurationSeconds: manifest.durationSeconds },
+  guide: slot('guide'),
 });

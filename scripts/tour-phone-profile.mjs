@@ -234,6 +234,14 @@ export async function run(options) {
     page.on('pageerror', (e) => browserErrors.push(`pageerror: ${e.message}`.slice(0, 300)));
     page.on('console', (m) => { if (['error', 'warning'].includes(m.type()) && browserErrors.length < 40 && /webgl|context|gpu|memory/i.test(m.text())) browserErrors.push(`${m.type()}: ${m.text().slice(0, 300)}`); });
     page.setDefaultTimeout(30_000);
+    // Proof that the tour never loads the 3D world: every request that looks like it, and every frame that is not the page.
+    const worldRequests = (report.worldRequests = []);
+    const mediaRequests = (report.mediaRequests = []);
+    page.on('request', (r) => {
+      const u = r.url();
+      if (/ca975b68e035|threejs|three\.|SceneSurface|authoring|\.json(\?|$)/i.test(u) && !/runtime-config|\/api\//.test(u)) worldRequests.push(u.replace(/^https?:\/\/[^/]+/, '').slice(0, 140));
+      if (/\/astrid\/onboarding\//.test(u)) mediaRequests.push(`${Math.round(performance.now?.() ?? 0)} ${u.replace(/^https?:\/\/[^/]+/, '').slice(-60)}`);
+    });
     const cdp = await context.newCDPSession(page);
     await cdp.send('Performance.enable');
     if (options.cpu > 1) await cdp.send('Emulation.setCPUThrottlingRate', { rate: options.cpu });
@@ -252,7 +260,9 @@ export async function run(options) {
       return {
         previewBox: r ? [Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)] : null,
         previewVisible: preview ? Boolean(preview.offsetParent) && (r.width > 0 && r.height > 0) : false,
-        entries: [...document.querySelectorAll('[data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset, inPreview: Boolean(e.closest('[data-editor-tour="preview"]')), box: [e.offsetWidth, e.offsetHeight] })),
+        liveSceneEntries: document.querySelectorAll('[data-testid="astrid-live-scene-entry"]').length,
+        iframes: document.querySelectorAll('iframe').length,
+        previewVideos: [...(preview?.querySelectorAll('video') ?? [])].map((v) => ({ src: v.currentSrc.slice(-24), paused: v.paused, t: Math.round(v.currentTime * 10) / 10, ready: v.readyState })),
         poster: Boolean(document.querySelector('[data-editor-tour-poster]')),
         status: [...document.querySelectorAll('[role="status"],[role="alert"]')].map((e) => e.textContent?.slice(0, 100)),
         dom: window.__pp.dom(),
@@ -339,6 +349,8 @@ export async function run(options) {
     await shot('05-compose2');
     await idle('compose2');
     report.browserErrors = browserErrors;
+    report.glContextsTop = await page.evaluate(() => window.__pp.gl.length);
+    report.iframesAtEnd = await page.evaluate(() => document.querySelectorAll('iframe').length);
     return await finish();
 
     async function finish() {
@@ -371,7 +383,7 @@ function renderMarkdown(r) {
       `- dbg ${p.dbg}`,
       `- timers/s: setTimeout ${p.counters.setTimeout ?? 0}, setInterval ${p.counters.setInterval ?? 0}; heap ${p.cdp.heapMB}MB; DOM nodes ${p.cdp.nodes}; WebGL contexts so far ${p.glContexts}; ready after tap ${p.readyAfterTapMs ?? '-'}ms`, '');
   }
-  L.push('## Scene (act 1 land)', '', '```json', JSON.stringify(r.scene, null, 1), '```', '', '## Notes', '', ...(r.notes.length ? r.notes.map((n) => `- ${n}`) : ['- none']), '', '## GL/console messages', '', ...(r.browserErrors?.length ? r.browserErrors.map((n) => `- ${n}`) : ['- none']));
+  L.push('## World / media proof', '', `- requests that look like the world or Three.js code: ${r.worldRequests?.length ? r.worldRequests.join(', ') : 'none'}`, `- WebGL contexts created in the page: ${r.glContextsTop}; iframes at end: ${r.iframesAtEnd}`, `- onboarding media requests: ${(r.mediaRequests ?? []).length}`, '', '## Scene (act 1 land)', '', '```json', JSON.stringify(r.scene, null, 1), '```', '', '## Notes', '', ...(r.notes.length ? r.notes.map((n) => `- ${n}`) : ['- none']), '', '## GL/console messages', '', ...(r.browserErrors?.length ? r.browserErrors.map((n) => `- ${n}`) : ['- none']));
   return `${L.join('\n')}\n`;
 }
 

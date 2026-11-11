@@ -8,7 +8,6 @@ import { useDeviceInfo } from '@/shared/hooks/mobile';
 import { useEditorTour, startEditorTour, exitEditorTour, type EditorTourBeat } from '@/shared/state/editorTourStore.ts';
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers.ts';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
-import { ASTRID_EDITOR_EXTENSIONS } from '@astrid/packs/rendering/editor/catalog';
 import { EditorRuntimeProvider } from '@/tools/video-editor/contexts/EditorRuntimeProvider.tsx';
 import { PUBLIC_ASTRID_ELEMENT_HOST } from '@/pages/Home/astrid-public-host.tsx';
 import { ProjectHeaderControls } from '@/shared/components/ProjectHeaderControls.tsx';
@@ -27,11 +26,11 @@ import { useEditorDeviceClass } from '@/tools/video-editor/tour/runner/useIsDesk
 import { TourChatPanel } from '@/tools/video-editor/components/AgentChat/TourChatPanel.tsx';
 import { TimelineEditorShellCore, type TimelineEditorRenderActions } from '@/tools/video-editor/components/TimelineEditorShellCore.tsx';
 import { TimelineEditorCoreBody } from '@/tools/video-editor/components/TimelineEditor/TimelineEditorCoreBody.tsx';
-import { useTimelineEditorOps, useTimelineDataSelector } from '@/tools/video-editor/hooks/timelineStore.ts';
-import { HOST_EXTENSIONS_PANEL_KEY, HOST_PROPERTIES_PANEL_KEY } from '@/tools/video-editor/components/PropertiesPanel/VideoEditorPanelDisplayControl.tsx';
+import { useTimelineEditorOps } from '@/tools/video-editor/hooks/timelineStore.ts';
+import { HOST_PROPERTIES_PANEL_KEY } from '@/tools/video-editor/components/PropertiesPanel/VideoEditorPanelDisplayControl.tsx';
 
-export const BROWSER_TOUR_EXTENSIONS = Object.freeze(ASTRID_EDITOR_EXTENSIONS.filter(extension => extension.manifest.id === 'haus.astrid.threejs-live-editor'));
-if (BROWSER_TOUR_EXTENSIONS.length !== 1) throw new Error('The bundled Lantern Valley world renderer is missing.');
+/** The tour needs no extension: step 1 is an ordinary media clip, so no world renderer is bundled or loaded. */
+const NO_EXTENSIONS: readonly never[] = Object.freeze([]);
 const EFFECTS = createVideoEditorEffectCatalog();
 const SEQUENCES = createVideoEditorSequenceComponentCatalog();
 const HEADER = tourHeaderProps();
@@ -52,15 +51,12 @@ function BrowserTourEditorSurface() {
   const ops = useTimelineEditorOps();
   const opsRef = useRef(ops);
   opsRef.current = ops;
-  const hasWorld = useTimelineDataSelector((timeline) => timeline.data?.resolvedConfig.clips.some(
-    (clip) => clip.clipType === 'haus.astrid.liveScene',
-  ) ?? false);
 
   useLayoutEffect(() => {
-    // The in-memory demo starts with the Inspector and switches to the world extension when it lands. The panel's
-    // Compact layout while the tour runs is the shell's own override (`useRightPanelLayout`), not a saved choice.
-    opsRef.current.setSelectedRightPanelId(hasWorld ? HOST_EXTENSIONS_PANEL_KEY : HOST_PROPERTIES_PANEL_KEY);
-  }, [hasWorld]);
+    // The in-memory demo shows the Inspector throughout. The panel's Compact layout while the tour runs is the shell's
+    // own override (`useRightPanelLayout`), not a saved choice.
+    opsRef.current.setSelectedRightPanelId(HOST_PROPERTIES_PANEL_KEY);
+  }, []);
 
   return <TimelineEditorShellCore
     timelineId={EDITOR_TOUR_TIMELINE_ID}
@@ -153,7 +149,7 @@ export function BrowserTourEditor({ onFinish, atEnd = false }: { onFinish: () =>
   return <EditorRuntimeProvider astridElementHost={PUBLIC_ASTRID_ELEMENT_HOST}
     dataProvider={dataProvider} timelineId={HEADER.timelineId} timelineName={HEADER.timelineName}
     timelineServices={PUBLIC_TIMELINE_SERVICE_HOOKS} effectCatalog={EFFECTS} sequenceComponentCatalog={SEQUENCES}
-    extensions={BROWSER_TOUR_EXTENSIONS} extensionStateRepository={null}
+    extensions={NO_EXTENSIONS} extensionStateRepository={null}
     runtime={{ assetResolver: dataProvider, exporter: null, hostContext: null }}
     enableMutationServices enableLiveServices={false} enableRenderExport={false}>
     <BrowserTourFrame />

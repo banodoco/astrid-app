@@ -51,6 +51,23 @@ describe('useLandWatch', () => {
     expect(result.current).toBe(false);
   });
 
+  it('watches again when the beat is landed on again, forward, after a Back', () => {
+    const { result, rerender } = watchAt(1, 'land');
+    present();
+    act(() => skipEditorTourAnimation());
+    expect(result.current).toBe(false);
+    // Back to respond and forward again: the same beat key, a new visit.
+    act(() => setEditorTourBeat(1, 'land', true));
+    rerender();
+    expect(result.current).toBe(false);
+    act(() => setEditorTourBeat(1, 'land'));
+    rerender();
+    expect(result.current).toBe(true);
+    present();
+    advance(LAND_WATCH_HOLD_MS[1]);
+    expect(result.current).toBe(false);
+  });
+
   it('never watches on Back or with reduced motion, nor on any other beat', () => {
     expect(watchAt(1, 'land', true).result.current).toBe(false);
     for (const beat of ['welcome', 'compose', 'respond', 'gallery', 'finale', 'feedback'] as const) expect(watchAt(2, beat).result.current).toBe(false);

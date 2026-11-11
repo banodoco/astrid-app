@@ -5,14 +5,12 @@ import { DEFAULT_VIDEO_TRACKS } from '@/tools/video-editor/lib/defaults.ts';
 import { EDITOR_TOUR_TRACK_IDS } from '@/tools/video-editor/tour/anchors.ts';
 import { EDITOR_TOUR_MEDIA, type EditorTourMediaSlot } from '@/tools/video-editor/tour/tourMedia.ts';
 import { EDITOR_TOUR_SCRIPT } from '@/tools/video-editor/tour/tourScript.ts';
-import { TOUR_SCENE_SOURCE_FROM, TOUR_SCENE_SOURCE_TO } from './tourSceneSource.ts';
 
 export const EDITOR_TOUR_TIMELINE_ID = 'tour-timeline';
 /** The names the editor header shows while the tour runs; the tour has no real project or timeline. */
 export const EDITOR_TOUR_PROJECT_NAME = 'Onboarding project';
 export const EDITOR_TOUR_TIMELINE_NAME = 'Lantern Valley';
-export const EDITOR_TOUR_LIVE_SCENE_CLIP_TYPE = 'haus.astrid.liveScene';
-/** The scene's length on the timeline, which the video row spans too. */
+/** The guide's length on the timeline, which the video row spans too. */
 export const TOUR_SCENE_SECONDS = 14;
 /** How long each of the four anchor frames holds on the stills row. */
 export const TOUR_ANCHOR_SECONDS = 1;
@@ -24,6 +22,7 @@ export const TOUR_CLIP_IDS = Object.freeze({
 } as const);
 
 const TOUR_ASSET_IDS = Object.freeze({
+  guide: 'tour-guide',
   stills: ['tour-still-start', 'tour-still-mid-1', 'tour-still-mid-2', 'tour-still-end'],
   video: 'tour-video',
 } as const);
@@ -68,6 +67,8 @@ function assetEntry(slot: EditorTourMediaSlot, type: string, label: string, dura
   } as AssetRegistryEntry;
 }
 
+const GUIDE_CLIP_LABEL = 'Lantern Valley Three.js visualization';
+
 // The video clip reuses the card's own words: the model that made it.
 const VIDEO_NAME = EDITOR_TOUR_SCRIPT.acts[3].card.labels[0];
 
@@ -76,6 +77,9 @@ export function createEditorTourAssetRegistry(media = EDITOR_TOUR_MEDIA): AssetR
   media.stills.forEach((slot, index) => {
     assets[TOUR_ASSET_IDS.stills[index]] = assetEntry(slot, 'image/webp', TOUR_ANCHORS[index].label);
   });
+  assets[TOUR_ASSET_IDS.guide] = assetEntry(
+    media.guide, 'video/mp4', GUIDE_CLIP_LABEL, media.guide.durationSeconds ?? TOUR_SCENE_SECONDS,
+  );
   assets[TOUR_ASSET_IDS.video] = assetEntry(
     media.video, 'video/mp4', VIDEO_NAME, media.video.durationSeconds ?? TOUR_SCENE_SECONDS,
   );
@@ -110,30 +114,16 @@ export function createEditorTourStageRemovalPatch(stage: 1 | 2 | 3): TimelinePat
  * vocabulary: `track.add` (above the current top row), then `clip.add` + `clip.update` per clip.
  * `version: 0` skips the canonical-version check.
  */
-export function createEditorTourStagePatch(
-  stage: 1 | 2 | 3,
-  liveScene: Record<string, unknown>,
-): TimelinePatch {
+export function createEditorTourStagePatch(stage: 1 | 2 | 3): TimelinePatch {
   const operations: TimelinePatchOperation[] = [];
   if (stage === 1) {
     operations.push(
       { op: 'track.update', target: EDITOR_TOUR_TRACK_IDS.scene, payload: { mode: 'merge', label: SCENE_TRACK_LABEL } },
-      {
-        op: 'clip.add',
-        target: TOUR_CLIP_IDS.scene,
-        payload: { track: EDITOR_TOUR_TRACK_IDS.scene, at: 0, clipType: EDITOR_TOUR_LIVE_SCENE_CLIP_TYPE },
-      },
+      { op: 'clip.add', target: TOUR_CLIP_IDS.scene, payload: { track: EDITOR_TOUR_TRACK_IDS.scene, at: 0, clipType: 'media' } },
       {
         op: 'clip.update',
         target: TOUR_CLIP_IDS.scene,
-        payload: {
-          mode: 'merge',
-          from: TOUR_SCENE_SOURCE_FROM,
-          to: TOUR_SCENE_SOURCE_TO,
-          speed: 1,
-          label: 'Lantern Valley Three.js visualization',
-          app: { liveScene },
-        },
+        payload: { mode: 'merge', asset: TOUR_ASSET_IDS.guide, from: 0, to: TOUR_SCENE_SECONDS, speed: 1, volume: 0, label: GUIDE_CLIP_LABEL },
       },
     );
   } else {

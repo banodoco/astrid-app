@@ -600,7 +600,8 @@ export async function run(options) {
               previewText: document.querySelector('[data-editor-tour="preview"]')?.textContent?.slice(0, 160) ?? null,
               previewIframes: document.querySelectorAll('[data-editor-tour="preview"] iframe').length,
             })) });
-          await nextButton(dest).click({ timeout: 5000 }).catch(() => {});
+          // Enter, not a click: during a land beat's watch the card has no Next to click yet.
+          await page.keyboard.press('Enter').catch(() => {});
         }
         if (Date.now() - start > CAP_MS) throw new Error(`${dest.id} did not settle within ${CAP_MS} ms: ${JSON.stringify(await page.evaluate(() => window.__tm.samples.at(-1)?.st))}; live scene: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset }))))}; browser errors: ${JSON.stringify(browserErrors.filter((e) => !e.includes('serviceWorker')).slice(0, 5))}`);
         await delay(50);

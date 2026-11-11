@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
@@ -17,31 +17,18 @@ import {
   type TimelineStoreApi,
 } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { EDITOR_TOUR_TRACK_ATTRIBUTE, EDITOR_TOUR_TRACK_IDS } from '@/tools/video-editor/tour/anchors.ts';
-import { loadTourLiveScene, TOUR_SCENE_SOURCE_FROM } from './tourSceneSource.ts';
 import { EDITOR_TOUR_MEDIA } from '../tourMedia.ts';
 import { TOUR_CLIP_IDS } from './tourStages.ts';
 
 vi.mock('./useTourMediaWarmup.ts', () => ({ useTourMediaWarmup: vi.fn(() => true) }));
 
-const fakeLiveScene = { kind: 'fake-live-scene', revision: 'sha256:tour-world' };
 const harness = vi.hoisted(() => ({
-  warmups: [] as Array<{ sourceTime: number; onReady?: (info: unknown) => void }>,
   centered: [] as string[],
   zooms: [] as number[],
 }));
 
-vi.mock('./tourSceneSource.ts', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./tourSceneSource.ts')>()),
-  loadTourLiveScene: vi.fn(async () => fakeLiveScene),
-}));
 vi.mock('@/tools/video-editor/lib/timeline-viewport-events.ts', () => ({
   requestCenterTimelineClip: (clipId: string) => { harness.centered.push(clipId); },
-}));
-vi.mock('@astrid/packs/rendering/ui/threejs-live-editor/SceneSurface', () => ({
-  SceneSurface: (props: { sourceTime: number; onReady?: (info: unknown) => void }) => {
-    harness.warmups.push(props);
-    return <div data-testid="warm-scene" data-source-time={props.sourceTime} />;
-  },
 }));
 
 import { EditorTourTimelineDriver, TOUR_ANCHOR_DWELL_MS } from './EditorTourTimelineDriver.tsx';
@@ -82,19 +69,6 @@ const goTo = (act: EditorTourAct, beat: EditorTourBeat) => act_(() => setEditorT
 const act_ = (fn: () => void) => act(() => { fn(); });
 const ready = () => getEditorTourState().ready.timeline;
 
-/** The visible live scene's status element, as `SceneSurface` renders it. */
-function addScene(phase: 'loading' | 'ready'): HTMLElement {
-  const scene = document.createElement('div');
-  scene.setAttribute('data-testid', 'astrid-live-scene-entry');
-  scene.setAttribute('data-phase', phase);
-  scene.dataset.desiredRevision = fakeLiveScene.revision;
-  scene.dataset.displayedRevision = fakeLiveScene.revision;
-  scene.dataset.desiredTime = TOUR_SCENE_SOURCE_FROM.toFixed(3);
-  scene.dataset.sourceTime = TOUR_SCENE_SOURCE_FROM.toFixed(3);
-  document.querySelector('[data-editor-tour="preview"]')!.append(scene);
-  return scene;
-}
-
 describe('EditorTourTimelineDriver', () => {
   let trackRow: HTMLElement;
   let preview: HTMLElement;
@@ -108,7 +82,6 @@ describe('EditorTourTimelineDriver', () => {
   }
 
   beforeEach(() => {
-    harness.warmups.length = 0;
     harness.centered.length = 0;
     harness.zooms.length = 0;
     // The landed row the driver waits for before it scrolls and plays.
@@ -119,6 +92,7 @@ describe('EditorTourTimelineDriver', () => {
     preview.dataset.editorTour = 'preview';
     document.body.append(preview);
     addDecodedVideo(0);
+    addDecodedVideo(0, preview, EDITOR_TOUR_MEDIA.guide.url);
     act_(() => startEditorTour());
   });
 
@@ -126,23 +100,9 @@ describe('EditorTourTimelineDriver', () => {
     trackRow.remove();
     preview.remove();
     document.querySelectorAll(`[${EDITOR_TOUR_TRACK_ATTRIBUTE}]`).forEach((row) => row.remove());
-    document.querySelectorAll('[data-testid="astrid-live-scene-entry"]').forEach((scene) => scene.remove());
     vi.useRealTimers();
     vi.restoreAllMocks();
     act_(() => exitEditorTour());
-  });
-
-  it('shows a retry when the world fails to load and lands the stage after retry succeeds', async () => {
-    vi.mocked(loadTourLiveScene).mockRejectedValueOnce(new Error('offline'));
-    const view = createHarness();
-    addScene('ready');
-    goTo(1, 'land');
-    expect(await view.findByRole('alert')).toHaveTextContent('could not load');
-    expect(view.apply).not.toHaveBeenCalled();
-    fireEvent.click(view.getByRole('button', { name: 'Retry demo' }));
-    await waitFor(() => expect(view.apply).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(ready()).toBe(true));
-    expect(view.queryByRole('alert')).toBeNull();
   });
 
   let presentationClock = 0;
@@ -270,32 +230,8 @@ describe('EditorTourTimelineDriver', () => {
     expect(view.previewHandle.play).not.toHaveBeenCalled();
   });
 
-  it('boots the opening scene during welcome without touching the timeline', async () => {
-    const { apply, findByTestId } = createHarness();
-    await waitFor(() => expect(ready()).toBe(true));
-    expect(apply).not.toHaveBeenCalled();
-    expect(await findByTestId('warm-scene')).toHaveAttribute('data-source-time', String(TOUR_SCENE_SOURCE_FROM));
-  });
-
-  it('warms the scene during act 1 respond and holds ready until it has booted', async () => {
-    const { apply, findByTestId } = createHarness();
-    await waitFor(() => expect(ready()).toBe(true));
-
-    goTo(1, 'respond');
-    const warm = await findByTestId('warm-scene');
-    // Seeked into the clip's source range, so the world is compiled at the frame 1c will show.
-    expect(warm).toHaveAttribute('data-source-time', String(TOUR_SCENE_SOURCE_FROM));
-    expect(ready()).toBe(false);
-    expect(apply).not.toHaveBeenCalled();
-
-    act_(() => harness.warmups.at(-1)!.onReady?.({}));
-    await waitFor(() => expect(ready()).toBe(true));
-    expect(apply).not.toHaveBeenCalled();
-  });
-
   it('lands each stage through ops.apply, then seeks 0 and plays (act 2 holds its last frame when entered instantly)', async () => {
     const { apply, calls, previewHandle } = createHarness();
-    addScene('ready');
 
     goTo(1, 'land');
     await waitFor(() => expect(ready()).toBe(true));
@@ -343,6 +279,69 @@ describe('EditorTourTimelineDriver', () => {
     expect(previewHandle.play).toHaveBeenCalledTimes(2);
   });
 
+  describe('act 1 plays the guide video like any media clip', () => {
+    const guideUrl = () => new URL(EDITOR_TOUR_MEDIA.guide.url, document.baseURI).href;
+
+    it('keeps the poster until the player has decoded frame 0 of the guide, then plays and reports ready', async () => {
+      preview.replaceChildren();
+      const { previewHandle } = createHarness();
+      goTo(1, 'land');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      // A different clip's frame (or one from outside the preview) never releases playback.
+      addDecodedVideo(0, preview, '/different-video.mp4');
+      addDecodedVideo(0, document.body, guideUrl());
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(previewHandle.seek).not.toHaveBeenCalled();
+      expect(previewHandle.play).not.toHaveBeenCalled();
+      expect(ready()).toBe(false);
+      expect(document.querySelector('[data-editor-tour-poster]')).toHaveAttribute('src', EDITOR_TOUR_MEDIA.frames[0].url);
+
+      const guide = addDecodedVideo(120, preview, guideUrl());
+      await waitFor(() => expect(previewHandle.seek).toHaveBeenCalledWith(0));
+      expect(previewHandle.play).not.toHaveBeenCalled();
+      guide.dataset.previewPresentedFrame = '0';
+      await waitFor(() => expect(ready()).toBe(true));
+      expect(previewHandle.play).toHaveBeenCalledTimes(1);
+      expect(document.querySelector('[data-editor-tour-poster]')).toBeNull();
+    });
+
+    it('lets skipAnimation advance the card without playing a video that has not drawn', async () => {
+      preview.replaceChildren();
+      const { previewHandle } = createHarness();
+      goTo(1, 'land');
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(ready()).toBe(false);
+      act_(() => skipEditorTourAnimation());
+      await waitFor(() => expect(ready()).toBe(true));
+      addDecodedVideo(0, preview, guideUrl());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(previewHandle.play).not.toHaveBeenCalled();
+    });
+
+    it.each(['back', 'exit', 'unmount'] as const)('does not autoplay a late first frame after %s', async (destination) => {
+      preview.replaceChildren();
+      const view = createHarness();
+      goTo(1, 'land');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      if (destination === 'back') goTo(1, 'respond');
+      if (destination === 'exit') act_(() => exitEditorTour());
+      if (destination === 'unmount') view.unmount();
+      addDecodedVideo(0, preview, guideUrl());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(view.previewHandle.play).not.toHaveBeenCalled();
+    });
+
+    it('never mounts a scene iframe or asks for the world', async () => {
+      const { previewHandle } = createHarness();
+      addDecodedVideo(0, preview, guideUrl());
+      goTo(1, 'welcome');
+      goTo(1, 'respond');
+      goTo(1, 'land');
+      await waitFor(() => expect(previewHandle.play).toHaveBeenCalledTimes(1));
+      expect(document.querySelector('iframe')).toBeNull();
+    });
+  });
+
   it('with reduced motion keeps each landing still: the poster stays, act 2 holds its last frame, nothing plays', async () => {
     vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: query === '(prefers-reduced-motion: reduce)', media: query } as MediaQueryList));
     act_(() => startEditorTour());
@@ -370,7 +369,6 @@ describe('EditorTourTimelineDriver', () => {
 
   it('steps back a stage by removing the later rows at once, and replays the landing going forward', async () => {
     const { apply, previewHandle } = createHarness();
-    addScene('ready');
     const rows = [EDITOR_TOUR_TRACK_IDS.stills, EDITOR_TOUR_TRACK_IDS.videos].map((id) => {
       const row = document.createElement('div');
       row.setAttribute(EDITOR_TOUR_TRACK_ATTRIBUTE, id);
@@ -397,19 +395,18 @@ describe('EditorTourTimelineDriver', () => {
     await waitFor(() => expect(apply).toHaveBeenCalledTimes(4));
     expect(apply.mock.calls[3][0].operations[0].op).toBe('track.add');
 
-    // Back from land(1) to respond(1) removes the scene clip, with no warm-up and no waiting on a scene.
+    // Back from land(1) to respond(1) removes the guide clip, with no warm-up and no waiting on a scene.
     act_(() => setEditorTourBeat(1, 'respond', true));
     await waitFor(() => expect(apply.mock.calls.slice(4).map(([patch]) => patch.operations[0].op)).toEqual(['track.remove', 'clip.remove']));
     expect(apply.mock.calls[5][0].operations[0].target).toBe(TOUR_CLIP_IDS.scene);
     expect(apply.mock.calls[5][0].operations[1]).toMatchObject({ op: 'track.update', target: EDITOR_TOUR_TRACK_IDS.scene, payload: { label: 'V1' } });
     await waitFor(() => expect(ready()).toBe(true));
-    expect(document.querySelector('[data-testid="warm-scene"]')).toBeNull();
+    expect(document.querySelector('iframe')).toBeNull();
     rows.forEach((row) => row.remove());
   });
 
   it('on gallery pauses and seeks the last anchor without a patch, whether arrived at forward or by Back, and keeps no poster', async () => {
     const { apply, calls, previewHandle } = createHarness();
-    addScene('ready');
     const rows = [EDITOR_TOUR_TRACK_IDS.stills, EDITOR_TOUR_TRACK_IDS.videos].map((id) => {
       const row = document.createElement('div');
       row.setAttribute(EDITOR_TOUR_TRACK_ATTRIBUTE, id);
@@ -456,129 +453,10 @@ describe('EditorTourTimelineDriver', () => {
     rows.forEach((row) => row.remove());
   });
 
-  it('holds act 1 land at 0 until the visible scene has painted, then plays and reports ready', async () => {
-    const { previewHandle } = createHarness();
-    const scene = addScene('loading');
-
-    goTo(1, 'land');
-    await waitFor(() => expect(previewHandle.seek).toHaveBeenCalledWith(0));
-    await new Promise((resolve) => setTimeout(resolve, 150));
-    expect(previewHandle.play).not.toHaveBeenCalled();
-    expect(ready()).toBe(false);
-    expect(document.querySelector('[data-editor-tour-poster]')).toHaveAttribute('src', EDITOR_TOUR_MEDIA.frames[0].url);
-
-    scene.setAttribute('data-phase', 'ready');
-    await waitFor(() => expect(ready()).toBe(true));
-    expect(previewHandle.play).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-editor-tour-poster]')).toBeNull();
-  });
-
-  it('lets skipAnimation advance the card without autoplaying an unready world', async () => {
-    const { previewHandle } = createHarness();
-    addScene('loading');
-
-    goTo(1, 'land');
-    await waitFor(() => expect(previewHandle.seek).toHaveBeenCalledWith(0));
-    expect(ready()).toBe(false);
-
-    act_(() => skipEditorTourAnimation());
-    await waitFor(() => expect(ready()).toBe(true));
-    expect(previewHandle.play).not.toHaveBeenCalled();
-  });
-
-  it('keeps the scene paused past eight seconds, offers recovery, and starts only at the acknowledged opening frame', async () => {
-    const realNow = performance.now.bind(performance);
-    let offset = 0;
-    vi.spyOn(performance, 'now').mockImplementation(() => realNow() + offset);
-    const { previewHandle, findByRole, queryByRole } = createHarness();
-    const scene = addScene('loading');
-
-    goTo(1, 'land');
-    await waitFor(() => expect(previewHandle.seek).toHaveBeenCalledWith(0));
-    expect(ready()).toBe(false);
-
-    offset = 9000;
-    expect(await findByRole('status')).toHaveTextContent('Preparing the 3D world');
-    expect(previewHandle.play).not.toHaveBeenCalled();
-    expect(ready()).toBe(false);
-    scene.dataset.phase = 'ready';
-    await waitFor(() => expect(ready()).toBe(true));
-    expect(queryByRole('status')).toBeNull();
-    expect(previewHandle.play).toHaveBeenCalledTimes(1);
-    expect(document.querySelector('[data-editor-tour-poster]')).toBeNull();
-  });
-
-  it('ignores ready thumbnails and stale preview frames, including on an instant return', async () => {
-    const { previewHandle } = createHarness();
-    const thumbnail = addScene('ready');
-    document.body.append(thumbnail);
-    const scene = addScene('ready');
-    scene.dataset.displayedRevision = 'sha256:old-world';
-    act_(() => setEditorTourBeat(1, 'land', true));
-    await waitFor(() => expect(previewHandle.seek).toHaveBeenCalledWith(0));
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)); });
-    expect(previewHandle.play).not.toHaveBeenCalled();
-    scene.dataset.displayedRevision = fakeLiveScene.revision;
-    scene.dataset.sourceTime = '7.000';
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)); });
-    expect(previewHandle.play).not.toHaveBeenCalled();
-    scene.dataset.sourceTime = TOUR_SCENE_SOURCE_FROM.toFixed(3);
-    scene.dataset.desiredTime = '7.000';
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)); });
-    expect(previewHandle.play).not.toHaveBeenCalled();
-    scene.dataset.desiredTime = TOUR_SCENE_SOURCE_FROM.toFixed(3);
-    await waitFor(() => expect(previewHandle.play).toHaveBeenCalledOnce());
-  });
-
-  it.each(['back', 'skip', 'exit', 'unmount'] as const)('does not autoplay a late scene acknowledgement after %s', async destination => {
-    const view = createHarness();
-    const scene = addScene('loading');
-    goTo(1, 'land');
-    await waitFor(() => expect(view.previewHandle.seek).toHaveBeenCalledWith(0));
-    if (destination === 'back') goTo(1, 'respond');
-    if (destination === 'skip') act_(() => skipEditorTourAnimation());
-    if (destination === 'exit') act_(() => exitEditorTour());
-    if (destination === 'unmount') view.unmount();
-    scene.dataset.phase = 'ready';
-    await act(async () => { await new Promise(resolve => setTimeout(resolve, 35)); });
-    expect(view.previewHandle.play).not.toHaveBeenCalled();
-  });
-
-  it('offers a restart after a visible world error without starting playback', async () => {
-    const view = createHarness();
-    const scene = addScene('loading');
-    goTo(1, 'land');
-    await waitFor(() => expect(view.previewHandle.seek).toHaveBeenCalledWith(0));
-    scene.dataset.phase = 'error';
-    expect(await view.findByRole('alert')).toHaveTextContent('could not render');
-    fireEvent.click(view.getByRole('button', { name: 'Restart demo' }));
-    expect(getEditorTourState().beat).toBe('welcome');
-    expect(view.previewHandle.play).not.toHaveBeenCalled();
-    expect(view.queryByRole('alert')).toBeNull();
-  });
-
-  it('does not wait for the scene on later acts, where the preview shows other media', async () => {
-    const { previewHandle } = createHarness();
-    addScene('ready');
-    goTo(1, 'land');
-    await waitFor(() => expect(ready()).toBe(true));
-    document.querySelectorAll('[data-testid="astrid-live-scene-entry"]').forEach((scene) => scene.remove());
-    addScene('loading');
-
-    const stillsRow = document.createElement('div');
-    stillsRow.setAttribute(EDITOR_TOUR_TRACK_ATTRIBUTE, EDITOR_TOUR_TRACK_IDS.stills);
-    document.body.append(stillsRow);
-    act_(() => setEditorTourBeat(2, 'land', true));
-    await waitFor(() => expect(ready()).toBe(true));
-    expect(previewHandle.seek).toHaveBeenCalledTimes(2);
-    expect(previewHandle.pause).toHaveBeenCalledTimes(2);
-  });
-
   it('retries a stage whose apply threw instead of stalling the tour', async () => {
     const { apply } = createHarness();
     apply.mockImplementationOnce(() => { throw new Error('not ready'); });
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    addScene('ready');
 
     goTo(1, 'land');
     await waitFor(() => expect(ready()).toBe(true), { timeout: 3000 });
@@ -594,8 +472,7 @@ describe('EditorTourTimelineDriver', () => {
     document.body.append(scroller);
     try {
       createHarness();
-      addScene('ready');
-      await waitFor(() => expect(harness.zooms).toEqual([Math.floor(((560 - 144 - 16) / 14) * 5)]));
+        await waitFor(() => expect(harness.zooms).toEqual([Math.floor(((560 - 144 - 16) / 14) * 5)]));
       expect(scroller.scrollLeft).toBe(0);
 
       goTo(1, 'land');
@@ -617,8 +494,7 @@ describe('EditorTourTimelineDriver', () => {
     document.body.append(scroller);
     try {
       const { store } = createHarness();
-      addScene('ready');
-      await act(async () => { await Promise.resolve(); });
+        await act(async () => { await Promise.resolve(); });
       for (let i = 0; i < 5; i += 1) {
         act_(() => store.setState((state) => ({ ...state, chrome: { ...state.chrome, setScaleWidth: ((update: number) => { harness.zooms.push(update); }) as never } })));
       }

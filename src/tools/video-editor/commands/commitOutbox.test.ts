@@ -464,6 +464,33 @@ describe('durable command outbox', () => {
     });
   });
 
+  it('a commit cut off by a navigation is sent again, byte for byte with its key, by the next page', async () => {
+    const env = environment();
+    let owner!: string;
+    let original!: OutboxRequest;
+    await env.open().create(scope, async (box, ownerId) => {
+      owner = ownerId;
+      await box.append(move(5), { head: h0 });
+      // What the page's request registry does to a commit still on the wire when the page goes.
+      const record = await box.dispatch(build, async (request) => {
+        original = request;
+        throw new DOMException('This page is navigating away', 'AbortError');
+      });
+      expect(record.pending?.request).toEqual(original);
+      expect(record.pending?.outcome?.kind).toBe('retry');
+    });
+    // The reloaded page: a new service on the same browser database recovers the owner and sends the same request.
+    const next = env.open();
+    expect((await next.list(scope))[0].pending?.request).toEqual(original);
+    await next.recover(scope, owner, async (box) => {
+      const transmit = vi.fn(async (request: OutboxRequest) => { expect(request).toEqual(original); return accepted(); });
+      const result = await box.dispatch(build, transmit);
+      expect(transmit).toHaveBeenCalledOnce();
+      expect(result.pending).toBeUndefined();
+      expect(result.intents).toEqual([]);
+    });
+  });
+
   it('ACK is atomic: abort retains A and B; retry removes only A and stores its exact acceptance', async () => {
     const env = environment();
     await env.open().create(scope, async (box) => {

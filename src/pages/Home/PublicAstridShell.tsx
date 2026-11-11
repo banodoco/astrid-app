@@ -754,7 +754,7 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
           <div className="astrid-hero-detail">
             <HeroSubtitle audience={state.audience} phone={environment.phone} onSwitch={(audience) => updateState({ audience })} />
             <div className="astrid-hero-actions">
-              <PublicAstridHeroCta active={visualActive} />
+              <PublicAstridHeroCta active={visualActive} phone={environment.phone} />
             </div>
           </div>
           <div className="astrid-hero-note">

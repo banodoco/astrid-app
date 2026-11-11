@@ -13,6 +13,11 @@ describe('PublicAstridHeroCta', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
+  it('invites a phone to visit the demo', () => {
+    render(<PublicAstridHeroCta active phone />);
+    expect(screen.getByRole('link', { name: 'Visit demo' })).toHaveAttribute('href', '/tools/video-editor');
+  });
+
   it('does not save the app preference on a phone', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('iPhone');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)');

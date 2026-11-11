@@ -1560,10 +1560,12 @@
     min-height: 0;
     grid-template-columns: minmax(0, 1fr) auto;
     grid-template-rows: auto minmax(0, 1fr) auto auto;
+    /* The social links ride in the header; the App/Agent switch sits in the footer's corner, under
+       the thumb. */
     grid-template-areas:
-      "brand switch"
+      "brand note"
       "stage stage"
-      "title note"
+      "title switch"
       "detail detail";
     align-items: start;
     align-content: stretch;
@@ -1584,11 +1586,18 @@
     backdrop-filter: blur(10px);
     pointer-events: none;
   }
-  .astrid-hero-copy :is(h1, .astrid-hero-detail, .astrid-hero-note) { position: relative; z-index: 1; }
+  .astrid-hero-copy :is(h1, .astrid-hero-detail, .astrid-audience-switch) { position: relative; z-index: 1; }
   .astrid-brand { min-height: 40px; gap: 8px; }
   .astrid-brand-name { font-size: 22px; }
-  .astrid-audience-switch { min-width: 0; }
-  .astrid-audience-switch button { min-height: 36px; padding-inline: 16px; }
+  /* Beside the orange call to action the switch goes quiet: the chosen side is marked in ink, so the
+     footer has one orange button, not two. */
+  .astrid-hero-copy .astrid-audience-switch { align-self: start; min-width: 0; margin-top: 13px; }
+  .astrid-audience-switch button { min-height: 34px; padding-inline: 14px; }
+  .astrid-audience-switch button[aria-pressed="true"],
+  .astrid-public-site[data-dusk] .astrid-audience-switch button[aria-pressed="true"] {
+    background: var(--astrid-ink);
+    color: var(--astrid-paper);
+  }
   .astrid-hero-copy h1 {
     align-self: center;
     max-width: none;
@@ -1633,9 +1642,8 @@
   .astrid-hero-cta > .astrid-button[data-active="false"] > :not(.astrid-visually-hidden) { translate: 0 4px; }
   .astrid-hero-cta > .astrid-button:focus-visible { outline: 2px solid var(--astrid-ink); outline-offset: 3px; }
   .astrid-button { min-height: 48px; font-size: 15px; font-weight: 600; }
-  /* The social links sit in the footer's top-right corner, beside the headline. */
-  .astrid-hero-note { align-self: start; justify-self: end; width: auto; margin: 0; padding: 8px 0 0; }
-  .astrid-hero-note .astrid-social-links { margin: 0 -7px 0 0; gap: 0; }
+  .astrid-hero-note { align-self: center; justify-self: end; width: auto; margin: 0; padding: 0; }
+  .astrid-hero-note .astrid-social-links { margin: 0 -7px 0 0; gap: 2px; }
 
   /* The stage takes the height between header and footer, up to the height its composition wants, and
      is centred in any that is left. Chips sit 8px inside its frame; the composition sits one connector
@@ -1657,7 +1665,7 @@
        controls. Panel heights below are in the miniature's own, unscaled pixels. */
     --astrid-phone-scale: .78;
     --astrid-phone-inset: 7%;
-    --astrid-phone-inspector: 64px;
+    --astrid-phone-inspector: 46px;
     --astrid-phone-timeline: 104px;
     width: 100%; min-width: 0; min-height: 0; height: auto; aspect-ratio: auto;
     border-radius: 16px;
@@ -1713,12 +1721,13 @@
   .astrid-public-site[data-audience] .astrid-inspector-panel-frame > div > div > [role="tablist"],
   .astrid-public-site[data-audience] .astrid-inspector-surface fieldset { display: none; }
   .astrid-public-site[data-audience] .astrid-inspector-surface [role="tabpanel"] > div {
-    padding: 4px 7px 5px; border-radius: 10px; overflow: hidden;
+    padding: 4px 6px; border-radius: 10px; overflow: hidden;
   }
   .astrid-public-site[data-audience] .astrid-inspector-surface [role="tabpanel"] > div > div {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: 20px 28px;
+    /* Just the clip's tabs: its name and close button are left out of the miniature. */
+    grid-template-rows: 28px;
     align-content: center;
     align-items: center;
     gap: 2px;
@@ -1726,8 +1735,7 @@
   }
   .astrid-public-site[data-audience] .astrid-inspector-surface [role="tabpanel"] > div > div > * { margin: 0; }
   .astrid-public-site[data-audience] .astrid-inspector-surface [role="tabpanel"] > div > div > :first-child {
-    height: 20px; min-width: 0; align-items: center; padding: 0 0 0 4px;
-    border: 0; border-radius: 0; background: transparent;
+    display: none;
   }
   .astrid-public-site[data-audience] .astrid-inspector-surface [data-clip-inspector-read-only] > :first-child button { width: 20px; height: 20px; min-height: 0; }
   .astrid-public-site[data-audience] .astrid-inspector-surface [role="tablist"].grid-cols-4 {
@@ -1867,8 +1875,7 @@
    footer and slimmer panels, so the demo keeps its room and nothing scrolls. */
 @media (max-width: 640px) and (max-height: 700px) {
   .astrid-hero-copy h1 { padding-top: 9px; font-size: clamp(19px, 5.6vw, 22px); line-height: 1.15; }
-  .astrid-hero-emphasis { display: inline; }
-  .astrid-hero-note { padding-top: 3px; }
+  .astrid-hero-copy .astrid-audience-switch { margin-top: 8px; }
   .astrid-hero-subtitle { font-size: 13px; }
   .astrid-mobile-hero-subtitles { margin: 4px 0 8px; }
   .astrid-button { min-height: 44px; }
@@ -1882,21 +1889,21 @@
   .astrid-hero-detail .astrid-mobile-hero-subtitles { display: none; }
   .astrid-hero-copy h1 { padding-bottom: 8px; }
   .astrid-brand { min-height: 36px; }
-  .astrid-audience-switch button { min-height: 32px; }
+  .astrid-audience-switch button { min-height: 30px; }
   .astrid-showcase { padding: 4px 0 6px; }
   .astrid-editor-stage { --astrid-phone-chip: 34px; --astrid-phone-gap: 14px; --astrid-phone-scale: .68; --astrid-phone-inset: 11%; }
 }
 /* Tall screens have room to spare: give it to the headline, the chips and the panels. */
 @media (max-width: 640px) and (min-height: 780px) {
   .astrid-hero-copy h1 { padding-top: 16px; font-size: clamp(28px, 8.4vw, 36px); }
-  .astrid-hero-note { padding-top: 12px; }
+  .astrid-hero-copy .astrid-audience-switch { margin-top: 18px; }
   .astrid-hero-subtitle { font-size: 15.5px; }
   .astrid-mobile-hero-subtitles { margin: 10px 0 16px; }
   .astrid-button { min-height: 52px; }
   .astrid-landing-grid { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
   .astrid-landing-grid::after { margin-bottom: calc(-1 * max(16px, env(safe-area-inset-bottom))); }
   .astrid-brand { min-height: 44px; }
-  .astrid-audience-switch button { min-height: 40px; }
+  .astrid-audience-switch button { min-height: 38px; }
   .astrid-editor-stage { --astrid-phone-chip: 42px; --astrid-phone-gap: 26px; --astrid-phone-scale: .86; --astrid-phone-inset: 5%; }
 
   .astrid-callout h2 { font-size: 13.5px; }
@@ -2040,8 +2047,9 @@
   .astrid-public-site[data-audience="agent"] .astrid-chat-surface {
     /* As tall as the exchange needs, centred between the chips, and never taller than the room there is:
        on a short screen the messages scroll inside it. */
-    left: auto; right: -4%; top: 0; bottom: 0; width: 86%; height: fit-content; max-height: 100%; margin-block: auto;
-    transform: none;
+    /* Centred, and drawn smaller again: a chat window you recognise, not a transcript you read. */
+    inset: 0; width: 86%; height: fit-content; max-height: calc(100% / .82); margin: auto;
+    transform: none; scale: .82;
     display: flex; flex-direction: column;
     border-color: color-mix(in srgb, var(--astrid-ink) 24%, var(--astrid-panel));
     border-radius: 14px;

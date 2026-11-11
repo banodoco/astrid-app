@@ -42,7 +42,7 @@
     },
     "src/integrations/runtime/generated-contract-metadata.ts": {
       "from": "packages/typescript/src/contract-metadata.ts",
-      "sha256": "sha256:3cfe180ace9405923f132849ff21617f647b1d7ecc336b81ebe7965b9ce9dc95"
+      "sha256": "sha256:5f3b28c417b2cbe485a23b0f02f358de1eed922c3729480472a17da8659c730b"
     },
     "src/integrations/runtime/generated.ts": {
       "from": "packages/typescript/src/generated.ts",
@@ -59,6 +59,6 @@
   },
   "manifest": "contract/artifacts.json",
   "producer": "astrid-runtime",
-  "producer_version": "sha256:37a460109f3644e71010dd7626ea15cfbffe8e6e5705470d5ea56baa2b2a3576",
-  "source_commit": "42ae24aff8d2cb854f874ce134161077a3ba3641"
+  "producer_version": "sha256:0c0469c379bbad8a1aaf1bb7eef06b4127b559b79ea3677ed3921f842da6d6bd",
+  "source_commit": "8b312c4b29bbb4fef5ac0849188678fe356b9e84"
 }

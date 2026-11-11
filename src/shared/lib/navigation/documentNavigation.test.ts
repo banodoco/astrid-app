@@ -1,10 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   abortOnNavigation,
+  cancelUnwaitedRequests,
   DocumentNavigatingError,
   documentNavigationPhase,
   inflightRuntimeRequests,
   installDocumentRequestRegistry,
+  installNavigationPreparationProtocol,
+  PREPARE_EVENT,
+  PREPARED_EVENT,
   prepareDocumentNavigation,
   registerNavigationOwner,
   releaseDocumentNavigation,
@@ -137,24 +141,28 @@ describe('document navigation preparation', () => {
     expect(inflightRuntimeRequests()).toEqual([]);
   });
 
-  it('cancels a byte body still arriving when a navigation is prepared, without waiting for it', async () => {
+  it('does not wait for a byte body still arriving, and cancels it once the navigation is certain', async () => {
     const { target, pending } = fakeGlobal();
     installDocumentRequestRegistry(target);
     const media = await (async () => { const started = target.fetch('/api/runtime/v1/objects/sha256-video'); pending[0].respond('video/mp4'); return started; })();
     const reading = media.arrayBuffer();
     await prepareDocumentNavigation({ timeoutMs: 5_000 });
+    expect(pending[0].aborted(), 'a page that may yet stay keeps it').toBe(false);
+    cancelUnwaitedRequests();
     expect(pending[0].aborted(), 'cancelled through the page\'s own signal, while the page is still here').toBe(true);
     await expect(reading).rejects.toMatchObject({ name: 'AbortError' });
     expect(documentNavigationPhase()).toBe('sealed');
   });
 
-  it('cancels a request with no deadline (an agent turn) at preparation, and prepares at once', async () => {
-    const { target } = fakeGlobal();
+  it('prepares at once past a request with no deadline (an agent turn), and cancels it once the navigation is certain', async () => {
+    const { target, pending } = fakeGlobal();
     installDocumentRequestRegistry(target);
     const turn = target.fetch('/api/astrid/acp/c-1/rpc', abortOnNavigation({ method: 'POST', body: '{"method":"session/prompt"}' }));
     const startedAt = Date.now();
     await prepareDocumentNavigation();
     expect(Date.now() - startedAt, 'not the 10 s preparation cap').toBeLessThan(1_000);
+    expect(pending[0].aborted(), 'a page that may yet stay keeps the turn').toBe(false);
+    cancelUnwaitedRequests();
     await expect(turn).rejects.toMatchObject({ name: 'AbortError' });
     expect(documentNavigationPhase()).toBe('sealed');
   });
@@ -178,6 +186,25 @@ describe('document navigation preparation', () => {
     expect(pending[0].aborted()).toBe(true);
     await expect(commit).rejects.toMatchObject({ name: 'AbortError' });
     expect(inflightRuntimeRequests()).toEqual([]);
+  });
+
+  it('keeps an agent turn and a byte body when the host prepares and then releases the page', async () => {
+    const { target, pending } = fakeGlobal();
+    installDocumentRequestRegistry(target);
+    const host = Object.assign(new EventTarget(), { document }) as unknown as Window;
+    installNavigationPreparationProtocol(host);
+    void target.fetch('/api/astrid/acp/c-1/rpc', abortOnNavigation({ method: 'POST' }));
+    const prepared = new Promise((resolve) => host.addEventListener(PREPARED_EVENT, resolve, { once: true }));
+    host.dispatchEvent(new CustomEvent(PREPARE_EVENT, { detail: { id: 'host' } }));
+    await prepared;
+    // A host that asks navigates next, so the turn's wait is cancelled before it is told the page is prepared.
+    expect(pending[0].aborted()).toBe(true);
+    releaseDocumentNavigation();
+    // Not asked again, a page that stays (B1, or no host at all) never cancels what it did not wait for.
+    void target.fetch('/api/astrid/acp/c-1/rpc', abortOnNavigation({ method: 'POST' }));
+    await prepareDocumentNavigation();
+    releaseDocumentNavigation();
+    expect(pending[1].aborted()).toBe(false);
   });
 
   it('release resumes owners after a navigation that did not happen', async () => {

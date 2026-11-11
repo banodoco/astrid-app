@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { prepareDocumentNavigation, releaseDocumentNavigation } from '@/shared/lib/navigation/documentNavigation';
+import { cancelUnwaitedRequests, prepareDocumentNavigation, releaseDocumentNavigation } from '@/shared/lib/navigation/documentNavigation';
 
 export type DraftSafeReloadGuard = {
   label: string;
@@ -142,6 +142,9 @@ export function useGuardedReload(reloadImpl: () => void = () => window.location.
         releaseDocumentNavigation();
         throw new Error(DRAFTS_CHANGED_BEFORE_RELOAD);
       }
+      // The reload is certain: only now are an agent turn's wait and media transfers cancelled, so a page that stays
+      // above keeps them.
+      cancelUnwaitedRequests();
       reloadImpl();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));

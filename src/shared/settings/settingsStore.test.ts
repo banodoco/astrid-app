@@ -452,3 +452,29 @@ describe('group names', () => {
     expect(tasksPaneLocked.ref().group).toBe('ui.panes');
   });
 });
+
+describe('a write cut off by a navigation', () => {
+  it('keeps the change in the snapshot, and the next page sends it', async () => {
+    const ref = numberRef('ui.panes', 'width');
+    const cut: AppStateApi = {
+      get: fake.api.get,
+      // What the page's request registry does to a write still on the wire when the page goes.
+      put: async () => { throw new DOMException('This page is navigating away', 'AbortError'); },
+    };
+    store.dispose();
+    store = new SettingsStore({ api: cut, storage: window.localStorage });
+    store.get(ref);
+    await settle();
+    store.set(ref, 640);
+    await settle();
+    expect(JSON.parse(localStorage.getItem(PANES_SNAPSHOT)!)).toMatchObject({ content: { width: 640 }, pending: ['width'] });
+    store.dispose();
+
+    // The reloaded page: a new store on the same browser storage.
+    store = new SettingsStore({ api: fake.api, storage: window.localStorage });
+    expect(store.get(ref), 'the change is shown before the Runtime answers').toBe(640);
+    await settle();
+    expect(fake.record('ui.panes').content).toEqual({ width: 640 });
+    expect(JSON.parse(localStorage.getItem(PANES_SNAPSHOT)!)).toMatchObject({ pending: [] });
+  });
+});

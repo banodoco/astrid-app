@@ -10,11 +10,12 @@
  * 3. Requests already on the wire end while this document is still alive, each with its own end event:
  *    - an ordinary request (its answer is JSON or text, the bodies a credential scan reads in full) is waited for, and
  *      its body is read to the end on a copy;
- *    - a request that would hold the page indefinitely is cancelled: one marked `abortOnNavigation` (an agent turn,
- *      which has no deadline of its own and goes on in the agent) while it waits for its answer, and any answer of
- *      another kind (media and object bytes, downloads, event streams) at once. Those bodies are never copied, so
- *      nothing is buffered on their behalf and a caller that cancels its body stops the transfer;
- *    - whatever is still on the wire when the 10 s run out is cancelled too.
+ *    - a request that would hold the page indefinitely is not waited for: one marked `abortOnNavigation` (an agent
+ *      turn, which has no deadline of its own and goes on in the agent) while it waits for its answer, and any answer
+ *      of another kind (media and object bytes, downloads, event streams). Those bodies are never copied, so nothing
+ *      is buffered on their behalf and a caller that cancels its body stops the transfer. They are cancelled only once
+ *      the navigation is certain (`cancelUnwaitedRequests`, right before it), so a page that stays keeps them;
+ *    - whatever is still on the wire when the 10 s run out is cancelled.
  *
  * If no navigation follows (a "stay on this page" answer, or a restore from the back/forward cache) the page opens
  * again and owners pick their work back up.
@@ -45,7 +46,7 @@ interface InFlight {
   done: Promise<void>;
   /** Cancels this request on the network, through the wrapper's own abort signal. */
   readonly abort: () => void;
-  /** Cancelled, not waited for, by a prepared navigation. */
+  /** Not waited for by a prepared navigation, and cancelled once that navigation is certain. */
   cancelOnPrepare: boolean;
 }
 
@@ -194,7 +195,6 @@ export function installDocumentRequestRegistry(target: typeof globalThis = globa
       if (settlesInFull(response)) { entry.cancelOnPrepare = false; return received(response); }
       // Left to its caller: a cancel the caller makes reaches the network, and a prepared navigation cancels it.
       entry.cancelOnPrepare = true;
-      if (phase !== 'open') { entry.abort(); return undefined; }
       uncopied.add(entry);
       collected?.register(response, entry);
       return undefined;
@@ -212,16 +212,19 @@ export function installDocumentRequestRegistry(target: typeof globalThis = globa
 }
 
 /** Runtime requests this document has started and that have not fully ended. */
-export function inflightRuntimeRequests(): string[] { return [...inflight].map((entry) => entry.label); }
+export function inflightRuntimeRequests(): string[] { return awaited().map((entry) => entry.label); }
+
+/** What a prepared navigation waits for: everything on the wire except what it cancels instead. */
+function awaited(): InFlight[] { return [...inflight].filter((entry) => !entry.cancelOnPrepare); }
 
 function waitForIdle(deadline: number): Promise<boolean> {
   return new Promise((resolve) => {
     const finish = () => {
       changes.delete(check);
       clearTimeout(timer);
-      resolve(inflight.size === 0);
+      resolve(awaited().length === 0);
     };
-    const check = () => { if (inflight.size === 0 || Date.now() >= deadline) finish(); };
+    const check = () => { if (awaited().length === 0 || Date.now() >= deadline) finish(); };
     changes.add(check);
     // The timer itself is the deadline: a timer can fire a millisecond before the clock reads it.
     const timer = setTimeout(finish, Math.max(0, deadline - Date.now()));
@@ -229,8 +232,12 @@ function waitForIdle(deadline: number): Promise<boolean> {
   });
 }
 
-/** Cancel what a navigation does not wait for: requests marked so, and bodies left to their callers. */
-function cancelUnwaited(): void {
+/**
+ * The navigation is certain (called synchronously right before it): cancel what preparation did not wait for, requests
+ * marked so and bodies left to their callers, so each ends with its own failure event while the document is alive.
+ * Not called when the page stays (a draft changed during the wait, or the host releases), so those requests go on.
+ */
+export function cancelUnwaitedRequests(): void {
   for (const entry of [...inflight]) if (entry.cancelOnPrepare) entry.abort();
   for (const entry of [...uncopied]) entry.abort();
   uncopied.clear();
@@ -238,7 +245,7 @@ function cancelUnwaited(): void {
 
 /** The 10 s ran out: cancel what is left, and give the cancellations a moment to end. */
 async function cancelRemaining(): Promise<void> {
-  for (const entry of [...inflight]) entry.abort();
+  for (const entry of awaited()) entry.abort();
   await waitForIdle(Date.now() + NAVIGATION_CANCEL_GRACE_MS);
 }
 
@@ -275,7 +282,6 @@ export function prepareDocumentNavigation(options: PrepareOptions = {}): Promise
     phase = 'settling';
     changed();
     options.onSettling?.();
-    cancelUnwaited();
     if (!await waitForIdle(deadline)) {
       const still = inflightRuntimeRequests();
       // Nothing is left on the wire when the page goes, even when preparing failed.
@@ -305,6 +311,7 @@ export function releaseDocumentNavigation(): void {
 /** Prepare, then navigate. A failed preparation still navigates: the person asked to leave. */
 export async function navigateDocument(navigate: () => void): Promise<void> {
   try { await prepareDocumentNavigation(); } catch { /* Durable owners carry what could not be settled. */ }
+  cancelUnwaitedRequests();
   navigate();
 }
 
@@ -322,8 +329,9 @@ export function installNavigationPreparationProtocol(target: Window = window): v
     const id = (event as CustomEvent<{ id?: unknown }>).detail?.id;
     const reply = (type: string, detail: Record<string, unknown> = {}) =>
       target.dispatchEvent(new CustomEvent(type, { detail: { id, ...detail } }));
+    // A host that asks navigates next: what preparation did not wait for is cancelled before it is told so.
     prepareDocumentNavigation({ onSettling: () => reply(SETTLING_EVENT) }).then(
-      () => reply(PREPARED_EVENT, { ok: true }),
+      () => { cancelUnwaitedRequests(); reply(PREPARED_EVENT, { ok: true }); },
       (error: unknown) => reply(PREPARED_EVENT, { ok: false, error: error instanceof Error ? error.message : String(error) }),
     );
   });

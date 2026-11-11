@@ -12,6 +12,8 @@
 name: Direct Journey
 
 on:
+  push:
+    branches: ["scratch/r12-t4b-*"]
   pull_request:
     paths:
       - ".github/workflows/direct-journey.yml"

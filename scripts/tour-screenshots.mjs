@@ -87,7 +87,7 @@ async function within(promise, timeout, message) {
   finally { clearTimeout(timer); }
 }
 
-async function freePort() {
+export async function freePort() {
   const server = createServer();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', done); });
   const { port } = server.address();
@@ -95,7 +95,7 @@ async function freePort() {
   return port;
 }
 
-async function waitServer(url, child, stopped, timeout = 120_000) {
+export async function waitServer(url, child, stopped, timeout = 120_000) {
   const deadline = Date.now() + timeout;
   while (Date.now() < deadline) {
     if (stopped()) throw new Error('Screenshot run interrupted');
@@ -141,7 +141,8 @@ async function settled(page, step, remaining, pending) {
     const elements = selectors.map(selector => document.querySelector(selector));
     if (elements.some(element => !element || !element.getBoundingClientRect().width || !element.getBoundingClientRect().height || getComputedStyle(element).visibility === 'hidden')) return false;
     const cutouts = [...document.querySelectorAll('#editor-tour-dim rect[fill="black"]')];
-    if (targetCount && cutouts.slice(0, targetCount).some(rect => Number(rect.getAttribute('width')) <= 0 || Number(rect.getAttribute('height')) <= 0)) return false;
+    // A short phone lights fewer cutouts than the beat has targets (the row gives way to the card), so one open cutout is enough.
+    if (targetCount && !cutouts.some(rect => Number(rect.getAttribute('width')) > 0 && Number(rect.getAttribute('height')) > 0)) return false;
     if (compose && getComputedStyle(document.querySelector('[data-editor-tour-shield]')).clipPath === 'none') return false;
     const animations = elements.flatMap(element => element.getAnimations({ subtree: true }));
     if (animations.some(animation => animation.playState === 'running' && animation.effect?.getComputedTiming().iterations !== Infinity)) return false;

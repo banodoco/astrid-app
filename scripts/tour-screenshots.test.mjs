@@ -69,6 +69,10 @@ test('derives a unique, complete path and real target selectors from the beat ma
   assert.equal(new Set(steps.map(step => step.id)).size, steps.length);
   assert(steps.find(step => step.beat === 'land').targets.some(selector => selector.includes('data-editor-tour-track')));
   assert.equal(steps.filter(step => step.beat === 'respond').length, 1);
+  const ids = steps.map(step => step.id);
+  assert.equal(ids.indexOf('act2-gallery'), ids.indexOf('act2-land') + 1);
+  assert.equal(ids.indexOf('act3-compose'), ids.indexOf('act2-gallery') + 1);
+  assert.deepEqual(steps.find(step => step.id === 'act2-gallery').targets, ['[data-editor-tour="generations-pane"]']);
 });
 
 test('profiles preserve descriptor touch/DPR with the requested viewport sizes', () => {

@@ -9,16 +9,17 @@ import {
   type EditorTourStage,
 } from '@/shared/state/editorTourStore.ts';
 import {
+  useTimelineChromeSelector,
   useTimelineDataSelector,
   useTimelineMutableAdapters,
   useTimelineOpsFromStore,
 } from '@/tools/video-editor/hooks/timelineStore.ts';
-import { requestCenterTimelineClip } from '@/tools/video-editor/lib/timeline-viewport-events.ts';
 import { editorTourSelector, editorTourTrackSelector } from '@/tools/video-editor/tour/anchors.ts';
 import { useTourMediaWarmup } from './useTourMediaWarmup.ts';
 import { EDITOR_TOUR_MEDIA, tourSaveData } from '../tourMedia.ts';
 import { loadTourLiveScene, TOUR_SCENE_SOURCE_FROM } from './tourSceneSource.ts';
-import { createEditorTourStagePatch, createEditorTourStageRemovalPatch, tourStageFocusClipId, tourTrackOrder, TOUR_ANCHORS, TOUR_CLIP_IDS } from './tourStages.ts';
+import { createEditorTourStagePatch, createEditorTourStageRemovalPatch, tourTrackOrder, TOUR_ANCHORS } from './tourStages.ts';
+import { tourFitScaleWidth } from './tourViewport.ts';
 
 const SceneSurface = lazy(() => import('@astrid/packs/rendering/ui/threejs-live-editor/SceneSurface')
   .then((module) => ({ default: module.SceneSurface })));
@@ -106,10 +107,53 @@ function SceneWarmup({ liveScene, onWarm }: { liveScene: Record<string, unknown>
   );
 }
 
+/** The timeline's scroll container, which publishes its label column width as `--label-width`. */
+const TIMELINE_SCROLLER_SELECTOR = '[data-timeline-row-layout="managed"]';
+
+/**
+ * Frames the timeline once for the whole tour: scrolled to 0 s, with all 14 s in view (zooming out only when the
+ * viewport is too narrow for the default zoom). After this nothing in the tour scrolls or zooms the timeline, so the
+ * spotlight on a row holds still and only the playhead moves; Back never touches it either. Re-checked if the
+ * timeline is resized (the chat pane opening), before any row has landed to be lit.
+ */
+function useTourTimelineFraming(loaded: boolean) {
+  const setScaleWidth = useTimelineChromeSelector((chrome) => chrome.setScaleWidth);
+  const scaleWidth = useTimelineDataSelector((data) => data.scaleWidth);
+  // Read through refs: the setter is not stable, and an effect re-run per render would frame (and write) once per render.
+  const chrome = useRef({ setScaleWidth, scaleWidth });
+  chrome.current = { setScaleWidth, scaleWidth };
+  useEffect(() => {
+    if (!loaded) return;
+    let observed: Element | null = null;
+    let observer: ResizeObserver | null = null;
+    const frame = () => {
+      const scroller = document.querySelector<HTMLElement>(TIMELINE_SCROLLER_SELECTOR);
+      if (!scroller) return;
+      if (scroller.scrollLeft !== 0) scroller.scrollLeft = 0;
+      const startLeft = parseFloat(getComputedStyle(scroller).getPropertyValue('--label-width')) || 0;
+      const viewportWidth = scroller.clientWidth;
+      // Only a real change is written: the setter saves a new preferences record even for the same zoom, and every save
+      // re-renders the editor (a write per check kept React committing every frame and starved the preview's first frame).
+      const fitted = tourFitScaleWidth({ viewportWidth, startLeft, scaleWidth: chrome.current.scaleWidth });
+      if (fitted !== null) chrome.current.setScaleWidth(fitted);
+      if (observed !== scroller) {
+        observer?.disconnect();
+        observed = scroller;
+        observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(frame);
+        observer?.observe(scroller);
+      }
+    };
+    frame();
+    // The scroller may mount after the data loads.
+    const retry = window.setInterval(() => { if (!observed) frame(); else window.clearInterval(retry); }, 100);
+    return () => { window.clearInterval(retry); observer?.disconnect(); };
+  }, [loaded]);
+}
+
 /**
  * Lives inside the tour's editor and takes the demo timeline to the tour's stage through the editor's
- * own ops (`track.add`, `clip.add`, `clip.update`), then presents it: scroll the new row into view,
- * and on each `land` beat play the 14 s from the start (act 2 presents each reference frame, then holds the last).
+ * own ops (`track.add`, `clip.add`, `clip.update`), then presents it: the timeline is framed once (0-14 s) and never
+ * scrolls or zooms again, and on each `land` beat the driver plays the 14 s from the start (act 2 presents each reference frame, then holds the last).
  * With reduced motion nothing plays: acts 1 and 3 keep their poster and act 2 holds its last frame.
  * Reports `ready.timeline` per beat.
  */
@@ -122,6 +166,7 @@ export function EditorTourTimelineDriver() {
   const ops = useTimelineOpsFromStore();
   const { previewRef } = useTimelineMutableAdapters();
   const loaded = useTimelineDataSelector((data) => !data.isLoading && data.data !== null);
+  useTourTimelineFraming(loaded);
   const [appliedStage, setAppliedStage] = useState<EditorTourStage>(0);
   const [liveScene, setLiveScene] = useState<Record<string, unknown> | null>(null);
   const [warm, setWarm] = useState(false);
@@ -201,6 +246,13 @@ export function EditorTourTimelineDriver() {
     };
     void (async () => {
       if (beat === 'respond' && act === 1 && !instant) await waitFor(() => warm, WARMUP_GIVE_UP_MS, isCancelled);
+      if (beat === 'gallery') {
+        // The dimmed preview is the same whether the user arrived forward (Next can cut act 2's walk short) or by Back.
+        await waitFor(() => previewRef.current !== null, RENDER_WAIT_MS, isCancelled);
+        if (isCancelled()) return;
+        previewRef.current?.pause();
+        previewRef.current?.seek(TOUR_ANCHORS[TOUR_ANCHORS.length - 1].at);
+      }
       if (beat === 'land') {
         const topTrack = tourTrackOrder(stage)[0];
         await waitFor(
@@ -218,7 +270,6 @@ export function EditorTourTimelineDriver() {
           const anchors = instant || reducedMotion ? [TOUR_ANCHORS.length - 1] : TOUR_ANCHORS.map((_, index) => index);
           for (const index of anchors) {
             if (isCancelled() || getEditorTourState().skipAnimation !== skipped) break;
-            requestCenterTimelineClip(TOUR_CLIP_IDS.stills[index]);
             previewRef.current?.seek(TOUR_ANCHORS[index].at);
             if (!instant && !reducedMotion) await waitFor(
               () => getEditorTourState().skipAnimation !== skipped,
@@ -227,8 +278,6 @@ export function EditorTourTimelineDriver() {
             );
           }
         } else {
-          const focusClipId = tourStageFocusClipId(stage);
-          if (focusClipId) requestCenterTimelineClip(focusClipId);
           if (reducedMotion) {
             // The poster stays over the paused preview: the still is the whole presentation.
             previewRef.current?.seek(0);

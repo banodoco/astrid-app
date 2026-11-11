@@ -30,15 +30,19 @@ export interface EditorTourScript {
   /** The centred card before act 1: Astrid says hello. */
   readonly welcome: { readonly title: string; readonly body: string; readonly action: string };
   /** The card's quiet line while the chat has the spotlight: before Send, and (act 1 only) while the reply plays. */
-  readonly hints: { readonly compose: string; readonly composeTouch: string; readonly respond: string };
+  readonly hints: { readonly compose: string; readonly composeTouch: string; readonly respond: string; readonly respondWorking: string };
   /** `send` is a touch card's own Send, the same press as the chat's. */
   readonly controls: { readonly next: string; readonly send: string; readonly back: string; readonly skip: string };
+  /** Act 2's second card, `gallery`: the Generations pane slides up. */
+  readonly gallery: { readonly title: string; readonly body: string };
   /** Agent → open models → output: the card's strip, one step per act. */
   readonly strip: readonly [string, string, string];
-  readonly finale: { readonly title: string; readonly action: string; readonly recap: readonly [string, string, string] };
+  /** After act 3: the lit chain is the one example; the body opens it out. */
+  readonly finale: { readonly title: string; readonly body: string; readonly action: string; readonly recap: readonly [string, string, string] };
   /** The last card, after the finale: Astrid asks for feedback and points to the Discord. */
   /** `mobileAction` ends the tour on a phone or tablet, where the next screen sends Astrid to a computer. */
-  readonly feedback: { readonly title: string; readonly body: string; readonly shortBody: string; readonly discord: string; readonly action: string; readonly mobileAction: string };
+  /** The title reads `before emphasis after`, joined by spaces; the card underlines `emphasis` once it has arrived. */
+  readonly feedback: { readonly title: { readonly before: string; readonly emphasis: string; readonly after: string }; readonly body: string; readonly shortBody: string; readonly discord: string; readonly action: string; readonly mobileAction: string };
 }
 
 /**
@@ -66,14 +70,14 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
     2: {
       composeHeader: 'Your agent can do anything with open models',
       prompt: 'Can you make me realistic frames for that using Qwen Image 2.1?',
-      reply: 'I made four realistic reference frames with Qwen Image 2.1 through WaveSpeed. They follow the flight from the valley to natural-looking buildings in town.',
+      reply: 'I made four realistic reference frames with Qwen Image 2.1. They follow the flight from the valley to natural-looking buildings in town.',
       toolCards: [
         { name: 'Captured 4 frames', detail: 'Start · mountains · descent · town' },
-        { name: 'Qwen Image 2.1 × 4', detail: 'WaveSpeed · frame → realistic still' },
+        { name: 'Qwen Image 2.1 × 4', detail: 'Frame → realistic still' },
       ],
       card: {
         title: 'Your agent works with open models and the ecosystem’s knowledge',
-        body: 'Use open models locally with ComfyUI or Wan2GP, or through a hosted service. These four frames were generated through WaveSpeed.',
+        body: 'Use open models locally with ComfyUI or Wan2GP, or through a hosted service.',
         visual: 'frame-to-still',
         labels: ['Frame', 'Qwen Image 2.1'],
       },
@@ -92,12 +96,21 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
     },
   },
   welcome: { title: 'Welcome to Astrid', body: 'Explore a completed project in this quick guided demo. The prompts replay its steps; no new generation runs.', action: 'OK' },
-  hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses tools built by the community to deliver this request' },
+  hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses community-built creative tools to deliver on this request', respondWorking: 'Astrid is working on it…' },
   controls: { next: 'Next', send: 'Send', back: 'Back', skip: 'Skip tour' },
+  gallery: {
+    title: 'And all your assets are organized automatically',
+    body: 'Everything you and your agent generate is kept here to view and edit. Use any model, create variants, and let your agent organize them with custom data.',
+  },
   strip: ['Agent', 'Open models', 'Output'],
-  finale: { title: 'Do you get it?', action: 'I got it', recap: ['Agent + extensions', 'Open models', 'Finished shot'] },
+  finale: {
+    title: 'And this is just one example',
+    body: 'There are infinite possibilities when you combine code with custom agent tools and custom interfaces.',
+    action: 'Next',
+    recap: ['Agent + extensions', 'Open models', 'Finished shot'],
+  },
   feedback: {
-    title: 'We actually need your feedback',
+    title: { before: 'We', emphasis: 'really', after: 'need your feedback' },
     body: 'We’re aiming for a tool that helps unlock the creative potential of open models and the open‑source community. But Astrid is a very early-stage product, and in many ways it doesn’t get there yet. Feedback on any issue you hit helps us improve it: no problem is too large or too small.',
     /** A phone's version: the same ask in a few lines. */
     shortBody: 'Astrid is very early, and in many ways it doesn’t get there yet. Tell us about any issue you hit: no problem is too large or too small.',

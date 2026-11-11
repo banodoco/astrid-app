@@ -16,6 +16,7 @@ import type { ResolvedTimelineConfig } from '@/tools/video-editor/types/index.ts
 import { getAdmittedElementReadiness, refreshAdmittedElements, subscribeAdmittedElementReadiness } from '@/tools/video-editor/runtime/admitted-elements.ts';
 import { PreviewLoadingPlaceholder } from './PreviewLoadingPlaceholder.tsx';
 import { areShotsSettling } from '@/tools/video-editor/lib/shots-settling.ts';
+import { useEditorTourRunning } from '@/shared/state/editorTourStore.ts';
 import { previewRevisionLabel, previewUnavailableLabel, type PreviewRevision } from './previewRevision.ts';
 import { isEditableTarget } from '@/tools/video-editor/lib/coordinate-utils.ts';
 import { isActivatableTarget } from '@/tools/video-editor/hooks/useKeyboardShortcuts.ts';
@@ -266,8 +267,10 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
     previewRevision: delivery.revision,
     ...(runtime?.astridElementHost ? { astridElementHost: runtime.astridElementHost } : {}),
   }), [delivery.revision, outputConfig, preparing, shotsSettling, runtime?.astridElementHost]);
-  const displayedRevisionLabel = previewRevisionLabel(delivery.revision);
-  const unavailableTarget = delivery.revision.unavailableTarget;
+  // The tour's demo timeline can never be saved, so "Unsaved local" and "Preview unavailable" would only be noise.
+  const touring = useEditorTourRunning();
+  const displayedRevisionLabel = touring ? '' : previewRevisionLabel(delivery.revision);
+  const unavailableTarget = touring ? undefined : delivery.revision.unavailableTarget;
   const metadata = useMemo(() => {
     const fps = outputConfig.output.fps;
     const { width, height } = parseResolution(outputConfig.output.resolution);

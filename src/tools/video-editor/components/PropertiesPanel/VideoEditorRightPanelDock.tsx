@@ -16,7 +16,7 @@ import { ExtensionManager } from '@/tools/video-editor/components/ExtensionManag
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { COARSE_TOUCH_TARGET } from '@/shared/components/ui/contracts/touchTarget.ts';
 
-import { HOST_EXTENSIONS_PANEL_KEY, HOST_PROPERTIES_PANEL_KEY, VideoEditorPanelDisplayControl } from './VideoEditorPanelDisplayControl';
+import { HOST_EXTENSIONS_PANEL_KEY, HOST_PROPERTIES_PANEL_KEY, VideoEditorPanelDisplayControl, useRightPanelLayout } from './VideoEditorPanelDisplayControl';
 export { HOST_EXTENSIONS_PANEL_KEY, HOST_PROPERTIES_PANEL_KEY } from './VideoEditorPanelDisplayControl';
 export type VideoEditorRightPanelTab = 'video' | 'inspector' | 'extensions';
 export interface VideoEditorRightPanelDockProps {
@@ -106,9 +106,7 @@ export function VideoEditorRightPanelDock({
   const currentKey = tab === 'inspector' ? HOST_PROPERTIES_PANEL_KEY : toolKey ?? HOST_PROPERTIES_PANEL_KEY;
   // Inspector and Extensions share one display mode. The host slot is the
   // canonical value; per-extension slots are read only for legacy migration.
-  const layout = preferences.rightPanelLayoutSlotsByPanelId[HOST_PROPERTIES_PANEL_KEY]
-    ?? preferences.rightPanelLayoutSlotsByPanelId[currentKey]
-    ?? 'dock';
+  const layout = useRightPanelLayout(preferences.rightPanelLayoutSlotsByPanelId, currentKey);
   // Only "Closed" (null) closes the dock: disabling the selected extension falls back to `tool`.
   const open = Boolean(video) || selected !== null;
   const dock = Boolean(video) || layout === 'dock';

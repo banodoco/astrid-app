@@ -58,4 +58,28 @@ describe('quiet Update available notice', () => {
     }
     expect(notice.textContent).not.toContain('Run it yourself');
   });
+
+  it('sits under the editor tour\u2019s dimming shield, inert, while the tour runs', async () => {
+    readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 3 } });
+    hostedCheckMock.mockResolvedValue({
+      release: 3, app: 'app-a', servedRelease: 4, servedApp: 'app-b', behind: true,
+      resolution: { installedRelease: 3, servedRelease: 4, releaseBehind: true },
+    });
+    vi.resetModules();
+    const { QuietUpdateNotice: TourPageNotice } = await import('./QuietUpdateNotice.tsx');
+    const { startEditorTour, exitEditorTour } = await import('@/shared/state/editorTourStore.ts');
+    const { UI_Z_LAYERS } = await import('@/shared/lib/uiLayers.ts');
+    render(<TourPageNotice connection={{ isConnected: true, managedByPinokio: false } as never} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const notice = await screen.findByTestId('quiet-update-notice');
+    expect(notice).toHaveClass('z-[100110]');
+    expect(notice.style.zIndex).toBe('');
+    expect(notice).not.toHaveAttribute('inert');
+    act(() => startEditorTour());
+    expect(Number(notice.style.zIndex)).toBeLessThan(UI_Z_LAYERS.EDITOR_TOUR_SHIELD);
+    expect(notice).toHaveAttribute('inert');
+    act(() => exitEditorTour());
+    expect(notice.style.zIndex).toBe('');
+    expect(notice).not.toHaveAttribute('inert');
+  });
 });

@@ -9,8 +9,14 @@ export const EDITOR_TOUR_ANCHORS = Object.freeze({
   chatTranscript: 'chat-transcript',
   /** The act's reply and its actions, in the tour's own chat. */
   chatReply: 'chat-reply',
+  /** The tour's whole chat pane: the card keeps clear of it while the chat is not what is lit. */
+  chatPane: 'chat-pane',
+  /** The act's tool actions in the tour's chat (the "N actions" group and its cards). */
+  chatActions: 'chat-actions',
   timeline: 'timeline',
   preview: 'preview',
+  /** The tour's Generations pane, at its resting rect (an invisible box beside the sliding pane, not the pane). */
+  generationsPane: 'generations-pane',
 } as const);
 
 export type EditorTourAnchor = (typeof EDITOR_TOUR_ANCHORS)[keyof typeof EDITOR_TOUR_ANCHORS];

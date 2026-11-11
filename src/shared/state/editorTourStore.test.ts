@@ -18,6 +18,7 @@ describe('editorTourStore', () => {
     expect(editorTourStage(1, 'land')).toBe(1);
     expect(editorTourStage(2, 'compose')).toBe(1);
     expect(editorTourStage(2, 'land')).toBe(2);
+    expect(editorTourStage(2, 'gallery')).toBe(2);
     expect(editorTourStage(3, 'respond')).toBe(2);
     expect(editorTourStage(3, 'land')).toBe(3);
     expect(editorTourStage(3, 'finale')).toBe(3);

@@ -6,12 +6,18 @@
 .editor-tour-card-playing .editor-tour-reveal { animation: editor-tour-reveal 640ms var(--tour-ease) var(--tour-delay, 0ms) both; }
 .editor-tour-card-playing .editor-tour-grow { animation: editor-tour-grow 520ms var(--tour-ease) var(--tour-delay, 0ms) both; }
 .editor-tour-card-playing .editor-tour-travel { animation: editor-tour-travel 560ms var(--tour-ease) var(--tour-delay, 0ms) both; }
-.editor-tour-card-playing .editor-tour-wipe { animation: editor-tour-wipe 900ms var(--tour-ease) var(--tour-delay, 0ms) both; }
-.editor-tour-card-playing .editor-tour-wipe-handle { animation: editor-tour-wipe-handle 900ms var(--tour-ease) var(--tour-delay, 0ms) both; }
+/* The feedback title's emphasis: once the card has landed, a pen stroke draws under the word from left to right and stays.
+   Quick out of the start, slowing as it reaches the end, as a hand does. (Act 2's comparison sweep is script-driven:
+   TourCompare, so a grab can stop it.) */
+.editor-tour-card-playing .editor-tour-underline { animation: editor-tour-underline 650ms cubic-bezier(0.3, 0.1, 0.25, 1) var(--tour-delay, 0ms) both; }
 /* The finale's chain (TourStrip's large strip; its timings match these lengths): a node's border flashes
    and stays lit, and the line to the next draws across at an even pace so it visibly lands. */
 .editor-tour-card-playing .editor-tour-light { animation: editor-tour-light 480ms ease-out var(--tour-delay, 0ms) both; }
 .editor-tour-card-playing .editor-tour-draw { animation: editor-tour-grow 380ms cubic-bezier(0.55, 0, 0.3, 1) var(--tour-delay, 0ms) both; }
+
+/* While the card still travels to its spot every part of the entrance holds at its start (each keyframe's `from`, as its
+   fill is `both`); it plays as the card comes to rest. */
+.editor-tour-card-waiting * { animation-play-state: paused !important; }
 
 /* Reduced motion: the card fades in once and everything inside it is already at rest. */
 .editor-tour-card-reduced { animation: editor-tour-fade 200ms ease-out both; }
@@ -31,8 +37,8 @@
   35% { opacity: 1; box-shadow: 0 0 0 3px hsl(var(--primary) / 0.35), 0 0 16px 2px hsl(var(--primary) / 0.5); }
 }
 @keyframes editor-tour-travel { from { left: 0%; opacity: 0; } 15%, 80% { opacity: 1; } }
-@keyframes editor-tour-wipe { from { clip-path: inset(0 0 0 100%); } }
-@keyframes editor-tour-wipe-handle { from { left: 100%; opacity: 0; } 15% { opacity: 1; } }
+/* Hidden while it waits: a round cap would otherwise leave a dot where the stroke starts. */
+@keyframes editor-tour-underline { from { stroke-dashoffset: 1; opacity: 0; } 6% { opacity: 1; } }
 @keyframes editor-tour-playhead { from { transform: scaleX(0); } to { transform: scaleX(1); } }
 
 @media (prefers-reduced-motion: reduce) {

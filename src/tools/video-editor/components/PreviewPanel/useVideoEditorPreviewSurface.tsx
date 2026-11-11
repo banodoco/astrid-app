@@ -10,6 +10,7 @@ import {
 import { shallow } from 'zustand/shallow';
 import { RemotionPreview } from '@/tools/video-editor/components/PreviewPanel/RemotionPreview.tsx';
 import { useTimelineChromeSelector, useTimelineDataSelector, useTimelinePlaybackSelector } from '@/tools/video-editor/hooks/timelineStore.ts';
+import { isDataProviderPersistenceEnabled } from '@/tools/video-editor/data/DataProvider.ts';
 import { useOptionalVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import { useVideoEditorPreviewComposition } from './useVideoEditorPreviewComposition.ts';
 import type { PreviewRevision } from './previewRevision.ts';
@@ -63,6 +64,12 @@ export function useVideoEditorPreviewSurface({
         : { kind: 'unknown', reason: compositionResolution.error?.message };
     }
 
+    // An in-memory timeline (the onboarding tour's demo) is never saved or committed: it has no revision to
+    // name, and nothing about it is "unsaved" or "unavailable". Labelling it would only flash chrome over the preview.
+    if (runtime?.provider && !isDataProviderPersistenceEnabled(runtime.provider)) {
+      return { kind: 'unknown' };
+    }
+
     const baseRevisionId = timelineData?.head?.headRevisionId;
     if (saveStatus !== 'saved') {
       return {
@@ -81,7 +88,7 @@ export function useVideoEditorPreviewSurface({
     return unavailableTarget
       ? { kind: 'unavailable', unavailableTarget }
       : { kind: 'unknown', reason: 'The loaded timeline has no committed revision identity.' };
-  }, [compositionResolution.error?.message, previewSource, runtime?.shots?.canonicalComposition,
+  }, [compositionResolution.error?.message, previewSource, runtime?.provider, runtime?.shots?.canonicalComposition,
     runtime?.shots?.canonicalCompositionError, runtime?.shots?.canonicalDraft, runtime?.userId,
     saveStatus, timelineData?.head?.headRevisionId]);
   const {

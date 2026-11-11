@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { usePaneLockPolicyState } from './usePaneLockPolicyState';
 import { acquirePaneControlsHost } from '@/shared/state/paneControlsHost';
+import { acquirePaneLockHold } from '@/shared/state/paneLockHolds';
 
 const useUserUIStateSpy = vi.fn();
 const useIsMobileSpy = vi.fn();
@@ -258,5 +259,71 @@ describe('usePaneLockPolicyState Tasks pane lock persistence', () => {
 
     expect(result.current.locks.tasks).toBe(false);
     expect(result.current.isTasksPaneOpenState).toBe(false);
+  });
+});
+
+describe('usePaneLockPolicyState pane lock holds', () => {
+  const stubUserLocks = (locks: { shots: boolean; tasks: boolean; gens: boolean; editor: boolean }) => {
+    const savePaneLocks = vi.fn();
+    useIsMobileSpy.mockReturnValue(false);
+    useIsTabletSpy.mockReturnValue(false);
+    useUserUIStateSpy.mockReturnValue({ value: locks, update: savePaneLocks, isLoading: false });
+    return savePaneLocks;
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    window.localStorage.clear();
+  });
+
+  it('leaves an unlocked Tasks pane as it was once the hold is released, and saves nothing either way', () => {
+    const savePaneLocks = stubUserLocks({ shots: false, tasks: false, gens: false, editor: false });
+    const { result } = renderHook(() => usePaneLockPolicyState());
+    expect(result.current.locks.tasks).toBe(false);
+    expect(result.current.isTasksPaneOpenState).toBe(false);
+
+    let release = () => {};
+    act(() => { release = acquirePaneLockHold({ tasks: true, gens: false }); });
+    expect(result.current.locks.tasks).toBe(true);
+    expect(result.current.isTasksPaneOpenState).toBe(true);
+
+    act(() => release());
+    expect(result.current.locks).toEqual({ shots: false, tasks: false, gens: false, editor: false });
+    expect(result.current.isTasksPaneOpenState).toBe(false);
+    expect(savePaneLocks).not.toHaveBeenCalled();
+    expect(window.localStorage.length).toBe(0);
+  });
+
+  it('reads a locked gallery as unlocked during the hold and locked again after', () => {
+    const savePaneLocks = stubUserLocks({ shots: false, tasks: true, gens: true, editor: false });
+    const { result } = renderHook(() => usePaneLockPolicyState());
+    expect(result.current.locks.gens).toBe(true);
+
+    let release = () => {};
+    act(() => { release = acquirePaneLockHold({ tasks: true, gens: false }); });
+    expect(result.current.locks).toEqual({ shots: false, tasks: true, gens: false, editor: false });
+
+    act(() => release());
+    expect(result.current.locks).toEqual({ shots: false, tasks: true, gens: true, editor: false });
+    expect(result.current.isTasksPaneOpenState).toBe(true);
+    expect(savePaneLocks).not.toHaveBeenCalled();
+  });
+
+  it('keeps a user Tasks lock that was open before and after the hold, and ignores holds on phones', () => {
+    stubUserLocks({ shots: false, tasks: true, gens: false, editor: false });
+    const { result } = renderHook(() => usePaneLockPolicyState());
+    let release = () => {};
+    act(() => { release = acquirePaneLockHold({ tasks: false }); });
+    expect(result.current.locks.tasks).toBe(false);
+    expect(result.current.isTasksPaneOpenState).toBe(false);
+    act(() => release());
+    expect(result.current.locks.tasks).toBe(true);
+    expect(result.current.isTasksPaneOpenState).toBe(true);
+
+    useIsMobileSpy.mockReturnValue(true);
+    const { result: phone } = renderHook(() => usePaneLockPolicyState());
+    act(() => { release = acquirePaneLockHold({ tasks: true }); });
+    expect(phone.current.locks.tasks).toBe(false);
+    act(() => release());
   });
 });

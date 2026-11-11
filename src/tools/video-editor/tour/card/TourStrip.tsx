@@ -18,7 +18,7 @@ const delay = (ms: number) => ({ '--tour-delay': `${ms}ms` }) as CSSProperties;
  * then the line to the next node draws across and the next one lights as it connects. The lengths match
  * `.editor-tour-light` and `.editor-tour-draw` in TourCard.css.
  */
-const LIGHT_START_MS = 450;
+const LIGHT_START_MS = 200;
 const LIGHT_STEP_MS = 580;
 const LIGHT_MS = 480;
 const DRAW_MS = 380;
@@ -57,7 +57,7 @@ export function TourStrip({ filled, labels, size = 'compact', playing = false, w
                 {lit ? (
                   <span data-tour-lit="line" className="editor-tour-draw absolute inset-x-0 -top-px h-[3px] origin-left bg-primary" style={delay(drawAt(index))} />
                 ) : (
-                  reached && <span className={cn('absolute inset-0 origin-left bg-primary/60', newest && 'editor-tour-grow')} style={delay(700)} />
+                  reached && <span className={cn('absolute inset-0 origin-left bg-primary/60', newest && 'editor-tour-grow')} style={delay(500)} />
                 )}
               </span>
             )}
@@ -72,7 +72,7 @@ export function TourStrip({ filled, labels, size = 'compact', playing = false, w
                   )}
                 >
                   {reached && (
-                    <span className={cn('absolute inset-0', newest && 'editor-tour-fade')} style={delay(1000)}>
+                    <span className={cn('absolute inset-0', newest && 'editor-tour-fade')} style={delay(800)}>
                       {node.kind === 'video' && !(large && playing)
                         // At rest the video shows where the flight ends (the town), so it never repeats the still beside it.
                         ? <TourMedia slot={VIDEO_REST} kind="still" />

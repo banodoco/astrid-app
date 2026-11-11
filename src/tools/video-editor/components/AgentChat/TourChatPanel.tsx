@@ -7,7 +7,7 @@ import {
   markEditorTourSent,
   useEditorTour,
 } from '@/shared/state/editorTourStore.ts';
-import { usePanesStore } from '@/shared/state/panesStore.ts';
+import { useEditorTourPaneLockHold } from '@/shared/state/paneLockHolds.ts';
 import { EDITOR_TOUR_ANCHOR_ATTRIBUTE, EDITOR_TOUR_ANCHORS } from '@/tools/video-editor/tour/anchors.ts';
 import { EDITOR_TOUR_SCRIPT } from '@/tools/video-editor/tour/tourScript.ts';
 import { AgentChatComposer } from './AgentChatComposer';
@@ -50,11 +50,11 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const reducedMotion = useEditorTour((state) => state.reducedMotion);
   const instant = useEditorTour((state) => state.instant);
   const skipAnimation = useEditorTour((state) => state.skipAnimation);
-  const setIsTasksPaneLocked = usePanesStore((state) => state.setIsTasksPaneLocked);
   const script = EDITOR_TOUR_SCRIPT.acts[act];
   const [coarsePointer] = useState(() => window.matchMedia?.('(pointer: coarse)').matches === true);
 
-  useEffect(() => { setIsTasksPaneLocked(true); }, [setIsTasksPaneLocked]);
+  // The chat is the Tasks pane: held locked for the tour, then given back as the user had it.
+  useEditorTourPaneLockHold();
 
   const [clock, setClock] = useState(() => ({ runId, ms: Date.now() }));
   if (clock.runId !== runId) setClock({ runId, ms: Date.now() });
@@ -142,9 +142,12 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const reply = replyFrom < 0 ? [] : renderedTurns.slice(replyFrom);
   const { scrollContainerRef, scrollContentRef, onScroll } = useChatScroll(`tour:${runId}`, true, renderedTurns.length);
 
+  // The act's actions (its last tool group) carry the anchor desktop's respond contracts onto once the reply is in.
+  const actions = reply.filter((item) => item.kind !== 'message').at(-1);
   const renderTurn = (item: RenderedTurn) => (
     <div
       key={item.key}
+      {...(item === actions ? { [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatActions } : {})}
       className={cn(item.kind === 'message' ? 'flex flex-col gap-2.5' : 'space-y-2', reducedMotion && turnAt(item) >= currentActStart && 'animate-in fade-in duration-300')}
     >
       {item.kind === 'message'
@@ -158,7 +161,7 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const thinking = busy && progress.replyChars === 0;
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden" {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatPane }}>
       <div className="relative flex min-w-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5">
         <div className="-ml-1.5 flex min-w-0 flex-col items-start">
           <AgentChatMenu sessions={NO_SESSIONS} activeSessionId={null} onSelectSession={NO_OP} defaultAgent="astrid" onNewChat={NO_OP} />

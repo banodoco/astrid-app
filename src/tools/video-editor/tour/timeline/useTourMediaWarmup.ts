@@ -17,13 +17,14 @@ export function useTourMediaWarmup(): boolean {
   const images = useRef(new Map<string, HTMLImageElement>());
   const video = useRef<HTMLVideoElement>();
   useEffect(() => {
+    const warmed = images.current;
     let frame = requestAnimationFrame(() => {
       frame = requestAnimationFrame(() => setStarted(true));
     });
     return () => {
       cancelAnimationFrame(frame);
-      images.current.forEach(image => image.removeAttribute('src'));
-      images.current.clear();
+      warmed.forEach(image => image.removeAttribute('src'));
+      warmed.clear();
       if (video.current) {
         video.current.pause();
         video.current.removeAttribute('src');

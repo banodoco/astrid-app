@@ -14,6 +14,7 @@ import {
   useTimelineOpsFromStore,
 } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { editorTourSelector, editorTourTrackSelector } from '@/tools/video-editor/tour/anchors.ts';
+import { useEditorDeviceClass } from '@/tools/video-editor/tour/runner/useIsDesktopEditor.ts';
 import { useTourMediaWarmup } from './useTourMediaWarmup.ts';
 import { EDITOR_TOUR_MEDIA } from '../tourMedia.ts';
 import { createEditorTourStagePatch, createEditorTourStageRemovalPatch, tourTrackOrder, TOUR_ANCHORS } from './tourStages.ts';
@@ -154,6 +155,14 @@ export function EditorTourTimelineDriver() {
 
   const instant = useEditorTour((state) => state.instant);
   const reducedMotion = useEditorTour((state) => state.reducedMotion);
+
+  // A phone's chat covers the whole screen while it has the spotlight: nothing plays (and the editor behind it is not
+  // re-rendered at the playback clock's pace) for a picture nobody can see. Landing the next result plays it afresh.
+  const phone = useEditorDeviceClass() === 'phone';
+  const inChat = beat === 'compose' || beat === 'respond';
+  useEffect(() => {
+    if (phone && inChat) previewRef.current?.pause();
+  }, [phone, inChat, runId, act, previewRef]);
 
   useEffect(() => {
     if (!loaded || appliedStage !== stage) return;

@@ -24,8 +24,9 @@ function workspace(initial: Project[] = []) {
     }),
     listTimelines: vi.fn(async (id: string) => timelines.get(id) ?? []),
     getProject: vi.fn(async (id: string) => projects.find(row => row.project_id === id)!),
-    publishParentComposition: vi.fn(async (id: string, timelineId: string) => {
-      timelines.set(id, [{ timeline_id: timelineId, head_revision_id: 'head', slug: 'main' }]);
+    // The real contract: Runtime's catalog creation installs the empty canonical bootstrap (its head) atomically.
+    createTimeline: vi.fn(async (id: string, timelineId: string, _key: string, name?: string) => {
+      timelines.set(id, [{ timeline_id: timelineId, head_revision_id: 'head', slug: 'main', name }]);
       return { revision_id: 'head' };
     }),
     updateProject: vi.fn(async (id: string, _key: string, _version: number, _name: string | undefined, metadata: Record<string, unknown>) => {
@@ -45,9 +46,9 @@ describe('prepareStarterProject', () => {
     expect(result.timelineId).toMatch(/^[0-9a-f-]{36}$/);
     expect(methods.createProject).toHaveBeenCalledWith('My first project', 'astrid-onboarding-project-intent-1',
       'my-first-project-intent-1', { aspect_ratio: '16:9', [STARTER_PROJECT_INTENT_METADATA]: 'intent-1' });
-    expect(methods.publishParentComposition).toHaveBeenCalledWith('created-project', result.timelineId,
-      expect.objectContaining({ parent_composition: expect.objectContaining({ clips: [], registry: { assets: {} } }) }),
-      'astrid-first-timeline-created-project');
+    expect(methods.createTimeline).toHaveBeenCalledOnce();
+    expect(methods.createTimeline).toHaveBeenCalledWith('created-project', result.timelineId,
+      'astrid-first-timeline-created-project', 'Main');
   });
 
   it('never interprets failed discovery as an empty workspace', async () => {
@@ -57,11 +58,11 @@ describe('prepareStarterProject', () => {
     expect(methods.createProject).not.toHaveBeenCalled();
   });
 
-  it('does not publish into an unconfirmed project after a malformed create response', async () => {
+  it('does not create a timeline in an unconfirmed project after a malformed create response', async () => {
     const { client, methods } = workspace();
     methods.createProject.mockResolvedValue({ name: 'My first project' } as Project);
     await expect(prepareStarterProject({ intentId: 'intent-1', client })).rejects.toThrow('did not confirm');
-    expect(methods.publishParentComposition).not.toHaveBeenCalled();
+    expect(methods.createTimeline).not.toHaveBeenCalled();
   });
 
   it('reopens the last project and its chosen timeline without mutating existing work', async () => {
@@ -73,14 +74,14 @@ describe('prepareStarterProject', () => {
     expect(await prepareStarterProject({ intentId: 'intent-1', preferredProjectId: 'last', client }))
       .toEqual({ projectId: 'last', timelineId: 'chosen' });
     expect(methods.createProject).not.toHaveBeenCalled();
-    expect(methods.publishParentComposition).not.toHaveBeenCalled();
+    expect(methods.createTimeline).not.toHaveBeenCalled();
     expect(methods.updateProject).not.toHaveBeenCalled();
   });
 
   it('does not create a timeline in an existing empty project', async () => {
     const { client, methods } = workspace([project('existing')]);
     expect(await prepareStarterProject({ intentId: 'intent-1', client })).toEqual({ projectId: 'existing', timelineId: null });
-    expect(methods.publishParentComposition).not.toHaveBeenCalled();
+    expect(methods.createTimeline).not.toHaveBeenCalled();
     expect(methods.createProject).not.toHaveBeenCalled();
   });
 
@@ -96,7 +97,7 @@ describe('prepareStarterProject', () => {
     methods.listTimelines.mockRejectedValue(new Error('timeline read failed'));
     await expect(prepareStarterProject({ intentId: 'intent-1', client })).rejects.toThrow('timeline read failed');
     expect(methods.createProject).not.toHaveBeenCalled();
-    expect(methods.publishParentComposition).not.toHaveBeenCalled();
+    expect(methods.createTimeline).not.toHaveBeenCalled();
     expect(methods.updateProject).not.toHaveBeenCalled();
   });
 
@@ -115,13 +116,13 @@ describe('prepareStarterProject', () => {
 
   it('repairs a failed timeline publication in the same project on retry', async () => {
     const { client, methods, projects } = workspace();
-    methods.publishParentComposition.mockRejectedValueOnce(new Error('publication failed'));
+    methods.createTimeline.mockRejectedValueOnce(new Error('publication failed'));
     await expect(prepareStarterProject({ intentId: 'intent-1', client })).rejects.toThrow('publication failed');
     const recovered = await prepareStarterProject({ intentId: 'intent-1', client });
     expect(projects).toHaveLength(1);
     expect(methods.createProject).toHaveBeenCalledTimes(1);
-    expect(methods.publishParentComposition.mock.calls[0][1]).toBe(recovered.timelineId);
-    expect(methods.publishParentComposition.mock.calls[1][1]).toBe(recovered.timelineId);
+    expect(methods.createTimeline.mock.calls[0][1]).toBe(recovered.timelineId);
+    expect(methods.createTimeline.mock.calls[1][1]).toBe(recovered.timelineId);
   });
 
   it('uses the same Runtime creation key for overlapping attempts', async () => {

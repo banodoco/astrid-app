@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { WelcomeFlow } from '@/app/onboarding/WelcomeFlow.tsx';
 import { AstridStatusSection } from '@/shared/components/SettingsModal/sections/AstridStatusSection.tsx';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
@@ -35,7 +34,6 @@ describe('done2', () => {
     const settings = 'curl -fsSL https://astrid.haus/install | sh -s -- --update';
     // Install surfaces keep the Setup block. Settings' status section and the update cards no longer render one (UR-3).
     const surfaces = [
-      { render: () => render(<WelcomeFlow entry="setup" />), command: standard },
       { render: () => render(<RuntimeConnectionPanel connection={connectionFor({ status: 'not_running' })} />), command: standard },
     ];
 

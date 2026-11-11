@@ -342,8 +342,25 @@ describe('EditorTourTimelineDriver', () => {
     });
   });
 
+  it('pauses the preview behind a phone chat', async () => {
+    const setWidth = (width: number) => Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    const before = window.innerWidth;
+    try {
+      setWidth(390);
+      window.dispatchEvent(new Event('resize'));
+      const { previewHandle } = createHarness();
+      await waitFor(() => expect(ready()).toBe(true));
+      previewHandle.pause.mockClear();
+      goTo(2, 'compose');
+      await waitFor(() => expect(previewHandle.pause).toHaveBeenCalled());
+    } finally {
+      setWidth(before);
+      window.dispatchEvent(new Event('resize'));
+    }
+  });
+
   it('with reduced motion keeps each landing still: the poster stays, act 2 holds its last frame, nothing plays', async () => {
-    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: query === '(prefers-reduced-motion: reduce)', media: query } as MediaQueryList));
+    vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: query === '(prefers-reduced-motion: reduce)', media: query, addEventListener: () => undefined, removeEventListener: () => undefined } as unknown as MediaQueryList));
     act_(() => startEditorTour());
     const { previewHandle } = createHarness();
     goTo(1, 'land');

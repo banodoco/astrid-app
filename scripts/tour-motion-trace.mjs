@@ -177,7 +177,9 @@ function installReactProbe() {
           if (name && !(up && (up.flags & 1))) origins[name] = (origins[name] ?? 0) + 1;
         }
         if (fiber.sibling) stack.push(fiber.sibling);
-        if (fiber.child) stack.push(fiber.child);
+        // A bailed-out fiber keeps its previous child list: its subtree was not visited and its descendants still carry the
+        // PerformedWork flag of whenever they last rendered, which would count them as re-rendered in every commit.
+        if (fiber.child && !(fiber.alternate && fiber.child === fiber.alternate.child)) stack.push(fiber.child);
       }
       probe.commits.push({ t: performance.now(), priority, counts, origins });
       if (probe.commits.length > 4000) probe.commits.splice(0, 1000);

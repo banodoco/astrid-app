@@ -1,0 +1,250 @@
+/* Keep the existing desktop/tablet grid and DOM order; only phones get the dock. */
+.astrid-mobile-footer { display: contents; }
+
+@media (max-width: 640px) {
+  .astrid-public-site[data-mobile-layout] {
+    --astrid-mobile-gutter: 14px;
+    min-height: 100vh;
+    min-height: 100dvh;
+    padding: 0 var(--astrid-mobile-gutter);
+    overflow-x: clip;
+    overflow-y: visible;
+  }
+
+  /* The middle track absorbs browser-toolbar changes, not the header/footer. A
+     real minimum lets short screens and enlarged text scroll instead of clipping. */
+  .astrid-public-site[data-mobile-layout] .astrid-landing-grid {
+    display: grid;
+    min-height: 100vh;
+    min-height: 100dvh;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: auto minmax(24rem, 1fr) auto;
+    grid-template-areas: "brand switch" "stage stage" "footer footer";
+    align-items: stretch;
+    gap: 0 8px;
+    padding: max(4px, env(safe-area-inset-top, 0px)) 0 0;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-hero-copy { display: contents; }
+  .astrid-public-site[data-mobile-layout] .astrid-brand { min-height: 52px; gap: 6px; }
+  .astrid-public-site[data-mobile-layout] .astrid-brand-name { font-size: 1.375rem; }
+  .astrid-public-site[data-mobile-layout] .astrid-brand-mink-button { min-width: 36px; min-height: 44px; }
+  .astrid-public-site[data-mobile-layout] .astrid-brand-mink-frame { width: 30px; height: 32px; flex-basis: 30px; }
+  .astrid-public-site[data-mobile-layout] .astrid-brand-mink { width: 27px; height: 27px; }
+  .astrid-public-site[data-mobile-layout] .astrid-beta { margin: 10px 0 0 -2px; }
+  .astrid-public-site[data-mobile-layout] .astrid-beta-tag { padding-inline: 4px; font-size: .5rem; }
+  .astrid-public-site[data-mobile-layout] .astrid-beta-link { padding-inline: 3px; }
+  .astrid-public-site[data-mobile-layout] .astrid-audience-switch { min-width: 0; padding: 2px; }
+  .astrid-public-site[data-mobile-layout] .astrid-audience-switch button { min-height: 44px; padding-inline: 12px; font-size: .8125rem; }
+
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-footer {
+    grid-area: footer;
+    position: relative;
+    z-index: 45;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    margin-inline: calc(-1 * var(--astrid-mobile-gutter));
+    padding: 11px var(--astrid-mobile-gutter) max(4px, env(safe-area-inset-bottom, 0px));
+    border-top: 1px solid var(--astrid-line);
+    background: var(--astrid-paper);
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-hero-copy h1 {
+    max-width: none;
+    margin: 0;
+    font-size: clamp(1.5rem, 6.8vw, 1.875rem);
+    line-height: 1.04;
+    letter-spacing: -.045em;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-hero-emphasis { display: block; }
+  .astrid-public-site[data-mobile-layout] .astrid-hero-detail { max-width: none; padding: 0; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-hero-subtitles { margin: 0 0 9px; }
+  .astrid-public-site[data-mobile-layout] .astrid-hero-subtitle { max-width: none; margin: 0; font-size: .8125rem; line-height: 1.35; }
+  .astrid-public-site[data-mobile-layout] .astrid-hero-actions { max-width: none; margin: 0; }
+  .astrid-public-site[data-mobile-layout] .astrid-button { min-height: 46px; height: auto; padding: 10px 16px; font-size: .9375rem; }
+  .astrid-public-site[data-mobile-layout] .astrid-hero-note { width: 100%; margin: 0; padding: 0; justify-content: center; }
+  .astrid-public-site[data-mobile-layout] .astrid-social-links { gap: 2px; margin: 0; }
+  .astrid-public-site[data-mobile-layout] .astrid-social-links a { min-width: 36px; min-height: 32px; padding: 7px 9px; }
+  .astrid-public-site[data-mobile-layout] .astrid-social-links svg { width: 16px; height: 16px; }
+
+  .astrid-public-site[data-mobile-layout] .astrid-showcase {
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    align-self: stretch;
+    padding: 6px 0 10px;
+    perspective: none;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-editor-stage[data-audience] {
+    --astrid-mobile-top: 3.25rem;
+    --astrid-mobile-bottom: 3.125rem;
+    --astrid-mobile-inspector: 3.75rem;
+    --astrid-mobile-timeline: 5.75rem;
+    --astrid-mobile-gap: .375rem;
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    aspect-ratio: auto;
+    margin: 0;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    box-shadow: none;
+    perspective: none;
+    transition: none;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-editor-tilt {
+    inset: var(--astrid-mobile-top) 4px var(--astrid-mobile-bottom);
+    transform-style: flat;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-editor-surfaces {
+    transform: none;
+    translate: none;
+    transform-style: flat;
+  }
+  .astrid-public-site[data-mobile-layout][data-audience] .astrid-inspector-surface {
+    left: 0; right: auto; top: 0; bottom: auto;
+    width: 100%; height: var(--astrid-mobile-inspector); padding: 3px;
+    transform: none;
+  }
+  .astrid-public-site[data-mobile-layout][data-audience] .astrid-inspector-surface [role="tabpanel"] > div { padding: 3px 6px; }
+  .astrid-public-site[data-mobile-layout][data-audience] .astrid-inspector-surface [role="tabpanel"] > div > div { gap: 2px; grid-template-rows: 20px 30px; }
+  .astrid-public-site[data-mobile-layout][data-audience="app"] .astrid-player-surface {
+    left: 0; right: auto;
+    top: calc(var(--astrid-mobile-inspector) + var(--astrid-mobile-gap));
+    bottom: calc(var(--astrid-mobile-timeline) + var(--astrid-mobile-gap));
+    width: 100%; height: auto; aspect-ratio: auto; padding: 4px;
+    transform: none;
+  }
+  .astrid-public-site[data-mobile-layout][data-audience="app"] .astrid-timeline-surface {
+    left: 0; top: auto; bottom: 0; width: 100%; height: var(--astrid-mobile-timeline);
+    transform: none;
+  }
+  .astrid-public-site[data-mobile-layout][data-audience="agent"] .astrid-chat-surface {
+    left: 0; right: 0; top: 0; bottom: 0; width: 100%; height: 100%;
+    transform: none;
+  }
+  .astrid-public-site[data-mobile-layout][data-audience="agent"] .astrid-inspector-surface { transform: translate(12%, 15%) rotate(3deg) scale(.75); }
+  .astrid-public-site[data-mobile-layout][data-audience="agent"] .astrid-timeline-surface {
+    left: 0; top: auto; bottom: 0; width: 96%; height: var(--astrid-mobile-timeline);
+    transform: rotate(-2deg);
+  }
+  /* The player is no longer tilted. Share its CSS tracks instead of running the
+     desktop connector/rider measurement loop on every mobile animation frame.
+     Important overrides only stale desktop inline geometry after a breakpoint change. */
+  .astrid-public-site[data-mobile-layout] .astrid-preview-transport-outlet {
+    left: 14px !important; right: 14px !important; top: auto !important;
+    bottom: calc(var(--astrid-mobile-bottom) + var(--astrid-mobile-timeline) + var(--astrid-mobile-gap) + 10px);
+    width: auto !important; height: 44px !important;
+    transform: none !important;
+    translate: none !important;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-agent-launcher {
+    left: auto !important; right: 10px !important; top: auto !important;
+    bottom: calc(var(--astrid-mobile-bottom) + 7px);
+    width: 44px; height: 44px;
+  }
+
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-callouts { z-index: 40; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-callout] {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    inset: auto;
+    width: calc(50% - 4px);
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    border: 1px solid var(--astrid-line);
+    border-radius: 10px;
+    background: var(--astrid-panel);
+    color: var(--astrid-ink);
+    box-shadow: 0 2px 8px rgb(0 0 0 / 10%);
+    pointer-events: auto;
+    opacity: 1;
+    transform: none;
+    translate: none;
+    animation: none;
+    transition: border-color 250ms ease, box-shadow 250ms ease;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-position="top-left"] { top: 0; left: 0; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-position="top-right"] { top: 0; right: 0; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-position="top"] { top: 0; left: 0; width: 100%; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-position^="bottom"] { bottom: 0; flex-direction: column-reverse; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-position="bottom-left"] { left: 0; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-position="bottom-right"] { right: 0; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-position="bottom"] { left: 6%; width: 88%; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature[data-open="true"] {
+    z-index: 2;
+    border-color: #ed6b23;
+    box-shadow: 0 6px 20px rgb(0 0 0 / 16%);
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature h2 { margin: 0; font: inherit; animation: none; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    width: 100%;
+    min-height: 44px;
+    padding: 8px 11px;
+    border: 0;
+    background: transparent;
+    color: var(--astrid-ink);
+    font: 600 .875rem/1.15 Georgia, 'Times New Roman', serif;
+    text-align: left;
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature-trigger:focus-visible {
+    outline: 2px solid #ed6b23;
+    outline-offset: -3px;
+    border-radius: 9px;
+  }
+  .astrid-mobile-feature-plus {
+    display: inline-block;
+    flex: 0 0 18px;
+    color: #ed6b23;
+    font: 400 1.125rem/1 system-ui, sans-serif;
+    text-align: center;
+    transition: transform 250ms cubic-bezier(.2,.8,.2,1);
+  }
+  .astrid-mobile-feature[data-open="true"] .astrid-mobile-feature-plus { transform: rotate(45deg); }
+  .astrid-mobile-feature-reveal {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 250ms cubic-bezier(.2,.8,.2,1);
+  }
+  .astrid-mobile-feature[data-open="true"] .astrid-mobile-feature-reveal { grid-template-rows: 1fr; }
+  .astrid-mobile-feature-clip { min-height: 0; overflow: hidden; visibility: hidden; }
+  .astrid-mobile-feature[data-open="true"] .astrid-mobile-feature-clip { visibility: visible; }
+  .astrid-mobile-feature-detail {
+    padding: 0 11px 11px;
+    opacity: 0;
+    translate: 0 3px;
+    transition: opacity 150ms ease, translate 200ms ease;
+  }
+  .astrid-mobile-feature[data-position^="bottom"] .astrid-mobile-feature-detail { padding: 11px 11px 0; }
+  .astrid-mobile-feature[data-open="true"] .astrid-mobile-feature-detail { opacity: 1; translate: 0 0; transition-delay: 45ms; }
+  .astrid-public-site[data-mobile-layout] .astrid-mobile-feature-detail p { margin: 0; font-size: .8125rem; line-height: 1.45; color: var(--astrid-muted); }
+  .astrid-mobile-integrations { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; margin: 10px 0 0; padding: 0; list-style: none; }
+  .astrid-mobile-integrations a { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 52px; padding: 4px; border-radius: 5px; color: var(--astrid-ink); font-size: .625rem; text-decoration: none; }
+  .astrid-mobile-integrations a:focus-visible { outline: 2px solid #ed6b23; outline-offset: 1px; }
+  .astrid-mobile-integrations img { width: 24px; height: 24px; object-fit: contain; }
+  .astrid-public-site[data-mobile-layout] [data-astrid-feature-highlight] {
+    outline: 2px solid #ed6b23;
+    outline-offset: 2px;
+  }
+
+  .astrid-mobile-callouts[data-reduced-motion="true"] *,
+  .astrid-mobile-callouts[data-reduced-motion="true"] *::before { transition: none !important; animation: none !important; }
+}
+
+@media (max-width: 350px) {
+  .astrid-public-site[data-mobile-layout] { --astrid-mobile-gutter: 10px; }
+  .astrid-public-site[data-mobile-layout] .astrid-audience-switch button { padding-inline: 9px; }
+  .astrid-public-site[data-mobile-layout] .astrid-brand-name { font-size: 1.25rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .astrid-mobile-callouts *, .astrid-mobile-callouts *::before { transition: none !important; animation: none !important; }
+}

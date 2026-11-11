@@ -4,9 +4,11 @@ import { retargetMotionTiming, type PublicAstridExperience, type PublicAstridMot
 import { ACTIVE_PUBLIC_ASTRID_EXAMPLE_METADATA, loadActivePublicAstridExample } from './publicAstridExampleSelection.ts';
 import type { PublicAstridMountedEditorProps } from './PublicAstridMountedEditor.tsx';
 import { PublicAstridCallouts } from './PublicAstridCallouts.tsx';
+import { PublicAstridMobileCallouts } from './PublicAstridMobileCallouts';
 import { PublicAstridHeroCta } from './PublicAstridHeroCta.tsx';
 import { MinkCircle } from './components/MinkCircle/MinkCircle';
 import './PublicAstridShell.css';
+import './PublicAstridMobile.css';
 import { PublicAstridSocialLinks } from './PublicAstridSocialLinks.tsx';
 import { usePublicAstridLayoutGlide } from './usePublicAstridLayoutGlide';
 import { usePublicAstridPlayerHeight } from './usePublicAstridPlayerHeight';
@@ -143,7 +145,7 @@ function HeroSubtitle({ audience, phone, onSwitch }: { audience: ExperienceState
               {mode === 'app' ? ' video editor' : ' creative agent'}
             </span>
           ))}
-        </span><span className="astrid-subtitle-shared"> built to unlock the artistic potential of open models.</span>
+        </span><span className="astrid-subtitle-shared">{phone ? ' for open models.' : ' built to unlock the artistic potential of open models.'}</span>
       </p>
     </div>
   );
@@ -260,7 +262,7 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
   const motionClockRef = useRef<PublicAstridMotionClock>(null);
   const reducedMotionRef = useRef(prefersReducedMotion);
   const landingGridRef = useRef<HTMLElement>(null);
-  usePublicAstridLayoutGlide(landingGridRef, prefersReducedMotion, visualActive);
+  usePublicAstridLayoutGlide(landingGridRef, prefersReducedMotion, visualActive && !environment.phone);
   const routeAnnouncementGenerationRef = useRef(0);
   const pendingRouteAnnouncementRef = useRef<{ generation: number; state: ExperienceState } | null>(null);
   const lastAnnouncedExperienceRef = useRef<ExperienceState | null>(null);
@@ -579,8 +581,8 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
     window.location.reload();
   }, []);
 
-  // Before callouts mount, size the preview for readiness. Once revealed, their stage pass owns it.
-  usePublicAstridPlayerHeight(editorStageRef, visualActive && !editorRevealed);
+  // Desktop callouts take over preview geometry after readiness. Mobile is sized entirely by CSS.
+  usePublicAstridPlayerHeight(editorStageRef, visualActive && !editorRevealed && !environment.phone);
 
   useEffect(() => {
     if (!visualActive) return;
@@ -673,6 +675,7 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
       data-astrid-lifecycle={lifecycle}
       data-astrid-visual-active={visualActive}
       data-astrid-public-entry="astrid-public-v1"
+      data-mobile-layout={environment.phone || undefined}
       data-astrid-direct-entry={directEntryAudience === state.audience ? directEntryAudience : undefined}
       data-audience={state.audience}
       data-theme={theme}
@@ -750,15 +753,17 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
               Agent
             </button>
           </nav>
-          <h1 id="astrid-hero-title">Push local AI to its <span className="astrid-hero-emphasis">creative limits.</span></h1>
-          <div className="astrid-hero-detail">
-            <HeroSubtitle audience={state.audience} phone={environment.phone} onSwitch={(audience) => updateState({ audience })} />
-            <div className="astrid-hero-actions">
-              <PublicAstridHeroCta active={visualActive} />
+          <div className="astrid-mobile-footer">
+            <h1 id="astrid-hero-title">Push local AI to its <span className="astrid-hero-emphasis">creative limits.</span></h1>
+            <div className="astrid-hero-detail">
+              <HeroSubtitle audience={state.audience} phone={environment.phone} onSwitch={(audience) => updateState({ audience })} />
+              <div className="astrid-hero-actions">
+                <PublicAstridHeroCta active={visualActive} />
+              </div>
             </div>
-          </div>
-          <div className="astrid-hero-note">
-            <PublicAstridSocialLinks />
+            <div className="astrid-hero-note">
+              <PublicAstridSocialLinks />
+            </div>
           </div>
         </div>
 
@@ -883,14 +888,21 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
               </button>
             )}
 
-            {editorRevealed && (
+            {editorRevealed && (environment.phone ? (
+              <PublicAstridMobileCallouts
+                stageRef={editorStageRef}
+                audience={state.audience}
+                reducedMotion={prefersReducedMotion}
+                active={visualActive}
+              />
+            ) : (
               <PublicAstridCallouts
                 stageRef={editorStageRef}
                 audience={state.audience}
                 reducedMotion={prefersReducedMotion}
                 active={visualActive}
               />
-            )}
+            ))}
           </div>
         </section>
       </section>

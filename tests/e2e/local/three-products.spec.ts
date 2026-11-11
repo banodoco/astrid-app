@@ -2205,7 +2205,7 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   // currently supports an ordinary image add", timelineLocalSaveHandoff.ts). Fixing #252 means restoring that native
   // video placement, verified read included; removing the image-only guard alone does not make this read happen.
   // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/252; owner decision 11 Nov moved the video-drop save fix to Plan 39, making this eligible despite the earlier Release 12 ruling.
-  test.fail(true, 'Dropped video is not saved (image-only guard); see #252');
+  test.fail(true, 'Dropped video is not saved: native video placement was removed in 7b33f8f50; see #252');
   const wrongVerified = await wrongVerifiedResponse;
   expect(wrongVerified.status()).toBe(404);
   await expect(wrongVerified.json()).resolves.toEqual({

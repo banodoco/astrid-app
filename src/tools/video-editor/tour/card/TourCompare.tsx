@@ -5,18 +5,25 @@ import { TourMedia } from './TourMedia';
 import { useEditorTour } from '@/shared/state/editorTourStore';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 
-/** Where the divider rests (percent from the left): a little more of the realistic still than of the frame, both readable. */
-export const COMPARE_REST = 58;
-/** The sweep starts a beat after the card has come to rest, then crosses once from the left edge to `COMPARE_REST`. */
+/** Where the divider rests (percent from the left): the middle, so the frame, the still and both labels read. */
+export const COMPARE_REST = 50;
+/**
+ * The sweep starts a beat after the card has come to rest. It is one left-to-right pass in two overlapping parts: the still wipes
+ * in across the frame, and the divider follows it in from the left edge to `COMPARE_REST`, bringing the frame back on its side.
+ */
 export const COMPARE_SWEEP_DELAY_MS = 200;
-export const COMPARE_SWEEP_MS = 1400;
+export const COMPARE_SWEEP_MS = 1700;
+/** The wipe's share of the sweep, the width of its soft edge (percent of the picture), and when the divider sets off. */
+const WIPE_END = 0.62;
+const WIPE_FEATHER = 10;
+const DIVIDER_START = 0.3;
 /** The act-2 card's entrance: it settles (and reports ready) just after the sweep has come to rest. */
 export const TOUR_COMPARE_ENTRANCE_MS = COMPARE_SWEEP_DELAY_MS + COMPARE_SWEEP_MS + 50;
 /** A press this close to the divider (px) takes it where it is, so grabbing it never makes it jump. */
 const GRAB_SLOP_PX = 18;
 const KEY_STEP = 5;
 const PAGE_STEP = 20;
-/** The divider fades up over the first part of the sweep, so it never appears stuck to the left edge. */
+/** The divider fades up over the first part of its travel, so it never appears stuck to the left edge. */
 const FADE_PORTION = 0.12;
 /** The most one animation frame advances the sweep (ms). */
 const MAX_FRAME_MS = 100;
@@ -37,10 +44,29 @@ const bezier = (x1: number, x2: number) => (t: number) => {
 /** A gentle start that gets going soon, and a long, soft landing: cubic-bezier(0.4, 0, 0.2, 1). */
 const ease = bezier(0.4, 0.2);
 
+/** Where the arrival is at progress `t` (0–1): the divider, its handle's opacity, and the front of the still's wipe (percent). */
+interface Pose { position: number; handle: number; front: number }
+const part = (t: number, from: number, to: number) => Math.min(1, Math.max(0, (t - from) / (to - from)));
+function poseAt(t: number): Pose {
+  return {
+    front: (100 + WIPE_FEATHER) * ease(part(t, 0, WIPE_END)),
+    position: COMPARE_REST * ease(part(t, DIVIDER_START, 1)),
+    handle: part(t, DIVIDER_START, DIVIDER_START + FADE_PORTION),
+  };
+}
+/** The still's soft leading edge while it wipes in; once it has crossed, the still is simply there. */
+function wipeMask(front: number | null) {
+  if (front === null || front >= 100 + WIPE_FEATHER) return undefined;
+  const mask = `linear-gradient(to right, #000 ${front - WIPE_FEATHER}%, transparent ${front}%)`;
+  return { maskImage: mask, WebkitMaskImage: mask };
+}
+
 /**
- * The frame → still comparison: the realistic still on the left, the Three.js frame it was made from on the right. As the
- * card arrives the divider sweeps once from the left edge, painting the still in over the frame, and rests at
- * `COMPARE_REST`. From then on it is a slider: drag anywhere along the picture (mouse, pen or touch), or focus the handle and use
+ * The frame → still comparison: the Three.js frame on the left, the realistic still made from it on the right. As the
+ * card arrives the picture is the frame alone; the still wipes in over it from left to right (the frame becomes the still), and
+ * the divider follows from the left edge, uncovering the frame again on its side, and rests at `COMPARE_REST`. With the frame on
+ * the left, a divider that only travelled right would uncover the frame and tell the story backwards; the wipe ahead of it is
+ * what says which came first. From then on it is a slider: drag anywhere along the picture (mouse, pen or touch), or focus the handle and use
  * the arrow keys, Page Up/Down, Home and End. Taking it mid-sweep stops the sweep where it is. Each label is clipped with its
  * own picture, so it only ever names what is under it. Mounted without `sweep` (reduced motion, Back) it rests from the start.
  */
@@ -53,6 +79,8 @@ export function TourCompare({ labels: [source, model], sweep, waiting = false }:
   const boxRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(sweep ? 0 : COMPARE_REST);
   const [reveal, setReveal] = useState(sweep ? 0 : 1);
+  /** While the still wipes in: its front (percent from the left); null once it is simply there. */
+  const [front, setFront] = useState<number | null>(sweep ? 0 : null);
   const [dragging, setDragging] = useState(false);
   const positionRef = useRef(position);
   /** Once the user takes the divider the sweep never moves it again. */
@@ -74,26 +102,33 @@ export function TourCompare({ labels: [source, model], sweep, waiting = false }:
   const skipAnimation = useEditorTour((state) => state.skipAnimation);
   const skipAtMount = useRef(skipAnimation);
   useEffect(() => {
-    if (skipAnimation === skipAtMount.current || !sweepsRef.current || takenRef.current) return;
+    if (skipAnimation === skipAtMount.current || !sweepsRef.current) return;
     sweepsRef.current = false;
+    setFront(null);
+    if (takenRef.current) return;
     moveTo(COMPARE_REST);
     setReveal(1);
   }, [skipAnimation]);
 
   useEffect(() => {
-    if (waiting || !sweepsRef.current || takenRef.current) return;
+    if (waiting || !sweepsRef.current) return;
     let frame = 0;
     let last: number | null = null;
     let elapsed = 0;
     const tick = (now: number) => {
-      if (takenRef.current || !sweepsRef.current) return;
+      if (!sweepsRef.current) return;
       // A long frame (the editor busy loading) slows the sweep down rather than letting it skip ahead.
       elapsed += last === null ? 0 : Math.min(now - last, MAX_FRAME_MS);
       last = now;
       const t = Math.min(1, Math.max(0, (elapsed - COMPARE_SWEEP_DELAY_MS) / COMPARE_SWEEP_MS));
-      moveTo(COMPARE_REST * ease(t));
-      setReveal(Math.min(1, t / FADE_PORTION));
-      if (t < 1) frame = requestAnimationFrame(tick);
+      const pose = poseAt(t);
+      // Once taken, the divider is the user's; the wipe still finishes, so the picture never snaps.
+      if (!takenRef.current) {
+        moveTo(pose.position);
+        setReveal(pose.handle);
+      }
+      setFront(t < WIPE_END ? pose.front : null);
+      if (t < (takenRef.current ? WIPE_END : 1)) frame = requestAnimationFrame(tick);
       else sweepsRef.current = false;
     };
     frame = requestAnimationFrame(tick);
@@ -162,11 +197,16 @@ export function TourCompare({ labels: [source, model], sweep, waiting = false }:
     >
       <div className="absolute inset-0" aria-hidden="true">
         <TourMedia slot={EDITOR_TOUR_MEDIA.frames[0]} kind="frame" />
-        <Chip className="right-2">{source}</Chip>
+        <Chip className="left-2">{source}</Chip>
       </div>
-      <div data-tour-compare-still className="absolute inset-0" style={{ clipPath: `inset(0 ${100 - position}% 0 0)` }} aria-hidden="true">
+      <div
+        data-tour-compare-still
+        className="absolute inset-0"
+        style={{ clipPath: `inset(0 0 0 ${position}%)`, ...wipeMask(front) }}
+        aria-hidden="true"
+      >
         <TourMedia slot={EDITOR_TOUR_MEDIA.stills[0]} kind="still" />
-        <Chip className="left-2">{model}</Chip>
+        <Chip className="right-2">{model}</Chip>
       </div>
       <div
         data-tour-compare-divider
@@ -176,12 +216,12 @@ export function TourCompare({ labels: [source, model], sweep, waiting = false }:
       <div
         role="slider"
         tabIndex={0}
-        aria-label={`Compare ${model} (left) with the ${source.toLowerCase()} (right)`}
+        aria-label={`Compare the ${source.toLowerCase()} (left) with ${model} (right)`}
         aria-orientation="horizontal"
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={value}
-        aria-valuetext={`${value}% ${model}`}
+        aria-valuetext={`${source} ${value}%, ${model} ${100 - value}%`}
         // The tour's own keys (Enter, Esc) still reach the tour; this handle keeps the arrows, Page Up/Down, Home and End.
         data-editor-tour-keys="own"
         onKeyDown={onKeyDown}

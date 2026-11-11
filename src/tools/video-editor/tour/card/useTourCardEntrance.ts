@@ -41,8 +41,10 @@ export function useTourCardEntrance(
   }, [skipAnimation, key]);
 
   useEffect(() => {
-    if (settled && reportsReady) markEditorTourReady('card');
-  }, [settled, reportsReady, key]);
+    // Never ready before the card is actually there: Next must not be live while the card is still arriving (or, on a
+    // land beat's watch, not shown yet).
+    if (settled && reportsReady && arrived) markEditorTourReady('card');
+  }, [settled, reportsReady, arrived, key]);
 
   return { settled, reducedMotion };
 }

@@ -8,9 +8,10 @@ import { TourGalleryLayer } from '../gallery/TourGalleryLayer';
 import { TourSpotlight } from './TourSpotlight';
 import { backEditorTour, finishEditorTour, runEditorTourPrimary, watchEditorTourSend } from './tourBeats';
 import { placeCard, type CardPosition } from './cardPlacement';
-import { TOUR_MOVE_EASE, TOUR_MOVE_MS, useSettledRects } from './useSettledRects';
+import { TOUR_LEAVE_MS, TOUR_MOVE_EASE, TOUR_MOVE_MS, useSettledRects } from './useSettledRects';
 import { spotlightTargetKey, useSpotlightMeasurement, useSpotlightRects, type SpotlightRect, type SpotlightTarget } from './useSpotlightRects';
-import { useCardMove } from './useCardMove';
+import { TOUR_ARRIVE_MS, useCardMove, WATCH_SUFFIX } from './useCardMove';
+import { LAND_WATCH_HOLD_MS, LAND_WATCH_PILL, useLandWatch } from './landWatch';
 import { useTourKeys } from './useTourKeys';
 import { useEditorDeviceClass } from './useIsDesktopEditor';
 import type { TimelineDeviceClass } from '../../lib/mobile-interaction-model';
@@ -128,22 +129,33 @@ function RunningTour() {
   const motion = !reducedMotion;
   // Respond has two phases on desktop: the reply coming in, then its actions (`respondWorking`).
   const working = respondWorking(device, beat, { chatReady, instant, reducedMotion });
-  const stepKey = `${runId}:${act}:${beat}${working ? ':working' : ''}`;
+  // A land beat first lets its result play alone (`useLandWatch`), then shows its explainer: two steps, one beat.
+  const watching = useLandWatch(`${runId}:${act}:${beat}`, act, beat);
+  const stepKey = `${runId}:${act}:${beat}${working ? ':working' : ''}${watching ? WATCH_SUFFIX : ''}`;
   const cardRef = useRef<HTMLDivElement>(null);
   const targets = spotlightTargets(act, beat, device, working);
   const measurement = useSpotlightMeasurement(targets);
   // The card and spotlight show the step whose targets have all arrived and held still; it trails the store's by the leave.
   const cardMoving = useRef<() => boolean>(() => false);
-  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current() });
+  const shownStep = useRef('');
+  // The watch ending keeps the card and its counter row: nothing leaves, the explainer unfolds where the card is.
+  const unfolding = shownStep.current === `${stepKey}${WATCH_SUFFIX}`;
+  const commit = useSettledRects({ key: stepKey, targetsKey: spotlightTargetKey(targets), measurement, motion, moving: () => cardMoving.current(), leaves: !unfolding });
+  shownStep.current = commit.key;
   const [, shownAct, shownBeat, shownPhase] = commit.key.split(':') as [string, `${EditorTourAct}`, EditorTourBeat, string | undefined];
   const pending = commit.key !== stepKey;
+  const watchShown = shownPhase === 'watch';
   // The browser tour's phone chat stays in until the card and spotlight have moved off it.
   useLayoutEffect(() => showEditorTourBeat(shownBeat), [shownBeat]);
   // The Send button is the one thing outside the card the user may press.
   const sendRects = useSpotlightRects(beat === 'compose' ? [editorTourSelector(EDITOR_TOUR_ANCHORS.chatSend)] : []);
-  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate, motion, pending });
+  const { size, arrivedKey, moving } = useCardMove(cardRef, { key: commit.key, animate: commit.animate, motion, pending: pending && !unfolding, pill: LAND_WATCH_PILL });
   cardMoving.current = moving;
-  const arrived = !motion || arrivedKey === commit.key;
+  // `landed`: the card's move is over. `arrived`: the explainer itself is there (never during a watch), so its entrance
+  // and its readiness wait for it.
+  const landed = !motion || arrivedKey === commit.key;
+  const arrived = landed && !watchShown;
+  const hidden = watchShown && !LAND_WATCH_PILL;
   // Whether this step's card rose into view by itself (the first card, a jump) or came in with the move; fixed per step.
   const rise = useRef({ key: '', rise: true });
   if (rise.current.key !== commit.key) rise.current = { key: commit.key, rise: !(motion && commit.animate) };
@@ -173,22 +185,29 @@ function RunningTour() {
       <div
         ref={cardRef}
         data-editor-tour-card-host
+        data-editor-tour-watch-hold={shownBeat === 'land' ? LAND_WATCH_HOLD_MS[Number(shownAct) as EditorTourAct] : undefined}
         // On a phone the card keeps clear of the home indicator of a full-screen web app.
         className={device === 'phone' ? 'fixed left-0 top-0 pb-[env(safe-area-inset-bottom)]' : 'fixed left-0 top-0'}
         style={{
           zIndex: UI_Z_LAYERS.EDITOR_TOUR_CARD,
           transform: `translate3d(${position.left}px, ${position.top}px, 0)`,
           willChange: 'transform',
-          transition: moves ? `transform ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}` : 'none',
+          // With no bar during a watch, the card fades out where it stands, takes its place unseen, and fades in there.
+          opacity: hidden ? 0 : 1,
+          transition: !moves ? 'none'
+            : LAND_WATCH_PILL ? `transform ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}`
+            : hidden ? `opacity ${TOUR_LEAVE_MS}ms ease-out, transform 0s linear ${TOUR_LEAVE_MS}ms`
+            : `opacity ${TOUR_ARRIVE_MS}ms ease-out, transform ${TOUR_MOVE_MS}ms ${TOUR_MOVE_EASE}`,
           // Between the store's beat changing and the card showing it, the old card's buttons would act on the new beat;
-          // while it travels in, its content is not there yet.
-          pointerEvents: pending || !arrived ? 'none' : undefined,
+          // while it travels in, its content is not there yet. A watch's bar (Back, Skip tour) is live once it has landed.
+          pointerEvents: (pending && !unfolding) || !landed || hidden ? 'none' : undefined,
         }}
       >
         <TourCard
           act={Number(shownAct) as EditorTourAct}
           beat={shownBeat}
           working={shownPhase === 'working'}
+          watching={watchShown}
           arrived={arrived}
           rise={rise.current.rise}
           device={device}

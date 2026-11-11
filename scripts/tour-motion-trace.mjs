@@ -2,7 +2,7 @@
 /**
  * node scripts/tour-motion-trace.mjs [--out test-results/tour-motion/<ts>] [--theme dark|light]
  *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--no-screencast]
- *   [--viewport 1440x900] [--react] [--reanalyse test-results/tour-motion/<name>] [--help]
+ *   [--viewport 1440x900] [--react] [--skip] [--reanalyse test-results/tour-motion/<name>] [--help]
  *
  * Measures MOTION of the first-run tour on desktop (1440x900 unless --viewport, reducedMotion: no-preference). The sibling
  * tour-screenshots.mjs only takes settled stills with motion off; this walks the same beats with motion on and,
@@ -21,6 +21,7 @@
  * respond, its two phases), never changes destination mid-flight or reverses, cutouts start within a frame of the card,
  * no lit cutout passes through the page corner (0,0,0,0), and the new step's content is only whole near rest.
  *
+ * --skip also traces act 2's land with Enter pressed 1.5 s into its watch (the explainer must then come at once).
  * --reanalyse re-scores an earlier run from its samples.json files with this version's analyser (no browser).
  * --react installs a React DevTools-style commit hook and reports, per transition (and for a beat that had to be nudged,
  * the 3 s before the nudge), how many React commits ran and which components re-rendered most: what keeps the page busy.
@@ -77,9 +78,13 @@ function installSampler() {
       t, host: r4(host), tf: host?.style.transform ?? null, tr: host?.style.transition ?? null, sec: r4(section), op: section ? Number(getComputedStyle(section).opacity) : null,
       // What the card's content shows, and how visible it is (content wrapper opacity x section opacity).
       cop: section ? Number(getComputedStyle(section).opacity) * (content ? Number(getComputedStyle(content).opacity) : 1) : null,
+      // A land beat's watch: the explainer is folded away (only the counter row shows, or nothing) while the result plays.
+      watch: card?.hasAttribute('data-editor-tour-card-watch') ?? false, hold: Number(host?.getAttribute('data-editor-tour-watch-hold')) || null,
+      hop: host ? Number(getComputedStyle(host).opacity) : null,
+      rop: (() => { const rest = card?.querySelector('[data-editor-tour-card-rest]'); return rest ? (rest.hasAttribute('data-folded') ? 0 : Number(getComputedStyle(rest).opacity)) : null; })(),
       card: card?.getAttribute('data-editor-tour-card') ?? null, phase: card?.getAttribute('data-editor-tour-card-phase') ?? null,
       cardSettled: card?.hasAttribute('data-settled') ?? false, arrived: card ? !card.hasAttribute('data-editor-tour-card-phase') && (card.hasAttribute('data-arrived') || !document.querySelector('[data-editor-tour-card-content]')) : false,
-      st: state && { status: state.status, act: state.act, beat: state.beat, shownBeat: state.shownBeat, ready: state.ready, instant: state.instant },
+      st: state && { status: state.status, act: state.act, beat: state.beat, shownBeat: state.shownBeat, ready: state.ready, instant: state.instant, skipAnimation: state.skipAnimation },
       beatReady: Boolean(state && window.__tourShotsBeats.isEditorTourBeatReady(state)),
       cut: [...document.querySelectorAll('#editor-tour-dim rect[fill="black"]')].map(geometry),
       ring: [...document.querySelectorAll('[data-editor-tour-ring]')].map(geometry),
@@ -243,7 +248,7 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
     const a = samples[i - 1].host, b = samples[i].host;
     if (a && b && (Math.abs(a[2] - b[2]) > EPS || Math.abs(a[3] - b[3]) > EPS)) sizeChanges.push({ t: round(samples[i].t, 0), from: [round(a[2]), round(a[3])], to: [round(b[2]), round(b[3])], whileMoving: samples[i].t >= (card.firstMoveT ?? Infinity) && samples[i].t <= (card.restT ?? -Infinity) });
   }
-  const label = (s) => (s.card && s.phase ? `${s.card}:${s.phase}` : s.card);
+  const label = (s) => (s.card && s.phase ? `${s.card}:${s.phase}` : s.card && s.watch ? `${s.card}:watch` : s.card);
   const swaps = [];
   for (let i = 1; i < samples.length; i++) if (label(samples[i]) !== label(samples[i - 1]) && last.host) {
     const h = samples[i].host;
@@ -333,7 +338,27 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
     maxMs: round(Math.max(...moving.map((k) => Math.abs(k.firstMoveT - card.firstMoveT))), 0),
     maxFrames: Math.max(...moving.map((k) => Math.abs(k.firstMoveFrame - cardFirstFrame))),
   };
-  const result = { frames, tourEnded: ended, startSync: sync, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
+  // Land pacing: the result plays alone (the watch) for `hold` ms after the timeline reports it is being presented, and
+  // only then does the explainer appear, in place.
+  let pacing = null;
+  if (dest.beat === 'land') {
+    const land = samples.filter((s) => s.t >= 0 && s.st?.beat === 'land' && s.st.act === dest.act);
+    const readyT = land.find((s) => s.st.ready.timeline)?.t ?? null;
+    const explainer = (s) => s.card === 'land' && !s.watch && s.st.shownBeat === 'land';
+    const cardT = land.find((s) => explainer(s) && (s.rop ?? s.cop ?? 1) > 0.05 && (s.hop ?? 1) > 0.05)?.t ?? null;
+    const wholeT = land.find((s) => explainer(s) && (s.rop ?? s.cop ?? 1) >= 0.99 && (s.hop ?? 1) >= 0.99)?.t ?? null;
+    const watchT = land.find((s) => s.watch)?.t ?? null;
+    const spotRest = Math.max(...cutouts.filter((k) => k.used && !k.closed).map((k) => k.restT ?? -Infinity));
+    const hold = land.find((s) => s.hold)?.hold ?? null;
+    const skipT = clicksOrKeys(samples);
+    const cardXY = samples.filter((s) => s.host && s.t >= (watchT ?? Infinity));
+    const moved = analyseSeries(cardXY.filter((s) => s.t >= (cardT ?? Infinity) - 50).map((s) => ({ t: s.t, v: s.host })), 2).travel;
+    pacing = { holdMs: hold, watchShownT: round(watchT, 0), spotlightRestT: Number.isFinite(spotRest) ? round(spotRest, 0) : null, timelineReadyT: round(readyT, 0), cardVisibleT: round(cardT, 0), cardWholeT: round(wholeT, 0),
+      heldMs: readyT != null && cardT != null ? round(cardT - readyT, 0) : null, skipped: skipT,
+      cardBeforeHold: hold != null && readyT != null && cardT != null ? cardT - readyT < hold - 20 : cardT != null && readyT == null,
+      cardMovedWhileAppearingPx: moved };
+  }
+  const result = { frames, tourEnded: ended, startSync: sync, pacing, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
   Object.assign(result, suspectsFor(result, source, dest, expectMoves), { expectMoves });
   return result;
 }
@@ -384,6 +409,12 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
     // A closing cutout is invisible before its fade ends, so its last lit frame comes early by design.
     if (!k.closed && k.restT != null && k.firstMoveT != null && c.restT != null && Math.abs(k.restT - c.restT) > 250) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at t=${Math.round(c.restT)}ms`);
   }
+  const p = m.pacing;
+  if (p) {
+    notes.push(`pacing: bar/watch shown t=${p.watchShownT ?? '-'}ms, spotlight at rest t=${p.spotlightRestT ?? '-'}ms, timeline ready t=${p.timelineReadyT ?? '-'}ms, explainer visible t=${p.cardVisibleT ?? '-'}ms (whole t=${p.cardWholeT ?? '-'}ms): held ${p.heldMs ?? '-'}ms of ${p.holdMs ?? '-'}ms${p.skipped != null ? `; skipped by the user at t=${p.skipped}ms` : ''}`);
+    if (p.cardBeforeHold && p.skipped == null) out.push(`explainer visible ${p.heldMs ?? '?'}ms after the timeline was ready, before its ${p.holdMs}ms hold elapsed`);
+    if (p.cardMovedWhileAppearingPx > 2) out.push(`card moved ${p.cardMovedWhileAppearingPx}px while its explainer appeared (it should unfold in place)`);
+  }
   if (m.frames.maxDtMs > 100 || m.frames.over50ms > 5) out.push(`environment: page frame cadence median ${m.frames.medianDtMs}ms, p95 ${m.frames.p95DtMs}ms, worst ${m.frames.maxDtMs}ms at t=${m.frames.maxDtAtT}ms, ${m.frames.over50ms} frames > 50ms (idle before trigger: median ${m.frames.preTriggerMedianDtMs}ms)`);
   if (m.previewUnavailable) out.push(`"Preview unavailable" text present in the preview for ${m.previewUnavailable.frames} frames, t=${m.previewUnavailable.firstT}–${m.previewUnavailable.lastT}ms`);
   void source;
@@ -397,6 +428,12 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
     return [...merged].map(([line, slots]) => (slots ? `cutout${slots.length > 1 ? 's' : ''} #${slots.join(',#')} ${line.slice(2)}` : line));
   };
   return { suspects: merge(out), notes: merge(notes) };
+}
+
+/** Whether the user skipped ahead inside the trace (the sampler marks Enter presses as `key` samples). */
+function clicksOrKeys(samples) {
+  const hit = samples.find((s, k) => k && s.st && samples[k - 1].st && s.st.skipAnimation !== samples[k - 1].st.skipAnimation);
+  return hit ? round(hit.t, 0) : null;
 }
 
 /** Moves a transition should make: one per user action (the back-early trace is two: Next, then Back), and desktop's
@@ -450,7 +487,7 @@ export function parseOptions(args) {
   const o = {};
   for (let i = 0; i < args.length; i++) {
     const [key, inline] = args[i].split('=');
-    if (key === '--back' || key === '--help' || key === '--no-screencast' || key === '--react') { o[key.slice(2)] = true; continue; }
+    if (key === '--back' || key === '--help' || key === '--no-screencast' || key === '--react' || key === '--skip') { o[key.slice(2)] = true; continue; }
     if (!['--out', '--theme', '--base-url', '--transitions', '--viewport', '--reanalyse'].includes(key)) throw new Error(`Unknown flag: ${key}`);
     o[key.slice(2)] = inline ?? args[++i];
     if (!o[key.slice(2)] || o[key.slice(2)].startsWith('--')) throw new Error(`${key} needs a value`);
@@ -636,6 +673,12 @@ export async function run(options) {
         }, 'act1-respond→act1-land→back-early→act1-respond');
         await recordBeat(src);
       }
+      if (options.skip && dst.id === 'act2-land') {
+        // Send, then Enter a moment into the watch: the explainer must come at once. Then Back, to walk on as usual.
+        await trace(src, '__skip', async () => { await nextButton(src).click(); await delay(1500); await page.keyboard.press('Enter'); return dst; });
+        const previous = await trace(dst, '__back-after-skip', back(dst));
+        await recordBeat(previous);
+      }
       await trace(src, '', forward(src, dst));
       await recordBeat(dst);
       if (options.back && dst.beat === 'land') {
@@ -666,6 +709,12 @@ function renderMarkdown(report) {
     const c = t.card;
     const cutoutRetargets = t.cutouts.reduce((n, k) => n + k.retargets.filter((r) => r.whileMoving).length, 0);
     lines.push(`| ${t.name} | ${c.segments.length} (${t.expectMoves}) | ${c.retargets.filter((r) => r.t >= 0).length} (${t.expectMoves}) | ${c.midFlightRetargets}${cutoutRetargets ? ` (+${cutoutRetargets} cutout)` : ''} | ${c.reversals} | ${c.firstMoveT == null ? '-' : `${Math.round(c.firstMoveT)} / ${Math.round(c.restT)}ms`} | ${t.startSync ? `${t.startSync.maxMs}ms / ${t.startSync.maxFrames}f` : '-'} | ${yes(t.cutouts.some((k) => k.cornerTouchT.length))} | ${c.contentInFlight.maxOpacityAway} | ${t.suspects.length} |`);
+  }
+  const paced = report.transitions.filter((t) => t.pacing);
+  if (paced.length) {
+    lines.push('', '## Land pacing', '', 'The result plays alone first: the explainer may appear only `hold` ms after the timeline reports the result is being presented (or at once when the user skips with Enter, or arrives by Back).', '',
+      '| transition | hold | spotlight at rest | timeline ready | explainer visible | held | card before hold elapsed | card moved while appearing |', '|---|---|---|---|---|---|---|---|');
+    for (const t of paced) { const p = t.pacing; lines.push(`| ${t.name} | ${p.holdMs ?? '-'}ms | ${p.spotlightRestT ?? '-'}ms | ${p.timelineReadyT ?? '-'}ms | ${p.cardVisibleT ?? '-'}ms | ${p.heldMs ?? '-'}ms | ${p.skipped != null ? `skipped at ${p.skipped}ms` : p.cardBeforeHold ? (/back/.test(t.name) && !/return/.test(t.name) ? 'yes (Back: no watch)' : 'YES') : 'no'} | ${p.cardMovedWhileAppearingPx}px |`); }
   }
   for (const t of report.transitions) {
     lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadavg1AtStart}->${t.hostLoad.loadavg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',

@@ -358,7 +358,8 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(reply()).toContainElement(screen.getByText('Thinking...'));
     expect(reply()).not.toContainElement(within(transcript()).getByText(ACT1.prompt));
     expect(composer().placeholder).toBe('Type to queue next message...');
-    advance(450);
+    // Thinking lasts 2.5 s, then a few reply characters have streamed in.
+    advance(2650);
     expect(transcript().textContent).toContain(ACT1.reply.slice(0, 20));
     expect(transcript().textContent).not.toContain(ACT1.reply);
     expect(chatReady()).toBe(false);

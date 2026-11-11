@@ -38,6 +38,11 @@ export interface TourCardProps {
   rise?: boolean;
   /** Respond only, while the reply is still coming in: a quiet working line, and no Next yet (Enter still finishes it). */
   working?: boolean;
+  /**
+   * Land only, while the result plays alone (the runner's watch): only the counter row shows, a quiet bar; the rest of the
+   * explainer is laid out but folded away, and unfolds in place when the watch ends.
+   */
+  watching?: boolean;
 }
 
 /** What the card's parts need to know about the device: finger-sized controls, and which layout. */
@@ -55,7 +60,7 @@ const ACT_COUNT = 3;
  * visual and the Agent → open models → output strip; at the end it says this was one example, then asks for feedback. Presentational: the runner positions it and owns the
  * actions. It marks itself ready once its entrance has played (at once on reduced motion or a skip).
  */
-export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'desktop', arrived = true, rise = true, working = false }: TourCardProps) {
+export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'desktop', arrived = true, rise = true, working = false, watching = false }: TourCardProps) {
   const runId = useEditorTour((state) => state.runId);
   const live = useEditorTour((state) => state.act === act && state.beat === beat);
   const key = `${runId}:${act}:${beat}${working ? ':working' : ''}`;
@@ -77,6 +82,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
       key={key}
       data-editor-tour-card={beat}
       data-editor-tour-card-phase={working ? 'working' : undefined}
+      data-editor-tour-card-watch={watching || undefined}
       data-settled={settled || undefined}
       data-arrived={arrived || undefined}
       className={cn('editor-tour-card', reducedMotion ? 'editor-tour-card-reduced' : !settled && cn('editor-tour-card-playing', !arrived && 'editor-tour-card-waiting'))}
@@ -104,7 +110,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
         {/* The runner fades this in and out as the card travels; the section itself (the card's box) stays. */}
         <div data-editor-tour-card-content>
         {beat === 'welcome' && <Welcome onPrimary={onPrimary} onSkip={onSkip} fit={fit} />}
-        {beat === 'land' && <Explainer act={act} playing={playing} entering={!reducedMotion && !settled} waiting={!arrived} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
+        {beat === 'land' && <Explainer act={act} playing={playing} entering={!reducedMotion && !settled} waiting={!arrived} watching={watching} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
         {beat === 'gallery' && <GalleryExplainer act={act} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
         {beat === 'finale' && <Finale playing={playing} onPrimary={onPrimary} onBack={onBack} fit={fit} />}
         {beat === 'feedback' && <Feedback onPrimary={onPrimary} onBack={onBack} fit={fit} />}
@@ -159,7 +165,19 @@ function NavRow({ secondary, children, className }: { secondary?: ReactNode; chi
 /** One heading style for every card's title on touch (Astrid's own cards keep the larger mink title). */
 const TOUCH_HEADING = 'text-pretty font-serif font-theme-heading text-xl leading-tight text-foreground';
 
-function Explainer({ act, playing, entering, waiting, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; entering: boolean; waiting: boolean; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
+/**
+ * Everything under a land card's counter row. Folded away during the watch (still laid out, so the runner knows the size
+ * the card will have and its media loads), it unfolds in place when the watch ends.
+ */
+function Rest({ folded, children }: { folded: boolean; children: ReactNode }) {
+  return (
+    <div data-editor-tour-card-rest data-folded={folded || undefined} style={folded ? { height: 0, overflow: 'hidden', visibility: 'hidden' } : undefined}>
+      {children}
+    </div>
+  );
+}
+
+function Explainer({ act, playing, entering, waiting, watching = false, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; entering: boolean; waiting: boolean; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
   const { title, body, visual, labels } = SCRIPT.acts[act].card;
   const next = <PrimaryButton label={SCRIPT.controls.next} onPrimary={onPrimary} fit={fit} />;
   const part = act === EDITOR_TOUR_GALLERY_ACT ? 1 : undefined;
@@ -167,6 +185,7 @@ function Explainer({ act, playing, entering, waiting, onPrimary, onBack, onSkip,
     return (
       <>
         <CounterRow act={act} part={part} onBack={onBack} onSkip={onSkip} fit={fit} />
+        <Rest folded={watching}>
         <div className="mt-3">
           <TourVisual visual={visual} labels={labels} playing={playing} entering={entering} waiting={waiting} />
         </div>
@@ -176,6 +195,7 @@ function Explainer({ act, playing, entering, waiting, onPrimary, onBack, onSkip,
           <TourStrip filled={act} labels={SCRIPT.strip} />
         </div>
         <div className="mt-5 flex justify-end">{next}</div>
+        </Rest>
       </>
     );
   }
@@ -185,12 +205,14 @@ function Explainer({ act, playing, entering, waiting, onPrimary, onBack, onSkip,
   return (
     <>
       <CounterRow act={act} part={part} onBack={onBack} onSkip={onSkip} fit={fit} />
+      <Rest folded={watching}>
       <h2 className={cn('mt-3', TOUCH_HEADING)}>{title}</h2>
       <p className={cn('mt-1.5 text-pretty text-muted-foreground', tablet ? 'text-[15px] leading-6' : 'text-sm leading-[1.4rem]')}>{body}</p>
       <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : undefined}>
         {tablet && <div className="min-w-0 flex-1"><TourStrip filled={act} labels={SCRIPT.strip} size="medium" /></div>}
         {next}
       </NavRow>
+      </Rest>
     </>
   );
 }

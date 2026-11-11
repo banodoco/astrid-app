@@ -13,12 +13,19 @@ const delay = (ms: number) => ({ '--tour-delay': `${ms}ms` }) as CSSProperties;
  * plays); `entering` is the entrance itself playing (the comparison's sweep). Act 2's comparison is a control, so it is the one
  * picture assistive technology reaches, and it is a little taller so both halves read.
  */
-export function TourVisual({ visual, labels, playing, entering = playing }: { visual: EditorTourVisual; labels: readonly [string, string]; playing: boolean; entering?: boolean }) {
+export function TourVisual({ visual, labels, playing, entering = playing, waiting = false }: {
+  visual: EditorTourVisual;
+  labels: readonly [string, string];
+  playing: boolean;
+  entering?: boolean;
+  /** The card is still travelling in: the entrance waits at its start. */
+  waiting?: boolean;
+}) {
   const compare = visual === 'frame-to-still';
   return (
     <div className={cn('relative overflow-hidden rounded-lg bg-muted ring-1 ring-border/70', compare ? 'h-40' : 'h-32')} aria-hidden={compare ? undefined : 'true'}>
       {visual === 'extension' && <ExtensionToClip labels={labels} />}
-      {compare && <TourCompare labels={labels} sweep={entering} />}
+      {compare && <TourCompare labels={labels} sweep={entering} waiting={waiting} />}
       {visual === 'still-to-video' && <StillToVideo labels={labels} playing={playing} />}
     </div>
   );

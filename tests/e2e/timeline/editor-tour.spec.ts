@@ -24,7 +24,7 @@ const STORE_MODULE = '/src/shared/state/editorTourStore.ts';
 const COMPOSER = '[data-editor-tour="chat-composer"]';
 const SHIELD = '[data-editor-tour-shield]';
 
-type Beat = 'welcome' | 'compose' | 'respond' | 'land' | 'finale' | 'feedback';
+type Beat = 'welcome' | 'compose' | 'respond' | 'land' | 'gallery' | 'finale' | 'feedback';
 
 test.use({
   viewport: { width: 1440, height: 900 },
@@ -49,7 +49,7 @@ async function waitSettled(page: Page, act: number, beat: Beat): Promise<void> {
   await expect.poll(async () => {
     const state = await tourState(page);
     const ready = beat === 'compose' || beat === 'respond' ? state.ready.chat
-      : beat === 'land' ? state.ready.timeline && state.ready.card
+      : beat === 'land' || beat === 'gallery' ? state.ready.timeline && state.ready.card
         : state.ready.card; // welcome, finale, feedback
     return state.status === 'running' && state.act === act && state.beat === beat && ready;
   }, { message: `act ${act} ${beat} is ready`, timeout: 60_000 }).toBe(true);
@@ -277,6 +277,13 @@ test.describe('editor tour', () => {
       if (act === 1) await waitForScenePicture(page);
       await shot(page, landShot);
       await pressPrimary(page, { act, beat: 'land' }); // Next
+      if (act === 2) {
+        // Act 2's land is followed by the Generations pane sliding up.
+        await waitSettled(page, act, 'gallery');
+        await expect(page.locator('[data-editor-tour="generations-pane"]')).toBeVisible();
+        await shot(page, '07b-act2-gallery');
+        await pressPrimary(page, { act, beat: 'gallery' }); // Next
+      }
     }
 
     await waitSettled(page, 3, 'finale');

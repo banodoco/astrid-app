@@ -115,11 +115,20 @@ describe('tour beat machine', () => {
       readyLand();
       stages.push(editorTourStage(act, 'land'));
       runEditorTourPrimary();
+      if (act === 2) {
+        // Act 2's land is followed by the gallery beat, which keeps act 2's timeline.
+        expect(getEditorTourState()).toMatchObject({ act: 2, beat: 'gallery', instant: false });
+        runEditorTourPrimary(); // not ready yet: finishes the animation first
+        expect(getEditorTourState()).toMatchObject({ beat: 'gallery', skipAnimation: expect.any(Number) });
+        readyLand();
+        stages.push(editorTourStage(act, 'gallery'));
+        runEditorTourPrimary();
+      }
     }
 
     // After act 3 lands, the next primary goes to finale, not a fourth compose.
     expect(getEditorTourState()).toMatchObject({ act: 3, beat: 'finale' });
-    expect(stages).toEqual([1, 2, 3]);
+    expect(stages).toEqual([1, 2, 2, 3]);
 
     // finale waits on card readiness
     runEditorTourPrimary();
@@ -145,6 +154,7 @@ describe('tour beat machine', () => {
       [1, 'compose'],
       [1, 'respond'],
       [2, 'land'],
+      [2, 'gallery'],
       [3, 'finale'],
       [3, 'feedback'],
     ] as const;
@@ -215,7 +225,8 @@ describe('tour Back', () => {
     [{ act: 1, beat: 'land' }, { act: 1, beat: 'respond' }],
     [{ act: 2, beat: 'compose' }, { act: 1, beat: 'land' }],
     [{ act: 2, beat: 'land' }, { act: 2, beat: 'compose' }],
-    [{ act: 3, beat: 'compose' }, { act: 2, beat: 'land' }],
+    [{ act: 2, beat: 'gallery' }, { act: 2, beat: 'land' }],
+    [{ act: 3, beat: 'compose' }, { act: 2, beat: 'gallery' }],
     [{ act: 3, beat: 'land' }, { act: 3, beat: 'compose' }],
     [{ act: 3, beat: 'finale' }, { act: 3, beat: 'land' }],
     [{ act: 3, beat: 'feedback' }, { act: 3, beat: 'finale' }],
@@ -255,7 +266,7 @@ describe('tour Back', () => {
       const { act, beat } = getEditorTourState();
       visited.push(`${act}:${beat}`);
     }
-    expect(visited).toEqual(['3:finale', '3:land', '3:compose', '2:land', '2:compose', '1:land', '1:respond', '1:compose', '1:welcome']);
+    expect(visited).toEqual(['3:finale', '3:land', '3:compose', '2:gallery', '2:land', '2:compose', '1:land', '1:respond', '1:compose', '1:welcome']);
   });
 });
 

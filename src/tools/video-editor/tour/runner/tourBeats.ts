@@ -1,6 +1,7 @@
 import { EDITOR_TOUR_ANCHORS, editorTourSelector } from '../anchors';
 import {
   exitEditorTour,
+  EDITOR_TOUR_GALLERY_ACT,
   getEditorTourState,
   markEditorTourSent,
   setEditorTourBeat,
@@ -12,6 +13,7 @@ import {
 /**
  * The beat machine, and the only writer of `act`/`beat`.
  *   welcome -(OK)-> compose -(sent)-> respond -(Next)-> land -(Next)-> next act's compose ... -> finale -(Next)-> feedback -(Start creating)-> exit
+ * Act 2's land is followed by `gallery` (the Generations pane slides up) before act 3's compose.
  * Act 1 stops on respond to explain the reply; on acts 2 and 3, Send goes straight to land.
  * Back returns to the previous place where the user acted (see `backEditorTour`).
  */
@@ -32,6 +34,7 @@ export function isEditorTourBeatReady({ beat, ready }: EditorTourState): boolean
     case 'respond':
       return ready.chat;
     case 'land':
+    case 'gallery':
       return ready.timeline && ready.card;
     case 'welcome':
     case 'finale':
@@ -45,7 +48,8 @@ function advanceBeat(): void {
   if (beat === 'welcome') return setEditorTourBeat(1, 'compose');
   if (beat === 'compose') return; // leaves only when the composer's Send is pressed
   if (beat === 'respond') return setEditorTourBeat(act, 'land');
-  if (beat === 'land') {
+  if (beat === 'land' && act === EDITOR_TOUR_GALLERY_ACT) return setEditorTourBeat(act, 'gallery');
+  if (beat === 'land' || beat === 'gallery') {
     return act < LAST_ACT ? setEditorTourBeat((act + 1) as typeof LAST_ACT, 'compose') : setEditorTourBeat(LAST_ACT, 'finale');
   }
   if (beat === 'finale') return setEditorTourBeat(LAST_ACT, 'feedback');
@@ -76,11 +80,14 @@ export function backEditorTour(): void {
     case 'welcome':
       return;
     case 'compose':
-      return act === 1 ? setEditorTourBeat(1, 'welcome', true) : setEditorTourBeat(previousAct, 'land', true);
+      if (act === 1) return setEditorTourBeat(1, 'welcome', true);
+      return act - 1 === EDITOR_TOUR_GALLERY_ACT ? setEditorTourBeat(previousAct, 'gallery', true) : setEditorTourBeat(previousAct, 'land', true);
     case 'respond':
       return setEditorTourBeat(act, 'compose', true);
     case 'land':
       return act === 1 ? setEditorTourBeat(1, 'respond', true) : setEditorTourBeat(act, 'compose', true);
+    case 'gallery':
+      return setEditorTourBeat(act, 'land', true);
     case 'finale':
       return setEditorTourBeat(LAST_ACT, 'land', true);
     case 'feedback':

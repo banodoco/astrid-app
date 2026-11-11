@@ -116,6 +116,65 @@ describe('TourCard', () => {
     expect(onSkip).toHaveBeenCalledTimes(1);
   });
 
+  describe('step 2\'s two parts', () => {
+    const dotsOf = (container: HTMLElement) => [...container.querySelectorAll<HTMLElement>('[aria-hidden="true"] > span.rounded-full')];
+
+    it('shows two dots after "2 of 3" on act 2\'s land: the first lit, the second quiet', () => {
+      const { container } = renderAt(2, 'land');
+      expect(screen.getByText('2 of 3')).toBeInTheDocument();
+      expect(screen.getByText('part 1 of 2')).toHaveClass('sr-only');
+      const dots = dotsOf(container);
+      expect(dots).toHaveLength(2);
+      expect(dots[0]).toHaveClass('bg-foreground/70');
+      expect(dots[1]).not.toHaveClass('bg-foreground/70');
+    });
+
+    it('shows no dots on the other acts\' lands', () => {
+      for (const tourAct of [1, 3] as const) {
+        const view = renderAt(tourAct, 'land');
+        expect(dotsOf(view.container)).toHaveLength(0);
+        expect(screen.queryByText(/part \d of 2/)).toBeNull();
+        view.unmount();
+        exitEditorTour();
+      }
+    });
+
+    it('explains the gallery with title, body and Next last, no picture and no strip, and reports ready', () => {
+      const { container, onPrimary, onSkip } = renderAt(2, 'gallery');
+      const section = screen.getByRole('region', { name: 'Tour, step 2 of 3, part 2 of 2' });
+      expect(section).toHaveClass('w-[380px]', 'p-5');
+      expect(screen.getByText('2 of 3')).toBeInTheDocument();
+      expect(screen.getByText('part 2 of 2')).toHaveClass('sr-only');
+      const dots = dotsOf(container);
+      expect(dots).toHaveLength(2);
+      expect(dots[0]).toHaveClass('bg-foreground/70');
+      expect(dots[1]).toHaveClass('bg-foreground/70');
+      expect(screen.getByRole('heading')).toHaveTextContent(SCRIPT.gallery.title);
+      expect(screen.getByText(SCRIPT.gallery.body)).toBeInTheDocument();
+      expect(container.querySelector('ol, img, video')).toBeNull();
+      const order = [...section.querySelectorAll('h2, p, button')].map((node) => node.tagName + (node.textContent ?? '').slice(0, 12));
+      expect(order.at(-1)).toMatch(/^BUTTONNext/);
+      advance(TOUR_CARD_ENTRANCE_MS - 1);
+      expect(cardReady()).toBe(false);
+      advance(1);
+      expect(cardReady()).toBe(true);
+      fireEvent.click(screen.getByRole('button', { name: /Next/ }));
+      fireEvent.click(screen.getByRole('button', { name: /Skip tour/ }));
+      expect(onPrimary).toHaveBeenCalledTimes(1);
+      expect(onSkip).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps Back at the foot on touch, beside Next', () => {
+      vi.spyOn(window, 'matchMedia').mockImplementation((query) => ({ matches: query === '(pointer: coarse)', media: query } as MediaQueryList));
+      startEditorTour();
+      setEditorTourBeat(2, 'gallery');
+      const { container } = render(<TourCard act={2} beat="gallery" device="phone" onPrimary={vi.fn()} onBack={vi.fn()} onSkip={vi.fn()} />);
+      const back = screen.getByRole('button', { name: /Back/ });
+      expect(back.parentElement).toBe(screen.getByRole('button', { name: /Next/ }).parentElement);
+      expect(container.querySelector('ol')).toBeNull();
+    });
+  });
+
   it('says "And this is just one example" at the finale: title, then the whole lit chain, then the body, then Next', () => {
     const { onPrimary, container } = renderAt(3, 'finale');
     const heading = screen.getByRole('heading');
@@ -407,12 +466,14 @@ describe('TourCard', () => {
       return { ...view, onBack };
     }
 
-    it.each(['compose', 'respond', 'land'] as const)('sits right of the counter on the %s top row, with Skip after it', (beat) => {
+    it.each(['compose', 'respond', 'land', 'gallery'] as const)('sits right of the counter on the %s top row, with Skip after it', (beat) => {
       const { onBack } = renderWithBack(2, beat);
       const counter = screen.getByText('2 of 3');
       const back = screen.getByRole('button', { name: /Back/ });
       const skip = screen.getByRole('button', { name: /Skip tour/ });
-      expect(counter.nextElementSibling).toBe(back);
+      // Act 2's cards put their part dots between the counter and Back.
+      expect(back.parentElement).toBe(counter.parentElement);
+      expect(counter.compareDocumentPosition(back) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(counter.closest('.justify-between')).toContainElement(skip);
       expect(back.compareDocumentPosition(skip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       fireEvent.click(back);

@@ -407,6 +407,55 @@ describe('EditorTourTimelineDriver', () => {
     rows.forEach((row) => row.remove());
   });
 
+  it('on gallery pauses and seeks the last anchor without a patch, whether arrived at forward or by Back, and keeps no poster', async () => {
+    const { apply, calls, previewHandle } = createHarness();
+    addScene('ready');
+    const rows = [EDITOR_TOUR_TRACK_IDS.stills, EDITOR_TOUR_TRACK_IDS.videos].map((id) => {
+      const row = document.createElement('div');
+      row.setAttribute(EDITOR_TOUR_TRACK_ATTRIBUTE, id);
+      document.body.append(row);
+      return row;
+    });
+
+    goTo(1, 'land');
+    await waitFor(() => expect(ready()).toBe(true));
+    act_(() => setEditorTourBeat(2, 'land', true));
+    await waitFor(() => expect(ready()).toBe(true));
+    expect(apply).toHaveBeenCalledTimes(2);
+    previewHandle.seek.mockClear();
+    previewHandle.play.mockClear();
+    calls.length = 0;
+
+    // Forward: Next from land(2) (even mid-walk) leaves the dimmed preview on the last anchor.
+    goTo(2, 'gallery');
+    expect(ready()).toBe(false);
+    await waitFor(() => expect(ready()).toBe(true));
+    expect(calls).toEqual(['pause', 'seek:13']);
+    expect(previewHandle.play).not.toHaveBeenCalled();
+    expect(apply).toHaveBeenCalledTimes(2);
+    expect(document.querySelector('[data-editor-tour-poster]')).toBeNull();
+
+    // Act 3's compose keeps stage 2: no patch. Its land applies act 3's patch once.
+    goTo(3, 'compose');
+    await waitFor(() => expect(ready()).toBe(true));
+    expect(apply).toHaveBeenCalledTimes(2);
+    goTo(3, 'land');
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(3));
+    expect(apply.mock.calls[2][0].operations[0].payload).toMatchObject({ before: EDITOR_TOUR_TRACK_IDS.stills });
+
+    // Back through compose(3) removes act 3's row; compose(3) -> gallery(2) -> land(2) patch nothing more.
+    act_(() => setEditorTourBeat(3, 'compose', true));
+    await waitFor(() => expect(apply).toHaveBeenCalledTimes(4));
+    calls.length = 0;
+    act_(() => setEditorTourBeat(2, 'gallery', true));
+    await waitFor(() => expect(ready()).toBe(true));
+    expect(calls.slice(-2)).toEqual(['pause', 'seek:13']);
+    act_(() => setEditorTourBeat(2, 'land', true));
+    await waitFor(() => expect(ready()).toBe(true));
+    expect(apply).toHaveBeenCalledTimes(4);
+    rows.forEach((row) => row.remove());
+  });
+
   it('holds act 1 land at 0 until the visible scene has painted, then plays and reports ready', async () => {
     const { previewHandle } = createHarness();
     const scene = addScene('loading');

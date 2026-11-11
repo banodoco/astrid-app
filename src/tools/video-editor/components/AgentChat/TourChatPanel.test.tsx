@@ -507,6 +507,24 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(screen.queryByText('Thinking...')).toBeNull();
   });
 
+  it('on the gallery beat shows act 2 complete with Send disabled, and nothing animating', () => {
+    startAtCompose();
+    render(<AgentChatPanel />);
+    act(() => setEditorTourBeat(2, 'land'));
+    const landText = transcript().textContent;
+    act(() => setEditorTourBeat(2, 'gallery'));
+
+    expect(transcript().textContent).toBe(landText);
+    expect(transcript().textContent).toContain(ACT2.prompt);
+    expect(transcript().textContent).toContain(ACT2.reply);
+    expect(screen.getAllByRole('button', { name: '[2 actions]' })).toHaveLength(2); // acts 1 and 2, both complete
+    expect(screen.queryByText('Thinking...')).toBeNull();
+    expect(sendButton()).toBeDisabled();
+    advance(5000);
+    expect(transcript().textContent).toBe(landText);
+    expect(getEditorTourState().sent).toBe(false);
+  });
+
   it('plays a normal beat after Back once the user moves forward again', () => {
     startAtCompose();
     render(<AgentChatPanel />);

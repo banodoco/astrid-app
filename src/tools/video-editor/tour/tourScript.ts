@@ -30,9 +30,11 @@ export interface EditorTourScript {
   /** The centred card before act 1: Astrid says hello. */
   readonly welcome: { readonly title: string; readonly body: string; readonly action: string };
   /** The card's quiet line while the chat has the spotlight: before Send, and (act 1 only) while the reply plays. */
-  readonly hints: { readonly compose: string; readonly composeTouch: string; readonly respond: string };
+  readonly hints: { readonly compose: string; readonly composeTouch: string; readonly respond: string; readonly respondWorking: string };
   /** `send` is a touch card's own Send, the same press as the chat's. */
   readonly controls: { readonly next: string; readonly send: string; readonly back: string; readonly skip: string };
+  /** Act 2's second card, `gallery`: the Generations pane slides up. */
+  readonly gallery: { readonly title: string; readonly body: string };
   /** Agent → open models → output: the card's strip, one step per act. */
   readonly strip: readonly [string, string, string];
   /** After act 3: the lit chain is the one example; the body opens it out. */
@@ -94,8 +96,12 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
     },
   },
   welcome: { title: 'Welcome to Astrid', body: 'Explore a completed project in this quick guided demo. The prompts replay its steps; no new generation runs.', action: 'OK' },
-  hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses community-built creative tools to deliver on this request' },
+  hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses community-built creative tools to deliver on this request', respondWorking: 'Astrid is working on it…' },
   controls: { next: 'Next', send: 'Send', back: 'Back', skip: 'Skip tour' },
+  gallery: {
+    title: 'And all your assets are organized automatically',
+    body: 'Everything you and your agent generate is kept here to view and edit. Use any model, create variants, and let your agent organize them with custom data.',
+  },
   strip: ['Agent', 'Open models', 'Output'],
   finale: {
     title: 'And this is just one example',

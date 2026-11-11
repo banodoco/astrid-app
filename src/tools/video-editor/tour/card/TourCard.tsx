@@ -5,7 +5,7 @@ import { TOUR_FINALE_ENTRANCE_MS, TourStrip } from './TourStrip';
 import { TourVisual } from './TourVisual';
 import { TOUR_COMPARE_ENTRANCE_MS } from './TourCompare';
 import { TOUR_CARD_ENTRANCE_MS, useTourCardEntrance } from './useTourCardEntrance';
-import { useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
+import { EDITOR_TOUR_GALLERY_ACT, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
 import { ChevronLeft, Send } from 'lucide-react';
 import { DiscordMark } from '@/pages/Home/PublicAstridSocialLinks';
 import { DISCORD_URL } from '@/pages/Home/publicAstridLinks';
@@ -29,6 +29,15 @@ export interface TourCardProps {
    * is roomier with a larger strip in place of the picture; both size every control for a finger (44 px).
    */
   device?: TimelineDeviceClass;
+  /**
+   * False while the card is still travelling to this beat's spot (the runner's move): its entrance (the visual, the strip,
+   * the underline, the comparison's sweep and any video) waits, held at its start, and begins as the card comes to rest.
+   */
+  arrived?: boolean;
+  /** The card's own rise into view; off when the runner brings the content in with its move instead. */
+  rise?: boolean;
+  /** Respond only, while the reply is still coming in: a quiet working line, and no Next yet (Enter still finishes it). */
+  working?: boolean;
 }
 
 /** What the card's parts need to know about the device: finger-sized controls, and which layout. */
@@ -46,11 +55,11 @@ const ACT_COUNT = 3;
  * visual and the Agent → open models → output strip; at the end it says this was one example, then asks for feedback. Presentational: the runner positions it and owns the
  * actions. It marks itself ready once its entrance has played (at once on reduced motion or a skip).
  */
-export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'desktop' }: TourCardProps) {
+export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'desktop', arrived = true, rise = true, working = false }: TourCardProps) {
   const runId = useEditorTour((state) => state.runId);
   const live = useEditorTour((state) => state.act === act && state.beat === beat);
-  const key = `${runId}:${act}:${beat}`;
-  const explains = beat === 'welcome' || beat === 'land' || beat === 'finale' || beat === 'feedback';
+  const key = `${runId}:${act}:${beat}${working ? ':working' : ''}`;
+  const explains = beat === 'welcome' || beat === 'land' || beat === 'gallery' || beat === 'finale' || beat === 'feedback';
   const coarse = typeof window !== 'undefined' && Boolean(window.matchMedia?.('(pointer: coarse)').matches);
   const fit: Fit = { device, touch: device !== 'desktop' || coarse, showKeyboardHints: detectInstallScenario() !== 'mobile' && !coarse };
   const phone = device === 'phone';
@@ -60,39 +69,47 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
   const entranceMs = beat === 'finale' ? TOUR_FINALE_ENTRANCE_MS
     : beat === 'land' && SCRIPT.acts[act].card.visual === 'frame-to-still' ? TOUR_COMPARE_ENTRANCE_MS
     : TOUR_CARD_ENTRANCE_MS;
-  const { settled, reducedMotion } = useTourCardEntrance(key, explains && live, entranceMs);
+  const { settled, reducedMotion } = useTourCardEntrance(key, explains && live, entranceMs, arrived);
+  const playing = !reducedMotion && arrived;
 
   return (
     <div
       key={key}
       data-editor-tour-card={beat}
+      data-editor-tour-card-phase={working ? 'working' : undefined}
       data-settled={settled || undefined}
-      className={cn('editor-tour-card', reducedMotion ? 'editor-tour-card-reduced' : !settled && 'editor-tour-card-playing')}
+      data-arrived={arrived || undefined}
+      className={cn('editor-tour-card', reducedMotion ? 'editor-tour-card-reduced' : !settled && cn('editor-tour-card-playing', !arrived && 'editor-tour-card-waiting'))}
     >
       <section
-        aria-label={beat === 'welcome' ? SCRIPT.welcome.title : beat === 'finale' ? SCRIPT.finale.title : beat === 'feedback' ? feedbackTitle() : `Tour, step ${act} of ${ACT_COUNT}`}
+        aria-label={beat === 'welcome' ? SCRIPT.welcome.title : beat === 'finale' ? SCRIPT.finale.title : beat === 'feedback' ? feedbackTitle() : beat === 'gallery' ? `Tour, step ${act} of ${ACT_COUNT}, part 2 of 2` : `Tour, step ${act} of ${ACT_COUNT}`}
         className={cn(
-          'editor-tour-rise max-w-[calc(100vw-24px)] max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card text-card-foreground shadow-xl',
+          rise && 'editor-tour-rise',
+          'max-w-[calc(100vw-24px)] max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card text-card-foreground shadow-xl',
           phone ? cn('w-[calc(100vw-24px)] rounded-2xl', explains ? 'p-5' : 'px-5 py-4') : tablet ? cn(
             beat === 'welcome' && 'w-[460px] p-7',
-            beat === 'land' && 'w-[580px] p-6',
+            (beat === 'land' || beat === 'gallery') && 'w-[580px] p-6',
             beat === 'finale' && 'w-[540px] p-7',
             beat === 'feedback' && 'w-[500px] p-7',
             !explains && 'w-[400px] px-5 py-4',
           ) : cn(
             beat === 'welcome' && 'w-[400px] p-6',
-            beat === 'land' && 'w-[380px] p-5',
+            (beat === 'land' || beat === 'gallery') && 'w-[380px] p-5',
             beat === 'finale' && 'w-[480px] p-6',
             beat === 'feedback' && 'w-[440px] p-6',
             !explains && (beat === 'respond' || (beat === 'compose' && SCRIPT.acts[act].composeHeader) ? 'w-[360px]' : 'w-[300px]') + ' px-4 py-3',
           ),
         )}
       >
+        {/* The runner fades this in and out as the card travels; the section itself (the card's box) stays. */}
+        <div data-editor-tour-card-content>
         {beat === 'welcome' && <Welcome onPrimary={onPrimary} onSkip={onSkip} fit={fit} />}
-        {beat === 'land' && <Explainer act={act} playing={!reducedMotion} entering={!reducedMotion && !settled} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
-        {beat === 'finale' && <Finale playing={!reducedMotion} onPrimary={onPrimary} onBack={onBack} fit={fit} />}
+        {beat === 'land' && <Explainer act={act} playing={playing} entering={!reducedMotion && !settled} waiting={!arrived} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
+        {beat === 'gallery' && <GalleryExplainer act={act} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
+        {beat === 'finale' && <Finale playing={playing} onPrimary={onPrimary} onBack={onBack} fit={fit} />}
         {beat === 'feedback' && <Feedback onPrimary={onPrimary} onBack={onBack} fit={fit} />}
-        {!explains && <Hint act={act} beat={beat} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
+        {!explains && <Hint act={act} beat={beat} working={working} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
+        </div>
       </section>
     </div>
   );
@@ -102,15 +119,29 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
  * The top row of the Hint and the Explainer: "N of 3", Back right beside it, Skip on the right. On touch, Back moves to
  * the card's foot (`NavRow`), so every card keeps its controls in the same two places.
  */
-function CounterRow({ act, onBack, onSkip, fit }: { act: EditorTourAct; fit: Fit } & Pick<TourCardProps, 'onBack' | 'onSkip'>) {
+function CounterRow({ act, part, onBack, onSkip, fit }: { act: EditorTourAct; part?: 1 | 2; fit: Fit } & Pick<TourCardProps, 'onBack' | 'onSkip'>) {
   return (
     <div className="flex items-center justify-between leading-none text-muted-foreground">
       <div className="flex items-center gap-3">
         <span className="text-xs tabular-nums">{act} of {ACT_COUNT}</span>
+        {part && <PartDots part={part} />}
         {!fit.touch && <BackControl onBack={onBack} touch={false} />}
       </div>
       <SkipControl onSkip={onSkip} fit={fit} />
     </div>
+  );
+}
+
+/** Step 2 has two parts: two small dots after the counter, the first lit on part 1 and both on part 2. Screen readers get the words. */
+function PartDots({ part }: { part: 1 | 2 }) {
+  return (
+    <>
+      <span aria-hidden="true" className="-ml-1.5 flex items-center gap-1">
+        <span className="h-1.5 w-1.5 rounded-full bg-foreground/70" />
+        <span className={cn('h-1.5 w-1.5 rounded-full', part === 2 ? 'bg-foreground/70' : 'bg-muted-foreground/30')} />
+      </span>
+      <span className="sr-only">part {part} of 2</span>
+    </>
   );
 }
 
@@ -127,15 +158,16 @@ function NavRow({ secondary, children, className }: { secondary?: ReactNode; chi
 /** One heading style for every card's title on touch (Astrid's own cards keep the larger mink title). */
 const TOUCH_HEADING = 'text-pretty font-serif font-theme-heading text-xl leading-tight text-foreground';
 
-function Explainer({ act, playing, entering, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; entering: boolean; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
+function Explainer({ act, playing, entering, waiting, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; entering: boolean; waiting: boolean; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
   const { title, body, visual, labels } = SCRIPT.acts[act].card;
   const next = <PrimaryButton label={SCRIPT.controls.next} onPrimary={onPrimary} fit={fit} />;
+  const part = act === EDITOR_TOUR_GALLERY_ACT ? 1 : undefined;
   if (!fit.touch) {
     return (
       <>
-        <CounterRow act={act} onBack={onBack} onSkip={onSkip} fit={fit} />
+        <CounterRow act={act} part={part} onBack={onBack} onSkip={onSkip} fit={fit} />
         <div className="mt-3">
-          <TourVisual visual={visual} labels={labels} playing={playing} entering={entering} />
+          <TourVisual visual={visual} labels={labels} playing={playing} entering={entering} waiting={waiting} />
         </div>
         <h2 className="mt-4 text-pretty font-serif font-theme-heading text-lg leading-tight text-foreground">{title}</h2>
         <p className="mt-1.5 text-pretty text-sm leading-6 text-muted-foreground">{body}</p>
@@ -151,13 +183,37 @@ function Explainer({ act, playing, entering, onPrimary, onBack, onSkip, fit }: {
   const tablet = fit.device === 'tablet';
   return (
     <>
-      <CounterRow act={act} onBack={onBack} onSkip={onSkip} fit={fit} />
+      <CounterRow act={act} part={part} onBack={onBack} onSkip={onSkip} fit={fit} />
       <h2 className={cn('mt-3', TOUCH_HEADING)}>{title}</h2>
       <p className={cn('mt-1.5 text-pretty text-muted-foreground', tablet ? 'text-[15px] leading-6' : 'text-sm leading-[1.4rem]')}>{body}</p>
       <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : undefined}>
         {tablet && <div className="min-w-0 flex-1"><TourStrip filled={act} labels={SCRIPT.strip} size="medium" /></div>}
         {next}
       </NavRow>
+    </>
+  );
+}
+
+/** Part 2 of step 2: what the Generations pane (sliding up beneath this card) holds. No picture and no strip; the pane is the visual. */
+function GalleryExplainer({ act, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
+  const { title, body } = SCRIPT.gallery;
+  const next = <PrimaryButton label={SCRIPT.controls.next} onPrimary={onPrimary} fit={fit} />;
+  if (!fit.touch) {
+    return (
+      <>
+        <CounterRow act={act} part={2} onBack={onBack} onSkip={onSkip} fit={fit} />
+        <h2 className="mt-3 text-pretty font-serif font-theme-heading text-lg leading-tight text-foreground">{title}</h2>
+        <p className="mt-1.5 text-pretty text-sm leading-6 text-muted-foreground">{body}</p>
+        <div className="mt-5 flex justify-end">{next}</div>
+      </>
+    );
+  }
+  return (
+    <>
+      <CounterRow act={act} part={2} onBack={onBack} onSkip={onSkip} fit={fit} />
+      <h2 className={cn('mt-3', TOUCH_HEADING)}>{title}</h2>
+      <p className={cn('mt-1.5 text-pretty text-muted-foreground', fit.device === 'tablet' ? 'text-[15px] leading-6' : 'text-sm leading-[1.4rem]')}>{body}</p>
+      <NavRow secondary={<BackControl onBack={onBack} touch />}>{next}</NavRow>
     </>
   );
 }
@@ -246,7 +302,7 @@ function FeedbackTitle() {
           {/* A slight rise and dip, like a pen's, never a ruler's line. */}
           <path
             className="editor-tour-underline"
-            style={{ '--tour-delay': '650ms' } as CSSProperties}
+            style={{ '--tour-delay': '350ms' } as CSSProperties}
             d="M1 6.2 C 18 4.6, 40 4.2, 60 5 S 88 6.4, 99 4.4"
             pathLength={1}
             strokeDasharray={1}
@@ -266,9 +322,20 @@ function FeedbackTitle() {
  * Compose: send the prompt (the chat's Send, or Enter). Respond (act 1 only): the reply's Next. On touch the card carries
  * its own Send as the primary action, the same press as the chat's.
  */
-function Hint({ act, beat, onPrimary, onBack, onSkip, fit }: TourCardProps & { fit: Fit }) {
+function Hint({ act, beat, working, onPrimary, onBack, onSkip, fit }: TourCardProps & { fit: Fit }) {
   const compose = beat === 'compose';
   const header = compose ? SCRIPT.acts[act].composeHeader : undefined;
+  if (working) {
+    // While the reply comes in the card only keeps the user company; the reply's own line and its Next follow it.
+    return (
+      <>
+        <CounterRow act={act} onBack={onBack} onSkip={onSkip} fit={fit} />
+        <div className={cn('flex items-center', fit.touch ? 'mt-3 min-h-11' : 'mt-2 min-h-9')}>
+          <p className="text-sm text-muted-foreground">{SCRIPT.hints.respondWorking}</p>
+        </div>
+      </>
+    );
+  }
   if (fit.touch) {
     return (
       <>

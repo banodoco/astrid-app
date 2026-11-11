@@ -4,6 +4,7 @@ import { EDITOR_TOUR_ANCHORS, EDITOR_TOUR_TRACK_IDS, editorTourSelector, editorT
 import { UI_Z_LAYERS } from '@/shared/lib/uiLayers';
 import { getEditorTourState, showEditorTourBeat, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
 import { TourCard } from '../card/TourCard';
+import { TourGalleryLayer } from '../gallery/TourGalleryLayer';
 import { TourSpotlight } from './TourSpotlight';
 import { backEditorTour, finishEditorTour, runEditorTourPrimary, watchEditorTourSend } from './tourBeats';
 import { placeCard } from './cardPlacement';
@@ -49,6 +50,8 @@ export function editorTourTargets(act: EditorTourAct, beat: EditorTourBeat, devi
       return [editorTourSelector(device === 'phone' ? EDITOR_TOUR_ANCHORS.chatReply : EDITOR_TOUR_ANCHORS.chatTranscript)];
     case 'land':
       return [editorTourTrackSelector(ACT_TRACK[act]), editorTourSelector(EDITOR_TOUR_ANCHORS.preview)];
+    case 'gallery':
+      return [editorTourSelector(EDITOR_TOUR_ANCHORS.generationsPane)];
     case 'welcome':
     case 'finale':
     case 'feedback':
@@ -133,6 +136,7 @@ function RunningTour() {
   });
   return (
     <>
+      <TourGalleryLayer />
       <TourSpotlight rects={settled.value} clickable={sendRects[0] ?? null} reducedMotion={reducedMotion} />
       <div
         ref={cardRef}

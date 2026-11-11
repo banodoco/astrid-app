@@ -7,8 +7,8 @@ import { cn } from '@/shared/components/ui/contracts/cn.ts';
 
 /** Where the divider rests (percent from the left): a little more of the realistic still than of the frame, both readable. */
 export const COMPARE_REST = 58;
-/** The sweep waits for the card to glide in and rise, then crosses once from the left edge to `COMPARE_REST`. */
-export const COMPARE_SWEEP_DELAY_MS = 450;
+/** The sweep starts a beat after the card has come to rest, then crosses once from the left edge to `COMPARE_REST`. */
+export const COMPARE_SWEEP_DELAY_MS = 200;
 export const COMPARE_SWEEP_MS = 1400;
 /** The act-2 card's entrance: it settles (and reports ready) just after the sweep has come to rest. */
 export const TOUR_COMPARE_ENTRANCE_MS = COMPARE_SWEEP_DELAY_MS + COMPARE_SWEEP_MS + 50;
@@ -44,7 +44,12 @@ const ease = bezier(0.4, 0.2);
  * the arrow keys, Page Up/Down, Home and End. Taking it mid-sweep stops the sweep where it is. Each label is clipped with its
  * own picture, so it only ever names what is under it. Mounted without `sweep` (reduced motion, Back) it rests from the start.
  */
-export function TourCompare({ labels: [source, model], sweep }: { labels: readonly [string, string]; sweep: boolean }) {
+export function TourCompare({ labels: [source, model], sweep, waiting = false }: {
+  labels: readonly [string, string];
+  sweep: boolean;
+  /** The card is still travelling in: the sweep holds at its start and begins as the card comes to rest. */
+  waiting?: boolean;
+}) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState(sweep ? 0 : COMPARE_REST);
   const [reveal, setReveal] = useState(sweep ? 0 : 1);
@@ -63,7 +68,7 @@ export function TourCompare({ labels: [source, model], sweep }: { labels: readon
     setReveal(1);
   };
 
-  // The sweep belongs to the card's arrival: it starts on mount or not at all. Settling on time does not touch it (it has
+  // The sweep belongs to the card's arrival: it starts as the card comes to rest (mounted with `sweep`), or not at all. Settling on time does not touch it (it has
   // landed by then, or is about to); a skip (Enter, or the runner's bump) finishes it where it would have ended.
   const sweepsRef = useRef(sweep);
   const skipAnimation = useEditorTour((state) => state.skipAnimation);
@@ -76,7 +81,7 @@ export function TourCompare({ labels: [source, model], sweep }: { labels: readon
   }, [skipAnimation]);
 
   useEffect(() => {
-    if (!sweepsRef.current || takenRef.current) return;
+    if (waiting || !sweepsRef.current || takenRef.current) return;
     let frame = 0;
     let last: number | null = null;
     let elapsed = 0;
@@ -93,7 +98,7 @@ export function TourCompare({ labels: [source, model], sweep }: { labels: readon
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, []);
+  }, [waiting]);
 
   const percentAt = (clientX: number) => {
     const box = boxRef.current?.getBoundingClientRect();

@@ -18,7 +18,7 @@ const delay = (ms: number) => ({ '--tour-delay': `${ms}ms` }) as CSSProperties;
  * then the line to the next node draws across and the next one lights as it connects. The lengths match
  * `.editor-tour-light` and `.editor-tour-draw` in TourCard.css.
  */
-const LIGHT_START_MS = 450;
+const LIGHT_START_MS = 200;
 const LIGHT_STEP_MS = 580;
 const LIGHT_MS = 480;
 const DRAW_MS = 380;

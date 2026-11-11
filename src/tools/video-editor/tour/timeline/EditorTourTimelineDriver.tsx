@@ -239,6 +239,13 @@ export function EditorTourTimelineDriver() {
     };
     void (async () => {
       if (beat === 'respond' && act === 1 && !instant) await waitFor(() => warm, WARMUP_GIVE_UP_MS, isCancelled);
+      if (beat === 'gallery') {
+        // The dimmed preview is the same whether the user arrived forward (Next can cut act 2's walk short) or by Back.
+        await waitFor(() => previewRef.current !== null, RENDER_WAIT_MS, isCancelled);
+        if (isCancelled()) return;
+        previewRef.current?.pause();
+        previewRef.current?.seek(TOUR_ANCHORS[TOUR_ANCHORS.length - 1].at);
+      }
       if (beat === 'land') {
         const topTrack = tourTrackOrder(stage)[0];
         await waitFor(

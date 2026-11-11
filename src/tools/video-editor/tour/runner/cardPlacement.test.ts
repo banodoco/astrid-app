@@ -46,6 +46,21 @@ describe('placeCard', () => {
     expectInViewport(position);
   });
 
+  it.each([
+    [{ width: 1440, height: 900 }, 380],
+    [{ width: 1280, height: 720 }, 300],
+  ])('puts the gallery card above a full-width bottom strip at %o, clear of it', (viewport, paneHeight) => {
+    const card = { width: 380, height: 220 };
+    const pane: SpotlightRect = { x: 0, y: viewport.height - paneHeight, width: viewport.width, height: paneHeight };
+
+    const position = placeCard([pane], card, viewport);
+
+    expect(position.top + card.height).toBeLessThanOrEqual(pane.y);
+    expect(position.top).toBeGreaterThanOrEqual(EDGE);
+    expect(position.left).toBeGreaterThanOrEqual(EDGE);
+    expect(position.left + card.width).toBeLessThanOrEqual(viewport.width - EDGE);
+  });
+
   it('docks bottom-right when the rects cover the whole viewport', () => {
     const rect: SpotlightRect = { x: 0, y: 0, width: 1440, height: 900 };
 

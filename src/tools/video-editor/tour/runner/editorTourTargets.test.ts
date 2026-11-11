@@ -7,6 +7,12 @@ describe('editorTourTargets', () => {
     expect(editorTourTargets(1, 'compose')).toEqual(['[data-editor-tour="chat-composer"]']);
   });
 
+  it('lights the whole Generations pane on gallery, on every device', () => {
+    for (const device of ['desktop', 'tablet', 'phone'] as const) {
+      expect(editorTourTargets(2, 'gallery', device)).toEqual(['[data-editor-tour="generations-pane"]']);
+    }
+  });
+
   it('lights the whole transcript on respond, and on a phone the reply and its actions alone', () => {
     expect(editorTourTargets(1, 'respond')).toEqual(['[data-editor-tour="chat-transcript"]']);
     expect(editorTourTargets(1, 'respond', 'tablet')).toEqual(['[data-editor-tour="chat-transcript"]']);

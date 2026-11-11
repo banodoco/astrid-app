@@ -7,11 +7,16 @@ import { createStore, useStore } from 'zustand';
  */
 
 export type EditorTourAct = 1 | 2 | 3;
-/** `welcome` comes once, before act 1's `compose`; the acts then run compose → respond → land; `finale` and then `feedback` end. */
-export type EditorTourBeat = 'welcome' | 'compose' | 'respond' | 'land' | 'finale' | 'feedback';
+/**
+ * `welcome` comes once, before act 1's `compose`; the acts then run compose → respond → land; `finale` and then `feedback` end.
+ * Act `EDITOR_TOUR_GALLERY_ACT` has one more beat after its `land`: `gallery`, where the Generations pane slides up.
+ */
+export type EditorTourBeat = 'welcome' | 'compose' | 'respond' | 'land' | 'gallery' | 'finale' | 'feedback';
 /** Rows on the demo timeline: 0 none · 1 scene · 2 + stills row · 3 + video row. */
 export type EditorTourStage = 0 | 1 | 2 | 3;
 export type EditorTourStatus = 'idle' | 'running';
+/** The act whose `land` is followed by the `gallery` beat (step 2, part 2 of 2). */
+export const EDITOR_TOUR_GALLERY_ACT: EditorTourAct = 2;
 export type EditorTourReadyKey = 'chat' | 'timeline' | 'card';
 
 export interface EditorTourState {
@@ -60,6 +65,7 @@ function prefersReducedMotion(): boolean {
 /** Each act's result lands on its `land` beat and stays for the rest of the tour. */
 export function editorTourStage(act: EditorTourAct, beat: EditorTourBeat): EditorTourStage {
   if (beat === 'welcome') return 0;
+  if (beat === 'gallery') return 2; // the gallery changes nothing on the timeline: act 2's result stays
   if (beat === 'finale' || beat === 'feedback') return 3;
   return (beat === 'land' ? act : act - 1) as EditorTourStage;
 }

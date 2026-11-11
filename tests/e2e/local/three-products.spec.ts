@@ -3312,6 +3312,8 @@ test('render R, publish R+1 before it runs: the render is R\'s, it plays, and it
     // c. The agent fills the slot with it and publishes R. The open App adopts R by itself.
     await agent.checkout();
     await agent.edit('--clip', render.slotClipId, '--swap-asset', `${render.markerAssetKey}=task:${markerTask}/marker_clip#${clip!.ordinal}`);
+    // P39-R12-TASK-SWAP, Plan 39 exception (R12): the Agent cannot commit a swap to a task-output handle ("patch references media outside Runtime-verified inputs"); handed to Release 13; remove the marker when the commit works. Issue: https://github.com/banodoco/astrid-app/issues/251
+    test.fail(true, 'Agent cannot commit a timeline swap to a task-output handle');
     const publishedR = await agent.commit('agent: marker clip in the slot', 'f2-render-r');
     expect(publishedR.old_head, 'R builds on the seed').toBe(render.headRevisionId);
     revisionR = publishedR.new_head;

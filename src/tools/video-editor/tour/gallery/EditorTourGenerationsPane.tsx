@@ -276,7 +276,7 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
             aria-hidden="true"
             style={{
               position: 'fixed', left: 0, bottom: 0, right: reserve, height: paneHeight,
-              visibility: 'hidden', pointerEvents: 'none',
+              opacity: 0, pointerEvents: 'none',
             }}
           />
         )}

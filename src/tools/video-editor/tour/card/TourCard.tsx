@@ -140,7 +140,8 @@ function PartDots({ part }: { part: 1 | 2 }) {
         <span className="h-1.5 w-1.5 rounded-full bg-foreground/70" />
         <span className={cn('h-1.5 w-1.5 rounded-full', part === 2 ? 'bg-foreground/70' : 'bg-muted-foreground/30')} />
       </span>
-      <span className="sr-only">part {part} of 2</span>
+      {/* Hidden by opacity, not `sr-only`: its 1px clip reads as clipped text to the screenshot walk's layout checks. */}
+      <span className="pointer-events-none absolute whitespace-nowrap opacity-0">part {part} of 2</span>
     </>
   );
 }

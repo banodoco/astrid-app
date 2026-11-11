@@ -142,9 +142,12 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const reply = replyFrom < 0 ? [] : renderedTurns.slice(replyFrom);
   const { scrollContainerRef, scrollContentRef, onScroll } = useChatScroll(`tour:${runId}`, true, renderedTurns.length);
 
+  // The act's actions (its last tool group) carry the anchor desktop's respond contracts onto once the reply is in.
+  const actions = reply.filter((item) => item.kind !== 'message').at(-1);
   const renderTurn = (item: RenderedTurn) => (
     <div
       key={item.key}
+      {...(item === actions ? { [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatActions } : {})}
       className={cn(item.kind === 'message' ? 'flex flex-col gap-2.5' : 'space-y-2', reducedMotion && turnAt(item) >= currentActStart && 'animate-in fade-in duration-300')}
     >
       {item.kind === 'message'
@@ -158,7 +161,7 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const thinking = busy && progress.replyChars === 0;
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden">
+    <div className="flex h-full w-full flex-col overflow-hidden" {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatPane }}>
       <div className="relative flex min-w-0 items-center justify-between gap-2 border-b border-border/70 px-3 py-1.5">
         <div className="-ml-1.5 flex min-w-0 flex-col items-start">
           <AgentChatMenu sessions={NO_SESSIONS} activeSessionId={null} onSelectSession={NO_OP} defaultAgent="astrid" onNewChat={NO_OP} />

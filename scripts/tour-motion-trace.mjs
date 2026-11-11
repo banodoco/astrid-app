@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
  * node scripts/tour-motion-trace.mjs [--out test-results/tour-motion/<ts>] [--theme dark|light]
- *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--no-screencast] [--help]
+ *   [--base-url http://127.0.0.1:PORT] [--transitions act1-welcome→act1-compose,...] [--back] [--no-screencast]
+ *   [--viewport 1440x900] [--help]
  *
- * Measures MOTION of the first-run tour on desktop (1440x900, reducedMotion: no-preference). The sibling
+ * Measures MOTION of the first-run tour on desktop (1440x900 unless --viewport, reducedMotion: no-preference). The sibling
  * tour-screenshots.mjs only takes settled stills with motion off; this walks the same beats with motion on and,
  * for each transition (settled beat N -> settled beat N+1), records:
  *   - an in-page requestAnimationFrame sampler (performance.now clock) of the card host/section, every spotlight
@@ -15,6 +16,10 @@
  * --back also traces: respond -> land -> Back as early as possible (before the beat is ready), and Back from every
  * settled land beat (plus the forward "return"). --transitions filters which traces are written; the walk still
  * visits every beat. Same launch machinery as tour-screenshots.mjs (isolated fake runtime, owned Vite in test mode).
+ *
+ * The summary table per transition is the motion contract: the card host moves in exactly one segment (two on desktop's
+ * respond, its two phases), never changes destination mid-flight or reverses, cutouts start within a frame of the card,
+ * no lit cutout passes through the page corner (0,0,0,0), and the new step's content is only whole near rest.
  *
  * Trust notes: screencast frames are sparse/irregular (Chrome only emits on visual change, and the screencast itself
  * costs a little time); the rAF samples are the precise record. Dates are NOT frozen here (a frozen clock would stall
@@ -53,17 +58,23 @@ function installSampler() {
     // style*; the attribute is just the destination. `c` = getComputedStyle (in flight), `a` = attribute (target),
     // `b` = getBBox. The run's report notes which of them actually moved during a transition.
     const s = getComputedStyle(el), bb = el.getBBox();
-    return { a: ['x', 'y', 'width', 'height'].map((n) => Number(el.getAttribute(n))), c: [px(s.x), px(s.y), px(s.width), px(s.height)], b: [bb.x, bb.y, bb.width, bb.height] };
+    // `o`: how open the cutout is (fill-opacity of a hole, stroke-opacity of a ring); a slot at 0 is closed and invisible.
+    const o = el.hasAttribute('data-editor-tour-ring') ? Number(s.strokeOpacity) : Number(s.fillOpacity);
+    return { a: ['x', 'y', 'width', 'height'].map((n) => Number(el.getAttribute(n))), c: [px(s.x), px(s.y), px(s.width), px(s.height)], b: [bb.x, bb.y, bb.width, bb.height], o };
   };
   const sample = () => {
     const t = performance.now(), host = document.querySelector('[data-editor-tour-card-host]');
     const card = document.querySelector('[data-editor-tour-card]'), section = card?.querySelector('section');
+    const content = section?.querySelector('[data-editor-tour-card-content]');
     const state = window.__tourShotsStore?.getEditorTourState();
     const tg = {};
     for (const sel of tm.targets) tg[sel] = r4(document.querySelector(sel));
     const s = {
       t, host: r4(host), tf: host?.style.transform ?? null, tr: host?.style.transition ?? null, sec: r4(section), op: section ? Number(getComputedStyle(section).opacity) : null,
-      card: card?.getAttribute('data-editor-tour-card') ?? null, cardSettled: card?.hasAttribute('data-settled') ?? false,
+      // What the card's content shows, and how visible it is (content wrapper opacity x section opacity).
+      cop: section ? Number(getComputedStyle(section).opacity) * (content ? Number(getComputedStyle(content).opacity) : 1) : null,
+      card: card?.getAttribute('data-editor-tour-card') ?? null, phase: card?.getAttribute('data-editor-tour-card-phase') ?? null,
+      cardSettled: card?.hasAttribute('data-settled') ?? false, arrived: card ? !card.hasAttribute('data-editor-tour-card-phase') && (card.hasAttribute('data-arrived') || !document.querySelector('[data-editor-tour-card-content]')) : false,
       st: state && { status: state.status, act: state.act, beat: state.beat, shownBeat: state.shownBeat, ready: state.ready, instant: state.instant },
       beatReady: Boolean(state && window.__tourShotsBeats.isEditorTourBeatReady(state)),
       cut: [...document.querySelectorAll('#editor-tour-dim rect[fill="black"]')].map(geometry),
@@ -75,6 +86,23 @@ function installSampler() {
     tm.samples.push(s);
     if (tm.samples.length > 20000) tm.samples.splice(0, 5000);
   };
+  // Long animation frames (> 120 ms) with what ran in them: the scripts that took longest, and how long style/layout and
+  // rendering took. This is what says WHY a transition stalled.
+  tm.loaf = [];
+  try {
+    new PerformanceObserver((list) => {
+      for (const e of list.getEntries()) {
+        if (e.duration <= 120) continue;
+        const end = e.startTime + e.duration;
+        tm.loaf.push({
+          t: e.startTime, d: Math.round(e.duration),
+          scripts: [...(e.scripts ?? [])].sort((a, b) => b.duration - a.duration).slice(0, 4).map((x) => ({ d: Math.round(x.duration), invoker: String(x.invoker ?? '').slice(0, 80), src: String(x.sourceURL ?? '').split('?')[0].split('/').slice(-2).join('/'), fn: x.sourceFunctionName || '' })),
+          styleLayoutMs: e.styleAndLayoutStart ? Math.round(end - e.styleAndLayoutStart) : null,
+          renderMs: e.renderStart ? Math.round(end - e.renderStart) : null,
+        });
+      }
+    }).observe({ type: 'long-animation-frame', buffered: false });
+  } catch { /* no Long Animation Frames API */ }
   const loop = () => { try { sample(); } catch { /* DOM mid-swap */ } requestAnimationFrame(loop); };
   requestAnimationFrame(loop);
   tm.isSettled = ({ act, beat }) => {
@@ -82,7 +110,7 @@ function installSampler() {
     // The browser tour ends (status idle, card gone) when the finale's primary is pressed; treat that as the settled end state.
     if (last?.st && last.st.status !== 'running' && last.st.act === act && last.st.beat === beat) return performance.now() - tm.lastChange >= 500;
     return Boolean(last?.st && last.st.status === 'running' && last.st.act === act && last.st.beat === beat && last.st.shownBeat === beat
-      && last.beatReady && last.card === beat && last.cardSettled && performance.now() - tm.lastChange >= 500);
+      && last.beatReady && last.card === beat && last.arrived && last.cardSettled && performance.now() - tm.lastChange >= 500);
   };
   tm.updateNotice = () => {
     const cuts = [...document.querySelectorAll('#editor-tour-dim rect[fill="black"]')].map((g) => ['x', 'y', 'width', 'height'].map((n) => Number(g.getAttribute(n))));
@@ -132,7 +160,7 @@ export function analyseSeries(points, dims = 4) {
     if (mag >= EPS) {
       if (points[i].t < 0) out.movedBeforeTrigger = true;
       if (seg && prev && dot(prev, d) < 0) { out.reversals++; out.segments.push(seg); seg = null; }
-      seg ??= { t0: points[i - 1].t, t1: points[i].t, dist: 0 };
+      seg ??= { t0: points[i - 1].t, tFirst: points[i].t, t1: points[i].t, dist: 0 };
       seg.t1 = points[i].t; seg.dist += pos; still = 0; prev = d; out.travel += pos;
       if (points[i].t >= 0) { out.firstMoveT ??= points[i].t; out.restT = points[i].t; }
       if (mag > out.maxJump.px) out.maxJump = { px: mag, t: points[i].t, dt: points[i].t - points[i - 1].t };
@@ -158,7 +186,7 @@ const teleport = (m) => m.maxJump.px > 80 && m.maxJump.px > 0.4 * m.travel && m.
 function degenerate(rect) { return !rect || rect[2] <= 0 || rect[3] <= 0; }
 
 /** Everything measured for one transition, from rAF samples with t re-based so the trigger click is 0. */
-export function analyseTransition(samples, { dest, source }) {
+export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
   const card = analyseSeries(samples.filter((s) => s.host).map((s) => ({ t: s.t, v: s.host })), 2);
   const first = samples.find((s) => s.host), last = samples.at(-1);
   const inFlight = samples.filter((s) => s.t >= (card.firstMoveT ?? Infinity) && s.t <= (card.restT ?? -Infinity));
@@ -167,10 +195,23 @@ export function analyseTransition(samples, { dest, source }) {
     const a = samples[i - 1].host, b = samples[i].host;
     if (a && b && (Math.abs(a[2] - b[2]) > EPS || Math.abs(a[3] - b[3]) > EPS)) sizeChanges.push({ t: round(samples[i].t, 0), from: [round(a[2]), round(a[3])], to: [round(b[2]), round(b[3])], whileMoving: samples[i].t >= (card.firstMoveT ?? Infinity) && samples[i].t <= (card.restT ?? -Infinity) });
   }
+  const label = (s) => (s.card && s.phase ? `${s.card}:${s.phase}` : s.card);
   const swaps = [];
-  for (let i = 1; i < samples.length; i++) if (samples[i].card !== samples[i - 1].card && last.host) {
+  for (let i = 1; i < samples.length; i++) if (label(samples[i]) !== label(samples[i - 1]) && last.host) {
     const h = samples[i].host;
-    swaps.push({ t: round(samples[i].t, 0), from: samples[i - 1].card, to: samples[i].card, distanceToDestinationPx: h ? round(Math.hypot(h[0] - last.host[0], h[1] - last.host[1])) : null });
+    swaps.push({ t: round(samples[i].t, 0), from: label(samples[i - 1]), to: label(samples[i]), distanceToDestinationPx: h ? round(Math.hypot(h[0] - last.host[0], h[1] - last.host[1])) : null });
+  }
+  // How visible the content of the step the card ends on is, while the card is still travelling to it: the most it shows
+  // more than 8 px from rest, and how far from rest it first becomes whole (>= 0.99).
+  const finalLabel = label(last);
+  const restXY = last.host?.slice(0, 2);
+  let contentInFlight = { maxOpacityAway: 0, atDistancePx: null, atT: null, wholeAtDistancePx: null, wholeAtT: null };
+  for (const s of samples) {
+    if (s.t < 0 || !s.host || !restXY || label(s) !== finalLabel) continue;
+    const opacity = s.cop ?? s.op ?? 1;
+    const distance = Math.hypot(s.host[0] - restXY[0], s.host[1] - restXY[1]);
+    if (distance > 8 && opacity > contentInFlight.maxOpacityAway) contentInFlight = { ...contentInFlight, maxOpacityAway: round(opacity, 2), atDistancePx: round(distance), atT: round(s.t, 0) };
+    if (opacity >= 0.99 && contentInFlight.wholeAtT == null) contentInFlight = { ...contentInFlight, wholeAtDistancePx: round(distance), wholeAtT: round(s.t, 0) };
   }
   const dim = ranges(samples.filter((s) => s.t >= 0).map((s) => ({ t: s.t, on: s.op != null && s.op < 0.99 })));
   const ended = last.st?.status !== 'running';
@@ -179,7 +220,8 @@ export function analyseTransition(samples, { dest, source }) {
   const worst = dts.indexOf(Math.max(...dts));
   const frames = { count: samples.length, medianDtMs: round(sorted[Math.floor(sorted.length / 2)]), p95DtMs: round(sorted[Math.floor(sorted.length * 0.95)]), maxDtMs: round(sorted.at(-1)), maxDtAtT: round(samples[worst + 1]?.t, 0), over50ms: dts.filter((d) => d > 50).length, preTriggerMedianDtMs: round(idle[Math.floor(idle.length / 2)]) };
   const xy = (tf) => (tf?.match(/-?[\d.]+px/g) ?? []).slice(0, 2).map(parseFloat);
-  const flight = (t) => t >= (card.firstMoveT ?? Infinity) && t <= (card.restT ?? -Infinity);
+  // Mid-flight: after the first frame of a motion segment and before its end (a second, separate move is not mid-flight).
+  const flight = (t) => card.segments.some((seg) => t > seg.tFirst && t <= seg.t1);
   const retargets = [], transitionToggles = [];
   for (let i = 1; i < samples.length; i++) {
     if (samples[i].tf !== samples[i - 1].tf && samples[i].tf && samples[i - 1].tf) retargets.push({ t: round(samples[i].t, 0), from: xy(samples[i - 1].tf), to: xy(samples[i].tf), whileMoving: flight(samples[i].t) });
@@ -189,6 +231,7 @@ export function analyseTransition(samples, { dest, source }) {
     start: rr(first?.host), end: rr(last.host), startXY: rr(first?.host?.slice(0, 2)), endXY: rr(last.host?.slice(0, 2)),
     ...card, segments: card.segments.map((s) => ({ t0: round(s.t0, 0), t1: round(s.t1, 0), dist: round(s.dist) })),
     retargets, transitionToggles, sizeChanges, contentSwaps: swaps, opacityBelow1: dim, minOpacity: round(Math.min(...samples.filter((s) => s.t >= 0 && s.op != null).map((s) => s.op)), 2),
+    contentInFlight, midFlightRetargets: retargets.filter((r) => r.whileMoving).length,
   };
   void inFlight;
 
@@ -196,7 +239,8 @@ export function analyseTransition(samples, { dest, source }) {
   const slots = Math.max(...samples.map((s) => s.cut.length), 0);
   const cutouts = [];
   for (let i = 0; i < slots; i++) {
-    const pts = samples.filter((s) => s.cut[i]).map((s) => ({ t: s.t, v: s.cut[i].c }));
+    // Only while lit: a slot that opens is first placed at its spot while invisible, and that placement is not motion.
+    const pts = samples.filter((s) => s.cut[i] && (s.cut[i].o ?? 1) > 0.01).map((s) => ({ t: s.t, v: s.cut[i].c }));
     const m = analyseSeries(pts, 4);
     const startRect = pts[0]?.v, endRect = pts.at(-1)?.v;
     const moving = pts.filter((p, k) => k && norm(p.v.map((n, j) => n - pts[k - 1].v[j])) >= EPS);
@@ -217,8 +261,14 @@ export function analyseTransition(samples, { dest, source }) {
       chase = { selector, shownAtT: round(shownAt, 0), maxGapPx: round(worst.px), atT: round(worst.t, 0), finalGapPx: lastT && lastC ? round(Math.max(Math.abs(lastC[0] - (lastT[0] - SPOT_PADDING)), Math.abs(lastC[1] - (lastT[1] - SPOT_PADDING)), Math.abs(lastC[0] + lastC[2] - (lastT[0] + lastT[2] + SPOT_PADDING)), Math.abs(lastC[1] + lastC[3] - (lastT[1] + lastT[3] + SPOT_PADDING)))) : null, targetTravelPx: tgt.travel, targetSegments: tgt.segments.length };
     }
     const cutRetargets = [];
-    for (let k = 1; k < samples.length; k++) { const a = samples[k - 1].cut[i]?.a, b = samples[k].cut[i]?.a; if (a && b && a.some((n, j) => Math.abs(n - b[j]) > 0.01)) cutRetargets.push({ t: round(samples[k].t, 0), from: rr(a), to: rr(b), whileMoving: m.firstMoveT != null && samples[k].t > m.firstMoveT && samples[k].t < m.restT }); }
-    cutouts.push({ slot: i, ...m, retargets: cutRetargets, segments: m.segments.map((s) => ({ t0: round(s.t0, 0), t1: round(s.t1, 0), dist: round(s.dist) })), start: rr(startRect), end: rr(endRect), startsDegenerate: degenerate(startRect), endsDegenerate: degenerate(endRect), path, chase });
+    for (let k = 1; k < samples.length; k++) { const a = samples[k - 1].cut[i]?.a, b = samples[k].cut[i]?.a; if (a && b && a.some((n, j) => Math.abs(n - b[j]) > 0.01)) cutRetargets.push({ t: round(samples[k].t, 0), from: rr(a), to: rr(b), whileMoving: m.segments.some((seg) => samples[k].t > seg.tFirst && samples[k].t < seg.t1) }); }
+    // A lit cutout (open, or with no opacity reported: older builds) at the page corner, in a slot this transition uses.
+    const used = pts.some((p) => !degenerate(p.v));
+    const corner = used ? samples.filter((s) => s.cut[i] && (s.cut[i].o ?? 1) > 0.01 && Math.abs(s.cut[i].c[0]) < 1 && Math.abs(s.cut[i].c[1]) < 1 && (s.cut[i].c[2] < 1 || s.cut[i].c[3] < 1)).map((s) => round(s.t, 0)) : [];
+    const opened = samples.some((s, k) => k && s.cut[i] && samples[k - 1].cut[i] && (samples[k - 1].cut[i].o ?? 1) < 0.5 && (s.cut[i].o ?? 1) >= 0.5);
+    const closed = samples.some((s, k) => k && s.cut[i] && samples[k - 1].cut[i] && (samples[k - 1].cut[i].o ?? 1) >= 0.5 && (s.cut[i].o ?? 1) < 0.5);
+    const firstMoveFrame = m.firstMoveT == null ? null : samples.findIndex((s) => s.t >= m.firstMoveT);
+    cutouts.push({ slot: i, ...m, used, cornerTouchT: corner, opened, closed, firstMoveFrame, retargets: cutRetargets, segments: m.segments.map((s) => ({ t0: round(s.t0, 0), t1: round(s.t1, 0), dist: round(s.dist) })), start: rr(startRect), end: rr(endRect), startsDegenerate: degenerate(startRect), endsDegenerate: degenerate(endRect), path, chase });
   }
   const ringCount = (s) => s.ring.length;
   const rings = samples.filter((s, k) => k && ringCount(s) !== ringCount(samples[k - 1])).map((s) => ({ t: round(s.t, 0), count: ringCount(s) }));
@@ -229,50 +279,72 @@ export function analyseTransition(samples, { dest, source }) {
   }
   const unavailable = samples.filter((s) => s.pu).map((s) => s.t);
   const previewUnavailable = unavailable.length ? { firstT: round(unavailable[0], 0), lastT: round(unavailable.at(-1), 0), frames: unavailable.length } : null;
-  const result = { frames, tourEnded: ended, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
-  result.suspects = suspectsFor(result, source, dest);
+  const cardFirstFrame = card.firstMoveT == null ? null : samples.findIndex((s) => s.t >= card.firstMoveT);
+  const moving = cutouts.filter((k) => k.firstMoveT != null && k.firstMoveT >= 0);
+  const sync = cardFirstFrame == null || !moving.length ? null : {
+    maxMs: round(Math.max(...moving.map((k) => Math.abs(k.firstMoveT - card.firstMoveT))), 0),
+    maxFrames: Math.max(...moving.map((k) => Math.abs(k.firstMoveFrame - cardFirstFrame))),
+  };
+  const result = { frames, tourEnded: ended, startSync: sync, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
+  Object.assign(result, suspectsFor(result, source, dest, expectMoves), { expectMoves });
   return result;
 }
 
-function suspectsFor(m, source, dest) {
-  const out = [], c = m.card;
+/**
+ * Plain-language findings. `suspects` break the motion contract (see the header); `notes` are the transition's timeline,
+ * for reading alongside the filmstrips. `expectMoves` is how many moves the step should make (2 for desktop's respond
+ * reached forward: arrive beside the reply, then contract onto its actions).
+ */
+function suspectsFor(m, source, dest, expectMoves = 1) {
+  const out = [], notes = [], c = m.card;
   if (m.tourEnded) out.push(`tour ended (status idle, card removed) instead of showing ${dest.id}; card/cutout metrics below cover the exit only`);
-  if (c.firstMoveT == null) out.push('card never moved');
+  if (c.firstMoveT == null) notes.push('card never moved');
   else {
-    if (c.segments.length > 1) out.push(`card moved in ${c.segments.length} segments (${segText(c.segments)})`);
+    if (c.segments.length > expectMoves) out.push(`card moved in ${c.segments.length} segments (${segText(c.segments)}), expected ${expectMoves}`);
+    else notes.push(`card moved in ${c.segments.length} segment(s) (${segText(c.segments)})${expectMoves > 1 ? ' (respond: arrive, then contract)' : ''}`);
     if (c.reversals) out.push(`card reversed direction ${c.reversals}x`);
     if (teleport(c)) out.push(`card jumped ${c.maxJump.px}px in one ${c.maxJump.dt}ms frame at t=${Math.round(c.maxJump.t)}ms (total travel ${c.travel}px)`);
-    if (c.firstMoveT > 150) out.push(`card started moving ${Math.round(c.firstMoveT)}ms after the trigger`);
-    out.push(`card travelled ${c.travel}px, first move t=${Math.round(c.firstMoveT)}ms, at rest t=${Math.round(c.restT)}ms`);
+    if (c.firstMoveT > 300) out.push(`card started moving ${Math.round(c.firstMoveT)}ms after the trigger`);
+    notes.push(`card travelled ${c.travel}px, first move t=${Math.round(c.firstMoveT)}ms, at rest t=${Math.round(c.restT)}ms`);
   }
-  for (const r of c.retargets) out.push(`card destination changed at t=${r.t}ms (${r.from.join(',')} -> ${r.to.join(',')})${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
-  for (const r of c.transitionToggles) out.push(`card host CSS transition ${/none/.test(r.to) ? 'switched OFF (moves teleport)' : 'switched ON'} at t=${r.t}ms`);
-  for (const s of c.sizeChanges) out.push(`card size ${s.from.join('x')} -> ${s.to.join('x')} at t=${s.t}ms${s.whileMoving ? ' (mid-flight)' : ''}`);
-  for (const s of c.contentSwaps) out.push(`card content swapped ${s.from} -> ${s.to} at t=${s.t}ms while ${s.distanceToDestinationPx}px from its destination`);
-  if (c.opacityBelow1.length) out.push(`card section opacity < 1 (min ${c.minOpacity}) at ${c.opacityBelow1.map((r) => `t=${r.t0}–${r.t1}ms`).join(', ')}`);
+  const destinationChanges = c.retargets.filter((r) => r.t >= 0);
+  for (const r of destinationChanges) (r.whileMoving ? out : notes).push(`card destination set at t=${r.t}ms (${r.from.join(',')} -> ${r.to.join(',')})${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
+  if (destinationChanges.length > expectMoves) out.push(`card destination set ${destinationChanges.length}x, expected ${expectMoves}`);
+  for (const r of c.transitionToggles) notes.push(`card host CSS transition ${/none/.test(r.to) ? 'switched OFF' : 'switched ON'} at t=${r.t}ms`);
+  for (const s of c.sizeChanges.slice(0, 2)) notes.push(`card size ${s.from.join('x')} -> ${s.to.join('x')} from t=${s.t}ms${s.whileMoving ? ' (morphing in flight)' : ''}`);
+  if (c.sizeChanges.length > 2) notes.push(`(${c.sizeChanges.length - 2} more size steps: the box morphing)`);
+  for (const s of c.contentSwaps) notes.push(`card content swapped ${s.from} -> ${s.to} at t=${s.t}ms while ${s.distanceToDestinationPx}px from its destination`);
+  const f = c.contentInFlight;
+  if (f.maxOpacityAway > 0.9) out.push(`new content ${c.contentSwaps.at(-1)?.to ?? ''} fully visible (${f.maxOpacityAway}) ${f.atDistancePx}px from rest at t=${f.atT}ms`);
+  if (f.wholeAtT != null) notes.push(`new content whole at t=${f.wholeAtT}ms, ${f.wholeAtDistancePx}px from rest (most shown >8px from rest: ${f.maxOpacityAway})`);
+  if (c.opacityBelow1.length) notes.push(`card section opacity < 1 (min ${c.minOpacity}) at ${c.opacityBelow1.map((r) => `t=${r.t0}–${r.t1}ms`).join(', ')}`);
+  if (m.startSync && m.startSync.maxFrames > 1) out.push(`cutouts and card did not start together: up to ${m.startSync.maxMs}ms / ${m.startSync.maxFrames} frames apart`);
   for (const k of m.cutouts) {
     const label = `cutout #${k.slot}`;
-    if (k.startsDegenerate && !k.endsDegenerate) out.push(`${label} grew from ${fmtRect(k.start)}; path ${k.path.map((p) => `t=${p.t}:${fmtRect(p.rect)}`).join(' -> ')}`);
-    if (!k.startsDegenerate && k.endsDegenerate) out.push(`${label} collapsed to ${fmtRect(k.end)}; path ${k.path.map((p) => `t=${p.t}:${fmtRect(p.rect)}`).join(' -> ')}`);
-    if (k.segments.length > 1) out.push(`${label} moved in ${k.segments.length} segments (${segText(k.segments)})`);
-    for (const r of k.retargets) out.push(`${label} destination changed at t=${r.t}ms ${fmtRect(r.from)} -> ${fmtRect(r.to)}${r.whileMoving ? ' while already moving (retarget mid-flight)' : ''}`);
+    if (k.cornerTouchT.length) out.push(`${label} passed through the page corner (0,0,0,0) while lit at t=${k.cornerTouchT.slice(0, 3).join(', ')}ms`);
+    else if (k.startsDegenerate && !k.endsDegenerate && k.travel > 1) out.push(`${label} grew from ${fmtRect(k.start)}; path ${k.path.map((p) => `t=${p.t}:${fmtRect(p.rect)}`).join(' -> ')}`);
+    if (k.opened) notes.push(`${label} opened in place`);
+    if (k.closed) notes.push(`${label} closed in place`);
+    if (k.segments.length > expectMoves) out.push(`${label} moved in ${k.segments.length} segments (${segText(k.segments)}), expected ${expectMoves}`);
+    for (const r of k.retargets) if (r.whileMoving) out.push(`${label} destination changed at t=${r.t}ms ${fmtRect(r.from)} -> ${fmtRect(r.to)} while already moving (retarget mid-flight)`);
     if (k.reversals) out.push(`${label} reversed direction ${k.reversals}x`);
     if (teleport(k)) out.push(`${label} jumped ${k.maxJump.px}px in one ${k.maxJump.dt}ms frame at t=${Math.round(k.maxJump.t)}ms`);
-    if (k.chase && k.chase.targetTravelPx > 2 && k.chase.maxGapPx - (k.chase.finalGapPx ?? 0) > 40) out.push(`${label} trailed its moving target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (resting offset ${k.chase.finalGapPx}px; target moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
-    const swap = c.contentSwaps[0], first = k.retargets.find((r) => r.t >= 0);
-    if (swap && first && first.t - swap.t > 60) out.push(`${label} began moving toward its new target ${first.t - swap.t}ms after the card content swapped (card swap t=${swap.t}ms, cutout retarget t=${first.t}ms)`);
-    if (k.restT != null && k.firstMoveT != null && (c.restT == null || Math.abs(k.restT - c.restT) > 250)) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at ${c.restT == null ? 'never moved' : `t=${Math.round(c.restT)}ms`}`);
+    if (k.chase && k.chase.targetTravelPx > 2 && k.chase.maxGapPx - (k.chase.finalGapPx ?? 0) > 40) notes.push(`${label} trailed its moving target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (resting offset ${k.chase.finalGapPx}px; target moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
+    if (k.restT != null && k.firstMoveT != null && c.restT != null && Math.abs(k.restT - c.restT) > 250) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at t=${Math.round(c.restT)}ms`);
   }
-  if (m.frames.maxDtMs > 100 || m.frames.over50ms > 5) out.push(`page frame cadence: median ${m.frames.medianDtMs}ms, p95 ${m.frames.p95DtMs}ms, worst ${m.frames.maxDtMs}ms at t=${m.frames.maxDtAtT}ms, ${m.frames.over50ms} frames > 50ms (idle before trigger: median ${m.frames.preTriggerMedianDtMs}ms)`);
+  if (m.frames.maxDtMs > 100 || m.frames.over50ms > 5) out.push(`environment: page frame cadence median ${m.frames.medianDtMs}ms, p95 ${m.frames.p95DtMs}ms, worst ${m.frames.maxDtMs}ms at t=${m.frames.maxDtAtT}ms, ${m.frames.over50ms} frames > 50ms (idle before trigger: median ${m.frames.preTriggerMedianDtMs}ms)`);
   if (m.previewUnavailable) out.push(`"Preview unavailable" text present in the preview for ${m.previewUnavailable.frames} frames, t=${m.previewUnavailable.firstT}–${m.previewUnavailable.lastT}ms`);
   void source;
-  // Slots beyond the beat's target count mirror slot 0, so identical lines are merged: "cutout #0" + "cutout #2" -> "cutouts #0,#2".
-  const merged = new Map();
-  for (const line of out) {
-    const hit = /^cutout #(\d+) (.*)$/.exec(line);
-    if (hit) merged.set(`c:${hit[2]}`, [...(merged.get(`c:${hit[2]}`) ?? []), hit[1]]); else merged.set(line, null);
-  }
-  return [...merged].map(([line, slots]) => (slots ? `cutout${slots.length > 1 ? 's' : ''} #${slots.join(',#')} ${line.slice(2)}` : line));
+  // Slots that share a line are merged: "cutout #0" + "cutout #2" -> "cutouts #0,#2".
+  const merge = (lines) => {
+    const merged = new Map();
+    for (const line of lines) {
+      const hit = /^cutout #(\d+) (.*)$/.exec(line);
+      if (hit) merged.set(`c:${hit[2]}`, [...(merged.get(`c:${hit[2]}`) ?? []), hit[1]]); else merged.set(line, null);
+    }
+    return [...merged].map(([line, slots]) => (slots ? `cutout${slots.length > 1 ? 's' : ''} #${slots.join(',#')} ${line.slice(2)}` : line));
+  };
+  return { suspects: merge(out), notes: merge(notes) };
 }
 
 /* ------------------------------------------------------------------ contact sheets */
@@ -301,13 +373,16 @@ export function parseOptions(args) {
   for (let i = 0; i < args.length; i++) {
     const [key, inline] = args[i].split('=');
     if (key === '--back' || key === '--help' || key === '--no-screencast') { o[key.slice(2)] = true; continue; }
-    if (!['--out', '--theme', '--base-url', '--transitions'].includes(key)) throw new Error(`Unknown flag: ${key}`);
+    if (!['--out', '--theme', '--base-url', '--transitions', '--viewport'].includes(key)) throw new Error(`Unknown flag: ${key}`);
     o[key.slice(2)] = inline ?? args[++i];
     if (!o[key.slice(2)] || o[key.slice(2)].startsWith('--')) throw new Error(`${key} needs a value`);
   }
   o.theme ??= 'dark';
   if (!['light', 'dark'].includes(o.theme)) throw new Error(`Unknown theme: ${o.theme}`);
   o.transitions = o.transitions?.split(',');
+  const [width, height] = (o.viewport ?? '1440x900').split('x').map(Number);
+  if (!(width >= 320 && height >= 320)) throw new Error(`--viewport needs WIDTHxHEIGHT, got ${o.viewport}`);
+  o.viewport = { width, height };
   return o;
 }
 
@@ -324,7 +399,7 @@ export async function run(options) {
   await mkdir(privateDir, { mode: 0o700 });
   const children = [];
   let browser;
-  const report = { version: 1, theme: options.theme, viewport: { width: 1440, height: 900 }, reducedMotion: 'no-preference', back: Boolean(options.back), steps: steps.map((s) => s.id), transitions: [], beats: {}, notes: [] };
+  const report = { version: 1, theme: options.theme, viewport: options.viewport ?? { width: 1440, height: 900 }, reducedMotion: 'no-preference', back: Boolean(options.back), steps: steps.map((s) => s.id), transitions: [], beats: {}, notes: [] };
   const spawnOwned = (args, env) => { const c = spawn(process.execPath, args, { env: { ...process.env, ...env }, stdio: 'ignore', detached: true }); children.push(c); return c; };
   try {
     const tokenFile = join(privateDir, 'token'), token = 'tour-motion-fake-runtime-only';
@@ -344,7 +419,7 @@ export async function run(options) {
 
     browser = await chromium.launch({ headless: true, executablePath: chromiumExecutable(), args: ['--no-sandbox'] });
     report.browser = browser.version();
-    const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, screen: { width: 1440, height: 900 }, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: options.theme, reducedMotion: 'no-preference', serviceWorkers: 'block' });
+    const context = await browser.newContext({ viewport: report.viewport, screen: report.viewport, deviceScaleFactor: 1, locale: 'en-US', timezoneId: 'UTC', colorScheme: options.theme, reducedMotion: 'no-preference', serviceWorkers: 'block' });
     await context.addInitScript(({ theme }) => {
       let seed = 0x12345678;
       Math.random = () => { seed = (Math.imul(1664525, seed) + 1013904223) >>> 0; return seed / 4294967296; };
@@ -392,7 +467,8 @@ export async function run(options) {
       while (!await page.evaluate((d) => window.__tm.isSettled(d), dest)) {
         if (!nudged && Date.now() - start > NUDGE_MS) {
           nudged = true;
-          nudges.push({ beat: dest.id, afterMs: Date.now() - start, state: await page.evaluate(() => window.__tm.samples.at(-1)?.st) });
+          nudges.push({ beat: dest.id, afterMs: Date.now() - start, state: await page.evaluate(() => window.__tm.samples.at(-1)?.st),
+            scene: await page.evaluate(() => [...document.querySelectorAll('[data-editor-tour="preview"] [data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset, box: [e.offsetWidth, e.offsetHeight] }))) });
           await nextButton(dest).click({ timeout: 5000 }).catch(() => {});
         }
         if (Date.now() - start > CAP_MS) throw new Error(`${dest.id} did not settle within ${CAP_MS} ms: ${JSON.stringify(await page.evaluate(() => window.__tm.samples.at(-1)?.st))}; live scene: ${JSON.stringify(await page.evaluate(() => [...document.querySelectorAll('[data-testid="astrid-live-scene-entry"]')].map((e) => ({ ...e.dataset }))))}; browser errors: ${JSON.stringify(browserErrors.filter((e) => !e.includes('serviceWorker')).slice(0, 5))}`);
@@ -403,11 +479,11 @@ export async function run(options) {
 
     /** Record samples + screencast around `action` (which returns the destination step), until the destination settles. */
     const trace = async (source, label, action, nameOverride) => {
-      await page.evaluate((targets) => { window.__tm.samples.length = 0; window.__tm.clicks.length = 0; window.__tm.targets = targets; }, [...new Set(steps.flatMap((s) => s.targets))]);
+      await page.evaluate((targets) => { window.__tm.samples.length = 0; window.__tm.clicks.length = 0; window.__tm.loaf.length = 0; window.__tm.targets = targets; }, [...new Set(steps.flatMap((s) => s.targets))]);
       const frames = [];
       const onFrame = (event) => { frames.push({ data: event.data, wall: event.metadata.timestamp * 1000 }); cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {}); };
       cdp.on('Page.screencastFrame', onFrame);
-      if (!options['no-screencast']) await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, everyNthFrame: 1, maxWidth: 1440, maxHeight: 900 });
+      if (!options['no-screencast']) await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, everyNthFrame: 1, maxWidth: report.viewport.width, maxHeight: report.viewport.height });
       await delay(300);
       const load0 = loadavg()[0];
       const dest = await action();
@@ -415,7 +491,7 @@ export async function run(options) {
       await delay(250);
       if (!options['no-screencast']) await cdp.send('Page.stopScreencast');
       cdp.off('Page.screencastFrame', onFrame);
-      const { samples, clicks } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks }));
+      const { samples, clicks, loaf } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks, loaf: window.__tm.loaf }));
       const name = nameOverride ?? `${source.id}→${dest.id}${label}`;
       if (!wanted(name)) return dest;
       const t0 = clicks[0]?.t ?? samples[0].t;
@@ -428,7 +504,10 @@ export async function run(options) {
         await writeFile(path, Buffer.from(f.data, 'base64'));
         shots.push({ path, t: f.wall - timeOrigin - t0 });
       }
-      const analysis = analyseTransition(rebased, { dest, source });
+      // Desktop's respond reached forward makes two moves (arrive beside the reply, contract onto its actions); by Back, one.
+      const expectMoves = dest.beat === 'respond' && !/back/.test(name) ? 2 : 1;
+      const analysis = analyseTransition(rebased, { dest, source, expectMoves });
+      analysis.longFrames = loaf.map((f) => ({ ...f, t: round(f.t - t0, 0) })).filter((f) => f.t > -200).sort((a, b) => b.d - a.d).slice(0, 5);
       const moved = (key) => rebased.some((s, k) => k && s.cut[0] && rebased[k - 1].cut[0] && s.cut[0][key].some((n, j) => Math.abs(n - rebased[k - 1].cut[0][key][j]) > 0.01));
       analysis.geometrySourcesMoved = { computedStyle: moved('c'), getBBox: moved('b'), attribute: moved('a') };
       const lastT = rebased.at(-1).t;
@@ -490,16 +569,24 @@ export async function run(options) {
 }
 
 function renderMarkdown(report) {
+  const yes = (v) => (v ? 'yes' : 'no');
   const lines = [`# Tour motion trace (${report.theme}, ${report.viewport.width}x${report.viewport.height}, motion on${report.back ? ', with Back' : ''})`, '', `Browser ${report.browser ?? '?'}. t=0 is the trigger click. Frame images: \`<transition>/frames\`, filmstrips read left to right, top to bottom.`, '',
-    '| transition | duration | card travel | card segments | card first move / rest | cutouts (segments) | suspects |', '|---|---|---|---|---|---|---|'];
-  for (const t of report.transitions) lines.push(`| ${t.name} | ${t.durationMs}ms | ${t.card.travel}px | ${t.card.segments.length} | ${t.card.firstMoveT == null ? '-' : `${Math.round(t.card.firstMoveT)} / ${Math.round(t.card.restT)}ms`} | ${t.cutouts.map((c) => c.segments.length).join('/')} | ${t.suspects.length} |`);
+    'Contract columns: card moves (segments; expected in brackets), mid-flight destination changes, direction reversals, how far apart card and cutouts start (ms / frames), whether a lit cutout touched the page corner, and the most the NEW content shows more than 8 px from rest.', '',
+    '| transition | card moves | mid-flight retargets | reversals | card first move / rest | cutout start gap | corner | new content >8px from rest | suspects |', '|---|---|---|---|---|---|---|---|---|'];
+  for (const t of report.transitions) {
+    const c = t.card;
+    const cutoutRetargets = t.cutouts.reduce((n, k) => n + k.retargets.filter((r) => r.whileMoving).length, 0);
+    lines.push(`| ${t.name} | ${c.segments.length} (${t.expectMoves}) | ${c.midFlightRetargets}${cutoutRetargets ? ` (+${cutoutRetargets} cutout)` : ''} | ${c.reversals} | ${c.firstMoveT == null ? '-' : `${Math.round(c.firstMoveT)} / ${Math.round(c.restT)}ms`} | ${t.startSync ? `${t.startSync.maxMs}ms / ${t.startSync.maxFrames}f` : '-'} | ${yes(t.cutouts.some((k) => k.cornerTouchT.length))} | ${c.contentInFlight.maxOpacityAway} | ${t.suspects.length} |`);
+  }
   for (const t of report.transitions) {
     lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadavg1AtStart}->${t.hostLoad.loadavg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',
       `Filmstrips: ${t.filmstrips.dense}; ${t.filmstrips.whole}`, '');
-    for (const c of t.cutouts) lines.push(`- cutout #${c.slot}: ${fmtRect(c.start)} -> ${fmtRect(c.end)}, travel ${c.travel}px, ${c.segments.length} segment(s)${c.chase ? `, max gap to ${c.chase.selector} ${c.chase.maxGapPx}px (final ${c.chase.finalGapPx}px)` : ''}`);
+    for (const c of t.cutouts) if (c.used) lines.push(`- cutout #${c.slot}: ${fmtRect(c.start)} -> ${fmtRect(c.end)}, travel ${c.travel}px, ${c.segments.length} segment(s)${c.opened ? ', opened in place' : ''}${c.closed ? ', closed in place' : ''}${c.chase ? `, max gap to ${c.chase.selector} ${c.chase.maxGapPx}px (final ${c.chase.finalGapPx}px)` : ''}`);
     lines.push('', '**Suspects**', '', ...(t.suspects.length ? t.suspects.map((s) => `- ${s}`) : ['- none']));
+    lines.push('', '**Timeline**', '', ...(t.notes.length ? t.notes.map((s) => `- ${s}`) : ['- nothing moved']));
+    if (t.longFrames?.length) lines.push('', '**Longest frames** (Long Animation Frames: what ran in them)', '', ...t.longFrames.map((f) => `- t=${f.t}ms ${f.d}ms (style+layout ${f.styleLayoutMs ?? '?'}ms, render ${f.renderMs ?? '?'}ms): ${f.scripts.map((x) => `${x.d}ms ${x.invoker}${x.fn ? ` ${x.fn}` : ''}${x.src ? ` @${x.src}` : ''}`).join('; ') || 'no script attribution'}`));
   }
-  if (report.nudges?.length) lines.push('', '## Beats that did not become ready by themselves', '', ...report.nudges.map((n) => `- ${n.beat}: not ready after ${Math.round(n.afterMs / 1000)}s (ready=${JSON.stringify(n.state?.ready)}); the tool pressed Next once like a user skipping the animation. Its trace contains that extra click.`));
+  if (report.nudges?.length) lines.push('', '## Beats that did not become ready by themselves', '', ...report.nudges.map((n) => `- ${n.beat}: not ready after ${Math.round(n.afterMs / 1000)}s (ready=${JSON.stringify(n.state?.ready)}); the tool pressed Next once like a user skipping the animation. Its trace contains that extra click.${n.scene ? ` Live scene: ${JSON.stringify(n.scene)}` : ''}`));
   lines.push('', '## Update available notice per settled beat', '', ...Object.entries(report.beats).map(([id, b]) => `- ${id}: ${b.updateAvailable.length ? b.updateAvailable.map((u) => `${fmtRect(u.rect)} centre ${u.centreInCutout ? 'inside' : 'outside'} cutouts`).join('; ') : 'absent'}`));
   return `${lines.join('\n')}\n`;
 }

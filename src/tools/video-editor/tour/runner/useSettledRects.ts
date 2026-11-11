@@ -33,6 +33,8 @@ interface CommitOptions {
   measurement: SpotlightMeasurement;
   /** False under reduced motion: the commit then never waits for the old content to leave. */
   motion: boolean;
+  /** Whether the card is still on its way (its move's animations have not finished): a commit within a step waits for it. */
+  moving?: () => boolean;
 }
 
 const isFar = (a: readonly SpotlightRect[], b: readonly SpotlightRect[]) => a.length !== b.length
@@ -62,13 +64,13 @@ function useViewportKey(): string {
  *  - a viewport resize commits at once, without animation.
  * Before the first commit the current measurement passes through unanimated.
  */
-export function useSettledRects({ key, targetsKey, measurement, motion }: CommitOptions): SpotlightCommit {
+export function useSettledRects({ key, targetsKey, measurement, motion, moving }: CommitOptions): SpotlightCommit {
   const viewport = useViewportKey();
   const valid = measurement.key === targetsKey;
   const [state, setState] = useState<SpotlightCommit | null>(null);
   const committed = useRef<(SpotlightCommit & { at: number; viewport: string }) | null>(null);
-  const latest = useRef({ key, valid, measurement, motion, viewport });
-  latest.current = { key, valid, measurement, motion, viewport };
+  const latest = useRef({ key, valid, measurement, motion, viewport, moving });
+  latest.current = { key, valid, measurement, motion, viewport, moving };
   const loop = useRef({ frame: 0, since: null as number | null, signature: '', changedAt: 0, frames: 0, jump: false });
 
   const commit = (animate: boolean, at: number) => {
@@ -82,7 +84,7 @@ export function useSettledRects({ key, targetsKey, measurement, motion }: Commit
   const tick = (now: number) => {
     const run = loop.current;
     run.frame = 0;
-    const { key: nextKey, valid: isValid, measurement: m, motion: moves } = latest.current;
+    const { key: nextKey, valid: isValid, measurement: m, motion: moves, moving: inFlight } = latest.current;
     const signature = signatureOf(m);
     if (signature !== run.signature) {
       run.signature = signature;
@@ -107,7 +109,7 @@ export function useSettledRects({ key, targetsKey, measurement, motion }: Commit
       return;
     }
     const left = !moves || !newStep || !done || now - run.since >= TOUR_LEAVE_MS;
-    const landed = newStep || !moves || now - done.at >= TOUR_MOVE_MS;
+    const landed = newStep || !moves || (now - done.at >= TOUR_MOVE_MS && !inFlight?.());
     if (isValid && landed && ((still && m.complete && left) || capped)) commit(!!done, now);
     else again();
   };

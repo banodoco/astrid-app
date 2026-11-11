@@ -122,7 +122,7 @@ describe('TourCard', () => {
     it('shows two dots after "2 of 3" on act 2\'s land: the first lit, the second quiet', () => {
       const { container } = renderAt(2, 'land');
       expect(screen.getByText('2 of 3')).toBeInTheDocument();
-      expect(screen.getByText('part 1 of 2')).toHaveClass('sr-only');
+      expect(screen.getByText('part 1 of 2')).toHaveClass('opacity-0');
       const dots = dotsOf(container);
       expect(dots).toHaveLength(2);
       expect(dots[0]).toHaveClass('bg-foreground/70');
@@ -144,7 +144,7 @@ describe('TourCard', () => {
       const section = screen.getByRole('region', { name: 'Tour, step 2 of 3, part 2 of 2' });
       expect(section).toHaveClass('w-[380px]', 'p-5');
       expect(screen.getByText('2 of 3')).toBeInTheDocument();
-      expect(screen.getByText('part 2 of 2')).toHaveClass('sr-only');
+      expect(screen.getByText('part 2 of 2')).toHaveClass('opacity-0');
       const dots = dotsOf(container);
       expect(dots).toHaveLength(2);
       expect(dots[0]).toHaveClass('bg-foreground/70');

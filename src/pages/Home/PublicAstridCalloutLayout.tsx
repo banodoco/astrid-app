@@ -193,12 +193,12 @@ export class PublicAstridCalloutLayout extends Component<Props> {
     // so App -> Agent pairs Effects -> Community, Models -> Tools, Timeline -> Workflows, and the reverse
     // keeps the established Agent -> App path.
     const phone = typeof window.matchMedia === 'function' && window.matchMedia(PHONE_QUERY).matches;
-    // Phone chips keep their place: left stays left (Effects <-> Community), right stays right
-    // (Timeline <-> Tools), and the bottom chip stays below (Models <-> Workflows).
-    const sourceOrder = phone && snapshot.boxes.length === 3
-      ? [1, 0, 2]
-      : previous.audience === 'app' && this.props.audience === 'agent'
-        ? [1, 2, 0]
+    // Phone chips keep their place both ways: left stays left (Effects <-> Community), right stays right
+    // (Timeline <-> Workflows), and the bottom chip stays below (Models <-> Tools).
+    const sourceOrder = previous.audience === 'app' && this.props.audience === 'agent'
+      ? [1, 2, 0]
+      : phone && snapshot.boxes.length === 3
+        ? [2, 0, 1]
         : snapshot.boxes.map((_, index) => index);
     const sourceBoxes = sourceOrder.map(index => snapshot.boxes[index]);
     const above = (box: DOMRect, stage: DOMRect) => box.top + box.height / 2 < stage.top + stage.height / 2;

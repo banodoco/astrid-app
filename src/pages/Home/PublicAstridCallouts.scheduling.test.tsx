@@ -410,7 +410,7 @@ describe('bounded stage passes', () => {
 
   it.each([
     [false, 'agent', ['community', 'tools', 'workflows']],
-    [true, 'agent', ['community', 'tools', 'workflows']],
+    [true, 'agent', ['community', 'workflows', 'tools']],
     [false, 'app', ['timeline', 'effects', 'models']],
     [true, 'app', ['effects', 'timeline', 'models']],
   ] as const)('staggers reconnect pulses in the %s %s introduction order', (isPhone, audience, order) => {

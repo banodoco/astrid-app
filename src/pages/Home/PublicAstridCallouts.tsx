@@ -74,7 +74,7 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     target: '.astrid-chat-surface',
     at: [0, 0.2],
     side: 'right',
-    phoneTitle: 'Community intelligence',
+    phoneTitle: 'Open knowledge',
     // On phones: down beside the conversation window and in to the left edge of Astrid's reply.
     phoneSide: 'bottom',
     phoneTarget: '.astrid-chat-surface .justify-start > .rounded-2xl',
@@ -88,12 +88,11 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     target: '.astrid-chat-surface',
     at: [0, 0.68],
     side: 'right',
-    phoneTitle: 'Reusable agent workflows',
-    phoneSide: 'top',
-    // On phones: the finished result, reached up the conversation's left margin.
-    phoneTarget: '.astrid-chat-surface .astrid-example-result',
-    phoneAt: [0, 0.5],
-    phoneSwing: 0.022,
+    phoneTitle: 'Agent workflows',
+    // On phones the chip sits top-right: straight down onto the top edge of the person's request.
+    phoneSide: 'bottom',
+    phoneTarget: '.astrid-chat-surface .justify-end > .rounded-2xl',
+    phoneAt: [0.8, 0],
   },
   {
     id: 'tools',
@@ -102,13 +101,13 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     target: '.astrid-chat-surface',
     at: [1, 0.42],
     side: 'left',
-    phoneTitle: 'Open-source tools',
-    phoneBody: 'ComfyUI, Wan2GP, HyperFrames, AI Toolkit, or anything you integrate.',
-    phoneSide: 'bottom',
-    // On phones: the person's request.
-    phoneTarget: '.astrid-chat-surface .justify-end > .rounded-2xl',
-    // Land on the top edge of the request bubble, in from its right corner.
-    phoneAt: [0.8, 0],
+    phoneTitle: 'Integrated into open-source tools',
+    // On phones the chip runs full width along the bottom, where its logos have room: its connector
+    // rises beside the conversation and turns in to the finished result.
+    phoneSide: 'top',
+    phoneTarget: '.astrid-chat-surface .astrid-example-result',
+    phoneAt: [0, 0.5],
+    phoneSwing: 0.022,
   },
 ];
 
@@ -167,7 +166,7 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
     // turns in to the timeline's right edge, clear of the player.
     phoneAt: [1, 0.3],
     side: 'top',
-    phoneTitle: 'Edit with your agents',
+    phoneTitle: 'Agent editing',
     phoneSide: 'bottom',
     phoneSwing: 0.93,
   },
@@ -226,7 +225,7 @@ function calloutsFor(audience: PublicAstridAudience) {
 }
 
 const MOBILE_CALLOUT_ORDER: Record<PublicAstridAudience, readonly string[]> = {
-  agent: ['community', 'tools', 'workflows'],
+  agent: ['community', 'workflows', 'tools'],
   app: ['effects', 'timeline', 'models'],
 };
 

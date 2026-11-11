@@ -1533,7 +1533,6 @@
   .astrid-callout[data-callout="models"] { bottom: -4%; }
   .astrid-callout[data-callout="timeline"] { bottom: -4%; }
   .astrid-callout { --astrid-callout-width: 184px; --astrid-callout-overhang: -32px; padding: 10px 12px; }
-  .astrid-callout h2 { font-size: 13.5px; }
   .astrid-callout p { font-size: 12px; }
 }
 
@@ -1781,8 +1780,8 @@
   .astrid-timeline-surface .timeline-canvas-edit-area .z-20 > .group > .truncate { display: none; }
   .astrid-timeline-surface .timeline-canvas-edit-area .z-20 > .group { justify-content: center; }
 
-  /* Chips. Two share the top of the frame and one sits at the bottom (App: Effects and Timeline above,
-     Models below; Agent: Community and Tools above, Workflows below). A chip is a button showing the
+  /* Chips. Two equal ones share the top of the frame and one sits at the bottom (App: Effects and
+     Timeline above, Models below; Agent: Community and Workflows above, Tools below). A chip is a button showing the
      title and a plus; unfolded, its body grows over the nearest panel, away from the frame's edge. */
   .astrid-callout {
     --astrid-callout-width: calc(50% - 12px);
@@ -1792,16 +1791,14 @@
   }
   .astrid-callout[data-callout] { top: auto; right: auto; bottom: auto; left: auto; }
   .astrid-callout:is([data-callout="effects"], [data-callout="community"]) { top: 8px; left: 8px; }
-  .astrid-callout:is([data-callout="timeline"], [data-callout="tools"]) { top: 8px; right: 8px; }
-  .astrid-callout:is([data-callout="models"], [data-callout="workflows"]) { bottom: 8px; left: 8px; }
-  /* Agent's longer left-hand title takes a little of the right chip's room. */
-  .astrid-callout[data-callout="community"] { --astrid-callout-width: calc(56% - 12px); }
-  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(44% - 12px); }
+  .astrid-callout:is([data-callout="timeline"], [data-callout="workflows"]) { top: 8px; right: 8px; }
+  .astrid-callout:is([data-callout="models"], [data-callout="tools"]) { bottom: 8px; left: 8px; }
   /* The Models chip stops short of the Agent launcher it points at. */
   .astrid-callout[data-callout="models"] { --astrid-callout-width: calc(100% - 16px - 76px); }
-  .astrid-callout[data-callout="workflows"] { --astrid-callout-width: calc(100% - 16px); }
+  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(100% - 16px); }
   .astrid-callout[data-open="true"] { z-index: 2; }
-  .astrid-callout h2 { font-size: 13px; line-height: 1.2; }
+  /* Titles scale with the screen so the half-width chips never cut theirs off. */
+  .astrid-callout h2 { font-size: clamp(10.5px, 3.45vw, 13.5px); line-height: 1.2; }
   .astrid-callout-toggle {
     display: flex;
     width: 100%;
@@ -1963,11 +1960,8 @@
 @media (max-width: 640px) {
   /* The unfolded Tools chip: the four integrations in one row, logos over names. */
   .astrid-integration-logos { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; margin: 0; padding: 0 9px 7px; }
-  .astrid-integration-logos a { min-height: 30px; padding: 0; }
-  /* The chip is too narrow for four names under the logos; its sentence lists them instead. */
-  .astrid-integration-logos span {
-    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
-  }
+  .astrid-integration-logos a { gap: 3px; min-height: 46px; padding: 0; font-size: 10px; letter-spacing: -.02em; }
+  .astrid-integration-logos span { white-space: nowrap; overflow-wrap: normal; }
   .astrid-integration-logos img { width: 28px; height: 28px; }
 
   .astrid-public-site .astrid-editor-stage,
@@ -2162,16 +2156,10 @@
   }
 }
 
-/* Narrow phones: the half-width chips keep their titles on one line. */
-@media (max-width: 380px) {
-  .astrid-callout h2 { font-size: 12px; }
+/* Narrow phones: tighter chips and switch. */
+@media (max-width: 360px) {
   .astrid-callout-toggle { padding: 0 7px 0 9px; gap: 4px; }
-}
-@media (max-width: 340px) {
-  .astrid-callout h2 { font-size: 10.5px; letter-spacing: -.01em; }
   .astrid-callout-toggle-icon { flex-basis: 14px; width: 14px; }
-  .astrid-callout[data-callout="community"] { --astrid-callout-width: calc(54% - 12px); }
-  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(46% - 12px); }
   .astrid-audience-switch button { padding-inline: 12px; }
   .astrid-brand { gap: 5px; }
 }

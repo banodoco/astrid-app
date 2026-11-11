@@ -2214,6 +2214,8 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   const wire = await faultFirstCommit(page);
   const importResponse = page.waitForResponse((response) => response.request().method() === 'POST' && /\/media-imports$/.test(new URL(response.url()).pathname), CEILING);
   const selectionResponse = page.waitForResponse((response) => response.request().method() === 'GET' && /\/media-selection\?/.test(new URL(response.url()).pathname + new URL(response.url()).search), CEILING);
+  // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/252; owner decision 11 Nov moved the video-drop save fix to Plan 39, making this eligible despite the earlier Release 12 ruling.
+  test.fail(true, 'Dropped video is not saved (image-only guard); see #252');
   const verifiedResponse = page.waitForResponse((response) => response.request().method() === 'GET' && /\/media-selection\/verified\?/.test(new URL(response.url()).pathname + new URL(response.url()).search), CEILING);
   await dropFileOnTimeline(page, file, seed3.appClipId, seed3.transitionClipId, 0, THREE_PRODUCTS_REFERENCE_AT, manualDropPointerAt);
   const imported = await importResponse;

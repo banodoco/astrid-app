@@ -28,6 +28,11 @@ import {
 } from '@/shared/lib/dnd/dragDrop';
 import type { GeneratedImageWithMetadata } from '@/shared/components/MediaGallery/types';
 import { parseRatio } from '@/shared/lib/media/aspectRatios';
+import {
+  MediaGalleryTileFrame,
+  extractResolutionFromMetadata,
+  resolveAspectRatioPadding,
+} from "./MediaGalleryItem/components/MediaGalleryTileFrame";
 import { useProjectSelectionContext } from "@/shared/contexts/ProjectContext";
 import { TOOL_IDS } from '@/shared/lib/tooling/toolIds';
 import { useShotNavigation } from "@/shared/hooks/shots/useShotNavigation";
@@ -43,53 +48,6 @@ import { bridgeMediaUrl } from '@/shared/lib/media/bridgeMediaUrl';
 import { getProjectSelectionFallbackId } from '@/shared/contexts/projectSelectionStore';
 import { useRenderBudget } from '@/shared/dev/useRenderBudget';
 import { isAdditiveSelectionEvent, isClickLikePointerGesture, isPrimaryPointer } from '@/shared/lib/interactions/selectionGesture';
-
-const MIN_PADDING = 60;
-const MAX_PADDING = 200;
-
-function clampPadding(value: number): number {
-  return Math.min(Math.max(value, MIN_PADDING), MAX_PADDING);
-}
-
-function extractResolutionFromMetadata(image: GeneratedImageWithMetadata): { width?: number; height?: number } {
-  let width = image.metadata?.width;
-  let height = image.metadata?.height;
-
-  if (width && height) {
-    return { width, height };
-  }
-
-  const resolution = image.metadata?.originalParams?.orchestrator_details?.resolution;
-  if (resolution && typeof resolution === 'string' && resolution.includes('x')) {
-    const [parsedWidth, parsedHeight] = resolution.split('x').map(Number);
-    if (!isNaN(parsedWidth) && !isNaN(parsedHeight)) {
-      width = parsedWidth;
-      height = parsedHeight;
-    }
-  }
-
-  return { width, height };
-}
-
-function resolveAspectRatioPadding(
-  image: GeneratedImageWithMetadata,
-  projectAspectRatio?: string,
-): string {
-  if (projectAspectRatio) {
-    const ratio = parseRatio(projectAspectRatio);
-    if (!isNaN(ratio)) {
-      const calculatedPadding = (1 / ratio) * 100;
-      return `${clampPadding(calculatedPadding)}%`;
-    }
-  }
-
-  const { width, height } = extractResolutionFromMetadata(image);
-  if (width && height) {
-    return `${clampPadding((height / width) * 100)}%`;
-  }
-
-  return '100%';
-}
 
 function toGenerationDragData(image: GeneratedImageWithMetadata): GenerationDropData | null {
   const generationId = getGenerationId(image) ?? image.id;
@@ -395,13 +353,13 @@ export const MediaGalleryItem: React.FC<MediaGalleryItemProps> = ({
     );
   }
   const imageContent = (
-    <div
+    <MediaGalleryTileFrame
         data-gallery-item-id={image.id}
-        className={`border rounded-lg overflow-hidden hover:shadow-md transition-[opacity,transform] duration-200 relative group bg-card ${
-          isSelected ? 'outline outline-2 outline-sky-400 -outline-offset-2 ' : ''
-        }${
-          isDragging ? 'opacity-50 scale-75' : ''
-        } ${!isMobile ? 'cursor-grab active:cursor-grabbing' : ''}`}
+        isSelected={isSelected}
+        isDragging={isDragging}
+        isMobile={isMobile}
+        aspectRatioPadding={aspectRatioPadding}
+        minHeight={minHeight}
         draggable={!isMobile}
         onDragStart={handleDragStart}
         onDragEnd={handleDragEnd}
@@ -411,15 +369,8 @@ export const MediaGalleryItem: React.FC<MediaGalleryItemProps> = ({
         onTouchEnd={wrapperHandlesTouch ? handleInteraction : undefined}
         onPointerDown={handleWrapperPointerDown}
         onPointerUp={handleWrapperPointerUp}
-    >
-      {/* Image layer */}
-      <div
-        style={{
-          paddingBottom: aspectRatioPadding,
-          minHeight: minHeight
-        }}
-        className="relative bg-muted/50"
-      >
+        media={(
+          <>
           {isAudioContent ? (
             <AudioContent image={image} shouldLoad={shouldLoad} onOpenLightbox={onOpenLightbox} onLoaded={() => onImageLoaded?.(image.id)} />
           ) : isVideoContent ? (
@@ -462,7 +413,9 @@ export const MediaGalleryItem: React.FC<MediaGalleryItemProps> = ({
               setImageLoading={setImageLoading}
             />
           )}
-      </div>
+          </>
+        )}
+    >
       {/* Overlay layer — single container above the image for all UI controls */}
       {image.id && (
       <div className="absolute inset-0 z-10 pointer-events-none [&>*]:pointer-events-auto">
@@ -565,7 +518,7 @@ export const MediaGalleryItem: React.FC<MediaGalleryItemProps> = ({
           />
       </div>)
       }
-    </div>
+    </MediaGalleryTileFrame>
   );
   return isMobile ? (
     <React.Fragment key={imageKey}>

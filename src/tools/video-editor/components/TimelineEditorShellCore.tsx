@@ -761,8 +761,8 @@ function TimelineEditorShellCoreComponent({
       )}
       data-shell-interaction="true"
     >
-      {/* The tour's header band: the tour's picture is a still or a scene, so the row gets the quiet scrim a video player puts behind its chrome. */}
-      {touring && <div aria-hidden data-testid="video-editor-tour-header-scrim" className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-black/60 via-black/35 to-transparent" />}
+      {/* The tour's header band: the tour's picture is a still or a scene, so the row gets a quiet scrim in the panel's own colour, so it reads as a header in either theme. */}
+      {touring && <div aria-hidden data-testid="video-editor-tour-header-scrim" className="pointer-events-none absolute inset-0 -z-10 bg-gradient-to-b from-card/90 via-card/50 to-transparent" />}
       <div className="pointer-events-auto flex min-w-0 max-w-[min(75%,32rem)] flex-col items-start gap-1">
         {previewControls && (
           <div

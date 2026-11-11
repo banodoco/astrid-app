@@ -12,6 +12,7 @@ import {
   skipEditorTourAnimation,
   startEditorTour,
 } from '@/shared/state/editorTourStore.ts';
+import { getPaneLockHolds } from '@/shared/state/paneLockHolds.ts';
 import { EDITOR_TOUR_SCRIPT } from '@/tools/video-editor/tour/tourScript.ts';
 import { EDITOR_TOUR_ANCHORS, editorTourSelector } from '@/tools/video-editor/tour/anchors.ts';
 
@@ -40,7 +41,6 @@ const mocks = vi.hoisted(() => ({
   composerRemoveAttachment: vi.fn(),
   composerClearAttachments: vi.fn(),
   loadGenerationForLightbox: vi.fn(),
-  setIsTasksPaneLocked: vi.fn(),
 }));
 
 
@@ -86,11 +86,6 @@ vi.mock('@/tools/video-editor/hooks/useAgentVoice', async (importOriginal) => ({
 
 vi.mock('@/shared/state/currentAttachmentSet', () => ({
   useCurrentAttachmentSet: (...args: unknown[]) => mocks.useCurrentAttachmentSet(...args),
-}));
-
-vi.mock('@/shared/state/panesStore', () => ({
-  usePanesStore: (selector: (state: { isTasksPaneLocked: boolean; setIsTasksPaneLocked: typeof mocks.setIsTasksPaneLocked }) => unknown) =>
-    selector({ isTasksPaneLocked: false, setIsTasksPaneLocked: mocks.setIsTasksPaneLocked }),
 }));
 
 vi.mock('@/domains/media-lightbox/MediaLightbox', () => ({
@@ -263,7 +258,6 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     render(<AgentChatPanel />);
 
     for (const spy of SESSION_HOOK_SPIES) expect(spy).not.toHaveBeenCalled();
-    expect(mocks.setIsTasksPaneLocked).toHaveBeenCalledWith(true);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(requestJsonSpy).not.toHaveBeenCalled();
     expect(requestRawSpy).not.toHaveBeenCalled();
@@ -271,6 +265,14 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(composer()).not.toBeNull();
     expect(sendButton()).not.toBeNull();
     expect(transcript()).not.toBeNull();
+  });
+
+  it('holds the Tasks pane locked while mounted, saving nothing, and gives it back on unmount', () => {
+    act(() => startEditorTour());
+    const view = render(<AgentChatPanel />);
+    expect(getPaneLockHolds()).toEqual({ tasks: true, gens: false });
+    view.unmount();
+    expect(getPaneLockHolds()).toEqual({});
   });
 
   it('during the welcome shows the real empty state and types nothing until act 1 compose', () => {

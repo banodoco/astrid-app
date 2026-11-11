@@ -15,7 +15,7 @@ export function AppBuildProvider({ children, reload = () => window.location.relo
   const { reload: handleReload, error: reloadError, pending: reloading } = useGuardedReload(reload);
   return <AppBuildContext.Provider value={pageStale}>
     {children}
-    {pageStale && <div role="status" style={layer.style} {...(layer.inert === undefined ? {} : { inert: layer.inert })} className="fixed bottom-4 right-4 rounded-md border bg-background px-3 py-2 text-sm shadow-md">
+    {pageStale && <div role="status" style={layer.style} {...(layer.inert === undefined ? {} : { inert: layer.inert })} className="fixed bottom-4 right-4 z-[100110] rounded-md border bg-background px-3 py-2 text-sm shadow-md">
       Editor updated · <button type="button" className="font-medium underline underline-offset-2" onClick={() => void handleReload()} disabled={reloading}>{reloading ? 'Saving drafts…' : 'Reload'}</button>
       {reloadError && <p role="alert" className="mt-2 max-w-sm text-destructive">Could not safely reload: {reloadError}</p>}
     </div>}

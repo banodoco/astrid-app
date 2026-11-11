@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useUserUIState } from '@/shared/hooks/useUserUIState';
 import { useIsMobile, useIsTablet } from '@/shared/hooks/mobile';
 import { usePaneControlsHosted } from '@/shared/state/paneControlsHost';
+import { usePaneLockHolds } from '@/shared/state/paneLockHolds';
 import { usePersistentState } from '@/shared/hooks/usePersistentState';
 
 type PaneLockKey = 'shots' | 'tasks' | 'gens' | 'editor';
@@ -38,11 +39,12 @@ export function usePaneLockPolicyState() {
     'paneLocks',
     { ...UNLOCKED_PANES, tasks: savedTasksLock ?? isDesktop },
   );
-  const [locks, setLocks] = useState(paneLocks);
+  const [userLocks, setLocks] = useState(paneLocks);
+  const holds = usePaneLockHolds();
 
   const [isGenerationsPaneOpenState, setIsGenerationsPaneOpenState] = useState(false);
   const [isEditorPaneOpenState, setIsEditorPaneOpenState] = useState(false);
-  const [isTasksPaneOpenState, setIsTasksPaneOpenState] = useState(false);
+  const [userTasksOpen, setIsTasksPaneOpenState] = useState(false);
 
   // The saved lock can arrive after first paint (a new browser reads it from the Runtime): apply it when it differs.
   useEffect(() => {
@@ -112,6 +114,15 @@ export function usePaneLockPolicyState() {
     },
     [isMobile, isTablet, transientPanes, savePaneLocks, saveTasksLock],
   );
+
+  // What the app sees: the user's saved locks with any holds (paneLockHolds.ts) laid over them. Nothing here is saved.
+  const locks = useMemo((): PaneLocksState => {
+    if (transientPanes) return userLocks;
+    const held = { ...userLocks, ...holds };
+    // A tablet shows one locked pane: a held lock replaces the rest, as locking it would have.
+    return isTablet && Object.values(holds).some(Boolean) ? { ...UNLOCKED_PANES, ...holds } : held;
+  }, [userLocks, holds, transientPanes, isTablet]);
+  const isTasksPaneOpenState = !transientPanes && holds.tasks !== undefined ? holds.tasks : userTasksOpen;
 
   const setIsGenerationsPaneLocked = useMemo(() => createPaneLockSetter('gens'), [createPaneLockSetter]);
   const setIsEditorPaneLocked = useMemo(() => createPaneLockSetter('editor'), [createPaneLockSetter]);

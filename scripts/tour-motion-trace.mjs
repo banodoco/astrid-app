@@ -21,6 +21,7 @@
  * time-based animation); Math.random is seeded.
  */
 import { spawn } from 'node:child_process';
+import { loadavg, cpus } from 'node:os';
 import { mkdir, rm, writeFile, readFile, copyFile } from 'node:fs/promises';
 import { resolve, relative, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -34,7 +35,7 @@ import { chromiumExecutable, freePort, waitServer } from './tour-screenshots.mjs
 const STORE = '/src/shared/state/editorTourStore.ts';
 const BEATS = '/src/tools/video-editor/tour/runner/tourBeats.ts';
 const SETTLE_QUIET_MS = 500; // geometry unchanged this long
-const CAP_MS = 40_000; // per-transition cap
+const CAP_MS = 90_000; // per-transition cap
 const SPOT_PADDING = 6; // useSpotlightRects PADDING: cutouts are the target rect outset by this (then clipped)
 const EPS = 0.5; // px per frame below which something counts as still
 const STILL_GAP = 3; // still frames that split two motion segments
@@ -378,20 +379,21 @@ export async function run(options) {
     const recordBeat = async (step) => { report.beats[step.id] = { updateAvailable: await page.evaluate(() => window.__tm.updateNotice()) }; };
 
     /** Record samples + screencast around `action` (which returns the destination step), until the destination settles. */
-    const trace = async (source, label, action) => {
+    const trace = async (source, label, action, nameOverride) => {
       await page.evaluate((targets) => { window.__tm.samples.length = 0; window.__tm.clicks.length = 0; window.__tm.targets = targets; }, [...new Set(steps.flatMap((s) => s.targets))]);
       const frames = [];
       const onFrame = (event) => { frames.push({ data: event.data, wall: event.metadata.timestamp * 1000 }); cdp.send('Page.screencastFrameAck', { sessionId: event.sessionId }).catch(() => {}); };
       cdp.on('Page.screencastFrame', onFrame);
       if (!options['no-screencast']) await cdp.send('Page.startScreencast', { format: 'jpeg', quality: 60, everyNthFrame: 1, maxWidth: 1440, maxHeight: 900 });
       await delay(300);
+      const load0 = loadavg()[0];
       const dest = await action();
       await waitSettled(dest);
       await delay(250);
       if (!options['no-screencast']) await cdp.send('Page.stopScreencast');
       cdp.off('Page.screencastFrame', onFrame);
       const { samples, clicks } = await page.evaluate(() => ({ samples: window.__tm.samples, clicks: window.__tm.clicks }));
-      const name = `${source.id}→${dest.id}${label}`;
+      const name = nameOverride ?? `${source.id}→${dest.id}${label}`;
       if (!wanted(name)) return dest;
       const t0 = clicks[0]?.t ?? samples[0].t;
       const rebased = samples.map((s) => ({ ...s, t: s.t - t0 }));
@@ -412,7 +414,7 @@ export async function run(options) {
       const sparse = Array.from({ length: FILM.cols * FILM.rows }, (_, i) => start + ((Math.min(end, lastT) - start) * i) / (FILM.cols * FILM.rows - 1));
       if (shots.length) { await sheet(shots, dense, join(dir, 'filmstrip-dense.jpg'), runProcess); await sheet(shots, sparse, join(dir, 'filmstrip-whole.jpg'), runProcess); }
       await writeFile(join(dir, 'samples.json'), JSON.stringify(rebased));
-      const entry = { name, dir: relative(out, dir), clicks: clicks.map((c) => ({ t: round(c.t - t0, 0), text: c.text })), screencast: { frames: shots.length, firstT: round(shots[0]?.t, 0), lastT: round(shots.at(-1)?.t, 0), medianGapMs: round(shots.map((s, k) => k && s.t - shots[k - 1].t).slice(1).sort((a, b) => a - b)[Math.floor((shots.length - 1) / 2)], 0) }, filmstrips: { dense: `${fileName(name)}/filmstrip-dense.jpg (+0..${FILM.denseStep * (FILM.cols * FILM.rows - 1)}ms every ${FILM.denseStep}ms)`, whole: `${fileName(name)}/filmstrip-whole.jpg (${Math.round(start)}..${Math.round(Math.min(end, lastT))}ms)` }, ...analysis };
+      const entry = { name, dir: relative(out, dir), hostLoad: { cpus: cpus().length, loadavg1AtStart: round(load0, 1), loadAvg1AtEnd: round(loadavg()[0], 1) }, clicks: clicks.map((c) => ({ t: round(c.t - t0, 0), text: c.text })), screencast: { frames: shots.length, firstT: round(shots[0]?.t, 0), lastT: round(shots.at(-1)?.t, 0), medianGapMs: round(shots.map((s, k) => k && s.t - shots[k - 1].t).slice(1).sort((a, b) => a - b)[Math.floor((shots.length - 1) / 2)], 0) }, filmstrips: { dense: `${fileName(name)}/filmstrip-dense.jpg (+0..${FILM.denseStep * (FILM.cols * FILM.rows - 1)}ms every ${FILM.denseStep}ms)`, whole: `${fileName(name)}/filmstrip-whole.jpg (${Math.round(start)}..${Math.round(Math.min(end, lastT))}ms)` }, ...analysis };
       report.transitions.push(entry);
       console.log(`  ${name}: card ${analysis.card.travel}px/${analysis.card.segments.length} seg, ${shots.length} frames`);
       return dest;
@@ -440,7 +442,7 @@ export async function run(options) {
           const at = await page.evaluate(() => window.__tm.clickBackWhenReachable('land', 5000));
           if (at == null) throw new Error('Back was never reachable on act1-land');
           return stepOf(1, 'respond');
-        });
+        }, 'act1-respond→act1-land→back-early→act1-respond');
         await recordBeat(src);
       }
       await trace(src, '', forward(src, dst));
@@ -469,7 +471,7 @@ function renderMarkdown(report) {
     '| transition | duration | card travel | card segments | card first move / rest | cutouts (segments) | suspects |', '|---|---|---|---|---|---|---|'];
   for (const t of report.transitions) lines.push(`| ${t.name} | ${t.durationMs}ms | ${t.card.travel}px | ${t.card.segments.length} | ${t.card.firstMoveT == null ? '-' : `${Math.round(t.card.firstMoveT)} / ${Math.round(t.card.restT)}ms`} | ${t.cutouts.map((c) => c.segments.length).join('/')} | ${t.suspects.length} |`);
   for (const t of report.transitions) {
-    lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms.`, '',
+    lines.push('', `## ${t.name}`, '', `Card ${fmtRect(t.card.start)} -> ${fmtRect(t.card.end)}. Clicks: ${t.clicks.map((c) => `"${c.text}" at ${c.t}ms`).join(', ') || 'none'}. Screencast: ${t.screencast.frames} frames, median gap ${t.screencast.medianGapMs}ms. Host load avg ${t.hostLoad.loadAvg1AtStart}->${t.hostLoad.loadAvg1AtEnd} on ${t.hostLoad.cpus} CPUs; page frames median ${t.frames.medianDtMs}ms, worst ${t.frames.maxDtMs}ms.`, '',
       `Filmstrips: ${t.filmstrips.dense}; ${t.filmstrips.whole}`, '');
     for (const c of t.cutouts) lines.push(`- cutout #${c.slot}: ${fmtRect(c.start)} -> ${fmtRect(c.end)}, travel ${c.travel}px, ${c.segments.length} segment(s)${c.chase ? `, max gap to ${c.chase.selector} ${c.chase.maxGapPx}px (final ${c.chase.finalGapPx}px)` : ''}`);
     lines.push('', '**Suspects**', '', ...(t.suspects.length ? t.suspects.map((s) => `- ${s}`) : ['- none']));

@@ -14,6 +14,8 @@ export const UI_Z_LAYERS = {
   RUNTIME_RECOVERY_CARD: 100017,
   // Desktop gallery hover peek (the eye): floats above the pane it was opened from.
   GALLERY_PEEK: 100018,
+  // The editor tour's own copy of the Generations pane (tour/gallery): above every real pane layer, under the shield.
+  EDITOR_TOUR_GALLERY: 100019,
   // The editor tour's input shield and card cover everything, panes included, so the Tasks pane chat is dimmed and blocked too.
   EDITOR_TOUR_SHIELD: 100020,
   EDITOR_TOUR_CARD: 100021,

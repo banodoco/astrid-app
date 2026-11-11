@@ -11,6 +11,8 @@ export const EDITOR_TOUR_ANCHORS = Object.freeze({
   chatReply: 'chat-reply',
   timeline: 'timeline',
   preview: 'preview',
+  /** The tour's Generations pane, at its resting rect (an invisible box beside the sliding pane, not the pane). */
+  generationsPane: 'generations-pane',
 } as const);
 
 export type EditorTourAnchor = (typeof EDITOR_TOUR_ANCHORS)[keyof typeof EDITOR_TOUR_ANCHORS];

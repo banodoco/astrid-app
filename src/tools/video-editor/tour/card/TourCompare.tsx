@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent, typ
 import { ChevronsLeftRight } from 'lucide-react';
 import { EDITOR_TOUR_MEDIA } from '../tourMedia';
 import { TourMedia } from './TourMedia';
+import { useEditorTour } from '@/shared/state/editorTourStore';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 
 /** Where the divider rests (percent from the left): a little more of the realistic still than of the frame, both readable. */
@@ -17,6 +18,8 @@ const KEY_STEP = 5;
 const PAGE_STEP = 20;
 /** The divider fades up over the first part of the sweep, so it never appears stuck to the left edge. */
 const FADE_PORTION = 0.12;
+/** The most one animation frame advances the sweep (ms). */
+const MAX_FRAME_MS = 100;
 
 const clamp = (value: number) => Math.min(100, Math.max(0, value));
 /** cubic-bezier(x1, 0, x2, 1) at progress `t`, solved for x by bisection (plenty for one sweep a tour). */
@@ -39,7 +42,7 @@ const ease = bezier(0.4, 0.2);
  * card arrives the divider sweeps once from the left edge, painting the still in over the frame, and rests at
  * `COMPARE_REST`. From then on it is a slider: drag anywhere along the picture (mouse, pen or touch), or focus the handle and use
  * the arrow keys, Page Up/Down, Home and End. Taking it mid-sweep stops the sweep where it is. Each label is clipped with its
- * own picture, so it only ever names what is under it. Without `sweep` (reduced motion, Back, or already settled) it rests.
+ * own picture, so it only ever names what is under it. Mounted without `sweep` (reduced motion, Back) it rests from the start.
  */
 export function TourCompare({ labels: [source, model], sweep }: { labels: readonly [string, string]; sweep: boolean }) {
   const boxRef = useRef<HTMLDivElement>(null);
@@ -60,28 +63,37 @@ export function TourCompare({ labels: [source, model], sweep }: { labels: readon
     setReveal(1);
   };
 
+  // The sweep belongs to the card's arrival: it starts on mount or not at all. Settling on time does not touch it (it has
+  // landed by then, or is about to); a skip (Enter, or the runner's bump) finishes it where it would have ended.
+  const sweepsRef = useRef(sweep);
+  const skipAnimation = useEditorTour((state) => state.skipAnimation);
+  const skipAtMount = useRef(skipAnimation);
   useEffect(() => {
-    if (sweep || takenRef.current) return;
-    // Settled before the sweep ended (a skip): it ends where it would have.
+    if (skipAnimation === skipAtMount.current || !sweepsRef.current || takenRef.current) return;
+    sweepsRef.current = false;
     moveTo(COMPARE_REST);
     setReveal(1);
-  }, [sweep]);
+  }, [skipAnimation]);
 
   useEffect(() => {
-    if (!sweep || takenRef.current) return;
+    if (!sweepsRef.current || takenRef.current) return;
     let frame = 0;
-    let start: number | null = null;
+    let last: number | null = null;
+    let elapsed = 0;
     const tick = (now: number) => {
-      if (takenRef.current) return;
-      start ??= now;
-      const t = Math.min(1, Math.max(0, (now - start - COMPARE_SWEEP_DELAY_MS) / COMPARE_SWEEP_MS));
+      if (takenRef.current || !sweepsRef.current) return;
+      // A long frame (the editor busy loading) slows the sweep down rather than letting it skip ahead.
+      elapsed += last === null ? 0 : Math.min(now - last, MAX_FRAME_MS);
+      last = now;
+      const t = Math.min(1, Math.max(0, (elapsed - COMPARE_SWEEP_DELAY_MS) / COMPARE_SWEEP_MS));
       moveTo(COMPARE_REST * ease(t));
       setReveal(Math.min(1, t / FADE_PORTION));
       if (t < 1) frame = requestAnimationFrame(tick);
+      else sweepsRef.current = false;
     };
     frame = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(frame);
-  }, [sweep]);
+  }, []);
 
   const percentAt = (clientX: number) => {
     const box = boxRef.current?.getBoundingClientRect();

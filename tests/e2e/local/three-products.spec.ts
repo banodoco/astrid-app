@@ -3562,6 +3562,75 @@ test('fresh project video drop: a video dropped on the first timeline records on
   await expect(page.getByText('Not saved', { exact: true })).toHaveCount(0);
 });
 
+function dropWavBase64(seconds = 2, rate = 8000) {
+  const samples = seconds * rate; const buffer = Buffer.alloc(44 + samples * 2);
+  buffer.write('RIFF', 0); buffer.writeUInt32LE(36 + samples * 2, 4); buffer.write('WAVE', 8); buffer.write('fmt ', 12);
+  buffer.writeUInt32LE(16, 16); buffer.writeUInt16LE(1, 20); buffer.writeUInt16LE(1, 22); buffer.writeUInt32LE(rate, 24);
+  buffer.writeUInt32LE(rate * 2, 28); buffer.writeUInt16LE(2, 32); buffer.writeUInt16LE(16, 34); buffer.write('data', 36); buffer.writeUInt32LE(samples * 2, 40);
+  for (let i = 0; i < samples; i += 1) buffer.writeInt16LE(Math.round(8000 * Math.sin((2 * Math.PI * 440 * i) / rate)), 44 + i * 2);
+  return buffer.toString('base64');
+}
+
+test('fresh project audio drop: a WAV dropped on A1 of the first timeline records one App-source commit and survives a reload', async ({ page, harness }) => {
+  const fresh = await harness.createFreshProject('First timeline audio drop');
+  const catalogPath = `/v1/projects/${fresh.projectId}/timelines`;
+  await openApp(page, harness);
+  await expectConnected(page);
+  await page.goto(`${harness.origin}${APP_ENTRY_ROUTE}?project=${fresh.projectId}`);
+  const createFirst = page.getByRole('button', { name: 'Create first timeline' });
+  await expect.poll(async () => (await harness.runtimeJson<any>('GET', `${catalogPath}?limit=50`)).body.items.length
+    || (await createFirst.isVisible() ? -1 : 0), CEILING).not.toBe(0);
+  if (await createFirst.isVisible()) await createFirst.click();
+  await expect(page.getByRole('combobox', { name: 'Select timeline' })).toContainText('Main', CEILING);
+  await expect(page.locator('.timeline-wrapper')).toBeVisible();
+  const catalog = await harness.runtimeJson<any>('GET', `${catalogPath}?limit=50`);
+  expect(catalog.body.items).toHaveLength(1);
+  const base = `${catalogPath}/${catalog.body.items[0].timeline_id}`;
+  const initial = await harness.runtimeJson<HistoryPage>('GET', `${base}/commits?limit=50`);
+  expect(initial.status, JSON.stringify(initial.body)).toBe(200);
+  await page.waitForTimeout(3000);
+  const row = page.locator('[data-row-id="A1"]').first();
+  const box = (await row.count()) ? await row.boundingBox() : await page.locator('.timeline-wrapper').first().boundingBox();
+  if (!box || box.width < 20 || box.height < 20) throw new Error('Cannot measure the audio drop target');
+  await page.evaluate(({ bytesBase64, x, y }) => {
+    const target = document.querySelector<HTMLElement>('.timeline-wrapper');
+    if (!target) throw new Error('Mounted timeline wrapper is missing');
+    const bytes = Uint8Array.from(atob(bytesBase64), (character) => character.charCodeAt(0));
+    const transfer = new DataTransfer();
+    transfer.items.add(new File([bytes], 'drop-on-empty.wav', { type: 'audio/wav' }));
+    for (const eventType of ['dragover', 'drop'] as const) {
+      target.dispatchEvent(new DragEvent(eventType, { bubbles: true, cancelable: true, clientX: x, clientY: y, dataTransfer: transfer }));
+    }
+  }, { bytesBase64: dropWavBase64(), x: box.x + Math.min(200, box.width / 2), y: box.y + box.height / 2 });
+  await expect(page.locator('.clip-action')).toHaveCount(1, CEILING);
+
+  let after!: HistoryPage;
+  await expect.poll(async () => {
+    const response = await harness.runtimeJson<HistoryPage>('GET', `${base}/commits?limit=50`);
+    if (response.status !== 200) return false;
+    after = response.body;
+    return after.items.filter((entry) => !initial.body.items.some((old) => old.publication_id === entry.publication_id)
+      && entry.source?.via === 'app').length;
+  }, { timeout: CEILING.timeout, message: 'the dropped audio must reach the Runtime as one App commit' }).toBe(1);
+  const revision = await harness.runtimeJson<any>('GET', `${base}/composition-revisions/${after.head.revision_id}`);
+  expect(revision.status, JSON.stringify(revision.body)).toBe(200);
+  const payload = revision.body.payload;
+  const clips = payload.clips ?? payload.config?.clips;
+  expect(clips).toHaveLength(1);
+  const clip = clips[0] as Record<string, any>;
+  expect(clip).toMatchObject({ clipType: 'media', from: 0 });
+  expect(clip.hold).toBeGreaterThan(0);
+  const assets = payload.registry?.assets ?? payload.config?.registry?.assets;
+  expect(String(assets?.[clip.asset]?.type)).toMatch(/^audio/);
+  await expect(page.getByText('Not saved', { exact: true })).toHaveCount(0);
+
+  await page.reload();
+  await expect(page.getByRole('combobox', { name: 'Select timeline' })).toContainText('Main', CEILING);
+  await expect(page.locator(`.clip-action[data-clip-id="${clip.id}"]`)).toHaveCount(1, CEILING);
+  await expect(page.getByText('You have unsaved changes', { exact: false })).toHaveCount(0);
+  await expect(page.getByText('Not saved', { exact: true })).toHaveCount(0);
+});
+
 // Runs with the other project-creating tests at the end of the file: it creates and opens a new project, and with a
 // fresh browser context the editor opens the most recently created project (VideoEditorPage.tsx mostRecentlyCreatedProject),
 // so every earlier serial test that expects the seeded project must run before it.

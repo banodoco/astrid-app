@@ -1,0 +1,39 @@
+name: Public homepage mobile
+
+on:
+  pull_request:
+    paths:
+      - 'src/pages/Home/PublicAstridMobile*'
+      - 'src/pages/Home/PublicAstridShell*'
+      - 'src/pages/Home/PublicAstridMountedEditor.tsx'
+      - 'tests/e2e/public-astrid-mobile-disclosures.spec.ts'
+      - '.github/workflows/public-home-mobile.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  mobile-home:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - name: Check mobile component and shell
+        run: npx eslint src/pages/Home/PublicAstridMobileCallouts.tsx src/pages/Home/PublicAstridMobileCallouts.test.tsx src/pages/Home/PublicAstridShell.tsx --max-warnings 0
+      - name: Verify disclosures and existing lifecycle contracts
+        run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridMobileCallouts.test.tsx src/pages/Home/PublicAstridHeroCta.test.tsx src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx
+      - run: npx playwright install --with-deps chromium
+      - name: Test the real homepage on phone and desktop
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-mobile-disclosures.spec.ts --project=chromium-desktop --workers=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: astrid-mobile-home-evidence
+          path: test-results
+          if-no-files-found: warn

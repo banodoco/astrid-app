@@ -2071,16 +2071,26 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await expect(referenceClip).toBeVisible();
   await expect(timelineWrapper).toBeVisible();
   await expect(page.getByRole('button', { name: 'Zoom out timeline', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Zoom out timeline', exact: true }).click();
-  const [dropBox, referenceBox, wrapperBox] = await Promise.all([
-    dropClip.boundingBox(),
-    referenceClip.boundingBox(),
-    timelineWrapper.boundingBox(),
-  ]);
-  if (!dropBox || !referenceBox || !wrapperBox) throw new Error('Cannot measure prepared manual-drop viewport');
-  const pixelsPerSecond = (referenceBox.x - dropBox.x) / THREE_PRODUCTS_REFERENCE_AT;
+  // One zoom step (x1/1.4, lib/timeline-scale.ts) no longer brings the 22.5s pointer inside the wrapper at the
+  // default scale, so use the same user-facing control until it does (bounded). The in-wrapper check below is kept.
+  const measureDropViewport = async () => {
+    const [dropBox, referenceBox, wrapperBox] = await Promise.all([
+      dropClip.boundingBox(),
+      referenceClip.boundingBox(),
+      timelineWrapper.boundingBox(),
+    ]);
+    if (!dropBox || !referenceBox || !wrapperBox) throw new Error('Cannot measure prepared manual-drop viewport');
+    const pixelsPerSecond = (referenceBox.x - dropBox.x) / THREE_PRODUCTS_REFERENCE_AT;
+    return { dropBox, wrapperBox, pixelsPerSecond, centeredPointerX: dropBox.x + manualDropPointerAt * pixelsPerSecond };
+  };
+  let viewport = await measureDropViewport();
+  for (let zoomClicks = 0; zoomClicks < 6; zoomClicks += 1) {
+    await page.getByRole('button', { name: 'Zoom out timeline', exact: true }).click();
+    viewport = await measureDropViewport();
+    if (viewport.centeredPointerX <= viewport.wrapperBox.x + viewport.wrapperBox.width) break;
+  }
+  const { wrapperBox, pixelsPerSecond, centeredPointerX } = viewport;
   expect(pixelsPerSecond).toBeGreaterThan(0);
-  const centeredPointerX = dropBox.x + manualDropPointerAt * pixelsPerSecond;
   expect(centeredPointerX).toBeGreaterThanOrEqual(wrapperBox.x);
   expect(centeredPointerX).toBeLessThanOrEqual(wrapperBox.x + wrapperBox.width);
   expect(manualDropPointerAt - manualDropDurationSeconds / 2).toBe(20);

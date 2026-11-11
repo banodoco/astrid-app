@@ -169,6 +169,7 @@ function parseOptions(argv) {
     if (a === '--help') o.help = true;
     else if (a === '--no-throttle') o.cpu = 1;
     else if (a === '--why') o.why = true;
+    else if (a === '--block-world') o['block-world'] = true;
     else if (a === '--tree') o.tree = true;
     else if (a.startsWith('--')) { const v = argv[++i]; o[a.slice(2)] = ['cpu', 'dpr', 'idle'].includes(a.slice(2)) ? Number(v) : v; }
   }
@@ -224,7 +225,8 @@ export async function run(options) {
           const res = await fetch(`${runtimeOrigin}${path}${url.search}`, { method: request.method(), headers: { Authorization: `Bearer ${token}`, 'Content-Type': request.headers()['content-type'] ?? 'application/json' }, body: request.postDataBuffer() ?? undefined, signal: AbortSignal.timeout(10_000) });
           await route.fulfill({ status: res.status, contentType: res.headers.get('content-type') ?? 'application/json', body: Buffer.from(await res.arrayBuffer()) });
         } catch { await route.abort().catch(() => {}); }
-      } else if (url.origin === baseUrl && !url.pathname.startsWith('/api/')) await route.continue();
+      } else if (options['block-world'] && /ca975b68e035d6af3aa6b828cd49acb2c99ab4bc66a0aaa83dbab8913b14c35e/.test(url.pathname)) await route.abort('blockedbyclient');
+      else if (url.origin === baseUrl && !url.pathname.startsWith('/api/')) await route.continue();
       else await route.abort('blockedbyclient');
     });
     const page = await context.newPage();

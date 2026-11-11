@@ -285,7 +285,7 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
     start: rr(first?.host), end: rr(last.host), startXY: rr(first?.host?.slice(0, 2)), endXY: rr(last.host?.slice(0, 2)),
     ...card, segments: card.segments.map((s) => ({ t0: round(s.t0, 0), t1: round(s.t1, 0), dist: round(s.dist) })),
     retargets, transitionToggles, sizeChanges, contentSwaps: swaps, opacityBelow1: dim, minOpacity: round(Math.min(...samples.filter((s) => s.t >= 0 && s.op != null).map((s) => s.op)), 2),
-    contentInFlight, midFlightRetargets: retargets.filter((r) => r.whileMoving).length,
+    hiddenFrames: samples.filter((s) => s.t >= 0 && s.hop != null && s.hop < 0.05).length, contentInFlight, midFlightRetargets: retargets.filter((r) => r.whileMoving).length,
   };
   void inFlight;
 
@@ -371,13 +371,17 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1 }) {
  */
 function suspectsFor(m, source, dest, expectMoves = 1) {
   const out = [], notes = [], c = m.card;
+  // A step with no card (a touch layout while the reply streams): the card is invisible, takes its next place unseen and
+  // fades in there, so its jump, and its start and rest relative to the cutouts, are not motion anyone sees.
+  const unseen = m.card.hiddenFrames > 0;
+  if (unseen) notes.push(`card hidden for ${m.card.hiddenFrames} frames (no card on this step); it reappeared in place`);
   if (m.tourEnded) out.push(`tour ended (status idle, card removed) instead of showing ${dest.id}; card/cutout metrics below cover the exit only`);
   if (c.firstMoveT == null) notes.push('card never moved');
   else {
     if (c.segments.length > expectMoves) out.push(`card moved in ${c.segments.length} segments (${segText(c.segments)}), expected ${expectMoves}`);
     else notes.push(`card moved in ${c.segments.length} segment(s) (${segText(c.segments)})${expectMoves > 1 ? ' (respond: arrive, then contract)' : ''}`);
     if (c.reversals) out.push(`card reversed direction ${c.reversals}x`);
-    if (teleport(c)) out.push(`card jumped ${c.maxJump.px}px in one ${c.maxJump.dt}ms frame at t=${Math.round(c.maxJump.t)}ms (total travel ${c.travel}px)`);
+    if (teleport(c) && !unseen) out.push(`card jumped ${c.maxJump.px}px in one ${c.maxJump.dt}ms frame at t=${Math.round(c.maxJump.t)}ms (total travel ${c.travel}px)`);
     // The design waits for the old content to leave (120 ms) and the new targets to hold still before anything moves, so
     // a start a few hundred ms after the click is expected; on this machine that is mostly slow frames. Over a second is not.
     if (c.firstMoveT > 1000) out.push(`card started moving ${Math.round(c.firstMoveT)}ms after the trigger`);
@@ -395,7 +399,7 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
   if (f.maxOpacityAway > 0.9) out.push(`new content ${c.contentSwaps.at(-1)?.to ?? ''} fully visible (${f.maxOpacityAway}) ${f.atDistancePx}px from rest at t=${f.atT}ms`);
   if (f.wholeAtT != null) notes.push(`new content whole at t=${f.wholeAtT}ms, ${f.wholeAtDistancePx}px from rest (most shown >8px from rest: ${f.maxOpacityAway})`);
   if (c.opacityBelow1.length) notes.push(`card section opacity < 1 (min ${c.minOpacity}) at ${c.opacityBelow1.map((r) => `t=${r.t0}–${r.t1}ms`).join(', ')}`);
-  if (m.startSync && m.startSync.maxFrames > 1) out.push(`cutouts and card did not start together: up to ${m.startSync.maxMs}ms / ${m.startSync.maxFrames} frames apart`);
+  if (m.startSync && m.startSync.maxFrames > 1 && !unseen) out.push(`cutouts and card did not start together: up to ${m.startSync.maxMs}ms / ${m.startSync.maxFrames} frames apart`);
   for (const k of m.cutouts) {
     const label = `cutout #${k.slot}`;
     if (k.cornerTouchT.length) out.push(`${label} passed through the page corner (0,0,0,0) while lit at t=${k.cornerTouchT.slice(0, 3).join(', ')}ms`);
@@ -408,7 +412,7 @@ function suspectsFor(m, source, dest, expectMoves = 1) {
     if (teleport(k)) out.push(`${label} jumped ${k.maxJump.px}px in one ${k.maxJump.dt}ms frame at t=${Math.round(k.maxJump.t)}ms`);
     if (k.chase && k.chase.targetTravelPx > 2 && k.chase.maxGapPx - (k.chase.finalGapPx ?? 0) > 40) notes.push(`${label} trailed its moving target ${k.chase.selector} by up to ${k.chase.maxGapPx}px at t=${k.chase.atT}ms (resting offset ${k.chase.finalGapPx}px; target moved ${k.chase.targetTravelPx}px in ${k.chase.targetSegments} segments)`);
     // A closing cutout is invisible before its fade ends, so its last lit frame comes early by design.
-    if (!k.closed && k.restT != null && k.firstMoveT != null && c.restT != null && Math.abs(k.restT - c.restT) > 250) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at t=${Math.round(c.restT)}ms`);
+    if (!k.closed && !unseen && k.restT != null && k.firstMoveT != null && c.restT != null && Math.abs(k.restT - c.restT) > 250) out.push(`${label} came to rest at t=${Math.round(k.restT)}ms but card at t=${Math.round(c.restT)}ms`);
   }
   const p = m.pacing;
   if (p) {

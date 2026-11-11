@@ -1320,7 +1320,7 @@ async function ownerWithTwoMountedDocuments(page: Page, seed: ThreeProductsSeed)
   return owner;
 }
 
-async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, sniff?: TokenSniff) {
+async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, sniff = TokenSniff.attachedTo(page)) {
   // A case selected alone must establish its own verified authoring baseline.
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   // The hosted blank page establishes the storage origin without mounting an

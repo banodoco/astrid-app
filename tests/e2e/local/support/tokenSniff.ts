@@ -6,6 +6,9 @@ type Admission = { state: 'unclassified' | 'dispatched' | 'blocked'; terminal: b
 
 /** A credential never reaches the page, requests, door answers or browser storage. */
 export class TokenSniff {
+  /** The scan attached to each page, so a shared helper that navigates a page can go through that scan's gate. */
+  private static readonly attached = new WeakMap<Page, TokenSniff>();
+  static attachedTo(page: Page): TokenSniff | undefined { return TokenSniff.attached.get(page); }
   private readonly pending: Array<Promise<void>> = [];
   private readonly captures: Capture[] = [];
   private readonly requests = new WeakMap<Request, Capture>();
@@ -39,6 +42,7 @@ export class TokenSniff {
   }
 
   async attach(page: Page) {
+    TokenSniff.attached.set(page, this);
     page.on('request', (request: Request) => {
       if (this.isApi(request)) this.admissions.set(request, { state: 'unclassified', terminal: false });
       this.signal();

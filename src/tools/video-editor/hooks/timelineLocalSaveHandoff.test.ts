@@ -1050,3 +1050,57 @@ describe('prepared image media on a newly created track', () => {
     await env.session.dispose();
   });
 });
+
+describe('Undo/Redo target only this actor\'s own publications', () => {
+  const entry = (id: string, previous: string | null, publisher: string, undoOf: string[] = []) => ({
+    publication_id: id, revision_id: id === 'p0' ? 'r0' : `r-${id}`, previous: previous ? { publication_id: previous } : null,
+    publisher, intent: 'recorded',
+    records: { schema_version: 1, commands: [], steps: [], undo_of: undoOf, undo_steps: null, restored_from: null },
+  });
+  async function withHistory(items: ReturnType<typeof entry>[]) {
+    const env = await environment();
+    const top = items.at(-1)!;
+    const head = env.initial.head;
+    expect(top.publication_id).toBe(head.publicationId);
+    const initial = { ...env.initial, head, history: { items, next_cursor: null,
+      head: { revision_id: head.revisionId, publication_id: head.publicationId } } } as unknown as typeof env.initial;
+    const append = vi.spyOn(env.session, 'append').mockResolvedValue(undefined as never);
+    const handoff = createTimelineLocalSaveHandoff({ initial, source: env.source, session: env.session, adopted: env.receipt });
+    vi.spyOn(handoff, 'flush').mockResolvedValue(undefined as never);
+    return { env, handoff, append };
+  }
+  const inverse = (append: { mock: { calls: unknown[][] } }) =>
+    (append.mock.calls[0][0] as { commands: { args: { publications: string[] } }[] }).commands[0].args.publications;
+
+  it('undoes the own edit beneath a newer Agent publication', async () => {
+    const { env, handoff, append } = await withHistory([entry('own', null, 'actor'), entry('p0', 'own', 'agent')]);
+    expect(handoff.canUndo()).toBe(true);
+    await handoff.undo();
+    expect(inverse(append)).toEqual(['own']);
+    await env.session.dispose();
+  });
+
+  it('has nothing to undo when only Agent publications exist', async () => {
+    const { env, handoff, append } = await withHistory([entry('a1', null, 'agent'), entry('p0', 'a1', 'agent')]);
+    expect(handoff.canUndo()).toBe(false);
+    await expect(handoff.undo()).rejects.toThrow('no persisted undo target');
+    expect(append).not.toHaveBeenCalled();
+    await env.session.dispose();
+  });
+
+  it('redoes the own undo beneath a newer Agent publication, not the Agent edit', async () => {
+    const { env, handoff, append } = await withHistory([entry('own', null, 'actor'),
+      entry('undo', 'own', 'actor', ['own']), entry('p0', 'undo', 'agent')]);
+    expect(handoff.canUndo()).toBe(false);
+    expect(handoff.canRedo()).toBe(true);
+    await handoff.redo();
+    expect(inverse(append)).toEqual(['undo']);
+    await env.session.dispose();
+  });
+
+  it('has nothing to redo when only Agent publications exist', async () => {
+    const { env, handoff } = await withHistory([entry('a1', null, 'agent'), entry('p0', 'a1', 'agent', ['a1'])]);
+    expect(handoff.canRedo()).toBe(false);
+    await env.session.dispose();
+  });
+});

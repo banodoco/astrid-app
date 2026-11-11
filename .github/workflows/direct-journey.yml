@@ -321,7 +321,8 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
           NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts --grep-invert 'quick: Astrid edit then App edit|concurrent edit: the App.s acknowledgement is lost'
+        run: |
+          npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts --grep-invert 'quick: Astrid edit then App edit|concurrent edit: the App.s acknowledgement is lost'
 
       # Pass rule (R-9, same as the direct journey): no quarantined cases exist for this spec, so every case must pass. Durations are
       # written to three-products-summary.json and recorded, never judged (R-10).

@@ -180,7 +180,7 @@ export function createTimelineLocalSaveHandoff(options: {
   let authoringSource = structuredClone(options.source);
   let document = structuredClone(options.initial.canonicalDocument);
   let sourceChecked = false;
-  let targets = historyTargets(options.initial.history, options.initial.head);
+  let targets = historyTargets(options.initial.history, options.initial.head, options.session.actorId);
   let inversePending = false;
 
   async function appendInverse(kind: 'undo' | 'redo'): Promise<void> {
@@ -692,10 +692,10 @@ export function createTimelineLocalSaveHandoff(options: {
         authoringSource = structuredClone(adopted.source);
         document = structuredClone(basis.canonicalDocument);
         sourceChecked = false;
-        targets = historyTargets(basis.history, basis.head);
+        targets = historyTargets(basis.history, basis.head, options.session.actorId);
         if (options.loadHistory) {
           const latest = await options.loadHistory();
-          targets = historyTargets(same(latest.head, basis.head) ? latest.history : undefined, basis.head);
+          targets = historyTargets(same(latest.head, basis.head) ? latest.history : undefined, basis.head, options.session.actorId);
         }
         return adopted.receipt;
       }
@@ -717,7 +717,7 @@ export function createTimelineLocalSaveHandoff(options: {
   return handoff;
 }
 
-function historyTargets(history: HistoryPage | undefined, head: TimelineCommandBasis['head']): { undo: string[]; redo: string[] } {
+function historyTargets(history: HistoryPage | undefined, head: TimelineCommandBasis['head'], actorId: string): { undo: string[]; redo: string[] } {
   if (!history?.items?.length || history.next_cursor !== null
     || history.head.revision_id !== head.revisionId || history.head.publication_id !== head.publicationId) return { undo: [], redo: [] };
   // Follow the authoritative ancestry so pagination/display ordering cannot
@@ -742,6 +742,10 @@ function historyTargets(history: HistoryPage | undefined, head: TimelineCommandB
       redo.length = 0;
       continue;
     }
+    // Undo/Redo only ever revert this actor's own edits; another actor's
+    // recorded publication is neither a target nor a barrier (guards still
+    // refuse the inverse if it conflicts with that later edit).
+    if (entry.publisher !== actorId) continue;
     const targets = entry.records.undo_of;
     if (!targets.length) {
       undo.push(entry.publication_id);

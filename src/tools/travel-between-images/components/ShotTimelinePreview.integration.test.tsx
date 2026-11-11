@@ -583,7 +583,17 @@ describe('shot timeline popup real recovery integration', () => {
     const currentClip = document.querySelector('.clip-action');
     expect(currentClip).toHaveAttribute('data-selected', 'true');
     fireEvent.contextMenu(currentClip!, { clientX: 20, clientY: 20 });
-    fireEvent.click(screen.getByText('Delete Clip'));
+    // The save is debounced by a real 500 ms timer (SAVE_DEBOUNCE_MS), which
+    // on a loaded machine used up most of waitFor's default 1000 ms. Fake only
+    // the timer functions while scheduling it and advance past the debounce,
+    // then go back to real timers for the asynchronous publish path.
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      fireEvent.click(screen.getByText('Delete Clip'));
+      await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    } finally {
+      vi.useRealTimers();
+    }
     await waitFor(() => expect(publish).toHaveBeenCalledTimes(1));
     expect(publish.mock.calls[0]![0]).toMatchObject({ expectedHeadRevisionId: compositionH1.headRevisionId });
     view.unmount();

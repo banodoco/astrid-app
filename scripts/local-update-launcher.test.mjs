@@ -481,7 +481,7 @@ test('a local exit-0 reply whose receipt did not update is not reported as updat
   const lines = ['Astrid did NOT update. It is still Release 1; Release 2 is available.',
     'Why: the installer finished without installing the new release. This is a bug in Astrid, not something you did.', RECEIPT_NEXT, RECEIPT_DETAILS];
   const { started, result } = await settledRun(t, { result: { status: 'updated' }, outcome: { kind: 'not-updated', reason: 'installer-bug', exit_code: 0 }, lines }, 0);
-  assert.equal(result.code, 3, result.stdout);
+  assert.equal(result.code, 3, `${result.stdout}\n${result.stderr}`);
   assert.ok(result.stdout.includes(lines.join('\n')), result.stdout);
   assert.doesNotMatch(result.stdout, /Astrid is updated and running|Astrid updated/);
   await started.waitFor(() => started.output.stdout.includes(lines[0]));

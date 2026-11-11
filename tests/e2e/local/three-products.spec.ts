@@ -1278,15 +1278,85 @@ function mountedDocumentIntentOf(payload: unknown): MountedDocumentIntent {
   return intent as MountedDocumentIntent;
 }
 
-/** The wire request is the exact doc.patch envelope derived from the persisted mounted-document intent. */
-function expectDocumentPatchRequest(request: CommitRequest, intent: MountedDocumentIntent): void {
+type GestureExpectation = { kind: 'move'; clipId: string; trackId: string } | { kind: 'track-label' };
+
+/**
+ * The exact guard set a mounted drag-move must carry, re-derived independently from the authored parent payload the
+ * gesture started from (the contract of the move branch in timelineLocalSaveHandoff.ts: selected clip timing fields,
+ * output fps / theme canvas fallback, registry asset, the moved track kind, pinnedShotGroups, the clip collection
+ * order and membership, and for every other clip its track, plus timing fields and asset for same-track siblings).
+ */
+function expectedMoveReads(parent: Record<string, any>, clipId: string, trackId: string): Array<Record<string, unknown>> {
+  const isObject = (value: unknown): value is Record<string, any> => typeof value === 'object' && value !== null && !Array.isArray(value);
+  const config = parent.config as Record<string, any>;
+  const topLevelClips = isObject(config) && !Object.hasOwn(config, 'clips') && Array.isArray(parent.clips);
+  const clips = (topLevelClips ? parent.clips : config.clips) as Array<Record<string, any>>;
+  const clipPath = topLevelClips ? ['clips'] : ['config', 'clips'];
+  const read = (value: Record<string, any>, key: string, path: string[]) => ({ kind: 'field', ref: 'parent', path: [...path, key],
+    state: Object.hasOwn(value, key) ? { state: 'present', value: value[key] } : { state: 'absent' } });
+  const readPath = (value: Record<string, any>, keys: string[], path: string[]): Record<string, unknown> => {
+    const [key, ...rest] = keys;
+    return rest.length && isObject(value[key]) ? readPath(value[key], rest, [...path, key]) : read(value, key, path);
+  };
+  const timing = (item: Record<string, any>) => ['id', 'track', 'at', 'clipType', 'hold', 'from', 'to', 'speed', 'asset']
+    .map((key) => read(item, key, [...clipPath, `id:${item.id}`]));
+  const assetRead = (item: Record<string, any>) => typeof item.asset === 'string' ? [readPath(parent.registry, ['assets', item.asset], ['config', 'registry'])] : [];
+  const clip = clips.find((item) => item.id === clipId)!;
+  expect(clip, `the moved clip ${clipId} is in the authored parent`).toBeTruthy();
+  expect(clip.track).toBe(trackId);
+  const reads: Array<Record<string, unknown>> = [...timing(clip), readPath(config, ['output', 'fps'], ['config'])];
+  if (!isObject(config.output) || config.output.fps == null) {
+    reads.push(read(config, 'theme', ['config']), readPath(config, ['theme_overrides', 'visual', 'canvas', 'fps'], ['config']));
+  }
+  reads.push(...assetRead(clip));
+  const track = (config.tracks as Array<Record<string, any>>).find((item) => item.id === trackId)!;
+  reads.push(read(track, 'kind', ['config', 'tracks', `id:${trackId}`]), read(config, 'pinnedShotGroups', ['config']));
+  const order = clips.map((item) => item.id as string);
+  reads.push({ kind: 'collection', ref: 'parent', path: clipPath, members: [...order].sort(), order });
+  for (const item of clips) {
+    if (item.id === clip.id) continue;
+    reads.push(read(item, 'track', [...clipPath, `id:${item.id}`]));
+    if (item.track === trackId) reads.push(...timing(item), ...assetRead(item));
+  }
+  return reads;
+}
+
+/** Order-insensitive exact equality of two read sets (each read itself is compared structurally). */
+function expectSameReads(actual: unknown, expected: Array<Record<string, unknown>>): void {
+  expect(Array.isArray(actual), 'the request declares its reads').toBe(true);
+  const sorted = (reads: unknown[]) => reads.map(canonical).sort();
+  expect(sorted(actual as unknown[])).toEqual(sorted(expected));
+}
+
+/**
+ * The wire request is the exact doc.patch envelope derived from the persisted mounted-document intent, and its
+ * guards are pinned per gesture rather than compared with whatever the intent happens to hold.
+ */
+function expectDocumentPatchRequest(request: CommitRequest, intent: MountedDocumentIntent, gesture: GestureExpectation): void {
   expect(request.commands, 'no rewritten original claims, references or created IDs').toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
     args: { changes: intent.changes }, created: [] }]);
   expect(request.label).toBe(intent.label);
-  expect(request.merge).toBe(intent.merge ?? 'atomic');
   expect(request.steps).toEqual([{ ...intent.step, command_ordinals: [0], patch: intent.changes }]);
-  if (intent.reads === undefined) expect(request).not.toHaveProperty('reads');
-  else expect(request.reads).toEqual(intent.reads);
+  if (gesture.kind === 'move') {
+    // timelineLocalSaveHandoff.ts:656 sends merge 'fields' with the gesture reads for every non-element gesture.
+    expect(intent.merge, 'a drag move persists a field merge').toBe('fields');
+    expect(request.merge, 'a drag move is a field merge, never atomic').toBe('fields');
+    expect(intent.reads, 'a drag move persists its reads').toBeDefined();
+    expect(request.reads, 'a drag move declares reads').toBeDefined();
+    expect(request.reads!.length).toBeGreaterThan(0);
+    const expected = expectedMoveReads(intent.before.parent_revision.payload as Record<string, any>, gesture.clipId, gesture.trackId);
+    expect(expected.length).toBeGreaterThan(0);
+    expectSameReads(request.reads, expected);
+    expect(request.reads).toEqual(intent.reads);
+    expect(request.steps![0]).toHaveProperty('reads', request.reads);
+  } else {
+    // A track-label gesture is excluded from the read block (timelineLocalSaveHandoff.ts:579), so reads stays
+    // undefined and appendDocument sends no merge (:656): the wire default is atomic.
+    expect(intent.reads, 'a label-only gesture has no reads').toBeUndefined();
+    expect(intent.merge, 'a label-only gesture persists no merge').toBeUndefined();
+    expect(request.merge).toBe('atomic');
+    expect(request).not.toHaveProperty('reads');
+  }
 }
 
 /** A track rename is a label-only bound gesture (5ae358a1f): one set of that track's label, guarded by its original value. */
@@ -1303,6 +1373,7 @@ async function ownerWithTwoMountedDocuments(page: Page, seed: ThreeProductsSeed)
   expect(owner.intents[1].basis).toEqual({ after: owner.intents[0].id });
   expect(owner.intents[1].readyBase, 'dependent B has never been sent').toBeUndefined();
   const first = mountedDocumentIntentOf(owner.intents[0].payload);
+  expectDocumentPatchRequest(JSON.parse(owner.pending!.request.body) as CommitRequest, first, { kind: 'move', clipId: seed.appClipId, trackId: 'V1' });
   const second = mountedDocumentIntentOf(owner.intents[1].payload);
   expect(second.basis).toEqual({ after: owner.intents[0].id });
   expect(second.before).toEqual(first.after);
@@ -1352,8 +1423,10 @@ async function prepareDependentMountedDocuments(page: Page, harness: DirectHarne
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
   const a = accepted(wire.posts[0]);
   const bodyA = JSON.parse(wire.posts[0].body) as CommitRequest;
-  expect(bodyA).toMatchObject({ base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id,
-    commands: [{ op: 'doc.patch', select: null, args: { changes: expect.any(Array) } }] });
+  expect(bodyA).toMatchObject({ base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id });
+  expect(bodyA.commands).toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [],
+    args: { changes: [{ op: 'set', ref: 'parent', path: ['clips', `id:${seed.appClipId}`, 'at'],
+      before: { state: 'present', value: 0 }, value: 5 }] } }]);
   expect(position(a.data.canonical_document, seed.appClipId)).toBe(5);
   expect((await history(harness, seed)).head.revision_id).toBe(pinOf(a).revision_id);
   // The second pointerdown observes the actual optimistic authored bundle A.
@@ -1383,8 +1456,10 @@ async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHa
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
   const a = accepted(wire.posts[0]);
   const bodyA = JSON.parse(wire.posts[0].body) as CommitRequest;
-  expect(bodyA).toMatchObject({ base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id,
-    commands: [{ op: 'doc.patch', select: null, args: { changes: expect.any(Array) } }] });
+  expect(bodyA).toMatchObject({ base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id });
+  expect(bodyA.commands).toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null, created: [],
+    args: { changes: [{ op: 'set', ref: 'parent', path: ['clips', `id:${seed.appClipId}`, 'at'],
+      before: { state: 'present', value: 0 }, value: 5 }] } }]);
   expect(position(a.data.canonical_document, seed.appClipId)).toBe(5);
   expect((await history(harness, seed)).head.revision_id).toBe(pinOf(a).revision_id);
   await ackLostFirst?.(a, wire);
@@ -1518,13 +1593,7 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
   const mountedB = mountedDocumentIntentOf(owner.intents[1].payload);
   expect(wire.posts[2].key).not.toBe(wire.posts[0].key);
   expect(requestB).toMatchObject({ base_revision_id: pinOf(a).revision_id, base_publication_id: pinOf(a).publication_id });
-  expect(requestB.commands, 'no rewritten original B claims, references or created IDs').toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
-    args: { changes: mountedB.changes }, created: [] }]);
-  expect(requestB.label).toBe(mountedB.label);
-  expect(requestB.merge).toBe(mountedB.merge ?? 'atomic');
-  expect(requestB.steps).toEqual([{ ...mountedB.step, command_ordinals: [0], patch: mountedB.changes }]);
-  if (mountedB.reads === undefined) expect(requestB).not.toHaveProperty('reads');
-  else expect(requestB.reads).toEqual(mountedB.reads);
+  expectDocumentPatchRequest(requestB, mountedB, { kind: 'move', clipId: seed3.appClipId, trackId: 'V1' });
   expect(b.data.status).toBe('merged');
   expect(b.data.previous_publication_id).toBe(pinOf(c).publication_id);
   expect(position(b.data.canonical_document, seed3.appClipId)).toBe(7);
@@ -1741,13 +1810,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   const mountedB = mountedDocumentIntentOf(owner.intents[1].payload);
   expect(wire.posts[2].key).not.toBe(wire.posts[0].key);
   expect(requestB).toMatchObject({ base_revision_id: pinOf(a).revision_id, base_publication_id: pinOf(a).publication_id });
-  expect(requestB.commands).toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
-    args: { changes: mountedB.changes }, created: [] }]);
-  expect(requestB.label).toBe(mountedB.label);
-  expect(requestB.merge).toBe(mountedB.merge ?? 'atomic');
-  expect(requestB.steps).toEqual([{ ...mountedB.step, command_ordinals: [0], patch: mountedB.changes }]);
-  if (mountedB.reads === undefined) expect(requestB).not.toHaveProperty('reads');
-  else expect(requestB.reads).toEqual(mountedB.reads);
+  expectDocumentPatchRequest(requestB, mountedB, { kind: 'move', clipId: seed3.appClipId, trackId: 'V1' });
   expect(b.data.publisher).toBe(a.data.publisher);
   expect(b.data.status).toBe('merged');
   expect(b.data.previous_publication_id).toBe(pinOf(c).publication_id);
@@ -1929,7 +1992,7 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
   const retriedOrdinary = accepted(wire.posts[1]);
   const localLabel = accepted(wire.posts[2]);
   expect(localLabel.data.status).toBe('merged');
-  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedLabel);
+  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedLabel, { kind: 'track-label' });
   expect(localLabel.data.canonical_document.parent_revision.payload.config).toMatchObject({
     tracks: expect.arrayContaining([
       expect.objectContaining({ id: 'V1', label: 'F2 ordinary local label' }),
@@ -2194,7 +2257,7 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   expect(wire.posts[1].body).toBe(addPost.body);
   expect(wire.posts[1].key).toBe(addPost.key);
   expect(wire.posts[1].response).toEqual(addPost.response);
-  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedFollowUp);
+  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedFollowUp, { kind: 'track-label' });
   await expect.poll(async () => (await commandOutboxes(reopened, seed3.timelineId))
     .every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
 
@@ -2457,13 +2520,7 @@ test('M1 real dependency conflict retains B original guards and pending identity
   const requestB = JSON.parse(wire.posts[2].body) as CommitRequest;
   const mountedB = mountedDocumentIntentOf(owner.intents[1].payload);
   expect(mountedB.changes[0], 'B keeps its original guard on the position A wrote').toMatchObject({ before: { state: 'present', value: 5 }, value: 7 });
-  expect(requestB.commands, 'no rewritten original B claims, references or created IDs').toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
-    args: { changes: mountedB.changes }, created: [] }]);
-  expect(requestB.label).toBe(mountedB.label);
-  expect(requestB.merge).toBe(mountedB.merge ?? 'atomic');
-  expect(requestB.steps).toEqual([{ ...mountedB.step, command_ordinals: [0], patch: mountedB.changes }]);
-  if (mountedB.reads === undefined) expect(requestB).not.toHaveProperty('reads');
-  else expect(requestB.reads).toEqual(mountedB.reads);
+  expectDocumentPatchRequest(requestB, mountedB, { kind: 'move', clipId: seed3.appClipId, trackId: 'V1' });
   expect(wire.posts[2].key).not.toBe(wire.posts[0].key);
   expect((await history(harness, seed3)).head.revision_id).toBe(pinOf(c).revision_id);
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 2);
@@ -2606,7 +2663,7 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   const retriedDuplicate = accepted(wire.posts[1]);
   const localLabel = accepted(wire.posts[2]);
   expect(localLabel.data.status).toBe('merged');
-  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedLabel);
+  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedLabel, { kind: 'track-label' });
   expect((localLabel.data.canonical_document as any).parent_revision.payload.config).toMatchObject({
     tracks: expect.arrayContaining([
       expect.objectContaining({ id: 'V1', label: 'F2 duplicate local label' }),
@@ -2701,7 +2758,8 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   expect(moveRequest.commands).toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
     args: { changes: moveChanges }, created: [] }]);
   expect(moveRequest.steps).toEqual([expect.objectContaining({ intent: `Move ${seed3.appClipId} on V1`, command_ordinals: [0], patch: moveChanges })]);
-  expect(moveRequest.reads?.length).toBeGreaterThan(0);
+  expect(moveRequest.merge).toBe('fields');
+  expectSameReads(moveRequest.reads, expectedMoveReads(original.parent, seed3.appClipId, 'V1'));
   expect(position(move.data.canonical_document, seed3.appClipId)).toBe(to);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId))
     .every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
@@ -2736,7 +2794,7 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
     body: wire.posts[0].body, key: wire.posts[0].key });
   const mountedRename = mountedDocumentIntentOf(kept.intents[0].payload);
   expectTrackLabelIntent(mountedRename, 'V1', trackLabel);
-  expectDocumentPatchRequest(JSON.parse(wire.posts[0].body) as CommitRequest, mountedRename);
+  expectDocumentPatchRequest(JSON.parse(wire.posts[0].body) as CommitRequest, mountedRename, { kind: 'track-label' });
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === kept.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
   const renamed = await history(harness, seed3);

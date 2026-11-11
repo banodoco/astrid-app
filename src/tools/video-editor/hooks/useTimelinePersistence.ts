@@ -251,6 +251,15 @@ export interface UseTimelinePersistenceResult {
   loadedBundleRef: MutableRefObject<TimelineBundleEnvelope | null>;
 }
 
+/** The user-facing refusal: the reason, then what was and was not kept. */
+export function timelineSaveRefusalMessage(reason: string, keptInBrowser: boolean): string {
+  const text = /^Not saved\b/i.test(reason) ? reason : `Not saved: ${reason}`;
+  const sentence = /[.!?]$/.test(text) ? text : `${text}.`;
+  return keptInBrowser
+    ? `${sentence} This change, and any edit after it, is not on the timeline; it is kept only in this browser. After a reload you can try saving it again or discard it.`
+    : `${sentence} This change, and any edit after it, is not on the timeline and could not be kept in this browser; it will be lost when this page is closed or reloaded.`;
+}
+
 export function useTimelinePersistence({
   store,
   provider,
@@ -870,8 +879,12 @@ export function useTimelinePersistence({
         cancelErrorRetryTimer();
         disarmWatchdog();
         setSaveStatus('error');
-        toast.error(persistenceError.message);
         rejectFlushWaiters(persistenceError, attempt, true);
+        // Say exactly what was kept. The refusal is sticky for this editor
+        // session, and only the browser recovery slot (offered after a reload)
+        // still holds the change; nothing reached the timeline.
+        const kept = await attempt.draftWrite.then(() => !attempt.session.storageFailure, () => false);
+        toast.error(timelineSaveRefusalMessage(persistenceError.message, kept));
         return;
       }
 

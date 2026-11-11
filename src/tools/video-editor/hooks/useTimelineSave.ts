@@ -62,7 +62,7 @@ export function bindElementParameterOwner(routes: ElementTimelineRoutes, context
 /** Keep parameter gestures on the scoped element route, before generic serialization. */
 export async function saveElementParameterEdit(current: TimelineData, mutation: TimelineEditMutation,
   basis: TimelineGestureReadBasis, routes: ElementTimelineRoutes, timelineId: string, adapter: AstridElementOperationAdapter) {
-  if (basis.kind !== 'element') throw new TimelineSaveError('Element parameter basis is unavailable; draft retained');
+  if (basis.kind !== 'element') throw new TimelineSaveError('Not saved: element parameter basis is unavailable');
   const op = basis.operation;
   if (!op || op.name !== 'timeline.update_element' || !op.params || op.element || op.duration !== undefined
     || op.clip_id !== basis.clipId || op.timeline !== timelineId || op.expected_version !== current.configVersion
@@ -72,14 +72,14 @@ export async function saveElementParameterEdit(current: TimelineData, mutation: 
     || canonicalJsonStringify(mutation.resolvedConfig) !== canonicalJsonStringify({ ...current.resolvedConfig,
       clips: current.resolvedConfig.clips.map(clip => clip.id === op.clip_id
         ? { ...clip, params: { ...clip.params, ...op.params } } : clip) })) {
-    throw new TimelineSaveError('Element parameter source changed; draft retained');
+    throw new TimelineSaveError('Not saved: element parameter source changed');
   }
   const original = await routes.get(timelineId);
   if (canonicalJsonStringify(original.config) !== canonicalJsonStringify(basis.config)
     || canonicalJsonStringify(original.registry) !== canonicalJsonStringify(basis.registry)
     || canonicalJsonStringify(original.head ?? null) !== canonicalJsonStringify(current.head)
     || original.config_version !== current.configVersion) {
-    throw new TimelineSaveError('Element parameter owner changed; draft retained');
+    throw new TimelineSaveError('Not saved: element parameter owner changed');
   }
   return adapter.execute(op);
 }
@@ -147,9 +147,9 @@ export function useTimelineSave(
       try {
         const original = structuredClone(source);
         const originalReads = gestureBasis ? structuredClone(gestureBasis) : undefined;
-        if (localOwner.closed || !localOwner.ready) throw markTimelineSaveRejection(new TimelineSaveError('Original local save session is unavailable; draft retained'), 'capture-owner-unavailable', 'TimelineSaveError');
+        if (localOwner.closed || !localOwner.ready) throw markTimelineSaveRejection(new TimelineSaveError('Not saved: original local save session is unavailable'), 'capture-owner-unavailable', 'TimelineSaveError');
         const handoff = await localOwner.ready;
-        if (localOwner.closed) throw markTimelineSaveRejection(new TimelineSaveError('Local save session was replaced; draft retained'), 'capture-owner-replaced', 'TimelineSaveError');
+        if (localOwner.closed) throw markTimelineSaveRejection(new TimelineSaveError('Not saved: local save session was replaced'), 'capture-owner-replaced', 'TimelineSaveError');
         await handoff.capture(original, originalReads);
         emitTimelineSaveDiagnostic('capture-resolved', () => ({ owner: localOwner, timelineId: localOwner.timelineId,
           source: original, gesture: originalReads,
@@ -162,9 +162,9 @@ export function useTimelineSave(
       }
     },
     async flush() {
-      if (localOwner.closed || !localOwner.ready) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
+      if (localOwner.closed || !localOwner.ready) throw new TimelineSaveError('Not saved: original local save session is unavailable');
       const handoff = await localOwner.ready;
-      if (localOwner.closed) throw new TimelineSaveError('Local save session was replaced; draft retained');
+      if (localOwner.closed) throw new TimelineSaveError('Not saved: local save session was replaced');
       try { return await handoff.flush(); }
       catch (error) { recordDraftReloadFailure(); throw error; }
     },
@@ -176,7 +176,7 @@ export function useTimelineSave(
       localOwner.operations++;
       try {
         const handoff = await localOwner.ready;
-        if (localOwner.closed || !handoff) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
+        if (localOwner.closed || !handoff) throw new TimelineSaveError('Not saved: original local save session is unavailable');
         await handoff.undo();
         localOwner.operationError = false;
       } catch (error) { localOwner.operationError = true; recordDraftReloadFailure(); throw error; }
@@ -187,7 +187,7 @@ export function useTimelineSave(
       localOwner.operations++;
       try {
         const handoff = await localOwner.ready;
-        if (localOwner.closed || !handoff) throw new TimelineSaveError('Original local save session is unavailable; draft retained');
+        if (localOwner.closed || !handoff) throw new TimelineSaveError('Not saved: original local save session is unavailable');
         await handoff.redo();
         localOwner.operationError = false;
       } catch (error) { localOwner.operationError = true; recordDraftReloadFailure(); throw error; }
@@ -324,7 +324,7 @@ export function useTimelineSave(
       localOwner.ready = (async () => {
         const verified = await originalRead;
         if (cancelled || !isCurrent() || localEditSeqRef.current !== editSeq) {
-          throw markTimelineSaveRejection(new TimelineSaveError('Local edits preceded the original verified read; draft retained'), 'owner-original-read-invalidated', 'TimelineSaveError');
+          throw markTimelineSaveRejection(new TimelineSaveError('Not saved: local edits preceded the original verified read'), 'owner-original-read-invalidated', 'TimelineSaveError');
         }
         const identity = await provider.getRecoverableIdentity!();
         emitTimelineSaveDiagnostic('identity-read', () => ({ owner: localOwner, timelineId,
@@ -853,7 +853,7 @@ export function useTimelineSave(
             || canonicalJsonStringify(currentDocument()) !== canonicalJsonStringify(original)
             || input.expectedVersion !== original.config_version
             || canonicalJsonStringify(input.expectedHead ?? null) !== canonicalJsonStringify(original.head ?? null)) {
-            throw new TimelineSaveError('Element original local document changed; draft retained');
+            throw new TimelineSaveError('Not saved: element original local document changed');
           }
         };
         checkCurrent();
@@ -893,10 +893,10 @@ export function useTimelineSave(
   const applyEdit = useCallback<ReturnType<typeof useTimelineCommit>['applyEdit']>((mutation, options) => {
     if (options?.gestureBasis?.kind !== 'element') { commitApplyEdit(mutation, options); return; }
     const current = elementDataRef.current;
-    if (!current) { toast.error('Element parameter source is unavailable; draft retained'); return; }
+    if (!current) { toast.error('Not saved: element parameter source is unavailable'); return; }
     const owner = elementParameterOwners.get(elementTimelineRoutes);
     if (!owner || owner.context !== options.gestureBasis.context) {
-      toast.error('Element parameter editor owner changed or is unavailable; draft retained'); return;
+      toast.error('Not saved: element parameter editor owner changed or is unavailable'); return;
     }
     void runElementSave(() => saveElementParameterEdit(current, mutation, options.gestureBasis!, elementTimelineRoutes, timelineId, owner.adapter.captureForTurn()))
       .catch(error => toast.error(error instanceof Error ? error.message : String(error)));

@@ -17,7 +17,7 @@ vi.mock('@/tools/video-editor/data/timelineDraftIndexedDb.ts', async (importOrig
   const actual = await importOriginal<typeof import('@/tools/video-editor/data/timelineDraftIndexedDb.ts')>();
   return { ...actual, saveTimelineDraft: vi.fn(actual.saveTimelineDraft) };
 });
-import { useTimelinePersistence, TimelineSaveBarrierError, type UseTimelinePersistenceResult } from './useTimelinePersistence';
+import { timelineSaveRefusalMessage, useTimelinePersistence, TimelineSaveBarrierError, type UseTimelinePersistenceResult } from './useTimelinePersistence';
 import { useClipEditing } from './useClipEditing';
 import { useTimelineCommit } from './useTimelineCommit';
 import { useTimelineOps } from './useTimelineOps';
@@ -525,7 +525,7 @@ describe('useTimelinePersistence — interaction gating', () => {
   it('keeps a local handoff refusal terminal without presenting it as a timeline conflict', async () => {
     const original = makeTimelineData('handoff-refusal');
     vi.mocked(toast.error).mockClear();
-    const refusal = new TimelineSaveError('The local save owner is unavailable; draft retained.');
+    const refusal = new TimelineSaveError('Not saved: the local save owner is unavailable');
     const capture = vi.fn(async () => { throw refusal; });
     const handoff = {
       capture,
@@ -546,7 +546,15 @@ describe('useTimelinePersistence — interaction gating', () => {
     });
 
     expect(capture).toHaveBeenCalledTimes(1);
-    expect(toast.error).toHaveBeenCalledExactlyOnceWith(refusal.message);
+    // The refusal states truthfully what was kept: the browser recovery slot
+    // holds the change, nothing reached the timeline, and no "reload" promise.
+    await vi.waitFor(() => expect(toast.error).toHaveBeenCalledTimes(1));
+    const shown = vi.mocked(toast.error).mock.calls[0][0] as string;
+    expect(shown).toBe(timelineSaveRefusalMessage(refusal.message, true));
+    expect(shown).toMatch(/^Not saved: the local save owner is unavailable\. /);
+    expect(shown).toContain('is not on the timeline; it is kept only in this browser');
+    expect(shown).not.toMatch(/draft retained|reload the timeline/i);
+    expect((await loadTimelineDraft('timeline-1'))?.draft.config).toEqual(edited.config);
     expect(harness.result.current.saveStatus).toBe('error');
     expect(harness.result.current.isConflictExhausted).toBe(false);
     expect(harness.saveTimeline).not.toHaveBeenCalled();

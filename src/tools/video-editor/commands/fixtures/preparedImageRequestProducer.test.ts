@@ -184,7 +184,7 @@ describe('prepared image request producer fixture', () => {
               : kind === 'local child mutation' ? 'local authored document changed'
                 : kind === 'registry' ? 'registry changes exceed'
                   : kind === 'missing selection' || kind === 'extra selection' ? 'Runtime project media selection'
-                    : kind === 'wrong recipe' ? 'ordinary image add'
+                    : kind === 'wrong recipe' ? 'ordinary image, video or audio add'
                       : kind === 'wrong command' ? 'prepared media command is unavailable' : 'more than one ordinary parent clip';
         await expect(capture).rejects.toThrow(message);
         const [stored] = await outboxes.list(scope);

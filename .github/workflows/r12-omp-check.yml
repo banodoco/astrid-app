@@ -1,0 +1,30 @@
+name: r12-omp-check
+on:
+  push:
+    branches: [scratch/r12-omp-check]
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Fetch both OMP URLs
+        run: |
+          S=78f0e0960f471c2c62b943272a48c33366f239fe
+          mkdir -p "$RUNNER_TEMP/omp" && cd "$RUNNER_TEMP/omp"
+          for o in peteromallet banodoco; do
+            for kind in archive codeload; do
+              if [ $kind = archive ]; then u="https://github.com/$o/oh-my-pi/archive/$S.tar.gz"; else u="https://codeload.github.com/$o/oh-my-pi/tar.gz/$S"; fi
+              f="$o-$kind.tgz"
+              echo "=== $o $kind $u"
+              echo "--- chain (no -L):"; curl -sSI "$u" | grep -i '^HTTP\|^location' || true
+              curl -sSL -o "$f" -w "status=%{http_code} final=%{url_effective} redirects=%{num_redirects}\n" "$u" || true
+              echo "sha256=$(sha256sum "$f" | cut -d' ' -f1) bytes=$(wc -c < "$f")"
+              echo "top-dir=$(tar tzf "$f" 2>&1 | head -1)"
+            done
+          done

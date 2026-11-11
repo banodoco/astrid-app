@@ -224,6 +224,22 @@ vi.mock('@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx', async (im
   };
 });
 
+/**
+ * Wait for the mounted preview to leave its initial/adopting state: it has reported a revision, that revision is no
+ * longer the 'unavailable' adoption placeholder, and the "Updating canonical shot" adoption banner is gone. Only then
+ * can the final label be asserted, so the initial 'unavailable' render can never satisfy a case.
+ */
+async function settledPreviewRevision(): Promise<unknown> {
+  await waitFor(() => {
+    expect(previewProps.previewRevision, 'the embedded preview reports a revision').toBeDefined();
+    expect((previewProps.previewRevision as { kind: string }).kind, 'adoption of the canonical head has finished').not.toBe('unavailable');
+    expect(document.querySelector('[data-shot-timeline-head-adoption]'), 'no adoption banner remains').toBeNull();
+  });
+  // Nothing may still be in flight that could change the label after it settled.
+  await act(async () => { await Promise.resolve(); });
+  return previewProps.previewRevision;
+}
+
 describe('shot timeline popup persistence', () => {
   beforeEach(async () => {
     resetFakeIndexedDB();
@@ -275,10 +291,10 @@ describe('shot timeline popup persistence', () => {
     render(React.createElement(ShotTimelinePreview, { composition, occurrenceId: 'occ-1' }));
 
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    await waitFor(() => expect(previewProps.previewRevision).toEqual({
+    expect(await settledPreviewRevision()).toEqual({
       kind: 'committed',
       revisionId: composition.headRevisionId,
-    }));
+    });
   });
 
   it.each([
@@ -294,9 +310,10 @@ describe('shot timeline popup persistence', () => {
     render(React.createElement(ShotTimelinePreview, { composition, occurrenceId: 'occ-1' }));
 
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    await waitFor(() => expect(previewProps.previewRevision).toEqual(committed
+    expect(await settledPreviewRevision()).toEqual(committed
       ? { kind: 'committed', revisionId: composition.headRevisionId }
-      : { kind: 'local', baseRevisionId: composition.headRevisionId }));
+      : { kind: 'local', baseRevisionId: composition.headRevisionId });
+    expect(document.querySelector('[data-shot-timeline-save-status]')?.getAttribute('data-shot-timeline-save-status')).toBe(status);
   });
 
   it('keeps a conflicted embedded preview local instead of claiming the canonical head', async () => {
@@ -306,10 +323,10 @@ describe('shot timeline popup persistence', () => {
     render(React.createElement(ShotTimelinePreview, { composition, occurrenceId: 'occ-1' }));
 
     await waitFor(() => expect(screen.getByTestId('preview')).toBeTruthy());
-    await waitFor(() => expect(previewProps.previewRevision).toEqual({
+    expect(await settledPreviewRevision()).toEqual({
       kind: 'local',
       baseRevisionId: composition.headRevisionId,
-    }));
+    });
   });
 
   it('renders recovery controls in the mounted popup surface', async () => {

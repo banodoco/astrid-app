@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { Images } from 'lucide-react';
 import { GenerationsPaneControls } from '@/features/gallery/components/GenerationsPane/components/GenerationsPaneControls';
 import { GenerationsPaneFrame } from '@/features/gallery/components/GenerationsPane/components/GenerationsPaneFrame';
@@ -32,7 +32,7 @@ interface EditorTourGenerationsPaneProps {
 }
 
 /** A touch of margin past the 300ms slide, for a `transitionend` that never comes (a hidden tab). */
-const CLOSE_FALLBACK_MS = 450;
+const CLOSE_FALLBACK_MS = 700;
 const NO_OP = () => undefined;
 
 const NO_SHOTS: never[] = [];
@@ -119,6 +119,8 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
   const [closing, setClosing] = useState(false);
   const wasOpenRef = useRef(open && !animate);
   const closingRef = useRef(false);
+  /** The pane has been on screen, closed, for a frame: a slide can start from where it is at once. */
+  const paintedClosedRef = useRef(false);
   const fallbackRef = useRef<number | undefined>(undefined);
   const onClosedRef = useRef(onClosed);
   onClosedRef.current = onClosed;
@@ -131,7 +133,7 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
     onClosedRef.current?.();
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (open) {
       wasOpenRef.current = true;
       closingRef.current = false;
@@ -141,7 +143,13 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
         setSlid(true);
         return undefined;
       }
-      // One frame at the closed position first, so the slide has somewhere to start from.
+      // Already painted closed (it mounts a step early): slide now, before this frame paints, so the pane sets off on the
+      // same frame as the spotlight that is moving onto it.
+      if (paintedClosedRef.current) {
+        setSlid(true);
+        return undefined;
+      }
+      // Mounted open: one frame at the closed position first, so the slide has somewhere to start from.
       let second = 0;
       const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setSlid(true)); });
       return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
@@ -158,6 +166,12 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
     fallbackRef.current = window.setTimeout(finishClose, CLOSE_FALLBACK_MS);
     return () => window.clearTimeout(fallbackRef.current);
   }, [open, animate, finishClose]);
+
+  useEffect(() => {
+    let second = 0;
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => { paintedClosedRef.current = true; }); });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, []);
 
   // The controls dim while the pane is arriving, as the real ones do.
   const { isInteractionDisabled } = usePaneInteractionLifecycle({ isOpen: slid, disableInteractionsDuringOpen: true });
@@ -181,7 +195,8 @@ export function EditorTourGenerationsPane({ open, animate, onClosed, columns }: 
           left={0}
           right={reserve}
           transformClass={slid ? 'translate-y-0' : 'translate-y-full'}
-          className={animate ? undefined : 'transition-none'}
+          // The same duration and easing as the tour's one move, so the pane and the cutout over it arrive together.
+          className={animate ? 'duration-[460ms] ease-[cubic-bezier(0.33,1,0.68,1)]' : 'transition-none'}
           onTransitionEnd={(event) => {
             if (event.target === event.currentTarget && event.propertyName === 'transform') finishClose();
           }}

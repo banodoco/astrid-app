@@ -186,10 +186,12 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const renderedTurns = useMemo(() => buildRenderedTurns(turns), [turns]);
   const currentActStart = new Date(tourActStartMs(baseMs, act)).toISOString();
   const turnAt = (item: RenderedTurn) => (item.kind === 'message' ? item.turn.timestamp : item.pairs[0].call.timestamp);
-  // The act's reply and actions come after its prompt; a phone's spotlight lights them alone.
-  const replyFrom = renderedTurns.findIndex((item) => turnAt(item) > currentActStart);
-  const conversation = replyFrom < 0 ? renderedTurns : renderedTurns.slice(0, replyFrom);
-  const reply = replyFrom < 0 ? [] : renderedTurns.slice(replyFrom);
+  // The act's exchange: its prompt (once sent), then the reply, then its actions. Everything before is earlier acts.
+  const actFrom = renderedTurns.findIndex((item) => turnAt(item) >= currentActStart);
+  const earlier = actFrom < 0 ? renderedTurns : renderedTurns.slice(0, actFrom);
+  const current = actFrom < 0 ? [] : renderedTurns.slice(actFrom);
+  const reply = current.filter((item) => turnAt(item) > currentActStart);
+  const said = current.filter((item) => item.kind === 'message');
   const { scrollContainerRef, scrollContentRef, onScroll } = useChatScroll(`tour:${runId}`, true, renderedTurns.length);
 
   // The act's actions (its last tool group) carry the anchor desktop's respond contracts onto once the reply is in.
@@ -201,6 +203,8 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
   const composerText = beat === 'compose' && !sent ? script.prompt.slice(0, progress.typed) : '';
   const busy = beat === 'respond' && !chatReady;
   const thinking = busy && progress.replyChars === 0;
+  // The reply bubble while it is still arriving.
+  const streaming = busy && progress.replyChars > 0 && progress.replyChars < script.reply.length ? reply.find((item) => item.kind === 'message') : undefined;
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden" {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatPane }}>
@@ -219,10 +223,20 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
           </div>
         )}
         <div ref={scrollContentRef} className="flex flex-col gap-2.5">
-          {conversation.map(renderTurn)}
-          {(reply.length > 0 || thinking) && (
-            <div className="flex flex-col gap-2.5" {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatReply }}>
-              {reply.map(renderTurn)}
+          {earlier.map(renderTurn)}
+          {(said.length > 0 || thinking) && (
+            // What the spotlight holds while the agent works: the prompt with the thinking line, then with the reply.
+            <div className="flex flex-col gap-2.5" {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatExchange }}>
+              {said.map((item) => (item.kind === 'message' && item === streaming ? (
+                // The reply takes its final size from its first character: the whole text is laid out unseen under the
+                // part that has arrived, so the bubble (and the spotlight around it) never grows as it streams.
+                <div key={item.key} className="grid">
+                  <div className="invisible col-start-1 row-start-1" aria-hidden="true">
+                    <TourTurnRow item={{ ...item, turn: { ...item.turn, content: script.reply } }} anchored={false} fadeIn={false} />
+                  </div>
+                  <div className="col-start-1 row-start-1">{renderTurn(item)}</div>
+                </div>
+              ) : renderTurn(item)))}
               {thinking && (
                 <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
@@ -231,6 +245,7 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
               )}
             </div>
           )}
+          {current.filter((item) => item.kind !== 'message').map(renderTurn)}
         </div>
       </div>
       <div className="border-t border-border/70 px-3 py-3">

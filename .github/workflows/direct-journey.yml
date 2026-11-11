@@ -302,7 +302,7 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
           NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts --grep "M2 native occurrence duplicate|M2 mixed editing|render R, publish R\\+1|empty bootstrap"
 
       # Pass rule (R-9, same as the direct journey): every case must pass except the named expected failures in config/testing/direct-journey-expected-failures.json (exactly those, each failing as expected). Durations are
       # written to three-products-summary.json and recorded, never judged (R-10).

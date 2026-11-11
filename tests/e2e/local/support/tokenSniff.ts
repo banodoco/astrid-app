@@ -95,9 +95,15 @@ export class TokenSniff {
         this.diagnostic('body-end', response.request());
       }, error => { this.diagnostic('body-failed', response.request()); throw error; }));
     });
-    if (this.diagnostics) page.on('framenavigated', frame => {
-      if (frame === page.mainFrame()) { this.navigation++; this.diagnostic('main-frame-committed'); }
-    });
+    if (this.diagnostics) {
+      page.on('framenavigated', frame => {
+        if (frame === page.mainFrame()) { this.navigation++; this.diagnostic('main-frame-committed'); }
+      });
+      page.on('domcontentloaded', () => this.diagnostic('domcontentloaded'));
+      page.on('load', () => this.diagnostic('load'));
+      page.on('close', () => this.diagnostic('page-close'));
+      page.on('crash', () => this.diagnostic('page-crash'));
+    }
     // Interception stays active through navigations. It preserves the request
     // lifecycle for raw-header capture, while falling through to the browser.
     // Playwright disables HTTP caching while routing is enabled.
@@ -119,6 +125,14 @@ export class TokenSniff {
       if (failed.length) throw new Error(`Incomplete credential scan: ${failed.map(item => `${item.label} (${item.state}; capture failed)`).join(', ')}`);
       const remaining = deadline - Date.now();
       if (remaining <= 0) {
+        this.diagnostic('drain-timeout');
+        for (const capture of captures) if (capture.pending) {
+          const kind = capture.label.endsWith(' headers') ? 'headers' : capture.label.endsWith(' body') ? 'body' : 'route';
+          this.diagnostic(`drain-pending-${kind}`, capture.request);
+        }
+        if (waiting()) for (const [request, admission] of this.admissions) {
+          if (!admission.terminal) this.diagnostic(`drain-nonterminal-${admission.state}`, request);
+        }
         const outstanding = captures.filter(item => item.pending).map(item => `${item.label} (${item.state})`);
         if (waiting()) for (const [request, admission] of this.admissions) {
           if (!admission.terminal) outstanding.push(`${this.label(request.method(), request.url(), 'request')} (${admission.state}; no terminal event)`);
@@ -156,6 +170,7 @@ export class TokenSniff {
       await task.catch(() => {}); // The credential ledger retains a failed disposition.
     };
     await page.route('**/api/**', handler);
+    this.diagnostic('gate-installed');
     try {
       // A fault fixture may own a deliberately held request. Settle that hold
       // under the gate so its retry cannot race the old-document drain.
@@ -168,7 +183,10 @@ export class TokenSniff {
     } finally {
       // Removing a still-running handler can fall through to another route.
       // A failed/stalled abort therefore leaves the gate installed, fail-closed.
-      if (aborts.every(capture => !capture.pending && !capture.failed)) await page.unroute('**/api/**', handler);
+      if (aborts.every(capture => !capture.pending && !capture.failed)) {
+        await page.unroute('**/api/**', handler);
+        this.diagnostic('gate-removed');
+      } else this.diagnostic('gate-retained');
     }
   }
 

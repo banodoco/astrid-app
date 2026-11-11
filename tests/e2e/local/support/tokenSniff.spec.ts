@@ -484,10 +484,14 @@ test('navigation waits for an observed response body even after its request fini
   page.emit('request', req);
   page.emit('response', { headers: () => ({ 'content-type': 'application/json' }), url: () => req.url(), request: () => req, text: () => body });
   page.emit('requestfinished', req);
+  let installed!: () => void;
+  const gateInstalled = new Promise<void>(resolve => { installed = resolve; });
+  page.route = (async () => { installed(); }) as Page['route'];
   let navigated = false;
   const navigation = sniff.navigate(page, async () => { navigated = true; });
-  await Promise.resolve();
-  await Promise.resolve();
+  await gateInstalled;
+  // Give the navigation path a full task turn after the gate is installed.
+  await new Promise<void>(resolve => setImmediate(resolve));
   expect(navigated).toBe(false);
   finish(secret);
   await navigation;
@@ -540,7 +544,7 @@ test('diagnostics record gate abort and a missing terminal without inventing an 
   page.emit('request', req);
   await handler({ request: () => req, abort: async () => {} } as unknown as Route);
   await expect(navigation).rejects.toThrow('no terminal event');
-  expect(events.map(event => event.event)).toEqual(expect.arrayContaining(['gate-entry', 'abort-begin', 'abort-end']));
+  expect(events.map(event => event.event)).toEqual(expect.arrayContaining(['gate-entry', 'abort-begin', 'abort-end', 'gate-installed', 'drain-timeout', 'drain-nonterminal-blocked', 'gate-removed']));
   expect(events.map(event => event.event)).not.toContain('requestfailed');
   expect(events.map(event => event.event)).not.toContain('requestfinished');
 });
@@ -567,4 +571,23 @@ test('workflow diagnostic flag emits only sanitized lifecycle records', async ()
     if (previous === undefined) delete process.env.TOKEN_SNIFF_DIAGNOSTICS;
     else process.env.TOKEN_SNIFF_DIAGNOSTICS = previous;
   }
+});
+
+test('diagnostics mark page lifecycle and sanitized pending-body timeout', async () => {
+  const page = fakePage();
+  page.unroute = async () => {};
+  const events: Array<Record<string, unknown>> = [];
+  const sniff = new TokenSniff({ secret }, 50, event => events.push(event));
+  await sniff.attach(page);
+  const req = request(`http://localhost:1234/api/${secret}?key=${secret}`);
+  page.emit('request', req);
+  page.emit('response', { headers: () => ({ 'content-type': 'text/plain' }), url: () => req.url(), request: () => req, text: () => new Promise(() => {}) });
+  page.emit('requestfinished', req);
+  page.emit('domcontentloaded');
+  page.emit('load');
+  page.emit('close');
+  page.emit('crash');
+  await expect(sniff.navigate(page, async () => {})).rejects.toThrow('Incomplete credential scan');
+  expect(events.map(event => event.event)).toEqual(expect.arrayContaining(['domcontentloaded', 'load', 'page-close', 'page-crash', 'drain-timeout', 'drain-pending-body', 'gate-installed', 'gate-removed']));
+  expect(JSON.stringify(events)).not.toContain(secret);
 });

@@ -1253,22 +1253,6 @@ async function expectImmutableClosure(harness: DirectHarness, seed: ThreeProduct
   expect(entry?.revision_id).toBe(document.parent_revision.revision_id);
 }
 
-async function ownerWithTwoMoves(page: Page, seed: ThreeProductsSeed) {
-  await expect.poll(async () => (await commandOutboxes(page, seed.timelineId)).some((owner) => owner.intents.length === 2), CEILING).toBe(true);
-  const owner = (await commandOutboxes(page, seed.timelineId)).find((candidate) => candidate.intents.length === 2)!;
-  expect(owner.pending?.request).toBeTruthy();
-  expect(owner.intents[1].basis).toEqual({ after: owner.intents[0].id });
-  expect(owner.intents[1].readyBase, 'dependent B has never been sent').toBeUndefined();
-  const commands = commandsOf(owner.intents[1].payload);
-  expect(commands).toHaveLength(1);
-  expect(commands[0]).toMatchObject({ op: 'clip.move', select: `parent/clip:${seed.appClipId}`, args: { on: 7 } });
-  expect(commands[0].reads?.find((read) => read.ref === `parent/clip:${seed.appClipId}` && canonical(read.path) === '["at"]')?.state)
-    .toEqual({ state: 'present', value: 5 });
-  expect(commands[0].expect && Object.keys(commands[0].expect).length).toBeGreaterThan(0);
-  expect(commands[0].bindings && Object.keys(commands[0].bindings).length).toBeGreaterThan(0);
-  return owner;
-}
-
 type MountedDocumentIntent = {
   basis: unknown;
   before: CanonicalDocument;
@@ -1292,6 +1276,24 @@ function mountedDocumentIntentOf(payload: unknown): MountedDocumentIntent {
     changes: expect.any(Array),
   });
   return intent as MountedDocumentIntent;
+}
+
+/** The wire request is the exact doc.patch envelope derived from the persisted mounted-document intent. */
+function expectDocumentPatchRequest(request: CommitRequest, intent: MountedDocumentIntent): void {
+  expect(request.commands, 'no rewritten original claims, references or created IDs').toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
+    args: { changes: intent.changes }, created: [] }]);
+  expect(request.label).toBe(intent.label);
+  expect(request.merge).toBe(intent.merge ?? 'atomic');
+  expect(request.steps).toEqual([{ ...intent.step, command_ordinals: [0], patch: intent.changes }]);
+  if (intent.reads === undefined) expect(request).not.toHaveProperty('reads');
+  else expect(request.reads).toEqual(intent.reads);
+}
+
+/** A track rename is a label-only bound gesture (5ae358a1f): one set of that track's label, guarded by its original value. */
+function expectTrackLabelIntent(intent: MountedDocumentIntent, trackId: string, label: string): void {
+  expect(intent.changes).toHaveLength(1);
+  expect(intent.changes[0]).toMatchObject({ op: 'set', ref: 'parent', value: label, before: { state: 'present' } });
+  expect((intent.changes[0].path as string[]).join('/')).toMatch(new RegExp(`tracks/id:${trackId}/label$`));
 }
 
 async function ownerWithTwoMountedDocuments(page: Page, seed: ThreeProductsSeed) {
@@ -1339,7 +1341,7 @@ async function openCommandTimeline(page: Page, harness: DirectHarness, seed: Thr
   return { ownerId: fresh[0].ownerId, scope: fresh[0].scope };
 }
 
-async function prepareDependentMoves(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, beforeBDrop?: (a: CommitAcceptedMutation) => Promise<void>) {
+async function prepareDependentMountedDocuments(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, beforeBDrop?: (a: CommitAcceptedMutation) => Promise<void>) {
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed);
@@ -1351,7 +1353,7 @@ async function prepareDependentMoves(page: Page, harness: DirectHarness, seed: T
   const a = accepted(wire.posts[0]);
   const bodyA = JSON.parse(wire.posts[0].body) as CommitRequest;
   expect(bodyA).toMatchObject({ base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id,
-    commands: [{ op: 'clip.move', select: `parent/clip:${seed.appClipId}`, args: { on: 5 } }] });
+    commands: [{ op: 'doc.patch', select: null, args: { changes: expect.any(Array) } }] });
   expect(position(a.data.canonical_document, seed.appClipId)).toBe(5);
   expect((await history(harness, seed)).head.revision_id).toBe(pinOf(a).revision_id);
   // The second pointerdown observes the actual optimistic authored bundle A.
@@ -1359,7 +1361,7 @@ async function prepareDependentMoves(page: Page, harness: DirectHarness, seed: T
     expect(wire.attempts, 'B stays unsent behind unacknowledged A').toBe(1);
     await beforeBDrop?.(a);
   });
-  const owner = await ownerWithTwoMoves(page, seed);
+  const owner = await ownerWithTwoMountedDocuments(page, seed);
   expect(owner.scope).toEqual({ realmId: harness.realmId, actorId: a.data.publisher, projectId: harness.seed.projectId, timelineId: seed.timelineId });
   expect(owner.pending!.request).toEqual({ method: 'POST', path: `${timelineBase(harness, seed)}/commit`,
     body: wire.posts[0].body, key: wire.posts[0].key });
@@ -1368,35 +1370,6 @@ async function prepareDependentMoves(page: Page, harness: DirectHarness, seed: T
 }
 
 type CommandWire = Awaited<ReturnType<typeof faultFirstCommit>>;
-
-async function prepareAfterAckLossMoves(page: Page, harness: DirectHarness, seed: ThreeProductsSeed,
-  ackLostFirst?: (a: CommitAcceptedMutation, wire: CommandWire) => Promise<void>) {
-  await harness.enableTimelineAuthoring(ASTRID_PYTHON);
-  const wire = await faultFirstCommit(page);
-  await openCommandTimeline(page, harness, seed);
-  const before = await history(harness, seed);
-  await dragTimelineClip(page, seed.appClipId, seed.transitionClipId, 0, 5, THREE_PRODUCTS_REFERENCE_AT, () => {
-    expect(wire.attempts, 'pointer movement previews; the actual drop commits').toBe(0);
-  });
-  await expect.poll(() => wire.posts.length, CEILING).toBe(1);
-  const a = accepted(wire.posts[0]);
-  const bodyA = JSON.parse(wire.posts[0].body) as CommitRequest;
-  expect(bodyA).toMatchObject({ base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id,
-    commands: [{ op: 'clip.move', select: `parent/clip:${seed.appClipId}`, args: { on: 5 } }] });
-  expect(position(a.data.canonical_document, seed.appClipId)).toBe(5);
-  expect((await history(harness, seed)).head.revision_id).toBe(pinOf(a).revision_id);
-  await ackLostFirst?.(a, wire);
-  // The second pointerdown observes the actual optimistic authored bundle A.
-  await dragTimelineClip(page, seed.appClipId, seed.transitionClipId, 5, 7, THREE_PRODUCTS_REFERENCE_AT, async () => {
-    expect(wire.attempts, 'B stays unsent behind unacknowledged A').toBe(1);
-  });
-  const owner = await ownerWithTwoMoves(page, seed);
-  expect(owner.scope).toEqual({ realmId: harness.realmId, actorId: a.data.publisher, projectId: harness.seed.projectId, timelineId: seed.timelineId });
-  expect(owner.pending!.request).toEqual({ method: 'POST', path: `${timelineBase(harness, seed)}/commit`,
-    body: wire.posts[0].body, key: wire.posts[0].key });
-  expect(wire.posts).toHaveLength(1);
-  return { wire, before, a, owner };
-}
 
 async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHarness, seed: ThreeProductsSeed,
   ackLostFirst?: (a: CommitAcceptedMutation, wire: CommandWire) => Promise<void>) {
@@ -1489,7 +1462,7 @@ async function expectFreshPreviewUnavailable(page: Page, astrid: AstridCli, harn
 test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, exact retry and UI undo preserve independent Agent work', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
   await sniff.attach(page);
-  const { wire, before, a, owner } = await prepareDependentMoves(page, harness, seed3);
+  const { wire, before, a, owner } = await prepareDependentMountedDocuments(page, harness, seed3);
   const realmBefore = await expectSameRealm(page, harness, astrid);
   // track.create is the supported structural proof; it does not alter the moved clip or its lane.
   const c = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(a), { kind: 'track', id: 'f2-independent-C' }, 'f2-independent-C');
@@ -1497,13 +1470,16 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
   expect(position(c.data.canonical_document, seed3.appClipId)).toBe(5);
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
+  wire.armRecoveryRetry();
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   const afterReload = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
   expect(afterReload.pending?.request).toEqual(owner.pending!.request);
   expect(afterReload.intents).toEqual(owner.intents);
-  expect(wire.posts, 'reload requires explicit owner recovery before retry').toHaveLength(1);
-  await sniff.close(page);
+  expect(wire.posts, 'reload does not send queued B or retry A').toHaveLength(1);
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  await wire.abortStagedRetry('connectionclosed');
+  await sniff.close(page, () => wire.abortStagedRetry('connectionclosed'));
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
@@ -1523,28 +1499,44 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
   expect(persisted.pending?.request).toEqual(owner.pending!.request);
   expect(persisted.intents).toEqual(owner.intents);
   expect(wire.posts).toHaveLength(1);
-  // Recovery is an actual user action selecting the persisted owner, never a test command injection.
-  await reopened.getByRole('button', { name: /^Recover saved edits/ })
-    .and(reopened.locator(`[data-owner-id="${owner.ownerId}"]`)).click();
+  // The App retries the retained owner by itself after reload (7b33f8f50, 4394b74a1); the fault route holds that
+  // retry until released, so exactly one POST has completed until then.
+  const originalARequest = { body: wire.posts[0].body, key: wire.posts[0].key };
+  wire.armRecoveryRetry();
+  await expect.poll(() => wire.observed.length, CEILING).toBe(4);
+  expect(wire.observed.slice(0, 4)).toEqual([originalARequest, originalARequest, originalARequest, originalARequest]);
+  expect(wire.forwarded).toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(3);
   expect(wire.posts[1]).toEqual(wire.posts[0]);
   const b = accepted(wire.posts[2]);
+  expect(wire.observed).toHaveLength(5);
+  expect(wire.observed[4]).toEqual({ body: wire.posts[2].body, key: wire.posts[2].key });
+  expect(wire.forwarded).toHaveLength(3);
   expect(b.data.publisher).toBe(a.data.publisher);
   const requestB = JSON.parse(wire.posts[2].body) as CommitRequest;
+  const mountedB = mountedDocumentIntentOf(owner.intents[1].payload);
   expect(wire.posts[2].key).not.toBe(wire.posts[0].key);
   expect(requestB).toMatchObject({ base_revision_id: pinOf(a).revision_id, base_publication_id: pinOf(a).publication_id });
-  expect(requestB.commands, 'no rewritten original B claims, references or created IDs').toEqual(commandsOf(owner.intents[1].payload));
-  expect(b.data.status).toBe('rebased');
+  expect(requestB.commands, 'no rewritten original B claims, references or created IDs').toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
+    args: { changes: mountedB.changes }, created: [] }]);
+  expect(requestB.label).toBe(mountedB.label);
+  expect(requestB.merge).toBe(mountedB.merge ?? 'atomic');
+  expect(requestB.steps).toEqual([{ ...mountedB.step, command_ordinals: [0], patch: mountedB.changes }]);
+  if (mountedB.reads === undefined) expect(requestB).not.toHaveProperty('reads');
+  else expect(requestB.reads).toEqual(mountedB.reads);
+  expect(b.data.status).toBe('merged');
   expect(b.data.previous_publication_id).toBe(pinOf(c).publication_id);
   expect(position(b.data.canonical_document, seed3.appClipId)).toBe(7);
   expect(b.data.canonical_document.parent_revision.payload.config).toMatchObject({ tracks: expect.arrayContaining([expect.objectContaining({ id: 'f2-independent-C', kind: 'audio', label: 'f2-independent-C' })]) });
   await expect.poll(async () => (await commandOutboxes(reopened, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.intents.length, CEILING).toBe(0);
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 3);
   const recordedB = (await history(harness, seed3)).items.find((entry) => entry.publication_id === pinOf(b).publication_id)?.records;
-  expect(recordedB?.commands[0].command).toEqual(requestB.commands[0]);
+  expectRecordedDocumentPatchCommand(recordedB?.commands[0].command, requestB.commands[0], seed3.appClipId);
   expect(recordedB?.commands[0].writes.length).toBeGreaterThan(0);
   expect(recordedB?.commands[0].reads.length).toBeGreaterThan(0);
   expect(recordedB?.commands[0].bindings.length).toBeGreaterThan(0);
+  await expectV2History(harness, seed3, wire.posts[2], 'merged');
   await expectImmutableClosure(harness, seed3, a);
   await expectImmutableClosure(harness, seed3, c);
   await expectImmutableClosure(harness, seed3, b);
@@ -1594,7 +1586,7 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
   await expectOpaqueDataKept(harness, seed3);
   journey.facts = { ...journey.facts, sourceTuple: revisionSet(journey.identity), renderer: 'not started',
     authoringLaunch: { profile: 'astrid', python: ASTRID_PYTHON },
-    headA: pinOf(a), headB: pinOf(b), independentC: pinOf(c), originalB: commandsOf(owner.intents[1].payload),
+    headA: pinOf(a), headB: pinOf(b), independentC: pinOf(c), originalB: mountedB.changes,
     exactRetry: { method: wire.posts[1].method, path: wire.posts[1].path, key: wire.posts[1].key }, legacySaveCount: wire.legacy.length };
   await sniff.expectClean(reopened, seed3.timelineId);
 });
@@ -1892,12 +1884,14 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
   const owner = (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.pending?.request.key === ordinaryPost.key)!;
   expect(commandsOf(owner.intents[0].payload)).toEqual(ordinaryRequest.commands);
   expect(owner.intents[1].basis).toEqual({ after: owner.intents[0].id });
-  expect(commandsOf(owner.intents[1].payload)).toEqual([expect.objectContaining({
-    op: 'track.set', select: 'parent/track:V1', args: { values: { label: 'F2 ordinary local label' }, clear: [] },
-  })]);
+  const mountedLabel = mountedDocumentIntentOf(owner.intents[1].payload);
+  expect(mountedLabel.basis).toEqual({ after: owner.intents[0].id });
+  expectTrackLabelIntent(mountedLabel, 'V1', 'F2 ordinary local label');
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
 
+  const originalRequest = { body: ordinaryPost.body, key: ordinaryPost.key };
+  wire.armRecoveryRetry();
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
@@ -1905,7 +1899,9 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
   expect(afterReload.pending?.request).toEqual(owner.pending?.request);
   expect(afterReload.intents).toEqual(owner.intents);
   expect(wire.posts).toHaveLength(1);
-  await sniff.close(page);
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  await wire.abortStagedRetry('connectionclosed');
+  await sniff.close(page, () => wire.abortStagedRetry('connectionclosed'));
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
@@ -1922,14 +1918,18 @@ test('M2 ordinary extension batch: move and hold, Agent label, lost ACK, restart
   expect(persisted.pending?.request).toEqual(owner.pending?.request);
   expect(persisted.intents).toEqual(owner.intents);
 
-  await reopened.getByRole('button', { name: /^Recover saved edits/ })
-    .and(reopened.locator(`[data-owner-id="${owner.ownerId}"]`)).click();
+  // The App retries the retained owner by itself (7b33f8f50, 4394b74a1); the fault route holds that retry until released.
+  wire.armRecoveryRetry();
+  await expect.poll(() => wire.observed.length, CEILING).toBe(4);
+  expect(wire.observed.slice(0, 4)).toEqual([originalRequest, originalRequest, originalRequest, originalRequest]);
+  expect(wire.forwarded).toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(3);
   expect(wire.posts[1], 'client and Runtime restart preserve the exact retry body and key').toEqual(wire.posts[0]);
   const retriedOrdinary = accepted(wire.posts[1]);
   const localLabel = accepted(wire.posts[2]);
-  expect(localLabel.data.status).toBe('rebased');
-  expect(JSON.parse(wire.posts[2].body).commands).toEqual(commandsOf(owner.intents[1].payload));
+  expect(localLabel.data.status).toBe('merged');
+  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedLabel);
   expect(localLabel.data.canonical_document.parent_revision.payload.config).toMatchObject({
     tracks: expect.arrayContaining([
       expect.objectContaining({ id: 'V1', label: 'F2 ordinary local label' }),
@@ -2157,17 +2157,24 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await editFirstTrackName(page, 'Manual drop follow-up');
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId))
     .find((owner) => owner.ownerId === ownerBeforeLoss.ownerId)?.intents.length, CEILING).toBe(2);
+  const followUpOwner = (await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === ownerBeforeLoss.ownerId)!;
+  expect(followUpOwner.intents[1].basis).toEqual({ after: followUpOwner.intents[0].id });
+  const mountedFollowUp = mountedDocumentIntentOf(followUpOwner.intents[1].payload);
+  expectTrackLabelIntent(mountedFollowUp, 'V1', 'Manual drop follow-up');
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId))
     .find((owner) => owner.ownerId === ownerBeforeLoss.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
+  wire.armRecoveryRetry();
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
   expect((await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === ownerBeforeLoss.ownerId)?.pending?.request)
     .toEqual(ownerBeforeLoss.pending!.request);
   expect(wire.posts).toHaveLength(1);
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  await wire.abortStagedRetry('connectionclosed');
 
-  await sniff.close(page);
+  await sniff.close(page, () => wire.abortStagedRetry('connectionclosed'));
   await harness.restartRuntime();
   const reopened = await context.newPage();
   captureBoundedBrowserEvidence(reopened);
@@ -2176,18 +2183,18 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await openApp(reopened, harness);
   await expectConnected(reopened);
   await openSeededTimeline(reopened, harness);
-  const recovered = reopened.getByRole('button', { name: /^Recover saved edits/ })
-    .and(reopened.locator(`[data-owner-id="${ownerBeforeLoss.ownerId}"]`));
-  await expect(recovered).toBeEnabled(CEILING);
-  await recovered.click();
+  // The App retries the retained owner by itself (7b33f8f50, 4394b74a1); the fault route holds that retry until released.
+  wire.armRecoveryRetry();
+  await expect.poll(() => wire.observed.length, CEILING).toBe(4);
+  expect(wire.observed.slice(0, 4)).toEqual([{ body: addPost.body, key: addPost.key }, { body: addPost.body, key: addPost.key },
+    { body: addPost.body, key: addPost.key }, { body: addPost.body, key: addPost.key }]);
+  expect(wire.posts, 'exactly one completed POST while the automatic retry is held').toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(3);
   expect(wire.posts[1].body).toBe(addPost.body);
   expect(wire.posts[1].key).toBe(addPost.key);
   expect(wire.posts[1].response).toEqual(addPost.response);
-  expect((JSON.parse(wire.posts[2].body) as CommitRequest).commands[0]).toMatchObject({
-    op: 'track.set',
-    args: { values: { label: 'Manual drop follow-up' }, clear: [] },
-  });
+  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedFollowUp);
   await expect.poll(async () => (await commandOutboxes(reopened, seed3.timelineId))
     .every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
 
@@ -2367,11 +2374,14 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   await expect.poll(async () => (await commandOutboxes(page, expectedScope.timelineId)).find((owner) => owner.pending)?.pending?.outcome?.kind, CEILING).toBe('retry');
 
   const beforeRestart = await expectSameRealm(page, harness, astrid);
+  wire.armRecoveryRetry();
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await expect(firstTrackName(page)).toHaveValue('Bootstrap actual consumer edit', CEILING);
   expect(wire.posts).toHaveLength(1);
-  await sniff.close(page);
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  await wire.abortStagedRetry('connectionclosed');
+  await sniff.close(page, () => wire.abortStagedRetry('connectionclosed'));
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(beforeRestart.runtimeInstanceId);
@@ -2384,8 +2394,12 @@ test('M2 real gate 5 bootstrap actual consumer: production initializer uses nati
   expect(wire.posts).toHaveLength(1);
   const persisted = (await commandOutboxes(reopened, expectedScope.timelineId)).find((owner) => owner.pending);
   expect(persisted, 'restart must preserve the exact in-flight bootstrap consumer edit').toBeTruthy();
-  await reopened.getByRole('button', { name: /^Recover saved edits/ })
-    .and(reopened.locator(`[data-owner-id="${persisted!.ownerId}"]`)).click();
+  // The App retries the retained owner by itself (7b33f8f50, 4394b74a1); the fault route holds that retry until released.
+  wire.armRecoveryRetry();
+  await expect.poll(() => wire.observed.length, CEILING).toBe(4);
+  expect(wire.observed[3], 'the App retries the retained request byte-identically').toEqual(wire.observed[0]);
+  expect(wire.posts, 'exactly one completed POST while the automatic retry is held').toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);
   expect(wire.posts[1]).toEqual(wire.posts[0]);
   await expect.poll(async () => (await commandOutboxes(reopened, expectedScope.timelineId)).every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
@@ -2415,15 +2429,16 @@ test('M1 real dependency conflict retains B original guards and pending identity
   expect(reset.status(), await reset.text()).toBe(200);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
   let c!: CommitAcceptedMutation;
-  const { wire, before, owner } = await prepareDependentMoves(page, harness, seed3, async (a) => {
+  const { wire, before, owner } = await prepareDependentMountedDocuments(page, harness, seed3, async (a) => {
     // Change the actual guard after pointerdown, before drop; B must not recapture it.
     c = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(a), { kind: 'move', clipId: seed3.appClipId, on: 6 }, 'f2-dependent-C');
   });
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
-  await page.getByRole('button', { name: 'Retry save', exact: true })
-    .and(page.getByTestId('timeline-command-retry')).click();
+  // The explicit retry control was retired (7b33f8f50, 4394b74a1): the App's own automatic retry of A is held by the
+  // fault route after the ACK loss, and releasing it lets A replay and dependent B follow.
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(3);
   expect(wire.posts[1]).toEqual(wire.posts[0]);
   expect(wire.posts[2].status).toBe(409);
@@ -2432,7 +2447,6 @@ test('M1 real dependency conflict retains B original guards and pending identity
   const conflict = wire.posts[2].response.details.conflicts;
   expect(conflict.length, JSON.stringify(wire.posts[2].response)).toBeGreaterThan(0);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('rejected');
-  await expect(page.getByTestId('timeline-command-recovery')).toContainText('Your changes are retained and need resolution before they can be saved.');
   const retained = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
   expect(retained.intents).toHaveLength(1);
   expect(retained.intents[0].id).toBe(owner.intents[1].id);
@@ -2440,7 +2454,16 @@ test('M1 real dependency conflict retains B original guards and pending identity
   expect(retained.intents[0].conflict).toBeTruthy();
   expect(retained.pending?.outcome?.kind).toBe('rejected');
   expect(retained.pending?.request.body).toBe(wire.posts[2].body);
-  expect(JSON.parse(wire.posts[2].body).commands).toEqual(commandsOf(owner.intents[1].payload));
+  const requestB = JSON.parse(wire.posts[2].body) as CommitRequest;
+  const mountedB = mountedDocumentIntentOf(owner.intents[1].payload);
+  expect(mountedB.changes[0], 'B keeps its original guard on the position A wrote').toMatchObject({ before: { state: 'present', value: 5 }, value: 7 });
+  expect(requestB.commands, 'no rewritten original B claims, references or created IDs').toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
+    args: { changes: mountedB.changes }, created: [] }]);
+  expect(requestB.label).toBe(mountedB.label);
+  expect(requestB.merge).toBe(mountedB.merge ?? 'atomic');
+  expect(requestB.steps).toEqual([{ ...mountedB.step, command_ordinals: [0], patch: mountedB.changes }]);
+  if (mountedB.reads === undefined) expect(requestB).not.toHaveProperty('reads');
+  else expect(requestB.reads).toEqual(mountedB.reads);
   expect(wire.posts[2].key).not.toBe(wire.posts[0].key);
   expect((await history(harness, seed3)).head.revision_id).toBe(pinOf(c).revision_id);
   expect((await history(harness, seed3)).items).toHaveLength(before.items.length + 2);
@@ -2449,11 +2472,8 @@ test('M1 real dependency conflict retains B original guards and pending identity
   const reloaded = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
   expect(reloaded.pending).toEqual(retained.pending);
   expect(reloaded.intents).toEqual(retained.intents);
-  const recoverConflict = page.getByRole('button', { name: /^Recover saved edits/ })
-    .and(page.locator(`[data-owner-id="${owner.ownerId}"]`));
-  await expect(recoverConflict).toBeVisible(CEILING);
-  await recoverConflict.click();
-  await expect(page.getByTestId('timeline-command-recovery')).toContainText('Your changes are retained and need resolution before they can be saved.');
+  // The "Recover saved edits" control and its notice were removed (7b33f8f50, 4394b74a1); the retained rejected owner must
+  // stay byte-identical and send nothing on its own after reload.
   const recoveredConflict = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === owner.ownerId)!;
   expect(recoveredConflict.intents).toEqual(retained.intents);
   expect(recoveredConflict.pending).toEqual(retained.pending);
@@ -2543,11 +2563,13 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   expect(commandsOf(owner.intents[0].payload)).toEqual(duplicateRequest.commands);
   expect(owner.intents[1].basis).toEqual({ after: owner.intents[0].id });
   expect(owner.intents[1].readyBase).toBeUndefined();
-  expect(commandsOf(owner.intents[1].payload)).toEqual([expect.objectContaining({
-    op: 'track.set', select: 'parent/track:V1', args: { values: { label: 'F2 duplicate local label' }, clear: [] },
-  })]);
+  const mountedLabel = mountedDocumentIntentOf(owner.intents[1].payload);
+  expect(mountedLabel.basis).toEqual({ after: owner.intents[0].id });
+  expectTrackLabelIntent(mountedLabel, 'V1', 'F2 duplicate local label');
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
+  const originalRequest = { body: duplicatePost.body, key: duplicatePost.key };
+  wire.armRecoveryRetry();
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
@@ -2555,7 +2577,9 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   expect(afterReload.pending?.request).toEqual(owner.pending?.request);
   expect(afterReload.intents).toEqual(owner.intents);
   expect(wire.posts).toHaveLength(1);
-  await sniff.close(page);
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  await wire.abortStagedRetry('connectionclosed');
+  await sniff.close(page, () => wire.abortStagedRetry('connectionclosed'));
 
   const restarted = await harness.restartRuntime();
   expect(restarted.oldInstanceId).toBe(realmBefore.runtimeInstanceId);
@@ -2571,14 +2595,18 @@ test('M2 native occurrence duplicate: lost ACK, Agent label, local label, restar
   const persisted = (await commandOutboxes(reopened, seed3.timelineId)).find((candidate) => candidate.ownerId === owner.ownerId)!;
   expect(persisted.pending?.request).toEqual(owner.pending?.request);
   expect(persisted.intents).toEqual(owner.intents);
-  await reopened.getByRole('button', { name: /^Recover saved edits/ })
-    .and(reopened.locator(`[data-owner-id="${owner.ownerId}"]`)).click();
+  // The App retries the retained owner by itself (7b33f8f50, 4394b74a1); the fault route holds that retry until released.
+  wire.armRecoveryRetry();
+  await expect.poll(() => wire.observed.length, CEILING).toBe(4);
+  expect(wire.observed.slice(0, 4)).toEqual([originalRequest, originalRequest, originalRequest, originalRequest]);
+  expect(wire.forwarded).toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(3);
   expect(wire.posts[1], 'the retry is byte-identical after client and Runtime restart').toEqual(wire.posts[0]);
   const retriedDuplicate = accepted(wire.posts[1]);
   const localLabel = accepted(wire.posts[2]);
-  expect(localLabel.data.status).toBe('rebased');
-  expect(JSON.parse(wire.posts[2].body).commands).toEqual(commandsOf(owner.intents[1].payload));
+  expect(localLabel.data.status).toBe('merged');
+  expectDocumentPatchRequest(JSON.parse(wire.posts[2].body) as CommitRequest, mountedLabel);
   expect((localLabel.data.canonical_document as any).parent_revision.payload.config).toMatchObject({
     tracks: expect.arrayContaining([
       expect.objectContaining({ id: 'V1', label: 'F2 duplicate local label' }),
@@ -2663,10 +2691,17 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   const move = accepted({ method: response.request().method(), path: new URL(response.url()).pathname,
     body: response.request().postData()!, key: response.request().headers()['idempotency-key'],
     status: response.status(), response: await response.json() });
-  expect(JSON.parse(response.request().postData()!)).toMatchObject({
-    base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id,
-    commands: [{ op: 'clip.move', select: `parent/clip:${seed3.appClipId}`, args: { on: to } }],
+  // The pointer drag is the mounted document save (7b33f8f50, 4394b74a1, f2d6d62c7): one guarded doc.patch with a move read set.
+  const moveRequest = JSON.parse(response.request().postData()!) as CommitRequest;
+  const moveChanges = [{ op: 'set', ref: 'parent', path: ['clips', `id:${seed3.appClipId}`, 'at'],
+    before: { state: 'present', value: from }, value: to }];
+  expect(moveRequest).toMatchObject({
+    base_revision_id: before.head.revision_id, base_publication_id: before.head.publication_id, merge: 'fields',
   });
+  expect(moveRequest.commands).toEqual([{ schema_version: 1, op: 'doc.patch', version: '1', select: null,
+    args: { changes: moveChanges }, created: [] }]);
+  expect(moveRequest.steps).toEqual([expect.objectContaining({ intent: `Move ${seed3.appClipId} on V1`, command_ordinals: [0], patch: moveChanges })]);
+  expect(moveRequest.reads?.length).toBeGreaterThan(0);
   expect(position(move.data.canonical_document, seed3.appClipId)).toBe(to);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId))
     .every((owner) => !owner.pending && !owner.intents.length), CEILING).toBe(true);
@@ -2682,7 +2717,6 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   const rename = accepted(wire.posts[0]);
   expect(JSON.parse(wire.posts[0].body)).toMatchObject({
     base_revision_id: moved.head.revision_id, base_publication_id: moved.head.publication_id,
-    commands: [{ op: 'track.set', select: 'parent/track:V1', args: { values: { label: trackLabel }, clear: [] } }],
   });
   expect(position(rename.data.canonical_document, seed3.appClipId)).toBe(to);
   expect(rename.data.canonical_document.parent_revision.payload.config).toMatchObject({
@@ -2700,7 +2734,9 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   expect(kept.scope).toMatchObject({ realmId: harness.realmId, projectId: harness.seed.projectId, timelineId: seed3.timelineId });
   expect(kept.pending?.request).toEqual({ method: 'POST', path: `${timelineBase(harness, seed3)}/commit`,
     body: wire.posts[0].body, key: wire.posts[0].key });
-  expect(commandsOf(kept.intents[0].payload)).toEqual(JSON.parse(wire.posts[0].body).commands);
+  const mountedRename = mountedDocumentIntentOf(kept.intents[0].payload);
+  expectTrackLabelIntent(mountedRename, 'V1', trackLabel);
+  expectDocumentPatchRequest(JSON.parse(wire.posts[0].body) as CommitRequest, mountedRename);
   await wire.loseAck();
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).find((owner) => owner.ownerId === kept.ownerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
   const renamed = await history(harness, seed3);
@@ -2708,6 +2744,7 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   expect(renamed.items).toHaveLength(moved.items.length + 1);
   expect(await allRevisions(harness, seed3)).toHaveLength(revisions.length + 1);
 
+  wire.armRecoveryRetry();
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }), () => wire.abortStagedRetry('connectionclosed'));
   await expectConnected(page);
   await openSeededTimeline(page, harness);
@@ -2716,8 +2753,11 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   expect(reloaded.intents).toEqual(kept.intents);
   expect(wire.posts).toHaveLength(1);
   expect(await history(harness, seed3)).toEqual(renamed);
-  await page.getByRole('button', { name: /^Recover saved edits/ })
-    .and(page.locator(`[data-owner-id="${kept.ownerId}"]`)).click();
+  // The App retries the retained owner by itself after reload (7b33f8f50, 4394b74a1); the fault route holds that retry.
+  await expect.poll(() => wire.observed.length, CEILING).toBe(3);
+  expect(wire.observed[2], 'the App retries the retained request byte-identically').toEqual(wire.observed[0]);
+  expect(wire.posts, 'exactly one completed POST while the automatic retry is held').toHaveLength(1);
+  await wire.releaseStagedRetry();
   await expect.poll(() => wire.posts.length, CEILING).toBe(2);
   expect(wire.posts[1], 'recovery preserves exact command bytes, guards, retry key and accepted result').toEqual(wire.posts[0]);
   await expect(firstTrackName(page)).toHaveValue(trackLabel);

@@ -333,7 +333,16 @@ export async function run(options) {
       if (readyMs === -1) report.notes.push(`${label}: beat ${dest.act}-${dest.beat} NOT ready after ${READY_CAP_MS / 1000}s (store: ${JSON.stringify(await state())})`);
       report.phases.at(-1).readyAfterTapMs = Date.now() - tapAt;
     };
-    const idle = async (label) => { await record(`${label}: idle ${options.idle / 1000}s`, () => delay(options.idle)); };
+    const idle = async (label) => {
+      const phase = await record(`${label}: idle ${options.idle / 1000}s`, async () => { await delay(options.idle - 200); });
+      // What is still animating on an idle beat (running CSS animations/transitions keep the compositor and main thread producing frames).
+      phase.animations = await page.evaluate(() => document.getAnimations().filter((a) => a.playState === 'running').map((a) => {
+        const t = a.effect?.target; const cls = (t?.getAttribute?.('class') ?? '').split(/\s+/).filter((c) => /animate|spin|pulse|blur|backdrop|transition/.test(c)).join('.');
+        return `${a.animationName ?? a.transitionProperty ?? a.constructor.name} on ${t?.tagName?.toLowerCase()}${cls ? `.${cls}` : ''}${t?.id ? `#${t.id}` : ''}${t?.dataset?.editorTour ? `[${t.dataset.editorTour}]` : ''} (${a.effect?.getTiming?.().iterations === Infinity ? 'infinite' : 'finite'})`;
+      }));
+      phase.layers = await page.evaluate(() => ({ fixedOrWillChange: [...document.querySelectorAll('*')].filter((e) => { const s = getComputedStyle(e); return s.willChange !== 'auto' || s.backdropFilter !== 'none' || s.filter !== 'none'; }).slice(0, 12).map((e) => `${e.tagName.toLowerCase()}.${(e.getAttribute('class') ?? '').slice(0, 50)} wc=${getComputedStyle(e).willChange} bf=${getComputedStyle(e).backdropFilter !== 'none'} f=${getComputedStyle(e).filter !== 'none'}`) }));
+      return phase;
+    };
 
     // ---- welcome
     const welcome = { act: 1, beat: 'welcome' };
@@ -397,6 +406,7 @@ function renderMarkdown(r) {
       ...(p.why?.length ? [`- why origins re-rendered: ${p.why.map(([n, c]) => `${n} x${c}`).join('; ')}`] : []),
       `- LoAF top scripts (ms): ${p.loaf.topScripts.map(([n, ms]) => `${ms} ${n}`).join('; ') || '-'}`,
       ...(p.cpuTop ? [`- CPU self time (ms): ${p.cpuTop.map(([k, ms]) => `${ms} ${k}`).join('; ')}`] : []),
+      ...(p.animations ? [`- running animations: ${p.animations.join('; ') || 'none'}`, `- will-change/backdrop/filter elements: ${p.layers?.fixedOrWillChange?.join('; ') || 'none'}`] : []),
       `- timers/s: setTimeout ${p.counters.setTimeout ?? 0}, setInterval ${p.counters.setInterval ?? 0}; heap ${p.cdp.heapMB}MB; DOM nodes ${p.cdp.nodes}; WebGL contexts so far ${p.glContexts}; ready after tap ${p.readyAfterTapMs ?? '-'}ms`, '');
   }
   L.push('## World / media proof', '', `- requests that look like the world or Three.js code: ${r.worldRequests?.length ? r.worldRequests.join(', ') : 'none'}`, `- WebGL contexts created in the page: ${r.glContextsTop}; iframes at end: ${r.iframesAtEnd}`, `- onboarding media requests: ${(r.mediaRequests ?? []).length}`, '', '## Scene (act 1 land)', '', '```json', JSON.stringify(r.scene, null, 1), '```', '', '## Notes', '', ...(r.notes.length ? r.notes.map((n) => `- ${n}`) : ['- none']), '', '## GL/console messages', '', ...(r.browserErrors?.length ? r.browserErrors.map((n) => `- ${n}`) : ['- none']));

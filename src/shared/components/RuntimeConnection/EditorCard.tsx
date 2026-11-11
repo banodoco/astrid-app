@@ -1,5 +1,6 @@
 import { useState, type HTMLAttributes, type ReactNode } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, ChevronLeft } from 'lucide-react';
+import { Button } from '@/shared/components/ui/button.tsx';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/shared/components/ui/collapsible.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 
@@ -45,4 +46,9 @@ export function EditorCardPage({ children, ...props }: HTMLAttributes<HTMLElemen
   return <main {...props} className="flex min-h-screen items-center justify-center bg-background p-4 text-foreground">
     <div className="w-full max-w-[576px]">{children}</div>
   </main>;
+}
+
+/** On a touch screen its hit area grows to 44 px (up and out, so the card's layout does not move). */
+export function BackButton({ onBack }: { readonly onBack: () => void }) {
+  return <Button type="button" variant="ghost" className="inline-flex h-auto items-center gap-0.5 rounded-md py-1 pl-1 pr-2 text-[13px] text-muted-foreground hover:bg-muted/60 hover:text-foreground [@media(pointer:coarse)]:-mt-2 [@media(pointer:coarse)]:min-h-11 [@media(pointer:coarse)]:pr-3 [@media(pointer:coarse)]:text-sm" onClick={onBack}><ChevronLeft aria-hidden="true" className="h-4 w-4" />Back</Button>;
 }

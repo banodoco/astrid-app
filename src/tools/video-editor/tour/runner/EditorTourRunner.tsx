@@ -34,7 +34,7 @@ const ACT_TRACK: Record<EditorTourAct, string> = {
  * the finale and the feedback card). On respond it is the act's actions, the beat's settled state (while the reply is
  * still coming in the runner holds the whole transcript instead: `spotlightTargets`).
  */
-export function editorTourTargets(act: EditorTourAct, beat: EditorTourBeat, device: TimelineDeviceClass = 'desktop'): string[] {
+export function editorTourTargets(act: EditorTourAct, beat: EditorTourBeat, _device: TimelineDeviceClass = 'desktop'): string[] {
   switch (beat) {
     case 'compose':
       return [editorTourSelector(EDITOR_TOUR_ANCHORS.chatComposer)];

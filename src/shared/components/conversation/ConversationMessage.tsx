@@ -64,11 +64,22 @@ function formatAttachmentSummary(attachments: ConversationTurn['attachments']) {
   return `${[imageCount ? plural(imageCount, 'image') : '', videoCount ? plural(videoCount, 'video') : ''].filter(Boolean).join(', ')} attached`;
 }
 
+// `toLocaleTimeString` builds a new Intl formatter on every call (slow on a phone, and a streaming reply renders every
+// message every frame): one formatter for the session, and the label of each timestamp is computed once.
+let timeFormat: Intl.DateTimeFormat | undefined;
+const timestampLabels = new Map<string, string>();
+
 function formatTimestamp(timestamp: string) {
   if (!timestamp) return '';
+  const cached = timestampLabels.get(timestamp);
+  if (cached !== undefined) return cached;
   const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return '';
-  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const label = Number.isNaN(date.getTime())
+    ? ''
+    : (timeFormat ??= new Intl.DateTimeFormat([], { hour: '2-digit', minute: '2-digit' })).format(date);
+  if (timestampLabels.size > 500) timestampLabels.clear();
+  timestampLabels.set(timestamp, label);
+  return label;
 }
 
 type ConversationAttachmentStripProps = {

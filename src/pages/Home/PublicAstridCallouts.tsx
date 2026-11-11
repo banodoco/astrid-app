@@ -573,6 +573,8 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
       // An unfolded phone card lies over the demo. A connector whose endpoint it covers fades out
       // rather than ending underneath it.
       const openBox = phone ? stageElement.querySelector<HTMLElement>('.astrid-callout[data-open="true"]')?.getBoundingClientRect() : undefined;
+      // True while any connector is still being drawn by its entrance animation, which this loop follows.
+      let introDrawing = false;
       for (const [index, callout] of callouts.entries()) {
         const path = svgElement.querySelector<SVGPathElement>(`path[data-callout="${callout.id}"]`);
         const dots = svgElement.querySelectorAll<SVGCircleElement>(`circle[data-callout="${callout.id}"]`);
@@ -853,10 +855,23 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
         setAttribute(dots[0], 'cx', paintedCurve[0].toFixed(1));
         setAttribute(dots[0], 'cy', paintedCurve[1].toFixed(1));
         setAttribute(dots[0], 'r', '4');
-        setAttribute(dots[1], 'cx', paintedCurve[6].toFixed(1));
-        setAttribute(dots[1], 'cy', paintedCurve[7].toFixed(1));
+        // The end dot leads the line: small while the line is still travelling (drawn by its entrance
+        // animation, or re-extending after a switch), then it grows as it lands, and the ring pulses
+        // out of that. The entrance draw is a stroke-dash animation, so its tip is read from the path.
+        const dashOffset = Number.parseFloat(getComputedStyle(path).strokeDashoffset);
+        const drawn = Number.isFinite(dashOffset) ? Math.max(0, Math.min(1, 1 - dashOffset)) : 1;
+        if (drawn < 1) introDrawing = true;
+        const tip = drawn > 0 && drawn < 1 && typeof path.getPointAtLength === 'function' && path.getAttribute('d')
+          ? path.getPointAtLength(path.getTotalLength() * drawn)
+          : null;
+        const reconnected = !move || (!!destination
+          && move.extensionStartedAt[index] !== undefined
+          && elapsed >= move.extensionStartedAt[index]! + extendDuration);
+        setAttribute(dots[1], 'cx', (tip?.x ?? paintedCurve[6]).toFixed(1));
+        setAttribute(dots[1], 'cy', (tip?.y ?? paintedCurve[7]).toFixed(1));
         setAttribute(dots[1], 'r', '4');
         setAttribute(dots[1], 'opacity', '1');
+        setAttribute(dots[1], 'data-tip', drawn <= 0 ? 'waiting' : drawn < 1 || !reconnected ? 'travelling' : 'landed');
         if (path.parentElement) {
           const endX = paintedCurve[6] + originX;
           const endY = paintedCurve[7] + originY;
@@ -928,7 +943,7 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
         settledCanonicalEpoch.current = move.epoch;
         moveRef.current = null;
       }
-      if (trackedChanged || !settled || moving || waitingForLayout || connectorRetracting || connectorAnimating) schedule();
+      if (trackedChanged || !settled || moving || waitingForLayout || connectorRetracting || connectorAnimating || introDrawing) schedule();
     }
     const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
     const observeGeometry = () => {

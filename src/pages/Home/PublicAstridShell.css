@@ -2264,12 +2264,13 @@
      one after another, about as fast as it reconnects when switching sides, and its end dot lands
      as the line arrives. */
   .astrid-public-site[data-astrid-direct-entry] :is(.astrid-callout, .astrid-callout-connectors g) {
-    --astrid-phone-chip-start: calc(160ms + var(--astrid-mobile-callout-index, 0) * 110ms);
-    --astrid-phone-line-start: calc(640ms + var(--astrid-mobile-callout-index, 0) * 320ms);
+    /* One chip at a time, a clear beat apart; each line sets off as its own chip finishes arriving. */
+    --astrid-phone-chip-start: calc(220ms + var(--astrid-mobile-callout-index, 0) * 320ms);
+    --astrid-phone-line-start: calc(var(--astrid-phone-chip-start) + 520ms);
     --astrid-phone-line-duration: 900ms;
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout {
-    animation: astrid-phone-chip-in 560ms cubic-bezier(.22, .61, .36, 1) var(--astrid-phone-chip-start) backwards;
+    animation: astrid-phone-chip-in 640ms cubic-bezier(.22, .61, .36, 1) var(--astrid-phone-chip-start) backwards;
   }
   .astrid-public-site[data-astrid-direct-entry] .astrid-callout-connectors path {
     animation-duration: var(--astrid-phone-line-duration);
@@ -2323,4 +2324,23 @@
 }
 @media (max-width: 640px) {
   .astrid-public-site[data-audience="agent"] .astrid-inspector-surface { transform: none; box-shadow: none; }
+}
+
+/* The end dot leads its line. PublicAstridCallouts marks it: hidden before the line sets off, small
+   while the line travels (on first load, and again while it re-extends after switching sides), then
+   it springs to full size as it lands, which is the moment the ring pulses out from it. This replaces
+   the timed landing animations above, so the dot follows the line itself at every size. */
+.astrid-public-site .astrid-callout-connectors .astrid-callout-dot-end[data-tip] {
+  animation: none !important;
+  transform-box: fill-box;
+  transform-origin: center;
+  transition: scale 320ms cubic-bezier(.34, 1.7, .64, 1), opacity 120ms ease;
+}
+.astrid-public-site .astrid-callout-connectors .astrid-callout-dot-end[data-tip="waiting"] { opacity: 0; scale: .45; }
+.astrid-public-site .astrid-callout-connectors .astrid-callout-dot-end[data-tip="travelling"] {
+  scale: .45;
+  transition: scale 180ms ease-in, opacity 120ms ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-public-site .astrid-callout-connectors .astrid-callout-dot-end[data-tip] { transition: none; }
 }

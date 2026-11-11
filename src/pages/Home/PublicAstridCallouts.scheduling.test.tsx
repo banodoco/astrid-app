@@ -90,8 +90,16 @@ beforeEach(() => {
   for (const name of ['clientWidth', 'clientLeft', 'clientTop', 'offsetWidth'] as const) {
     vi.spyOn(HTMLElement.prototype, name, 'get').mockImplementation(() => { events.push('read'); return name.endsWith('Width') ? 100 : 0; });
   }
+  // jsdom assembles a computed style by calling setProperty on a fresh declaration. That is a read of
+  // the document, so those calls are not counted as writes.
+  const computedStyle = window.getComputedStyle.bind(window);
+  let readingComputedStyle = false;
+  vi.spyOn(window, 'getComputedStyle').mockImplementation((...args) => {
+    readingComputedStyle = true;
+    try { return computedStyle(...args); } finally { readingComputedStyle = false; }
+  });
   const styleWrite = CSSStyleDeclaration.prototype.setProperty;
-  vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty').mockImplementation(function (this: CSSStyleDeclaration, ...args) { events.push('write'); return styleWrite.apply(this, args); });
+  vi.spyOn(CSSStyleDeclaration.prototype, 'setProperty').mockImplementation(function (this: CSSStyleDeclaration, ...args) { if (!readingComputedStyle) events.push('write'); return styleWrite.apply(this, args); });
   const attributeWrite = Element.prototype.setAttribute;
   vi.spyOn(Element.prototype, 'setAttribute').mockImplementation(function (this: Element, ...args) { events.push('write'); return attributeWrite.apply(this, args); });
 });

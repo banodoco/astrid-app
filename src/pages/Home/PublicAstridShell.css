@@ -1788,13 +1788,14 @@
   }
   .astrid-editor-stage {
     --astrid-phone-chip: 38px;
-    /* Deep enough that an unfolded top chip stops short of the tab its connector lands on. */
-    --astrid-phone-gap: 24px;
-    --astrid-phone-rail: calc(8px + var(--astrid-phone-chip) + var(--astrid-phone-gap));
+    /* A chip floats midway between the frame's edge and the demo: the same space above it as below. */
+    --astrid-phone-gap: 18px;
+    --astrid-phone-rail: calc(var(--astrid-phone-gap) * 2 + var(--astrid-phone-chip));
     /* The demo is a miniature: laid out at full size, then drawn at this scale and narrower than the
        frame, so it reads as a whole editor (or a whole chat window) rather than a few oversized
        controls. Panel heights below are in the miniature's own, unscaled pixels. */
     --astrid-phone-scale: .78;
+    --astrid-phone-chat-scale: .94;
     --astrid-phone-inset: 7%;
     --astrid-phone-inspector: 46px;
     --astrid-phone-timeline: 104px;
@@ -1920,19 +1921,19 @@
      Timeline above, Models below; Agent: Community and Workflows above, Tools below). A chip is a button showing the
      title and a plus; unfolded, its body grows over the nearest panel, away from the frame's edge. */
   .astrid-callout {
-    --astrid-callout-width: calc(50% - 12px);
+    --astrid-callout-width: calc(50% - 17px);
     padding: 0;
     border-radius: 11px;
     pointer-events: auto;
   }
   .astrid-callout[data-callout] { top: auto; right: auto; bottom: auto; left: auto; }
-  .astrid-callout:is([data-callout="effects"], [data-callout="community"]) { top: 8px; left: 8px; }
-  .astrid-callout:is([data-callout="timeline"], [data-callout="workflows"]) { top: 8px; right: 8px; }
-  .astrid-callout:is([data-callout="models"], [data-callout="tools"]) { bottom: 8px; left: 8px; }
+  .astrid-callout:is([data-callout="effects"], [data-callout="community"]) { top: var(--astrid-phone-gap); left: 12px; }
+  .astrid-callout:is([data-callout="timeline"], [data-callout="workflows"]) { top: var(--astrid-phone-gap); right: 12px; }
+  .astrid-callout:is([data-callout="models"], [data-callout="tools"]) { bottom: var(--astrid-phone-gap); left: 12px; }
   /* The Models chip stops short of the Agent launcher it points at. */
-  .astrid-callout[data-callout="models"] { --astrid-callout-width: calc(100% - 16px - 76px); }
+  .astrid-callout[data-callout="models"] { --astrid-callout-width: calc(100% - 24px - 72px); }
   /* Agent's bottom chip is the same width, centred under the conversation. */
-  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(100% - 16px - 76px); left: 46px; }
+  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(100% - 24px - 72px); left: 48px; }
   .astrid-callout[data-open="true"] { z-index: 2; }
   /* Titles scale with the screen so the half-width chips never cut theirs off. */
   .astrid-callout h2 { font-size: clamp(10.5px, 3.45vw, 13.5px); line-height: 1.2; }
@@ -2016,7 +2017,7 @@
   .astrid-landing-grid { padding-bottom: max(10px, env(safe-area-inset-bottom)); }
   .astrid-landing-grid::after { margin-bottom: calc(-1 * max(10px, env(safe-area-inset-bottom))); }
   .astrid-showcase { padding: 6px 0 8px; }
-  .astrid-editor-stage { --astrid-phone-chip: 36px; --astrid-phone-gap: 22px; }
+  .astrid-editor-stage { --astrid-phone-chip: 36px; --astrid-phone-gap: 16px; }
 }
 /* The smallest screens keep headline and action only, and trim every panel a little more. */
 @media (max-width: 640px) and (max-height: 600px) {
@@ -2025,7 +2026,7 @@
   .astrid-brand { min-height: 36px; }
   .astrid-audience-switch button { min-height: 30px; }
   .astrid-showcase { padding: 4px 0 6px; }
-  .astrid-editor-stage { --astrid-phone-chip: 34px; --astrid-phone-gap: 20px; --astrid-phone-scale: .68; --astrid-phone-inset: 11%; }
+  .astrid-editor-stage { --astrid-phone-chip: 34px; --astrid-phone-gap: 13px; --astrid-phone-chat-scale: .84; --astrid-phone-scale: .68; --astrid-phone-inset: 11%; }
 }
 /* Tall screens have room to spare: give it to the headline, the chips and the panels. */
 @media (max-width: 640px) and (min-height: 780px) {
@@ -2038,7 +2039,7 @@
   .astrid-landing-grid::after { margin-bottom: calc(-1 * max(16px, env(safe-area-inset-bottom))); }
   .astrid-brand { min-height: 44px; }
   .astrid-audience-switch button { min-height: 38px; }
-  .astrid-editor-stage { --astrid-phone-chip: 42px; --astrid-phone-gap: 26px; --astrid-phone-scale: .86; --astrid-phone-inset: 5%; }
+  .astrid-editor-stage { --astrid-phone-chip: 42px; --astrid-phone-gap: 24px; --astrid-phone-scale: .86; --astrid-phone-inset: 5%; }
 
   .astrid-callout h2 { font-size: 13.5px; }
 }
@@ -2179,8 +2180,8 @@
     /* As tall as the exchange needs, centred between the chips, and never taller than the room there is:
        on a short screen the messages scroll inside it. */
     /* Centred, and drawn smaller again: a chat window you recognise, not a transcript you read. */
-    inset: 0; width: 86%; height: fit-content; max-height: calc(100% / .82); margin: auto;
-    transform: none; scale: .82;
+    inset: 0; width: 90%; height: fit-content; max-height: calc(100% / var(--astrid-phone-chat-scale)); margin: auto;
+    transform: none; scale: var(--astrid-phone-chat-scale);
     display: flex; flex-direction: column;
     border-color: color-mix(in srgb, var(--astrid-ink) 24%, var(--astrid-panel));
     border-radius: 14px;
@@ -2309,6 +2310,8 @@
   .astrid-callout-toggle-icon { flex-basis: 14px; width: 14px; }
   .astrid-audience-switch button { padding-inline: 12px; }
   .astrid-brand { gap: 5px; }
+  .astrid-callout[data-callout="models"] { --astrid-callout-width: calc(100% - 24px - 56px); }
+  .astrid-callout[data-callout="tools"] { --astrid-callout-width: calc(100% - 24px - 56px); left: 40px; }
 }
 
 /* Agent pose of the inspector: a uniform scale and move of its App box, never a different layout box.

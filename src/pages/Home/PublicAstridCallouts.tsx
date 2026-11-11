@@ -145,10 +145,9 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
     side: 'bottom',
     phoneTitle: 'Live-code effects',
     phoneSide: 'bottom',
-    // On phones the inspector is a compact strip right under this chip: land on the Effects tab itself,
-    // low enough in the strip to stay in view while the chip is unfolded.
-    phoneTarget: '.astrid-inspector-surface [role="tablist"].grid-cols-4 > [role="tab"]:first-child',
-    phoneAt: [0.84, 0.92],
+    // On phones the inspector is a compact strip of tabs right under this chip: land on its lower edge
+    // just past the Effects tab, which stays in view while the chip is unfolded over the strip.
+    phoneAt: [0.21, 1],
     // Tablets draw the inspector small and zoomed out, with the label just above it: land on its top
     // edge there too, instead of on the clip title in the middle of the card.
     tabletAt: [0.5, 0],

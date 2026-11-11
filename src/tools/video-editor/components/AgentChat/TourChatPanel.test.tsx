@@ -12,6 +12,7 @@ import {
   skipEditorTourAnimation,
   startEditorTour,
 } from '@/shared/state/editorTourStore.ts';
+import { getPaneLockHolds } from '@/shared/state/paneLockHolds.ts';
 import { EDITOR_TOUR_SCRIPT } from '@/tools/video-editor/tour/tourScript.ts';
 import { EDITOR_TOUR_ANCHORS, editorTourSelector } from '@/tools/video-editor/tour/anchors.ts';
 
@@ -40,7 +41,6 @@ const mocks = vi.hoisted(() => ({
   composerRemoveAttachment: vi.fn(),
   composerClearAttachments: vi.fn(),
   loadGenerationForLightbox: vi.fn(),
-  setIsTasksPaneLocked: vi.fn(),
 }));
 
 
@@ -86,11 +86,6 @@ vi.mock('@/tools/video-editor/hooks/useAgentVoice', async (importOriginal) => ({
 
 vi.mock('@/shared/state/currentAttachmentSet', () => ({
   useCurrentAttachmentSet: (...args: unknown[]) => mocks.useCurrentAttachmentSet(...args),
-}));
-
-vi.mock('@/shared/state/panesStore', () => ({
-  usePanesStore: (selector: (state: { isTasksPaneLocked: boolean; setIsTasksPaneLocked: typeof mocks.setIsTasksPaneLocked }) => unknown) =>
-    selector({ isTasksPaneLocked: false, setIsTasksPaneLocked: mocks.setIsTasksPaneLocked }),
 }));
 
 vi.mock('@/domains/media-lightbox/MediaLightbox', () => ({
@@ -175,8 +170,15 @@ function transcript(): HTMLElement {
   return document.querySelector<HTMLElement>(editorTourSelector(EDITOR_TOUR_ANCHORS.chatTranscript))!;
 }
 
-function reply(): HTMLElement {
-  return document.querySelector<HTMLElement>(editorTourSelector(EDITOR_TOUR_ANCHORS.chatReply))!;
+function exchange(): HTMLElement {
+  return document.querySelector<HTMLElement>(editorTourSelector(EDITOR_TOUR_ANCHORS.chatExchange))!;
+}
+
+/** The transcript's text as it shows: without the unseen full-reply copy that reserves the streaming bubble's size. */
+function shownTranscript(): string {
+  const copy = transcript().cloneNode(true) as HTMLElement;
+  copy.querySelectorAll('[aria-hidden="true"]').forEach((node) => node.remove());
+  return copy.textContent ?? '';
 }
 
 function advance(ms: number) {
@@ -263,7 +265,6 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     render(<AgentChatPanel />);
 
     for (const spy of SESSION_HOOK_SPIES) expect(spy).not.toHaveBeenCalled();
-    expect(mocks.setIsTasksPaneLocked).toHaveBeenCalledWith(true);
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(requestJsonSpy).not.toHaveBeenCalled();
     expect(requestRawSpy).not.toHaveBeenCalled();
@@ -271,6 +272,14 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(composer()).not.toBeNull();
     expect(sendButton()).not.toBeNull();
     expect(transcript()).not.toBeNull();
+  });
+
+  it('holds the Tasks pane locked while mounted, saving nothing, and gives it back on unmount', () => {
+    act(() => startEditorTour());
+    const view = render(<AgentChatPanel />);
+    expect(getPaneLockHolds()).toEqual({ tasks: true, gens: false });
+    view.unmount();
+    expect(getPaneLockHolds()).toEqual({});
   });
 
   it('during the welcome shows the real empty state and types nothing until act 1 compose', () => {
@@ -352,13 +361,21 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(transcript().textContent).not.toContain(ACT1.reply.slice(0, 20));
 
     expect(screen.getByText('Thinking...')).toBeInTheDocument();
-    // A phone lights the act's answer alone: it starts as the indicator, under the prompt and outside it.
-    expect(reply()).toContainElement(screen.getByText('Thinking...'));
-    expect(reply()).not.toContainElement(within(transcript()).getByText(ACT1.prompt));
+    // The spotlight's first hold: the sent prompt with the thinking line under it, and nothing else.
+    expect(exchange()).toContainElement(screen.getByText('Thinking...'));
+    expect(exchange()).toContainElement(within(transcript()).getByText(ACT1.prompt));
+    const thinkingHeightMarker = exchange().children.length;
+    expect(thinkingHeightMarker).toBe(2);
     expect(composer().placeholder).toBe('Type to queue next message...');
-    advance(450);
-    expect(transcript().textContent).toContain(ACT1.reply.slice(0, 20));
-    expect(transcript().textContent).not.toContain(ACT1.reply);
+    // Thinking lasts 2.5 s, then a few reply characters have streamed in.
+    advance(2650);
+    expect(shownTranscript()).toContain(ACT1.reply.slice(0, 20));
+    expect(shownTranscript()).not.toContain(ACT1.reply);
+    // The bubble has its final size from the first character: the whole reply is laid out, unseen, under what has
+    // arrived, so the spotlight around the exchange expands once and never chases the stream.
+    const reserved = exchange().querySelector('[aria-hidden="true"]')!;
+    expect(reserved).toHaveClass('invisible');
+    expect(reserved.textContent).toContain(ACT1.reply);
     expect(chatReady()).toBe(false);
     // Like the real chat, the indicator is gone once the reply text starts.
     expect(screen.queryByText('Thinking...')).toBeNull();
@@ -383,10 +400,12 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     for (const card of ACT1.toolCards) {
       expect(transcript().textContent).toContain(card.name);
       expect(transcript().textContent).toContain(card.detail);
-      expect(reply().textContent).toContain(card.name);
+      // The actions are outside the exchange: the spotlight leaves it for them.
+      expect(exchange().textContent).not.toContain(card.name);
     }
-    expect(reply().textContent).toContain(ACT1.reply);
-    expect(reply().textContent).not.toContain(ACT1.prompt);
+    expect(exchange().textContent).toContain(ACT1.reply);
+    expect(exchange().textContent).toContain(ACT1.prompt);
+    expect(exchange().querySelector('[aria-hidden="true"]')).toBeNull();
     expect(screen.queryByText('Thinking...')).toBeNull();
 
     act(() => setEditorTourBeat(2, 'compose'));
@@ -503,6 +522,38 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(screen.queryByRole('button', { name: '[2 actions]' })).not.toBeNull();
     expect(chatReady()).toBe(true);
     expect(screen.queryByText('Thinking...')).toBeNull();
+  });
+
+  it('anchors the act’s actions (its tool group) for the spotlight to contract onto, and the whole pane for the card to keep clear of', () => {
+    startAtCompose();
+    render(<AgentChatPanel />);
+    act(() => setEditorTourBeat(1, 'respond', true));
+
+    const actions = document.querySelectorAll(editorTourSelector(EDITOR_TOUR_ANCHORS.chatActions));
+    expect(actions).toHaveLength(1);
+    expect(exchange().contains(actions[0])).toBe(false);
+    expect(transcript().contains(actions[0])).toBe(true);
+    expect(actions[0].textContent).toContain('[2 actions]');
+    expect(actions[0].textContent).not.toContain(ACT1.reply);
+    expect(document.querySelector(editorTourSelector(EDITOR_TOUR_ANCHORS.chatPane))?.contains(transcript())).toBe(true);
+  });
+
+  it('on the gallery beat shows act 2 complete with Send disabled, and nothing animating', () => {
+    startAtCompose();
+    render(<AgentChatPanel />);
+    act(() => setEditorTourBeat(2, 'land'));
+    const landText = transcript().textContent;
+    act(() => setEditorTourBeat(2, 'gallery'));
+
+    expect(transcript().textContent).toBe(landText);
+    expect(transcript().textContent).toContain(ACT2.prompt);
+    expect(transcript().textContent).toContain(ACT2.reply);
+    expect(screen.getAllByRole('button', { name: '[2 actions]' })).toHaveLength(2); // acts 1 and 2, both complete
+    expect(screen.queryByText('Thinking...')).toBeNull();
+    expect(sendButton()).toBeDisabled();
+    advance(5000);
+    expect(transcript().textContent).toBe(landText);
+    expect(getEditorTourState().sent).toBe(false);
   });
 
   it('plays a normal beat after Back once the user moves forward again', () => {

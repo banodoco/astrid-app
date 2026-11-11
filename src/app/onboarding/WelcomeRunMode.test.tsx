@@ -24,7 +24,7 @@ vi.mock('@/shared/hooks/platformInstall/signals.ts', () => ({
 
 import { WelcomeRunMode, type RunMode, type WindowMode } from './WelcomeRunMode.tsx';
 
-function mount(onContinue: (phase: 'setup') => void = install.onContinue, runMode: RunMode = 'hosted', windowMode: WindowMode = 'app-window', setWindowMode = vi.fn()) {
+function mount(onContinue: (phase: 'connection' | 'local') => void = install.onContinue, runMode: RunMode = 'hosted', windowMode: WindowMode = 'app-window', setWindowMode = vi.fn()) {
   return render(<TooltipProvider><WelcomeRunMode windowMode={windowMode} setWindowMode={setWindowMode} onContinue={onContinue} runMode={runMode} setRunMode={vi.fn()} /></TooltipProvider>);
 }
 
@@ -68,7 +68,7 @@ describe('run-mode choice', () => {
     expect(await screen.findByText('Keep using it in this tab.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue in this tab' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Continue in this tab' }));
-    expect(install.onContinue).toHaveBeenCalledWith('setup');
+    expect(install.onContinue).toHaveBeenCalledWith('connection');
     fireEvent.click(screen.getByRole('radio', { name: 'Install as app' }));
     expect(setWindowMode).toHaveBeenCalledWith('app-window');
   });
@@ -93,7 +93,7 @@ describe('run-mode choice', () => {
   it('keeps the local option description short and links here to the editor repository', () => {
     mount(() => undefined, 'local');
 
-    const localLabel = screen.getByRole('radio', { name: 'Run app on your computer' }).closest('label');
+    const localLabel = screen.getByRole('radio', { name: 'Run Astrid on your computer' }).closest('label');
     expect(localLabel?.textContent).toContain('•Everything runs on your machine•No permissions and works offline. GitHub here.');
 
     const link = screen.getByRole('link', { name: 'here' });
@@ -106,7 +106,7 @@ describe('run-mode choice', () => {
   it('shows no Astrid icon on the run-mode card', () => {
     const { container } = mount(() => undefined, 'hosted');
 
-    expect(screen.getByRole('heading', { name: 'How do you want to run the app?' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'How do you want to run Astrid?' })).toBeInTheDocument();
     expect(container.querySelector('img[src="/astrid-app-icon-192.png"]')).toBeNull();
   });
 
@@ -116,7 +116,7 @@ describe('run-mode choice', () => {
     const desk = () => container.querySelector('[data-scene="desk"]');
 
     expect(screen.getByRole('radio', { name: 'Use the hosted version' }).closest('label')).toContainElement(beach() as HTMLElement);
-    expect(screen.getByRole('radio', { name: 'Run app on your computer' }).closest('label')).toContainElement(desk() as HTMLElement);
+    expect(screen.getByRole('radio', { name: 'Run Astrid on your computer' }).closest('label')).toContainElement(desk() as HTMLElement);
     expect(beach()).toHaveAttribute('aria-hidden', 'true');
     expect(desk()).toHaveAttribute('aria-hidden', 'true');
     expect(beach()).toHaveAttribute('data-motion', 'play');
@@ -171,16 +171,16 @@ describe('run-mode choice', () => {
     expect(screen.queryByRole('radiogroup', { name: 'How to open Astrid' })).not.toBeInTheDocument();
     expect(screen.getByText('Needs Chrome or Edge to reach your computer.')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Copy link for Chrome or Edge' })).toBeInTheDocument();
-    expect(screen.getByRole('radio', { name: 'Run app on your computer' })).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Run Astrid on your computer' })).toBeInTheDocument();
   });
 
-  it('mobile Continue enters the setup phase', () => {
+  it('mobile Continue enters the connection phase', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('iPhone');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Chrome/131.0.0.0 Mobile Safari/537.36');
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Continue in this tab' }));
 
-    expect(install.onContinue).toHaveBeenCalledWith('setup');
+    expect(install.onContinue).toHaveBeenCalledWith('connection');
   });
 
   it('an installed standalone app has no window choice', () => {
@@ -189,15 +189,15 @@ describe('run-mode choice', () => {
     expect(screen.queryByRole('radiogroup', { name: 'How to open Astrid' })).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Continue' }));
-    expect(install.onContinue).toHaveBeenCalledWith('setup');
+    expect(install.onContinue).toHaveBeenCalledWith('connection');
   });
 
-  it('writes setup before prompting and shows the accepted path', async () => {
+  it('writes connection before prompting and shows the accepted path', async () => {
     const prompt = vi.fn(async () => undefined);
     install.prompt = { prompt, userChoice: Promise.resolve({ outcome: 'accepted' }) };
     mount();
     fireEvent.click(screen.getByRole('button', { name: 'Install and continue' }));
-    expect(install.calledWithPhase).toBe('setup');
+    expect(install.calledWithPhase).toBe('connection');
     expect(prompt).toHaveBeenCalledOnce();
     expect(await screen.findByText('Astrid opened in its own window')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Continue here instead' })).toBeInTheDocument();
@@ -213,7 +213,7 @@ describe('run-mode choice', () => {
     expect(await screen.findByText('Astrid opened in its own window')).toBeInTheDocument();
     install.standalone = true;
     view.rerender(<TooltipProvider><WelcomeRunMode windowMode="app-window" setWindowMode={vi.fn()} onContinue={install.onContinue} runMode="hosted" setRunMode={vi.fn()} /></TooltipProvider>);
-    await vi.waitFor(() => expect(install.onContinue).toHaveBeenCalledWith('setup'));
+    await vi.waitFor(() => expect(install.onContinue).toHaveBeenCalledWith('connection'));
     expect(screen.queryByText('Astrid opened in its own window')).not.toBeInTheDocument();
   });
 
@@ -258,12 +258,12 @@ describe('run-mode choice', () => {
     const onContinue = vi.fn();
     const setRunMode = vi.fn();
     const { rerender } = render(<WelcomeRunMode windowMode="app-window" setWindowMode={vi.fn()} onContinue={onContinue} runMode="hosted" setRunMode={setRunMode} />);
-    fireEvent.click(screen.getByRole('radio', { name: 'Run app on your computer' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Run Astrid on your computer' }));
     expect(setRunMode).toHaveBeenCalledWith('local');
     rerender(<WelcomeRunMode windowMode="app-window" setWindowMode={vi.fn()} onContinue={onContinue} runMode="local" setRunMode={setRunMode} />);
     expect(screen.queryByRole('radiogroup', { name: 'How to open Astrid' })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'Set up with your agent' }));
-    expect(onContinue).toHaveBeenCalledWith('setup');
+    expect(onContinue).toHaveBeenCalledWith('local');
   });
 
   it('bypasses the available install prompt when local mode is selected', () => {
@@ -272,14 +272,23 @@ describe('run-mode choice', () => {
     const onContinue = vi.fn();
     const setRunMode = vi.fn();
     const { rerender } = render(<WelcomeRunMode windowMode="app-window" setWindowMode={vi.fn()} onContinue={onContinue} runMode="hosted" setRunMode={setRunMode} />);
-    fireEvent.click(screen.getByRole('radio', { name: 'Run app on your computer' }));
+    fireEvent.click(screen.getByRole('radio', { name: 'Run Astrid on your computer' }));
     expect(setRunMode).toHaveBeenCalledWith('local');
     rerender(<WelcomeRunMode windowMode="app-window" setWindowMode={vi.fn()} onContinue={onContinue} runMode="local" setRunMode={setRunMode} />);
-    expect(screen.getByRole('radio', { name: 'Run app on your computer' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: 'Run Astrid on your computer' })).toHaveAttribute('aria-checked', 'true');
     fireEvent.click(screen.getByRole('button', { name: 'Set up with your agent' }));
     expect(onContinue).toHaveBeenCalledOnce();
-    expect(onContinue).toHaveBeenCalledWith('setup');
+    expect(onContinue).toHaveBeenCalledWith('local');
     expect(prompt).not.toHaveBeenCalled();
     expect(install.consume).not.toHaveBeenCalled();
+  });
+
+  it('has a Back to the tour only when its caller offers one', () => {
+    const onBack = vi.fn();
+    const { rerender } = render(<TooltipProvider><WelcomeRunMode windowMode="app-window" setWindowMode={vi.fn()} onContinue={vi.fn()} runMode="hosted" setRunMode={vi.fn()} /></TooltipProvider>);
+    expect(screen.queryByRole('button', { name: 'Back' })).not.toBeInTheDocument();
+    rerender(<TooltipProvider><WelcomeRunMode windowMode="app-window" setWindowMode={vi.fn()} onContinue={vi.fn()} onBack={onBack} runMode="hosted" setRunMode={vi.fn()} /></TooltipProvider>);
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
+    expect(onBack).toHaveBeenCalledOnce();
   });
 });

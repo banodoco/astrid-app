@@ -4,6 +4,7 @@ import { act, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { RemotionPreview, type PreviewHandle } from '@/tools/video-editor/components/PreviewPanel/RemotionPreview';
 import type { ResolvedTimelineConfig } from '@/tools/video-editor/types';
+import { exitEditorTour, startEditorTour } from '@/shared/state/editorTourStore.ts';
 import { VideoEditorRuntimeProvider, type VideoEditorRuntimeContextValue } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import type { AstridElementHost } from '@/tools/video-editor/runtime/astrid-element-host.ts';
 import { getAdmittedElementReadiness, refreshAdmittedElements, setAdmittedElementScope } from '@/tools/video-editor/runtime/admitted-elements.ts';
@@ -231,6 +232,21 @@ describe('RemotionPreview', () => {
     // natural completion pauses on its last valid frame, while Player.play()
     // still rewinds automatically when the person presses Play again there.
     expect(playerPropsHistory.at(-1)?.moveToBeginningWhenEnded).toBe(false);
+  });
+
+  it('renders no clips while the onboarding tour runs (its picture is the tour\'s own), and keeps the timeline\'s length', () => {
+    const config = makeMediaConfig('tour-idle', { to: 14 });
+    act(() => startEditorTour());
+    try {
+      render(<RemotionPreview config={config} onTimeUpdate={vi.fn()} playerContainerRef={createRef<HTMLDivElement>()} />);
+      expect(playerPropsHistory.at(-1)?.config.clips).toEqual([]);
+      expect(playerPropsHistory.at(-1)?.durationInFrames).toBe(14 * 30);
+      // The tour ends: the same player renders the timeline's clips again.
+      act(() => exitEditorTour());
+      expect(playerPropsHistory.at(-1)?.config.clips).toEqual(config.clips);
+    } finally {
+      act(() => exitEditorTour());
+    }
   });
 
   it('leaves the outer surround transparent without changing the Player picture/config', () => {

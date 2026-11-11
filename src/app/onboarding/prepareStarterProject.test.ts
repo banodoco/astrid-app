@@ -46,6 +46,7 @@ describe('prepareStarterProject', () => {
     expect(result.timelineId).toMatch(/^[0-9a-f-]{36}$/);
     expect(methods.createProject).toHaveBeenCalledWith('My first project', 'astrid-onboarding-project-intent-1',
       'my-first-project-intent-1', { aspect_ratio: '16:9', [STARTER_PROJECT_INTENT_METADATA]: 'intent-1' });
+    expect(methods.createTimeline).toHaveBeenCalledOnce();
     expect(methods.createTimeline).toHaveBeenCalledWith('created-project', result.timelineId,
       'astrid-first-timeline-created-project', 'Main');
   });
@@ -57,7 +58,7 @@ describe('prepareStarterProject', () => {
     expect(methods.createProject).not.toHaveBeenCalled();
   });
 
-  it('does not publish into an unconfirmed project after a malformed create response', async () => {
+  it('does not create a timeline in an unconfirmed project after a malformed create response', async () => {
     const { client, methods } = workspace();
     methods.createProject.mockResolvedValue({ name: 'My first project' } as Project);
     await expect(prepareStarterProject({ intentId: 'intent-1', client })).rejects.toThrow('did not confirm');

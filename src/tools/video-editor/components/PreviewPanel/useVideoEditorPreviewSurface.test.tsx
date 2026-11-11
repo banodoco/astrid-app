@@ -69,6 +69,38 @@ describe('useVideoEditorPreviewSurface', () => {
     });
   });
 
+  it('names no revision for an in-memory timeline, even when a save is pending or the canonical host reports an error', () => {
+    mocks.timeline = {
+      data: { head: null },
+      resolvedConfig: { output: { resolution: '1280x720', fps: 30, file: 'preview.mp4' }, tracks: [], clips: [], registry: {} },
+    };
+    mocks.chrome = { saveStatus: 'dirty' };
+    mocks.playback = {
+      currentTime: 0,
+      previewRef: { current: null },
+      playerContainerRef: { current: null },
+      onPreviewTimeUpdate: vi.fn(),
+    };
+    mocks.runtime = {
+      userId: null,
+      provider: { persistenceEnabled: false },
+      shots: { canonicalCompositionError: Object.assign(new Error('provider unavailable'), { targetRevisionId: 'x' }) },
+    };
+
+    const { result } = renderHook(() => useVideoEditorPreviewSurface());
+    act(() => result.current.slotRef(document.createElement('div')));
+    const previewElement = (result.current.portal as unknown as { children: React.ReactElement }).children;
+    expect(previewElement.props.previewRevision).toEqual({ kind: 'unknown' });
+
+    // A persisted timeline still reports its unavailable revision.
+    mocks.runtime = { ...(mocks.runtime as object), provider: { persistenceEnabled: true } };
+    mocks.chrome = { saveStatus: 'saved' };
+    const persisted = renderHook(() => useVideoEditorPreviewSurface());
+    act(() => persisted.result.current.slotRef(document.createElement('div')));
+    const persistedElement = (persisted.result.current.portal as unknown as { children: React.ReactElement }).children;
+    expect(persistedElement.props.previewRevision).toMatchObject({ kind: 'unavailable' });
+  });
+
   it('marks a pending ordinary save local instead of claiming it is committed', () => {
     mocks.timeline = {
       data: { head: { headRevisionId: 'accepted-before', projectId: 'project', timelineId: 'timeline' } },

@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/shared/components/ui/
 import { runInstallPrompt, useInstallPromptSignals, useStandaloneStatus } from '@/shared/hooks/platformInstall/signals.ts';
 import { detectInstallScenario } from '@/pages/Home/installScenario.ts';
 import { LOCAL_SETUP, type WindowMode } from '@/shared/components/RuntimeConnection/copy.ts';
-import { EditorCard } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
+import { BackButton, EditorCard } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
 import { EditorCardLayer } from '@/shared/components/RuntimeConnection/EditorCardLayer.tsx';
 import { CopyFallback, useCopyAction } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
 import { readWelcomePhase, writeWelcomePhase } from './welcomeProgress.ts';
@@ -16,7 +16,10 @@ export type { WindowMode };
 export type RunMode = 'hosted' | 'local';
 
 interface Props {
-  readonly onContinue: (phase: 'setup') => void;
+  /** Where the choice leads: hosted connects, local sets up on this computer. */
+  readonly onContinue: (phase: 'connection' | 'local') => void;
+  /** Returns to the tour's last card. */
+  readonly onBack?: () => void;
   readonly windowMode: WindowMode;
   readonly setWindowMode: (mode: WindowMode) => void;
   readonly runMode: RunMode;
@@ -34,7 +37,7 @@ const OPTION_HEADING = 'col-[2] row-[1] flex flex-wrap items-center gap-x-2 gap-
 const OPTION_MINK = 'col-[3] row-[1] group-hover:opacity-100 group-hover:saturate-100 @[26rem]:row-[1/3] @[26rem]:self-center';
 const OPTION_DESCRIPTION = 'col-[2/4] row-[2] mt-1 block text-[13px] leading-5 text-muted-foreground @[26rem]:col-[2]';
 
-export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode, setRunMode }: Props) {
+export function WelcomeRunMode({ onContinue, onBack, windowMode, setWindowMode, runMode, setRunMode }: Props) {
   const { deferredPrompt, consumeDeferredPrompt } = useInstallPromptSignals();
   const standalone = useStandaloneStatus();
   const scenario = detectInstallScenario();
@@ -43,11 +46,12 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
   const [opened, setOpened] = useState(false);
   const linkCopy = useCopyAction(window.location.href);
 
-  const continueHere = () => onContinue('setup');
+  const continueHere = () => onContinue(runMode === 'local' ? 'local' : 'connection');
   const installApp = async () => {
     if (!deferredPrompt) return continueHere();
     const previousPhase = readWelcomePhase();
-    writeWelcomePhase('setup');
+    // The installed app window opens where this tab was going: connecting.
+    writeWelcomePhase('connection');
     try {
       const { outcome } = await runInstallPrompt(deferredPrompt);
       consumeDeferredPrompt(deferredPrompt);
@@ -64,7 +68,7 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
   };
 
   useEffect(() => {
-    if (opened && standalone) onContinue('setup');
+    if (opened && standalone) onContinue('connection');
   }, [opened, standalone, onContinue]);
 
   if (opened && !standalone) return <main aria-label="Astrid opened in its own window">
@@ -83,7 +87,7 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
 
   return <main aria-label="How to run Astrid">
     <EditorCardLayer cardKey="choose">
-      <EditorCard title="How do you want to run the app?" icon={false}>
+      <EditorCard title="How do you want to run Astrid?" icon={false} topLeft={onBack ? <BackButton onBack={onBack} /> : undefined}>
         <div className="space-y-4">
           <RadioGroup aria-label="How to run Astrid" value={runMode} onValueChange={value => setRunMode(value as RunMode)} className="space-y-2.5">
             <div className={`@container rounded-xl border transition-colors ${runMode === 'hosted' ? 'border-primary/70 bg-primary/[0.06]' : 'border-border hover:border-foreground/25 hover:bg-muted/40'}`}>
@@ -109,7 +113,7 @@ export function WelcomeRunMode({ onContinue, windowMode, setWindowMode, runMode,
               <label htmlFor="welcome-run-local" onClick={() => setRunMode('local')} className={OPTION_LABEL}>
                 <RadioGroupItem id="welcome-run-local" value="local" aria-labelledby="welcome-title-local" className={OPTION_RADIO} />
                 <span className={OPTION_HEADING}>
-                  <span id="welcome-title-local" className="text-[15px] font-medium text-foreground">Run app on your computer</span>
+                  <span id="welcome-title-local" className="text-[15px] font-medium text-foreground">Run Astrid on your computer</span>
                   <span className="rounded-full bg-muted px-2 py-px text-[11px] text-muted-foreground">Most control</span>
                 </span>
                 <RunModeMink scene="desk" active={runMode === 'local'} className={OPTION_MINK} />

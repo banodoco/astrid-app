@@ -46,6 +46,21 @@ describe('placeCard', () => {
     expectInViewport(position);
   });
 
+  it.each([
+    [{ width: 1440, height: 900 }, 380],
+    [{ width: 1280, height: 720 }, 300],
+  ])('puts the gallery card above a full-width bottom strip at %o, clear of it', (viewport, paneHeight) => {
+    const card = { width: 380, height: 220 };
+    const pane: SpotlightRect = { x: 0, y: viewport.height - paneHeight, width: viewport.width, height: paneHeight };
+
+    const position = placeCard([pane], card, viewport);
+
+    expect(position.top + card.height).toBeLessThanOrEqual(pane.y);
+    expect(position.top).toBeGreaterThanOrEqual(EDGE);
+    expect(position.left).toBeGreaterThanOrEqual(EDGE);
+    expect(position.left + card.width).toBeLessThanOrEqual(viewport.width - EDGE);
+  });
+
   it('docks bottom-right when the rects cover the whole viewport', () => {
     const rect: SpotlightRect = { x: 0, y: 0, width: 1440, height: 900 };
 
@@ -109,5 +124,69 @@ describe('placeCard', () => {
     for (const rects of layouts) {
       expectInViewport(placeCard(rects, CARD, VIEWPORT));
     }
+  });
+});
+
+/** The desktop tour's lit areas and chat pane, as measured by scripts/tour-motion-trace.mjs at each size. */
+const DESKTOP = {
+  '1440x900': {
+    viewport: { width: 1440, height: 900 },
+    preview: { x: 6, y: 51, width: 756, height: 491.8 },
+    row: { x: 7, y: 613.8, width: 604, height: 48 },
+    chat: { x: 1141, y: 2, width: 299, height: 898 },
+    gallery: { x: 0, y: 711, width: 1146, height: 189 },
+  },
+  '1280x720': {
+    viewport: { width: 1280, height: 720 },
+    preview: { x: 6, y: 51, width: 596, height: 377 },
+    row: { x: 7, y: 499, width: 604, height: 48 },
+    chat: { x: 981, y: 2, width: 299, height: 718 },
+    gallery: { x: 0, y: 531, width: 986, height: 189 },
+  },
+} as const;
+
+const overlapX = (left: number, width: number, r: SpotlightRect) => Math.max(0, Math.min(left + width, r.x + r.width) - Math.max(left, r.x));
+const covers = (p: { left: number; top: number }, card: { width: number; height: number }, r: SpotlightRect) => overlapX(p.left, card.width, r) > 0
+  && Math.min(p.top + card.height, r.y + r.height) - Math.max(p.top, r.y) > 0;
+
+describe.each(Object.entries(DESKTOP))('placeCard on the desktop tour at %s', (_size, { viewport, preview, row, chat, gallery }) => {
+  const land = { width: 380, height: 471 };
+
+  it('never covers the lit preview or row with the land card', () => {
+    const position = placeCard([row, preview], land, viewport, { avoid: [chat] });
+    expect(covers(position, land, preview)).toBe(false);
+    expect(covers(position, land, row)).toBe(false);
+    expect(position.top + land.height).toBeLessThanOrEqual(viewport.height - EDGE);
+  });
+
+  it('keeps the card clear of the unlit chat whenever a spot clear of both exists', () => {
+    // A card narrow enough for the space between the preview and the chat stays out of the chat...
+    const room = chat.x - Math.max(preview.x + preview.width, row.x + row.width) - 2 * 16;
+    const narrow = { width: room, height: 420 };
+    const fits = placeCard([row, preview], narrow, viewport, { avoid: [chat] });
+    expect(covers(fits, narrow, chat)).toBe(false);
+    expect(covers(fits, narrow, preview) || covers(fits, narrow, row)).toBe(false);
+    // ...while the 380 px land card has no such spot at this size: it keeps the lit areas clear and overlaps only the
+    // dimmed chat's edge, by the few pixels it lacks.
+    expect(room).toBeLessThan(land.width);
+    const position = placeCard([row, preview], land, viewport, { avoid: [chat] });
+    expect(overlapX(position.left, land.width, chat)).toBeLessThanOrEqual(land.width - room);
+  });
+
+  it('puts the gallery card above the full-width strip, clear of it and of the chat', () => {
+    const card = { width: 380, height: 255 };
+    const position = placeCard([gallery], card, viewport, { avoid: [chat] });
+    expect(position.top + card.height).toBeLessThanOrEqual(gallery.y);
+    expect(covers(position, card, chat)).toBe(false);
+  });
+});
+
+describe('placeCard on touch respond', () => {
+  it('prefers the spot above the actions at the foot of the chat', () => {
+    const phone = { width: 375, height: 667 };
+    const actions: SpotlightRect = { x: 10, y: 380, width: 355, height: 150 };
+    const card = { width: 351, height: 170 };
+    const position = placeCard([actions], card, phone, { edge: 12, gap: 8, preferAbove: true });
+    expect(position).toEqual({ left: 12, top: 380 - 8 - 170 });
   });
 });

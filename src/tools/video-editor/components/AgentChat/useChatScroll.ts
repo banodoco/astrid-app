@@ -6,6 +6,7 @@ export function useChatScroll(sessionKey: string | null, ready: boolean, content
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const scrollContentRef = useRef<HTMLDivElement | null>(null);
   const state = useRef({ sessionKey, ready: false, following: true, hadContent: false, readOffset: 0 });
+  const lastPositioned = useRef<{ sessionKey: string | null; ready: boolean; contentCount: number } | null>(null);
 
   const positionIfFollowing = useCallback(() => {
     const container = scrollContainerRef.current;
@@ -28,7 +29,15 @@ export function useChatScroll(sessionKey: string | null, ready: boolean, content
     if (resuming && !state.current.following) {
       scrollContainerRef.current?.scrollTo({ top: state.current.readOffset, behavior: 'instant' });
     }
-    positionIfFollowing();
+    // Reading the container's size right after React has mutated the transcript forces a synchronous layout, and this
+    // effect runs on every render (a tour types and streams into the chat every frame). Growth of the content within
+    // the same turn is followed by the ResizeObserver below, which runs after layout in the same frame; only a change
+    // of session, readiness or turn count needs the position set here, before paint.
+    const last = lastPositioned.current;
+    if (!last || last.sessionKey !== sessionKey || last.ready !== nextReady || last.contentCount !== contentCount) {
+      lastPositioned.current = { sessionKey, ready: nextReady, contentCount };
+      positionIfFollowing();
+    }
   });
 
   useLayoutEffect(() => {

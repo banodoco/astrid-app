@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog';
@@ -444,4 +444,15 @@ it('the Full screen button shows a tooltip on hover and focus, and clicking hide
   await user.click(pop);
   expect(screen.queryByRole('tooltip')).toBeNull();
   expect(screen.getByTestId('fullscreen-key')).toHaveTextContent(panelKey);
+});
+it('shows the Compact layout while the editor tour runs, without writing it to the saved preferences', async () => {
+  const { startEditorTour, exitEditorTour } = await import('@/shared/state/editorTourStore');
+  render(<Harness initialPreferences={{ rightPanelLayoutSlotsByPanelId: { 'host:properties': 'dock' } }} />);
+  const region = screen.getByRole('region', { name: 'Video editor right panel' });
+  expect(region).toHaveAttribute('data-layout', 'dock');
+  act(() => startEditorTour());
+  expect(region).toHaveAttribute('data-layout', 'compact');
+  expect(state.preferences.rightPanelLayoutSlotsByPanelId['host:properties']).toBe('dock');
+  act(() => exitEditorTour());
+  expect(region).toHaveAttribute('data-layout', 'dock');
 });

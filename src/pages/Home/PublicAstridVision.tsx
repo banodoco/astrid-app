@@ -42,6 +42,12 @@ function MarkdownText({ value, className }: { value: string; className?: string 
   </div>;
 }
 
+/** Keep hyphenated compounds such as "open-source" whole when a title wraps. */
+function KeepHyphenated({ value }: { value: string }) {
+  return <>{value.split(/(\S+-\S+)/).map((part, i) =>
+    i % 2 ? <span key={i} className="astrid-vision-nowrap">{part}</span> : part)}</>;
+}
+
 /** One little crisp pixel arrow shared by the pillar and principle cards. */
 function PixelArrow() {
   return (
@@ -117,7 +123,7 @@ function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevisio
 function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: PublicVisionProject[] }) {
   const [open, setOpen] = useState(false);
   const bodyId = useId();
-  const plans = openProjects.filter(project => project.gapIds.includes(gap.id)).slice(0, 3);
+  const plans = openProjects.filter(project => (project.primaryGapId ?? project.gapIds[0]) === gap.id).slice(0, 3);
   return (
     <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={open || undefined}>
       <h3>
@@ -151,6 +157,44 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
   );
 }
 
+/** Stand-ins for the loading skeleton: never shown, only measured, so they match the usual copy's length. */
+const SKELETON_TITLE = 'A tool to unlock the collective artistic ambition of the open-source AI community';
+const SKELETON_LEAD = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
+const SKELETON_ATTRIBUTION = 'This vision is drawn from the Astrid Dev repository.';
+
+const PROJECT_GOAL_LINES = 5;
+
+/**
+ * A project's goal shows at most five lines (one on phones, set by --goal-lines in the stylesheet);
+ * when there is more, the next line is softly blurred and faded so the card reads as a teaser for
+ * its GitHub plan.
+ */
+function ProjectGoal({ value }: { value: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [clamped, setClamped] = useState(false);
+  useLayoutEffect(() => {
+    const frame = ref.current;
+    const body = frame?.firstElementChild as HTMLElement | null;
+    if (!frame || !body) return undefined;
+    const measure = () => {
+      const style = getComputedStyle(frame);
+      const line = Number.parseFloat(style.lineHeight);
+      const lines = Number.parseFloat(style.getPropertyValue('--goal-lines')) || PROJECT_GOAL_LINES;
+      setClamped(Number.isFinite(line) && body.offsetHeight > line * lines + 2);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'function') return undefined;
+    const observer = new ResizeObserver(measure);
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, [value]);
+  return (
+    <div className="astrid-vision-project-goal" ref={ref} data-clamped={clamped || undefined}>
+      <MarkdownText value={value} />
+    </div>
+  );
+}
+
 function ProjectRow({ project }: { project: PublicVisionProject }) {
   return (
     <li className="astrid-vision-project-row">
@@ -158,7 +202,7 @@ function ProjectRow({ project }: { project: PublicVisionProject }) {
         <span className="astrid-vision-project-status" data-status={project.status}>{project.status}</span>
         <h3>{project.title}</h3>
       </div>
-      <MarkdownText value={project.goalMarkdown} />
+      <ProjectGoal value={project.goalMarkdown} />
       <a href={project.githubUrl} target="_blank" rel="noreferrer">Project details on GitHub</a>
     </li>
   );
@@ -344,10 +388,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section id="astrid-vision-manifesto" className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
-            <p className="astrid-vision-eyebrow">Vision</p>
+            <p className="astrid-vision-eyebrow" data-index="01">Vision</p>
             {content
               ? <>
-                  <h1 id="astrid-vision-title">Vision</h1>
+                  <h1 id="astrid-vision-title"><KeepHyphenated value={content.vision.title} /></h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
                     This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
@@ -355,15 +399,18 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                 </>
               : error
                 ? <>
-                    <h1 id="astrid-vision-title">Vision</h1>
+                    <h1 id="astrid-vision-title">Astrid’s vision</h1>
                     <p className="astrid-vision-lead" role="alert">
                       The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
                     </p>
                   </>
                 : <div className="astrid-vision-skeleton-hero" role="status" aria-label="Loading Astrid's vision">
-                    <div className="astrid-vision-skeleton-line" />
-                    <div className="astrid-vision-skeleton-line" />
-                    <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
+                    {/* The real headline and intro elements, holding invisible stand-in text of about the
+                        usual length: each wrapped line is drawn as a bar, so the skeleton has the shape
+                        the text will have at this width and nothing shifts when the text arrives. */}
+                    <h1 aria-hidden="true"><span className="astrid-vision-skeleton-text">{SKELETON_TITLE}</span></h1>
+                    <div className="astrid-vision-lead" aria-hidden="true"><p><span className="astrid-vision-skeleton-text">{SKELETON_LEAD}</span></p></div>
+                    <p className="astrid-vision-source-attribution" aria-hidden="true"><span className="astrid-vision-skeleton-text">{SKELETON_ATTRIBUTION}</span></p>
                   </div>}
           </div>
           <Juggler />
@@ -411,7 +458,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       {content && (<>
       <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Pillars</p>
+          <p className="astrid-vision-eyebrow" data-index="02">Pillars</p>
           <h2 id="astrid-vision-north-star-title">The pillars of our vision</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
@@ -420,10 +467,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               data-play={playing === index || centred === index || undefined}
               style={{ '--reveal-delay': (index % 2) * 90 + 'ms' } as CSSProperties}
               onClick={() => play(index)}>
-              <span className="astrid-vision-pillar-number" aria-hidden="true">{index + 1}.</span>
+              <span className="astrid-vision-pillar-number" aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+              <div className="astrid-vision-pillar-stage"><NorthStarMink art={pillar.art} /></div>
               <h3>{pillar.title}</h3>
               <p>{pillar.descriptor}</p>
-              <NorthStarMink art={pillar.art} />
               <span className="astrid-vision-pillar-details" aria-hidden="true">
                 Details <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
@@ -437,7 +484,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       <section id="astrid-vision-standards" className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Principles</p>
+          <p className="astrid-vision-eyebrow" data-index="03">Principles</p>
           <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
         </div>
         <ol className="astrid-vision-standards-list" ref={sigilsRef}>
@@ -452,7 +499,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   : <MarkdownText value={principle.bodyMarkdown} />}
               </div>
               <span className="astrid-vision-principle-corner" aria-hidden="true">
-                <span className="astrid-vision-card-arrow"><PixelArrow /></span>
+                Details <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}
@@ -464,7 +511,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       <section id="astrid-vision-parts" className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
         <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Gaps</p>
+          <p className="astrid-vision-eyebrow" data-index="04">Gaps</p>
           <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : 'How we currently fall short'}</h2>
         </div>
         <div className="astrid-vision-context-row">
@@ -493,7 +540,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       <section id="astrid-vision-projects" className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
         <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
-          <p className="astrid-vision-eyebrow">Projects</p>
+          <p className="astrid-vision-eyebrow" data-index="05">Projects</p>
           <h2 id="astrid-vision-projects-title">How we plan to reach our aspirations</h2>
         </div>
         <div className="astrid-vision-context-row">
@@ -541,7 +588,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"
           aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
-            <p className="astrid-vision-eyebrow">Help us</p>
+            <p className="astrid-vision-eyebrow" data-index="06">Help us</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
             <MarkdownText value={contributionIntro} />
             {content.vision.agentPrompt ? (

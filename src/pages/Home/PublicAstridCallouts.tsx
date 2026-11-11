@@ -1,4 +1,4 @@
-import { useCallback, useLayoutEffect, useRef, type CSSProperties, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type RefObject } from 'react';
 import type { PublicAstridAudience } from './publicAstridMotion';
 import { RIDERS } from './publicAstridRiders';
 import { readPublicAstridPlayerHeight } from './usePublicAstridPlayerHeight';
@@ -57,6 +57,10 @@ interface CalloutDefinition {
    * so the connector runs down the conversation's margin instead of across its messages.
    */
   phoneSwing?: number;
+  /** A shorter title for the phone's one-line chip, which unfolds to show the body when tapped. */
+  phoneTitle: string;
+  /** Body copy for the unfolded phone card, when the full sentence would cover the demo. */
+  phoneBody?: string;
 }
 
 /** Phone connectors into the conversation stop at its edges when the thread is scrolled. */
@@ -70,11 +74,11 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     target: '.astrid-chat-surface',
     at: [0, 0.2],
     side: 'right',
-    phoneSide: 'top',
-    phoneSwing: 0.9,
-    // On phones: Astrid's reply, reached along the conversation's right edge.
-    phoneTarget: '.astrid-chat-surface .justify-start > .rounded-2xl',
-    phoneAt: [1, 0.5],
+    phoneTitle: 'Open knowledge',
+    // On phones: straight down onto the top edge of the conversation window, above Astrid's avatar.
+    phoneSide: 'bottom',
+    phoneTarget: '.astrid-chat-surface [data-conversation-presentation] > div:first-child',
+    phoneAt: [0.075, 0],
   },
   {
     id: 'workflows',
@@ -83,25 +87,27 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     target: '.astrid-chat-surface',
     at: [0, 0.68],
     side: 'right',
-    phoneSide: 'top',
-    // On phones: the finished result.
-    phoneTarget: '.astrid-chat-surface .astrid-example-result',
-    phoneAt: [0, 0.5],
-    phoneSwing: 0.1,
+    phoneTitle: 'Agent workflows',
+    // On phones the chip sits top-right: straight down onto the top edge of the person's request.
+    phoneSide: 'bottom',
+    phoneTarget: '.astrid-chat-surface .justify-end > .rounded-2xl',
+    phoneAt: [0.8, 0],
   },
   {
     id: 'tools',
     title: 'Integrated into many open-source tools',
-    body: 'And you or others in the community can integrate anything.',
+    body: 'It works with popular tools, but you can also integrate anything you’d like.',
     target: '.astrid-chat-surface',
     at: [1, 0.42],
     side: 'left',
-    phoneSide: 'bottom',
-    // On phones: the person's request.
-    phoneTarget: '.astrid-chat-surface .justify-end > .rounded-2xl',
-    // Land on the top edge of the request bubble, slightly in from its right corner.
-    phoneAt: [0.93, 0],
-    phoneSwing: 0.9,
+    phoneTitle: 'Integrated into open-source tools',
+    // On phones the chip sits along the bottom, where its logos have room. Its connector rises beside
+    // the conversation and turns in to Astrid's reply, which stays clear of the chip when it unfolds
+    // upwards over the result and composer.
+    phoneSide: 'top',
+    phoneTarget: '.astrid-chat-surface .justify-start > .rounded-2xl',
+    phoneAt: [0, 0.6],
+    phoneSwing: 0.03,
   },
 ];
 
@@ -131,16 +137,17 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
   {
     id: 'effects',
     title: 'Live vibe code effects and visuals',
-    body: 'Describe a look; its code is edited live.',
+    body: 'Your agent codes the effects live.',
     // Target the whole card so the connector also works with no clip selected.
     target: '.astrid-inspector-surface',
     at: [0.5, 0.5],
     side: 'bottom',
+    phoneTitle: 'Live-code effects',
     phoneSide: 'bottom',
-    // On phones the inspector is a compact strip right under this card: drop straight down from the
-    // card's middle onto the inspector's top edge (the card's centre sits ~76% across the inspector)
-    // rather than landing on whichever tab happens to sit at the inspector's centre.
-    phoneAt: [0.76, 0],
+    // On phones the inspector is a compact strip of tabs right under this chip: land inside the Effects
+    // tab, in the middle of the clear space to the left of its label.
+    phoneTarget: '.astrid-inspector-surface [role="tablist"].grid-cols-4 > [role="tab"]:first-child',
+    phoneAt: [0.15, 0.5],
     // Tablets draw the inspector small and zoomed out, with the label just above it: land on its top
     // edge there too, instead of on the clip title in the middle of the card.
     tabletAt: [0.5, 0],
@@ -155,64 +162,30 @@ const APP_CALLOUTS: readonly CalloutDefinition[] = [
     // The middle of the first track sits ~57px below the panel's top at every desktop and tablet size.
     at: [0.27, 0.2],
     atTop: 57,
-    // Land near the upper-left fifth of the timeline instead of its visual centre.
-    phoneAt: [0.2, 0.2],
+    // On phones the chip sits top-right: its connector runs down beside the miniature and comes in to
+    // the timeline's top edge, just inside its top right corner.
+    phoneAt: [0.955, 0],
     side: 'top',
-    // On phones this card sits on the top rail beside Effects, so the connector
-    // leaves its bottom-left corner while keeping the same timeline endpoint.
+    phoneTitle: 'Agent editing',
     phoneSide: 'bottom',
-    phoneAnchor: 0.12,
+    phoneAnchor: 0.93,
   },
   {
     id: 'models',
     title: 'Your agent runs your local models',
-    body: 'It figures out how to get local models to do the job and gets it running on your machine.',
+    body: 'It figures out how to get local models to do the job, and makes the generations run efficiently on your machine.',
     target: '[data-astrid-agent-launcher]',
     at: [0.5, 0],
-    // On phones the connector comes up from below, so it ends in the middle of the launcher; on tablets
+    // On phones the chip sits to the launcher's lower left and reaches across to its edge; on tablets
     // it rises from the label hanging below the timeline to the launcher's lower edge.
-    phoneAt: [0.5, 0.5],
+    phoneAt: [0.04, 0.6],
+    phoneTitle: 'Your agent runs local models',
     tabletSide: 'top',
     tabletAt: [0.5, 1],
     side: 'bottom',
-    phoneSide: 'top',
+    phoneSide: 'right',
   },
 ];
-
-/** Which cards hang over the stage's top and bottom edges on phones. Keep in step with PublicAstridShell.css. */
-const PHONE_RAILS: Record<PublicAstridAudience, { top: readonly string[]; bottom: readonly string[] }> = {
-  agent: { top: ['tools'], bottom: ['community', 'workflows'] },
-  app: { top: ['timeline', 'effects'], bottom: ['models'] },
-};
-
-/** A card's settled height, read from its content so a card that is still morphing reports its destination. */
-function settledCardHeight(card: HTMLElement) {
-  const content = card.querySelector<HTMLElement>(':scope > .astrid-callout-content');
-  if (!content) return card.offsetHeight;
-  const style = getComputedStyle(card);
-  return content.offsetHeight + parseFloat(style.paddingTop) + parseFloat(style.paddingBottom)
-    + parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
-}
-
-/**
- * Phone stage sizing inputs: the tallest card on each rail and, in Agent, the conversation's own height.
- * The stylesheet turns them into the stage height and the composition's insets, so the demo sits the same
- * gap below the top cards as above the bottom ones however the copy wraps. Reads only.
- */
-function readPhoneStageFit(stage: HTMLElement, cards: ReadonlyMap<string, HTMLElement>, audience: PublicAstridAudience) {
-  const fit: Array<[string, string]> = [];
-  const rail = (name: string, ids: readonly string[]) => {
-    const height = Math.max(0, ...ids.map(id => { const card = cards.get(id); return card ? settledCardHeight(card) : 0; }));
-    if (height > 0) fit.push([name, `${Math.ceil(height)}px`]);
-  };
-  rail('--astrid-phone-rail-top', PHONE_RAILS[audience].top);
-  rail('--astrid-phone-rail-bottom', PHONE_RAILS[audience].bottom);
-  if (audience === 'agent') {
-    const chat = stage.querySelector<HTMLElement>('.astrid-chat-surface');
-    if (chat?.offsetHeight) fit.push(['--astrid-agent-chat-height', `${Math.ceil(chat.offsetHeight)}px`]);
-  }
-  return fit;
-}
 
 const PARALLAX_EASE = 0.1;
 const CALLOUT_RESTING_BEND_MIN_PX = 2;
@@ -228,6 +201,21 @@ const PARALLAX_TILT_Y_DEG = 5;
 const PHONE_MEDIA_QUERY = '(max-width: 640px)';
 const TABLET_MEDIA_QUERY = '(max-width: 1099px)';
 
+function subscribePhoneLayout(onChange: () => void) {
+  if (typeof window.matchMedia !== 'function') return () => {};
+  const query = window.matchMedia(PHONE_MEDIA_QUERY);
+  query.addEventListener?.('change', onChange);
+  return () => query.removeEventListener?.('change', onChange);
+}
+
+function usePhoneLayout() {
+  return useSyncExternalStore(
+    subscribePhoneLayout,
+    () => typeof window.matchMedia === 'function' && window.matchMedia(PHONE_MEDIA_QUERY).matches,
+    () => false,
+  );
+}
+
 function calloutsFor(audience: PublicAstridAudience) {
   const definitions = audience === 'agent' ? AGENT_CALLOUTS : APP_CALLOUTS;
   // This is the established desktop introduction order. Phone timing below uses
@@ -237,7 +225,7 @@ function calloutsFor(audience: PublicAstridAudience) {
 }
 
 const MOBILE_CALLOUT_ORDER: Record<PublicAstridAudience, readonly string[]> = {
-  agent: ['tools', 'community', 'workflows'],
+  agent: ['community', 'workflows', 'tools'],
   app: ['effects', 'timeline', 'models'],
 };
 
@@ -398,19 +386,22 @@ function connectorGeometry(stage: HTMLElement, callout: CalloutDefinition, phone
   // Chat content can mount or become measurable after the surface has landed. Its
   // readiness must not hide/restart the connector or delay the card-settle clock.
   const chatFallback = !precise && phone && callout.target === PHONE_CLAMP_SELECTOR;
-  const resolved = precise ?? (chatFallback ? resolveVisibleTarget(stage, callout.target) : null);
+  // Any other phone-only target (the Effects tab, absent while no clip is selected) falls back to its panel.
+  const panelFallback = !precise && !chatFallback && phone && !!callout.phoneTarget;
+  const resolved = precise ?? (chatFallback || panelFallback ? resolveVisibleTarget(stage, callout.target) : null);
   if (!resolved) return null;
   const side = phone ? callout.phoneSide : tablet ? callout.tabletSide ?? callout.side : callout.side;
-  const [ax, preferredY] = phone ? callout.phoneAt ?? callout.at : tablet ? callout.tabletAt ?? callout.at : callout.at;
+  const [ax, preferredY] = panelFallback ? callout.at : phone ? callout.phoneAt ?? callout.at : tablet ? callout.tabletAt ?? callout.at : callout.at;
   const ay = chatFallback ? callout.at[1] : preferredY;
   const box = resolved.rect;
   const end = { x: box.left + box.width * ax, y: box.top + (!phone && callout.atTop !== undefined ? callout.atTop : box.height * ay) };
   // Surface-relative fallback coordinates are already inside the panel, even if
   // an empty mobile conversation has not acquired its content height yet.
   const clampBox = !chatFallback && phone && callout.phoneTarget ? resolved.element.closest(PHONE_CLAMP_SELECTOR)?.getBoundingClientRect() : undefined;
-  // The Tools connector is intentionally attached to the request bubble's exact top border;
-  // clamping it to the chat surface would pull that endpoint a few pixels inside the card.
-  if (clampBox && callout.id !== 'tools') end.y = Math.max(clampBox.top + 56, Math.min(clampBox.bottom - 16, end.y));
+  // A message scrolled out of a short conversation keeps its connector just inside the conversation's
+  // edge; a target on the window's own edge is left exactly there.
+  if (clampBox && end.y < clampBox.top - 1) end.y = clampBox.top + 10;
+  else if (clampBox && end.y > clampBox.bottom - 16) end.y = clampBox.bottom - 16;
   return { end, side, swing: phone ? callout.phoneSwing : undefined };
 }
 
@@ -426,6 +417,24 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
   const moveRef = useRef<CalloutMove | null>(null);
   const settledCanonicalCurves = useRef<number[][]>([]);
   const settledCanonicalEpoch = useRef<number | undefined>(undefined);
+  // Phones show each card as a one-line chip; tapping one unfolds its body over the demo, one at a time.
+  const phone = usePhoneLayout();
+  const bodyIdPrefix = useId();
+  const [openId, setOpenId] = useState<string | null>(null);
+  useEffect(() => { setOpenId(null); }, [audience, phone]);
+  useEffect(() => {
+    if (!openId) return undefined;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!(event.target instanceof Element) || !event.target.closest('.astrid-callout')) setOpenId(null);
+    };
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === 'Escape') setOpenId(null); };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [openId]);
 
   // Connectors, plus the flat App controls that must follow tilted surfaces: the
   // transport rides the player, and the agent launcher sits on the conversation
@@ -474,7 +483,6 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
       const phone = phoneQuery.matches;
       const tablet = !phone && tabletQuery.matches;
       setStyle(stageElement, '--astrid-player-height', readPublicAstridPlayerHeight(stageElement, phone));
-      if (phone) for (const [name, value] of readPhoneStageFit(stageElement, cardRefs.current, audience)) setStyle(stageElement, name, value);
       const tilt = stageElement.querySelector<HTMLElement>('.astrid-editor-tilt');
       if (pointer) {
         if (pointer.leaving) {
@@ -522,8 +530,9 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
         // hidden chat's desktop positioning box, which can move independently on resize.
         const box = launcherAnchor.getBoundingClientRect();
         const size = launcher.offsetWidth;
-        const left = phone ? box.right - size - 4 : box.left + box.width / 2 - size / 2;
-        const top = phone ? box.bottom - size - 4 : box.top + box.height / 2 - size / 2;
+        // On phones it perches on the miniature's lower right corner, overhanging into the gutter.
+        const left = phone ? box.right - size * .62 : box.left + box.width / 2 - size / 2;
+        const top = phone ? box.bottom - size * .56 : box.top + box.height / 2 - size / 2;
         setAttribute(launcher, 'data-astrid-tracked', 'true');
         setStyle(launcher, 'left', `${left - originX}px`);
         setStyle(launcher, 'top', `${top - originY}px`);
@@ -563,6 +572,11 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
       // Both audiences use the natural extension duration after the same
       // final-geometry gate; retraction and the residual hold remain separate.
       const extendDuration = baseExtendDuration;
+      // An unfolded phone card lies over the demo. A connector whose endpoint it covers fades out
+      // rather than ending underneath it.
+      const openBox = phone ? stageElement.querySelector<HTMLElement>('.astrid-callout[data-open="true"]')?.getBoundingClientRect() : undefined;
+      // True while any connector is still being drawn by its entrance animation, which this loop follows.
+      let introDrawing = false;
       for (const [index, callout] of callouts.entries()) {
         const path = svgElement.querySelector<SVGPathElement>(`path[data-callout="${callout.id}"]`);
         const dots = svgElement.querySelectorAll<SVGCircleElement>(`circle[data-callout="${callout.id}"]`);
@@ -843,10 +857,29 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
         setAttribute(dots[0], 'cx', paintedCurve[0].toFixed(1));
         setAttribute(dots[0], 'cy', paintedCurve[1].toFixed(1));
         setAttribute(dots[0], 'r', '4');
-        setAttribute(dots[1], 'cx', paintedCurve[6].toFixed(1));
-        setAttribute(dots[1], 'cy', paintedCurve[7].toFixed(1));
+        // The end dot leads the line: small while the line is still travelling (drawn by its entrance
+        // animation, or re-extending after a switch), then it grows as it lands, and the ring pulses
+        // out of that. The entrance draw is a stroke-dash animation, so its tip is read from the path.
+        const dashOffset = Number.parseFloat(getComputedStyle(path).strokeDashoffset);
+        const drawn = Number.isFinite(dashOffset) ? Math.max(0, Math.min(1, 1 - dashOffset)) : 1;
+        if (drawn < 1) introDrawing = true;
+        const tip = drawn > 0 && drawn < 1 && typeof path.getPointAtLength === 'function' && path.getAttribute('d')
+          ? path.getPointAtLength(path.getTotalLength() * drawn)
+          : null;
+        const reconnected = !move || (!!destination
+          && move.extensionStartedAt[index] !== undefined
+          && elapsed >= move.extensionStartedAt[index]! + extendDuration);
+        setAttribute(dots[1], 'cx', (tip?.x ?? paintedCurve[6]).toFixed(1));
+        setAttribute(dots[1], 'cy', (tip?.y ?? paintedCurve[7]).toFixed(1));
         setAttribute(dots[1], 'r', '4');
         setAttribute(dots[1], 'opacity', '1');
+        setAttribute(dots[1], 'data-tip', drawn <= 0 ? 'waiting' : drawn < 1 || !reconnected ? 'travelling' : 'landed');
+        if (path.parentElement) {
+          const endX = paintedCurve[6] + originX;
+          const endY = paintedCurve[7] + originY;
+          const occluded = !!openBox && endX > openBox.left && endX < openBox.right && endY > openBox.top && endY < openBox.bottom;
+          setAttribute(path.parentElement, 'data-occluded', String(occluded));
+        }
         const ping = svgElement.querySelector<SVGCircleElement>(`circle[data-callout-ping="${callout.id}"]`);
         if (ping) {
           setAttribute(ping, 'cx', paintedCurve[6].toFixed(1));
@@ -912,7 +945,7 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
         settledCanonicalEpoch.current = move.epoch;
         moveRef.current = null;
       }
-      if (trackedChanged || !settled || moving || waitingForLayout || connectorRetracting || connectorAnimating) schedule();
+      if (trackedChanged || !settled || moving || waitingForLayout || connectorRetracting || connectorAnimating || introDrawing) schedule();
     }
     const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
     const observeGeometry = () => {
@@ -985,17 +1018,8 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
     };
   }, [active, appView, audience, callouts, reducedMotion, stageRef]);
 
-  // Runs after the new audience is committed but before the morph measures where the cards land, so
-  // the first switch to a phone layout lands them on the fitted stage rather than on its fallback size.
-  const fitPhoneStage = useCallback(() => {
-    const stage = stageRef.current ?? svgRef.current?.closest<HTMLElement>('.astrid-editor-stage, [data-testid="stage"]');
-    if (!stage || typeof window.matchMedia !== 'function' || !window.matchMedia(PHONE_MEDIA_QUERY).matches) return;
-    const fit = readPhoneStageFit(stage, cardRefs.current, audience);
-    for (const [name, value] of fit) stage.style.setProperty(name, value);
-  }, [audience, stageRef]);
-
   return (
-    <PublicAstridCalloutLayout audience={audience} reducedMotion={reducedMotion} active={active} move={moveRef} prepareLayout={fitPhoneStage}>
+    <PublicAstridCalloutLayout audience={audience} reducedMotion={reducedMotion} active={active} move={moveRef}>
       <svg ref={svgRef} className="astrid-callout-connectors" aria-hidden="true">
         {callouts.map((callout, index) => (
             <g key={index} style={calloutTiming(index, audience, callout.id)}>
@@ -1006,7 +1030,41 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
           </g>
         ))}
       </svg>
-      {callouts.map((callout, index) => (
+      {callouts.map((callout, index) => phone ? (
+        <article
+          key={index}
+          className="astrid-callout"
+          data-callout={callout.id}
+          data-compact
+          data-open={openId === callout.id}
+          style={calloutTiming(index, audience, callout.id)}
+          ref={(element) => {
+            if (element) cardRefs.current.set(callout.id, element);
+            else cardRefs.current.delete(callout.id);
+          }}
+        >
+          <div className="astrid-callout-content">
+            <h2>
+              <button
+                type="button"
+                className="astrid-callout-toggle"
+                aria-expanded={openId === callout.id}
+                aria-controls={`${bodyIdPrefix}${callout.id}`}
+                onClick={() => setOpenId(current => current === callout.id ? null : callout.id)}
+              >
+                <span>{callout.phoneTitle}</span>
+                <span className="astrid-callout-toggle-icon" aria-hidden="true" />
+              </button>
+            </h2>
+            <div className="astrid-callout-body" id={`${bodyIdPrefix}${callout.id}`}>
+              <div className="astrid-callout-body-inner">
+                {callout.id === 'tools' && <IntegrationLinks />}
+                <p>{callout.phoneBody ?? callout.body}</p>
+              </div>
+            </div>
+          </div>
+        </article>
+      ) : (
         <article
           key={index}
           className="astrid-callout"

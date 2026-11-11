@@ -55,11 +55,11 @@ test('current gaps show a compact list; status filter reveals all and closed', a
   await expect(showAll).toHaveAttribute('aria-expanded', 'false');
 });
 
-test('pillars are numbered 1–4 and use deliberate mobile title wrapping', async ({ page }) => {
+test('pillars are numbered 01–04 and use deliberate mobile title wrapping', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const numbers = page.locator('.astrid-vision-pillar-number');
-  await expect(numbers).toHaveText(['1.', '2.', '3.', '4.']);
+  await expect(numbers).toHaveText(['01', '02', '03', '04']);
   const title = page.locator('.astrid-vision-principles h3').first();
   const lines = await title.evaluate(el => {
     const css = getComputedStyle(el);

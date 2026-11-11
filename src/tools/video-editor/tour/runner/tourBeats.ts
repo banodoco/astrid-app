@@ -1,6 +1,7 @@
 import { EDITOR_TOUR_ANCHORS, editorTourSelector } from '../anchors';
 import {
   exitEditorTour,
+  EDITOR_TOUR_GALLERY_ACT,
   getEditorTourState,
   markEditorTourSent,
   setEditorTourBeat,
@@ -11,7 +12,8 @@ import {
 
 /**
  * The beat machine, and the only writer of `act`/`beat`.
- *   welcome -(OK)-> compose -(sent)-> respond -(Next)-> land -(Next)-> next act's compose ... -> finale -(I got it)-> feedback -(Start creating)-> exit
+ *   welcome -(OK)-> compose -(sent)-> respond -(Next)-> land -(Next)-> next act's compose ... -> finale -(Next)-> feedback -(Start creating)-> exit
+ * Act 2's land is followed by `gallery` (the Generations pane slides up) before act 3's compose.
  * Act 1 stops on respond to explain the reply; on acts 2 and 3, Send goes straight to land.
  * Back returns to the previous place where the user acted (see `backEditorTour`).
  */
@@ -25,6 +27,26 @@ export function registerBrowserTourFinish(finish: () => void): () => void {
   return () => { if (browserTourFinish === finish) browserTourFinish = null; };
 }
 
+/**
+ * A seam for work that must start inside the user's own tap (iOS only lets `play()` through when it is called from a
+ * gesture's event handler): listeners run synchronously, inside that handler, on every Next / OK / Enter and on the chat's
+ * Send, with the act and beat the user is leaving. Returns the unregister.
+ */
+export type EditorTourGestureListener = (leaving: { act: EditorTourState['act']; beat: EditorTourState['beat'] }) => void;
+const gestureListeners = new Set<EditorTourGestureListener>();
+export function registerEditorTourGesture(listener: EditorTourGestureListener): () => void {
+  gestureListeners.add(listener);
+  return () => { gestureListeners.delete(listener); };
+}
+/** Call synchronously from a user's event handler that moves the tour forward. */
+export function notifyEditorTourGesture(): void {
+  const { status, act, beat } = getEditorTourState();
+  if (status !== 'running') return;
+  for (const listener of [...gestureListeners]) {
+    try { listener({ act, beat }); } catch (error) { console.error('Editor tour: a gesture listener threw.', error); }
+  }
+}
+
 /** Whether the parts that present the current beat have finished animating. */
 export function isEditorTourBeatReady({ beat, ready }: EditorTourState): boolean {
   switch (beat) {
@@ -32,6 +54,7 @@ export function isEditorTourBeatReady({ beat, ready }: EditorTourState): boolean
     case 'respond':
       return ready.chat;
     case 'land':
+    case 'gallery':
       return ready.timeline && ready.card;
     case 'welcome':
     case 'finale':
@@ -45,17 +68,19 @@ function advanceBeat(): void {
   if (beat === 'welcome') return setEditorTourBeat(1, 'compose');
   if (beat === 'compose') return; // leaves only when the composer's Send is pressed
   if (beat === 'respond') return setEditorTourBeat(act, 'land');
-  if (beat === 'land') {
+  if (beat === 'land' && act === EDITOR_TOUR_GALLERY_ACT) return setEditorTourBeat(act, 'gallery');
+  if (beat === 'land' || beat === 'gallery') {
     return act < LAST_ACT ? setEditorTourBeat((act + 1) as typeof LAST_ACT, 'compose') : setEditorTourBeat(LAST_ACT, 'finale');
   }
   if (beat === 'finale') return setEditorTourBeat(LAST_ACT, 'feedback');
   finishEditorTour();
 }
 
-/** Enter, and the card's OK / Next / "I got it" button: finish the animation first, then act. */
+/** Enter, and the card's OK / Next button: finish the animation first, then act. */
 export function runEditorTourPrimary(): void {
   const state = getEditorTourState();
   if (state.status !== 'running') return;
+  notifyEditorTourGesture();
   if (!isEditorTourBeatReady(state)) return skipEditorTourAnimation();
   if (state.beat === 'compose') {
     if (!state.sent) markEditorTourSent();
@@ -76,11 +101,14 @@ export function backEditorTour(): void {
     case 'welcome':
       return;
     case 'compose':
-      return act === 1 ? setEditorTourBeat(1, 'welcome', true) : setEditorTourBeat(previousAct, 'land', true);
+      if (act === 1) return setEditorTourBeat(1, 'welcome', true);
+      return act - 1 === EDITOR_TOUR_GALLERY_ACT ? setEditorTourBeat(previousAct, 'gallery', true) : setEditorTourBeat(previousAct, 'land', true);
     case 'respond':
       return setEditorTourBeat(act, 'compose', true);
     case 'land':
       return act === 1 ? setEditorTourBeat(1, 'respond', true) : setEditorTourBeat(act, 'compose', true);
+    case 'gallery':
+      return setEditorTourBeat(act, 'land', true);
     case 'finale':
       return setEditorTourBeat(LAST_ACT, 'land', true);
     case 'feedback':

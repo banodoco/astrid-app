@@ -123,7 +123,7 @@ test('technical wrangling takes three seconds to resolve and one second to retur
 });
 
 
-test('mobile hero gets breathing room and the editorial arrows and pillar numbers use pixel geometry', async ({ page, request }) => {
+test('mobile hero gets breathing room and the editorial cues and pillar numbers use pixel type', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   for (const width of [390, 1440]) {
@@ -138,28 +138,21 @@ test('mobile hero gets breathing room and the editorial arrows and pillar number
     await expect(pixelNumbers.first()).toHaveCSS('font-family', /Departure Mono/);
     const arrows = page.locator('.astrid-vision-standards-list > li .astrid-vision-principle-corner');
     await expect(arrows).toHaveCount(4);
-    for (let index = 0; index < 4; index++) {
-      const corner = arrows.nth(index);
-      const mark = corner.locator('.astrid-vision-card-arrow');
-      await expect(mark.locator('svg[viewBox="0 0 18 18"]')).toHaveCount(1);
-      const positions = await corner.evaluate(el => {
-        const outer = el.getBoundingClientRect();
-        const inner = el.querySelector('svg')!.getBoundingClientRect();
-        return {
-          dx: inner.x + inner.width / 2 - (outer.x + outer.width / 2),
-          dy: inner.y + inner.height / 2 - (outer.y + outer.height / 2),
-        };
-      });
-      expect(Math.abs(positions.dx)).toBeLessThan(1);
-      expect(Math.abs(positions.dy)).toBeLessThan(1);
-      await expect(corner).toHaveCSS('border-radius', '3px');
+    const cues = page.locator('.astrid-vision-principles .astrid-vision-pillar-details, .astrid-vision-standards-list .astrid-vision-principle-corner');
+    await expect(cues).toHaveCount(8);
+    for (let index = 0; index < 8; index++) {
+      const cue = cues.nth(index);
+      await expect(cue.locator('.astrid-vision-card-arrow svg[viewBox="0 0 18 18"]')).toHaveCount(1);
+      await expect(cue).toHaveText(/Details/i);
+      await expect(cue).toHaveCSS('font-family', /Departure Mono/);
+      await expect(cue).toHaveCSS('font-size', '11px');
+      await expect(cue).toHaveCSS('border-top-width', '0px');
     }
-    await expect(page.locator('.astrid-vision-principles .astrid-vision-pillar-details svg[viewBox="0 0 18 18"]')).toHaveCount(4);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
   }
 });
 
-test('pillars read as a four-up portrait composition on desktop and compact cards below', async ({ page, request }) => {
+test('pillars put the art on a stage above the copy, beside it in one column, with a left-aligned cue', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   for (const width of [390, 760, 800, 1179, 1280, 1440]) {
@@ -184,13 +177,16 @@ test('pillars read as a four-up portrait composition on desktop and compact card
       const item = items[i];
       expect(Math.abs(item.number.x - item.heading.x)).toBeLessThan(2);
       expect(Math.abs(item.heading.x - item.copy.x)).toBeLessThan(2);
-      expect(item.detail.y).toBeGreaterThanOrEqual(Math.max(item.art.y + item.art.height, item.copy.y + item.copy.height) - 2);
-      expect(item.detail.x + item.detail.width).toBeLessThanOrEqual(item.card.x + item.card.width - 6);
+      // The details cue sits under the copy on the same left edge, not off to the right.
+      expect(Math.abs(item.detail.x - item.copy.x)).toBeLessThan(2);
+      expect(item.detail.y).toBeGreaterThanOrEqual(item.copy.y + item.copy.height - 2);
+      expect(item.card.y + item.card.height - (item.detail.y + item.detail.height)).toBeLessThan(32);
       expect(item.art.x + item.art.width).toBeLessThanOrEqual(item.card.x + item.card.width - 6);
-      if (width >= 1180) {
-        expect(item.card.height).toBeGreaterThanOrEqual(435);
-        expect(item.card.height).toBeLessThan(560);
-        expect(item.art.y).toBeGreaterThanOrEqual(item.copy.y + item.copy.height - 2);
+      if (width > 760) {
+        expect(item.card.height).toBeLessThan(width >= 1180 ? 520 : 470);
+        // Art is directly above the title, so copy and illustration stay together.
+        expect(item.art.y + item.art.height).toBeLessThanOrEqual(item.heading.y);
+        expect(item.heading.y - (item.art.y + item.art.height)).toBeLessThan(48);
         expect(Math.abs(item.art.x + item.art.width / 2 - (item.card.x + item.card.width / 2))).toBeLessThan(12);
       } else {
         expect(item.card.height).toBeLessThan(width <= 640 ? 350 : 430);
@@ -214,7 +210,7 @@ test('pillars read as a four-up portrait composition on desktop and compact card
   }
 });
 
-test('principles borrow the former pillar composition: two compact columns with sigils beside text', async ({ page, request }) => {
+test('principles sit in the reading column: copy and cue on the left, a larger sigil on the right', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.emulateMedia({ reducedMotion: 'reduce' });
   for (const width of [390, 800, 1280, 1440]) {
@@ -237,12 +233,17 @@ test('principles borrow the former pillar composition: two compact columns with 
       expect(box.card.height).toBeLessThan(width <= 760 ? 310 : 285);
       expect(box.sigil.x).toBeGreaterThanOrEqual(box.text.x + box.text.width - 2);
       expect(box.arrow.y).toBeGreaterThanOrEqual(box.text.y + box.text.height - 2);
-      expect(box.arrow.x).toBeGreaterThanOrEqual(box.sigil.x - 2);
+      expect(Math.abs(box.arrow.x - box.text.x)).toBeLessThan(2);
+      expect(box.sigil.width).toBeGreaterThanOrEqual(width <= 760 ? 72 : 96);
       expect(box.sigil.x + box.sigil.width).toBeLessThanOrEqual(box.card.x + box.card.width - 6);
       expect(box.radius).toBe('14px');
       expect(box.border).toBe('1px');
     }
     const first = boxes[0].card, second = boxes[1].card, third = boxes[2].card;
+    // The grid shares the section heading's column instead of bleeding past it.
+    const head = await page.locator('.astrid-vision-standards > .astrid-vision-section-head').boundingBox();
+    expect(Math.abs(first.x - head!.x)).toBeLessThan(2);
+    expect(Math.abs(second.x + second.width - (head!.x + head!.width))).toBeLessThan(2);
     if (width > 760) {
       expect(second.x).toBeGreaterThan(first.x + first.width);
       expect(Math.abs(second.y - first.y)).toBeLessThan(2);
@@ -346,7 +347,7 @@ test('phones get one compact sticky header with navigation beside a folding Astr
 });
 
 
-test('principle sigils use softer faded page colors while retaining delicate hover effects', async ({ page, request }) => {
+test('principle sigils use softer faded page colors while their readable cue stays solid', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -356,26 +357,16 @@ test('principle sigils use softer faded page colors while retaining delicate hov
   const cornerArrows = cards.locator('.astrid-vision-principle-corner');
   for (let index = 0; index < 4; index++) {
     await expect(marks.nth(index)).toHaveCSS('opacity', '0.58');
-    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '0.58');
+    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '1');
     await expect(marks.nth(index)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     await expect(cornerArrows.nth(index)).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    await expect.poll(() => cards.nth(index).evaluate(card => {
-      const mark = card.querySelector('.astrid-vision-principle-sigil')!;
-      const arrow = card.querySelector('.astrid-vision-principle-corner')!;
-      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
-    })).toBe(true);
   }
   const colors = await marks.evaluateAll(elements => elements.map(element => getComputedStyle(element).color));
   expect(new Set(colors).size).toBe(4);
   for (let index = 0; index < 4; index++) {
     await cards.nth(index).hover();
     await expect(marks.nth(index)).toHaveCSS('opacity', '0.82');
-    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '0.82');
-    await expect.poll(() => cards.nth(index).evaluate(card => {
-      const mark = card.querySelector('.astrid-vision-principle-sigil')!;
-      const arrow = card.querySelector('.astrid-vision-principle-corner')!;
-      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
-    })).toBe(true);
+    await expect(cornerArrows.nth(index)).toHaveCSS('opacity', '1');
   }
   await cards.nth(0).hover();
   await expect(cards.nth(0).locator('.astrid-vision-sigil-orbit'))
@@ -464,12 +455,7 @@ test('phone scroll activates each principle sigil through the middle of the view
       await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '3s');
     }
     await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
-    await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '0.82');
-    await expect.poll(() => card.evaluate(el => {
-      const mark = el.querySelector('.astrid-vision-principle-sigil')!;
-      const arrow = el.querySelector('.astrid-vision-principle-corner')!;
-      return getComputedStyle(mark).color === getComputedStyle(arrow).color;
-    })).toBe(true);
+    await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '1');
     if (index > 0) await expect(cards.nth(index - 1)).not.toHaveAttribute('data-sigil-active', 'true');
   }
   await page.emulateMedia({ reducedMotion: 'reduce' });

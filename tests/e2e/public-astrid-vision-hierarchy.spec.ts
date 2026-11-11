@@ -8,8 +8,8 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
   const content = await response.json() as {
     pillars: { id: string; title: string }[];
     principles: { id: string; title: string }[];
-    gaps: { id: string; title: string; assessment: string; appliesTo: string[]; githubUrl: string }[];
-    projects: { id: string; title: string; status: string; gapIds: string[]; githubUrl: string }[];
+    gaps: { id: string; title: string; assessment: string; appliesTo: string[]; primaryAppliesTo?: string; githubUrl: string }[];
+    projects: { id: string; title: string; status: string; gapIds: string[]; primaryGapId?: string | null; githubUrl: string }[];
   };
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
@@ -26,7 +26,7 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
       const modal = page.getByRole('dialog', { name: entry.title });
       await expect(modal).toBeVisible();
       const expectedGaps = content.gaps.filter(gap =>
-        gap.assessment !== 'closed' && gap.appliesTo.includes(kind + ':' + entry.id));
+        gap.assessment !== 'closed' && (gap.primaryAppliesTo ?? gap.appliesTo[0]) === kind + ':' + entry.id);
       await expect(modal.locator('.astrid-vision-details-gap h4')).toHaveText(expectedGaps.map(gap => gap.title));
 
       for (const gap of expectedGaps) {
@@ -34,7 +34,7 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
           .filter({ has: page.getByRole('link', { name: gap.title }) });
         await expect(row.locator('h4 a')).toHaveAttribute('href', gap.githubUrl);
         const plans = content.projects.filter(project =>
-          project.status !== 'done' && project.status !== 'cancelled' && project.gapIds.includes(gap.id));
+          project.status !== 'done' && project.status !== 'cancelled' && (project.primaryGapId ?? project.gapIds[0]) === gap.id);
         await expect(row.locator('.astrid-vision-details-project-heading a'))
           .toHaveCount(plans.length);
         for (const [index, plan] of plans.entries()) {
@@ -54,6 +54,45 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
       await page.keyboard.press('Escape');
       await expect(modal).toHaveCount(0);
     }
+  }
+});
+
+test('pillar and principle detail scroll edges blur only when more content remains', async ({ page, request }) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const content = await response.json();
+  await page.route(FEED, route => route.fulfill({
+    status: 200, contentType: 'application/json',
+    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
+  }));
+  await page.setViewportSize({ width: 390, height: 780 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+
+  for (const subject of [content.pillars[0], content.principles[0]]) {
+    await page.getByRole('button', { name: 'Explore ' + subject.title + ': gaps and projects' }).click();
+    const dialog = page.getByRole('dialog', { name: subject.title });
+    const viewport = dialog.locator('.astrid-vision-details-scroll');
+    const top = dialog.locator('.astrid-vision-details-scroll-fade--top');
+    const bottom = dialog.locator('.astrid-vision-details-scroll-fade--bottom');
+
+    await expect(bottom).toHaveAttribute('data-visible', 'true');
+    await expect(top).not.toHaveAttribute('data-visible', 'true');
+    await expect(top).toHaveCSS('pointer-events', 'none');
+    await expect(bottom).toHaveCSS('pointer-events', 'none');
+
+    await viewport.evaluate(node => { node.scrollTop = (node.scrollHeight - node.clientHeight) / 2; });
+    await expect(top).toHaveAttribute('data-visible', 'true');
+    await expect(bottom).toHaveAttribute('data-visible', 'true');
+
+    await viewport.evaluate(node => { node.scrollTop = node.scrollHeight; });
+    await expect(bottom).not.toHaveAttribute('data-visible', 'true');
+    await expect(top).toHaveAttribute('data-visible', 'true');
+
+    await viewport.evaluate(node => { node.scrollTop = 0; });
+    await expect(top).not.toHaveAttribute('data-visible', 'true');
+    await expect(bottom).toHaveAttribute('data-visible', 'true');
+    await page.keyboard.press('Escape');
+    await expect(dialog).toHaveCount(0);
   }
 });
 
@@ -406,7 +445,7 @@ test('every joined principle, including interior cards without physical left bor
 });
 
 
-test('principle arrow is a subtle boxed control in the bottom-right corner at every layout width', async ({ page, request }) => {
+test('principle details cue sits bottom-left on the copy edge, with the sigil on the right, at every layout width', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json();
@@ -423,18 +462,22 @@ test('principle arrow is a subtle boxed control in the bottom-right corner at ev
       const arrow = card.locator('.astrid-vision-principle-corner');
       const cardBounds = await card.boundingBox();
       const arrowBounds = await arrow.boundingBox();
+      const titleBounds = await card.locator('h3').boundingBox();
+      const sigilBounds = await card.locator('.astrid-vision-principle-sigil').boundingBox();
       expect(cardBounds).not.toBeNull();
       expect(arrowBounds).not.toBeNull();
-      expect(cardBounds!.x + cardBounds!.width - (arrowBounds!.x + arrowBounds!.width))
-        .toBeGreaterThanOrEqual(12);
-      expect(cardBounds!.x + cardBounds!.width - (arrowBounds!.x + arrowBounds!.width))
-        .toBeLessThan(27);
+      // Same left edge as the title, close to the card's bottom edge.
+      expect(Math.abs(arrowBounds!.x - titleBounds!.x)).toBeLessThan(2);
       expect(cardBounds!.y + cardBounds!.height - (arrowBounds!.y + arrowBounds!.height))
         .toBeGreaterThanOrEqual(12);
       expect(cardBounds!.y + cardBounds!.height - (arrowBounds!.y + arrowBounds!.height))
-        .toBeLessThan(27);
-      await expect(arrow).toHaveCSS('border-top-width', '1px');
-      await expect(arrow).toHaveCSS('position', 'relative');
+        .toBeLessThan(32);
+      // The sigil owns the right-hand column and is vertically centred in the card.
+      expect(sigilBounds!.x).toBeGreaterThan(titleBounds!.x + titleBounds!.width - 1);
+      const sigilMid = sigilBounds!.y + sigilBounds!.height / 2;
+      expect(Math.abs(sigilMid - (cardBounds!.y + cardBounds!.height / 2))).toBeLessThan(cardBounds!.height * .2);
+      await expect(arrow).toHaveText(/Details/i);
+      await expect(arrow).toHaveCSS('border-top-width', '0px');
       // A single full-card button remains the actual keyboard-accessible hit area.
       await expect(card.getByRole('button', { name: /Explore .*: gaps and projects/ })).toHaveCount(1);
     }

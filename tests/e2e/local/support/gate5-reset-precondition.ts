@@ -17,6 +17,9 @@ export interface Gate5ResetPreconditionInput {
   expectedRequestAnnotations?: { rationale?: string; group_id?: string };
   authoritativeHistory: unknown;
   preGestureDocument: unknown;
+  /** Runtime's own digests (runtime_protocol timeline_commit_validation.digest) of the raw reply's payload and document: Python
+   *  json.dumps spells floats such as 5.0, which a JS recompute from parsed JSON cannot reproduce. */
+  runtimeDigests: { payload: string; document: string };
   clipId: string;
   expectedTrackId: string;
   expectedPreviousPosition: number;
@@ -305,9 +308,9 @@ export function assertGate5ResetPrecondition(input: Gate5ResetPreconditionInput)
     selected[0].at = input.expectedPosition;
   }
   expectedParent.revision_id = acceptedRevisionId;
-  expectedParent.content_digest = digest(expectedPayload);
+  expectedParent.content_digest = input.runtimeDigests.payload;
   exact(document, expectedDocument, 'canonical closure');
-  exact(data.document_digest, digest(expectedDocument), 'document digest');
+  exact(data.document_digest, input.runtimeDigests.document, 'document digest');
   exact(data.id_map, {}, 'id map');
 
   const authoritativeHead = object(input.authoritativeHead, 'authoritative head');

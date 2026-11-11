@@ -131,6 +131,8 @@ before(async () => {
   valid = {
     request, requestIdentity: request, responseRequest: request, requestIdempotencyKey: durableKey,
     expectedOwnerId: 'owner-setup', expectedOwnerScope: ownerScope, authoritativeHistory, preGestureDocument,
+    // The fixture is a JS-digest world with no Runtime reply text; these stand for Runtime's digests of the accepted reply.
+    runtimeDigests: { payload: fixtureDigest(canonicalDocument.parent_revision.payload), document: fixtureDigest(canonicalDocument) },
     responseStatus: 200, responseBody: response, expectedBase: base, expectedScope: scope,
     clipId, expectedTrackId: trackId, expectedPreviousPosition: 0, expectedPosition: 5, settledOutboxes: settled, authoritativeHead, authoritativeRevision,
   };

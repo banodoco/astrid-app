@@ -16,6 +16,14 @@
       "issue": "https://github.com/banodoco/astrid-app/issues/250",
       "owner": "Plan 39 manager",
       "expiry": "2026-11-25"
+    },
+    {
+      "id": "P39-R12-TASK-SWAP",
+      "file": "tests/e2e/local/three-products.spec.ts",
+      "title": "render R, publish R+1 before it runs: the render is R's, it plays, and it is the film the App showed",
+      "issue": "https://github.com/banodoco/astrid-app/issues/251",
+      "owner": "Plan 39 manager",
+      "expiry": "2026-11-25"
     }
   ]
 }

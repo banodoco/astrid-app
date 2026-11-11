@@ -952,8 +952,11 @@ export class DirectHarness {
   private async commitNativeSeed(payload: Record<string, unknown>): Promise<{ revisionId: string; publicationId: string }> {
     const python = this.authoringPython;
     if (!python) throw new Error('native seed requires the authoring Runtime');
-    const credential = path.join(this.tmp, 'three-products-seed-credential.json');
-    await this.provisionCredential(ASTRID_ACTOR, path.basename(credential));
+    // Minting a credential for ASTRID_ACTOR replaces the actor's earlier one. When the Astrid CLI fixture already minted it
+    // (`astrid-credential.json`), reuse that file: a seed made after the CLI exists (the render timeline) must not revoke the CLI's token.
+    const astridCredential = path.join(this.tmp, 'astrid-credential.json');
+    const credential = existsSync(astridCredential) ? astridCredential : path.join(this.tmp, 'three-products-seed-credential.json');
+    if (credential !== astridCredential) await this.provisionCredential(ASTRID_ACTOR, path.basename(credential));
     const script = String.raw`
 import copy, hashlib, json, sys
 from pathlib import Path
@@ -1088,6 +1091,38 @@ if case['fixture'] == 'three-products':
     if patches:
         bundle = execute(before, patches, verified_media=verified).bundle
         commands.extend(patches)
+elif case['fixture'] == 'render':
+    r = case['render']
+    occ_ref = 'occurrence:' + r['occurrence_id']
+    add(capture_track_create(bundle, 'parent', {'id': 'S1', 'kind': 'visual', 'label': 'S1'}))
+    add(capture_occurrence_create(bundle, r['occurrence_id'], r['shot_id'], name=r['shot_title'], track='S1', on=0, duration=r['duration_ms'] / 1000))
+    add(capture_track_create(bundle, occ_ref, {'id': 'V2', 'kind': 'visual', 'label': 'V2'}))
+    expected_occurrence = {'occurrence_id': r['occurrence_id'], 'shot_id': r['shot_id'],
+        'placement': {'start_ms': 0}, 'source_offset': 0, 'duration_ms': r['duration_ms'], 'speed': 1,
+        'track': 'S1', 'transform': {}, 'gain': 1, 'mute': False, 'provenance': {}}
+    occurrence = document_from_bundle(bundle)['parent_revision']['payload']['occurrences'][0]
+    add({'schema_version': 1, 'op': 'doc.patch', 'version': '1', 'select': None, 'args': {'changes': [
+        {'op': 'set', 'ref': 'parent', 'path': ['occurrences', 'occurrence_id:' + r['occurrence_id'], key],
+         'before': {'state': 'present', 'value': copy.deepcopy(occurrence[key])} if key in occurrence else {'state': 'absent'},
+         'value': copy.deepcopy(value)}
+        for key, value in expected_occurrence.items() if key not in ('occurrence_id', 'shot_id')
+    ]}})
+    before = copy.deepcopy(bundle)
+    after = copy.deepcopy(bundle)
+    expected_parent = {'slug': 'main', 'name': r['name'], 'registry': copy.deepcopy(r['parent_registry']),
+                       'clips': copy.deepcopy(r['parent_clips']),
+                       'config': {'output': {'resolution': '1280x720', 'fps': r['fps'], 'file': 'out.mp4'},
+                                  'clips': copy.deepcopy(r['parent_clips']), 'tracks': copy.deepcopy(before['parent']['config']['tracks'])}}
+    expected_shot = {'metadata': {'title': r['shot_title']}, 'items': [], 'pools': [], 'selected_variants': {},
+        'provenance': {}, 'generation_inputs': {}, 'audio_bindings': [], 'text_bindings': []}
+    after['parent'] = copy.deepcopy(expected_parent)
+    after['shots'][r['shot_id']]['payload'] = copy.deepcopy(expected_shot)
+    after['shots'][r['shot_id']]['internal_timeline'] = copy.deepcopy(r['internal'])
+    admit = [{'schema_version': 1, 'op': 'media.admit', 'version': '1', 'select': None,
+              'args': {'inputs': [{'pin': pin} for pin in raw_pins]}}] if raw_pins else []
+    patches = admit + emit_document_commands(before, after)
+    bundle = execute(before, patches, verified_media=verified).bundle
+    commands.extend(patches)
 elif case['fixture'] == 'parent':
     # A caller-authored parent payload (clips, registry, config extras). Extra tracks are created through the provider first,
     # so the payload keeps the Runtime-normalized track rows.
@@ -1168,6 +1203,15 @@ if case['fixture'] == 'three-products':
     assert raw_shot['shot_id'] == 'f2-shot' and raw_internal['timeline_id'] == case['timeline_id']
     assert canonical_json(raw_shot['payload']) == canonical_json(expected_shot_payload), 'seed changed authored shot payload'
     assert canonical_json(raw_internal['payload']) == canonical_json(expected_internal), 'seed changed authored internal payload'
+elif case['fixture'] == 'render':
+    assert len(raw_occurrences) == len(document['shot_revisions']) == len(document['internal_timeline_revisions']) == 1
+    raw_occurrence = copy.deepcopy(raw_occurrences[0])
+    raw_shot, raw_internal = document['shot_revisions'][0], document['internal_timeline_revisions'][0]
+    assert raw_occurrence.pop('shot_revision_id') == raw_shot['revision_id']
+    assert canonical_json(raw_occurrence) == canonical_json(expected_occurrence), 'seed changed authored occurrence'
+    assert raw_shot['shot_id'] == r['shot_id'] and raw_internal['timeline_id'] == case['timeline_id']
+    assert raw_shot['payload'] == {**expected_shot, 'internal_timeline_revision_id': raw_internal['revision_id']}, 'seed changed authored shot payload'
+    assert canonical_json(raw_internal['payload']) == canonical_json(r['internal']), 'seed changed authored internal payload'
 else:
     assert raw_occurrences == document['shot_revisions'] == document['internal_timeline_revisions'] == []
 print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': receipt['receipt_id']}))
@@ -1492,8 +1536,6 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
 
     const ids = { shotId: 'f2-render-shot', occurrenceId: 'f2-render-occurrence', slotClipId: 'f2-render-slot', markerAssetKey: 'f2-render-marker', placeholderAssetKey: 'f2-render-placeholder' };
     const timelineId = randomUUID();
-    const internalRevisionId = randomUUID();
-    const shotRevisionId = randomUUID();
     const clip = (id: string, at: number, asset: string, from: number, to: number) => ({ id, at, track: 'V2', clipType: 'media', asset, from, to, speed: 1 });
     const shotClips = [
       clip('f2-render-before', 0, 'f2-render-pattern', 0, 2),
@@ -1501,40 +1543,28 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
       clip('f2-render-after', 4, 'f2-render-pattern', 4, 6),
     ];
     const parentClips = [{ id: 'f2-render-tone', at: 0, track: 'A1', clipType: 'media', asset: 'f2-render-tone', from: 0, to: 6, speed: 1, volume: 1 }];
-    const publication = compositionPublication({ projectId, timelineId }, null, RENDER_TIMELINE_NAME, 30);
-    publication.parent_composition.config = {
-      ...publication.parent_composition.config,
-      clips: parentClips,
-      tracks: [{ id: 'S1', kind: 'visual', label: 'S1' }, { id: 'A1', kind: 'audio', label: 'A1' }],
-    } as unknown as typeof publication.parent_composition.config;
-    publication.parent_composition.clips = parentClips as unknown as typeof publication.parent_composition.clips;
-    publication.parent_composition.registry = { assets: { 'f2-render-tone': entry(toneObject, 6) } } as unknown as typeof publication.parent_composition.registry;
-    Object.assign(publication, {
-      internal_timeline_revisions: [{
-        timeline_id: timelineId,
-        revision_id: internalRevisionId,
-        payload: {
+    // Runtime retired `composition-revisions` publication (410 retired_route); seed through `POST .../timelines/{t}/commit`
+    // EditCommands, as the other seeds do. The parent keeps the bootstrap's V1/A1 (Runtime 8012d6a) and gains the visual track S1
+    // that hosts the shot occurrence. The commit route admits only media the same commit names (`media.admit`), so the three
+    // seeded objects are named as raw pins.
+    const shell = await this.createCommitTimeline(projectId, timelineId, RENDER_TIMELINE_NAME);
+    const committed = await this.commitNativeSeed({
+      fixture: 'render', initialize: true, label: 'Seed render timeline', project_id: projectId, timeline_id: timelineId,
+      head_revision_id: shell.revisionId, base_publication_id: shell.publicationId, idempotency_key: randomUUID(),
+      raw_media: [toneObject.objectId, patternObject.objectId, placeholder.objectId],
+      render: {
+        name: RENDER_TIMELINE_NAME, fps: 30, shot_id: ids.shotId, occurrence_id: ids.occurrenceId, shot_title: 'F2 render shot', duration_ms: 6000,
+        parent_clips: parentClips, parent_registry: { assets: { 'f2-render-tone': entry(toneObject, 6) } },
+        internal: {
           tracks: [{ id: 'V2', kind: 'visual', label: 'V2' }],
           clips: shotClips, effects: [], audio: [], layout: {},
           registry: { assets: { 'f2-render-pattern': entry(patternObject, 6), [ids.placeholderAssetKey]: entry(placeholder, 4) } },
           assets: [],
         },
-      }],
-      shot_revisions: [{
-        shot_id: ids.shotId,
-        revision_id: shotRevisionId,
-        internal_timeline_revision_id: internalRevisionId,
-        payload: { metadata: { title: 'F2 render shot' }, items: [], pools: [], selected_variants: {}, provenance: {}, generation_inputs: {}, audio_bindings: [], text_bindings: [] },
-      }],
+      },
     });
-    (publication.parent_composition as Record<string, unknown>).occurrences = [{
-      occurrence_id: ids.occurrenceId, shot_id: ids.shotId, shot_revision_id: shotRevisionId,
-      placement: { start_ms: 0 }, source_offset: 0, duration_ms: 6000, speed: 1, track: 'S1', transform: {}, gain: 1, mute: false, provenance: {},
-    }];
-    const published = await this.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, publication);
-    if (published.status !== 200) throw new Error(`seed render timeline: ${published.status} ${JSON.stringify(published.body)}`);
     this.renderSeed = {
-      projectSlug: (project.body.data ?? project.body).slug, timelineId, timelineName: RENDER_TIMELINE_NAME, headRevisionId: published.body.data.new_head,
+      projectSlug: (project.body.data ?? project.body).slug, timelineId, timelineName: RENDER_TIMELINE_NAME, headRevisionId: committed.revisionId,
       ...ids, placeholder, placeholderGrey: { ...RENDER_GREY }, occurrenceBlockSelector: `[data-action-id="shot-group-label"][data-shot-group-drag-anchor-clip-id="${ids.occurrenceId}"]`, fps: 30, durationSeconds: 6,
     };
     return this.renderSeed;

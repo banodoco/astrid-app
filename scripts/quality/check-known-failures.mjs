@@ -49,7 +49,7 @@ function scanFile(file, repoRoot, exceptions) {
       let enclosingTitle;
       for (let i = index; i >= 0; i--) {
         const header = lines[i].match(/^\s*test(?:\.\w+)?\(\s*(['"])(.*?)\1\s*,/);
-        if (header) { enclosingTitle = header[2]; break; }
+        if (header) { enclosingTitle = header[2].replace(/\\(['"])/g, '$1'); break; }
       }
       return {
         where,

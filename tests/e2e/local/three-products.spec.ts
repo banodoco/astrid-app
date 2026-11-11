@@ -2077,16 +2077,26 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await expect(referenceClip).toBeVisible();
   await expect(timelineWrapper).toBeVisible();
   await expect(page.getByRole('button', { name: 'Zoom out timeline', exact: true })).toBeVisible();
-  await page.getByRole('button', { name: 'Zoom out timeline', exact: true }).click();
-  const [dropBox, referenceBox, wrapperBox] = await Promise.all([
-    dropClip.boundingBox(),
-    referenceClip.boundingBox(),
-    timelineWrapper.boundingBox(),
-  ]);
-  if (!dropBox || !referenceBox || !wrapperBox) throw new Error('Cannot measure prepared manual-drop viewport');
-  const pixelsPerSecond = (referenceBox.x - dropBox.x) / THREE_PRODUCTS_REFERENCE_AT;
+  // One zoom step (x1/1.4, lib/timeline-scale.ts) no longer brings the 22.5s pointer inside the wrapper at the
+  // default scale, so use the same user-facing control until it does (bounded). The in-wrapper check below is kept.
+  const measureDropViewport = async () => {
+    const [dropBox, referenceBox, wrapperBox] = await Promise.all([
+      dropClip.boundingBox(),
+      referenceClip.boundingBox(),
+      timelineWrapper.boundingBox(),
+    ]);
+    if (!dropBox || !referenceBox || !wrapperBox) throw new Error('Cannot measure prepared manual-drop viewport');
+    const pixelsPerSecond = (referenceBox.x - dropBox.x) / THREE_PRODUCTS_REFERENCE_AT;
+    return { dropBox, wrapperBox, pixelsPerSecond, centeredPointerX: dropBox.x + manualDropPointerAt * pixelsPerSecond };
+  };
+  let viewport = await measureDropViewport();
+  for (let zoomClicks = 0; zoomClicks < 6; zoomClicks += 1) {
+    await page.getByRole('button', { name: 'Zoom out timeline', exact: true }).click();
+    viewport = await measureDropViewport();
+    if (viewport.centeredPointerX <= viewport.wrapperBox.x + viewport.wrapperBox.width) break;
+  }
+  const { wrapperBox, pixelsPerSecond, centeredPointerX } = viewport;
   expect(pixelsPerSecond).toBeGreaterThan(0);
-  const centeredPointerX = dropBox.x + manualDropPointerAt * pixelsPerSecond;
   expect(centeredPointerX).toBeGreaterThanOrEqual(wrapperBox.x);
   expect(centeredPointerX).toBeLessThanOrEqual(wrapperBox.x + wrapperBox.width);
   expect(manualDropPointerAt - manualDropDurationSeconds / 2).toBe(20);
@@ -2492,10 +2502,18 @@ test('M1 real dependency conflict retains B original guards and pending identity
     if (request.method() === 'POST' && SAVES.test(new URL(request.url()).pathname)) legacy.push(request.url());
   });
   await openCommandTimeline(page, harness, seed3);
-  const resetResponse = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
-  await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 5, 0, THREE_PRODUCTS_REFERENCE_AT);
-  const reset = await resetResponse;
-  expect(reset.status(), await reset.text()).toBe(200);
+  // The worker-scoped seed carries whatever position the previous case left. A reset drag from 5 is only a real
+  // gesture when the clip is at 5; at 0 there is nothing to reset (a no-op drag sends no commit).
+  const startHead = (await history(harness, seed3)).head;
+  const startAt = ((await revisionBody(harness, startHead.revision_id)).payload.clips as Array<{ id: string; at: number }>)
+    .find((clip) => clip.id === seed3.appClipId)!.at;
+  if (startAt !== 0) {
+    expect(startAt).toBe(5);
+    const resetResponse = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
+    await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 5, 0, THREE_PRODUCTS_REFERENCE_AT);
+    const reset = await resetResponse;
+    expect(reset.status(), await reset.text()).toBe(200);
+  }
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
   let c!: CommitAcceptedMutation;
   const { wire, before, owner } = await prepareDependentMountedDocuments(page, harness, seed3, async (a) => {

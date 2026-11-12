@@ -2763,7 +2763,10 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   const finalHistory = await history(harness, seed3);
   expect(finalHistory.head).toEqual(pinOf(independent));
   expect(finalHistory.items).toHaveLength(before.items.length + 3);
-  expect(finalHistory.items.some((entry) => (entry.records?.undo_of ?? []).length > 0)).toBe(false);
+  // Only this test's own publications: seed3 is worker-scoped, so earlier serial tests' undos are in its history.
+  const addedEntries = finalHistory.items.filter((entry) => !before.items.some((old) => old.publication_id === entry.publication_id));
+  expect(addedEntries).toHaveLength(3);
+  expect(addedEntries.some((entry) => (entry.records?.undo_of ?? []).length > 0), 'the refused undo published no undo').toBe(false);
   const headState = await revisionState(harness, seed3, pinOf(independent).revision_id);
   expect(headState.trackLabel).toBe(trackLabel);
   expect((headState.parent.config.tracks as Array<{ id: string }>).map((track) => track.id)).toContain('f2-mixed-independent');

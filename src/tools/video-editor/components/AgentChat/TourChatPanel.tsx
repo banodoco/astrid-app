@@ -219,12 +219,17 @@ export function TourChatPanel({ isExpanded = false }: { isExpanded?: boolean }) 
 
   const composerText = beat === 'compose' && !sent ? script.prompt.slice(0, progress.typed) : '';
   const busy = beat === 'respond' && !chatReady;
-  const thinking = busy && progress.replyChars === 0;
+  // These three follow the reply's own progress, never `ready.chat`: the store's flag reaches a render on its own (a
+  // store change renders at once, the progress it was set with a moment later), and for that one render "ready, but the
+  // last card not in yet" would drop the reserved layout, shrink the transcript and scroll it, and then put it back: the
+  // actions group, and the highlight on it, jumped as the second card came in on any screen short enough to scroll.
+  const thinking = beat === 'respond' && progress.replyChars === 0;
   // From the reply's first character the actions group takes its final place and size, unseen, under the reply: the
   // transcript scrolls once, the cards are then revealed into the group, and nothing moves when they do.
-  const reserveActions = busy && progress.replyChars > 0 && !!allActions && progress.cards < script.toolCards.length;
+  // The reserved copy stays for the whole beat: there is no moment at which taking it away could change a size.
+  const reserveActions = beat === 'respond' && progress.replyChars > 0 && !!allActions;
   // The reply bubble while it is still arriving.
-  const streaming = busy && progress.replyChars > 0 && progress.replyChars < script.reply.length ? reply.find((item) => item.kind === 'message') : undefined;
+  const streaming = beat === 'respond' && progress.replyChars > 0 && progress.replyChars < script.reply.length ? reply.find((item) => item.kind === 'message') : undefined;
 
   return (
     <div className="flex h-full w-full flex-col overflow-hidden" {...{ [EDITOR_TOUR_ANCHOR_ATTRIBUTE]: EDITOR_TOUR_ANCHORS.chatPane }}>

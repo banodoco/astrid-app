@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import './TourCard.css';
 import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
 import { TOUR_FINALE_ENTRANCE_MS, TourStrip } from './TourStrip';
@@ -6,7 +6,7 @@ import { TourVisual } from './TourVisual';
 import { TOUR_COMPARE_ENTRANCE_MS } from './TourCompare';
 import { TOUR_CARD_ENTRANCE_MS, useTourCardEntrance } from './useTourCardEntrance';
 import { EDITOR_TOUR_GALLERY_ACT, markEditorTourReady, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, ChevronUp } from 'lucide-react';
 import { DiscordMark } from '@/pages/Home/PublicAstridSocialLinks';
 import { DISCORD_URL } from '@/pages/Home/publicAstridLinks';
 import { Button } from '@/shared/components/ui/button.tsx';
@@ -71,6 +71,10 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
     : TOUR_CARD_ENTRANCE_MS;
   const { settled, reducedMotion } = useTourCardEntrance(key, explains && live, entranceMs, arrived);
   const playing = !reducedMotion && arrived;
+  // Whether a phone explainer's body shows: open to begin with, then as the user last left it, for this run.
+  const [detailsFor, setDetailsFor] = useState({ runId, open: true });
+  const detailsOpen = detailsFor.runId === runId ? detailsFor.open : true;
+  const details: Details = { open: detailsOpen, onToggle: () => setDetailsFor({ runId, open: !detailsOpen }), animate: !reducedMotion };
   // The card is there and at rest: from now its Next acts on the first press, whatever of its entrance is still playing.
   useEffect(() => {
     if (arrived && live && !working) markEditorTourReady('arrived');
@@ -89,7 +93,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
         aria-label={beat === 'welcome' ? SCRIPT.welcome.title : beat === 'finale' ? SCRIPT.finale.title : beat === 'feedback' ? feedbackTitle() : beat === 'gallery' ? `Tour, step ${act} of ${ACT_COUNT}, part 2 of 2` : `Tour, step ${act} of ${ACT_COUNT}`}
         className={cn(
           rise && 'editor-tour-rise',
-          'max-w-[calc(100vw-24px)] max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card text-card-foreground shadow-xl',
+          'relative max-w-[calc(100vw-24px)] max-h-[calc(100dvh-24px)] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card text-card-foreground shadow-xl',
           phone ? cn('w-[calc(100vw-24px)] rounded-2xl', beat === 'land' ? 'px-5 py-3' : explains ? 'p-5' : 'px-5 py-4') : tablet ? cn(
             beat === 'welcome' && 'w-[460px] p-7',
             (beat === 'land' || beat === 'gallery') && 'w-[580px] p-6',
@@ -108,7 +112,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
         {/* The runner fades this in and out as the card travels; the section itself (the card's box) stays. */}
         <div data-editor-tour-card-content>
         {beat === 'welcome' && <Welcome onPrimary={onPrimary} onSkip={onSkip} fit={fit} />}
-        {beat === 'land' && <Explainer act={act} playing={playing} entering={!reducedMotion && !settled} waiting={!arrived} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
+        {beat === 'land' && <Explainer act={act} playing={playing} entering={!reducedMotion && !settled} waiting={!arrived} details={details} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
         {beat === 'gallery' && <GalleryExplainer act={act} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
         {beat === 'finale' && <Finale onPrimary={onPrimary} onBack={onBack} fit={fit} />}
         {beat === 'feedback' && <Feedback onPrimary={onPrimary} onBack={onBack} fit={fit} />}
@@ -163,7 +167,34 @@ function NavRow({ secondary, children, className }: { secondary?: ReactNode; chi
 /** One heading style for every card's title on touch (Astrid's own cards keep the larger mink title). */
 const TOUCH_HEADING = 'text-pretty font-serif font-theme-heading text-xl leading-tight text-foreground';
 
-function Explainer({ act, playing, entering, waiting, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; entering: boolean; waiting: boolean; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
+/** A phone explainer's body can be folded away; the choice is kept for the rest of the run. */
+interface Details { open: boolean; onToggle: () => void; animate: boolean }
+
+/**
+ * The little tab on a phone explainer's bottom edge: an arrow pointing up while the body shows (press to fold it away,
+ * leaving the title and the buttons, and the whole preview in view) and down once it is folded (press to bring it back).
+ * It sits in the card's own bottom padding, between Back and Next, so it costs the card no height; its touch target is
+ * 44 px all the same.
+ */
+function DetailsTab({ open, onToggle, animate, controls }: Details & { controls: string }) {
+  return (
+    <button
+      type="button"
+      data-editor-tour-details-tab
+      aria-expanded={open}
+      aria-controls={controls}
+      aria-label={open ? SCRIPT.controls.hideDetails : SCRIPT.controls.showDetails}
+      className="group absolute bottom-0 left-1/2 flex h-11 w-16 -translate-x-1/2 items-end justify-center rounded-sm focus-visible:outline-none"
+      onClick={onToggle}
+    >
+      <span className="flex h-4 w-12 items-center justify-center rounded-t-md border border-b-0 border-border/70 bg-muted/60 text-muted-foreground transition-colors group-hover:text-foreground group-focus-visible:ring-2 group-focus-visible:ring-ring">
+        <ChevronUp className={cn('h-3.5 w-3.5', animate && 'transition-transform duration-300', !open && 'rotate-180')} aria-hidden />
+      </span>
+    </button>
+  );
+}
+
+function Explainer({ act, playing, entering, waiting, details, onPrimary, onBack, onSkip, fit }: { act: EditorTourAct; playing: boolean; entering: boolean; waiting: boolean; details: Details; fit: Fit } & Omit<TourCardProps, 'act' | 'beat'>) {
   const { title, body, visual, labels } = SCRIPT.acts[act].card;
   const next = <PrimaryButton label={SCRIPT.controls.next} onPrimary={onPrimary} fit={fit} />;
   const part = act === EDITOR_TOUR_GALLERY_ACT ? 1 : undefined;
@@ -184,14 +215,30 @@ function Explainer({ act, playing, entering, waiting, onPrimary, onBack, onSkip,
     );
   }
   // On touch the spotlit preview above shows this act's picture, full size. A tablet keeps the chain as a pager between
-  // Back and Next; a phone keeps only what it needs, so the card leaves the preview and its new row in view.
+  // Back and Next. A phone's card sits above the preview: its body shows by default and folds away behind the tab on its
+  // bottom edge, which leaves the compact card (title, Back, Next) and the whole preview in view.
   const tablet = fit.device === 'tablet';
+  const bodyId = `editor-tour-details-${act}`;
   return (
     <>
       <CounterRow act={act} part={part} onBack={onBack} onSkip={onSkip} fit={fit} />
       <h2 className={cn(tablet ? 'mt-3' : 'mt-2', TOUCH_HEADING)}>{title}</h2>
-      {/* A phone's explainer sits above the preview, so it is compact: the title alone, no body. */}
       {tablet && <p className="mt-1.5 text-pretty text-[15px] leading-6 text-muted-foreground">{body}</p>}
+      {!tablet && (
+        // Rows 1fr <-> 0fr: the body's own height animates, whatever it is, and the card grows down from its fixed top.
+        <div
+          id={bodyId}
+          data-editor-tour-details={details.open ? 'open' : 'folded'}
+          className={cn('grid', details.animate && 'transition-[grid-template-rows,opacity] duration-300 ease-out', details.open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0')}
+          {...(details.open ? {} : { inert: '' })}
+        >
+          <div className="min-h-0 overflow-hidden">
+            <p className="pt-1.5 text-pretty text-sm leading-[1.4rem] text-muted-foreground">{body}</p>
+          </div>
+        </div>
+      )}
+      {/* Before the buttons in the document (it is placed on the bottom edge by CSS): the card's primary action stays its last control. */}
+      {!tablet && <DetailsTab {...details} controls={bodyId} />}
       <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : 'mt-2'}>
         {tablet && <div className="min-w-0 flex-1"><TourStrip filled={act} labels={SCRIPT.strip} size="medium" /></div>}
         {next}

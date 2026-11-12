@@ -1,4 +1,5 @@
-import type { CSSProperties } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
+import type { TourTwoLineLabel } from '../tourScript';
 import { EDITOR_TOUR_MEDIA, type EditorTourMediaSlot } from '../tourMedia';
 import { TourMedia, type TourMediaKind } from './TourMedia';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
@@ -33,19 +34,30 @@ export const TOUR_FINALE_ENTRANCE_MS = lightAt(NODES.length - 1) + LIGHT_MS;
  * card (its connector draws in, then the thumbnail fades up); later steps wait as empty frames (`medium` is the same at the large strip's size, for a tablet's card). The large strip
  * (the finale) is the whole chain lit in the accent, played in by the card's entrance and at rest once it settles.
  */
+type StripLabel = string | TourTwoLineLabel;
+
+const plainLabel = (label: StripLabel) => (typeof label === 'string' ? label : label.join(' '));
+
+function labelText(label: StripLabel, twoLines: boolean): ReactNode {
+  if (typeof label === 'string' || !twoLines) return plainLabel(label);
+  return <>{label[0]}<br />{label[1]}</>;
+}
+
 export function TourStrip({ filled, labels, size = 'compact', wrapLabels = false }: {
   filled: 1 | 2 | 3;
-  labels: readonly [string, string, string];
+  /** Plain labels, or labels with their one allowed break (`wrapLabels` then breaks every one of them there). */
+  labels: readonly [StripLabel, StripLabel, StripLabel];
   size?: 'compact' | 'medium' | 'large';
   /** Whether the chain's entrance is playing (large strip only); the pictures themselves are always stills. */
   playing?: boolean;
-  /** Let long labels take two lines (a phone's finale), instead of running past their node. */
+  /** Set every two-part label on two lines, broken where the script says (a phone's finale): all of them, so none sits
+   *  on one line beside a neighbour on two. Without it each is one line. */
   wrapLabels?: boolean;
 }) {
   const large = size === 'large';
   const big = size !== 'compact';
   return (
-    <ol className="flex items-start" aria-label={labels.join(', then ')}>
+    <ol className="flex items-start" aria-label={labels.map(plainLabel).join(', then ')}>
       {NODES.map((node, index) => {
         const reached = index < filled;
         const newest = !large && index === filled - 1;
@@ -89,7 +101,7 @@ export function TourStrip({ filled, labels, size = 'compact', wrapLabels = false
                 )}
               </span>
               <span className={cn('text-xs', wrapLabels ? 'w-24 text-center leading-tight' : 'whitespace-nowrap leading-none', large || reached ? 'text-foreground' : 'text-muted-foreground')}>
-                {labels[index]}
+                {labelText(labels[index], wrapLabels)}
               </span>
             </span>
           </li>

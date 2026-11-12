@@ -54,13 +54,17 @@ function ExtensionToClip({ labels: [name, kind] }: { labels: readonly [string, s
   );
 }
 
-/** The start frame comes alive: the 14 s shot fades up over it and plays under a slow playhead. */
+/**
+ * The start frame becomes the shot: the 14 s shot's first frame fades up over the still it was made from, under a slow
+ * playhead. A picture, not a second video: the preview beside this card is already playing the shot, and a second decoder
+ * of the same clip halved the page's frame rate while the card was up (measured, 4x-throttled: 17 ms frames became 31 ms).
+ */
 function StillToVideo({ labels: [model, length], playing }: { labels: readonly [string, string]; playing: boolean }) {
   return (
     <>
       <TourMedia slot={EDITOR_TOUR_MEDIA.stills[0]} kind="still" />
       <div className="editor-tour-fade absolute inset-0" style={delay(250)}>
-        <TourMedia slot={EDITOR_TOUR_MEDIA.video} kind="video" poster={EDITOR_TOUR_MEDIA.stills[0].displayUrl ?? EDITOR_TOUR_MEDIA.stills[0].url} playing={playing} />
+        <TourMedia slot={EDITOR_TOUR_MEDIA.video} kind="still" />
       </div>
       <Chip className="left-2 bottom-3 flex items-center gap-1">
         <Play className="h-2.5 w-2.5 fill-current" strokeWidth={0} />

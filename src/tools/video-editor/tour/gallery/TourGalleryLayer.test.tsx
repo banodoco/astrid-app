@@ -2,7 +2,7 @@ import { act, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { exitEditorTour, setEditorTourBeat, showEditorTourBeat, startEditorTour } from '@/shared/state/editorTourStore';
 import { getPaneLockHolds } from '@/shared/state/paneLockHolds';
-import { TourGalleryLayer } from './TourGalleryLayer';
+import { TOUR_GALLERY_MOUNT_AFTER_MS, TourGalleryLayer } from './TourGalleryLayer';
 
 const pane = vi.hoisted(() => ({ props: [] as Array<Record<string, unknown>>, mounts: 0, unmounts: 0 }));
 
@@ -45,10 +45,15 @@ describe('TourGalleryLayer', () => {
     expect(mounted()).toBe(false);
   });
 
-  it('mounts closed on act 2\'s land, and opens only when the card and spotlight commit to the gallery, not when the store moves', () => {
+  it('mounts closed during act 2\'s land, a moment after its result is shown (never inside the Send press), and opens only when the card and spotlight commit to the gallery, not when the store moves', async () => {
+    vi.useFakeTimers();
     render(<TourGalleryLayer />);
     go(2, 'land');
+    expect(mounted()).toBe(false);
     show('land');
+    expect(mounted()).toBe(false);
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUR_GALLERY_MOUNT_AFTER_MS + 100); });
+    vi.useRealTimers();
     expect(mounted()).toBe(true);
     expect(last()).toMatchObject({ open: false, anchored: false, animate: true });
 

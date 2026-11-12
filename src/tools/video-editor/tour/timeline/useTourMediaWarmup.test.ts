@@ -3,7 +3,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { exitEditorTour, setEditorTourBeat, startEditorTour } from '@/shared/state/editorTourStore.ts';
 import { EDITOR_TOUR_MEDIA } from '../tourMedia.ts';
-import { tourWarmupPictures, useTourMediaWarmup } from './useTourMediaWarmup.ts';
+import { TOUR_WARM_DECODE_CAP_MS, tourWarmupPictures, useTourMediaWarmup } from './useTourMediaWarmup.ts';
 
 beforeEach(() => startEditorTour());
 afterEach(() => { exitEditorTour(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
@@ -50,7 +50,9 @@ it('yields first paint, then decodes step 1\'s poster alone until step 1 has lan
   expect(images).toHaveLength(0);
   paint();
   expect(view.result.current).toBe(true);
-  expect(sources(images)).toEqual([guidePoster]);
+  // Each picture waits for an idle moment, the first included.
+  expect(images).toHaveLength(0);
+  await waitFor(() => expect(sources(images)).toEqual([guidePoster]));
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 40)); });
   expect(decode).toHaveBeenCalledTimes(1);
 
@@ -77,4 +79,22 @@ it('continues after an image decode fails and cancels remaining work on exit', a
   const count = images.length;
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 60)); });
   expect(images).toHaveLength(count);
+});
+
+it('gives up on a picture whose decode never settles, and warms the next one', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  try {
+    const { images, decode, paint } = setup();
+    decode.mockReturnValueOnce(new Promise(() => undefined));
+    act(() => setEditorTourBeat(1, 'land'));
+    const view = renderHook(useTourMediaWarmup);
+    paint(); paint();
+    await act(async () => { await vi.advanceTimersByTimeAsync(100); });
+    expect(images).toHaveLength(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(TOUR_WARM_DECODE_CAP_MS + 100); });
+    expect(images.length).toBeGreaterThanOrEqual(2);
+    view.unmount();
+  } finally {
+    vi.useRealTimers();
+  }
 });

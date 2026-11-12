@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import { editorTourTargets, respondWorking, spotlightTargets } from './EditorTourRunner';
 import { spotlightTargetKey } from './useSpotlightRects';
 
-const LIVE = { chatReady: false, instant: false, reducedMotion: false };
+const LIVE = { actionsShowing: false, instant: false, reducedMotion: false };
 
 describe('respond phases', () => {
   it('is working only while the reply streams in, forward, with motion', () => {
     expect(respondWorking('respond', LIVE)).toBe(true);
-    expect(respondWorking('respond', { ...LIVE, chatReady: true })).toBe(false);
+    expect(respondWorking('respond', { ...LIVE, actionsShowing: true })).toBe(false);
     // Back and reduced motion arrive with the reply already there: straight to the actions.
     expect(respondWorking('respond', { ...LIVE, instant: true })).toBe(false);
     expect(respondWorking('respond', { ...LIVE, reducedMotion: true })).toBe(false);

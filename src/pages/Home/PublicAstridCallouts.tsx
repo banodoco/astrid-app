@@ -100,7 +100,7 @@ const AGENT_CALLOUTS: readonly CalloutDefinition[] = [
     target: '.astrid-chat-surface',
     at: [1, 0.42],
     side: 'left',
-    phoneTitle: 'Integrated into open-source tools',
+    phoneTitle: 'Leverage open source tools',
     // On phones the chip sits along the bottom, where its logos have room. Its connector rises beside
     // the conversation and turns in to Astrid's reply, which stays clear of the chip when it unfolds
     // upwards over the result and composer.

@@ -773,14 +773,14 @@ describe('useExternalDrop', () => {
 
     const dataRef = {
       current: makeDropTestData({
-        tracks: [{ id: 'V1', kind: 'visual', label: 'V1' }],
-        rows: [{ id: 'V1', actions: [] }],
-        clipOrder: { V1: [] },
+        tracks: [{ id: 'V1', kind: 'visual', label: 'V1' }, { id: 'A1', kind: 'audio', label: 'A1' }],
+        rows: [{ id: 'V1', actions: [] }, { id: 'A1', actions: [] }],
+        clipOrder: { V1: [], A1: [] },
         registry: { assets: {} as Record<string, { file: string; type?: string; duration?: number }> },
       }),
     } as React.MutableRefObject<DropTestData>;
     const pendingOpsRef = { current: 0 } as React.MutableRefObject<number>;
-    const mediaSelection = { asset: 'asset-rt', generation_id: 'gen-a', variant_id: 'var-a', object_id: 'obj-a' };
+    const mediaSelection = { asset: 'asset-rt', generation_id: 'gen-a', variant_id: 'var-a', object_id: `sha256:${'a'.repeat(64)}`, catalog_digest: `sha256:${'b'.repeat(64)}` };
     const upload = deferred<{ generationId: string; variantType: 'video'; imageUrl: string; metadata: { content_type: string; original_filename: string } }>();
     const uploadVideoGeneration = vi.fn(async () => upload.promise);
     const prepareGenerationAsset = vi.fn((gen: { generationId: string }) => ({
@@ -807,9 +807,9 @@ describe('useExternalDrop', () => {
       lastPosition: {
         time: 12,
         rowIndex: 0,
-        trackId: 'V1',
-        trackKind: 'visual',
-        trackName: 'V1',
+        trackId: 'A1',
+        trackKind: 'audio',
+        trackName: 'A1',
         isNewTrack: false,
         isNewTrackTop: false,
         isReject: false,
@@ -858,7 +858,10 @@ describe('useExternalDrop', () => {
     });
 
     expect(uploadVideoGeneration).toHaveBeenCalledTimes(1);
+    expect(uploadVideoGeneration).toHaveBeenCalledWith(expect.objectContaining({ name: 'clip.mp3', type: 'audio/mpeg' }));
     expect(prepareAssetUpload).not.toHaveBeenCalled();
+    expect(uploadAsset).not.toHaveBeenCalled();
+    expect(patchRegistry).not.toHaveBeenCalled();
     expect(handleAssetDrop).not.toHaveBeenCalled();
 
     upload.resolve({
@@ -870,9 +873,11 @@ describe('useExternalDrop', () => {
     await dropPromise;
 
     expect(prepareAssetUpload).not.toHaveBeenCalled();
+    expect(uploadAsset).not.toHaveBeenCalled();
+    expect(patchRegistry).not.toHaveBeenCalled();
     expect(handleAssetDrop).toHaveBeenCalledWith(
       'asset-rt',
-      expect.anything(),
+      'A1',
       12,
       false,
       false,

@@ -237,11 +237,12 @@ function Explainer({ act, playing, entering, waiting, details, onPrimary, onBack
           </div>
         </div>
       )}
+      {/* Before the buttons in the document (it is placed on the bottom edge by CSS): the card's primary action stays its last control. */}
+      {!tablet && <DetailsTab {...details} controls={bodyId} />}
       <NavRow secondary={<BackControl onBack={onBack} touch />} className={tablet ? 'items-end gap-5' : 'mt-2'}>
         {tablet && <div className="min-w-0 flex-1"><TourStrip filled={act} labels={SCRIPT.strip} size="medium" /></div>}
         {next}
       </NavRow>
-      {!tablet && <DetailsTab {...details} controls={bodyId} />}
     </>
   );
 }

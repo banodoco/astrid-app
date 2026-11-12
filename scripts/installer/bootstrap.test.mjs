@@ -63,16 +63,24 @@ function screen(text) {
   }).join('\n').trim();
 }
 
-for (const [locale, frames, mark] of [['C.UTF-8', '▁╱▔╲▁╱▔╲', '✓'], ['C', '_/-\\_/-\\', 'done']]) {
-  test(`POSIX draws its zigzag only on a terminal and ends the line with ${mark} (${locale})`, () => scenario(async (context) => {
+// The steady stream of mink tracks, one frame a tick from a run setting off. astrid-agent's
+// tests/test_installer_progress.py pins astrid.installer.progress to these same frames.
+const tracks = {
+  unicode: ['⠳         ⠠', '⠲ ⠳        ', '⠢ ⠲ ⠳      ', '⠠ ⠢ ⠲ ⠳    ', '  ⠠ ⠢ ⠲ ⠳  ', '    ⠠ ⠢ ⠲ ⠳', '      ⠠ ⠢ ⠲', '        ⠠ ⠢'],
+  ascii: ["'.        .", "'  '.      ", " . '  '.   ", "    . '  '.", "       . ' "],
+};
+for (const [locale, frames, mark] of [['C.UTF-8', tracks.unicode, '✓'], ['C', tracks.ascii, 'done']]) {
+  test(`POSIX runs mink tracks only on a terminal and ends the line with ${mark} (${locale})`, () => scenario(async (context) => {
     // PYTHONCOERCECLOCALE=0 keeps the pty helper from exporting a UTF-8 LC_CTYPE for a C locale.
     const terminalEnv = { LANG: locale, LC_ALL: '', LC_CTYPE: '', PYTHONCOERCECLOCALE: '0', TERM: 'xterm', NO_COLOR: '', CI: '', MOCK_PYTHON_RELEASE: '' };
-    // uv's Python setup is slow enough for the zigzag to draw itself in full.
+    // uv's Python setup is slow enough for a whole cycle of tracks.
     const release = path.join(context.root, 'release-python');
     setTimeout(() => writeFile(release, 'continue'), 2500);
     const result = await context.run('python3', ['-c', onTerminal, '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, MOCK_PYTHON_RELEASE: release });
     assert.equal(result.code, 0, result.stderr);
-    assert.ok(result.stdout.includes(frames), JSON.stringify(result.stdout));
+    assert.ok(frames.every((frame) => [...frame].length === 11), 'the tracks keep one width');
+    // Each tick steps back over the 11 cells and draws the next frame, starting at tick 0.
+    assert.ok(result.stdout.includes(`${preparation} ${' '.repeat(11)}${frames.map((frame) => '\b'.repeat(11) + frame).join('')}`), JSON.stringify(result.stdout));
     assert.equal(screen(result.stdout), `${preparation} ${mark}\nAstrid is ready.`);
     const piped = await run(context, [], terminalEnv);
     assert.equal(piped.stdout, `${preparation}\nAstrid is ready.\n`);

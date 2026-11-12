@@ -25,6 +25,12 @@ export interface EditorTourActScript {
   };
 }
 
+/**
+ * A label with its one allowed break: on one line where there is room (the two parts joined by a space), and on two lines,
+ * broken exactly here, where there is not. Labels shown side by side then always have the same number of lines.
+ */
+export type TourTwoLineLabel = readonly [string, string];
+
 export interface EditorTourScript {
   readonly acts: Readonly<Record<EditorTourAct, EditorTourActScript>>;
   /** The centred card before act 1: Astrid says hello. */
@@ -34,13 +40,14 @@ export interface EditorTourScript {
   readonly watching: string;
   readonly hints: { readonly compose: string; readonly composeTouch: string; readonly respond: string; readonly respondWorking: string };
   /** `send` is a touch card's own Send, the same press as the chat's. */
-  readonly controls: { readonly next: string; readonly send: string; readonly back: string; readonly skip: string };
+  /** `hideDetails` / `showDetails` name the tab that folds a phone explainer's body away and brings it back. */
+  readonly controls: { readonly next: string; readonly send: string; readonly back: string; readonly skip: string; readonly hideDetails: string; readonly showDetails: string };
   /** Act 2's second card, `gallery`: the Generations pane slides up. */
   readonly gallery: { readonly title: string; readonly body: string };
   /** Agent → open models → output: the card's strip, one step per act. */
   readonly strip: readonly [string, string, string];
   /** After act 3: the lit chain is the one example; the body opens it out. */
-  readonly finale: { readonly title: string; readonly body: string; readonly action: string; readonly recap: readonly [string, string, string] };
+  readonly finale: { readonly title: string; readonly body: string; readonly action: string; readonly recap: readonly [TourTwoLineLabel, TourTwoLineLabel, TourTwoLineLabel] };
   /** The last card, after the finale: Astrid asks for feedback and points to the Discord. */
   /** `mobileAction` ends the tour on a phone or tablet, where the next screen sends Astrid to a computer. */
   /** The title reads `before emphasis after`, joined by spaces; the card underlines `emphasis` once it has arrived. */
@@ -79,7 +86,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
       ],
       card: {
         title: 'Your agent works with open models and the ecosystem’s knowledge',
-        body: 'Use open models locally to generate right onto your timeline.',
+        body: 'Your agent can use ComfyUI and other tools and put the output directly on your timeline.',
         visual: 'frame-to-still',
         labels: ['Frame', 'Qwen Image 2.1'],
       },
@@ -100,7 +107,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
   welcome: { title: 'Welcome to Astrid', body: 'Explore a completed project in this quick guided demo. The prompts replay its steps; no new generation runs.', action: 'OK' },
   watching: 'The result is playing. Its explanation follows; press Enter to skip ahead.',
   hints: { compose: 'Press Send to ask Astrid', composeTouch: 'Tap Send to ask Astrid', respond: 'Your agent uses community-built creative tools to deliver on this request', respondWorking: 'Astrid is working on it…' },
-  controls: { next: 'Next', send: 'Send', back: 'Back', skip: 'Skip tour' },
+  controls: { next: 'Next', send: 'Send', back: 'Back', skip: 'Skip tour', hideDetails: 'Hide details', showDetails: 'Show details' },
   gallery: {
     title: 'And all your assets are organized automatically',
     body: 'Everything you and your agent generate is kept here to view and edit. Use any model, create variants, and let your agent organize them with custom data.',
@@ -110,7 +117,7 @@ export const EDITOR_TOUR_SCRIPT = Object.freeze<EditorTourScript>({
     title: 'And this is just one example',
     body: 'There are infinite possibilities when you combine open models with custom agent tools and human interfaces.',
     action: 'Next',
-    recap: ['Agent + extensions', 'Open models', 'Finished shot'],
+    recap: [['Agent +', 'extensions'], ['Open', 'models'], ['Finished', 'shot']],
   },
   feedback: {
     title: { before: 'We', emphasis: 'really', after: 'need your feedback' },

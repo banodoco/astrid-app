@@ -6,6 +6,7 @@ import { AgentChatPanel as AgentChatPanelWithoutProvider } from './AgentChat';
 import { RuntimeConnectionProvider } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { AstridBridgeTransport } from '@/integrations/astrid/transport.ts';
 import {
+  markEditorTourReady,
   exitEditorTour,
   getEditorTourState,
   setEditorTourBeat,
@@ -536,6 +537,23 @@ describe('TourChatPanel (AgentChatPanel during the editor tour)', () => {
     expect(actions[0].textContent).toContain('[2 actions]');
     expect(actions[0].textContent).not.toContain(ACT1.reply);
     expect(document.querySelector(editorTourSelector(EDITOR_TOUR_ANCHORS.chatPane))?.contains(transcript())).toBe(true);
+  });
+
+  it('keeps the actions group’s reserved layout when the store says ready before the last card has rendered: nothing may shrink and jump', () => {
+    startAtCompose();
+    render(<AgentChatPanel />);
+    typeAndSend(ACT1.prompt);
+    act(() => setEditorTourBeat(1, 'respond'));
+    // Into the reply, before any card: the group already has its final layout, unseen.
+    advance(2650);
+    const group = () => document.querySelector<HTMLElement>(editorTourSelector(EDITOR_TOUR_ANCHORS.chatActions))!;
+    const reserved = () => group().querySelector(':scope > [aria-hidden="true"]');
+    expect(reserved()?.textContent).toContain(ACT1.toolCards.at(-1)!.name);
+    // The store's flag can reach a render before the progress it was set with: ready, the last card not in yet.
+    act(() => markEditorTourReady('chat'));
+    expect(reserved()?.textContent).toContain(ACT1.toolCards.at(-1)!.name);
+    advanceUntil(() => (group().textContent ?? '').split(ACT1.toolCards.at(-1)!.name).length > 2);
+    expect(reserved()).not.toBeNull();
   });
 
   it('on the gallery beat shows act 2 complete with Send disabled, and nothing animating', () => {

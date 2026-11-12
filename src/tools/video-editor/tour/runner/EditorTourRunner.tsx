@@ -86,12 +86,12 @@ export function cardHidden(device: TimelineDeviceClass, phase: string | undefine
 }
 
 /**
- * A phone's land card sits above the preview, over the editor's dimmed header, so the preview and the timeline rows under
- * it stay in view. When it is taller than the space there it starts at the top edge and overlaps the preview's top a little.
+ * A phone's land card hangs from the top of the screen, over the editor's dimmed header and above the preview, so the
+ * preview and the timeline rows under it stay in view. Its top never moves: with its body showing it reaches down over
+ * the top of the preview, and folding the body away (the tab on its bottom edge) shrinks it back up, clear of it.
  */
-export function phoneLandPosition(rects: readonly SpotlightRect[], card: { height: number }): CardPosition {
-  const top = Math.min(...rects.map((r) => r.y));
-  return { left: PHONE_EDGE, top: Math.max(PHONE_LAND_TOP, top - PHONE_GAP - card.height) };
+export function phoneLandPosition(): CardPosition {
+  return { left: PHONE_EDGE, top: PHONE_LAND_TOP };
 }
 
 /**
@@ -202,7 +202,7 @@ function RunningTour() {
     const beside = device === 'desktop' && shownPhase === 'working' && transcriptBox.length ? transcriptBox : rects;
     // A phone's card spans the width: in the middle of the screen, or right above or below what it points at; on a land
     // beat always above the preview. On touch the reply's card sits just above the actions it explains, in the chat.
-    const position = device === 'phone' && shownBeat === 'land' && rects.length ? phoneLandPosition(rects, cardSize) : placeCard(beside, cardSize, viewport, {
+    const position = device === 'phone' && shownBeat === 'land' && rects.length ? phoneLandPosition() : placeCard(beside, cardSize, viewport, {
       ...(device === 'phone' ? { edge: PHONE_EDGE, gap: PHONE_GAP } : {}),
       preferAbove: device !== 'desktop' && shownBeat === 'respond',
       ...(device === 'desktop' ? { avoid: desktopCardAvoid(shownBeat) } : {}),

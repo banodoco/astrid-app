@@ -2199,13 +2199,15 @@ test('M2 real mounted manual video drop: Runtime selection refusal is closed, na
   await dropFileOnTimeline(page, file, seed3.appClipId, seed3.transitionClipId, 0, THREE_PRODUCTS_REFERENCE_AT, manualDropPointerAt);
   const wrongImported = await wrongImportResponse;
   expect(wrongImported.status(), await wrongImported.text()).toBe(201);
-  // The import above succeeds. Everything from the verified-selection read below depends on the missing behaviour:
-  // 7b33f8f50 removed the native parent-media placement that read the verified selection before clip.add-media
-  // (its getProjectVerifiedMedia call), leaving the mounted handoff that refuses prepared video ("prepared media
-  // currently supports an ordinary image add", timelineLocalSaveHandoff.ts). Fixing #252 means restoring that native
-  // video placement, verified read included; removing the image-only guard alone does not make this read happen.
-  // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/252; owner decision 11 Nov moved the video-drop save fix to Plan 39, making this eligible despite the earlier Release 12 ruling.
-  test.fail(true, 'Dropped video is not saved: native video placement was removed in 7b33f8f50; see #252');
+  // The import above succeeds. Everything from the verified-selection read below depends on the missing behaviour.
+  // 7b33f8f50 removed the native parent-media placement that read the verified selection before clip.add-media.
+  // With the #252 fix a dropped video is saved through the mounted handoff as clip.add-media, and the Runtime
+  // rechecks the selection at commit acceptance (timeline_commit_port.py), so this test's verified read no longer
+  // happens. Converting the wrong-selection step to the commit-time refusal (404 not_found) leaves a rejected
+  // outbox chain that blocks the later correct drop in the same mounted owner (localSaveSession.ts "Resolve
+  // retained local saves before editing again"), which is #253, owner-deferred to Plan 39.
+  // P39-R12-VIDEO-DROP, https://github.com/banodoco/astrid-app/issues/253; owner decision 11 Nov kept #253 in Plan 39; this test is converted once a refused save no longer blocks later edits.
+  test.fail(true, 'Manual drop no longer makes the verified-selection read, and the commit-time conversion is blocked by #253 (a refused save blocks later edits)');
   const wrongVerified = await wrongVerifiedResponse;
   expect(wrongVerified.status()).toBe(404);
   await expect(wrongVerified.json()).resolves.toEqual({

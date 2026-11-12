@@ -29,7 +29,7 @@
       "id": "P39-R12-VIDEO-DROP",
       "file": "tests/e2e/local/three-products.spec.ts",
       "title": "M2 real mounted manual video drop: Runtime selection refusal is closed, native ADD recovers exactly, and undo preserves opaque data",
-      "issue": "https://github.com/banodoco/astrid-app/issues/252",
+      "issue": "https://github.com/banodoco/astrid-app/issues/253",
       "owner": "Plan 39 manager",
       "expiry": "2026-11-25"
     }

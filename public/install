@@ -65,16 +65,32 @@ fi
 # A calm sign of life on an interactive terminal: mink tracks in snow run
 # along the end of the line until the installer starts talking, which leaves a
 # check mark. Pipes, files, CI, NO_COLOR and TERM=dumb get the plain line.
+# The tracks run only while the whole line fits the terminal's width (a wrapped
+# line cannot be redrawn in place); otherwise the line just gets its mark.
 # astrid.installer.progress draws the same frames from the same rule, and
 # draws them only when told so here.
+# The terminal's width now, in $cols; empty when nothing can tell.
+spin_columns() {
+    cols=$(stty size </dev/tty 2>/dev/null) || cols=
+    cols=${cols#* }
+    case $cols in ''|*[!0-9]*) cols=${COLUMNS:-} ;; esac
+    case $cols in ''|*[!0-9]*) cols= ;; esac
+}
+# Whether the line, its tracks and room for an echoed ^C fit on one row.
+spin_fits() {
+    spin_columns
+    [ -n "$cols" ] && [ $((${#ready} + 1 + spin_width + 2)) -lt "$cols" ]
+}
 spin_style=
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ -z "${CI:-}" ] && [ "${TERM:-}" != dumb ] && sleep 0.01 2>/dev/null; then
     case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-        *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) spin_style=unicode spin_mark='✓' spin_slots=6 spin_period=8 spin_blank=' ' ;;
-        *) spin_style=ascii spin_mark='done' spin_slots=4 spin_period=5 spin_blank='  ' ;;
+        *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) spin_style=unicode spin_mark='✓' spin_slots=6 spin_period=8 spin_blank=' ' spin_pad=12 ;;
+        *) spin_style=ascii spin_mark='done' spin_slots=4 spin_period=5 spin_blank='  ' spin_pad=9 ;;
     esac
     spin_width=$((spin_slots * (${#spin_blank} + 1) - 1))
-    export ASTRID_INSTALL_PROGRESS="$spin_style"
+    spin_columns
+    # The width is a fallback for the installer, which reads it live from its stdin.
+    export ASTRID_INSTALL_PROGRESS="$spin_style:$cols"
 else
     unset ASTRID_INSTALL_PROGRESS
 fi
@@ -90,6 +106,15 @@ spin() {
         sleep 0.19
         kill -0 "$$" 2>/dev/null || exit 0  # never outlive the script
         if [ -e "$tmp/installer-started" ]; then spin_end "$spin_mark"; fi
+        if [ "$spin_still" -eq 1 ]; then continue; fi
+        if ! spin_fits; then
+            # The terminal was narrowed: erase the tracks and end the line plainly.
+            spin_repeat "$spin_width" '\b'
+            spin_repeat "$spin_width" ' '
+            spin_repeat "$spin_width" '\b'
+            spin_still=1
+            continue
+        fi
         frame='' slot=0
         while [ "$slot" -lt "$spin_slots" ]; do
             age=$(( (tick - slot + spin_slots * spin_period) % spin_period ))
@@ -97,26 +122,32 @@ spin() {
             if [ "$slot" -eq 0 ]; then frame=$cell; else frame="$frame $cell"; fi
             slot=$((slot + 1))
         done
-        spin_repeat '\b'
+        spin_repeat "$spin_width" '\b'
         printf '%s' "$frame"
         tick=$(( (tick + 1) % spin_period ))
     done
 }
-# Print $1 (a space, or the escape \b) once per cell of the tracks.
+# Print $2 (a space, or the escape \b) $1 times.
 spin_repeat() {
     cells=0
-    while [ "$cells" -lt "$spin_width" ]; do printf '%b' "$1"; cells=$((cells + 1)); done
+    while [ "$cells" -lt "$1" ]; do printf '%b' "$2"; cells=$((cells + 1)); done
 }
 # End the line with $1 (the mark, or nothing) in place of the tracks. Rewriting
-# it from its start also clears a ^C the terminal echoed.
+# a line with tracks from its start also clears a ^C the terminal echoed.
 spin_end() {
-    printf '\r%s %s             \n' "$ready" "$1"
+    if [ "$spin_still" -eq 1 ]; then
+        printf '%s\n' "$1"
+    else
+        printf '\r%s %s' "$ready" "$1"
+        if [ -n "$1" ]; then spin_repeat "$spin_pad" ' '; else spin_repeat $((spin_width + 2)) ' '; fi
+        printf '\n'
+    fi
     : >"$tmp/spin-done"
     exit 0
 }
 if [ -n "$spin_style" ]; then
     printf '%s ' "$ready"
-    spin_repeat ' '
+    if spin_fits; then spin_still=0; spin_repeat "$spin_width" ' '; else spin_still=1; fi
     if [ "$spin_style" = unicode ]; then spin ⠳ ⠲ ⠢ ⠠ & else spin "'." "' " " ." & fi
     spin_pid=$!
 else

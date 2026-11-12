@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { test } from 'node:test';
@@ -33,12 +33,14 @@ for (const record of ['astrid/current', 'astrid-install.json']) {
   }));
 }
 
-// Runs the bootstrap on a pseudo-terminal and returns what it wrote there.
+// Runs the bootstrap on a pseudo-terminal of the given width and returns what it wrote there.
 const onTerminal = `
-import os, pty, sys
+import fcntl, os, pty, struct, sys, termios
+columns, command = int(sys.argv[1]), sys.argv[2:]
 pid, terminal = pty.fork()
 if pid == 0:
-    os.execvp(sys.argv[1], sys.argv[1:])
+    fcntl.ioctl(1, termios.TIOCSWINSZ, struct.pack('HHHH', 24, columns, 0, 0))
+    os.execvp(command[0], command)
 output = bytearray()
 while True:
     try: chunk = os.read(terminal, 65536)
@@ -76,7 +78,7 @@ for (const [locale, frames, mark] of [['C.UTF-8', tracks.unicode, '✓'], ['C', 
     // uv's Python setup is slow enough for a whole cycle of tracks.
     const release = path.join(context.root, 'release-python');
     setTimeout(() => writeFile(release, 'continue'), 2500);
-    const result = await context.run('python3', ['-c', onTerminal, '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, MOCK_PYTHON_RELEASE: release });
+    const result = await context.run('python3', ['-c', onTerminal, '80', '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, MOCK_PYTHON_RELEASE: release });
     assert.equal(result.code, 0, result.stderr);
     assert.ok(frames.every((frame) => [...frame].length === 11), 'the tracks keep one width');
     // Each tick steps back over the 11 cells and draws the next frame, starting at tick 0.
@@ -85,12 +87,28 @@ for (const [locale, frames, mark] of [['C.UTF-8', tracks.unicode, '✓'], ['C', 
     const piped = await run(context, [], terminalEnv);
     assert.equal(piped.stdout, `${preparation}\nAstrid is ready.\n`);
     for (const optOut of [{ NO_COLOR: '1' }, { TERM: 'dumb' }, { CI: 'true' }]) {
-      const plain = await context.run('python3', ['-c', onTerminal, '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, ...optOut });
+      const plain = await context.run('python3', ['-c', onTerminal, '80', '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, ...optOut });
       assert.equal(plain.code, 0, plain.stderr);
       assert.equal(plain.stdout.replace(/\r\n/g, '\n'), `${preparation}\nAstrid is ready.\n`, JSON.stringify(optOut));
     }
   }));
 }
+
+test('POSIX leaves out the tracks when the line would wrap, and still ends it once with its mark', () => scenario(async (context) => {
+  const terminalEnv = { LANG: 'C.UTF-8', LC_ALL: '', LC_CTYPE: '', TERM: 'xterm', NO_COLOR: '', CI: '', MOCK_PYTHON_RELEASE: '' };
+  const release = path.join(context.root, 'release-python');
+  // 57 cells of text, a space, 11 cells of tracks and 2 for an echoed ^C need 72 columns.
+  for (const [columns, animated] of [[40, false], [71, false], [72, true]]) {
+    await rm(release, { force: true });
+    const timer = setTimeout(() => writeFile(release, 'continue'), 1000);
+    const result = await context.run('python3', ['-c', onTerminal, String(columns), '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, MOCK_PYTHON_RELEASE: release });
+    clearTimeout(timer);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout.includes('\b'), animated, `${columns} columns: ${JSON.stringify(result.stdout)}`);
+    if (!animated) assert.equal(result.stdout, `${preparation} ✓\r\nAstrid is ready.\r\n`);
+    assert.equal(screen(result.stdout), `${preparation} ✓\nAstrid is ready.`);
+  }
+}));
 
 test('POSIX uses developer manifest, the per-OS data layout (HOME-based on macOS, XDG on Linux), exact local commits and Python without external shims', () => scenario(async (context) => {
   context.manifest.agent.repo = path.join(context.root, 'source with spaces');

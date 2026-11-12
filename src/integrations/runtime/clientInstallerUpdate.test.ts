@@ -6,13 +6,19 @@ function bytes(value: unknown): Uint8Array {
   return new TextEncoder().encode(JSON.stringify(value));
 }
 
-const oldStatus = { available: false, state: 'none', reason: 'updater-unavailable' };
+const oldStatus = { available: false, state: 'none' };
 const acceptance = {
   accepted: true,
   state: 'accepted',
   operation_id: '0123456789abcdef0123456789abcdef',
   message: 'Update accepted.',
 };
+const terminal = (state: 'updated' | 'rolled_back' | 'failed') => ({
+  accepted: false,
+  state,
+  operation_id: 'fedcba9876543210fedcba9876543210',
+  message: `${state} while reconciling the previous operation.`,
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -68,6 +74,71 @@ describe('AstridRuntimeClient installer update adapter', () => {
     expect(calls[1]?.init.method).toBe('POST');
     expect(calls[1]?.init.body).toBeUndefined();
     expect(calls[1]?.init.headers).toMatchObject({ Authorization: 'Bearer secret' });
+  });
+
+  it.each(['accepted', 'launching', 'active'] as const)('accepts an admitted %s response', async (state) => {
+    const response = { ...acceptance, state };
+    const transport: Transport = vi.fn(async () => ({ status: 202, headers: {}, body: bytes(response) }));
+    const client = new AstridRuntimeClient({ baseUrl: 'https://connector.test', token: 'secret', transport });
+
+    await expect(client.startInstallerUpdate()).resolves.toEqual(response);
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
+  it.each(['updated', 'rolled_back', 'failed'] as const)('accepts a terminal %s reconciliation response', async (state) => {
+    const response = terminal(state);
+    const transport: Transport = vi.fn(async () => ({ status: 202, headers: {}, body: bytes(response) }));
+    const client = new AstridRuntimeClient({ baseUrl: 'https://connector.test', token: 'secret', transport });
+
+    await expect(client.startInstallerUpdate()).resolves.toEqual(response);
+    expect(transport).toHaveBeenCalledOnce();
+    expect(transport).toHaveBeenCalledWith('POST', '/v1/update', { Accept: 'application/json', Authorization: 'Bearer secret' }, undefined);
+  });
+
+  it.each([
+    { accepted: false, state: 'accepted', operation_id: 'a'.repeat(32), message: 'mismatched' },
+    { accepted: true, state: 'updated', operation_id: 'a'.repeat(32), message: 'mismatched' },
+    { accepted: false, state: 'active', operation_id: 'a'.repeat(32), message: 'non-terminal' },
+    { accepted: false, state: ['failed'], operation_id: 'a'.repeat(32), message: 'array coercion' },
+    { accepted: false, state: 'future', operation_id: 'a'.repeat(32), message: 'unknown' },
+    { accepted: false, state: 7, operation_id: 'a'.repeat(32), message: 'non-string' },
+    { accepted: false, state: 'failed', operation_id: 'not-an-operation', message: 'malformed id' },
+    { accepted: false, state: 'failed', operation_id: 'a'.repeat(32) },
+  ])('rejects malformed, mismatched, coerced, or unknown update response %#', async (body) => {
+    const transport: Transport = vi.fn(async () => ({ status: 202, headers: {}, body: bytes(body) }));
+    const client = new AstridRuntimeClient({ baseUrl: 'https://connector.test', transport });
+
+    await expect(client.startInstallerUpdate()).rejects.toThrow('invalid installer update acceptance response');
+    expect(transport).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    { available: false, state: 'none', reason: 'busy' },
+    { available: false, state: 'none', reason: 'autostart-off' },
+    { available: false, state: 'none', reason: 'unsupported-service-manager' },
+  ] as const)('accepts the allowlisted %s status reason', async (status) => {
+    const transport: Transport = vi.fn(async () => ({ status: 200, headers: {}, body: bytes(status) }));
+    const client = new AstridRuntimeClient({ baseUrl: 'https://connector.test', token: 'secret', transport });
+
+    await expect(client.readInstallerUpdateStatus()).resolves.toEqual(status);
+  });
+
+  it.each([
+    { available: true, state: 'none', reason: 'unknown-reason' },
+    { available: false, state: 'none', reason: '' },
+    { available: false, state: 'none', reason: 'recovery-needed' },
+    { available: true, state: 'none', reason: 'busy' },
+    { available: false, state: 'recovery-needed', reason: 'busy' },
+    { available: false, state: ['none'], reason: undefined },
+    { available: false, state: 'active', outcome: ['failed'] },
+    { available: false, state: 'terminal' },
+    { available: false, state: 7 },
+    { available: false, state: 'none', reason: 7 },
+  ])('rejects an unknown, malformed, or misplaced status field %#', async (status) => {
+    const transport: Transport = vi.fn(async () => ({ status: 200, headers: {}, body: bytes(status) }));
+    const client = new AstridRuntimeClient({ baseUrl: 'https://connector.test', transport });
+
+    await expect(client.readInstallerUpdateStatus()).rejects.toThrow();
   });
 
   it('surfaces a lost acceptance acknowledgement after exactly one POST', async () => {

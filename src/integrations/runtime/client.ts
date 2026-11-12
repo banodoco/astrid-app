@@ -197,6 +197,26 @@ export type RuntimeConnectorError = RuntimeAuthenticationError | RuntimeUnavaila
 export type InstallerUpdateStatusState = 'none' | 'active' | 'terminal' | 'recovery-needed';
 export type InstallerUpdateOutcome = 'updated' | 'rolled_back' | 'failed';
 export type InstallerUpdateReason = 'busy' | 'autostart-off' | 'unsupported-service-manager' | 'recovery-needed';
+type InstallerUpdateAcceptanceState = 'accepted' | 'launching' | 'active';
+type InstallerUpdateRefusalReason = Exclude<InstallerUpdateReason, 'recovery-needed'>;
+
+const INSTALLER_UPDATE_ACCEPTANCE_STATES = new Set<InstallerUpdateAcceptanceState>(['accepted', 'launching', 'active']);
+const INSTALLER_UPDATE_OUTCOMES = new Set<InstallerUpdateOutcome>(['updated', 'rolled_back', 'failed']);
+const INSTALLER_UPDATE_REFUSAL_REASONS = new Set<InstallerUpdateRefusalReason>([
+  'busy', 'autostart-off', 'unsupported-service-manager',
+]);
+
+export function isInstallerUpdateStatusState(value: unknown): value is InstallerUpdateStatusState {
+  return value === 'none' || value === 'active' || value === 'terminal' || value === 'recovery-needed';
+}
+
+export function isInstallerUpdateOutcome(value: unknown): value is InstallerUpdateOutcome {
+  return typeof value === 'string' && INSTALLER_UPDATE_OUTCOMES.has(value as InstallerUpdateOutcome);
+}
+
+export function isInstallerUpdateRefusalReason(value: unknown): value is InstallerUpdateRefusalReason {
+  return typeof value === 'string' && INSTALLER_UPDATE_REFUSAL_REASONS.has(value as InstallerUpdateRefusalReason);
+}
 
 /** Exact editor-owned explanations for the Runtime's allowlisted refusal states. */
 export const INSTALLER_UPDATE_REASON_MESSAGES: Readonly<Record<InstallerUpdateReason, string>> = Object.freeze({
@@ -225,10 +245,19 @@ export type InstallerUpdateCapability = Pick<InstallerUpdateStatus, 'available' 
 /** Successful durable acceptance of an update request. */
 export interface InstallerUpdateAcceptance {
   accepted: true;
-  state: 'accepted';
+  state: InstallerUpdateAcceptanceState;
   operation_id: string;
   message: string;
 }
+
+export interface InstallerUpdateTerminalResult {
+  accepted: false;
+  state: InstallerUpdateOutcome;
+  operation_id: string;
+  message: string;
+}
+
+export type InstallerUpdateResponse = InstallerUpdateAcceptance | InstallerUpdateTerminalResult;
 
 /** Startup identity exposed by the authenticated health endpoint. */
 export interface InstallerUpdateHealth extends Omit<Health, 'identity'> {
@@ -246,26 +275,31 @@ function objectValue(value: unknown): value is Record<string, unknown> {
 
 function validateInstallerUpdateStatus(value: unknown): InstallerUpdateStatus {
   if (!objectValue(value) || typeof value.available !== 'boolean'
-    || !['none', 'active', 'terminal', 'recovery-needed'].includes(String(value.state))) {
+    || !isInstallerUpdateStatusState(value.state)) {
     throw new Error('invalid installer update status response');
   }
   if (value.operation_id !== undefined && typeof value.operation_id !== 'string') throw new Error('invalid installer update operation id');
   if (value.result !== undefined && typeof value.result !== 'string') throw new Error('invalid installer update result');
-  if (value.outcome !== undefined && !['updated', 'rolled_back', 'failed'].includes(String(value.outcome))) throw new Error('invalid installer update outcome');
+  if (value.outcome !== undefined && (!isInstallerUpdateOutcome(value.outcome) || value.state !== 'terminal')) throw new Error('invalid installer update outcome');
+  if (value.state === 'terminal' && !isInstallerUpdateOutcome(value.outcome)) throw new Error('invalid installer update outcome');
   if (value.target_release !== undefined && typeof value.target_release !== 'string' && typeof value.target_release !== 'number') throw new Error('invalid installer update target release');
   if (value.accepted_at !== undefined && typeof value.accepted_at !== 'string' && typeof value.accepted_at !== 'number') throw new Error('invalid installer update acceptance time');
   if (value.log_path !== undefined && typeof value.log_path !== 'string') throw new Error('invalid installer update log path');
-  if (value.reason !== undefined && (typeof value.reason !== 'string' || !value.reason)) throw new Error('invalid installer update reason');
+  if (value.reason !== undefined && (!isInstallerUpdateRefusalReason(value.reason)
+    || value.state !== 'none' || value.available)) throw new Error('invalid installer update reason');
   return value as unknown as InstallerUpdateStatus;
 }
 
-function validateInstallerUpdateAcceptance(value: unknown): InstallerUpdateAcceptance {
-  if (!objectValue(value) || value.accepted !== true || value.state !== 'accepted'
+function validateInstallerUpdateResponse(value: unknown): InstallerUpdateResponse {
+  if (!objectValue(value) || typeof value.accepted !== 'boolean'
     || typeof value.operation_id !== 'string' || !/^[0-9a-f]{32}$/.test(value.operation_id)
-    || typeof value.message !== 'string') {
+    || typeof value.message !== 'string'
+    || (value.accepted === true
+      ? !INSTALLER_UPDATE_ACCEPTANCE_STATES.has(value.state as InstallerUpdateAcceptanceState)
+      : !isInstallerUpdateOutcome(value.state))) {
     throw new Error('invalid installer update acceptance response');
   }
-  return value as unknown as InstallerUpdateAcceptance;
+  return value as unknown as InstallerUpdateResponse;
 }
 
 function validateInstallerUpdateHealth(value: unknown): InstallerUpdateHealth {
@@ -789,9 +823,9 @@ export class AstridRuntimeClient {
   }
 
   /** Accept one update request. A lost acknowledgement is surfaced; this POST is never retried. */
-  async startInstallerUpdate(): Promise<InstallerUpdateAcceptance> {
+  async startInstallerUpdate(): Promise<InstallerUpdateResponse> {
     if (this.readOnly) throw new RuntimeCompatibilityError('identity', 'A discovery client cannot start an update.', this.baseUrl);
-    return validateInstallerUpdateAcceptance(JSON.parse(new TextDecoder().decode(
+    return validateInstallerUpdateResponse(JSON.parse(new TextDecoder().decode(
       await this.installerUpdateRequest('POST', '/v1/update'),
     )) as unknown);
   }

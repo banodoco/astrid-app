@@ -185,7 +185,8 @@ describe('TourCard', () => {
     expect(heading.compareDocumentPosition(chain) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(chain.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(SCRIPT.finale.action).toBe('Next');
-    for (const recap of SCRIPT.finale.recap) expect(screen.getByText(recap)).toBeInTheDocument();
+    // Desktop has room: each label on one line, its two parts joined.
+    for (const recap of SCRIPT.finale.recap) expect(screen.getByText(recap.join(' '))).toBeInTheDocument();
     // Three pictures, none of them a video: the shot is already playing in the preview.
     expect(container.querySelectorAll('ol img')).toHaveLength(3);
     expect(container.querySelector('ol video')).toBeNull();
@@ -590,12 +591,62 @@ describe('TourCard on touch', () => {
     expect(screen.getAllByRole('button').map((button) => button.textContent)).toEqual([SCRIPT.controls.skip, SCRIPT.controls.back]);
   });
 
-  it('keeps a phone’s land explainer compact, to sit above the preview: the title, Back and Next, no body', () => {
-    renderTouch(1, 'land', 'phone');
+  it('shows a phone’s land explainer with its body, and a tab on its bottom edge that folds the body away and brings it back', () => {
+    const { container } = renderTouch(1, 'land', 'phone');
     expect(screen.getByRole('heading')).toHaveTextContent(SCRIPT.acts[1].card.title);
-    expect(screen.queryByText(SCRIPT.acts[1].card.body)).toBeNull();
+    const body = container.querySelector<HTMLElement>('[data-editor-tour-details]')!;
+    expect(body).toHaveAttribute('data-editor-tour-details', 'open');
+    expect(body).toHaveTextContent(SCRIPT.acts[1].card.body);
+    const tab = screen.getByRole('button', { name: SCRIPT.controls.hideDetails });
+    expect(tab).toHaveAttribute('aria-expanded', 'true');
+    expect(tab).toHaveAttribute('aria-controls', body.id);
+    // A finger-sized target, though the tab itself is small.
+    expect(tab).toHaveClass('h-11');
+
+    fireEvent.click(tab);
+    expect(body).toHaveAttribute('data-editor-tour-details', 'folded');
+    expect(body).toHaveAttribute('inert');
+    expect(body).toHaveClass('grid-rows-[0fr]');
+    expect(screen.getByRole('button', { name: SCRIPT.controls.showDetails })).toHaveAttribute('aria-expanded', 'false');
+    // Back and Next are there either way.
     expect(screen.getByRole('button', { name: /Next/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Back/ })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: SCRIPT.controls.showDetails }));
+    expect(body).toHaveAttribute('data-editor-tour-details', 'open');
+    expect(body).not.toHaveAttribute('inert');
+  });
+
+  it('keeps the choice for the following explainers of the run, and starts open again on a new run', () => {
+    const view = renderTouch(1, 'land', 'phone');
+    fireEvent.click(screen.getByRole('button', { name: SCRIPT.controls.hideDetails }));
+    act(() => setEditorTourBeat(2, 'land'));
+    view.rerender(<TourCard act={2} beat="land" device="phone" onPrimary={vi.fn()} onBack={vi.fn()} onSkip={vi.fn()} />);
+    expect(view.container.querySelector('[data-editor-tour-details]')).toHaveAttribute('data-editor-tour-details', 'folded');
+    expect(screen.getByRole('button', { name: SCRIPT.controls.showDetails })).toBeInTheDocument();
+
+    act(() => { startEditorTour(); setEditorTourBeat(1, 'land'); });
+    view.rerender(<TourCard act={1} beat="land" device="phone" onPrimary={vi.fn()} onBack={vi.fn()} onSkip={vi.fn()} />);
+    expect(view.container.querySelector('[data-editor-tour-details]')).toHaveAttribute('data-editor-tour-details', 'open');
+  });
+
+  it('has no tab on a tablet or on desktop, where the body always shows', () => {
+    renderTouch(1, 'land', 'tablet');
+    expect(screen.queryByRole('button', { name: SCRIPT.controls.hideDetails })).toBeNull();
+  });
+
+  it('sets every finale label on two lines on a phone, broken where the script says, and each on one line elsewhere', () => {
+    const phone = renderTouch(3, 'finale', 'phone');
+    const labels = [...phone.container.querySelectorAll('ol br')].map((br) => br.parentElement!);
+    expect(labels).toHaveLength(3);
+    for (const [index, label] of labels.entries()) {
+      expect(label.querySelectorAll('br')).toHaveLength(1);
+      expect(label.textContent).toBe(SCRIPT.finale.recap[index].join(''));
+    }
+    phone.unmount();
+    const tablet = renderTouch(3, 'finale', 'tablet');
+    expect(tablet.container.querySelectorAll('ol br')).toHaveLength(0);
+    expect(screen.getByText(SCRIPT.finale.recap[0].join(' '))).toBeInTheDocument();
   });
 
   it('keeps the body on a tablet’s land explainer', () => {

@@ -25,15 +25,8 @@ describe('editorTourTargets', () => {
 });
 
 describe('phoneLandPosition', () => {
-  const track = { x: 0, y: 440, width: 393, height: 44 };
-  const preview = { x: 6, y: 150, width: 381, height: 216 };
-
-  it('puts a phone’s land card above the preview, so the preview and the rows under it stay in view', () => {
-    expect(phoneLandPosition([track, preview], { height: 120 })).toEqual({ left: 12, top: 150 - 8 - 120 });
-  });
-
-  it('starts at the top edge when the card is taller than the space there, never lower', () => {
-    expect(phoneLandPosition([track, preview], { height: 160 })).toEqual({ left: 12, top: 6 });
+  it('hangs a phone’s land card from the top of the screen, whatever its height: folding its body never moves its top', () => {
+    expect(phoneLandPosition()).toEqual({ left: 12, top: 6 });
   });
 });
 

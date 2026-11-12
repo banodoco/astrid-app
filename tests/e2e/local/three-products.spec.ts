@@ -3548,9 +3548,13 @@ test('fresh project video drop: a video dropped on the first timeline records on
   }, { timeout: CEILING.timeout, message: 'the dropped video must reach the Runtime as one App commit' }).toBe(1);
   const appEntry = after.items.find((entry) => !initial.body.items.some((old) => old.publication_id === entry.publication_id)
     && entry.source?.via === 'app');
-  expect(appEntry?.records?.commands).toHaveLength(1);
-  const addRecord = appEntry!.records!.commands[0]!;
-  expect(addRecord.command.op).toBe('clip.add-media');
+  // A drop on a fresh timeline commits the track it needs alongside the media birth (timelineLocalSaveHandoff.ts),
+  // so require exactly one clip.add-media and no other clip write in the commit.
+  const appCommands = appEntry!.records!.commands;
+  const addRecords = appCommands.filter((record) => record.command.op === 'clip.add-media');
+  expect(addRecords).toHaveLength(1);
+  expect(appCommands.filter((record) => String(record.command.op).startsWith('clip.') && record.command.op !== 'clip.add-media')).toEqual([]);
+  const addRecord = addRecords[0]!;
   const selection = (addRecord.command.args as Record<string, any>).media;
   expect(Object.keys(selection).sort()).toEqual(['asset', 'catalog_digest', 'generation_id', 'object_id', 'variant_id']);
   expect(selection).toMatchObject({ asset: expect.any(String), generation_id: expect.any(String), variant_id: expect.any(String),
@@ -3633,9 +3637,13 @@ test('fresh project audio drop: a WAV dropped on A1 of the first timeline record
   }, { timeout: CEILING.timeout, message: 'the dropped audio must reach the Runtime as one App commit' }).toBe(1);
   const appEntry = after.items.find((entry) => !initial.body.items.some((old) => old.publication_id === entry.publication_id)
     && entry.source?.via === 'app');
-  expect(appEntry?.records?.commands).toHaveLength(1);
-  const addRecord = appEntry!.records!.commands[0]!;
-  expect(addRecord.command.op).toBe('clip.add-media');
+  // A drop on a fresh timeline commits the track it needs alongside the media birth (timelineLocalSaveHandoff.ts),
+  // so require exactly one clip.add-media and no other clip write in the commit.
+  const appCommands = appEntry!.records!.commands;
+  const addRecords = appCommands.filter((record) => record.command.op === 'clip.add-media');
+  expect(addRecords).toHaveLength(1);
+  expect(appCommands.filter((record) => String(record.command.op).startsWith('clip.') && record.command.op !== 'clip.add-media')).toEqual([]);
+  const addRecord = addRecords[0]!;
   const selection = (addRecord.command.args as Record<string, any>).media;
   expect(Object.keys(selection).sort()).toEqual(['asset', 'catalog_digest', 'generation_id', 'object_id', 'variant_id']);
   const audioBytes = Buffer.from(dropWavBase64(), 'base64');

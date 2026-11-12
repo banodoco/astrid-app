@@ -67,13 +67,13 @@ fi
 # leaving a check mark, when the installer starts talking. Pipes, files, CI,
 # NO_COLOR and TERM=dumb get the plain line. astrid.installer.progress draws
 # the same frames, and draws them only when told so here.
-spin_cells=
+spin_style=
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ -z "${CI:-}" ] && [ "${TERM:-}" != dumb ] && sleep 0.01 2>/dev/null; then
     case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
-        *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) spin_cells='▁ ╱ ▔ ╲ ▁ ╱ ▔ ╲'; spin_mark='✓'; ASTRID_INSTALL_PROGRESS=unicode ;;
-        *) spin_cells='_ / - \ _ / - \'; spin_mark=done; ASTRID_INSTALL_PROGRESS=ascii ;;
+        *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) spin_style=unicode spin_mark='✓' ;;
+        *) spin_style=ascii spin_mark='done' ;;
     esac
-    export ASTRID_INSTALL_PROGRESS
+    export ASTRID_INSTALL_PROGRESS="$spin_style"
 else
     unset ASTRID_INSTALL_PROGRESS
 fi
@@ -104,10 +104,9 @@ spin_end() {
     : >"$tmp/spin-done"
     exit 0
 }
-if [ -n "$spin_cells" ]; then
+if [ -n "$spin_style" ]; then
     printf '%s ' "$ready"
-    # shellcheck disable=SC2086 # one argument per cell
-    spin $spin_cells &
+    if [ "$spin_style" = unicode ]; then spin ▁ ╱ ▔ ╲ ▁ ╱ ▔ ╲ & else spin _ / - "\\" _ / - "\\" & fi
     spin_pid=$!
 else
     echo "$ready"

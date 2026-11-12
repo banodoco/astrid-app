@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { EDITOR_TOUR_ANCHOR_ATTRIBUTE, EDITOR_TOUR_ANCHORS, EDITOR_TOUR_CARD_HOST_ATTRIBUTE, EDITOR_TOUR_SHIELD_ATTRIBUTE, EDITOR_TOUR_TRACK_ATTRIBUTE } from '../anchors';
+import { EDITOR_TOUR_ANCHOR_ATTRIBUTE, EDITOR_TOUR_ANCHORS, EDITOR_TOUR_CARD_HOST_ATTRIBUTE, EDITOR_TOUR_REST_ATTRIBUTE, EDITOR_TOUR_SHIELD_ATTRIBUTE, EDITOR_TOUR_TRACK_ATTRIBUTE } from '../anchors';
 import { CLIP_BODY_SELECTOR } from '../../lib/timeline-dom';
 
 export interface SpotlightRect {
@@ -13,20 +13,58 @@ const PADDING = 6;
 
 interface Box { left: number; top: number; right: number; bottom: number }
 
+const RESTING_SELECTOR = `[${EDITOR_TOUR_REST_ATTRIBUTE}="in"]`;
+
+/**
+ * One reading of the page. A pane that slides in by a CSS transform (the phone's chat) declares that it is heading for
+ * its place (`EDITOR_TOUR_REST_ATTRIBUTE`): everything inside it is then measured where it will REST, not where the slide
+ * has it this frame, so the spotlight can set off as the pane does instead of waiting for it to stop. The transform at
+ * rest is the identity, so the way still to go is the translation of the in-flight matrix.
+ */
+interface Reading {
+  /** The translation each sliding pane still has to lose. */
+  slides: Map<Element, { x: number; y: number }>;
+}
+
+function slideOf(pane: Element, reading: Reading): { x: number; y: number } {
+  const known = reading.slides.get(pane);
+  if (known) return known;
+  let slide = { x: 0, y: 0 };
+  const transform = getComputedStyle(pane).transform;
+  if (transform && transform !== 'none' && typeof DOMMatrixReadOnly === 'function') {
+    try {
+      const matrix = new DOMMatrixReadOnly(transform);
+      // A pure translation only: anything else (a scale, a rotation) is not a slide this can undo.
+      if (matrix.is2D && matrix.a === 1 && matrix.b === 0 && matrix.c === 0 && matrix.d === 1) slide = { x: matrix.e, y: matrix.f };
+    } catch { /* an unparsable transform: measured as it is */ }
+  }
+  reading.slides.set(pane, slide);
+  return slide;
+}
+
+/** An element's box where it will rest (`Reading`). */
+function restingRect(element: Element, reading: Reading): Box {
+  const box = element.getBoundingClientRect();
+  const pane = element.closest(RESTING_SELECTOR);
+  if (!pane) return { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+  const { x, y } = slideOf(pane, reading);
+  return { left: box.left - x, top: box.top - y, right: box.right - x, bottom: box.bottom - y };
+}
+
 /**
  * The part of an element its scrolling or clipping ancestors actually show (a timeline row is wider than the timeline),
  * and where its spotlight's padding may reach (`bounds`): the viewport, and a scrolling panel's own edges, so the
  * transcript's light never spills into the chat header.
  */
-function visibleBox(element: Element): { visible: Box; bounds: Box } {
-  const box = element.getBoundingClientRect();
-  const visible = { left: box.left, top: box.top, right: box.right, bottom: box.bottom };
+function visibleBox(element: Element, reading: Reading): { visible: Box; bounds: Box } {
+  const box = restingRect(element, reading);
+  const visible = { ...box };
   const { scrolls, clips } = clipping(element);
   const bounds = scrolls
     ? { left: Math.max(0, box.left), top: Math.max(0, box.top), right: Math.min(window.innerWidth, box.right), bottom: Math.min(window.innerHeight, box.bottom) }
     : { left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight };
   for (const { parent, x, y } of clips) {
-    const clip = parent.getBoundingClientRect();
+    const clip = restingRect(parent, reading);
     if (x) {
       visible.left = Math.max(visible.left, clip.left);
       visible.right = Math.min(visible.right, clip.right);
@@ -80,15 +118,16 @@ const TRANSCRIPT_PADDING = 12;
 /**
  * Where an element's content ends, when it is shorter than the element: a track row runs the timeline's whole width but
  * its spotlight ends with its last clip, and the chat transcript's ends below its last message. The empty rest stays
- * dimmed and free for the card.
+ * dimmed and free for the card. Null while a track row has no clip yet: the row mounts a moment before its clips do, and
+ * a row measured then would be lit at full width and corrected (a second move) when they arrive.
  */
-function contentExtent(element: Element, box: Box): Box {
+function contentExtent(element: Element, box: Box, reading: Reading): Box | null {
   if (element.hasAttribute(EDITOR_TOUR_TRACK_ATTRIBUTE)) {
-    const clips = Array.from(element.querySelectorAll(CLIP_BODY_SELECTOR), (clip) => clip.getBoundingClientRect().right);
-    return clips.length ? { ...box, right: Math.min(box.right, Math.max(...clips)) } : box;
+    const clips = Array.from(element.querySelectorAll(CLIP_BODY_SELECTOR), (clip) => restingRect(clip, reading)).filter((clip) => clip.right - clip.left > 0);
+    return clips.length ? { ...box, right: Math.min(box.right, Math.max(...clips.map((clip) => clip.right))) } : null;
   }
   if (element.getAttribute(EDITOR_TOUR_ANCHOR_ATTRIBUTE) === EDITOR_TOUR_ANCHORS.chatTranscript) {
-    const children = Array.from(element.children, (child) => child.getBoundingClientRect()).filter((rect) => rect.height > 0);
+    const children = Array.from(element.children, (child) => restingRect(child, reading)).filter((rect) => rect.bottom - rect.top > 0);
     const end = Math.max(...children.map((rect) => rect.bottom)) + TRANSCRIPT_PADDING;
     return children.length ? { ...box, bottom: Math.max(box.top + 2 * TRANSCRIPT_PADDING, Math.min(box.bottom, end)) } : box;
   }
@@ -112,14 +151,15 @@ function parseTargetKey(key: string): SpotlightTarget[] {
   return key ? key.split('|').map((part) => (part.endsWith('#whole') ? { selector: part.slice(0, -'#whole'.length), whole: true as const } : part)) : [];
 }
 
-function measure(targets: readonly SpotlightTarget[]): SpotlightRect[] {
+function measure(targets: readonly SpotlightTarget[], reading: Reading = { slides: new Map() }): SpotlightRect[] {
   const rects: SpotlightRect[] = [];
   for (const target of targets) {
     const element = document.querySelector(selectorOf(target));
     if (!element) continue;
-    const { visible, bounds } = visibleBox(element);
-    const extent = typeof target === 'string' ? contentExtent(element, visible) : visible;
-    // Only the part on screen: a pane still outside it (sliding in) has nothing to light yet.
+    const { visible, bounds } = visibleBox(element, reading);
+    const extent = typeof target === 'string' ? contentExtent(element, visible, reading) : visible;
+    if (!extent) continue;
+    // Only the part on screen: a pane still outside it (and not declared on its way in) has nothing to light yet.
     const box = { left: Math.max(bounds.left, extent.left), top: Math.max(bounds.top, extent.top), right: Math.min(bounds.right, extent.right), bottom: Math.min(bounds.bottom, extent.bottom) };
     if (box.right - box.left <= 0 || box.bottom - box.top <= 0) continue;
     const padded = {
@@ -148,6 +188,11 @@ export interface SpotlightMeasurement {
   complete: boolean;
   /** The rects have held for a couple of frames: nothing is sliding, so whoever waits for stillness need wait no longer. */
   still?: boolean;
+  /**
+   * The rects as they are this frame, for whoever cannot wait any longer (the settle cap): React only hears of the first
+   * reading and of readings at rest, so during a long slide the published rects are where the slide began.
+   */
+  latest?: () => readonly SpotlightRect[];
 }
 
 const sameMeasurement = (a: SpotlightMeasurement, b: SpotlightMeasurement) => a.key === b.key && a.complete === b.complete && sameRects(a.rects, b.rects);
@@ -155,6 +200,35 @@ const sameMeasurement = (a: SpotlightMeasurement, b: SpotlightMeasurement) => a.
 /** A measurement counts as still once it has held this many frames, and at least this long (a busy page runs frames back to back). */
 const STILL_FRAMES = 2;
 const STILL_MS = 48;
+/**
+ * ...or, when no transition or animation that could move a target is running on it or around it, as soon as two readings
+ * a frame apart agree: nothing is carrying it anywhere, so there is nothing to wait out.
+ */
+const CALM_FRAMES = 1;
+
+/** Properties whose transitions cannot move or resize anything. */
+const PAINT_ONLY = /^(opacity|visibility|color|fill|stroke|filter|backdropFilter|boxShadow|textDecorationColor|caretColor|accentColor|(background|border|outline)\w*Color|(fill|stroke)Opacity|offset|easing|composite|computedOffset)$/;
+
+/**
+ * Whether a CSS transition or animation that can change geometry is running on a target or one of its ancestors. A
+ * declared sliding pane's own transform does not count: its targets are already measured where they will rest. Where the
+ * browser cannot say (no Web Animations), the answer is yes and stillness is timed as before.
+ */
+function carried(elements: readonly Element[]): boolean {
+  if (typeof document.getAnimations !== 'function') return true;
+  return document.getAnimations().some((animation) => {
+    if (animation.playState === 'finished' || animation.playState === 'idle') return false;
+    const effect = animation.effect as KeyframeEffect | null;
+    const subject = effect?.target;
+    if (!subject || !elements.some((element) => subject === element || subject.contains(element))) return false;
+    let properties: string[];
+    try {
+      properties = [...new Set(effect.getKeyframes().flatMap((keyframe) => Object.keys(keyframe)))].filter((name) => !PAINT_ONLY.test(name));
+    } catch { return true; }
+    if (properties.length === 0) return false;
+    return !(subject.matches(RESTING_SELECTOR) && properties.every((name) => name === 'transform'));
+  });
+}
 /** How often the targets are looked at when nothing has announced a change: a shift that fired no event is still found. */
 const CHECK_MS = 1000;
 
@@ -186,6 +260,12 @@ export function useSpotlightMeasurement(targets: readonly SpotlightTarget[]): Sp
 
   useEffect(() => {
     const list = parseTargetKey(key);
+    // Nothing to measure (a step with no spotlight, a helper measurement that is off): no observers, no listeners.
+    if (list.length === 0) {
+      setMeasurement((previous) => (previous.key === '' && previous.rects.length === 0 && previous.still ? previous : { key: '', rects: [], complete: true, still: true }));
+      return undefined;
+    }
+    const latest = () => last?.rects ?? [];
     const resizeObserver = new ResizeObserver(() => schedule());
     let observed = new Set<Element>();
     let found: Array<{ target: SpotlightTarget; element: Element }> = [];
@@ -197,7 +277,7 @@ export function useSpotlightMeasurement(targets: readonly SpotlightTarget[]): Sp
 
     const publish = (next: SpotlightMeasurement): void => {
       published = next;
-      setMeasurement((previous) => (sameMeasurement(previous, next) && !!previous.still === !!next.still ? previous : next));
+      setMeasurement((previous) => (sameMeasurement(previous, next) && !!previous.still === !!next.still ? previous : { ...next, latest }));
     };
 
     function update(now: number = performance.now()) {
@@ -212,7 +292,8 @@ export function useSpotlightMeasurement(targets: readonly SpotlightTarget[]): Sp
       if (last && sameMeasurement(last, next)) heldFrames += 1;
       else { heldFrames = 0; heldSince = now; }
       last = next;
-      const still = heldFrames >= STILL_FRAMES && now - heldSince >= STILL_MS;
+      const still = (heldFrames >= STILL_FRAMES && now - heldSince >= STILL_MS)
+        || (heldFrames >= CALM_FRAMES && next.complete && !carried(found.map((entry) => entry.element)));
       // React hears of the first measurement, a change in completeness, and rects that have come to rest; never of a
       // frame of something sliding.
       const known = published;

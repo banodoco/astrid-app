@@ -80,4 +80,36 @@ describe('useSpotlightMeasurement', () => {
     expect(result.current.rects[0].x).toBe(244);
     expect(result.current.still).toBe(true);
   });
+
+  it('measures a target inside a pane that is sliding to its place where it will rest, so it is still at once', () => {
+    const pane = document.createElement('div');
+    pane.setAttribute('data-editor-tour-rest', 'in');
+    pane.setAttribute('data-test-extra', '');
+    document.body.append(pane);
+    pane.append(target);
+    let slide = 300;
+    const computed = window.getComputedStyle.bind(window);
+    const style = vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => (
+      element === pane ? { ...computed(element, pseudo), transform: `matrix(1, 0, 0, 1, ${slide}, 0)`, overflowX: 'visible', overflowY: 'visible' } as CSSStyleDeclaration : computed(element, pseudo)
+    ));
+    vi.stubGlobal('DOMMatrixReadOnly', class { is2D = true; a = 1; b = 0; c = 0; d = 1; e: number; f = 0; constructor(text: string) { this.e = Number(/matrix\(1, 0, 0, 1, (-?[\d.]+)/.exec(text)?.[1] ?? 0); } });
+    try {
+      const { result } = mount();
+      // The pane slides in: the target's box follows it, its resting box does not move.
+      for (let i = 0; i < 6; i += 1) { slide -= 50; x = 400 + slide; frame(); }
+      expect(result.current).toMatchObject({ complete: true, still: true });
+      expect(result.current.rects[0].x).toBe(400 - 6);
+    } finally {
+      style.mockRestore();
+      vi.unstubAllGlobals();
+      document.body.append(target);
+    }
+  });
+
+  it('sets nothing up for an empty target list', () => {
+    const observe = vi.spyOn(MutationObserver.prototype, 'observe');
+    renderHook(() => useSpotlightMeasurement([]));
+    expect(observe).not.toHaveBeenCalled();
+    observe.mockRestore();
+  });
 });

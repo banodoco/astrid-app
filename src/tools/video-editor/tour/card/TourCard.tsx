@@ -1,11 +1,11 @@
-import type { CSSProperties, ReactNode } from 'react';
+import { useEffect, type CSSProperties, type ReactNode } from 'react';
 import './TourCard.css';
 import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
 import { TOUR_FINALE_ENTRANCE_MS, TourStrip } from './TourStrip';
 import { TourVisual } from './TourVisual';
 import { TOUR_COMPARE_ENTRANCE_MS } from './TourCompare';
 import { TOUR_CARD_ENTRANCE_MS, useTourCardEntrance } from './useTourCardEntrance';
-import { EDITOR_TOUR_GALLERY_ACT, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
+import { EDITOR_TOUR_GALLERY_ACT, markEditorTourReady, useEditorTour, type EditorTourAct, type EditorTourBeat } from '@/shared/state/editorTourStore';
 import { ChevronLeft } from 'lucide-react';
 import { DiscordMark } from '@/pages/Home/PublicAstridSocialLinks';
 import { DISCORD_URL } from '@/pages/Home/publicAstridLinks';
@@ -71,6 +71,10 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
     : TOUR_CARD_ENTRANCE_MS;
   const { settled, reducedMotion } = useTourCardEntrance(key, explains && live, entranceMs, arrived);
   const playing = !reducedMotion && arrived;
+  // The card is there and at rest: from now its Next acts on the first press, whatever of its entrance is still playing.
+  useEffect(() => {
+    if (arrived && live && !working) markEditorTourReady('arrived');
+  }, [arrived, live, working, key]);
 
   return (
     <div
@@ -106,7 +110,7 @@ export function TourCard({ act, beat, onPrimary, onBack, onSkip, device = 'deskt
         {beat === 'welcome' && <Welcome onPrimary={onPrimary} onSkip={onSkip} fit={fit} />}
         {beat === 'land' && <Explainer act={act} playing={playing} entering={!reducedMotion && !settled} waiting={!arrived} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
         {beat === 'gallery' && <GalleryExplainer act={act} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
-        {beat === 'finale' && <Finale playing={playing} onPrimary={onPrimary} onBack={onBack} fit={fit} />}
+        {beat === 'finale' && <Finale onPrimary={onPrimary} onBack={onBack} fit={fit} />}
         {beat === 'feedback' && <Feedback onPrimary={onPrimary} onBack={onBack} fit={fit} />}
         {!explains && <Hint act={act} beat={beat} working={working} onPrimary={onPrimary} onBack={onBack} onSkip={onSkip} fit={fit} />}
         </div>
@@ -244,12 +248,12 @@ function Welcome({ onPrimary, onSkip, fit }: Omit<TourCardProps, 'act' | 'beat'>
 }
 
 /** "And this is just one example": the lit chain is the example, and the line under it opens it out. */
-function Finale({ playing, onPrimary, onBack, fit }: { playing: boolean; onPrimary: () => void; onBack?: () => void; fit: Fit }) {
+function Finale({ onPrimary, onBack, fit }: { onPrimary: () => void; onBack?: () => void; fit: Fit }) {
   return (
     <>
       <MinkTitle>{SCRIPT.finale.title}</MinkTitle>
       <div className="mt-6">
-        <TourStrip filled={3} labels={SCRIPT.finale.recap} size="large" playing={playing} wrapLabels={fit.device === 'phone'} />
+        <TourStrip filled={3} labels={SCRIPT.finale.recap} size="large" wrapLabels={fit.device === 'phone'} />
       </div>
       <p className="mt-6 text-pretty text-[15px] leading-6 text-muted-foreground">{SCRIPT.finale.body}</p>
       <div className="mt-6 flex items-center justify-between gap-3">

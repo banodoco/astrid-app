@@ -5,6 +5,11 @@ export const EDITOR_TOUR_TRACK_ATTRIBUTE = 'data-editor-tour-track';
 /** The running tour's own overlay: the card's host and the dimming shield. */
 export const EDITOR_TOUR_CARD_HOST_ATTRIBUTE = 'data-editor-tour-card-host';
 export const EDITOR_TOUR_SHIELD_ATTRIBUTE = 'data-editor-tour-shield';
+/**
+ * On a pane that slides to its place by a CSS transform which is the identity at rest (the phone's chat): `in` while it is
+ * there or on its way there. The spotlight then measures what is inside it where it will rest (`useSpotlightRects`).
+ */
+export const EDITOR_TOUR_REST_ATTRIBUTE = 'data-editor-tour-rest';
 
 export const EDITOR_TOUR_ANCHORS = Object.freeze({
   chatComposer: 'chat-composer',

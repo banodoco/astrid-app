@@ -17,7 +17,11 @@ export type EditorTourStage = 0 | 1 | 2 | 3;
 export type EditorTourStatus = 'idle' | 'running';
 /** The act whose `land` is followed by the `gallery` beat (step 2, part 2 of 2). */
 export const EDITOR_TOUR_GALLERY_ACT: EditorTourAct = 2;
-export type EditorTourReadyKey = 'chat' | 'timeline' | 'card';
+/**
+ * `actions`: the reply's actions have begun to appear, in a group already at its final size (the highlight sets off for it).
+ * `arrived`: the beat's own card is on screen and at rest (its entrance may still be playing): its Next acts at once.
+ */
+export type EditorTourReadyKey = 'chat' | 'timeline' | 'card' | 'actions' | 'arrived';
 
 export interface EditorTourState {
   /** Bumps on every start or replay, so parts can reset per run. */
@@ -41,7 +45,7 @@ export interface EditorTourState {
   skipAnimation: number;
 }
 
-const NOT_READY: EditorTourState['ready'] = Object.freeze({ chat: false, timeline: false, card: false });
+const NOT_READY: EditorTourState['ready'] = Object.freeze({ chat: false, timeline: false, card: false, actions: false, arrived: false });
 
 const editorTourStore = createStore<EditorTourState>(() => ({
   runId: 0,

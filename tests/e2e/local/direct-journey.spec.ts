@@ -35,7 +35,7 @@ import { expect, type Page, type Route } from '@playwright/test';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { BIG_DOWNLOAD_BYTES, BIG_UPLOAD_BYTES, DirectHarness, DOOR_PORT, rawRequest, sha256Hex, compositionPublication } from './support/harness.ts';
+import { BIG_DOWNLOAD_BYTES, BIG_UPLOAD_BYTES, DirectHarness, DOOR_PORT, rawRequest, sha256Hex } from './support/harness.ts';
 import { APP_ENTRY_ROUTE, UI, currentHead, editFirstTrackName, expectConnected, firstTrackName, holdTimelineSaves, openApp, openSeededTimeline, revisionBody, test, waitForAudit } from './support/app.ts';
 import { skipWhen } from '../support/declaredSkip.ts';
 import { SpeedTable } from './support/measure.ts';
@@ -58,6 +58,7 @@ let lastDownload: Buffer | undefined;
 // Helpers
 
 interface PageResponse { status: number; headers: Record<string, string>; text: string }
+interface TimelineHead { revisionId: string; publicationId: string }
 
 /** fetch() executed inside the page, so CORS, preflights and local-network rules apply as in a real visit. */
 async function pageFetch(page: Page, url: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}): Promise<PageResponse> {
@@ -68,6 +69,47 @@ async function pageFetch(page: Page, url: string, init: { method?: string; heade
 }
 
 const json = <T = any>(response: PageResponse): T => JSON.parse(response.text);
+
+const timelinePath = (harness: DirectHarness) => `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}`;
+
+async function currentTimelineHead(harness: DirectHarness): Promise<TimelineHead> {
+  const response = await harness.runtimeJson('GET', timelinePath(harness));
+  expect(response.status).toBe(200);
+  const { head_revision_id: revisionId, head_publication_id: publicationId } = response.body as Record<string, unknown>;
+  expect(typeof revisionId).toBe('string');
+  expect(typeof publicationId).toBe('string');
+  return { revisionId: revisionId as string, publicationId: publicationId as string };
+}
+
+/**
+ * The seeded timeline has a real V1 track. Changing its label exercises the
+ * requester-bound writer on the same field the conflict journey edits.
+ */
+function timelineCommit(harness: DirectHarness, head: TimelineHead, trackName: string) {
+  return {
+    api_version: 1,
+    project_id: harness.seed.projectId,
+    timeline_id: harness.seed.timelineId,
+    base_revision_id: head.revisionId,
+    base_publication_id: head.publicationId,
+    commands: [{
+      schema_version: 1,
+      op: 'track.set',
+      version: '1',
+      select: 'parent/track:V1',
+      args: { values: { label: trackName }, clear: [] },
+    }],
+    source: { via: 'app' },
+  };
+}
+
+function acceptedHead(body: any): TimelineHead {
+  const revisionId = body?.data?.accepted_revision_id;
+  const publicationId = body?.receipt?.receipt_id;
+  expect(typeof revisionId).toBe('string');
+  expect(typeof publicationId).toBe('string');
+  return { revisionId, publicationId };
+}
 
 async function openHostedPage(page: Page, harness: DirectHarness) {
   await page.goto(`${harness.origin}/__blank.html`);
@@ -424,8 +466,12 @@ test.describe('core journey', () => {
     await openApp(page, harness);
     await expectConnected(page);
     await openSeededTimeline(page, harness);
-    const head = await currentHead(harness);
-    const second = await harness.runtimeJson('POST', `/v1/projects/${harness.seed.projectId}/timelines/${harness.seed.timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
+    const head = await currentTimelineHead(harness);
+    // The only intentional retired-writer POST remains a negative assertion.
+    const retired = await harness.runtimeJson('POST', `${timelinePath(harness)}/composition-revisions`, {});
+    expect(retired.status).toBe(410);
+    expect(retired.body).toMatchObject({ code: 'retired_route' });
+    const second = await harness.runtimeJson('POST', `${timelinePath(harness)}/commit`, timelineCommit(harness, head, 'Second writer'));
     expect(second.status).toBe(200);
     await editFirstTrackName(page, 'Draft from the first writer');
     const conflict = page.getByRole('alertdialog', { name: 'This timeline changed somewhere else' });
@@ -437,7 +483,7 @@ test.describe('core journey', () => {
     const draftField = page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first();
     await expect(draftField).toHaveValue('Draft from the first writer');
     // The stale save was refused, not applied: the second writer's revision is still the head.
-    expect(await currentHead(harness)).toBe(second.body.data.new_head);
+    expect(await currentHead(harness)).toBe(acceptedHead(second.body).revisionId);
   });
 
   test('through the hosted origin: open, read the timeline, save with the expected head, reload byte-identical', async ({ page, harness }) => {
@@ -455,16 +501,15 @@ test.describe('core journey', () => {
     const direct = await harness.runtimeFetch(inspectPath, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
     expect(read.text).toBe(await direct.text());
 
-    const head = await currentHead(harness);
-    const publication = compositionPublication(harness.seed, head, 'Main (edited through the door)', 24);
-    const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify(publication),
+    const head = await currentTimelineHead(harness);
+    const saved = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': randomUUID() }, body: JSON.stringify(timelineCommit(harness, head, 'Main (edited through the door)')),
     });
     expect(saved.status, saved.text).toBe(200);
-    const newHead: string = json(saved).data.new_head;
-    expect(newHead).not.toBe(head);
+    const newHead = acceptedHead(json(saved));
+    expect(newHead.revisionId).not.toBe(head.revisionId);
 
-    const revisionPath = `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions/${newHead}`;
+    const revisionPath = `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions/${newHead.revisionId}`;
     const beforeReload = await call(revisionPath);
     expect(beforeReload.status).toBe(200);
     expect(beforeReload.text).toContain('Main (edited through the door)');
@@ -481,21 +526,27 @@ test.describe('core journey', () => {
   test('through the hosted origin: a second writer saves first, the stale save is refused and the first writer keeps its draft', async ({ page, harness }) => {
     const { projectId, timelineId } = harness.seed;
     await openHostedPage(page, harness);
-    const publishUrl = `${harness.doorBase}/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`;
-    const head = await currentHead(harness);
-    const draft = compositionPublication(harness.seed, head, 'First writer draft', 12); // held by the caller
+    const publishUrl = `${harness.doorBase}/v1/projects/${projectId}/timelines/${timelineId}/commit`;
+    const head = await currentTimelineHead(harness);
+    const draft = timelineCommit(harness, head, 'First writer draft'); // held by the caller
 
-    const second = await harness.runtimeJson('POST', `/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, compositionPublication(harness.seed, head, 'Second writer', 24));
+    const second = await harness.runtimeJson('POST', `${timelinePath(harness)}/commit`, timelineCommit(harness, head, 'Second writer'));
     expect(second.status).toBe(200);
+    const secondHead = acceptedHead(second.body);
 
     const refused = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-stale-save' }, body: JSON.stringify(draft) });
     expect(refused.status).toBe(409);
-    expect(json(refused).details).toMatchObject({ reason: 'stale_head', expected_head: head, actual_head: second.body.data.new_head });
+    expect(json(refused).details).toMatchObject({
+      status: 'conflict',
+      base: { revision_id: head.revisionId, publication_id: head.publicationId },
+      current: { revision_id: secondHead.revisionId, publication_id: secondHead.publicationId },
+    });
     // Nothing of the draft reached the Runtime; the draft object itself is untouched for a retry.
-    expect(await currentHead(harness)).toBe(second.body.data.new_head);
-    expect(draft.expected_head).toBe(head);
-    expect(draft.parent_composition.name).toBe('First writer draft');
-    const rebased = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify({ ...draft, expected_head: second.body.data.new_head }) });
+    expect(await currentHead(harness)).toBe(secondHead.revisionId);
+    expect(draft.base_revision_id).toBe(head.revisionId);
+    expect(draft.base_publication_id).toBe(head.publicationId);
+    expect(draft.commands[0].args.values.label).toBe('First writer draft');
+    const rebased = await pageFetch(page, publishUrl, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Idempotency-Key': 'journey-rebased-save' }, body: JSON.stringify({ ...draft, base_revision_id: secondHead.revisionId, base_publication_id: secondHead.publicationId }) });
     expect(rebased.status, rebased.text).toBe(200);
   });
 });
@@ -712,7 +763,7 @@ test.describe('restarts', () => {
     let release!: () => void;
     let signalRequest!: () => void;
     const saveStarted = new Promise<void>((resolve) => { signalRequest = resolve; });
-    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
+    await page.route(/\/timelines\/[^/]+\/commit$/, async route => {
       if (route.request().method() !== 'POST') return route.fallback();
       signalRequest();
       await new Promise<void>((resolve) => { release = resolve; });
@@ -741,7 +792,7 @@ test.describe('restarts', () => {
     await expectConnected(page);
     await openSeededTimeline(page, harness);
     const headBefore = await currentHead(harness);
-    await page.route(/\/timelines\/[^/]+\/composition-revisions$/, async route => {
+    await page.route(/\/timelines\/[^/]+\/commit$/, async route => {
       if (route.request().method() === 'POST') return route.abort('failed');
       return route.fallback();
     });
@@ -1082,8 +1133,8 @@ test('speed table: each step through the door against the Runtime directly', asy
       expect((await call(`/v1/projects/${projectId}/timelines/${timelineId}/inspect`, { method: 'POST', headers: jsonHeaders, body: '{}' })).status).toBe(200);
     });
     await speed.time('save timeline (publish revision)', via, SMALL, async () => {
-      const head = await currentHead(harness);
-      const response = await call(`/v1/projects/${projectId}/timelines/${timelineId}/composition-revisions`, { method: 'POST', headers: { ...jsonHeaders, 'Idempotency-Key': idem() }, body: JSON.stringify(compositionPublication(harness.seed, head, `speed ${via}`, 30)) });
+      const head = await currentTimelineHead(harness);
+      const response = await call(`/v1/projects/${projectId}/timelines/${timelineId}/commit`, { method: 'POST', headers: { ...jsonHeaders, 'Idempotency-Key': idem() }, body: JSON.stringify(timelineCommit(harness, head, `speed ${via}`)) });
       expect(response.status, response.text).toBe(200);
     });
     await speed.time('image GET (small)', via, SMALL, async () => {

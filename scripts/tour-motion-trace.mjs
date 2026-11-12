@@ -87,6 +87,8 @@ function installSampler() {
       rop: (() => { const rest = card?.querySelector('[data-editor-tour-card-rest]'); return rest ? (rest.hasAttribute('data-folded') ? 0 : Number(getComputedStyle(rest).opacity)) : null; })(),
       card: card?.getAttribute('data-editor-tour-card') ?? null, phase: card?.getAttribute('data-editor-tour-card-phase') ?? null,
       cardSettled: card?.hasAttribute('data-settled') ?? false, arrived: card ? !card.hasAttribute('data-editor-tour-card-phase') && (card.hasAttribute('data-arrived') || !document.querySelector('[data-editor-tour-card-content]')) : false,
+      // The chat transcript's scroll: [scrollTop, scrollHeight, clientHeight]. A lit rect that shifts is often this.
+      scr: (() => { const el = document.querySelector('[data-editor-tour="chat-transcript"]'); return el ? [el.scrollTop, el.scrollHeight, el.clientHeight] : null; })(),
       st: state && { status: state.status, act: state.act, beat: state.beat, shownBeat: state.shownBeat, ready: state.ready, instant: state.instant, skipAnimation: state.skipAnimation },
       beatReady: Boolean(state && window.__tourShotsBeats.isEditorTourBeatReady(state)),
       cut: [...document.querySelectorAll('#editor-tour-dim rect[fill="black"]')].map(geometry),
@@ -383,9 +385,24 @@ export function analyseTransition(samples, { dest, source, expectMoves = 1, expe
     const lit = cutouts.find((k) => k.used);
     respond = lit ? { destinations: lit.retargets.filter((r) => r.t >= 0).map((r) => ({ t: r.t, rect: r.to, midFlight: r.whileMoving })), cutoutMoves: lit.segments.length } : null;
   }
+  // The actions group after Send: its rect (and the cutout on it) must be established once and then hold to the pixel
+  // while its cards come in one after the other.
+  let actionsDrift = null;
+  const ACTIONS = '[data-editor-tour="chat-actions"]';
+  if (dest.beat === 'respond') {
+    const seen = samples.filter((s) => s.t >= 0 && s.tg[ACTIONS]);
+    if (seen.length) {
+      const rest = seen.at(-1).tg[ACTIONS];
+      const worstOf = (list) => list.reduce((worst, s) => { const d = Math.max(...s.tg[ACTIONS].map((n, k) => Math.abs(n - rest[k]))); return d > worst.px ? { px: round(d), t: round(s.t, 0), rect: rr(s.tg[ACTIONS]) } : worst; }, { px: 0, t: null, rect: null });
+      const fromCard = seen.filter((s) => s.st?.ready?.actions);
+      const lit = cutouts.find((k) => k.used);
+      const onActions = lit ? lit.retargets.filter((r) => r.t >= (fromCard[0]?.t ?? seen[0].t) - 400) : [];
+      actionsDrift = { firstSeenT: round(seen[0].t, 0), firstCardT: round(fromCard[0]?.t, 0), restRect: rr(rest), sinceFirstCard: worstOf(fromCard.length ? fromCard : seen), sinceMounted: worstOf(seen), cutoutDestinationsOnActions: onActions.map((r) => ({ t: r.t, rect: r.to })) };
+    }
+  }
   const latency = latencyOf(samples, { card, cutouts, marks, tap, longFrames, label });
   if (respond) Object.assign(respond, actionsOf(samples, cutouts, label));
-  const result = { latency, frames, tourEnded: ended, startSync: sync, pacing, gallery, respond, expectCutoutMoves, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
+  const result = { latency, frames, tourEnded: ended, startSync: sync, pacing, gallery, respond, actionsDrift, expectCutoutMoves, durationMs: round(last.t, 0), cardFinalBeat: last.card, card: cardOut, cutouts, ringChanges: rings, ringMotion, previewUnavailable, geometrySourcesMoved: null };
   Object.assign(result, suspectsFor(result, source, dest, expectMoves, expectCutoutMoves), { expectMoves });
   return result;
 }
@@ -518,6 +535,12 @@ function suspectsFor(m, source, dest, expectMoves = 1, expectCutoutMoves = expec
   if (m.respond) {
     notes.push(`respond: spotlight destinations ${m.respond.destinations.map((d) => `t=${d.t}ms ${fmtRect(d.rect)}`).join(' -> ')} (${m.respond.cutoutMoves} moves)`);
     if (m.respond.destinations.length > expectCutoutMoves) out.push(`respond spotlight changed destination ${m.respond.destinations.length}x, expected at most ${expectCutoutMoves} (chasing?)`);
+  }
+  if (m.actionsDrift) {
+    const a = m.actionsDrift;
+    notes.push(`actions group: mounted t=${a.firstSeenT}ms, first card t=${a.firstCardT ?? '-'}ms, rests at ${fmtRect(a.restRect)}; rect drift since the first card ${a.sinceFirstCard.px}px, since mounted ${a.sinceMounted.px}px; cutout sent there ${a.cutoutDestinationsOnActions.map((d) => `t=${d.t}ms ${fmtRect(d.rect)}`).join(', then ')}`);
+    if (a.sinceFirstCard.px > 0.5) out.push(`actions rect drifted ${a.sinceFirstCard.px}px after its first card (at t=${a.sinceFirstCard.t}ms it was ${fmtRect(a.sinceFirstCard.rect)}, it rests at ${fmtRect(a.restRect)})`);
+    if (a.cutoutDestinationsOnActions.length > 1) out.push(`the cutout was sent to the actions ${a.cutoutDestinationsOnActions.length}x (it should be placed once)`);
   }
   const p = m.pacing;
   if (p) {
@@ -863,8 +886,8 @@ function renderMarkdown(report) {
   const responds = report.transitions.filter((t) => t.respond);
   if (responds.length) {
     lines.push('', '## Respond phases', '', 'The spotlight after Send: the prompt with the thinking line, one expansion to the prompt and the reply, then the actions. Each destination is set once; none while a move is in flight.', '',
-      '| transition | spotlight destinations (t: rect) | moves | set mid-flight |', '|---|---|---|---|');
-    for (const t of responds) lines.push(`| ${t.name} | ${t.respond.destinations.map((d) => `${d.t}ms: ${fmtRect(d.rect)}`).join(' → ')} | ${t.respond.cutoutMoves} | ${t.respond.destinations.filter((d) => d.midFlight).length} |`);
+      '| transition | spotlight destinations (t: rect) | moves | set mid-flight | actions rect drift px (since first card / since mounted) |', '|---|---|---|---|---|');
+    for (const t of responds) lines.push(`| ${t.name} | ${t.respond.destinations.map((d) => `${d.t}ms: ${fmtRect(d.rect)}`).join(' → ')} | ${t.respond.cutoutMoves} | ${t.respond.destinations.filter((d) => d.midFlight).length} | ${t.actionsDrift ? `${t.actionsDrift.sinceFirstCard.px} / ${t.actionsDrift.sinceMounted.px}` : '-'} |`);
     if (responds.some((t) => t.respond.actions)) {
       lines.push('', 'The last phase: the spotlight should travel onto the actions group WHILE its cards appear (setting off with the first, arriving about as the last is there), with the card whole as it lands.', '',
         '| transition | action cards | first card | last card | spotlight move | move starts after first card | move ends after last card | card whole |', '|---|---|---|---|---|---|---|---|');

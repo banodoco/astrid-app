@@ -15,7 +15,15 @@
     $PreparationFailure = $null
     $LogReady = $false
     $NativeExitCode = 1
-    [Console]::WriteLine('Getting Astrid ready. The first time takes a few minutes.')
+    # Only a computer without an earlier install (its version pointer or the
+    # per-user selection record) hears that the first time is slow.
+    $Ready = 'Getting Astrid ready.'
+    if (-not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'Astrid\current')) -and
+        -not (Test-Path -LiteralPath (Join-Path $InstallerRoot 'astrid-install.json')) -and
+        -not (Test-Path -LiteralPath (Join-Path $env:LOCALAPPDATA 'astrid-install.json'))) {
+        $Ready += ' The first time takes a few minutes.'
+    }
+    [Console]::WriteLine($Ready)
 
     # The readers run in .NET so stderr never becomes a PS 5.1 terminating
     # error, and progress bypasses the function's captured success output.

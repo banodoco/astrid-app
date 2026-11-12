@@ -82,6 +82,15 @@ test('PowerShell explains first-run preparation before Python setup completes', 
   alive(await output.result);
 }));
 
+test('PowerShell does not promise a slow first time when an install already exists', () => scenario(async (context, run) => {
+  // The legacy selection beside LOCALAPPDATA: the private Astrid Installer directory must stay the script's to create.
+  await writeFile(path.join(context.env.LOCALAPPDATA, 'astrid-install.json'), '{}');
+  const result = await run(['--update']);
+  alive(result);
+  assert.match(result.stdout, /^Getting Astrid ready\.\r?\n/);
+  assert.doesNotMatch(result.stdout, /The first time takes a few minutes\./);
+}));
+
 for (const architecture of ['PROCESSOR_ARCHITECTURE', 'PROCESSOR_ARCHITEW6432']) {
   test(`PowerShell refuses ARM64 via ${architecture} before downloads`, () => scenario(async (context, run) => {
     const result = await run([], architecture === 'PROCESSOR_ARCHITECTURE'

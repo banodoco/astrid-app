@@ -22,6 +22,68 @@ test('POSIX explains first-run preparation before Python setup completes', () =>
   assert.equal((await output.result).code, 0);
 }));
 
+for (const record of ['astrid/current', 'astrid-install.json']) {
+  test(`POSIX does not promise a slow first time when an install already exists (${record})`, () => scenario(async (context) => {
+    const data = context.env.XDG_DATA_HOME;
+    await mkdir(path.dirname(path.join(data, record)), { recursive: true });
+    await writeFile(path.join(data, record), '{}');
+    const result = await run(context, ['--update']);
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'Getting Astrid ready.\nAstrid is ready.');
+  }));
+}
+
+// Runs the bootstrap on a pseudo-terminal and returns what it wrote there.
+const onTerminal = `
+import os, pty, sys
+pid, terminal = pty.fork()
+if pid == 0:
+    os.execvp(sys.argv[1], sys.argv[1:])
+output = bytearray()
+while True:
+    try: chunk = os.read(terminal, 65536)
+    except OSError: break
+    if not chunk: break
+    output.extend(chunk)
+_, status = os.waitpid(pid, 0)
+sys.stdout.buffer.write(bytes(output))
+sys.exit(os.waitstatus_to_exitcode(status))
+`;
+// What a terminal shows once the output settles: backspaces and carriage returns applied.
+function screen(text) {
+  return text.replace(/\r\n/g, '\n').split('\n').map((line) => {
+    const cells = [];
+    let cursor = 0;
+    for (const char of line) {
+      if (char === '\b') cursor = Math.max(0, cursor - 1);
+      else if (char === '\r') cursor = 0;
+      else { cells[cursor] = char; cursor += 1; }
+    }
+    return cells.join('').trimEnd();
+  }).join('\n').trim();
+}
+
+for (const [locale, frames, mark] of [['C.UTF-8', '▁╱▔╲▁╱▔╲', '✓'], ['C', '_/-\\_/-\\', 'done']]) {
+  test(`POSIX draws its zigzag only on a terminal and ends the line with ${mark} (${locale})`, () => scenario(async (context) => {
+    // PYTHONCOERCECLOCALE=0 keeps the pty helper from exporting a UTF-8 LC_CTYPE for a C locale.
+    const terminalEnv = { LANG: locale, LC_ALL: '', LC_CTYPE: '', PYTHONCOERCECLOCALE: '0', TERM: 'xterm', NO_COLOR: '', CI: '', MOCK_PYTHON_RELEASE: '' };
+    // uv's Python setup is slow enough for the zigzag to draw itself in full.
+    const release = path.join(context.root, 'release-python');
+    setTimeout(() => writeFile(release, 'continue'), 2500);
+    const result = await context.run('python3', ['-c', onTerminal, '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, MOCK_PYTHON_RELEASE: release });
+    assert.equal(result.code, 0, result.stderr);
+    assert.ok(result.stdout.includes(frames), JSON.stringify(result.stdout));
+    assert.equal(screen(result.stdout), `${preparation} ${mark}\nAstrid is ready.`);
+    const piped = await run(context, [], terminalEnv);
+    assert.equal(piped.stdout, `${preparation}\nAstrid is ready.\n`);
+    for (const optOut of [{ NO_COLOR: '1' }, { TERM: 'dumb' }, { CI: 'true' }]) {
+      const plain = await context.run('python3', ['-c', onTerminal, '/bin/sh', path.join(repo, 'public/install')], { ...terminalEnv, ...optOut });
+      assert.equal(plain.code, 0, plain.stderr);
+      assert.equal(plain.stdout.replace(/\r\n/g, '\n'), `${preparation}\nAstrid is ready.\n`, JSON.stringify(optOut));
+    }
+  }));
+}
+
 test('POSIX uses developer manifest, the per-OS data layout (HOME-based on macOS, XDG on Linux), exact local commits and Python without external shims', () => scenario(async (context) => {
   context.manifest.agent.repo = path.join(context.root, 'source with spaces');
   context.manifest.runtime.repo = pathToFileURL(path.join(context.root, 'runtime source')).href;

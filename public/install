@@ -12,7 +12,16 @@ bootstrap="$data_home/astrid/bootstrap"
 mkdir -p "$bootstrap" "$(dirname "$log")"
 chmod 700 "$(dirname "$log")"
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/astrid-install.XXXXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+spin_pid=
+# Stop the readiness line's zigzag (below) before anything else is printed.
+spin_stop() {
+    if [ -n "$spin_pid" ]; then
+        kill "$spin_pid" 2>/dev/null || :
+        wait "$spin_pid" 2>/dev/null || :
+        spin_pid=
+    fi
+}
+trap 'spin_stop; rm -rf "$tmp"' EXIT
 trap 'exit 129' HUP
 trap 'exit 143' TERM
 # Let the foreground installer finish its rollback after the first Ctrl+C.
@@ -25,10 +34,9 @@ fetch() {
     fi
 }
 # What failed, in one plain line, then where the full story is.
-fail() { echo "Astrid couldn't finish. Your work is kept." >&2; echo "$1" >&2; echo "Details: $log" >&2; exit 1; }
+fail() { spin_stop; echo "Astrid couldn't finish. Your work is kept." >&2; echo "$1" >&2; echo "Details: $log" >&2; exit 1; }
 download_failed="It couldn't download what it needs. Check your internet connection, then run the same command again."
 prepare_failed="It couldn't prepare Python on this computer. Check that the disk has free space, then run the same command again."
-echo 'Getting Astrid ready. The first time takes a few minutes.'
 manifest="$tmp/manifest.json"
 manifest_next=0
 manifest_provided=0
@@ -47,6 +55,62 @@ done
 if [ "$manifest_next" -eq 1 ] || [ -z "$manifest" ]; then
     echo 'A path is required after --manifest.' >&2
     exit 2
+fi
+# Only a computer without an earlier install (its version pointer or the
+# per-user selection record) hears that the first time is slow.
+ready='Getting Astrid ready.'
+if [ ! -e "$data_home/astrid/current" ] && [ ! -e "$data_home/astrid-install.json" ]; then
+    ready="$ready The first time takes a few minutes."
+fi
+# A calm sign of life on an interactive terminal: a zigzag that draws itself
+# (bottom, up, across, down), then erases itself the same way back. It stops,
+# leaving a check mark, when the installer starts talking. Pipes, files, CI,
+# NO_COLOR and TERM=dumb get the plain line. astrid.installer.progress draws
+# the same frames, and draws them only when told so here.
+spin_cells=
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ] && [ -z "${CI:-}" ] && [ "${TERM:-}" != dumb ] && sleep 0.01 2>/dev/null; then
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *[Uu][Tt][Ff]-8*|*[Uu][Tt][Ff]8*) spin_cells='▁ ╱ ▔ ╲ ▁ ╱ ▔ ╲'; spin_mark='✓'; ASTRID_INSTALL_PROGRESS=unicode ;;
+        *) spin_cells='_ / - \ _ / - \'; spin_mark=done; ASTRID_INSTALL_PROGRESS=ascii ;;
+    esac
+    export ASTRID_INSTALL_PROGRESS
+else
+    unset ASTRID_INSTALL_PROGRESS
+fi
+# Draws the cells given as arguments one a tick (about nine a second), then
+# erases them back, until the installer starts or spin_stop interrupts it.
+spin() {
+    drawn=0 grow=1
+    trap 'spin_end ""' TERM
+    while :; do
+        sleep 0.11
+        kill -0 "$$" 2>/dev/null || exit 0  # never outlive the script
+        if [ -e "$tmp/installer-started" ]; then spin_end "$spin_mark"; fi
+        if [ "$grow" -eq 1 ]; then
+            eval "printf '%s' \"\${$((drawn + 1))}\""
+            drawn=$((drawn + 1))
+            if [ "$drawn" -eq $# ]; then grow=0; fi
+        else
+            printf '\b \b'
+            drawn=$((drawn - 1))
+            if [ "$drawn" -eq 0 ]; then grow=1; fi
+        fi
+    done
+}
+# End the line with $1 (the mark, or nothing) in place of the zigzag. Rewriting
+# it from its start also clears a ^C the terminal echoed.
+spin_end() {
+    printf '\r%s %s          \n' "$ready" "$1"
+    : >"$tmp/spin-done"
+    exit 0
+}
+if [ -n "$spin_cells" ]; then
+    printf '%s ' "$ready"
+    # shellcheck disable=SC2086 # one argument per cell
+    spin $spin_cells &
+    spin_pid=$!
+else
+    echo "$ready"
 fi
 if [ "$manifest_provided" -ne 1 ]; then
     manifest_url=${ASTRID_INSTALL_MANIFEST_URL:-https://astrid.haus/install-manifest.json}
@@ -72,7 +136,21 @@ export ASTRID_INSTALL_UV="$uv"
 if (: </dev/tty) 2>/dev/null; then exec 3</dev/tty; else exec 3</dev/null; fi
 # Keep stdout live and retain its status independently of the progress reader.
 mkfifo "$tmp/progress"
-tee -i "$tmp/core.out" <"$tmp/progress" &
+# With the zigzag running, hold the installer's first byte until its line is
+# finished, so the two never draw over each other.
+relay() {
+    first=$(dd bs=1 count=1 2>/dev/null; echo .)
+    first=${first%.}
+    if [ -n "$first" ]; then
+        : >"$tmp/installer-started"
+        waited=0
+        while [ ! -e "$tmp/spin-done" ] && [ "$waited" -lt 40 ]; do sleep 0.05; waited=$((waited + 1)); done
+        printf '%s' "$first"
+        printf '%s' "$first" >"$tmp/core.out"
+    fi
+    exec tee -i -a "$tmp/core.out"
+}
+if [ -n "$spin_pid" ]; then relay <"$tmp/progress" & else tee -i "$tmp/core.out" <"$tmp/progress" & fi
 progress_pid=$!
 # This only resolves manifest pins and hands off; the package owns every step.
 if "$uv" run --no-project --python "$PYTHON_VERSION" python -u -I -c '
@@ -120,6 +198,7 @@ args.extend(flags)
 os.execv(args[0], args)
 ' "$tmp/bootstrap-venv" "$manifest" "$@" <&3 >"$tmp/progress" 2>>"$log"; then status=0; else status=$?; fi
 wait "$progress_pid"
+spin_stop
 if [ "$status" -ne 0 ]; then
     # The installer's own failure paragraph, or its run receipt (which ends with a
     # Details line), already said what happened; only a silent exit gets this one.

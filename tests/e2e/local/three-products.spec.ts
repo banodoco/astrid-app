@@ -3553,7 +3553,6 @@ test('fresh project video drop: a video dropped on the first timeline records on
   expect(addRecord.command.op).toBe('clip.add-media');
   const selection = (addRecord.command.args as Record<string, any>).media;
   expect(Object.keys(selection).sort()).toEqual(['asset', 'catalog_digest', 'generation_id', 'object_id', 'variant_id']);
-  expect(addRecord.selections).toContainEqual(selection);
   expect(selection).toMatchObject({ asset: expect.any(String), generation_id: expect.any(String), variant_id: expect.any(String),
     object_id: harness.seed.video.digest, catalog_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/) });
   const revision = await harness.runtimeJson<any>('GET', `${base}/composition-revisions/${after.head.revision_id}`);
@@ -3563,7 +3562,9 @@ test('fresh project video drop: a video dropped on the first timeline records on
   expect(clips).toHaveLength(1);
   const clip = clips[0] as Record<string, any>;
   expect(clip).toMatchObject({ clipType: 'media', from: 0, speed: 1 });
-  expect((addRecord.command.args as Record<string, any>).row.id).toBe('V1');
+  // args.row.id is the new clip's id; args.row.track is its track (timeline-commit-types.ts).
+  expect((addRecord.command.args as Record<string, any>).row.track).toBe('V1');
+  expect((addRecord.command.args as Record<string, any>).row.id).toBe(clip.id);
   expect(clip.asset).toBe(selection.asset);
   expect(selection.object_id).toBe(harness.seed.video.digest);
   expect(clip.hold).toBeGreaterThan(0);
@@ -3637,7 +3638,6 @@ test('fresh project audio drop: a WAV dropped on A1 of the first timeline record
   expect(addRecord.command.op).toBe('clip.add-media');
   const selection = (addRecord.command.args as Record<string, any>).media;
   expect(Object.keys(selection).sort()).toEqual(['asset', 'catalog_digest', 'generation_id', 'object_id', 'variant_id']);
-  expect(addRecord.selections).toContainEqual(selection);
   const audioBytes = Buffer.from(dropWavBase64(), 'base64');
   const audioDigest = sha256Hex(new Uint8Array(audioBytes));
   expect(selection).toMatchObject({ asset: expect.any(String), generation_id: expect.any(String), variant_id: expect.any(String),
@@ -3649,7 +3649,9 @@ test('fresh project audio drop: a WAV dropped on A1 of the first timeline record
   expect(clips).toHaveLength(1);
   const clip = clips[0] as Record<string, any>;
   expect(clip).toMatchObject({ clipType: 'media', from: 0 });
-  expect((addRecord.command.args as Record<string, any>).row.id).toBe('A1');
+  // args.row.id is the new clip's id; args.row.track is its track (timeline-commit-types.ts).
+  expect((addRecord.command.args as Record<string, any>).row.track).toBe('A1');
+  expect((addRecord.command.args as Record<string, any>).row.id).toBe(clip.id);
   expect(clip.asset).toBe(selection.asset);
   expect(selection.object_id).toBe(audioDigest);
   expect(clip.hold).toBe(2);

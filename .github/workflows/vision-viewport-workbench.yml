@@ -1,25 +1,26 @@
-name: Vision viewport source context
+name: Apply scoped vision viewport refinement
 on:
   push:
     branches: [fix/vision-viewport-sequence-20261113]
     paths: [.github/workflows/vision-viewport-workbench.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  context:
+  apply:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-      - name: Export relevant exact-source files
+          ref: fix/vision-viewport-sequence-20261113
+          fetch-depth: 0
+      - name: Apply only to the inspected source
         run: |
-          mkdir -p /tmp/vision-context
-          git rev-parse HEAD > /tmp/vision-context/HEAD.txt
-          git archive --format=tar HEAD src/pages/Home tests/e2e/public-astrid-vision-*.spec.ts tests/fixtures/public-vision.ts .github/workflows/public-vision.yml playwright.config.ts playwright.vision.config.ts package.json config/testing/vitest.config.ts AGENTS.md > /tmp/vision-context/source.tar
-          curl --fail --retry 2 https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json -o /tmp/vision-context/vision.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: vision-viewport-context
-          path: /tmp/vision-context/
-          retention-days: 3
+          git diff --exit-code 48d0a417211b9010a55893f461e349c39ae0888f -- src tests
+          python3 .vision-viewport-apply.py
+          python3 .vision-viewport-tests.py
+          git diff --check
+          git diff --stat
+          git rm .vision-viewport-apply.py .vision-viewport-tests.py
+          git add src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(vision): stable viewport spacing, ordered pillar animation and next-item navigation'
+          git push origin HEAD:fix/vision-viewport-sequence-20261113

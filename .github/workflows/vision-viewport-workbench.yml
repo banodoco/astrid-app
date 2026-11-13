@@ -1,0 +1,25 @@
+name: Vision viewport source context
+on:
+  push:
+    branches: [fix/vision-viewport-sequence-20261113]
+    paths: [.github/workflows/vision-viewport-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  context:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Export relevant exact-source files
+        run: |
+          mkdir -p /tmp/vision-context
+          git rev-parse HEAD > /tmp/vision-context/HEAD.txt
+          git archive --format=tar HEAD src/pages/Home tests/e2e/public-astrid-vision-*.spec.ts tests/fixtures/public-vision.ts .github/workflows/public-vision.yml playwright.config.ts playwright.vision.config.ts package.json config/testing/vitest.config.ts AGENTS.md > /tmp/vision-context/source.tar
+          curl --fail --retry 2 https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json -o /tmp/vision-context/vision.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vision-viewport-context
+          path: /tmp/vision-context/
+          retention-days: 3

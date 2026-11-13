@@ -38,7 +38,7 @@ for (const width of [1440, 390]) {
     await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible();
     await expect(disclosure).toHaveAttribute('open', '');
-    await expect(disclosure.locator('strong')).toHaveText(['We should:', 'We should never:']);
+    await expect(disclosure.locator('.astrid-vision-details-characteristic-body strong')).toHaveText(['We should:', 'We should never:']);
     await expect(disclosure.locator('ul').first()).toHaveCSS('list-style-type', 'disc');
     await gaps.first().locator('summary').click();
     await expect(gaps.first()).toHaveAttribute('open', '');

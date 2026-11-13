@@ -10,11 +10,12 @@ export type VisionGapProjects = { gap: PublicVisionGap; projects: PublicVisionPr
 export function currentGapsForSubject(
   content: PublicVisionContent,
   subject: VisionSubject,
+  includeCompletedProjects = false,
 ): VisionGapProjects[] {
   const subjectRef = subject.kind + ':' + subject.id;
   const projectsByGap = new Map<string, PublicVisionProject[]>();
   for (const project of content.projects) {
-    if (project.status === 'done' || project.status === 'cancelled') continue;
+    if (!includeCompletedProjects && (project.status === 'done' || project.status === 'cancelled')) continue;
     // Secondary gaps remain traceable in the source, but every project is
     // displayed only under its single primary gap.
     const gapId = project.primaryGapId ?? project.gapIds[0];
@@ -45,7 +46,9 @@ export function aspirationsForSubject(content: PublicVisionContent, subject: Vis
 } {
   const entry = (subject.kind === 'pillar' ? content.pillars : content.principles)
     .find(item => item.id === subject.id);
-  const current = currentGapsForSubject(content, subject);
+  // The new hierarchy counts every primary-linked project, including finished
+  // work; project status remains visible. The legacy current-work list stays unchanged.
+  const current = currentGapsForSubject(content, subject, true);
   return {
     aspirations: (entry?.characteristics ?? []).map(aspiration => {
       const ref = subject.kind + ':' + subject.id + '/' + aspiration.id;
@@ -55,7 +58,7 @@ export function aspirationsForSubject(content: PublicVisionContent, subject: Vis
         hasMeasuredGap: content.gaps.some(gap => gap.aspiration === ref),
       };
     }),
-    legacyGaps: current.filter(({ gap }) => gap.aspiration === undefined),
+    legacyGaps: currentGapsForSubject(content, subject).filter(({ gap }) => gap.aspiration === undefined),
     hasAspirationLinks: content.gaps.some(gap => gap.aspiration !== undefined),
   };
 }

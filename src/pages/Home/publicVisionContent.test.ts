@@ -143,6 +143,11 @@ describe('aspiration references in schema v1', () => {
       expect(() => parsePublicVisionContent(candidate)).toThrow(/aspirations/);
     }
   });
+  it('rejects null rather than treating it as an omitted supporting list', () => {
+    const candidate = visionFixture();
+    const invalid = { ...candidate, gaps: candidate.gaps.map(gap => ({ ...gap, supportingAspirations: null })) };
+    expect(() => parsePublicVisionContent(invalid)).toThrow(/aspirations/);
+  });
   it('requires the same primary and deduplicated supporting elements in old and new fields', () => {
     const candidate = visionFixture();
     candidate.gaps[0].supportingAspirations!.push('pillar:art/continuity', 'principle:open-by-design/continuity');

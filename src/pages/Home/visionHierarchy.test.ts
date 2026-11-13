@@ -49,13 +49,13 @@ describe('aspiration grouping', () => {
     expect(aspirationsForSubject(value, { kind: 'principle', id: 'open-by-design' })
       .aspirations.every(row => row.gaps.length === 0)).toBe(true);
   });
-  it('counts current primary projects and chooses the lowest priority order, including legacy gapIds fallback', () => {
+  it('counts all primary projects and chooses the lowest priority order, including legacy gapIds fallback', () => {
     const value = visionFixture();
     value.projects.reverse();
     delete value.projects[0].primaryGapId;
     value.projects[1].status = 'done';
     const [first, empty] = aspirationsForSubject(value, { kind: 'pillar', id: 'art' }).aspirations[0].gaps;
-    expect(first.projects.map(item => item.title)).toEqual(['Live composition', 'Editable history']);
+    expect(first.projects.map(item => item.title)).toEqual(['Live composition', 'Reusable tools', 'Editable history']);
     expect(empty.projects).toEqual([]);
   });
   it('distinguishes no measured gap from a closed measured gap and keeps older feeds flat', () => {

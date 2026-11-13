@@ -149,7 +149,7 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
   ]);
   for (const gap of gaps) {
     if (gap.aspiration === undefined && gap.supportingAspirations === undefined) continue;
-    const supporting = gap.supportingAspirations ?? [];
+    const supporting = gap.supportingAspirations === undefined ? [] : gap.supportingAspirations;
     if (!nonempty(gap.aspiration) || !aspirationRefs.has(gap.aspiration) ||
         !Array.isArray(supporting) || !supporting.every(ref => nonempty(ref) && aspirationRefs.has(ref)) ||
         new Set([gap.aspiration, ...supporting]).size !== supporting.length + 1) {

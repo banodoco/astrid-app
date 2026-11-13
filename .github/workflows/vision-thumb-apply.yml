@@ -1,0 +1,44 @@
+name: Apply focused principle regression expectation update
+on:
+  push:
+    branches: [fix/vision-thumb-controls-20261113]
+    paths: [.github/workflows/vision-thumb-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-thumb-controls-20261113
+      - name: Preserve every case and update only the changed presentation contract
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          path = Path('tests/e2e/public-astrid-vision-hierarchy.spec.ts')
+          data = path.read_bytes()
+          assert hashlib.sha1(b'blob ' + str(len(data)).encode() + b'\0' + data).hexdigest() == '8170871991decd7d51d6bed64be9a23eb0572235'
+          text = data.decode()
+          start = text.index("test('principle details cue sits bottom-left")
+          before, case = text[:start], text[start:]
+          def once(old, new):
+              global case
+              assert case.count(old) == 1, (old, case.count(old))
+              case = case.replace(old, new)
+          once("      const titleBounds = await card.locator('h3').boundingBox();",
+               "      const titleBounds = await card.locator('h3').boundingBox();\n      const copyBounds = await card.locator('.astrid-vision-principle-statement, .astrid-vision-markdown').boundingBox();")
+          once("      // The sigil owns the right-hand column and is vertically centred in the card.\n      expect(sigilBounds!.x).toBeGreaterThan(titleBounds!.x + titleBounds!.width - 1);",
+               "      // The sigil stays beside the secondary copy. On mobile the title\n      // now deliberately spans both columns; desktop keeps the original layout.\n      expect(sigilBounds!.x).toBeGreaterThan(copyBounds!.x + copyBounds!.width - 1);\n      if (width <= 760) {\n        expect(titleBounds!.y + titleBounds!.height).toBeLessThanOrEqual(copyBounds!.y + 1);\n        expect(titleBounds!.x + titleBounds!.width).toBeGreaterThanOrEqual(sigilBounds!.x + sigilBounds!.width - 1);\n      } else {\n        expect(sigilBounds!.x).toBeGreaterThan(titleBounds!.x + titleBounds!.width - 1);\n      }")
+          once("await expect(arrow).toHaveText(/Details/i);", r"await expect(arrow).toHaveText(/\d+ gaps?.*\d+ projects?/i);")
+          path.write_text(before + case)
+          PY
+          git diff --check
+          git diff -- tests/e2e/public-astrid-vision-hierarchy.spec.ts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tests/e2e/public-astrid-vision-hierarchy.spec.ts
+          git commit -m 'test(vision): retain sigil alignment coverage with full-width mobile titles'
+          git push origin HEAD:fix/vision-thumb-controls-20261113

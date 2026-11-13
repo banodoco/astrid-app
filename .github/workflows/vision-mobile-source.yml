@@ -1,0 +1,22 @@
+name: Vision mobile source workbench
+on:
+  push:
+    branches: [feat/vision-mobile-catalogs-20261113]
+    paths: [.github/workflows/vision-mobile-source.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Archive the exact relevant tracked source
+        run: |
+          mkdir -p /tmp/vision-source
+          git archive --format=zip HEAD AGENTS.md src/pages/Home tests/e2e tests/fixtures config/testing playwright.config.ts playwright.vision.config.ts .github/workflows/public-vision.yml scripts/quality/check-public-vision-production.mjs package.json package-lock.json > /tmp/vision-source/source.zip
+          git rev-parse HEAD > /tmp/vision-source/revision.txt
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vision-mobile-source
+          path: /tmp/vision-source/
+          retention-days: 1

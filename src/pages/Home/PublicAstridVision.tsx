@@ -10,10 +10,13 @@ import { NORTH_STAR_ART, NorthStarMink, type NorthStarArt } from './PublicAstrid
 import { usePublicAstridEnvironment, type PublicAstridEnvironment } from './publicAstridLifecycle';
 import { usePublicVisionContent, PUBLIC_VISION_REPO_URL, type PublicVisionGap, type PublicVisionProject } from './publicVisionContent';
 import { VisionDetailDialog } from './VisionDetailDialog';
+import { VisionDialog } from './VisionDialog';
 import { VisionPrincipleSigil } from './VisionPrincipleSigil';
 import { VisionSectionNav } from './VisionSectionNav';
-import type { VisionSubject } from './visionHierarchy';
+import { aspirationsForSubject, type VisionSubject } from './visionHierarchy';
+import type { PublicVisionContent } from './publicVisionContent';
 import './PublicAstridVision.css';
+import './VisionMobileLayout.css';
 
 const PILLAR_ART: readonly NorthStarArt[] = [
   NORTH_STAR_ART.art,
@@ -57,6 +60,19 @@ function PixelArrow() {
       <path d="M4 14L13 5M8 5h5v5" />
     </svg>
   );
+}
+
+/** Count exactly the primary groups rendered in the subject popup, including
+ * completed work where that popup includes it. Supporting links never duplicate counts. */
+function SubjectCounts({ content, subject }: { content: PublicVisionContent; subject: VisionSubject }) {
+  const hierarchy = aspirationsForSubject(content, subject);
+  const groups = [...hierarchy.aspirations.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
+  const gaps = new Set(groups.map(item => item.gap.id)).size;
+  const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
+  return <span className="astrid-vision-subject-counts">
+    <span>{gaps} {gaps === 1 ? 'gap' : 'gaps'}</span><span aria-hidden="true"> · </span>
+    <span>{projects} {projects === 1 ? 'project' : 'projects'}</span>
+  </span>;
 }
 
 const JUGGLED_ITEMS = [
@@ -160,7 +176,7 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
 /** Stand-ins for the loading skeleton: never shown, only measured, so they match the usual copy's length. */
 const SKELETON_TITLE = 'A tool to unlock the collective artistic ambition of the open-source AI community';
 const SKELETON_LEAD = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
-const SKELETON_ATTRIBUTION = 'This vision is drawn from the Astrid Dev repository.';
+const SKELETON_ATTRIBUTION = 'Populated by the Astrid Dev repository.';
 
 const PROJECT_GOAL_LINES = 5;
 
@@ -228,6 +244,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [showAllGaps, setShowAllGaps] = useState(false);
   const [headerCondensed, setHeaderCondensed] = useState(false);
   const [selectedSubject, setSelectedSubject] = useState<VisionSubject | null>(null);
+  const [selectedCatalog, setSelectedCatalog] = useState<'gaps' | 'projects' | null>(null);
   useEffect(() => {
     if (!visible) return;
     const update = () => setHeaderCondensed(window.scrollY > 72);
@@ -245,12 +262,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     detailOpenedByPointer.current = lastInteractionWasPointer.current;
     detailTrigger.current = trigger;
     detailScrollY.current = window.scrollY;
+    setSelectedCatalog(null);
     setSelectedSubject(subject);
   };
   const closeSubject = () => {
     const trigger = detailTrigger.current;
     const previousScrollY = detailScrollY.current;
     setSelectedSubject(null);
+    setSelectedCatalog(null);
+    if (['#astrid-vision-parts', '#astrid-vision-projects'].includes(window.location.hash)) {
+      window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+    }
     const pointerClose = detailOpenedByPointer.current;
     // Keyboard users get focus back. Touch users don't inherit the large
     // outline caused by Safari restoring focus to a full-card button.
@@ -261,6 +283,36 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       window.scrollTo(0, previousScrollY);
     });
   };
+  const openCatalog = (catalog: 'gaps' | 'projects', trigger: HTMLButtonElement) => {
+    detailOpenedByPointer.current = lastInteractionWasPointer.current;
+    detailTrigger.current = trigger;
+    detailScrollY.current = window.scrollY;
+    setSelectedSubject(null);
+    setGapFilter('all');
+    setProjectFilter('all');
+    setShowAllGaps(true);
+    setShowAllProjects(true);
+    setSelectedCatalog(catalog);
+  };
+  // Old section bookmarks still lead to the corresponding catalog, not a dead anchor.
+  useEffect(() => {
+    if (!content || !visible) return;
+    const followCatalogHash = () => {
+      const catalog = window.location.hash === '#astrid-vision-parts' ? 'gaps'
+        : window.location.hash === '#astrid-vision-projects' ? 'projects' : null;
+      if (!catalog) return;
+      detailScrollY.current = window.scrollY;
+      detailOpenedByPointer.current = false;
+      detailTrigger.current = document.getElementById('astrid-see-all-' + catalog) as HTMLButtonElement | null;
+      setSelectedSubject(null);
+      setGapFilter('all'); setProjectFilter('all');
+      setShowAllGaps(true); setShowAllProjects(true);
+      setSelectedCatalog(catalog);
+    };
+    followCatalogHash();
+    window.addEventListener('hashchange', followCatalogHash);
+    return () => window.removeEventListener('hashchange', followCatalogHash);
+  }, [content, visible]);
   const [agentCopyState, setAgentCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
   const agentCopyTimer = useRef<number>();
   const contributionIntro = content?.vision.contributeMarkdown
@@ -287,7 +339,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   }, [content?.source.revision]);
   // Newly filtered rows must still receive reveal observation.
   const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
-    gapFilter + ':' + showAllGaps + ':' + projectFilter + ':' + showAllProjects);
+    gapFilter + ':' + showAllGaps + ':' + projectFilter + ':' + showAllProjects + ':' + selectedCatalog);
   useLayoutEffect(() => {
     if (!visible) return undefined;
     return skySession.registerPaletteTarget(pageRef.current, 'vision');
@@ -382,7 +434,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
           <span className="astrid-vision-brand-name">Astrid</span>
         </a>
         {content && <VisionSectionNav reducedMotion={reducedMotion}
-          includeHelp={Boolean(content.vision.contributeMarkdown)} />}
+          includeHelp={true} />}
       </header>
 
       <section id="astrid-vision-manifesto" className="astrid-vision-manifesto" aria-labelledby="astrid-vision-title">
@@ -394,7 +446,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   <h1 id="astrid-vision-title"><KeepHyphenated value={content.vision.title} /></h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
-                    This vision is drawn from the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
+                    Populated by the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
                   </p>
                 </>
               : error
@@ -438,21 +490,6 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               </div>)}
             </div>
           </section>
-          <section className="astrid-vision-loading-group">
-            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
-            {Array.from({ length: 3 }, (_, i) => <div key={i} className="astrid-vision-loading-row">
-              <div className="astrid-vision-skeleton-line" />
-            </div>)}
-          </section>
-          <section className="astrid-vision-loading-group">
-            <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
-            <div className="astrid-vision-loading-projects">
-              {Array.from({ length: 9 }, (_, i) => <div key={i} className="astrid-vision-loading-project">
-                <div className="astrid-vision-skeleton-line" />
-                <div className="astrid-vision-skeleton-line astrid-vision-skeleton-line-short" />
-              </div>)}
-            </div>
-          </section>
         </div>
       )}
       {content && (<>
@@ -471,8 +508,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <div className="astrid-vision-pillar-stage"><NorthStarMink art={pillar.art} /></div>
               <h3>{pillar.title}</h3>
               <p>{pillar.descriptor}</p>
-              <span className="astrid-vision-pillar-details" aria-hidden="true">
-                Details <span className="astrid-vision-card-arrow"><PixelArrow /></span>
+              <span className="astrid-vision-pillar-details">
+                <SubjectCounts content={content} subject={{ kind: 'pillar', id: pillar.id }} /> <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + pillar.title + ': gaps and projects'}
@@ -509,11 +546,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </ol>
       </section>
 
-      <section id="astrid-vision-parts" className="astrid-vision-parts" aria-labelledby="astrid-vision-parts-title">
-        <div className="astrid-vision-section-head astrid-vision-parts-head" data-reveal>
-          <p className="astrid-vision-eyebrow" data-index="04">Gaps</p>
-          <h2 id="astrid-vision-parts-title">{gapFilter === 'all' ? 'All vision gaps' : gapFilter === 'closed' ? 'Gaps we’ve closed' : 'How we currently fall short'}</h2>
-        </div>
+      </>)}
+      {content && selectedSubject && (
+        <VisionDetailDialog key={selectedSubject.kind + ':' + selectedSubject.id}
+          content={content} subject={selectedSubject} onClose={closeSubject} />
+      )}
+      {content && selectedCatalog && (
+        <VisionDialog key={selectedCatalog} title={selectedCatalog === 'gaps' ? 'All gaps' : 'All projects'}
+          eyebrow="Explore the work" className="astrid-vision-catalog"
+          identity={content.source.revision + ':' + selectedCatalog} onClose={closeSubject}>
+          {selectedCatalog === 'gaps' ? (
+      <section id="astrid-vision-parts" className="astrid-vision-parts" aria-label="Gap catalog">
         <div className="astrid-vision-context-row">
           <p className="astrid-vision-section-context">These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress. <a href={PUBLIC_VISION_REPO_URL + '/blob/main/docs/contribution-workflow.md#define-or-reassess-a-vision-gap'} target="_blank" rel="noreferrer">What makes a gap?</a></p>
           <div className="astrid-vision-filter-bar">
@@ -538,11 +581,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         )}
       </section>
 
-      <section id="astrid-vision-projects" className="astrid-vision-issues astrid-vision-projects" aria-labelledby="astrid-vision-projects-title">
-        <div className="astrid-vision-section-head astrid-vision-issues-head" data-reveal>
-          <p className="astrid-vision-eyebrow" data-index="05">Projects</p>
-          <h2 id="astrid-vision-projects-title">How we plan to reach our aspirations</h2>
-        </div>
+          ) : (
+      <section id="astrid-vision-projects" className="astrid-vision-issues astrid-vision-projects" aria-label="Project catalog">
         <div className="astrid-vision-context-row">
           <p className="astrid-vision-section-context">These projects come directly from the <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Astrid Dev catalog</a>, in priority order. A listing doesn't mean someone has already started work.</p>
           <div className="astrid-vision-filter-bar">
@@ -579,16 +619,14 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         </p>
       </section>
 
-      </>)}
-      {content && selectedSubject && (
-        <VisionDetailDialog key={selectedSubject.kind + ':' + selectedSubject.id}
-          content={content} subject={selectedSubject} onClose={closeSubject} />
+          )}
+        </VisionDialog>
       )}
-      {content?.vision.contributeMarkdown && (
+      {content && (
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"
           aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
-            <p className="astrid-vision-eyebrow" data-index="06">Help us</p>
+            <p className="astrid-vision-eyebrow" data-index="04">Help us</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
             <MarkdownText value={contributionIntro} />
             {content.vision.agentPrompt ? (
@@ -600,6 +638,12 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               <a className="astrid-vision-copy-agent-fallback" href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}
                 target="_blank" rel="noreferrer">See agent instructions on GitHub</a>
             )}
+            <div className="astrid-vision-catalog-actions">
+              <button id="astrid-see-all-projects" type="button" aria-haspopup="dialog"
+                onClick={event => openCatalog('projects', event.currentTarget)}>See all projects <PixelArrow /></button>
+              <button id="astrid-see-all-gaps" type="button" aria-haspopup="dialog"
+                onClick={event => openCatalog('gaps', event.currentTarget)}>See all gaps <PixelArrow /></button>
+            </div>
             {agentCopyState === 'failed' && (
               <p className="astrid-vision-copy-agent-status" role="alert">
                 Couldn’t copy. <a href={PUBLIC_VISION_REPO_URL + '#want-to-contribute-give-this-to-your-agent'}

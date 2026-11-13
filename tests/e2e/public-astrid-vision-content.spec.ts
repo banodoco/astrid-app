@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
 
+
+async function openCatalog(page: import('@playwright/test').Page, kind: 'gaps' | 'projects', current = true) {
+  if (await page.getByRole('dialog').count()) await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'See all ' + kind, exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'All ' + kind })).toBeVisible();
+  if (current) await page.getByRole('combobox', { name: 'Filter ' + kind + ' by status' }).selectOption('current');
+}
+
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
 async function feed(request: import('@playwright/test').APIRequestContext) {
@@ -70,6 +78,7 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   }));
   expect(titleLayouts.every(({ title, copy }) => copy.y >= title.y + title.height - 2)).toBe(true);
 
+  await openCatalog(page, 'gaps');
   const current = content.gaps.filter(gap => gap.assessment !== 'closed');
   const gapRows = page.locator('.astrid-vision-part');
   await expect(gapRows).toHaveCount(Math.min(10, current.length));
@@ -95,22 +104,15 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   await trigger.click();
   await expect(body).toBeHidden();
 
-  await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(1);
-  await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(1);
+  await expect(page.locator('.astrid-vision-parts-head > p')).toHaveCount(0);
+  await expect(page.locator('.astrid-vision-issues-head > p')).toHaveCount(0);
   const gapContext = page.locator('.astrid-vision-parts .astrid-vision-context-row > .astrid-vision-section-context');
   await expect(gapContext).toContainText("These are the gaps between where we are now and where we want to get to, and the evidence we're using to assess our progress.");
   const gapDefinition = gapContext.getByRole('link', { name: 'What makes a gap?' });
   await expect(gapDefinition).toHaveAttribute('href',
     'https://github.com/banodoco/astrid-dev/blob/main/docs/contribution-workflow.md#define-or-reassess-a-vision-gap');
-  const catalogLink = page.locator('.astrid-vision-projects .astrid-vision-context-row > .astrid-vision-section-context a');
-  await expect(catalogLink).toHaveText('Astrid Dev catalog');
-  await expect(catalogLink).toHaveAttribute('href', /github\.com\/banodoco\/astrid-dev\/tree\/[0-9a-f]{40}\/plans$/);
-  expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
-  await expect(page.getByRole('link', { name: 'Astrid on GitHub' }))
-    .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
-  const gapFilter = page.getByRole('combobox', { name: 'Filter gaps by status' });
-  const projectFilter = page.getByRole('combobox', { name: 'Filter projects by status' });
   for (const section of ['.astrid-vision-parts', '.astrid-vision-projects']) {
+    await openCatalog(page, section.includes('projects') ? 'projects' : 'gaps');
     const row = page.locator(section + ' .astrid-vision-context-row');
     const description = await row.locator('.astrid-vision-section-context').boundingBox();
     const filter = await row.locator('.astrid-vision-filter-bar').boundingBox();
@@ -120,7 +122,17 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
     expect(Math.abs(description!.y + description!.height / 2 -
       (filter!.y + filter!.height / 2))).toBeLessThan(2);
   }
-  for (const select of [gapFilter, projectFilter]) {
+  await openCatalog(page, 'projects');
+  const catalogLink = page.locator('.astrid-vision-projects .astrid-vision-context-row > .astrid-vision-section-context a');
+  await expect(catalogLink).toHaveText('Astrid Dev catalog');
+  await expect(catalogLink).toHaveAttribute('href', /github\.com\/banodoco\/astrid-dev\/tree\/[0-9a-f]{40}\/plans$/);
+  expect(await catalogLink.evaluate(element => getComputedStyle(element).textDecorationLine)).toContain('underline');
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('link', { name: 'Astrid on GitHub' }))
+    .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev');
+  for (const kind of ['gaps', 'projects'] as const) {
+    await openCatalog(page, kind);
+    const select = page.getByRole('combobox', { name: 'Filter ' + kind + ' by status' });
     const style = await select.evaluate(element => {
       const css = getComputedStyle(element);
       return { appearance: css.appearance, paddingRight: Number.parseFloat(css.paddingRight), image: css.backgroundImage };
@@ -137,6 +149,7 @@ test('phone status controls stay right-aligned under descriptions and within hal
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
     for (const section of ['.astrid-vision-parts', '.astrid-vision-projects']) {
+      await openCatalog(page, section.includes('projects') ? 'projects' : 'gaps');
       const row = page.locator(section + ' .astrid-vision-context-row');
       const description = await row.locator('.astrid-vision-section-context').boundingBox();
       const filter = await row.locator('.astrid-vision-filter-bar').boundingBox();
@@ -157,7 +170,7 @@ test('every chapter, Help us included, opens with one shared rule, pixel eyebrow
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const heads = page.locator('.astrid-vision-north-star > .astrid-vision-section-head, .astrid-vision-standards > .astrid-vision-section-head, .astrid-vision-parts > .astrid-vision-section-head, .astrid-vision-projects > .astrid-vision-section-head, .astrid-vision-contribute');
-  await expect(heads).toHaveCount(5);
+  await expect(heads).toHaveCount(3);
   const styles = await heads.evaluateAll(elements => elements.map(element => {
     const css = getComputedStyle(element);
     const eyebrow = element.querySelector('.astrid-vision-eyebrow')!;
@@ -180,7 +193,7 @@ test('every chapter, Help us included, opens with one shared rule, pixel eyebrow
   expect(new Set(styles.map(s => s.paddingTop)).size).toBe(1);
   expect(new Set(styles.map(s => s.headingSize)).size).toBe(1);
   expect(styles.every(s => s.eyebrowFont.includes('Departure Mono'))).toBeTruthy();
-  expect(styles.map(s => s.eyebrowIndex)).toEqual(['"02"', '"03"', '"04"', '"05"', '"06"']);
+  expect(styles.map(s => s.eyebrowIndex)).toEqual(['"02"', '"03"', '"04"']);
   expect(Math.max(...styles.map(s => s.x)) - Math.min(...styles.map(s => s.x))).toBeLessThan(2);
   expect(Math.max(...styles.map(s => s.width)) - Math.min(...styles.map(s => s.width))).toBeLessThan(2);
 });
@@ -264,6 +277,7 @@ test('failed copy shows an honest GitHub fallback', async ({ page, request }) =>
 test('projects filter current work by default and can reveal every historic project', async ({ page, request }) => {
   const content = await pinnedFeed(page, request);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await openCatalog(page, 'projects', true);
   const current = content.projects.filter(project => !['done', 'cancelled'].includes(project.status));
   const initial = current.slice(0, 8);
   const rows = page.locator('.astrid-vision-project-row');
@@ -290,6 +304,7 @@ test('phone gap disclosures start collapsed, open evidence, and filter all statu
   const content = await pinnedFeed(page, request);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await openCatalog(page, 'gaps', true);
   const current = content.gaps.filter(gap => gap.assessment !== 'closed');
   const first = content.gaps.find(g => g.id === 'AA-001')!;
   const gap = page.locator('#gap-aa-001');
@@ -328,6 +343,7 @@ test('status filters include closed gaps and completed projects from a valid fee
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(altered),
   }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await openCatalog(page, 'gaps', true);
   const gapFilter = page.getByRole('combobox', { name: 'Filter gaps by status' });
   const projectFilter = page.getByRole('combobox', { name: 'Filter projects by status' });
   await expect(page.locator('.astrid-vision-part')).toHaveCount(
@@ -338,6 +354,7 @@ test('status filters include closed gaps and completed projects from a valid fee
   await expect(page.locator('.astrid-vision-part')).toHaveCount(Math.min(10, altered.gaps.length));
   await page.getByRole('button', { name: 'Show all gaps' }).click();
   await expect(page.locator('.astrid-vision-part')).toHaveCount(altered.gaps.length);
+  await openCatalog(page, 'projects', false);
   await projectFilter.selectOption('all');
   await expect(page.locator('.astrid-vision-project-row')).toHaveCount(altered.projects.length);
   await projectFilter.selectOption('done');
@@ -374,6 +391,7 @@ test('project goals respect the responsive line budget and fade the overflow lin
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await openCatalog(page, 'projects', true);
     const goals = page.locator('.astrid-vision-project-row .astrid-vision-project-goal');
     await expect(goals.first()).toBeVisible();
     const measured = await goals.evaluateAll(elements => elements.map(element => {

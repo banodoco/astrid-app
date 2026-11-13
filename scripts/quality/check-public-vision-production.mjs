@@ -34,7 +34,14 @@ async function checkPage(browser, content) {
     await expect(page.locator('main.astrid-vision h1')).toHaveText(content.vision.title, { timeout: 15_000 });
     await expect(page.locator('.astrid-vision-principles h3')).toHaveCount(content.pillars.length);
     await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
+    await expect(page.locator('.astrid-vision > #astrid-vision-parts')).toHaveCount(0);
+    await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();
     await expect(page.locator('#gap-aa-001')).toBeAttached();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'See all projects', exact: true }).click();
+    await expect(page.getByRole('dialog', { name: 'All projects' })).toBeVisible();
+    await expect(page.locator('.astrid-vision-project-row')).toHaveCount(content.projects.length);
     await expect(page.getByRole('alert')).toHaveCount(0);
     console.log(`Production vision page renders ${content.pillars.length} pillars, ${content.principles.length} principles, and the first live gap.`);
   } finally {

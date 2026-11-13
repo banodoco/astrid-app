@@ -1,5 +1,13 @@
 import { expect, test } from '@playwright/test';
 
+
+async function openCatalog(page: import('@playwright/test').Page, kind: 'gaps' | 'projects', current = true) {
+  if (await page.getByRole('dialog').count()) await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'See all ' + kind, exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'All ' + kind })).toBeVisible();
+  if (current) await page.getByRole('combobox', { name: 'Filter ' + kind + ' by status' }).selectOption('current');
+}
+
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
 test('desktop shows eight preloaded cards plus a view-all tile, then all without stale reveal', async ({page, request}) => {
@@ -16,6 +24,7 @@ test('desktop shows eight preloaded cards plus a view-all tile, then all without
     body: JSON.stringify(data),
   }));
   await page.goto('/vision', {waitUntil: 'domcontentloaded'});
+  await openCatalog(page, 'projects', true);
   const grid = page.locator('.astrid-vision-project-list');
   const cards = grid.locator('.astrid-vision-project-row');
   await expect(cards).toHaveCount(8);
@@ -35,6 +44,7 @@ test('desktop shows eight preloaded cards plus a view-all tile, then all without
 test('expanded mobile gap details occupy the entire row, including the ID column', async ({page}) => {
   await page.setViewportSize({width: 390, height: 844});
   await page.goto('/vision', {waitUntil: 'domcontentloaded'});
+  await openCatalog(page, 'gaps', true);
   const gap = page.locator('#gap-aa-001');
   await gap.locator('h3 button').click();
   const body = gap.locator('.astrid-vision-part-body');
@@ -53,6 +63,7 @@ test('gap IDs remain on one line alongside titles on phone and desktop', async (
   for (const width of [390, 1440]) {
     await page.setViewportSize({width, height: 900});
     await page.goto('/vision', {waitUntil: 'domcontentloaded'});
+  await openCatalog(page, 'gaps', true);
     await page.getByRole('button', { name: 'Show all gaps' }).click();
     for (const id of ['AA-001', 'F-003'] as const) {
       const item = page.locator('#gap-' + id.toLowerCase());
@@ -87,7 +98,7 @@ test('first visit paints stable text skeletons until GitHub content becomes avai
   await page.goto('/vision', {waitUntil: 'domcontentloaded'});
   await expect(page.locator('.astrid-vision-skeleton-hero')).toBeVisible();
   await expect(page.locator('.astrid-vision-loading-pillars .astrid-vision-loading-pillar')).toHaveCount(4);
-  await expect(page.locator('.astrid-vision-loading-projects .astrid-vision-loading-project')).toHaveCount(9);
+  await expect(page.locator('.astrid-vision-loading-projects')).toHaveCount(0);
   await expect(page.locator('.astrid-vision-principles h3')).toHaveCount(4);
   await expect(page.locator('.astrid-vision-loading-sections')).toHaveCount(0);
 });

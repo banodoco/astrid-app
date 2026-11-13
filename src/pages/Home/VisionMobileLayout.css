@@ -1,0 +1,60 @@
+/* The page presents the vision; the full work catalogs are opened on demand. */
+.astrid-vision-subject-counts { display: inline-flex; flex-wrap: wrap; gap: 0 4px; }
+.astrid-vision .astrid-vision-pillar-details { max-width: 100%; }
+.astrid-vision-catalog-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+.astrid-vision-catalog-actions button {
+  display: inline-flex; align-items: center; justify-content: space-between; gap: 12px;
+  min-height: 44px; padding: 11px 16px; border: 1px solid var(--astrid-line);
+  border-radius: 8px; background: var(--astrid-panel); color: var(--astrid-ink);
+  font: 500 14px/1.4 Inter, ui-sans-serif, system-ui, sans-serif; cursor: pointer;
+}
+.astrid-vision-catalog-actions button:hover { border-color: var(--astrid-accent); }
+.astrid-vision-catalog-actions button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+.astrid-vision > .astrid-vision-details { max-height: min(94dvh, 1080px); }
+.astrid-vision-details-shell { max-height: min(94dvh, 1080px); }
+.astrid-vision > .astrid-vision-catalog { width: min(1120px, calc(100vw - 48px)); }
+.astrid-vision-catalog :is(.astrid-vision-parts, .astrid-vision-projects) { width: 100%; margin: 0; padding: 0; }
+.astrid-vision-catalog .astrid-vision-context-row { margin-top: 0; }
+/* Catalogs scroll inside the native dialog, not on the page's reveal timeline. */
+.astrid-vision-catalog [data-reveal] { opacity: 1; transform: none; }
+@media (max-width: 760px) {
+  .astrid-vision .astrid-vision-principles,
+  .astrid-vision .astrid-vision-loading-pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .astrid-vision .astrid-vision-principles > li {
+    display: grid; grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 120px auto 1fr auto; gap: 0;
+    padding: 12px; min-width: 0;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-number { grid-column: 1; grid-row: 1; margin: 0; }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-stage {
+    grid-column: 1; grid-row: 2; height: 104px; min-height: 0; margin: 6px 0 10px;
+    padding: 0; align-self: center; place-items: center;
+  }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: 1px; align-self: center; }
+  .astrid-vision .astrid-vision-principles h3 {
+    grid-column: 1; grid-row: 3; min-width: 0; margin: 0 0 10px;
+    font-size: clamp(17px, 4.5vw, 22px); line-height: 1.15; overflow-wrap: anywhere;
+  }
+  .astrid-vision .astrid-vision-principles li > p { grid-column: 1; grid-row: 4; margin: 0; font-size: 13px; line-height: 1.5; }
+  .astrid-vision .astrid-vision-principles .astrid-vision-pillar-details {
+    grid-column: 1; grid-row: 5; margin: 14px 0 0; gap: 6px; align-items: flex-end;
+  }
+  .astrid-vision-subject-counts { gap: 0 3px; }
+  .astrid-vision .astrid-vision-standards-list { row-gap: 16px; }
+  .astrid-vision-catalog .astrid-vision-section-context { max-width: none; }
+  .astrid-vision > .astrid-vision-details {
+    width: 100vw; max-width: 100vw; border-inline-width: 0; border-radius: 10px;
+    max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+  }
+  .astrid-vision-details-shell { max-height: calc(100dvh - 16px - env(safe-area-inset-top) - env(safe-area-inset-bottom)); }
+  .astrid-vision-details-header { padding: 18px max(16px, env(safe-area-inset-right)) 14px max(16px, env(safe-area-inset-left)); }
+  .astrid-vision-details-scroll { padding: 16px max(16px, env(safe-area-inset-right)) 20px max(16px, env(safe-area-inset-left)); }
+  .astrid-vision-details-close { min-width: 44px; min-height: 44px; }
+  .astrid-vision-catalog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .astrid-vision-catalog-actions button { padding: 12px 10px; gap: 6px; font-size: 13px; text-align: left; }
+  .astrid-vision-catalog-actions svg { flex: none; }
+}
+@media (max-width: 360px) {
+  .astrid-vision .astrid-vision-principles > li { padding: 10px; }
+  .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: .85px; }
+}

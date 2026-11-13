@@ -143,7 +143,7 @@ test('mobile hero gets breathing room and the editorial cues and pillar numbers 
     for (let index = 0; index < 8; index++) {
       const cue = cues.nth(index);
       await expect(cue.locator('.astrid-vision-card-arrow svg[viewBox="0 0 18 18"]')).toHaveCount(1);
-      await expect(cue).toHaveText(/Details/i);
+      await expect(cue).toHaveText(index < 4 ? /\d+ gaps?.*\d+ projects?/i : /Details/i);
       await expect(cue).toHaveCSS('font-family', /Departure Mono/);
       await expect(cue).toHaveCSS('font-size', '11px');
       await expect(cue).toHaveCSS('border-top-width', '0px');
@@ -171,7 +171,7 @@ test('pillars put the art on a stage above the copy, beside it in one column, wi
         detail: box('.astrid-vision-pillar-details'),
       };
     }));
-    const columns = width >= 1180 ? 4 : width > 760 ? 2 : 1;
+    const columns = width >= 1180 ? 4 : 2;
     const rowCount = 4 / columns;
     for (let i = 0; i < items.length; i++) {
       const item = items[i];
@@ -189,9 +189,10 @@ test('pillars put the art on a stage above the copy, beside it in one column, wi
         expect(item.heading.y - (item.art.y + item.art.height)).toBeLessThan(48);
         expect(Math.abs(item.art.x + item.art.width / 2 - (item.card.x + item.card.width / 2))).toBeLessThan(12);
       } else {
-        expect(item.card.height).toBeLessThan(width <= 640 ? 350 : 430);
-        expect(item.art.x).toBeGreaterThanOrEqual(item.heading.x + item.heading.width - 2);
-        expect(item.art.x).toBeGreaterThanOrEqual(item.copy.x + item.copy.width - 2);
+        // Two narrow columns keep the complete copy; art now sits above it.
+        expect(item.art.y + item.art.height).toBeLessThanOrEqual(item.heading.y + 1);
+        expect(item.art.x).toBeGreaterThanOrEqual(item.card.x);
+        expect(Math.abs(item.art.x + item.art.width / 2 - (item.card.x + item.card.width / 2))).toBeLessThan(12);
       }
     }
     for (let i = 0; i < items.length; i++) {
@@ -202,7 +203,7 @@ test('pillars put the art on a stage above the copy, beside it in one column, wi
         expect(items[i].card.y).toBeGreaterThan(items[i - columns].card.y + items[i - columns].card.height - 1);
       }
     }
-    expect(rowCount).toBe(width >= 1180 ? 1 : width > 760 ? 2 : 4);
+    expect(rowCount).toBe(width >= 1180 ? 1 : 2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
     await cards.first().getByRole('button', { name: /Explore .*: gaps and projects/ }).click();
     await expect(page.getByRole('dialog')).toBeVisible();
@@ -272,11 +273,11 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
   await expect(header.locator('nav')).toHaveCount(1);
   await expect(nav).toHaveCSS('position', 'relative');
   await expect(wordmark).toHaveCSS('max-width', '100px');
-  await expect(nav.getByRole('link')).toHaveCount(6);
+  await expect(nav.getByRole('link')).toHaveCount(4);
   expect(await nav.locator('a').evaluateAll(elements => elements.map(el => el.getAttribute('href'))))
     .toEqual([
       '#astrid-vision-manifesto', '#astrid-vision-pillars', '#astrid-vision-standards',
-      '#astrid-vision-parts', '#astrid-vision-projects', '#astrid-vision-contribute',
+      '#astrid-vision-contribute',
     ]);
   const brand = header.locator('.astrid-vision-brand');
   const brandRect = await brand.boundingBox();
@@ -289,8 +290,6 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
   for (const [label, id] of [
     ['Pillars', 'astrid-vision-pillars'],
     ['Principles', 'astrid-vision-standards'],
-    ['Gaps', 'astrid-vision-parts'],
-    ['Projects', 'astrid-vision-projects'],
     ['Help us', 'astrid-vision-contribute'],
   ]) {
     const link = nav.getByRole('link', { name: new RegExp(label + '$') });
@@ -328,11 +327,11 @@ test('phones get one compact sticky header with navigation beside a folding Astr
   expect(size).not.toBeNull();
   expect(size!.x).toBeGreaterThanOrEqual(0);
   expect(size!.x + size!.width).toBeLessThanOrEqual(391);
-  const link = nav.getByRole('link', { name: /Gaps$/ });
+  const link = nav.getByRole('link', { name: /Help us$/ });
   await link.click();
   await expect(link).toHaveAttribute('aria-current', 'location');
-  await expect(page).toHaveURL(/#astrid-vision-parts$/);
-  await expect(page.locator('#astrid-vision-parts')).toBeVisible();
+  await expect(page).toHaveURL(/#astrid-vision-contribute$/);
+  await expect(page.locator('#astrid-vision-contribute')).toBeVisible();
   await expect(header).toHaveAttribute('data-condensed', 'true');
   await expect(header.locator('.astrid-vision-brand-name')).toHaveCSS('max-width', '0px');
   const icon = header.locator('.astrid-vision-brand img');
@@ -392,7 +391,7 @@ test('the enlarged header spans the viewport while navigation stays aligned in o
     expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(width + 1);
     expect(bounds!.height).toBeGreaterThanOrEqual(width <= 760 ? 68 : 86);
     await expect(header).toHaveCSS('position', 'sticky');
-    await expect(nav.getByRole('link')).toHaveCount(6);
+    await expect(nav.getByRole('link')).toHaveCount(4);
     const pillars = nav.getByRole('link', { name: /Pillars$/ });
     await expect(pillars).toHaveAttribute('href', '#astrid-vision-pillars');
     await pillars.click();
@@ -513,27 +512,25 @@ test('phone header centers the active section when horizontal scroll bounds perm
   const nav = page.getByRole('navigation', { name: 'Vision page sections' });
   await expect(nav).toBeVisible();
 
-  let centered = 0;
-  for (const label of ['Pillars', 'Principles', 'Gaps', 'Projects']) {
+  for (const label of ['Pillars', 'Principles', 'Help us']) {
     const active = nav.getByRole('link', { name: new RegExp(label + '$') });
     await active.click();
     await expect(active).toHaveAttribute('aria-current', 'location');
-    const state = await nav.evaluate(el => {
+    // Four links can all fit, or leave only edge-clamped positions. Assert the
+    // actual bounded center rather than requiring a fictitious interior slot.
+    await expect.poll(() => nav.evaluate(el => {
       const selected = el.querySelector('a[aria-current="location"]')!;
       const a = selected.getBoundingClientRect();
       const n = el.getBoundingClientRect();
-      return {
-        offset: a.left + a.width / 2 - (n.left + n.width / 2),
-        scrollLeft: el.scrollLeft,
-        maxScroll: el.scrollWidth - el.clientWidth,
-      };
-    });
-    if (state.scrollLeft > 2 && state.scrollLeft < state.maxScroll - 2) {
-      centered++;
-      expect(Math.abs(state.offset)).toBeLessThan(10);
-    }
+      const desired = el.scrollLeft + a.left - n.left + a.width / 2 - el.clientWidth / 2;
+      const bounded = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, desired));
+      return Math.abs(el.scrollLeft - bounded);
+    })).toBeLessThan(10);
+    const activeBox = await active.boundingBox();
+    const navBox = await nav.boundingBox();
+    expect(activeBox!.x).toBeGreaterThanOrEqual(navBox!.x - 1);
+    expect(activeBox!.x + activeBox!.width).toBeLessThanOrEqual(navBox!.x + navBox!.width + 1);
   }
-  expect(centered).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(321);
 });
 
@@ -556,17 +553,21 @@ test('desktop section clicks keep the chosen highlight throughout smooth page sc
     }).observe(nav, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
   });
 
-  const destination = nav.getByRole('link', { name: /Projects$/ });
+  const destination = nav.getByRole('link', { name: /Help us$/ });
   await destination.click();
   await expect(destination).toHaveAttribute('aria-current', 'location');
-  await expect.poll(() => page.evaluate(() =>
-    document.getElementById('astrid-vision-projects')?.getBoundingClientRect().top ?? 9999))
-    .toBeLessThan(230);
+  await expect.poll(() => page.evaluate(() => {
+    const target = document.getElementById('astrid-vision-contribute')!;
+    const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+    const requested = window.scrollY + target.getBoundingClientRect().top - margin;
+    const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    return Math.abs(window.scrollY - Math.min(maximum, Math.max(0, requested)));
+  })).toBeLessThan(3);
   await page.waitForTimeout(200);
   const selections = await page.evaluate(() =>
     (window as typeof window & { __astridNavSelections?: string[] }).__astridNavSelections ?? []);
   expect(selections.length).toBeGreaterThan(0);
-  expect(selections.every(id => id === '#astrid-vision-projects'), selections.join(' → ')).toBe(true);
+  expect(selections.every(id => id === '#astrid-vision-contribute'), selections.join(' → ')).toBe(true);
 
   // After the smooth jump completes, ordinary user scrolling can update the
   // active section again; the clicked item must not remain locked.

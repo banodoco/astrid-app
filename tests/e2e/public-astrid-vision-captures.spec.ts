@@ -36,8 +36,14 @@ test('capture actual vision page on desktop and phone', async ({ page }) => {
   await capture(page, '.astrid-vision-manifesto', 'desktop-hero.png');
   await capture(page, '.astrid-vision-north-star', 'desktop-pillars.png');
   await capture(page, '.astrid-vision-standards', 'desktop-principles.png');
-  await capture(page, '.astrid-vision-parts', 'desktop-gaps.png');
-  await capture(page, '.astrid-vision-projects', 'desktop-projects.png');
+  await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.screenshot({ path: join(folder, 'desktop-gaps.png'), animations: 'disabled' });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'See all projects', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.screenshot({ path: join(folder, 'desktop-projects.png'), animations: 'disabled' });
+  await page.keyboard.press('Escape');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
@@ -45,6 +51,12 @@ test('capture actual vision page on desktop and phone', async ({ page }) => {
   await capture(page, '.astrid-vision-manifesto', 'phone-hero.png');
   await capture(page, '.astrid-vision-north-star', 'phone-pillars.png');
   await capture(page, '.astrid-vision-standards', 'phone-principles.png');
-  await capture(page, '.astrid-vision-parts', 'phone-gaps.png');
-  await capture(page, '.astrid-vision-projects', 'phone-projects.png');
+  await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.screenshot({ path: join(folder, 'phone-gaps.png'), animations: 'disabled' });
+  await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'See all projects', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.screenshot({ path: join(folder, 'phone-projects.png'), animations: 'disabled' });
+  await page.keyboard.press('Escape');
 });

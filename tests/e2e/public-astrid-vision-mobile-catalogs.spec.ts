@@ -134,3 +134,128 @@ test('catalog backdrop consumes the closing tap without activating the button be
     await context.close();
   }
 });
+
+
+async function expectReachableFrame(page: Page, width: number) {
+  const dialog = page.getByRole('dialog');
+  const header = dialog.locator('.astrid-vision-details-header');
+  const frame = dialog.locator('.astrid-vision-details-scroll-frame');
+  const close = dialog.getByRole('button', { name: 'Close details' });
+  const [panelBox, headerBox, frameBox, closeBox] = await Promise.all([
+    dialog.boundingBox(), header.boundingBox(), frame.boundingBox(), close.boundingBox(),
+  ]);
+  expect(panelBox).not.toBeNull(); expect(headerBox).not.toBeNull();
+  expect(frameBox).not.toBeNull(); expect(closeBox).not.toBeNull();
+  if (width <= 760) {
+    expect(frameBox!.y + frameBox!.height).toBeLessThanOrEqual(headerBox!.y + 1);
+    expect(Math.abs(headerBox!.y + headerBox!.height - panelBox!.y - panelBox!.height)).toBeLessThan(2);
+    expect(closeBox!.y).toBeGreaterThan(page.viewportSize()!.height - 150);
+    expect(closeBox!.width).toBeGreaterThanOrEqual(44);
+    expect(closeBox!.height).toBeGreaterThanOrEqual(44);
+  } else {
+    expect(headerBox!.y + headerBox!.height).toBeLessThanOrEqual(frameBox!.y + 1);
+  }
+  const before = closeBox!.y;
+  await dialog.locator('.astrid-vision-details-scroll').evaluate(node => { node.scrollTop = node.scrollHeight; });
+  expect(Math.abs((await close.boundingBox())!.y - before)).toBeLessThan(1);
+  expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+}
+
+for (const width of [320, 390]) {
+  test(`compact principles, text catalogs and reachable bottom controls at ${width}px`, async ({ page, request }, info) => {
+    const response = await request.get(FEED);
+    expect(response.ok()).toBeTruthy();
+    const feed = await response.json() as PublicVisionContent;
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    await page.evaluate(() => document.fonts.ready);
+    const nav = page.getByRole('navigation', { name: 'Vision page sections' });
+    await expect(nav.getByRole('link', { name: 'Help', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Help us', exact: true })).toHaveCount(0);
+    const cards = page.locator('.astrid-vision-standards-list > li');
+    await cards.first().scrollIntoViewIfNeeded();
+    // Measure after the wordmark has finished folding. The final link
+    // shares the header's right inset, rather than leaving spare space.
+    await expect.poll(async () => nav.evaluate(node => {
+      const bar = node.closest('.astrid-vision-bar')!;
+      const last = node.querySelector('a:last-child')!;
+      return Math.abs(last.getBoundingClientRect().right -
+        (bar.getBoundingClientRect().right - Number.parseFloat(getComputedStyle(bar).paddingRight)));
+    })).toBeLessThan(2);
+    for (const [index, principle] of feed.principles.entries()) {
+      const card = cards.nth(index);
+      const hierarchy = aspirationsForSubject(feed, { kind: 'principle', id: principle.id });
+      const groups = [...hierarchy.aspirations.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
+      const gaps = new Set(groups.map(item => item.gap.id)).size;
+      const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
+      await expect(card.locator('.astrid-vision-subject-counts'))
+        .toHaveText(`${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
+      await expect(card.locator('h3')).toHaveText(principle.title);
+      await expect(card.locator('.astrid-vision-principle-statement')).toHaveText(principle.statement!);
+      const geometry = await card.evaluate(node => {
+        const title = node.querySelector('h3')!;
+        const copy = node.querySelector('.astrid-vision-principle-statement')!;
+        const sigil = node.querySelector('.astrid-vision-principle-sigil')!;
+        return { card: node.getBoundingClientRect().toJSON(), title: title.getBoundingClientRect().toJSON(),
+          copy: copy.getBoundingClientRect().toJSON(), sigil: sigil.getBoundingClientRect().toJSON(),
+          titleLine: Number.parseFloat(getComputedStyle(title).lineHeight),
+          copyLine: Number.parseFloat(getComputedStyle(copy).lineHeight),
+          clamp: getComputedStyle(copy).webkitLineClamp,
+          noOverflow: node.scrollWidth <= node.clientWidth + 1 };
+      });
+      expect(geometry.title.height).toBeLessThanOrEqual(geometry.titleLine + 1);
+      expect(geometry.title.width).toBeGreaterThan(geometry.copy.width + 60);
+      expect(geometry.copy.height).toBeLessThanOrEqual(geometry.copyLine * 2 + 1);
+      expect(geometry.clamp).toBe('2');
+      expect(geometry.sigil.x).toBeGreaterThanOrEqual(geometry.copy.x + geometry.copy.width);
+      expect(geometry.card.height).toBeLessThan(175);
+      expect(geometry.noOverflow).toBe(true);
+    }
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(`${folder}/thumb-controls-${info.project.name}-${width}-source.json`, JSON.stringify(feed.source));
+    await page.locator('.astrid-vision-standards').screenshot({ path: `${folder}/real-compact-principles-${info.project.name}-${width}.png` });
+    await cards.first().getByRole('button').click();
+    await expectReachableFrame(page, width);
+    // Preview clamping does not shorten or replace the complete source in the popup.
+    await expect(page.getByRole('dialog').locator('.astrid-vision-details-statement')).toHaveText(feed.principles[0].statement!);
+    await page.getByRole('dialog').locator('.astrid-vision-details-scroll').evaluate(node => { node.scrollTop = 0; });
+    await page.screenshot({ path: `${folder}/real-bottom-principle-${info.project.name}-${width}.png` });
+    await page.getByRole('button', { name: 'Close details' }).click();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
+
+    const actions = page.locator('.astrid-vision-catalog-actions');
+    await actions.scrollIntoViewIfNeeded();
+    await expect(actions.locator('.astrid-vision-catalog-divider')).toHaveText('|');
+    await expect(actions.locator('.astrid-vision-catalog-divider')).toHaveAttribute('aria-hidden', 'true');
+    await expect(actions.locator('button')).toHaveText(['See all projects', 'See all gaps']);
+    for (const button of await actions.locator('button').all()) {
+      await expect(button).toHaveCSS('border-top-width', '0px');
+      await expect(button).toHaveCSS('border-left-width', '0px');
+      await expect(button).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    }
+    expect(await actions.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    await page.locator('.astrid-vision-contribute').screenshot({ path: `${folder}/real-text-catalog-actions-${info.project.name}-${width}.png` });
+    for (const kind of ['gaps', 'projects'] as const) {
+      const trigger = actions.getByRole('button', { name: 'See all ' + kind, exact: true });
+      await trigger.focus(); await page.keyboard.press('Enter');
+      await expect(page.getByRole('dialog', { name: 'All ' + kind })).toBeVisible();
+      await expectReachableFrame(page, width);
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toHaveCount(0);
+      await expect(trigger).toBeFocused();
+    }
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
+  });
+}
+
+test('desktop dialog headings remain above their scrolling content', async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await page.locator('.astrid-vision-standards-list > li').first().getByRole('button').click();
+  await expectReachableFrame(page, 1440);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+});

@@ -1,15 +1,18 @@
 /* The page presents the vision; the full work catalogs are opened on demand. */
 .astrid-vision-subject-counts { display: inline-flex; flex-wrap: wrap; gap: 0 4px; }
 .astrid-vision .astrid-vision-pillar-details { max-width: 100%; }
-.astrid-vision-catalog-actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+/* Text actions remain generous touch targets without looking like boxed buttons. */
+.astrid-vision-catalog-actions { display: flex; align-items: center; gap: 0; margin-top: 12px; }
 .astrid-vision-catalog-actions button {
-  display: inline-flex; align-items: center; justify-content: space-between; gap: 12px;
-  min-height: 44px; padding: 11px 16px; border: 1px solid var(--astrid-line);
-  border-radius: 8px; background: var(--astrid-panel); color: var(--astrid-ink);
-  font: 500 14px/1.4 Inter, ui-sans-serif, system-ui, sans-serif; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; padding: 8px 0; border: 0; border-radius: 0;
+  background: transparent; color: var(--astrid-ink);
+  font: 500 14px/1.4 Inter, ui-sans-serif, system-ui, sans-serif;
+  cursor: pointer; white-space: nowrap; text-underline-offset: 4px;
 }
-.astrid-vision-catalog-actions button:hover { border-color: var(--astrid-accent); }
+.astrid-vision-catalog-actions button:hover { color: var(--astrid-accent); text-decoration: underline; }
 .astrid-vision-catalog-actions button:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 3px; }
+.astrid-vision-catalog-divider { flex: none; margin-inline: 14px; color: var(--astrid-muted); }
 .astrid-vision > .astrid-vision-details { max-height: min(94dvh, 1080px); }
 .astrid-vision-details-shell { max-height: min(94dvh, 1080px); }
 .astrid-vision > .astrid-vision-catalog { width: min(1120px, calc(100vw - 48px)); }
@@ -50,11 +53,64 @@
   .astrid-vision-details-header { padding: 18px max(16px, env(safe-area-inset-right)) 14px max(16px, env(safe-area-inset-left)); }
   .astrid-vision-details-scroll { padding: 16px max(16px, env(safe-area-inset-right)) 20px max(16px, env(safe-area-inset-left)); }
   .astrid-vision-details-close { min-width: 44px; min-height: 44px; }
-  .astrid-vision-catalog-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .astrid-vision-catalog-actions button { padding: 12px 10px; gap: 6px; font-size: 13px; text-align: left; }
-  .astrid-vision-catalog-actions svg { flex: none; }
+  .astrid-vision-catalog-actions button { font-size: 13px; }
+  .astrid-vision-catalog-divider { margin-inline: 12px; }
 }
 @media (max-width: 360px) {
   .astrid-vision .astrid-vision-principles > li { padding: 10px; }
   .astrid-vision .astrid-vision-principles .astrid-vision-principle-art { --px: .85px; }
+}
+
+/* Thumb-friendly phone controls. Desktop keeps its heading above the content. */
+@media (max-width: 760px) {
+  /* Auto margin consumes spare space, but becomes zero if links must scroll:
+     the first link remains reachable on small or enlarged-text displays. */
+  .astrid-vision .astrid-vision-section-nav { justify-content: flex-start; align-self: flex-start; }
+  .astrid-vision-section-nav a { padding-inline: 7px; }
+  .astrid-vision-section-nav a:first-child { margin-inline-start: auto; }
+
+  /* Full-width heading; the original sigil stays to the right of the preview. */
+  .astrid-vision .astrid-vision-standards-list > li {
+    grid-template-columns: minmax(0, 1fr) 72px;
+    grid-template-rows: auto auto auto;
+    column-gap: 12px; padding: 16px;
+  }
+  .astrid-vision .astrid-vision-standards-list > li > div { display: contents; }
+  .astrid-vision .astrid-vision-standards-list > li h3 {
+    grid-column: 1 / -1; grid-row: 1;
+    margin: 0 0 10px; font-size: clamp(16px, 4.6vw, 20px); line-height: 1.2;
+    /* Actual titles fit on one line. Enlarged or future longer titles may
+       wrap instead of being silently clipped or shrinking indefinitely. */
+    overflow-wrap: normal;
+  }
+  .astrid-vision .astrid-vision-standards-list > li :is(.astrid-vision-principle-statement, .astrid-vision-markdown) {
+    grid-column: 1; grid-row: 2; min-width: 0; margin: 0;
+    font-size: 14px; line-height: 1.5;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2;
+    overflow: hidden;
+  }
+  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-sigil {
+    grid-column: 2; grid-row: 2 / 4; align-self: center;
+  }
+  .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner {
+    grid-column: 1; grid-row: 3; margin-top: 12px; line-height: 1.4;
+  }
+
+  /* Keep the complete title and the close control in a stationary bottom
+     bar. Only the content above it scrolls; native modal handling is unchanged. */
+  .astrid-vision > .astrid-vision-details {
+    top: auto; right: 0; bottom: calc(8px + env(safe-area-inset-bottom)); left: 0; margin: 0;
+  }
+  .astrid-vision-details-shell { flex-direction: column-reverse; }
+  .astrid-vision-details-header {
+    align-items: center; border-bottom: 0; border-top: 1px solid var(--astrid-line);
+    padding: 14px max(16px, env(safe-area-inset-right)) 14px max(16px, env(safe-area-inset-left));
+  }
+  .astrid-vision-details-eyebrow { margin-bottom: 6px; font-size: 10px; }
+  .astrid-vision-details-header h2 { font-size: clamp(23px, 6vw, 30px); }
+}
+@media (max-width: 360px) {
+  /* Reserve room for every navigation link on the narrowest phones. */
+  .astrid-vision-bar .astrid-vision-brand-name { max-width: 0; opacity: 0; }
+  .astrid-vision-bar .astrid-vision-brand { gap: 0; }
 }

@@ -1,5 +1,11 @@
 /* Projects are a distinct disclosure level inside an opened gap, not labels
    appended to the gap title. Keep authored introductions readable at phone width. */
+/* Explicitly hide closed bodies so nested summaries cannot remain visible or
+   focusable in WebKit while their parent gap is closed. */
+.astrid-vision-details-gap:not([open]) > .astrid-vision-details-gap-body,
+.astrid-vision-project:not([open]) > .astrid-vision-project-body {
+  display: none;
+}
 .astrid-vision-project-disclosures > ul {
   display: grid;
   gap: 10px;

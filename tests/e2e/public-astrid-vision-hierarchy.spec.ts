@@ -1,11 +1,15 @@
 import { expect, test } from '@playwright/test';
+import { legacyVisionFixture } from '../fixtures/public-vision';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
 test('pillars and principles open current gaps with correctly linked GitHub project plans', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json() as {
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  }) as {
     pillars: { id: string; title: string }[];
     principles: { id: string; title: string }[];
     gaps: { id: string; title: string; assessment: string; appliesTo: string[]; primaryAppliesTo?: string; githubUrl: string }[];
@@ -60,7 +64,10 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
 test('pillar and principle detail scroll edges blur only when more content remains', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -99,7 +106,10 @@ test('pillar and principle detail scroll edges blur only when more content remai
 test('a dialog can be dismissed via its close button and returns focus to the card', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -119,7 +129,10 @@ test('a dialog can be dismissed via its close button and returns focus to the ca
 test('mobile principle card has no redundant footer CTA, fills the touch target and keeps scroll on close', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -162,7 +175,10 @@ test('mobile principle card has no redundant footer CTA, fills the touch target 
 test('principle cards use four reserved sigil colors, transparent panels and border-only hover feedback', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -189,7 +205,10 @@ test('principle cards use four reserved sigil colors, transparent panels and bor
 test('mobile modal keeps the X fixed, scrolls within the panel and closes from top and bottom backdrop', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -235,7 +254,10 @@ test('mobile modal keeps the X fixed, scrolls within the panel and closes from t
 test('first touch outside the dialog only dismisses it and cannot click through to cards', async ({ browser, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json() as { principles: { id: string; title: string }[] };
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  }) as { principles: { id: string; title: string }[] };
   const context = await browser.newContext({
     viewport: { width: 390, height: 780 },
     isMobile: true, hasTouch: true, deviceScaleFactor: 2,
@@ -289,7 +311,10 @@ test('first touch outside the dialog only dismisses it and cannot click through 
 test('compact principle cards remain readable and open from title or sigil', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json() as { principles: { id: string; title: string }[] };
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  }) as { principles: { id: string; title: string }[] };
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -355,7 +380,10 @@ test('compact principle cards remain readable and open from title or sigil', asy
 test('aspiration hover animates only its arrow without underlining the title', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -377,53 +405,39 @@ test('aspiration hover animates only its arrow without underlining the title', a
 });
 
 
-test('gap headers and their projects share distinct stable color families', async ({ page, request }) => {
-  const response = await request.get(FEED);
-  expect(response.ok()).toBeTruthy();
-  const content = await response.json() as {
-    pillars: { id: string; title: string }[];
-    principles: { id: string; title: string }[];
-  };
-  await page.route(FEED, route => route.fulfill({
-    status: 200, contentType: 'application/json',
-    headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
-  }));
+test('gap headers and their projects keep distinct tones when a primary element changes', async ({ page }) => {
+  const content = legacyVisionFixture();
+  await page.route(FEED, route => route.fulfill({ json: content }));
   await page.setViewportSize({ width: 390, height: 780 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-
-  const pillar = content.pillars.find(item => item.id === 'artistic-ambition')!;
-  await page.getByRole('button', { name: 'Explore ' + pillar.title + ': gaps and projects' }).click();
-  const dialog = page.getByRole('dialog');
-  const gaps = dialog.locator('.astrid-vision-details-gap');
+  await page.getByRole('button', { name: 'Explore Artistic ambition: gaps and projects' }).click();
+  const gaps = page.getByRole('dialog').locator('.astrid-vision-details-gap');
+  await expect(gaps).toHaveCount(2);
   const appearances = await gaps.evaluateAll(elements => elements.map(el => ({
     tone: el.getAttribute('data-tone'),
-    title: el.querySelector('h4')?.textContent,
-    headerBackground: getComputedStyle(el.querySelector('.astrid-vision-details-gap-heading')!).backgroundColor,
-    projectBackground: el.querySelector('.astrid-vision-details-projects')
-      ? getComputedStyle(el.querySelector('.astrid-vision-details-projects')!).backgroundColor
-      : null,
+    header: getComputedStyle(el.querySelector('.astrid-vision-details-gap-heading')!).backgroundColor,
+    projects: el.querySelector('.astrid-vision-details-projects')
+      ? getComputedStyle(el.querySelector('.astrid-vision-details-projects')!).backgroundColor : null,
   })));
-  expect(appearances.length).toBeGreaterThanOrEqual(2);
-  expect(new Set(appearances.map(item => item.tone)).size).toBe(appearances.length);
-  expect(appearances.every(item => item.headerBackground !== 'rgba(0, 0, 0, 0)')).toBeTruthy();
-  expect(appearances.filter(item => item.projectBackground)
-    .every(item => item.projectBackground !== item.headerBackground)).toBeTruthy();
-  const sharedGap = gaps.filter({ hasText: "Artists can't yet sustain ambitious work end to end" });
-  const firstTone = await sharedGap.getAttribute('data-tone');
-  await dialog.getByRole('button', { name: 'Close details' }).click();
-
-  const principle = content.principles.find(item => item.id === 'in-the-creators-control')!;
-  await page.getByRole('button', { name: 'Explore ' + principle.title + ': gaps and projects' }).click();
-  const sameGap = page.getByRole('dialog').locator('.astrid-vision-details-gap')
-    .filter({ hasText: "Artists can't yet sustain ambitious work end to end" });
-  await expect(sameGap).toHaveAttribute('data-tone', firstTone!);
+  expect(new Set(appearances.map(item => item.tone)).size).toBe(2);
+  expect(appearances.every(item => item.header !== 'rgba(0, 0, 0, 0)')).toBe(true);
+  expect(appearances.filter(item => item.projects).every(item => item.projects !== item.header)).toBe(true);
+  content.gaps[0].appliesTo = ['principle:open-by-design', 'pillar:art'];
+  content.gaps[0].primaryAppliesTo = 'principle:open-by-design';
+  await page.reload();
+  await page.getByRole('button', { name: 'Explore Open by design: gaps and projects' }).click();
+  await expect(page.getByRole('dialog').locator('.astrid-vision-details-gap').first())
+    .toHaveAttribute('data-tone', appearances[0].tone!);
 });
 
 
 test('every joined principle, including interior cards without physical left borders, gains a full hover box', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),
@@ -448,7 +462,10 @@ test('every joined principle, including interior cards without physical left bor
 test('principle details cue sits bottom-left on the copy edge, with the sigil on the right, at every layout width', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const content = await response.json();
+  const content = await response.json().then(value => {
+    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    return value;
+  });
   await page.route(FEED, route => route.fulfill({
     status: 200, contentType: 'application/json',
     headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(content),

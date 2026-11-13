@@ -35,6 +35,9 @@ export interface PublicVisionGap {
   appliesTo: string[];
   /** Primary relationship is explicit in new feeds; first appliesTo is the legacy fallback. */
   primaryAppliesTo?: string;
+  /** Plan 53 refs use <kind>:<element>/<aspiration>; absent in older v1 feeds. */
+  aspiration?: string;
+  supportingAspirations?: string[];
   desiredMarkdown: string;
   currentMarkdown: string;
   missingMarkdown: string;
@@ -137,6 +140,27 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
       !gaps.every(gap => gap.appliesTo.every(ref => subjects.has(ref))) ||
       !projects.every(project => project.gapIds.every(id => ids.has(id)))) {
     throw new Error('Unresolved or duplicate public vision relationships');
+  }
+  const aspirationRefs = new Set([
+    ...pillars.flatMap(pillar => (pillar.characteristics ?? []).map(
+      (item: PublicVisionCharacteristic) => 'pillar:' + pillar.id + '/' + item.id)),
+    ...principles.flatMap(principle => (principle.characteristics ?? []).map(
+      (item: PublicVisionCharacteristic) => 'principle:' + principle.id + '/' + item.id)),
+  ]);
+  for (const gap of gaps) {
+    if (gap.aspiration === undefined && gap.supportingAspirations === undefined) continue;
+    const supporting = gap.supportingAspirations === undefined ? [] : gap.supportingAspirations;
+    if (!nonempty(gap.aspiration) || !aspirationRefs.has(gap.aspiration) ||
+        !Array.isArray(supporting) || !supporting.every(ref => nonempty(ref) && aspirationRefs.has(ref)) ||
+        new Set([gap.aspiration, ...supporting]).size !== supporting.length + 1) {
+      throw new Error('Unresolved or duplicate public vision aspirations');
+    }
+    const elements = [...new Set([gap.aspiration, ...supporting].map(ref => ref.split('/')[0]))];
+    if (elements[0] !== (gap.primaryAppliesTo ?? gap.appliesTo[0]) ||
+        elements.length !== gap.appliesTo.length ||
+        elements.some((ref, index) => ref !== gap.appliesTo[index])) {
+      throw new Error('Aspiration relationships disagree with their vision elements');
+    }
   }
   return value as unknown as PublicVisionContent;
 }

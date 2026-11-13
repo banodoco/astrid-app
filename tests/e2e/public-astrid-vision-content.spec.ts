@@ -369,7 +369,7 @@ test('feed errors are explained and offer a retry', async ({ page }) => {
     .toHaveAttribute('href', 'https://github.com/banodoco/astrid-dev/blob/main/vision/README.md');
 });
 
-test('project goals show at most five lines, then dissolve the sixth', async ({ page, request }) => {
+test('project goals respect the responsive line budget and fade the overflow line', async ({ page, request }) => {
   await pinnedFeed(page, request);
   for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -384,17 +384,18 @@ test('project goals show at most five lines, then dissolve the sixth', async ({ 
         clamped: element.hasAttribute('data-clamped'),
         lines: element.getBoundingClientRect().height / line,
         fullLines: body.offsetHeight / line,
+        limit: Number.parseFloat(css.getPropertyValue('--goal-lines')) || 5,
         mask: css.maskImage || css.webkitMaskImage,
       };
     }));
     for (const goal of measured) {
-      expect(goal.clamped).toBe(goal.fullLines > 5.1);
+      expect(goal.clamped).toBe(goal.fullLines > goal.limit + 0.1);
       if (goal.clamped) {
-        expect(goal.lines).toBeGreaterThan(5.9);
-        expect(goal.lines).toBeLessThan(6.1);
+        expect(goal.lines).toBeGreaterThan(goal.limit + 0.9);
+        expect(goal.lines).toBeLessThan(goal.limit + 1.1);
         expect(goal.mask).toContain('linear-gradient');
       } else {
-        expect(goal.lines).toBeLessThan(5.2);
+        expect(goal.lines).toBeLessThan(goal.limit + 0.2);
       }
     }
     expect(measured.some(goal => goal.clamped)).toBeTruthy();

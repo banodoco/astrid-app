@@ -1,12 +1,82 @@
 import { useLayoutEffect, useId, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ExternalLink, X } from 'lucide-react';
-import type { PublicVisionContent } from './publicVisionContent';
-import { currentGapsForSubject, type VisionSubject } from './visionHierarchy';
+import type { PublicVisionContent, PublicVisionProject } from './publicVisionContent';
+import { aspirationsForSubject, findAspiration, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
 
-// Keep each gap's palette identity stable across pillar and principle dialogs.
-// These are editorial accents, not gap status colors; the actual status remains text.
+// Editorial accents retain the same identity across pillar and principle dialogs.
 const GAP_TONES = ['clay', 'ochre', 'sage', 'teal', 'blue', 'plum'] as const;
+
+function GapProjects({ projects }: { projects: PublicVisionProject[] }) {
+  if (projects.length === 0) {
+    return <p className="astrid-vision-details-empty">No current projects linked yet.</p>;
+  }
+  return (
+    <div className="astrid-vision-details-projects">
+      <p>Projects addressing this gap</p>
+      <ul>
+        {projects.map(project => (
+          <li key={project.id}>
+            <div className="astrid-vision-details-project-heading">
+              <a href={project.githubUrl} target="_blank" rel="noreferrer">
+                {project.title}<ExternalLink size={14} aria-hidden="true" />
+              </a>
+              <span>{project.status}</span>
+            </div>
+            <div className="astrid-vision-details-project-goal">
+              <ReactMarkdown>{project.goalMarkdown}</ReactMarkdown>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function AspirationGap({ content, item }: { content: PublicVisionContent; item: VisionGapProjects }) {
+  const { gap, projects } = item;
+  const supporting = (gap.supportingAspirations ?? [])
+    .map(ref => findAspiration(content, ref)?.title).filter(Boolean);
+  const tone = GAP_TONES[content.gaps.findIndex(candidate => candidate.id === gap.id) % GAP_TONES.length];
+  return (
+    <details className="astrid-vision-details-gap" data-tone={tone} data-gap-id={gap.id}>
+      <summary className="astrid-vision-details-gap-heading astrid-vision-details-gap-summary">
+        <span className="astrid-vision-details-gap-summary-copy">
+          <span className="astrid-vision-details-gap-title">{gap.title}</span>
+          <span className="astrid-vision-details-gap-preview">
+            {projects.length > 0 ? (
+              <><strong>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</strong><span aria-hidden="true"> · </span><span>{projects[0].title}</span></>
+            ) : 'No project yet'}
+          </span>
+        </span>
+        <ChevronDown size={17} strokeWidth={1.75} aria-hidden="true" />
+      </summary>
+      <div className="astrid-vision-details-gap-body">
+        <div className="astrid-vision-details-gap-assessment">
+          <span>{gap.assessment}</span>
+          <a href={gap.githubUrl} target="_blank" rel="noreferrer">Gap on GitHub<ExternalLink size={13} aria-hidden="true" /></a>
+        </div>
+        <dl className="astrid-vision-details-gap-description">
+          {([
+            ['Desired state', gap.desiredMarkdown],
+            ['Current state', gap.currentMarkdown],
+            ['What is missing', gap.missingMarkdown],
+            ['Closure evidence', gap.closureEvidenceMarkdown],
+          ] as const).map(([label, markdown]) => (
+            <div key={label}>
+              <dt>{label}</dt>
+              <dd><ReactMarkdown>{markdown}</ReactMarkdown></dd>
+            </div>
+          ))}
+        </dl>
+        <GapProjects projects={projects} />
+        {supporting.length > 0 && (
+          <p className="astrid-vision-details-supporting"><strong>Also relates to</strong> {supporting.join(' · ')}</p>
+        )}
+      </div>
+    </details>
+  );
+}
 
 export function VisionDetailDialog({
   content, subject, onClose,
@@ -24,7 +94,7 @@ export function VisionDetailDialog({
   const entry = subject.kind === 'pillar'
     ? content.pillars.find(pillar => pillar.id === subject.id)
     : content.principles.find(principle => principle.id === subject.id);
-  const gaps = currentGapsForSubject(content, subject);
+  const hierarchy = aspirationsForSubject(content, subject);
 
   useLayoutEffect(() => {
     if (dialogRef.current && !dialogRef.current.open) {
@@ -36,7 +106,7 @@ export function VisionDetailDialog({
   }, []);
 
   // Show a fade only where scrollable content actually continues. Observe both the
-  // viewport and its content so expanded characteristics update the edges too.
+  // viewport and its content so expanded aspirations and gaps update the edges too.
   useLayoutEffect(() => {
     const viewport = scrollRef.current;
     const inner = scrollContentRef.current;
@@ -61,24 +131,13 @@ export function VisionDetailDialog({
     };
   }, [content.source.revision, subject.id, subject.kind]);
 
-  const backdropPointerRef = useRef<number | null>(null);
-  const closeScheduledRef = useRef(false);
+  const backdropPointerRef = useRef<{ pointerId: number; x: number; y: number; moved: boolean } | null>(null);
   const isOutsidePanel = (clientX: number, clientY: number) => {
     const dialog = dialogRef.current;
     if (!dialog?.open) return false;
     const bounds = dialog.getBoundingClientRect();
     return clientX < bounds.left || clientX > bounds.right ||
       clientY < bounds.top || clientY > bounds.bottom;
-  };
-  const closeAfterGesture = () => {
-    if (closeScheduledRef.current) return;
-    closeScheduledRef.current = true;
-    // Do not remove the modal during pointerdown: mobile Safari can retarget
-    // the subsequent synthetic click to the underlying card.
-    window.requestAnimationFrame(() => {
-      closeScheduledRef.current = false;
-      dialogRef.current?.close();
-    });
   };
 
   if (!entry) return null;
@@ -89,26 +148,40 @@ export function VisionDetailDialog({
       aria-labelledby={titleId}
       onClose={onClose}
       onPointerDownCapture={event => {
-        if (!isOutsidePanel(event.clientX, event.clientY)) return;
-        backdropPointerRef.current = event.pointerId;
-        event.preventDefault();
-        event.stopPropagation();
+        // Keep the native modal top layer until the gesture's final click.
+        // A requestAnimationFrame after pointerup can precede Safari's click.
+        backdropPointerRef.current = event.isPrimary && event.button === 0 &&
+          event.target === event.currentTarget && isOutsidePanel(event.clientX, event.clientY)
+          ? { pointerId: event.pointerId, x: event.clientX, y: event.clientY, moved: false } : null;
+        if (backdropPointerRef.current) event.stopPropagation();
+      }}
+      onPointerMoveCapture={event => {
+        const gesture = backdropPointerRef.current;
+        if (gesture?.pointerId === event.pointerId &&
+            Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 10) {
+          gesture.moved = true;
+        }
       }}
       onPointerUpCapture={event => {
-        if (backdropPointerRef.current !== event.pointerId) return;
-        backdropPointerRef.current = null;
-        event.preventDefault();
+        const gesture = backdropPointerRef.current;
+        if (gesture?.pointerId !== event.pointerId) return;
+        if (gesture.moved || !isOutsidePanel(event.clientX, event.clientY)) backdropPointerRef.current = null;
         event.stopPropagation();
-        closeAfterGesture();
+        // Do not cancel the default action: consume the compatibility click below.
       }}
       onPointerCancelCapture={event => {
-        if (backdropPointerRef.current === event.pointerId) backdropPointerRef.current = null;
+        if (backdropPointerRef.current?.pointerId === event.pointerId) backdropPointerRef.current = null;
       }}
       onClickCapture={event => {
-        if (!isOutsidePanel(event.clientX, event.clientY)) return;
+        const beganOnBackdrop = backdropPointerRef.current !== null;
+        backdropPointerRef.current = null;
+        // Keyboard activation of a child can report (0, 0); coordinates alone
+        // would mistake it for a backdrop click and break disclosures and links.
+        if (event.target !== event.currentTarget || !isOutsidePanel(event.clientX, event.clientY)) return;
         event.preventDefault();
         event.stopPropagation();
-        closeAfterGesture();
+        // This click already has a fixed target. It cannot activate a card beneath.
+        if (beganOnBackdrop) dialogRef.current?.close();
       }}
     >
       <div className="astrid-vision-details-shell">
@@ -119,94 +192,73 @@ export function VisionDetailDialog({
             </p>
             <h2 id={titleId} ref={titleRef} tabIndex={-1}>{entry.title}</h2>
           </div>
-          <button
-            type="button"
-            className="astrid-vision-details-close"
-            aria-label="Close details"
-            onClick={() => dialogRef.current?.close()}
-          >
+          <button type="button" className="astrid-vision-details-close" aria-label="Close details"
+            onClick={event => { event.stopPropagation(); dialogRef.current?.close(); }}>
             <X size={20} aria-hidden="true" />
           </button>
         </header>
         <div className="astrid-vision-details-scroll-frame">
           <div className="astrid-vision-details-scroll" ref={scrollRef}>
             <div className="astrid-vision-details-scroll-inner" ref={scrollContentRef}>
-          {entry.statement && entry.explanationMarkdown && entry.characteristics ? (
-            <>
-              <div className="astrid-vision-details-description">
-                <p className="astrid-vision-details-statement">{entry.statement}</p>
-                <ReactMarkdown>{entry.explanationMarkdown}</ReactMarkdown>
-              </div>
-              <section className="astrid-vision-details-characteristics" aria-label="Characteristics">
-                <h3>What defines this</h3>
-                <div className="astrid-vision-details-characteristic-list">
-                  {entry.characteristics.map(characteristic => (
-                    <details className="astrid-vision-details-characteristic" key={characteristic.id}>
-                      <summary>
-                        <span className="astrid-vision-details-characteristic-copy">
-                          <strong>{characteristic.title}</strong>
-                          <span>{characteristic.summary}</span>
-                        </span>
-                        <ChevronDown size={18} strokeWidth={1.75} aria-hidden="true" />
-                      </summary>
-                      <div className="astrid-vision-details-characteristic-body">
-                        <ReactMarkdown>{characteristic.detailsMarkdown}</ReactMarkdown>
-                      </div>
-                    </details>
-                  ))}
-                </div>
-              </section>
-            </>
-          ) : (
-            <div className="astrid-vision-details-description">
-              <ReactMarkdown>{entry.bodyMarkdown}</ReactMarkdown>
-            </div>
-          )}
-          <section className="astrid-vision-details-gaps" aria-label="Current gaps and projects">
-          <h3>Gaps preventing this</h3>
-          {gaps.length === 0 ? (
-            <p className="astrid-vision-details-empty">No current gaps are linked to this {subject.kind}.</p>
-          ) : (
-            <ul className="astrid-vision-details-gap-list">
-              {gaps.map(({ gap, projects }) => (
-                <li key={gap.id} className="astrid-vision-details-gap"
-                  data-tone={GAP_TONES[content.gaps.findIndex(item => item.id === gap.id) % GAP_TONES.length]}>
-                  <div className="astrid-vision-details-gap-heading">
-                    <h4>
-                      <a href={gap.githubUrl} target="_blank" rel="noreferrer">
-                        {gap.title}
-                        <ExternalLink size={14} aria-hidden="true" />
-                      </a>
-                    </h4>
+              {entry.statement && entry.explanationMarkdown && entry.characteristics ? (
+                <>
+                  <div className="astrid-vision-details-description">
+                    <p className="astrid-vision-details-statement">{entry.statement}</p>
+                    <ReactMarkdown>{entry.explanationMarkdown}</ReactMarkdown>
                   </div>
-                  {projects.length > 0 ? (
-                    <div className="astrid-vision-details-projects">
-                      <p>Projects addressing this gap</p>
-                      <ul>
-                        {projects.map(project => (
-                          <li key={project.id}>
-                            <div className="astrid-vision-details-project-heading">
-                              <a href={project.githubUrl} target="_blank" rel="noreferrer">
-                                {project.title}
-                                <ExternalLink size={14} aria-hidden="true" />
-                              </a>
-                              <span>{project.status}</span>
+                  <section className="astrid-vision-details-characteristics" aria-label="Aspirations">
+                    <h3>Aspirations</h3>
+                    <div className="astrid-vision-details-characteristic-list">
+                      {hierarchy.aspirations.map(({ aspiration, gaps, hasMeasuredGap }) => (
+                        <section className="astrid-vision-details-aspiration" key={aspiration.id} data-aspiration-id={aspiration.id}>
+                          <details className="astrid-vision-details-characteristic">
+                            <summary>
+                              <span className="astrid-vision-details-characteristic-copy">
+                                <strong>{aspiration.title}</strong><span>{aspiration.summary}</span>
+                              </span>
+                              <ChevronDown size={18} strokeWidth={1.75} aria-hidden="true" />
+                            </summary>
+                            <div className="astrid-vision-details-characteristic-body">
+                              <ReactMarkdown>{aspiration.detailsMarkdown}</ReactMarkdown>
                             </div>
-                            <div className="astrid-vision-details-project-goal">
-                              <ReactMarkdown>{project.goalMarkdown}</ReactMarkdown>
-                            </div>
-                          </li>
-                        ))}
-                      </ul>
+                          </details>
+                          {gaps.length > 0 ? (
+                            <ul className="astrid-vision-details-aspiration-gaps" aria-label={'Gaps for ' + aspiration.title}>
+                              {gaps.map(item => <li key={item.gap.id}><AspirationGap content={content} item={item} /></li>)}
+                            </ul>
+                          ) : hierarchy.hasAspirationLinks ? (
+                            <p className="astrid-vision-details-aspiration-empty">
+                              {hasMeasuredGap ? 'No current gaps are measured against this.' : 'No gap is measured against this yet.'}
+                            </p>
+                          ) : null}
+                        </section>
+                      ))}
                     </div>
+                  </section>
+                </>
+              ) : (
+                <div className="astrid-vision-details-description"><ReactMarkdown>{entry.bodyMarkdown}</ReactMarkdown></div>
+              )}
+              {(!hierarchy.hasAspirationLinks || hierarchy.legacyGaps.length > 0) && (
+                <section className="astrid-vision-details-gaps" aria-label="Current gaps and projects">
+                  <h3>Gaps preventing this</h3>
+                  {hierarchy.legacyGaps.length === 0 ? (
+                    <p className="astrid-vision-details-empty">No current gaps are linked to this {subject.kind}.</p>
                   ) : (
-                    <p className="astrid-vision-details-empty">No current projects linked yet.</p>
+                    <ul className="astrid-vision-details-gap-list">
+                      {hierarchy.legacyGaps.map(({ gap, projects }) => (
+                        <li key={gap.id} className="astrid-vision-details-gap"
+                          data-tone={GAP_TONES[content.gaps.findIndex(item => item.id === gap.id) % GAP_TONES.length]}>
+                          <div className="astrid-vision-details-gap-heading">
+                            <h4><a href={gap.githubUrl} target="_blank" rel="noreferrer">{gap.title}<ExternalLink size={14} aria-hidden="true" /></a></h4>
+                          </div>
+                          <GapProjects projects={projects} />
+                        </li>
+                      ))}
+                    </ul>
                   )}
-                </li>
-              ))}
-            </ul>
-          )}
-          </section>
+                </section>
+              )}
             </div>
           </div>
           <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"

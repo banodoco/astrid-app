@@ -53,6 +53,7 @@ test('gap IDs remain on one line alongside titles on phone and desktop', async (
   for (const width of [390, 1440]) {
     await page.setViewportSize({width, height: 900});
     await page.goto('/vision', {waitUntil: 'domcontentloaded'});
+    await page.getByRole('button', { name: 'Show all gaps' }).click();
     for (const id of ['AA-001', 'F-003'] as const) {
       const item = page.locator('#gap-' + id.toLowerCase());
       const label = item.locator('.astrid-vision-part-number');

@@ -1,0 +1,61 @@
+name: Plan 53 focused validation
+
+on:
+  push:
+    branches: [chatgpt/53-vision-aspirations]
+
+permissions:
+  contents: read
+
+jobs:
+  vision:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/astrid-dev
+          ref: chatgpt/53-vision-aspirations
+          path: .plan53-dev
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Record exact sources and export candidate feed
+        run: |
+          mkdir -p plan53-evidence
+          printf 'astrid-app %s\nastrid-dev %s\n' "$(git rev-parse HEAD)" "$(git -C .plan53-dev rev-parse HEAD)" > plan53-evidence/source-revisions.txt
+          python3 .plan53-dev/scripts/export_public_vision.py --output "$PWD/plan53-evidence/candidate-feed.json"
+      - name: Install dependencies
+        run: npm ci --legacy-peer-deps
+      - name: Unit and consumer contract tests
+        env:
+          PUBLIC_VISION_FEED_FILE: ${{ github.workspace }}/plan53-evidence/candidate-feed.json
+        run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/publicVisionContent.test.ts src/pages/Home/visionHierarchy.test.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts --reporter=default --reporter=json --outputFile=plan53-evidence/unit-results.json
+      - name: Lint changed vision surfaces
+        if: ${{ !cancelled() }}
+        run: npx eslint src/pages/Home/VisionDetailDialog.tsx src/pages/Home/visionHierarchy.ts src/pages/Home/publicVisionContent.ts --max-warnings 0
+      - name: Hosted build
+        if: ${{ !cancelled() }}
+        run: npm run build:hosted
+      - name: Install browser
+        if: ${{ !cancelled() }}
+        run: npx playwright install --with-deps chromium
+      - name: Vision desktop and phone browser tests
+        if: ${{ !cancelled() }}
+        env:
+          PUBLIC_VISION_FEED_FILE: ${{ github.workspace }}/plan53-evidence/candidate-feed.json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: plan53-evidence/browser-results.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision --project=chromium-desktop --reporter=line,json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: plan53-validation
+          path: |
+            plan53-evidence/
+            test-results/
+          retention-days: 7

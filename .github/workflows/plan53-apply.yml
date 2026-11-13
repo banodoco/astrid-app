@@ -1,0 +1,64 @@
+name: Plan 53 apply source
+
+on:
+  push:
+    branches: [chatgpt/53-vision-aspirations]
+    paths: [.github/workflows/plan53-apply.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    if: github.ref == 'refs/heads/chatgpt/53-vision-aspirations'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Apply the source delta with preimage and postimage verification
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, lzma, pathlib, subprocess
+          root = pathlib.Path.cwd()
+          chunks = sorted(root.glob('.plan53-transfer/part-*.b64'))
+          assert len(chunks) == 3, 'Expected all three transfer chunks'
+          raw = lzma.decompress(base64.b64decode(''.join(p.read_text() for p in chunks), validate=True))
+          assert hashlib.sha256(raw).hexdigest() == 'ace197f875858063caecbcb58d706d6aee31ba8473279588778f665cabab8e5d', 'Transfer digest mismatch'
+          changes = json.loads(raw)
+          assert len(changes) == 14
+          prepared = {}
+          for name, change in changes.items():
+              relative = pathlib.PurePosixPath(name)
+              assert not relative.is_absolute() and '..' not in relative.parts
+              assert relative.parts[0] in {'src', 'tests', '.github', 'playwright.vision.config.ts'}
+              target = root / relative
+              assert not target.is_symlink()
+              before = target.read_bytes() if target.exists() else b''
+              assert hashlib.sha256(before).hexdigest() == change['before'], f'Source changed: {name}'
+              lines = before.decode().splitlines(keepends=True)
+              for start, end, replacement in reversed(change['edits']):
+                  lines[start:end] = [replacement]
+              after = ''.join(lines).encode()
+              assert hashlib.sha256(after).hexdigest() == change['after'], f'Postimage mismatch: {name}'
+              if name.startswith('.github/workflows/'):
+                  print(f'Workflow updated separately through connector: {name}; expected SHA256 {change["after"]}')
+                  continue
+              prepared[name] = after
+          for name, data in prepared.items():
+              target = root / name
+              target.parent.mkdir(parents=True, exist_ok=True)
+              target.write_bytes(data)
+          subprocess.run(['git', 'add', '--', *prepared], check=True)
+          subprocess.run(['git', 'rm', '-r', '--', '.plan53-transfer'], check=True)
+          print(f'Applied and verified {len(prepared)} source and test files.')
+          PY
+      - name: Commit only to the isolated working branch
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git diff --cached --check
+          git commit -m 'feat(vision): connect aspirations, gaps and projects; consume backdrop clicks before dismissal'
+          git push origin HEAD:refs/heads/chatgpt/53-vision-aspirations
+          git rev-parse HEAD

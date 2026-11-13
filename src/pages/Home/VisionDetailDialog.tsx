@@ -2,7 +2,7 @@ import { useLayoutEffect, useId, useRef, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ExternalLink, X } from 'lucide-react';
 import type { PublicVisionContent, PublicVisionProject } from './publicVisionContent';
-import { aspirationsForSubject, findAspiration, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
+import { aspirationsForSubject, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
 import './VisionProjectDisclosure.css';
 
 // Editorial accents retain the same identity across pillar and principle dialogs.
@@ -74,10 +74,19 @@ function GapProjects({ projects }: { projects: PublicVisionProject[] }) {
   );
 }
 
+function GapDesiredState({ markdown }: { markdown: string }) {
+  return (
+    <dl className="astrid-vision-details-gap-description">
+      <div>
+        <dt>Desired state</dt>
+        <dd><ReactMarkdown>{markdown}</ReactMarkdown></dd>
+      </div>
+    </dl>
+  );
+}
+
 function AspirationGap({ content, item }: { content: PublicVisionContent; item: VisionGapProjects }) {
   const { gap, projects } = item;
-  const supporting = (gap.supportingAspirations ?? [])
-    .map(ref => findAspiration(content, ref)?.title).filter(Boolean);
   const tone = GAP_TONES[content.gaps.findIndex(candidate => candidate.id === gap.id) % GAP_TONES.length];
   return (
     <details className="astrid-vision-details-gap" data-tone={tone} data-gap-id={gap.id}>
@@ -90,30 +99,12 @@ function AspirationGap({ content, item }: { content: PublicVisionContent; item: 
             ) : 'No project yet'}
           </span>
         </span>
+        <span className="astrid-vision-details-gap-label">Gap</span>
         <ChevronDown size={17} strokeWidth={1.75} aria-hidden="true" />
       </summary>
       <div className="astrid-vision-details-gap-body">
-        <div className="astrid-vision-details-gap-assessment">
-          <span>{gap.assessment}</span>
-          <a href={gap.githubUrl} target="_blank" rel="noreferrer">Gap on GitHub<ExternalLink size={13} aria-hidden="true" /></a>
-        </div>
+        <GapDesiredState markdown={gap.desiredMarkdown} />
         <GapProjects projects={projects} />
-        <dl className="astrid-vision-details-gap-description">
-          {([
-            ['Desired state', gap.desiredMarkdown],
-            ['Current state', gap.currentMarkdown],
-            ['What is missing', gap.missingMarkdown],
-            ['Closure evidence', gap.closureEvidenceMarkdown],
-          ] as const).map(([label, markdown]) => (
-            <div key={label}>
-              <dt>{label}</dt>
-              <dd><ReactMarkdown>{markdown}</ReactMarkdown></dd>
-            </div>
-          ))}
-        </dl>
-        {supporting.length > 0 && (
-          <p className="astrid-vision-details-supporting"><strong>Also relates to</strong> {supporting.join(' · ')}</p>
-        )}
       </div>
     </details>
   );
@@ -290,9 +281,11 @@ export function VisionDetailDialog({
                       {hierarchy.legacyGaps.map(({ gap, projects }) => (
                         <li key={gap.id} className="astrid-vision-details-gap"
                           data-tone={GAP_TONES[content.gaps.findIndex(item => item.id === gap.id) % GAP_TONES.length]}>
-                          <div className="astrid-vision-details-gap-heading">
+                          <div className="astrid-vision-details-gap-heading astrid-vision-details-gap-heading--labelled">
                             <h4><a href={gap.githubUrl} target="_blank" rel="noreferrer">{gap.title}<ExternalLink size={14} aria-hidden="true" /></a></h4>
+                            <span className="astrid-vision-details-gap-label">Gap</span>
                           </div>
+                          <GapDesiredState markdown={gap.desiredMarkdown} />
                           <GapProjects projects={projects} />
                         </li>
                       ))}

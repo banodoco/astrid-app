@@ -1,7 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
-import { visionFixture } from '../fixtures/public-vision';
+import { legacyVisionFixture, visionFixture } from '../fixtures/public-vision';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
@@ -10,6 +10,28 @@ async function openVision(page: Page, feed = visionFixture()) {
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Explore Artistic ambition: gaps and projects' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+}
+
+async function expectGapPresentation(row: Locator) {
+  const heading = row.locator('.astrid-vision-details-gap-heading');
+  const label = heading.locator('.astrid-vision-details-gap-label');
+  await expect(label).toHaveText('Gap');
+  await expect(label).toBeVisible();
+  const copy = heading.locator('.astrid-vision-details-gap-summary-copy, h4');
+  const [copyBox, labelBox] = await Promise.all([copy.boundingBox(), label.boundingBox()]);
+  expect(copyBox).not.toBeNull();
+  expect(labelBox).not.toBeNull();
+  expect(labelBox!.x).toBeGreaterThanOrEqual(copyBox!.x + copyBox!.width - 1);
+  await expect(row.locator('.astrid-vision-details-gap-description dt')).toHaveText(['Desired state']);
+  await expect(row.locator('.astrid-vision-details-gap-assessment, .astrid-vision-details-supporting')).toHaveCount(0);
+  // Assert both reading order and visual order, including the empty-project case.
+  expect(await row.evaluate(node => {
+    const desired = node.querySelector('.astrid-vision-details-gap-description')!;
+    const projects = node.querySelector('.astrid-vision-details-projects, .astrid-vision-details-empty')!;
+    return Boolean(desired.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+      desired.getBoundingClientRect().bottom <= projects.getBoundingClientRect().top + 1;
+  })).toBe(true);
+  expect(await heading.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
 }
 
 for (const width of [1440, 390]) {
@@ -41,6 +63,7 @@ for (const width of [1440, 390]) {
     await expect(gapSummary).toContainText('Finish ambitious work');
     await expect(gapSummary).toContainText('3 projects');
     await expect(gapSummary).not.toContainText('Live composition');
+    await expect(gapSummary.locator('.astrid-vision-details-gap-label')).toHaveText('Gap');
     await expect(gaps.nth(1).locator(':scope > summary')).toContainText('No project yet');
     await expect(aspirations.nth(1)).toContainText('No current gaps are measured against this.');
     await expect(aspirations.nth(2)).toContainText('No gap is measured against this yet.');
@@ -56,8 +79,15 @@ for (const width of [1440, 390]) {
     await expect(disclosure.locator('ul').first()).toHaveCSS('list-style-type', 'disc');
     await gapSummary.click();
     await expect(gaps.first()).toHaveAttribute('open', '');
-    await expect(gaps.first().locator('.astrid-vision-details-gap-description dt'))
-      .toHaveText(['Desired state', 'Current state', 'What is missing', 'Closure evidence']);
+    await expectGapPresentation(gaps.first());
+    await expect(gaps.first().locator('.astrid-vision-details-gap-description dd')).toHaveText(feed.gaps[0].desiredMarkdown);
+    // The label is part of the same gap toggle, including when there are no projects.
+    await gaps.nth(1).locator('.astrid-vision-details-gap-label').click();
+    await expect(gaps.nth(1)).toHaveAttribute('open', '');
+    await expectGapPresentation(gaps.nth(1));
+    await expect(gaps.nth(1).locator('.astrid-vision-project')).toHaveCount(0);
+    await expect(gaps.nth(1).locator('.astrid-vision-details-gap-description dd')).toHaveText(feed.gaps[1].desiredMarkdown);
+    await gaps.nth(1).locator(':scope > summary').click();
     const projects = gaps.first().locator('.astrid-vision-project');
     await expect(projects).toHaveCount(3);
     await expect(projects.locator('.astrid-vision-project-title'))
@@ -92,7 +122,6 @@ for (const width of [1440, 390]) {
     await page.keyboard.press('Space');
     await expect(projects.first()).not.toHaveAttribute('open', '');
     await expect(projects.nth(1)).toHaveAttribute('open', '');
-    await expect(gaps.first().locator('.astrid-vision-details-supporting')).toHaveText('Also relates to Creative agency');
     await expect(dialog.locator('[data-gap-id="AA-001"]')).toHaveCount(1);
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     for (const card of await projects.all()) {
@@ -127,6 +156,7 @@ for (const width of [1440, 390]) {
     const row = dialog.locator('[data-gap-id="' + gap!.id + '"]');
     await expect(row.locator(':scope > summary')).not.toContainText(plans[0].title);
     await row.locator(':scope > summary').click();
+    await expectGapPresentation(row);
     const cards = row.locator('.astrid-vision-project');
     await expect(cards).toHaveCount(plans.length);
     await expect(cards.locator('.astrid-vision-project-title')).toHaveText(plans.map(plan => plan.title));
@@ -139,7 +169,7 @@ for (const width of [1440, 390]) {
     // Screenshots use the published source unchanged, never the dummy fixture.
     mkdirSync('test-results/vision-captures', { recursive: true });
     writeFileSync(`test-results/vision-captures/real-projects-${info.project.name}-${width}-source.json`,
-      JSON.stringify({ source: feed.source, gapId: gap!.id, projects: plans }, null, 2));
+      JSON.stringify({ source: feed.source, gapId: gap!.id, desiredMarkdown: gap!.desiredMarkdown, projects: plans }, null, 2));
     await row.evaluate(node => {
       const viewport = node.closest('.astrid-vision-details-scroll')!;
       viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 8;
@@ -160,6 +190,18 @@ for (const width of [1440, 390]) {
     await page.screenshot({ path: `test-results/vision-captures/real-project-expanded-${info.project.name}-${width}.png` });
   });
 }
+
+test('legacy gap cards also label the gap and put only desired state before projects', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const feed = legacyVisionFixture();
+  await openVision(page, feed);
+  const rows = page.getByRole('dialog').locator('.astrid-vision-details-gap-list > li');
+  await expect(rows).toHaveCount(2);
+  for (const [index, row] of (await rows.all()).entries()) {
+    await expectGapPresentation(row);
+    await expect(row.locator('.astrid-vision-details-gap-description dd')).toHaveText(feed.gaps[index].desiredMarkdown);
+  }
+});
 
 test('exported candidate feed renders real Packs rules and real aspiration links', async ({ page }, info) => {
   // The fixture fallback also keeps this test runnable without a sibling checkout.

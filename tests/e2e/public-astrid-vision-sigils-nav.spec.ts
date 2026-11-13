@@ -232,7 +232,10 @@ test('principles sit in the reading column: copy and cue on the left, a larger s
     }));
     for (const box of boxes) {
       expect(box.card.height).toBeLessThan(width <= 760 ? 310 : 285);
-      expect(box.sigil.x).toBeGreaterThanOrEqual(box.text.x + box.text.width - 2);
+      if (width <= 760) {
+        expect(box.sigil.x).toBeLessThan(box.text.x + box.text.width);
+        expect(box.sigil.width).toBeGreaterThanOrEqual(140);
+      } else expect(box.sigil.x).toBeGreaterThanOrEqual(box.text.x + box.text.width - 2);
       expect(box.arrow.y).toBeGreaterThanOrEqual(box.text.y + box.text.height - 2);
       expect(Math.abs(box.arrow.x - box.text.x)).toBeLessThan(2);
       expect(box.sigil.width).toBeGreaterThanOrEqual(width <= 760 ? 72 : 96);

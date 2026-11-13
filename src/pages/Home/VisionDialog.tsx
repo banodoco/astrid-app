@@ -1,13 +1,14 @@
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { X } from 'lucide-react';
+import { ChevronRight, X } from 'lucide-react';
 
-export function VisionDialog({ title, eyebrow, identity, className = '', children, onClose }: {
+export function VisionDialog({ title, eyebrow, identity, className = '', children, onClose, next }: {
   title: string;
   eyebrow: string;
   identity: string;
   className?: string;
   children: ReactNode;
   onClose: () => void;
+  next?: { label: string; onClick: () => void };
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -25,6 +26,37 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
       titleRef.current?.focus({ preventScroll: true });
     }
   }, []);
+
+  // Chrome on iPhone changes its visible viewport as browser controls move.
+  // Bind panel position and height to that same viewport; CSS applies safe areas
+  // once with max(), rather than adding a second home-indicator-sized gap.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const viewport = window.visualViewport;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      // Do not undo the user's pinch zoom by continually shrinking the dialog.
+      if (viewport && viewport.scale > 1.05) return;
+      dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
+      dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
+    };
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };
+    update();
+    viewport?.addEventListener('resize', schedule);
+    viewport?.addEventListener('scroll', schedule);
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      viewport?.removeEventListener('resize', schedule);
+      viewport?.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, []);
+
+  // Keep the native modal/top layer, but reset disclosures and scroll per subject.
+  useLayoutEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [identity]);
 
   // Show a fade only where scrollable content actually continues. Observe both the
   // viewport and its content so expanded aspirations, gaps and projects update the edges too.
@@ -66,6 +98,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
       ref={dialogRef}
       className={'astrid-vision-details ' + className}
       aria-labelledby={titleId}
+      data-has-next={Boolean(next) || undefined}
       onClose={onClose}
       onPointerDownCapture={event => {
         // Keep the native modal top layer until the gesture's final click.
@@ -110,7 +143,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
             <p className="astrid-vision-details-eyebrow">
               {eyebrow}
             </p>
-            <h2 id={titleId} ref={titleRef} tabIndex={-1}>{title}</h2>
+            <h2 id={titleId} ref={titleRef} tabIndex={-1} aria-live="polite">{title}</h2>
           </div>
           <button type="button" className="astrid-vision-details-close" aria-label="Close details"
             onClick={event => { event.stopPropagation(); dialogRef.current?.close(); }}>
@@ -119,10 +152,15 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
         </header>
         <div className="astrid-vision-details-scroll-frame">
           <div className="astrid-vision-details-scroll" ref={scrollRef}>
-            <div className="astrid-vision-details-scroll-inner" ref={scrollContentRef}>
+            <div className="astrid-vision-details-scroll-inner" ref={scrollContentRef} key={identity}>
               {children}
             </div>
           </div>
+          {next && <button type="button" className="astrid-vision-details-next"
+            aria-label={next.label} title={next.label}
+            onClick={event => { event.stopPropagation(); next.onClick(); }}>
+            <ChevronRight size={24} aria-hidden="true" />
+          </button>}
           <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"
             data-visible={scrollEdges.top || undefined} aria-hidden="true" />
           <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"

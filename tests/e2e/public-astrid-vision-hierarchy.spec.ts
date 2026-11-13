@@ -491,13 +491,15 @@ test('principle details cue sits bottom-left on the copy edge, with the sigil on
         .toBeGreaterThanOrEqual(12);
       expect(cardBounds!.y + cardBounds!.height - (arrowBounds!.y + arrowBounds!.height))
         .toBeLessThan(32);
-      // The sigil stays beside the secondary copy. On mobile the title
-      // now deliberately spans both columns; desktop keeps the original layout.
-      expect(sigilBounds!.x).toBeGreaterThan(copyBounds!.x + copyBounds!.width - 1);
+      // Phone copy now spans the whole card over a quiet background sigil.
+      // Desktop keeps its separate reading column and illustration.
       if (width <= 760) {
         expect(titleBounds!.y + titleBounds!.height).toBeLessThanOrEqual(copyBounds!.y + 1);
-        expect(titleBounds!.x + titleBounds!.width).toBeGreaterThanOrEqual(sigilBounds!.x + sigilBounds!.width - 1);
+        expect(Math.abs(titleBounds!.width - copyBounds!.width)).toBeLessThan(2);
+        expect(sigilBounds!.x).toBeLessThan(copyBounds!.x + copyBounds!.width);
+        await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.13');
       } else {
+        expect(sigilBounds!.x).toBeGreaterThan(copyBounds!.x + copyBounds!.width - 1);
         expect(sigilBounds!.x).toBeGreaterThan(titleBounds!.x + titleBounds!.width - 1);
       }
       const sigilMid = sigilBounds!.y + sigilBounds!.height / 2;

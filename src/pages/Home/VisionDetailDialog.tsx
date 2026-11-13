@@ -111,10 +111,11 @@ function AspirationGap({ content, item }: { content: PublicVisionContent; item: 
 }
 
 export function VisionDetailDialog({
-  content, subject, onClose,
+  content, subject, onSelect, onClose,
 }: {
   content: PublicVisionContent;
   subject: VisionSubject;
+  onSelect: (subject: VisionSubject) => void;
   onClose: () => void;
 }) {
   const entry = subject.kind === 'pillar'
@@ -122,10 +123,15 @@ export function VisionDetailDialog({
     : content.principles.find(principle => principle.id === subject.id);
   const hierarchy = aspirationsForSubject(content, subject);
   if (!entry) return null;
+  const siblings = subject.kind === 'pillar' ? content.pillars : content.principles;
+  const index = siblings.findIndex(item => item.id === subject.id);
+  const next = siblings[(index + 1) % siblings.length];
   return (
     <VisionDialog title={entry.title}
-      eyebrow={subject.kind === 'pillar' ? 'What we’re building towards' : 'The principles that drive us'}
-      identity={content.source.revision + ':' + subject.kind + ':' + subject.id} onClose={onClose}>
+      eyebrow={subject.kind === 'pillar' ? 'What we’re building towards' : 'The principles that guide us'}
+      identity={content.source.revision + ':' + subject.kind + ':' + subject.id} onClose={onClose}
+      next={siblings.length > 1 ? { label: 'Next ' + subject.kind + ': ' + next.title,
+        onClick: () => onSelect({ kind: subject.kind, id: next.id }) } : undefined}>
               {entry.statement && entry.explanationMarkdown && entry.characteristics ? (
                 <>
                   <div className="astrid-vision-details-description">

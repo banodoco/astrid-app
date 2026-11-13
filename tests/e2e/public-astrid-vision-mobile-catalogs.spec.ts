@@ -206,10 +206,17 @@ for (const width of [320, 390]) {
           noOverflow: node.scrollWidth <= node.clientWidth + 1 };
       });
       expect(geometry.title.height).toBeLessThanOrEqual(geometry.titleLine + 1);
-      expect(geometry.title.width).toBeGreaterThan(geometry.copy.width + 60);
+      expect(Math.abs(geometry.title.width - geometry.copy.width)).toBeLessThan(2);
       expect(geometry.copy.height).toBeLessThanOrEqual(geometry.copyLine * 2 + 1);
       expect(geometry.clamp).toBe('2');
-      expect(geometry.sigil.x).toBeGreaterThanOrEqual(geometry.copy.x + geometry.copy.width);
+      expect(geometry.sigil.x).toBeLessThan(geometry.copy.x + geometry.copy.width);
+      expect(geometry.sigil.width).toBeGreaterThanOrEqual(140);
+      await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.13');
+      await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('pointer-events', 'none');
+      if (width === 390) {
+        expect(await card.locator('.astrid-vision-principle-statement').evaluate(node =>
+          node.scrollHeight <= Number.parseFloat(getComputedStyle(node).lineHeight) * 2 + 1)).toBe(true);
+      }
       expect(geometry.card.height).toBeLessThan(175);
       expect(geometry.noOverflow).toBe(true);
     }
@@ -258,4 +265,154 @@ test('desktop dialog headings remain above their scrolling content', async ({ pa
   await expectReachableFrame(page, 1440);
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).toHaveCount(0);
+});
+
+
+// Simulate toolbar/keyboard viewport changes; this is not a physical iPhone UI test.
+test('mobile panels keep equal visible-viewport margins through resize and offset changes', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await page.locator('.astrid-vision-principles > li').first().getByRole('button').click();
+  const dialog = page.getByRole('dialog');
+  const header = dialog.locator('.astrid-vision-details-header');
+  const close = dialog.getByRole('button', { name: 'Close details' });
+  for (const { height, top } of [{ height: 700, top: 0 }, { height: 800, top: 12 },
+    { height: 620, top: 28 }, { height: 700, top: 0 }]) {
+    await page.evaluate(({ height, top }) => {
+      const viewport = window.visualViewport!;
+      Object.defineProperties(viewport, {
+        height: { configurable: true, value: height }, offsetTop: { configurable: true, value: top },
+      });
+      viewport.dispatchEvent(new Event('resize'));
+      viewport.dispatchEvent(new Event('scroll'));
+    }, { height, top });
+    await expect.poll(async () => {
+      const b = (await dialog.boundingBox())!;
+      return Math.max(Math.abs(b.y - top - 24), Math.abs(top + height - b.y - b.height - 24));
+    }).toBeLessThan(2);
+    expect((await header.boundingBox())!.height).toBeGreaterThanOrEqual(112);
+    expect((await close.boundingBox())!.height).toBeGreaterThanOrEqual(52);
+    const before = (await close.boundingBox())!.y;
+    await dialog.locator('.astrid-vision-details-scroll').evaluate(node => { node.scrollTop = node.scrollHeight; });
+    expect(Math.abs((await close.boundingBox())!.y - before)).toBeLessThan(1);
+  }
+  // Pinch zoom must not be undone by shrinking the panel to the zoomed viewport.
+  const heightBeforeZoom = (await dialog.boundingBox())!.height;
+  await page.evaluate(() => {
+    Object.defineProperties(window.visualViewport!, {
+      height: { configurable: true, value: 350 }, scale: { configurable: true, value: 2 },
+    });
+    window.visualViewport!.dispatchEvent(new Event('resize'));
+  });
+  await page.waitForTimeout(100);
+  expect((await dialog.boundingBox())!.height).toBe(heightBeforeZoom);
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('mobile panel retains viewport bounds without the VisualViewport API', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(window, 'visualViewport', { value: undefined }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
+  for (const height of [844, 650, 844]) {
+    await page.setViewportSize({ width: 390, height });
+    await expect.poll(async () => {
+      const b = (await page.getByRole('dialog').boundingBox())!;
+      return Math.max(Math.abs(b.y - 24), Math.abs(height - b.y - b.height - 24));
+    }).toBeLessThan(2);
+  }
+});
+
+for (const width of [390, 1440]) {
+  test(`next subject cycles inside one modal with reset content at ${width}px`, async ({ page, request }, info) => {
+    const response = await request.get(FEED);
+    expect(response.ok()).toBeTruthy();
+    const feed = await response.json() as PublicVisionContent;
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('heading', { name: 'The principles that guide us', exact: true })).toBeVisible();
+    for (const kind of ['pillar', 'principle'] as const) {
+      const subjects = kind === 'pillar' ? feed.pillars : feed.principles;
+      const opener = page.getByRole('button', { name: 'Explore ' + subjects[0].title + ': gaps and projects' });
+      await opener.focus(); await page.keyboard.press('Enter');
+      const dialog = page.getByRole('dialog');
+      await dialog.evaluate(node => node.setAttribute('data-same-modal', 'yes'));
+      for (let index = 0; index < subjects.length; index++) {
+        await expect(dialog).toHaveAccessibleName(subjects[index].title);
+        await expect(dialog).toHaveAttribute('data-same-modal', 'yes');
+        await expect(dialog.locator('.astrid-vision-details-statement')).toHaveText(subjects[index].statement!);
+        await expect.poll(() => dialog.locator('.astrid-vision-details-scroll').evaluate(node => node.scrollTop)).toBe(0);
+        const next = dialog.getByRole('button', { name: 'Next ' + kind + ': ' + subjects[(index + 1) % subjects.length].title });
+        const b = (await next.boundingBox())!, panel = (await dialog.boundingBox())!;
+        const frame = (await dialog.locator('.astrid-vision-details-scroll-frame').boundingBox())!;
+        expect(panel.x + panel.width - b.x - b.width).toBeLessThan(16);
+        expect(Math.abs(b.y + b.height / 2 - frame.y - frame.height / 2)).toBeLessThan(2);
+        expect(b.width).toBeGreaterThanOrEqual(44);
+        // The rail is separate from the text, not a floating button obscuring it.
+        const textRight = await dialog.locator('.astrid-vision-details-scroll-inner').evaluate(node => node.getBoundingClientRect().right);
+        expect(textRight).toBeLessThanOrEqual(b.x + 1);
+        if (index === 0) {
+          mkdirSync(folder, { recursive: true });
+          await page.screenshot({ path: `${folder}/real-next-${kind}-${info.project.name}-${width}.png` });
+        }
+        await dialog.locator('.astrid-vision-details-scroll').evaluate(node => { node.scrollTop = node.scrollHeight; });
+        await next.click();
+      }
+      await expect(dialog).toHaveAccessibleName(subjects[0].title);
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect(opener).toBeFocused();
+    }
+  });
+}
+
+test('two-column mobile pillars animate in reading order as scroll advances and reverses', async ({ page, request }, info) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const feed = await response.json() as PublicVisionContent;
+  await page.route(FEED, route => route.fulfill({ json: feed }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const cards = page.locator('.astrid-vision-principles > li');
+  await expect(cards).toHaveCount(4);
+  await page.evaluate(() => document.fonts.ready);
+  // Exercise actual forward/backward scrolling, not coordinates copied from
+  // the selection algorithm. At page top the first row is already visible.
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await expect(cards.first()).toHaveAttribute('data-play', 'true');
+  const end = await cards.last().evaluate(node => {
+    const box = node.getBoundingClientRect();
+    return Math.max(0, box.bottom + window.scrollY - window.innerHeight / 2);
+  });
+  const samples: { direction: string; scrollY: number; active: number }[] = [];
+  const sweep = async (direction: 'down' | 'up') => {
+    const observed: number[] = [];
+    const steps = Math.ceil(end / 32);
+    for (let step = 0; step <= steps; step++) {
+      const top = end * (direction === 'down' ? step / steps : 1 - step / steps);
+      await page.evaluate(top => new Promise<void>(resolve => {
+        window.scrollTo({ top, behavior: 'instant' });
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }), top);
+      const selected = await cards.evaluateAll(nodes => nodes.flatMap((node, i) => node.hasAttribute('data-play') ? [i] : []));
+      expect(selected).toHaveLength(1);
+      const active = selected[0];
+      if (observed.at(-1) !== active) {
+        observed.push(active);
+        samples.push({ direction, scrollY: await page.evaluate(() => window.scrollY), active });
+        await expect(cards.nth(active).locator('.astrid-vision-art-layer').first()).toHaveCSS('animation-play-state', 'running');
+      }
+    }
+    return observed;
+  };
+  expect(await sweep('down')).toEqual([0, 1, 2, 3]);
+  expect(await sweep('up')).toEqual([3, 2, 1, 0]);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(`${folder}/pillar-sequence-${info.project.name}.json`, JSON.stringify({ source: feed.source, samples }, null, 2));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await expect.poll(() => cards.evaluateAll(nodes => nodes.some(node => node.hasAttribute('data-play')))).toBe(false);
 });

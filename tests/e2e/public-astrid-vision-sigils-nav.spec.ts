@@ -232,7 +232,10 @@ test('principles sit in the reading column: copy and cue on the left, a larger s
     }));
     for (const box of boxes) {
       expect(box.card.height).toBeLessThan(width <= 760 ? 310 : 285);
-      expect(box.sigil.x).toBeGreaterThanOrEqual(box.text.x + box.text.width - 2);
+      if (width <= 760) {
+        expect(box.sigil.x).toBeLessThan(box.text.x + box.text.width);
+        expect(box.sigil.width).toBeGreaterThanOrEqual(140);
+      } else expect(box.sigil.x).toBeGreaterThanOrEqual(box.text.x + box.text.width - 2);
       expect(box.arrow.y).toBeGreaterThanOrEqual(box.text.y + box.text.height - 2);
       expect(Math.abs(box.arrow.x - box.text.x)).toBeLessThan(2);
       expect(box.sigil.width).toBeGreaterThanOrEqual(width <= 760 ? 72 : 96);
@@ -453,7 +456,8 @@ test('phone scroll activates each principle sigil through the middle of the view
       await expect(card.locator('.astrid-vision-sigil-knot')).toHaveCSS('transition-duration', '3s');
       await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '3s');
     }
-    await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
+    // Background sigils stay subdued even while their internal shapes animate.
+    await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.13');
     await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '1');
     if (index > 0) await expect(cards.nth(index - 1)).not.toHaveAttribute('data-sigil-active', 'true');
   }

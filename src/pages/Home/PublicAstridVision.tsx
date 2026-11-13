@@ -360,22 +360,62 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     setPlaying(null);
     setCentred(null);
   }, [visible, reducedMotion]);
-  // On a phone there is no hover, so the card crossing the middle of the screen plays as you scroll past.
+  // Two cards share each row: give them separate scroll milestones in DOM order.
+  // Layout offsets (not reveal-transformed rectangles) keep the thresholds stable.
   const principlesRef = useRef<HTMLOListElement>(null);
   const [centred, setCentred] = useState<number | null>(null);
   useEffect(() => {
     const list = principlesRef.current;
-    if (!visible || reducedMotion || !phone || !list || typeof IntersectionObserver !== 'function') { setCentred(null); return undefined; }
-    const cards = Array.from(list.children);
-    const observer = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        const index = cards.indexOf(entry.target);
-        if (entry.isIntersecting) setCentred(index);
-        else setCentred((current) => (current === index ? null : current));
+    if (!visible || reducedMotion || !phone || !list) { setCentred(null); return; }
+    let frame = 0;
+    const measure = () => {
+      frame = 0;
+      const cards = Array.from(list.children) as HTMLElement[];
+      if (!cards.length) return;
+      const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
+      const viewportTop = window.visualViewport?.offsetTop ?? 0;
+      const listTop = list.getBoundingClientRect().top - viewportTop;
+      const firstOffset = cards[0].offsetTop;
+      const rows: { top: number; height: number; indices: number[] }[] = [];
+      cards.forEach((card, index) => {
+        const top = listTop + card.offsetTop - firstOffset;
+        const row = rows.find(row => Math.abs(row.top - top) < 2);
+        if (row) { row.indices.push(index); row.height = Math.max(row.height, card.offsetHeight); }
+        else rows.push({ top, height: card.offsetHeight, indices: [index] });
+      });
+      let selected: number | null = null;
+      let nextRowStart = 0;
+      for (const row of rows) {
+        // A row may already be visible at scrollY=0. Clamp its entry to real
+        // scroll space so the left card still gets a turn before the right.
+        // Monotonic row starts also cover two short rows visible on arrival.
+        const step = Math.min(row.height / row.indices.length, viewportHeight * .18);
+        const start = Math.max(nextRowStart, row.top + window.scrollY - viewportHeight * .84);
+        row.indices.forEach((index, column) => {
+          if (window.scrollY >= start + step * column) selected = index;
+        });
+        nextRowStart = start + step * row.indices.length;
       }
-    }, { rootMargin: '-45% 0px -45% 0px' });
-    cards.forEach((card) => observer.observe(card));
-    return () => observer.disconnect();
+      if (selected !== null) {
+        const row = rows.find(row => row.indices.includes(selected!))!;
+        if (row.top + row.height <= 0 || row.top >= viewportHeight) selected = null;
+      }
+      setCentred(previous => previous === selected ? previous : selected);
+    };
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(measure); };
+    const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(schedule) : null;
+    resize?.observe(list);
+    window.addEventListener('scroll', schedule, { passive: true });
+    window.addEventListener('resize', schedule);
+    window.visualViewport?.addEventListener('resize', schedule);
+    measure();
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      resize?.disconnect();
+      window.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+      window.visualViewport?.removeEventListener('resize', schedule);
+    };
   }, [phone, visible, reducedMotion, content?.source.revision]);
   // Mirror the pillar minks: each principle's pixel sigil animates as its
   // card crosses the center of the phone viewport, without requiring hover.
@@ -522,7 +562,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section id="astrid-vision-standards" className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow" data-index="03">Principles</p>
-          <h2 id="astrid-vision-standards-title">The principles that drive us</h2>
+          <h2 id="astrid-vision-standards-title">The principles that guide us</h2>
         </div>
         <ol className="astrid-vision-standards-list" ref={sigilsRef}>
           {content.principles.map(principle => (
@@ -548,8 +588,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
 
       </>)}
       {content && selectedSubject && (
-        <VisionDetailDialog key={selectedSubject.kind + ':' + selectedSubject.id}
-          content={content} subject={selectedSubject} onClose={closeSubject} />
+        <VisionDetailDialog key={selectedSubject.kind}
+          content={content} subject={selectedSubject} onSelect={setSelectedSubject} onClose={closeSubject} />
       )}
       {content && selectedCatalog && (
         <VisionDialog key={selectedCatalog} title={selectedCatalog === 'gaps' ? 'All gaps' : 'All projects'}

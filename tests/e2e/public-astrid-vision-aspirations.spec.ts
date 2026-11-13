@@ -307,9 +307,12 @@ test('gap groups use singular labels and empty aspirations stay quiet', async ({
   await dialog.locator('.astrid-vision-details-gap > summary').click();
   await expectGapPresentation(dialog.locator('.astrid-vision-details-gap'));
   await page.keyboard.press('Escape');
-  feed.gaps = [];
-  feed.projects = []; // Empty feeds cannot keep dangling project references.
-  await openVision(page, feed);
+  // The feed contract requires a populated catalog; empty groups are
+  // represented by a subject with no current gaps, not an invalid feed.
+  // Exercise legacy fallback too, with its real closed-gap semantics.
+  const quiet = legacyVisionFixture();
+  quiet.gaps.forEach(gap => { gap.assessment = 'closed'; });
+  await openVision(page, quiet);
   await expect(page.getByRole('dialog').locator('.astrid-vision-details-gap-group-label, .astrid-vision-details-gaps')).toHaveCount(0);
   await expect(page.getByRole('dialog')).not.toContainText('No current gaps');
 });

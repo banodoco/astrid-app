@@ -3,9 +3,14 @@ name: Plan 53 focused validation
 on:
   push:
     branches: [chatgpt/53-vision-aspirations]
+    paths-ignore: ['.plan53-transfer/**']
 
 permissions:
   contents: read
+
+concurrency:
+  group: plan53-vision-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   vision:
@@ -18,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-dev
-          ref: chatgpt/53-vision-aspirations
+          ref: 4cd164c23bb27bf603128b9a40df984501304ed7
           path: .plan53-dev
           persist-credentials: false
       - uses: actions/setup-node@v4
@@ -42,15 +47,21 @@ jobs:
       - name: Hosted build
         if: ${{ !cancelled() }}
         run: npm run build:hosted
-      - name: Install browser
+      - name: Install browsers
         if: ${{ !cancelled() }}
-        run: npx playwright install --with-deps chromium
+        run: npx playwright install --with-deps chromium webkit
       - name: Vision desktop and phone browser tests
         if: ${{ !cancelled() }}
         env:
           PUBLIC_VISION_FEED_FILE: ${{ github.workspace }}/plan53-evidence/candidate-feed.json
-          PLAYWRIGHT_JSON_OUTPUT_FILE: plan53-evidence/browser-results.json
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision --project=chromium-desktop --reporter=line,json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: plan53-evidence/chromium-results.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision --project=chromium-desktop --output=test-results/chromium --reporter=line,json
+      - name: Native WebKit phone dialog tests
+        if: ${{ !cancelled() }}
+        env:
+          PUBLIC_VISION_FEED_FILE: ${{ github.workspace }}/plan53-evidence/candidate-feed.json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: plan53-evidence/webkit-results.json
+        run: npx playwright test --config playwright.vision.config.ts --output=test-results/webkit --reporter=line,json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -59,3 +70,26 @@ jobs:
             plan53-evidence/
             test-results/
           retention-days: 7
+  legacy-consumer:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 237b28be935af49c23464fa6ca1cf30db67ebaa0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/astrid-dev
+          ref: 4cd164c23bb27bf603128b9a40df984501304ed7
+          path: .plan53-dev
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - name: The pre-migration app accepts the new feed
+        run: |
+          python3 .plan53-dev/scripts/export_public_vision.py --output "$RUNNER_TEMP/candidate-feed.json"
+          PUBLIC_VISION_FEED_FILE="$RUNNER_TEMP/candidate-feed.json" npm run vision:check

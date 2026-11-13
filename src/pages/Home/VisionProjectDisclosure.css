@@ -1,0 +1,103 @@
+/* Projects are a distinct disclosure level inside an opened gap, not labels
+   appended to the gap title. Keep authored introductions readable at phone width. */
+.astrid-vision-project-disclosures > ul {
+  display: grid;
+  gap: 10px;
+}
+.astrid-vision-project-disclosures > ul > li {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+}
+.astrid-vision-project {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--gap-accent) 30%, var(--astrid-line));
+  border-radius: 8px;
+  background: var(--astrid-panel);
+}
+.astrid-vision-project > .astrid-vision-project-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  cursor: pointer;
+  list-style: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.astrid-vision-project-summary::-webkit-details-marker { display: none; }
+.astrid-vision-project-summary-copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+}
+.astrid-vision-project-title {
+  color: var(--astrid-ink);
+  font: 600 14px/1.45 Inter, ui-sans-serif, system-ui, sans-serif;
+}
+.astrid-vision-project-intro {
+  display: block;
+  color: var(--astrid-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.astrid-vision-project-summary > svg {
+  flex: none;
+  margin-top: 2px;
+  color: var(--gap-accent);
+  transition: transform 160ms ease;
+}
+.astrid-vision-project[open] > .astrid-vision-project-summary > svg { transform: rotate(180deg); }
+.astrid-vision-project-summary:hover .astrid-vision-project-title { color: var(--gap-accent); }
+.astrid-vision-project-summary:focus-visible {
+  outline: 2px solid var(--astrid-accent);
+  outline-offset: -3px;
+  border-radius: 7px;
+}
+.astrid-vision-project-body {
+  padding: 14px;
+  border-top: 1px solid var(--astrid-line);
+  color: var(--astrid-muted);
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.astrid-vision-project-body .astrid-vision-details-project-goal { margin: 0 0 14px; }
+.astrid-vision-project-body .astrid-vision-details-project-goal p + p { margin-top: 10px; }
+.astrid-vision-project-body .astrid-vision-project-metadata {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  margin: 0 0 16px;
+}
+.astrid-vision-project-metadata > div { min-width: 0; }
+.astrid-vision-project-metadata dt {
+  color: var(--astrid-ink);
+  font-size: 11px;
+  font-weight: 600;
+}
+.astrid-vision-project-metadata dd,
+.astrid-vision-project-metadata p { margin: 3px 0 0; }
+.astrid-vision-project-metadata > div:first-child dd { text-transform: capitalize; }
+.astrid-vision-project-body .astrid-vision-details-project-heading a {
+  align-items: center;
+  font-size: 12px;
+  font-weight: 500;
+}
+.astrid-vision-project-body a:focus-visible {
+  outline: 2px solid var(--astrid-accent);
+  outline-offset: 3px;
+}
+.astrid-vision-project-body ul { list-style: disc; padding-left: 1.3em; margin: 8px 0; }
+.astrid-vision-project-body ol { list-style: decimal; padding-left: 1.3em; margin: 8px 0; }
+.astrid-vision-project-body li { padding: 0; margin: 4px 0; border: 0; }
+@media (max-width: 560px) {
+  .astrid-vision-project > .astrid-vision-project-summary { padding: 12px; gap: 8px; }
+  .astrid-vision-project-body { padding: 12px; }
+  .astrid-vision-project-body .astrid-vision-project-metadata { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-project-summary > svg { transition: none; }
+}

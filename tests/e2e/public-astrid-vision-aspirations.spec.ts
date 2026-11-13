@@ -1,20 +1,34 @@
 import { expect, test, type Page } from '@playwright/test';
-import { mkdirSync, readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
 import { visionFixture } from '../fixtures/public-vision';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
-async function openVision(page: Page) {
-  await page.route(FEED, route => route.fulfill({ json: visionFixture() }));
+async function openVision(page: Page, feed = visionFixture()) {
+  await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   await page.getByRole('button', { name: 'Explore Artistic ambition: gaps and projects' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
 }
 
 for (const width of [1440, 390]) {
-  test(`aspiration → gap → projects is readable before expanding at ${width}px`, async ({ page }, info) => {
+  test(`aspiration → gap → independent project disclosures at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
-    await openVision(page);
+    const feed = visionFixture();
+    const intros = [
+      'Keep every camera and sound cue together while composing a scene.',
+      'Share reusable tools without losing their original settings.',
+      'Preserve earlier creative decisions across editing sessions.',
+    ];
+    feed.projects.forEach((project, index) => {
+      project.goalMarkdown = intros[index] + (index === 0 ? '\n\nA separate detailed explanation stays behind the project disclosure.' : '');
+      project.owner = 'Project owner ' + index;
+      project.estimate = (index + 1) + ' days';
+      project.waitingOn = 'Dependency ' + index;
+    });
+    feed.projects[2].status = 'done';
+    await openVision(page, feed);
     const dialog = page.getByRole('dialog');
     const aspirations = dialog.locator('.astrid-vision-details-aspiration');
     await expect(aspirations).toHaveCount(3);
@@ -23,16 +37,16 @@ for (const width of [1440, 390]) {
     await expect(disclosure).not.toHaveAttribute('open', '');
     const gaps = aspiration.locator('.astrid-vision-details-gap');
     await expect(gaps).toHaveCount(2);
-    await expect(gaps.first().locator('summary')).toContainText('Finish ambitious work');
-    await expect(gaps.first().locator('summary')).toContainText('3 projects');
-    await expect(gaps.first().locator('summary')).toContainText('Live composition');
-    await expect(gaps.nth(1).locator('summary')).toContainText('No project yet');
+    const gapSummary = gaps.first().locator(':scope > summary');
+    await expect(gapSummary).toContainText('Finish ambitious work');
+    await expect(gapSummary).toContainText('3 projects');
+    await expect(gapSummary).not.toContainText('Live composition');
+    await expect(gaps.nth(1).locator(':scope > summary')).toContainText('No project yet');
     await expect(aspirations.nth(1)).toContainText('No current gaps are measured against this.');
     await expect(aspirations.nth(2)).toContainText('No gap is measured against this yet.');
     await expect(dialog.getByRole('region', { name: 'Current gaps and projects' })).toHaveCount(0);
     await expect(gaps.first().locator('.astrid-vision-details-gap-body')).toBeHidden();
-    mkdirSync('test-results/vision-captures', { recursive: true });
-    await page.screenshot({ path: `test-results/vision-captures/aspirations-${info.project.name}-${width}.png` });
+    await expect(gaps.first().locator('.astrid-vision-project-summary').first()).toBeHidden();
 
     await disclosure.locator('summary').focus();
     await page.keyboard.press('Enter');
@@ -40,21 +54,110 @@ for (const width of [1440, 390]) {
     await expect(disclosure).toHaveAttribute('open', '');
     await expect(disclosure.locator('.astrid-vision-details-characteristic-body strong')).toHaveText(['We should:', 'We should never:']);
     await expect(disclosure.locator('ul').first()).toHaveCSS('list-style-type', 'disc');
-    await gaps.first().locator('summary').click();
+    await gapSummary.click();
     await expect(gaps.first()).toHaveAttribute('open', '');
-    await expect(gaps.first().locator('dt')).toHaveText(['Desired state', 'Current state', 'What is missing', 'Closure evidence']);
-    await expect(gaps.first().locator('.astrid-vision-details-project-heading a'))
+    await expect(gaps.first().locator('.astrid-vision-details-gap-description dt'))
+      .toHaveText(['Desired state', 'Current state', 'What is missing', 'Closure evidence']);
+    const projects = gaps.first().locator('.astrid-vision-project');
+    await expect(projects).toHaveCount(3);
+    await expect(projects.locator('.astrid-vision-project-title'))
       .toHaveText(['Live composition', 'Reusable tools', 'Editable history']);
+    for (const [index, project] of feed.projects.entries()) {
+      const card = projects.nth(index);
+      await expect(card).toHaveAttribute('data-project-id', project.id);
+      await expect(card).not.toHaveAttribute('open', '');
+      await expect(card.locator('.astrid-vision-project-intro')).toHaveText(intros[index]);
+      await expect(card.locator('.astrid-vision-project-intro')).toBeVisible();
+      await expect(card.locator('.astrid-vision-project-body')).toBeHidden();
+      await expect(card.locator('summary a')).toHaveCount(0);
+      await expect(card.locator('.astrid-vision-details-project-heading a')).toHaveAttribute('href', project.githubUrl);
+    }
+    await projects.first().locator('summary').click();
+    await expect(projects.first()).toHaveAttribute('open', '');
+    await expect(projects.first().locator('.astrid-vision-project-body')).toBeVisible();
+    await expect(projects.first().locator('.astrid-vision-details-project-goal'))
+      .toHaveText('A separate detailed explanation stays behind the project disclosure.');
+    await expect(projects.first().locator('.astrid-vision-project-metadata dt'))
+      .toHaveText(['Status', 'Owner', 'Estimate', 'Waiting on']);
+    await expect(projects.first().locator('.astrid-vision-project-metadata dd'))
+      .toHaveText(['queued', 'Project owner 0', '1 days', 'Dependency 0']);
+    await expect(gaps.first()).toHaveAttribute('open', '');
+    await expect(projects.nth(1)).not.toHaveAttribute('open', '');
+    await projects.nth(1).locator('summary').focus();
+    await page.keyboard.press('Enter');
+    await expect(projects.nth(1)).toHaveAttribute('open', '');
+    await expect(projects.first()).toHaveAttribute('open', '');
+    await expect(projects.nth(2)).not.toHaveAttribute('open', '');
+    await projects.first().locator('summary').focus();
+    await page.keyboard.press('Space');
+    await expect(projects.first()).not.toHaveAttribute('open', '');
+    await expect(projects.nth(1)).toHaveAttribute('open', '');
     await expect(gaps.first().locator('.astrid-vision-details-supporting')).toHaveText('Also relates to Creative agency');
     await expect(dialog.locator('[data-gap-id="AA-001"]')).toHaveCount(1);
-    const noOverflow = await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1);
-    expect(noOverflow).toBe(true);
-    await gaps.first().locator('summary').scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `test-results/vision-captures/aspirations-expanded-${info.project.name}-${width}.png` });
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    for (const card of await projects.all()) {
+      expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    }
+    mkdirSync('test-results/vision-captures', { recursive: true });
+    await projects.first().locator('summary').scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `test-results/vision-captures/fixture-project-disclosures-${info.project.name}-${width}.png` });
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
     await page.getByRole('button', { name: 'Explore Open by design: gaps and projects' }).click();
     await expect(page.getByRole('dialog').locator('[data-gap-id="AA-001"]')).toHaveCount(0);
+  });
+
+  test(`published project titles and introductions stay together at ${width}px`, async ({ page, request }, info) => {
+    const response = await request.get(FEED);
+    expect(response.ok()).toBeTruthy();
+    const feed = await response.json() as PublicVisionContent;
+    const projectsFor = (id: string) => feed.projects
+      .filter(project => (project.primaryGapId ?? project.gapIds[0]) === id)
+      .sort((a, b) => a.priorityOrder - b.priorityOrder);
+    const gap = feed.gaps.find(item => item.assessment !== 'closed' && item.aspiration &&
+      item.primaryAppliesTo?.startsWith('pillar:') && projectsFor(item.id).length >= 2);
+    expect(gap).toBeDefined();
+    const pillar = feed.pillars.find(item => 'pillar:' + item.id === gap!.primaryAppliesTo)!;
+    const plans = projectsFor(gap!.id);
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    await page.getByRole('button', { name: 'Explore ' + pillar.title + ': gaps and projects' }).click();
+    const dialog = page.getByRole('dialog');
+    const row = dialog.locator('[data-gap-id="' + gap!.id + '"]');
+    await expect(row.locator(':scope > summary')).not.toContainText(plans[0].title);
+    await row.locator(':scope > summary').click();
+    const cards = row.locator('.astrid-vision-project');
+    await expect(cards).toHaveCount(plans.length);
+    await expect(cards.locator('.astrid-vision-project-title')).toHaveText(plans.map(plan => plan.title));
+    for (const [index, plan] of plans.entries()) {
+      const card = cards.nth(index);
+      await expect(card).not.toHaveAttribute('open', '');
+      await expect(card.locator('.astrid-vision-project-intro')).not.toBeEmpty();
+      await expect(card.locator('.astrid-vision-details-project-heading a')).toHaveAttribute('href', plan.githubUrl);
+    }
+    // Screenshots use the published source unchanged, never the dummy fixture.
+    mkdirSync('test-results/vision-captures', { recursive: true });
+    writeFileSync(`test-results/vision-captures/real-projects-${info.project.name}-${width}-source.json`,
+      JSON.stringify({ source: feed.source, gapId: gap!.id, projects: plans }, null, 2));
+    await row.evaluate(node => {
+      const viewport = node.closest('.astrid-vision-details-scroll')!;
+      viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 8;
+    });
+    await page.screenshot({ path: `test-results/vision-captures/real-projects-${info.project.name}-${width}.png` });
+    await cards.first().locator('summary').click();
+    await expect(cards.first().locator('.astrid-vision-project-body')).toBeVisible();
+    await expect(cards.first().locator('.astrid-vision-project-metadata dd')).toHaveText([
+      plans[0].status, plans[0].owner, plans[0].estimate, plans[0].waitingOn,
+    ]);
+    await expect(row).toHaveAttribute('open', '');
+    await expect(cards.nth(1)).not.toHaveAttribute('open', '');
+    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    await cards.first().evaluate(node => {
+      const viewport = node.closest('.astrid-vision-details-scroll')!;
+      viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 8;
+    });
+    await page.screenshot({ path: `test-results/vision-captures/real-project-expanded-${info.project.name}-${width}.png` });
   });
 }
 
@@ -79,7 +182,7 @@ test('exported candidate feed renders real Packs rules and real aspiration links
   await expect(aspiration.locator('.astrid-vision-details-characteristic-body')).toContainText('We should never:');
   await expect(aspiration.locator('.astrid-vision-details-characteristic-body ul')).toHaveCount(2);
   mkdirSync('test-results/vision-captures', { recursive: true });
-  await page.screenshot({ path: `test-results/vision-captures/packs-${info.project.name}.png` });
+  await page.screenshot({ path: `test-results/vision-captures/${file ? 'candidate' : 'fixture'}-packs-${info.project.name}.png` });
 });
 
 test.describe('a dismissal consumes precisely one gesture', () => {

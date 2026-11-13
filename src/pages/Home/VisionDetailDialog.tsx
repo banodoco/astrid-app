@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ExternalLink, X } from 'lucide-react';
 import type { PublicVisionContent, PublicVisionProject } from './publicVisionContent';
 import { aspirationsForSubject, findAspiration, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
+import './VisionProjectDisclosure.css';
 
 // Editorial accents retain the same identity across pillar and principle dialogs.
 const GAP_TONES = ['clay', 'ochre', 'sage', 'teal', 'blue', 'plum'] as const;
@@ -12,22 +13,62 @@ function GapProjects({ projects }: { projects: PublicVisionProject[] }) {
     return <p className="astrid-vision-details-empty">No current projects linked yet.</p>;
   }
   return (
-    <div className="astrid-vision-details-projects">
+    <div className="astrid-vision-details-projects astrid-vision-project-disclosures">
       <p>Projects addressing this gap</p>
       <ul>
-        {projects.map(project => (
-          <li key={project.id}>
-            <div className="astrid-vision-details-project-heading">
-              <a href={project.githubUrl} target="_blank" rel="noreferrer">
-                {project.title}<ExternalLink size={14} aria-hidden="true" />
-              </a>
-              <span>{project.status}</span>
-            </div>
-            <div className="astrid-vision-details-project-goal">
-              <ReactMarkdown>{project.goalMarkdown}</ReactMarkdown>
-            </div>
-          </li>
-        ))}
+        {projects.map(project => {
+          // Use the authored introduction, not a rewritten slogan or a clipped sentence.
+          const [intro, ...remaining] = project.goalMarkdown.trim().split(/\r?\n\s*\r?\n/);
+          return (
+            <li key={project.id}>
+              <details className="astrid-vision-project" data-project-id={project.id}>
+                <summary className="astrid-vision-project-summary">
+                  <span className="astrid-vision-project-summary-copy">
+                    <strong className="astrid-vision-project-title">{project.title}</strong>
+                    <span className="astrid-vision-project-intro">
+                      <ReactMarkdown
+                        allowedElements={['p', 'strong', 'em', 'del', 'code', 'a', 'br']}
+                        unwrapDisallowed
+                        components={{
+                          p: ({ children }) => <span>{children}</span>,
+                          // The entire summary toggles the project; source links belong below it.
+                          a: ({ children }) => <span>{children}</span>,
+                        }}
+                      >{intro}</ReactMarkdown>
+                    </span>
+                  </span>
+                  <ChevronDown size={17} strokeWidth={1.75} aria-hidden="true" />
+                </summary>
+                <div className="astrid-vision-project-body">
+                  {remaining.length > 0 && (
+                    <div className="astrid-vision-details-project-goal">
+                      <ReactMarkdown>{remaining.join('\n\n')}</ReactMarkdown>
+                    </div>
+                  )}
+                  <dl className="astrid-vision-project-metadata">
+                    {([
+                      ['Status', project.status],
+                      ['Owner', project.owner],
+                      ['Estimate', project.estimate],
+                      ['Waiting on', project.waitingOn],
+                    ] as const).map(([label, value]) => (
+                      <div key={label}>
+                        <dt>{label}</dt>
+                        <dd><ReactMarkdown>{value}</ReactMarkdown></dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <div className="astrid-vision-details-project-heading">
+                    <a href={project.githubUrl} target="_blank" rel="noreferrer"
+                      aria-label={'Read the full project plan: ' + project.title}>
+                      Read the full project plan<ExternalLink size={14} aria-hidden="true" />
+                    </a>
+                  </div>
+                </div>
+              </details>
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
@@ -45,7 +86,7 @@ function AspirationGap({ content, item }: { content: PublicVisionContent; item: 
           <span className="astrid-vision-details-gap-title">{gap.title}</span>
           <span className="astrid-vision-details-gap-preview">
             {projects.length > 0 ? (
-              <><strong>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</strong><span aria-hidden="true"> · </span><span>{projects[0].title}</span></>
+              <strong>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</strong>
             ) : 'No project yet'}
           </span>
         </span>
@@ -56,6 +97,7 @@ function AspirationGap({ content, item }: { content: PublicVisionContent; item: 
           <span>{gap.assessment}</span>
           <a href={gap.githubUrl} target="_blank" rel="noreferrer">Gap on GitHub<ExternalLink size={13} aria-hidden="true" /></a>
         </div>
+        <GapProjects projects={projects} />
         <dl className="astrid-vision-details-gap-description">
           {([
             ['Desired state', gap.desiredMarkdown],
@@ -69,7 +111,6 @@ function AspirationGap({ content, item }: { content: PublicVisionContent; item: 
             </div>
           ))}
         </dl>
-        <GapProjects projects={projects} />
         {supporting.length > 0 && (
           <p className="astrid-vision-details-supporting"><strong>Also relates to</strong> {supporting.join(' · ')}</p>
         )}
@@ -106,7 +147,7 @@ export function VisionDetailDialog({
   }, []);
 
   // Show a fade only where scrollable content actually continues. Observe both the
-  // viewport and its content so expanded aspirations and gaps update the edges too.
+  // viewport and its content so expanded aspirations, gaps and projects update the edges too.
   useLayoutEffect(() => {
     const viewport = scrollRef.current;
     const inner = scrollContentRef.current;

@@ -1,4 +1,4 @@
-name: Plan 53 apply source
+name: Plan 53 apply review fixes
 
 on:
   push:
@@ -17,48 +17,33 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
-      - name: Apply the source delta with preimage and postimage verification
+      - name: Apply reviewed source delta with exact before and after hashes
         run: |
           python3 - <<'PY'
           import base64, hashlib, json, lzma, pathlib, subprocess
-          root = pathlib.Path.cwd()
-          chunks = sorted(root.glob('.plan53-transfer/part-*.b64'))
-          assert len(chunks) == 3, 'Expected all three transfer chunks'
-          raw = lzma.decompress(base64.b64decode(''.join(p.read_text() for p in chunks), validate=True))
-          assert hashlib.sha256(raw).hexdigest() == 'ace197f875858063caecbcb58d706d6aee31ba8473279588778f665cabab8e5d', 'Transfer digest mismatch'
+          encoded = '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'
+          raw = lzma.decompress(base64.b64decode(encoded, validate=True))
+          assert hashlib.sha256(raw).hexdigest() == '113f2c211264f2a66dd70e2216d11530d1ed8a5067cd542b9f82a5c856209227'
           changes = json.loads(raw)
-          assert len(changes) == 14
+          assert len(changes) == 6
           prepared = {}
           for name, change in changes.items():
-              relative = pathlib.PurePosixPath(name)
-              assert not relative.is_absolute() and '..' not in relative.parts
-              assert relative.parts[0] in {'src', 'tests', '.github', 'playwright.vision.config.ts'}
-              target = root / relative
-              assert not target.is_symlink()
-              before = target.read_bytes() if target.exists() else b''
-              assert hashlib.sha256(before).hexdigest() == change['before'], f'Source changed: {name}'
+              path = pathlib.Path(name)
+              assert not path.is_absolute() and '..' not in path.parts and not path.is_symlink()
+              before = path.read_bytes()
+              assert hashlib.sha256(before).hexdigest() == change['before'], name
               lines = before.decode().splitlines(keepends=True)
-              for start, end, replacement in reversed(change['edits']):
-                  lines[start:end] = [replacement]
+              for start, end, replacement in reversed(change['edits']): lines[start:end] = [replacement]
               after = ''.join(lines).encode()
-              assert hashlib.sha256(after).hexdigest() == change['after'], f'Postimage mismatch: {name}'
-              if name.startswith('.github/workflows/'):
-                  print(f'Workflow updated separately through connector: {name}; expected SHA256 {change["after"]}')
-                  continue
-              prepared[name] = after
-          for name, data in prepared.items():
-              target = root / name
-              target.parent.mkdir(parents=True, exist_ok=True)
-              target.write_bytes(data)
-          subprocess.run(['git', 'add', '--', *prepared], check=True)
-          subprocess.run(['git', 'rm', '-r', '--', '.plan53-transfer'], check=True)
-          print(f'Applied and verified {len(prepared)} source and test files.')
+              assert hashlib.sha256(after).hexdigest() == change['after'], name
+              prepared[path] = after
+          for path, data in prepared.items(): path.write_bytes(data)
+          subprocess.run(['git', 'add', '--', *map(str, prepared)], check=True)
           PY
-      - name: Commit only to the isolated working branch
+      - name: Commit only to the working branch
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git diff --cached --check
-          git commit -m 'feat(vision): connect aspirations, gaps and projects; consume backdrop clicks before dismissal'
+          git commit -m 'fix(vision): include completed project history, reject null refs and focus browser assertions'
           git push origin HEAD:refs/heads/chatgpt/53-vision-aspirations
-          git rev-parse HEAD

@@ -99,7 +99,6 @@ function AspirationGap({ content, item }: { content: PublicVisionContent; item: 
             ) : 'No project yet'}
           </span>
         </span>
-        <span className="astrid-vision-details-gap-label">Gap</span>
         <ChevronDown size={17} strokeWidth={1.75} aria-hidden="true" />
       </summary>
       <div className="astrid-vision-details-gap-body">
@@ -125,12 +124,15 @@ export function VisionDetailDialog({
   if (!entry) return null;
   const siblings = subject.kind === 'pillar' ? content.pillars : content.principles;
   const index = siblings.findIndex(item => item.id === subject.id);
-  const next = siblings[(index + 1) % siblings.length];
+  const previous = siblings[index - 1];
+  const next = siblings[index + 1];
   return (
     <VisionDialog title={entry.title}
       eyebrow={subject.kind === 'pillar' ? 'What we’re building towards' : 'The principles that guide us'}
       identity={content.source.revision + ':' + subject.kind + ':' + subject.id} onClose={onClose}
-      next={siblings.length > 1 ? { label: 'Next ' + subject.kind + ': ' + next.title,
+      previous={previous ? { label: 'Previous ' + subject.kind + ': ' + previous.title,
+        onClick: () => onSelect({ kind: subject.kind, id: previous.id }) } : undefined}
+      next={next ? { label: 'Next ' + subject.kind + ': ' + next.title,
         onClick: () => onSelect({ kind: subject.kind, id: next.id }) } : undefined}>
               {entry.statement && entry.explanationMarkdown && entry.characteristics ? (
                 <>
@@ -141,7 +143,7 @@ export function VisionDetailDialog({
                   <section className="astrid-vision-details-characteristics" aria-label="Aspirations">
                     <h3>Aspirations</h3>
                     <div className="astrid-vision-details-characteristic-list">
-                      {hierarchy.aspirations.map(({ aspiration, gaps, hasMeasuredGap }) => (
+                      {hierarchy.aspirations.map(({ aspiration, gaps }) => (
                         <section className="astrid-vision-details-aspiration" key={aspiration.id} data-aspiration-id={aspiration.id}>
                           <details className="astrid-vision-details-characteristic">
                             <summary>
@@ -154,15 +156,14 @@ export function VisionDetailDialog({
                               <ReactMarkdown>{aspiration.detailsMarkdown}</ReactMarkdown>
                             </div>
                           </details>
-                          {gaps.length > 0 ? (
-                            <ul className="astrid-vision-details-aspiration-gaps" aria-label={'Gaps for ' + aspiration.title}>
-                              {gaps.map(item => <li key={item.gap.id}><AspirationGap content={content} item={item} /></li>)}
-                            </ul>
-                          ) : hierarchy.hasAspirationLinks ? (
-                            <p className="astrid-vision-details-aspiration-empty">
-                              {hasMeasuredGap ? 'No current gaps are measured against this.' : 'No gap is measured against this yet.'}
-                            </p>
-                          ) : null}
+                          {gaps.length > 0 && (
+                            <div className="astrid-vision-details-gap-group">
+                              <h4 className="astrid-vision-details-gap-group-label">{gaps.length === 1 ? 'Gap' : 'Gaps'}</h4>
+                              <ul className="astrid-vision-details-aspiration-gaps" aria-label={'Gaps for ' + aspiration.title}>
+                                {gaps.map(item => <li key={item.gap.id}><AspirationGap content={content} item={item} /></li>)}
+                              </ul>
+                            </div>
+                          )}
                         </section>
                       ))}
                     </div>
@@ -171,26 +172,21 @@ export function VisionDetailDialog({
               ) : (
                 <div className="astrid-vision-details-description"><ReactMarkdown>{entry.bodyMarkdown}</ReactMarkdown></div>
               )}
-              {(!hierarchy.hasAspirationLinks || hierarchy.legacyGaps.length > 0) && (
+              {hierarchy.legacyGaps.length > 0 && (
                 <section className="astrid-vision-details-gaps" aria-label="Current gaps and projects">
-                  <h3>Gaps preventing this</h3>
-                  {hierarchy.legacyGaps.length === 0 ? (
-                    <p className="astrid-vision-details-empty">No current gaps are linked to this {subject.kind}.</p>
-                  ) : (
+                  <h3 className="astrid-vision-details-gap-group-label">{hierarchy.legacyGaps.length === 1 ? 'Gap' : 'Gaps'}</h3>
                     <ul className="astrid-vision-details-gap-list">
                       {hierarchy.legacyGaps.map(({ gap, projects }) => (
                         <li key={gap.id} className="astrid-vision-details-gap"
                           data-tone={GAP_TONES[content.gaps.findIndex(item => item.id === gap.id) % GAP_TONES.length]}>
-                          <div className="astrid-vision-details-gap-heading astrid-vision-details-gap-heading--labelled">
+                          <div className="astrid-vision-details-gap-heading">
                             <h4><a href={gap.githubUrl} target="_blank" rel="noreferrer">{gap.title}<ExternalLink size={14} aria-hidden="true" /></a></h4>
-                            <span className="astrid-vision-details-gap-label">Gap</span>
                           </div>
                           <GapDesiredState markdown={gap.desiredMarkdown} />
                           <GapProjects projects={projects} />
                         </li>
                       ))}
                     </ul>
-                  )}
                 </section>
               )}
     </VisionDialog>

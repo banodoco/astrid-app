@@ -1,27 +1,14 @@
-/* Gap headers identify their level; the authored desired state precedes projects. */
-.astrid-vision-details-gap-label {
-  flex: none;
-  margin-inline-start: auto;
-  padding: 2px 6px;
-  border: 1px solid color-mix(in oklab, var(--gap-accent) 40%, transparent);
-  border-radius: 4px;
-  color: var(--gap-accent);
-  font: 600 10px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+/* Label the relationship once above the group, not inside every gap title. */
+.astrid-vision-details-gap-group-label {
+  margin: 2px 0 8px 24px;
+  color: var(--astrid-muted);
+  font: 500 11px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
   letter-spacing: .08em;
   text-transform: uppercase;
-  white-space: nowrap;
 }
-.astrid-vision-details-gap-heading--labelled {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-.astrid-vision-details-gap-heading--labelled > h4 { min-width: 0; flex: 1; }
+.astrid-vision-details-gaps > .astrid-vision-details-gap-group-label { margin-left: 0; }
 .astrid-vision-details-gap-description > div:last-child { margin-bottom: 0; }
-.astrid-vision-details-gap-body > .astrid-vision-details-empty {
-  margin: 0;
-  padding: 14px 18px 16px;
-}
+.astrid-vision-details-gap-body > .astrid-vision-details-empty { margin: 0; padding: 14px 18px 16px; }
 
 /* Projects are a distinct disclosure level inside an opened gap, not labels
    appended to the gap title. Keep authored introductions readable at phone width. */

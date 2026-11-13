@@ -54,15 +54,18 @@ jobs:
       - name: Preserve public page lifecycle and share metadata
         run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts
       - name: Build the hosted website
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build:hosted
       - name: Install Chromium and WebKit for focused browser validation
+        id: browsers
         run: npx playwright install --with-deps chromium webkit
       - name: Verify vision content on desktop and phone
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/chromium-results.json
         run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts --project=chromium-desktop --output=test-results/chromium --reporter=line,json
       - name: Verify native dialog touch behavior in WebKit
-        if: success() || failure()
+        if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/webkit-results.json
         run: npx playwright test --config playwright.vision.config.ts --output=test-results/webkit --reporter=line,json

@@ -4,10 +4,11 @@ import base from './playwright.config';
 /** Native dialog and touch regression gate, including Safari's WebKit engine. */
 export default defineConfig({
   ...base,
-  // A cold Vite transform and high-DPI WebKit compete for the same CI CPU.
-  // Serialize this six-test browser gate; retain failures without retrying them.
+  // Cold Vite transforms and full-width 3x WebKit screenshots share the CI CPU.
+  // Run 43428020937 reached its final navigation after capturing at 58 seconds;
+  // allow the complete capture-and-interaction case to finish, without retries.
   workers: 1,
-  timeout: 60_000,
+  timeout: 90_000,
   testMatch: '**/public-astrid-vision-aspirations.spec.ts',
   use: { ...base.use, launchOptions: {} },
   projects: [

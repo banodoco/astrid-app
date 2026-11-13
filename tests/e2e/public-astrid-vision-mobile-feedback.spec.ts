@@ -1,10 +1,19 @@
 import { expect, test } from '@playwright/test';
 
+
+async function openCatalog(page: import('@playwright/test').Page, kind: 'gaps' | 'projects', current = true) {
+  if (await page.getByRole('dialog').count()) await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'See all ' + kind, exact: true }).click();
+  await expect(page.getByRole('dialog', { name: 'All ' + kind })).toBeVisible();
+  if (current) await page.getByRole('combobox', { name: 'Filter ' + kind + ' by status' }).selectOption('current');
+}
+
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
 test('mobile gaps start collapsed and can be opened and closed', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await openCatalog(page, 'gaps', true);
   const first = page.locator('#gap-aa-001');
   const body = first.locator('.astrid-vision-part-body');
   const toggle = first.locator('h3 button');
@@ -30,6 +39,7 @@ test('current gaps show a compact list; status filter reveals all and closed', a
   }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await openCatalog(page, 'gaps', true);
   const items = page.locator('.astrid-vision-part');
   const current = data.gaps.filter(gap => gap.assessment !== 'closed').length;
   const filter = page.getByRole('combobox', { name: 'Filter gaps by status' });

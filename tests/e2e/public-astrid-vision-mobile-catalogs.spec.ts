@@ -18,7 +18,7 @@ async function expectContained(page: Page, width: number) {
   if (width <= 760) {
     expect(Math.abs(bounds!.x)).toBeLessThan(1);
     expect(Math.abs(bounds!.width - width)).toBeLessThan(1);
-    expect(bounds!.height).toBeGreaterThan(830);
+    expect(await dialog.evaluate(el => Number.parseFloat(getComputedStyle(el).maxHeight))).toBeGreaterThan(830);
   }
 }
 

@@ -227,9 +227,10 @@ test('mobile modal keeps the X fixed, scrolls within the panel and closes from t
   await expect(scroll).toHaveCSS('overflow-y', 'auto');
   const rect = await dialog.boundingBox();
   expect(rect).not.toBeNull();
-  expect(rect!.x).toBeGreaterThanOrEqual(18);
-  expect(rect!.y).toBeGreaterThanOrEqual(35);
-  expect(rect!.y + rect!.height).toBeLessThanOrEqual(745);
+  expect(Math.abs(rect!.x)).toBeLessThan(1);
+  expect(rect!.width).toBe(390);
+  expect(rect!.y).toBeGreaterThanOrEqual(7);
+  expect(rect!.y + rect!.height).toBeLessThanOrEqual(773);
   const initial = await close.boundingBox();
   expect(initial).not.toBeNull();
   await scroll.evaluate(el => { el.scrollTop = el.scrollHeight; });
@@ -239,14 +240,14 @@ test('mobile modal keeps the X fixed, scrolls within the panel and closes from t
   expect(Math.abs(scrolled!.y - initial!.y)).toBeLessThan(2);
   expect(Math.abs(scrolled!.x - initial!.x)).toBeLessThan(2);
 
-  await page.mouse.click(rect!.x + rect!.width / 2, rect!.y - 14);
+  await page.mouse.click(rect!.x + rect!.width / 2, rect!.y / 2);
   await expect(dialog).toHaveCount(0);
 
   await trigger.click();
   await expect(dialog).toBeVisible();
   const again = await dialog.boundingBox();
   expect(again).not.toBeNull();
-  await page.mouse.click(again!.x + again!.width / 2, again!.y + again!.height + 14);
+  await page.mouse.click(again!.x + again!.width / 2, (again!.y + again!.height + 780) / 2);
   await expect(dialog).toHaveCount(0);
 });
 
@@ -289,7 +290,7 @@ test('first touch outside the dialog only dismisses it and cannot click through 
 
     const bounds = await dialog.boundingBox();
     expect(bounds).not.toBeNull();
-    await page.touchscreen.tap(bounds!.x + bounds!.width / 2, bounds!.y - 14);
+    await page.touchscreen.tap(bounds!.x + bounds!.width / 2, bounds!.y / 2);
     await expect(dialog).toHaveCount(0);
     // A delayed synthetic click from the same touch must not reach the card below.
     await page.waitForTimeout(350);

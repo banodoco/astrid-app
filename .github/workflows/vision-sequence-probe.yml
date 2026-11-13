@@ -1,0 +1,52 @@
+name: Diagnose pillar sequence geometry
+on:
+  push:
+    branches: [fix/vision-viewport-sequence-20261113]
+    paths: [.github/workflows/vision-sequence-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium
+      - name: Instrument the failing assertion without changing product code
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts')
+          s=p.read_text()
+          old="    await page.evaluate(top => window.scrollTo({ top, behavior: 'instant' }), target);"
+          new=old+'''
+              console.log('SEQUENCE', JSON.stringify({ index, target, positions, geometry: await cards.evaluateAll(nodes => ({
+                scrollY: window.scrollY, innerHeight: window.innerHeight,
+                visualHeight: window.visualViewport?.height, visualTop: window.visualViewport?.offsetTop,
+                list: nodes[0].parentElement!.getBoundingClientRect().toJSON(),
+                cards: nodes.map(node => ({ box: node.getBoundingClientRect().toJSON(),
+                  offsetTop: (node as HTMLElement).offsetTop, height: (node as HTMLElement).offsetHeight,
+                  parent: (node as HTMLElement).offsetParent?.className, active: node.hasAttribute('data-play') })),
+              })) }));
+              await page.screenshot({ path: 'test-results/vision-captures/sequence-probe-' + index + '.png' });
+          '''
+          assert old in s
+          p.write_text(s.replace(old,new))
+          PY
+          mkdir -p test-results/vision-captures
+      - name: Reproduce only the failing sequence case
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/sequence-results.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts --grep 'two-column mobile pillars' --project=chromium-desktop --reporter=line,json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-sequence-probe
+          path: test-results/
+          retention-days: 3

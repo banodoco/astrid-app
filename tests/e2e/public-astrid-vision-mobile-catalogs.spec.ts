@@ -450,6 +450,11 @@ test('two-column mobile pillars animate in reading order as scroll advances and 
 });
 
 
+// WebKit mobile emulation rejects wheel input before dispatch. Exercise real
+// wheels at both responsive widths in a wheel-capable context, with a separate
+// mobile-emulated touch cancellation check below. No assertions are skipped.
+test.describe('native wheel scroll isolation', () => {
+  test.use({ isMobile: false });
 for (const width of [390, 1440]) {
   test(`all popup types lock the page and ignore control-bar scrolling at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
@@ -531,3 +536,47 @@ for (const width of [390, 1440]) {
     await expect.poll(() => page.evaluate(() => scrollY)).toBeLessThan(start);
   });
 }
+
+});
+
+
+test('mobile popup controls cancel drags but preserve content gestures and zoom', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  for (const kind of ['pillar', 'principle', 'gaps', 'projects']) {
+    const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').first().getByRole('button')
+      : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').first().getByRole('button')
+      : page.getByRole('button', { name: 'See all ' + kind, exact: true });
+    await opener.scrollIntoViewIfNeeded();
+    await opener.focus();
+    const before = await page.evaluate(() => scrollY);
+    await page.keyboard.press('Enter');
+    const dialog = page.getByRole('dialog');
+    const result = await dialog.evaluate(node => {
+      const header = node.querySelector('.astrid-vision-details-header')!;
+      const scroll = node.querySelector('.astrid-vision-details-scroll')!;
+      const drag = (target: Element, fingers: number) => {
+        const event = new Event('touchmove', { bubbles: true, cancelable: true });
+        Object.defineProperty(event, 'touches', { value: Array.from({ length: fingers }, (_, identifier) => ({ identifier })) });
+        target.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      return { header: drag(header, 1), backdrop: drag(node, 1), content: drag(scroll, 1),
+        pinch: drag(header, 2), fixed: getComputedStyle(document.body).position };
+    });
+    expect(result).toEqual({ header: true, backdrop: true, content: false, pinch: false, fixed: 'fixed' });
+    await expect(dialog.locator('.astrid-vision-details-header')).toHaveCSS('touch-action', 'pinch-zoom');
+    await expect(dialog.locator('.astrid-vision-details-scroll')).toHaveCSS('overscroll-behavior-y', 'none');
+    await dialog.getByRole('button', { name: 'Close details' }).click();
+    await expect(dialog).toHaveCount(0);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBe(before);
+    await expect(page.locator('body')).not.toHaveCSS('position', 'fixed');
+  }
+  // Component disposal must release the lock even without a close event.
+  await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
+  await expect(page.getByRole('dialog')).toBeVisible();
+  await page.locator('.astrid-vision-brand').evaluate(node => (node as HTMLAnchorElement).click());
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await expect(page.locator('body')).not.toHaveCSS('position', 'fixed');
+});

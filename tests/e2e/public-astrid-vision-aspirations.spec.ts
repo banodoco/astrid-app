@@ -308,6 +308,7 @@ test('gap groups use singular labels and empty aspirations stay quiet', async ({
   await expectGapPresentation(dialog.locator('.astrid-vision-details-gap'));
   await page.keyboard.press('Escape');
   feed.gaps = [];
+  feed.projects = []; // Empty feeds cannot keep dangling project references.
   await openVision(page, feed);
   await expect(page.getByRole('dialog').locator('.astrid-vision-details-gap-group-label, .astrid-vision-details-gaps')).toHaveCount(0);
   await expect(page.getByRole('dialog')).not.toContainText('No current gaps');

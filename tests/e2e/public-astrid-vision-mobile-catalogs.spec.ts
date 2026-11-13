@@ -460,6 +460,8 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    // Existing longhand styles must survive the shared page lock.
+    await page.evaluate(() => { document.body.style.overflowY = 'auto'; });
     const openers = [
       page.locator('.astrid-vision-principles > li').first().getByRole('button'),
       page.locator('.astrid-vision-standards-list > li').first().getByRole('button'),
@@ -501,6 +503,16 @@ for (const width of [390, 1440]) {
         return { drag: drag.defaultPrevented, pinch: pinch.defaultPrevented };
       });
       expect(touch).toEqual({ drag: true, pinch: false });
+      // Some closed desktop subjects legitimately fit without a scrollbar.
+      // Open their real disclosures before asserting scroll movement;
+      // the control-bar checks above also exercise the short state.
+      if (index < 2) {
+        await scroll.locator('details').evaluateAll(nodes => {
+          for (const node of nodes) (node as HTMLDetailsElement).open = true;
+        });
+        await scroll.evaluate(node => { node.scrollTop = 0; });
+      }
+      await expect.poll(() => scroll.evaluate(node => node.scrollHeight - node.clientHeight)).toBeGreaterThan(0);
       const contentBox = (await scroll.boundingBox())!;
       await page.mouse.move(contentBox.x + contentBox.width / 2, contentBox.y + contentBox.height / 2);
       await page.mouse.wheel(0, 280);

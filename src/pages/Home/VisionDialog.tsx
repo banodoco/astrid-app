@@ -38,13 +38,16 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
     const gap = window.innerWidth - root.clientWidth;
     const padding = Number.parseFloat(getComputedStyle(body).paddingRight) || 0;
     set(root.style, 'scroll-behavior', 'auto');
-    set(root.style, 'overflow', 'hidden');
-    set(root.style, 'overscroll-behavior', 'none');
+    set(root.style, 'overflow-x', 'hidden');
+    set(root.style, 'overflow-y', 'hidden');
+    set(root.style, 'overscroll-behavior-x', 'none');
+    set(root.style, 'overscroll-behavior-y', 'none');
     set(body.style, 'position', 'fixed');
     set(body.style, 'top', -y + 'px');
     set(body.style, 'left', -x + 'px');
     set(body.style, 'width', '100%');
-    set(body.style, 'overflow', 'hidden');
+    set(body.style, 'overflow-x', 'hidden');
+    set(body.style, 'overflow-y', 'hidden');
     if (gap > 0) set(body.style, 'padding-right', padding + gap + 'px');
 
     // A gesture starting on the stationary controls or backdrop does nothing.

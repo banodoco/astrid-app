@@ -384,12 +384,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         else rows.push({ top, height: card.offsetHeight, indices: [index] });
       });
       let selected: number | null = null;
+      let nextRowStart = 0;
       for (const row of rows) {
-        // Start the left card as the row enters; a little more travel plays the right.
+        // A row may already be visible at scrollY=0. Clamp its entry to real
+        // scroll space so the left card still gets a turn before the right.
+        // Monotonic row starts also cover two short rows visible on arrival.
         const step = Math.min(row.height / row.indices.length, viewportHeight * .18);
+        const start = Math.max(nextRowStart, row.top + window.scrollY - viewportHeight * .84);
         row.indices.forEach((index, column) => {
-          if (row.top + step * column <= viewportHeight * .84) selected = index;
+          if (window.scrollY >= start + step * column) selected = index;
         });
+        nextRowStart = start + step * row.indices.length;
       }
       if (selected !== null) {
         const row = rows.find(row => row.indices.includes(selected!))!;

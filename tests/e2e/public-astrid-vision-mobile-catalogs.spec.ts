@@ -369,26 +369,50 @@ for (const width of [390, 1440]) {
   });
 }
 
-test('two-column mobile pillars animate in reading order as scroll advances and reverses', async ({ page }) => {
+test('two-column mobile pillars animate in reading order as scroll advances and reverses', async ({ page, request }, info) => {
+  const response = await request.get(FEED);
+  expect(response.ok()).toBeTruthy();
+  const feed = await response.json() as PublicVisionContent;
+  await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const cards = page.locator('.astrid-vision-principles > li');
   await expect(cards).toHaveCount(4);
   await page.evaluate(() => document.fonts.ready);
-  // Measure stable layout coordinates, not the card reveal transform.
-  const positions = await cards.evaluateAll(nodes => {
-    const first = nodes[0] as HTMLElement;
-    const top = first.parentElement!.getBoundingClientRect().top + window.scrollY;
-    return nodes.map(node => top + (node as HTMLElement).offsetTop - first.offsetTop);
+  // Exercise actual forward/backward scrolling, not coordinates copied from
+  // the selection algorithm. At page top the first row is already visible.
+  await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+  await expect(cards.first()).toHaveAttribute('data-play', 'true');
+  const end = await cards.last().evaluate(node => {
+    const box = node.getBoundingClientRect();
+    return Math.max(0, box.bottom + window.scrollY - window.innerHeight / 2);
   });
-  for (const index of [0, 1, 2, 3, 2, 1, 0]) {
-    const target = positions[index] - 844 * (index % 2 === 0 ? .75 : .5);
-    await page.evaluate(top => window.scrollTo({ top, behavior: 'instant' }), target);
-    await expect.poll(() => cards.evaluateAll(nodes => nodes.flatMap((node, i) => node.hasAttribute('data-play') ? [i] : []))).toEqual([index]);
-    await expect(cards.nth(index).locator('.astrid-vision-art-layer').first()).toHaveCSS('animation-play-state', 'running');
-  }
+  const samples: { direction: string; scrollY: number; active: number }[] = [];
+  const sweep = async (direction: 'down' | 'up') => {
+    const observed: number[] = [];
+    const steps = Math.ceil(end / 32);
+    for (let step = 0; step <= steps; step++) {
+      const top = end * (direction === 'down' ? step / steps : 1 - step / steps);
+      await page.evaluate(top => new Promise<void>(resolve => {
+        window.scrollTo({ top, behavior: 'instant' });
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }), top);
+      const selected = await cards.evaluateAll(nodes => nodes.flatMap((node, i) => node.hasAttribute('data-play') ? [i] : []));
+      expect(selected).toHaveLength(1);
+      const active = selected[0];
+      if (observed.at(-1) !== active) {
+        observed.push(active);
+        samples.push({ direction, scrollY: await page.evaluate(() => window.scrollY), active });
+        await expect(cards.nth(active).locator('.astrid-vision-art-layer').first()).toHaveCSS('animation-play-state', 'running');
+      }
+    }
+    return observed;
+  };
+  expect(await sweep('down')).toEqual([0, 1, 2, 3]);
+  expect(await sweep('up')).toEqual([3, 2, 1, 0]);
+  mkdirSync(folder, { recursive: true });
+  writeFileSync(`${folder}/pillar-sequence-${info.project.name}.json`, JSON.stringify({ source: feed.source, samples }, null, 2));
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await expect(cards.locator('[data-play]')).toHaveCount(0);
   await expect.poll(() => cards.evaluateAll(nodes => nodes.some(node => node.hasAttribute('data-play')))).toBe(false);
 });

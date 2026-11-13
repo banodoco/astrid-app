@@ -456,7 +456,8 @@ test('phone scroll activates each principle sigil through the middle of the view
       await expect(card.locator('.astrid-vision-sigil-knot')).toHaveCSS('transition-duration', '3s');
       await expect(card.locator('.astrid-vision-sigil-clear-path')).toHaveCSS('transition-duration', '3s');
     }
-    await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');
+    // Background sigils stay subdued even while their internal shapes animate.
+    await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.13');
     await expect(card.locator('.astrid-vision-principle-corner')).toHaveCSS('opacity', '1');
     if (index > 0) await expect(cards.nth(index - 1)).not.toHaveAttribute('data-sigil-active', 'true');
   }

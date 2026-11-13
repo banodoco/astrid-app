@@ -1,52 +1,104 @@
-name: Diagnose pillar sequence geometry
+name: Apply diagnosed pillar sequence repair
 on:
   push:
     branches: [fix/vision-viewport-sequence-20261113]
     paths: [.github/workflows/vision-sequence-probe.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  probe:
+  repair:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          persist-credentials: false
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.0'
-          cache: npm
-      - run: npm ci --legacy-peer-deps
-      - run: npx playwright install --with-deps chromium
-      - name: Instrument the failing assertion without changing product code
+          ref: fix/vision-viewport-sequence-20261113
+          fetch-depth: 0
+      - name: Apply the measured initial-viewport repair
         run: |
+          git diff --exit-code 9ac3c5261eecf627d0841183e2e391b9931a2684 -- src tests
           python3 - <<'PY'
           from pathlib import Path
-          p=Path('tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts')
-          s=p.read_text()
-          old="    await page.evaluate(top => window.scrollTo({ top, behavior: 'instant' }), target);"
-          new=old+'''
-              console.log('SEQUENCE', JSON.stringify({ index, target, positions, geometry: await cards.evaluateAll(nodes => ({
-                scrollY: window.scrollY, innerHeight: window.innerHeight,
-                visualHeight: window.visualViewport?.height, visualTop: window.visualViewport?.offsetTop,
-                list: nodes[0].parentElement!.getBoundingClientRect().toJSON(),
-                cards: nodes.map(node => ({ box: node.getBoundingClientRect().toJSON(),
-                  offsetTop: (node as HTMLElement).offsetTop, height: (node as HTMLElement).offsetHeight,
-                  parent: (node as HTMLElement).offsetParent?.className, active: node.hasAttribute('data-play') })),
-              })) }));
-              await page.screenshot({ path: 'test-results/vision-captures/sequence-probe-' + index + '.png' });
-          '''
-          assert old in s
+          p=Path('src/pages/Home/PublicAstridVision.tsx');s=p.read_text()
+          old='''      let selected: number | null = null;
+                for (const row of rows) {
+                  // Start the left card as the row enters; a little more travel plays the right.
+                  const step = Math.min(row.height / row.indices.length, viewportHeight * .18);
+                  row.indices.forEach((index, column) => {
+                    if (row.top + step * column <= viewportHeight * .84) selected = index;
+                  });
+                }'''
+          new='''      let selected: number | null = null;
+                let nextRowStart = 0;
+                for (const row of rows) {
+                  // A row may already be visible at scrollY=0. Clamp its entry to real
+                  // scroll space so the left card still gets a turn before the right.
+                  // Monotonic row starts also cover two short rows visible on arrival.
+                  const step = Math.min(row.height / row.indices.length, viewportHeight * .18);
+                  const start = Math.max(nextRowStart, row.top + window.scrollY - viewportHeight * .84);
+                  row.indices.forEach((index, column) => {
+                    if (window.scrollY >= start + step * column) selected = index;
+                  });
+                  nextRowStart = start + step * row.indices.length;
+                }'''
+          assert s.count(old)==1
           p.write_text(s.replace(old,new))
+          p=Path('tests/e2e/public-astrid-vision-sigils-nav.spec.ts');s=p.read_text()
+          old="await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.82');"
+          assert s.count(old)==1
+          p.write_text(s.replace(old,"// Background sigils stay subdued even while their internal shapes animate.\n    await expect(card.locator('.astrid-vision-principle-sigil')).toHaveCSS('opacity', '0.13');"))
+          p=Path('tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts');s=p.read_text()
+          i=s.index("test('two-column mobile pillars animate")
+          s=s[:i]+'''test('two-column mobile pillars animate in reading order as scroll advances and reverses', async ({ page, request }, info) => {
+            const response = await request.get(FEED);
+            expect(response.ok()).toBeTruthy();
+            const feed = await response.json() as PublicVisionContent;
+            await page.route(FEED, route => route.fulfill({ json: feed }));
+            await page.setViewportSize({ width: 390, height: 844 });
+            await page.emulateMedia({ reducedMotion: 'no-preference' });
+            await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+            const cards = page.locator('.astrid-vision-principles > li');
+            await expect(cards).toHaveCount(4);
+            await page.evaluate(() => document.fonts.ready);
+            // Exercise actual forward/backward scrolling, not coordinates copied from
+            // the selection algorithm. At page top the first row is already visible.
+            await page.evaluate(() => window.scrollTo({ top: 0, behavior: 'instant' }));
+            await expect(cards.first()).toHaveAttribute('data-play', 'true');
+            const end = await cards.last().evaluate(node => {
+              const box = node.getBoundingClientRect();
+              return Math.max(0, box.bottom + window.scrollY - window.innerHeight / 2);
+            });
+            const samples: { direction: string; scrollY: number; active: number }[] = [];
+            const sweep = async (direction: 'down' | 'up') => {
+              const observed: number[] = [];
+              const steps = Math.ceil(end / 32);
+              for (let step = 0; step <= steps; step++) {
+                const top = end * (direction === 'down' ? step / steps : 1 - step / steps);
+                await page.evaluate(top => new Promise<void>(resolve => {
+                  window.scrollTo({ top, behavior: 'instant' });
+                  requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+                }), top);
+                const selected = await cards.evaluateAll(nodes => nodes.flatMap((node, i) => node.hasAttribute('data-play') ? [i] : []));
+                expect(selected).toHaveLength(1);
+                const active = selected[0];
+                if (observed.at(-1) !== active) {
+                  observed.push(active);
+                  samples.push({ direction, scrollY: await page.evaluate(() => window.scrollY), active });
+                  await expect(cards.nth(active).locator('.astrid-vision-art-layer').first()).toHaveCSS('animation-play-state', 'running');
+                }
+              }
+              return observed;
+            };
+            expect(await sweep('down')).toEqual([0, 1, 2, 3]);
+            expect(await sweep('up')).toEqual([3, 2, 1, 0]);
+            mkdirSync(folder, { recursive: true });
+            writeFileSync(`${folder}/pillar-sequence-${info.project.name}.json`, JSON.stringify({ source: feed.source, samples }, null, 2));
+            await page.emulateMedia({ reducedMotion: 'reduce' });
+            await expect.poll(() => cards.evaluateAll(nodes => nodes.some(node => node.hasAttribute('data-play')))).toBe(false);
+          });
+          '''
+          p.write_text(s)
           PY
-          mkdir -p test-results/vision-captures
-      - name: Reproduce only the failing sequence case
-        env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/sequence-results.json
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts --grep 'two-column mobile pillars' --project=chromium-desktop --reporter=line,json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: vision-sequence-probe
-          path: test-results/
-          retention-days: 3
+          git diff --check
+          git add src/pages/Home/PublicAstridVision.tsx tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix(vision): preserve the first pillar turn when rows start in view'
+          git push origin HEAD:fix/vision-viewport-sequence-20261113

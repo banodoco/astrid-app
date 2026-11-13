@@ -1,0 +1,36 @@
+name: Correct empty-group fixture scope
+on:
+  push:
+    branches: [fix/vision-dialog-bounds-scroll-20261113]
+    paths: [.github/workflows/vision-empty-group-proof.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-dialog-bounds-scroll-20261113
+      - name: Exercise a subject with no current gaps without invalidating the feed
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-aspirations.spec.ts')
+          s=p.read_text()
+          old='  feed.gaps = [];\n  feed.projects = []; // Empty feeds cannot keep dangling project references.\n  await openVision(page, feed);'
+          assert s.count(old)==1
+          new='''  // The feed contract requires a populated catalog; empty groups are
+            // represented by a subject with no current gaps, not an invalid feed.
+            // Exercise legacy fallback too, with its real closed-gap semantics.
+            const quiet = legacyVisionFixture();
+            quiet.gaps.forEach(gap => { gap.assessment = 'closed'; });
+            await openVision(page, quiet);'''
+          p.write_text(s.replace(old,new))
+          PY
+          git diff --check
+          git config user.name 'ChatGPT'
+          git config user.email 'chatgpt@users.noreply.github.com'
+          git add tests/e2e/public-astrid-vision-aspirations.spec.ts
+          git commit -m 'test(vision): assert empty groups using valid closed-gap catalog data'
+          git push origin HEAD:fix/vision-dialog-bounds-scroll-20261113

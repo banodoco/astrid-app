@@ -1,13 +1,14 @@
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { ChevronRight, X } from 'lucide-react';
+import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
-export function VisionDialog({ title, eyebrow, identity, className = '', children, onClose, next }: {
+export function VisionDialog({ title, eyebrow, identity, className = '', children, onClose, previous, next }: {
   title: string;
   eyebrow: string;
   identity: string;
   className?: string;
   children: ReactNode;
   onClose: () => void;
+  previous?: { label: string; onClick: () => void };
   next?: { label: string; onClick: () => void };
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -16,7 +17,66 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
   const scrollContentRef = useRef<HTMLDivElement>(null);
   const [scrollEdges, setScrollEdges] = useState({ top: false, bottom: false });
   const titleId = useId();
+  const releasePageRef = useRef<(() => void) | null>(null);
 
+
+  // Native modality makes the page inert, but does not itself lock scrolling.
+  // Freeze its exact visual position on iOS as well as desktop, and restore
+  // only the inline properties we own. Next/previous never release this lock.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    const scroller = scrollRef.current;
+    if (!dialog || !scroller) return;
+    const root = document.documentElement;
+    const body = document.body;
+    const x = window.scrollX, y = window.scrollY;
+    const changes: { style: CSSStyleDeclaration; key: string; value: string; priority: string }[] = [];
+    const set = (style: CSSStyleDeclaration, key: string, value: string) => {
+      changes.push({ style, key, value: style.getPropertyValue(key), priority: style.getPropertyPriority(key) });
+      style.setProperty(key, value);
+    };
+    const gap = window.innerWidth - root.clientWidth;
+    const padding = Number.parseFloat(getComputedStyle(body).paddingRight) || 0;
+    set(root.style, 'scroll-behavior', 'auto');
+    set(root.style, 'overflow', 'hidden');
+    set(root.style, 'overscroll-behavior', 'none');
+    set(body.style, 'position', 'fixed');
+    set(body.style, 'top', -y + 'px');
+    set(body.style, 'left', -x + 'px');
+    set(body.style, 'width', '100%');
+    set(body.style, 'overflow', 'hidden');
+    if (gap > 0) set(body.style, 'padding-right', padding + gap + 'px');
+
+    // A gesture starting on the stationary controls or backdrop does nothing.
+    // Do not cancel taps, content scrolling, or the user's two-finger zoom.
+    const inContent = (target: EventTarget | null) => target instanceof Node && scroller.contains(target);
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !inContent(event.target) && event.cancelable) event.preventDefault();
+    };
+    const touchmove = (event: TouchEvent) => {
+      if (event.touches.length === 1 && !inContent(event.target) && event.cancelable) event.preventDefault();
+    };
+    dialog.addEventListener('wheel', wheel, { passive: false });
+    dialog.addEventListener('touchmove', touchmove, { passive: false });
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      dialog.removeEventListener('wheel', wheel);
+      dialog.removeEventListener('touchmove', touchmove);
+      // Keep instant restoration until the old page position is back in place.
+      for (const item of changes.slice(1).reverse()) {
+        if (item.value) item.style.setProperty(item.key, item.value, item.priority);
+        else item.style.removeProperty(item.key);
+      }
+      window.scrollTo({ left: x, top: y, behavior: 'instant' });
+      const behavior = changes[0];
+      if (behavior.value) behavior.style.setProperty(behavior.key, behavior.value, behavior.priority);
+      else behavior.style.removeProperty(behavior.key);
+    };
+    releasePageRef.current = release;
+    return () => { release(); releasePageRef.current = null; };
+  }, []);
 
   useLayoutEffect(() => {
     if (dialogRef.current && !dialogRef.current.open) {
@@ -56,7 +116,15 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
   }, []);
 
   // Keep the native modal/top layer, but reset disclosures and scroll per subject.
-  useLayoutEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = 0; }, [identity]);
+  useLayoutEffect(() => {
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    const active = document.activeElement;
+    // At an endpoint, move keyboard focus off the now-disabled arrow.
+    if (active instanceof HTMLButtonElement && active.disabled &&
+        active.classList.contains('astrid-vision-details-navigation')) {
+      dialogRef.current?.querySelector<HTMLButtonElement>('.astrid-vision-details-navigation:not(:disabled)')?.focus({ preventScroll: true });
+    }
+  }, [identity]);
 
   // Show a fade only where scrollable content actually continues. Observe both the
   // viewport and its content so expanded aspirations, gaps and projects update the edges too.
@@ -98,8 +166,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
       ref={dialogRef}
       className={'astrid-vision-details ' + className}
       aria-labelledby={titleId}
-      data-has-next={Boolean(next) || undefined}
-      onClose={onClose}
+      onClose={() => { releasePageRef.current?.(); onClose(); }}
       onPointerDownCapture={event => {
         // Keep the native modal top layer until the gesture's final click.
         // A requestAnimationFrame after pointerup can precede Safari's click.
@@ -156,11 +223,18 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
               {children}
             </div>
           </div>
-          {next && <button type="button" className="astrid-vision-details-next"
-            aria-label={next.label} title={next.label}
-            onClick={event => { event.stopPropagation(); next.onClick(); }}>
-            <ChevronRight size={24} aria-hidden="true" />
-          </button>}
+          {(previous || next) && <>
+            <button type="button" className="astrid-vision-details-navigation astrid-vision-details-previous"
+              disabled={!previous} aria-label={previous?.label ?? 'Previous item'} title={previous?.label}
+              onClick={event => { event.stopPropagation(); previous?.onClick(); }}>
+              <ChevronLeft size={24} aria-hidden="true" />
+            </button>
+            <button type="button" className="astrid-vision-details-navigation astrid-vision-details-next"
+              disabled={!next} aria-label={next?.label ?? 'Next item'} title={next?.label}
+              onClick={event => { event.stopPropagation(); next?.onClick(); }}>
+              <ChevronRight size={24} aria-hidden="true" />
+            </button>
+          </>}
           <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"
             data-visible={scrollEdges.top || undefined} aria-hidden="true" />
           <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"

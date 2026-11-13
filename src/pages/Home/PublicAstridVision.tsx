@@ -247,7 +247,9 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const [selectedCatalog, setSelectedCatalog] = useState<'gaps' | 'projects' | null>(null);
   useEffect(() => {
     if (!visible) return;
-    const update = () => setHeaderCondensed(window.scrollY > 72);
+    const update = () => {
+      if (!document.querySelector('.astrid-vision-details[open]')) setHeaderCondensed(window.scrollY > 72);
+    };
     update();
     window.addEventListener('scroll', update, { passive: true });
     return () => window.removeEventListener('scroll', update);
@@ -370,6 +372,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     let frame = 0;
     const measure = () => {
       frame = 0;
+      if (document.querySelector('.astrid-vision-details[open]')) return;
       const cards = Array.from(list.children) as HTMLElement[];
       if (!cards.length) return;
       const viewportHeight = window.visualViewport?.height ?? window.innerHeight;
@@ -389,8 +392,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         // A row may already be visible at scrollY=0. Clamp its entry to real
         // scroll space so the left card still gets a turn before the right.
         // Monotonic row starts also cover two short rows visible on arrival.
-        const step = Math.min(row.height / row.indices.length, viewportHeight * .18);
-        const start = Math.max(nextRowStart, row.top + window.scrollY - viewportHeight * .84);
+        // Give each card a longer share of scroll travel, rather than
+        // switching as soon as two adjacent cards enter the same screen band.
+        const step = Math.min(row.height * .6, viewportHeight * .30);
+        const start = Math.max(nextRowStart, row.top + window.scrollY - viewportHeight * .76);
         row.indices.forEach((index, column) => {
           if (window.scrollY >= start + step * column) selected = index;
         });

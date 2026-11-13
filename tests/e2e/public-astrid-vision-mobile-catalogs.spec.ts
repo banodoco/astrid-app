@@ -326,6 +326,7 @@ test('mobile panel retains viewport bounds without the VisualViewport API', asyn
 
 for (const width of [390, 1440]) {
   test(`next subject cycles inside one modal with reset content at ${width}px`, async ({ page, request }, info) => {
+    // Same regression case, now with the owner's bounded back/forward contract.
     const response = await request.get(FEED);
     expect(response.ok()).toBeTruthy();
     const feed = await response.json() as PublicVisionContent;
@@ -333,34 +334,61 @@ for (const width of [390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('heading', { name: 'The principles that guide us', exact: true })).toBeVisible();
     for (const kind of ['pillar', 'principle'] as const) {
       const subjects = kind === 'pillar' ? feed.pillars : feed.principles;
       const opener = page.getByRole('button', { name: 'Explore ' + subjects[0].title + ': gaps and projects' });
       await opener.focus(); await page.keyboard.press('Enter');
       const dialog = page.getByRole('dialog');
       await dialog.evaluate(node => node.setAttribute('data-same-modal', 'yes'));
+      const scroll = dialog.locator('.astrid-vision-details-scroll');
+      const next = dialog.locator('.astrid-vision-details-next');
+      const previous = dialog.locator('.astrid-vision-details-previous');
+      const initialWidth = await scroll.evaluate(node => node.clientWidth);
       for (let index = 0; index < subjects.length; index++) {
         await expect(dialog).toHaveAccessibleName(subjects[index].title);
         await expect(dialog).toHaveAttribute('data-same-modal', 'yes');
         await expect(dialog.locator('.astrid-vision-details-statement')).toHaveText(subjects[index].statement!);
-        await expect.poll(() => dialog.locator('.astrid-vision-details-scroll').evaluate(node => node.scrollTop)).toBe(0);
-        const next = dialog.getByRole('button', { name: 'Next ' + kind + ': ' + subjects[(index + 1) % subjects.length].title });
-        const b = (await next.boundingBox())!, panel = (await dialog.boundingBox())!;
+        await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBe(0);
+        expect(await scroll.evaluate(node => node.clientWidth)).toBe(initialWidth);
+        expect(await scroll.evaluate(node => {
+          const css = getComputedStyle(node);
+          return Math.abs(parseFloat(css.paddingLeft) - parseFloat(css.paddingRight));
+        })).toBeLessThan(1);
+        if (index === 0) await expect(previous).toBeDisabled();
+        else await expect(previous).toHaveAccessibleName('Previous ' + kind + ': ' + subjects[index - 1].title);
+        if (index === subjects.length - 1) await expect(next).toBeDisabled();
+        else await expect(next).toHaveAccessibleName('Next ' + kind + ': ' + subjects[index + 1].title);
         const frame = (await dialog.locator('.astrid-vision-details-scroll-frame').boundingBox())!;
-        expect(panel.x + panel.width - b.x - b.width).toBeLessThan(16);
-        expect(Math.abs(b.y + b.height / 2 - frame.y - frame.height / 2)).toBeLessThan(2);
-        expect(b.width).toBeGreaterThanOrEqual(44);
-        // The rail is separate from the text, not a floating button obscuring it.
-        const textRight = await dialog.locator('.astrid-vision-details-scroll-inner').evaluate(node => node.getBoundingClientRect().right);
-        expect(textRight).toBeLessThanOrEqual(b.x + 1);
-        if (index === 0) {
-          mkdirSync(folder, { recursive: true });
-          await page.screenshot({ path: `${folder}/real-next-${kind}-${info.project.name}-${width}.png` });
+        for (const arrow of [previous, next]) {
+          const box = (await arrow.boundingBox())!;
+          expect(Math.abs(box.y + box.height / 2 - frame.y - frame.height / 2)).toBeLessThan(2);
+          expect(box.width).toBeGreaterThanOrEqual(44);
+          await expect(arrow).toHaveCSS('position', 'absolute');
         }
-        await dialog.locator('.astrid-vision-details-scroll').evaluate(node => { node.scrollTop = node.scrollHeight; });
-        await next.click();
+        // The overlay must not reserve a rail or change the underlying text width.
+        const text = (await dialog.locator('.astrid-vision-details-scroll-inner').boundingBox())!;
+        expect(text.x).toBeLessThan((await previous.boundingBox())!.x + 44);
+        expect(text.x + text.width).toBeGreaterThan((await next.boundingBox())!.x);
+        if (index === 1) {
+          mkdirSync(folder, { recursive: true });
+          await page.screenshot({ path: `${folder}/real-floating-${kind}-${info.project.name}-${width}.png` });
+        }
+        if (index < subjects.length - 1) {
+          await scroll.evaluate(node => { node.scrollTop = node.scrollHeight; });
+          await next.click();
+        }
       }
+      // Native disabled click cannot wrap the fourth item around to the first.
+      await next.evaluate(node => (node as HTMLButtonElement).click());
+      await expect(dialog).toHaveAccessibleName(subjects.at(-1)!.title);
+      for (let index = subjects.length - 2; index >= 0; index--) {
+        await previous.click();
+        await expect(dialog).toHaveAccessibleName(subjects[index].title);
+        await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBe(0);
+        await expect(dialog).toHaveAttribute('data-same-modal', 'yes');
+      }
+      await expect(previous).toBeDisabled();
+      await previous.evaluate(node => (node as HTMLButtonElement).click());
       await expect(dialog).toHaveAccessibleName(subjects[0].title);
       await page.keyboard.press('Escape');
       await expect(dialog).toHaveCount(0);
@@ -410,9 +438,96 @@ test('two-column mobile pillars animate in reading order as scroll advances and 
     return observed;
   };
   expect(await sweep('down')).toEqual([0, 1, 2, 3]);
+  // Each of the first three cards gets a substantial visible scroll interval.
+  const down = samples.filter(sample => sample.direction === 'down');
+  for (let i = 1; i < down.length; i++) expect(down[i].scrollY - down[i - 1].scrollY).toBeGreaterThan(180);
+  expect(end - down[3].scrollY).toBeGreaterThan(100);
   expect(await sweep('up')).toEqual([3, 2, 1, 0]);
   mkdirSync(folder, { recursive: true });
   writeFileSync(`${folder}/pillar-sequence-${info.project.name}.json`, JSON.stringify({ source: feed.source, samples }, null, 2));
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await expect.poll(() => cards.evaluateAll(nodes => nodes.some(node => node.hasAttribute('data-play')))).toBe(false);
 });
+
+
+for (const width of [390, 1440]) {
+  test(`all popup types lock the page and ignore control-bar scrolling at ${width}px`, async ({ page }, info) => {
+    await page.setViewportSize({ width, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    const openers = [
+      page.locator('.astrid-vision-principles > li').first().getByRole('button'),
+      page.locator('.astrid-vision-standards-list > li').first().getByRole('button'),
+      page.getByRole('button', { name: 'See all gaps', exact: true }),
+      page.getByRole('button', { name: 'See all projects', exact: true }),
+    ];
+    const records = [];
+    for (const [index, opener] of openers.entries()) {
+      await opener.scrollIntoViewIfNeeded();
+      await opener.focus();
+      const before = await page.evaluate(() => ({ x: scrollX, y: scrollY, body: document.body.style.cssText,
+        overflow: document.documentElement.style.overflow, behavior: document.documentElement.style.scrollBehavior }));
+      await page.keyboard.press('Enter');
+      const dialog = page.getByRole('dialog');
+      const scroll = dialog.locator('.astrid-vision-details-scroll');
+      const header = dialog.locator('.astrid-vision-details-header');
+      await expect(dialog).toBeVisible();
+      await expect(page.locator('body')).toHaveCSS('position', 'fixed');
+      const anchor = await opener.boundingBox();
+      const lockedY = await page.evaluate(() => scrollY);
+      const h = (await header.boundingBox())!;
+      const originalInner = await scroll.evaluate(node => node.scrollTop);
+      await page.mouse.move(h.x + h.width / 2, h.y + h.height / 2);
+      for (const delta of [360, -360]) {
+        await page.mouse.wheel(0, delta);
+        await page.waitForTimeout(100);
+        expect(await page.evaluate(() => scrollY)).toBe(lockedY);
+        expect(await scroll.evaluate(node => node.scrollTop)).toBe(originalInner);
+      }
+      // Touch cancellation is checked directly in WebKit as well as Chromium.
+      // Synthetic touches do not claim to reproduce physical iPhone momentum.
+      const touch = await header.evaluate(node => {
+        const drag = new Event('touchmove', { bubbles: true, cancelable: true });
+        Object.defineProperty(drag, 'touches', { value: [{ identifier: 1 }] });
+        node.dispatchEvent(drag);
+        const pinch = new Event('touchmove', { bubbles: true, cancelable: true });
+        Object.defineProperty(pinch, 'touches', { value: [{ identifier: 1 }, { identifier: 2 }] });
+        node.dispatchEvent(pinch);
+        return { drag: drag.defaultPrevented, pinch: pinch.defaultPrevented };
+      });
+      expect(touch).toEqual({ drag: true, pinch: false });
+      const contentBox = (await scroll.boundingBox())!;
+      await page.mouse.move(contentBox.x + contentBox.width / 2, contentBox.y + contentBox.height / 2);
+      await page.mouse.wheel(0, 280);
+      await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBeGreaterThan(0);
+      // No chaining at either end of the actual content scroller.
+      for (const bottom of [true, false]) {
+        await scroll.evaluate((node, bottom) => { node.scrollTop = bottom ? node.scrollHeight : 0; }, bottom);
+        await page.mouse.wheel(0, bottom ? 500 : -500);
+        await page.waitForTimeout(100);
+        expect(await page.evaluate(() => scrollY)).toBe(lockedY);
+      }
+      await page.mouse.move(2, 2);
+      await page.mouse.wheel(0, 300);
+      await page.waitForTimeout(100);
+      expect(await page.evaluate(() => scrollY)).toBe(lockedY);
+      expect(Math.abs((await opener.boundingBox())!.y - anchor!.y)).toBeLessThan(1);
+      records.push({ kind: index, before: before.y, lockedY, touch });
+      if (index % 2 === 0) await dialog.getByRole('button', { name: 'Close details' }).click();
+      else await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() => scrollY)).toBe(before.y);
+      const after = await page.evaluate(() => ({ body: document.body.style.cssText,
+        overflow: document.documentElement.style.overflow, behavior: document.documentElement.style.scrollBehavior }));
+      expect(after).toEqual({ body: before.body, overflow: before.overflow, behavior: before.behavior });
+      await expect(opener).toBeFocused();
+    }
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(`${folder}/scroll-lock-${info.project.name}-${width}.json`, JSON.stringify(records, null, 2));
+    // The ordinary page becomes scrollable again after repeated modal closes.
+    await page.mouse.move(width / 2, 100);
+    const start = await page.evaluate(() => scrollY);
+    await page.mouse.wheel(0, -300);
+    await expect.poll(() => page.evaluate(() => scrollY)).toBeLessThan(start);
+  });
+}

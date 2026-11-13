@@ -1,0 +1,52 @@
+name: Apply mobile vision layout
+on:
+  push:
+    branches: [fix/vision-mobile-catalogs-20261113]
+    paths: [.github/workflows/vision-mobile-layout-apply.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-mobile-catalogs-20261113
+          fetch-depth: 0
+      - name: Require the inspected product baseline
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$(git hash-object src/pages/Home/PublicAstridVision.tsx)" = d0ae6d7ac5ba2bf756cd60e7bd4826efdbdd2372
+          test "$(git hash-object src/pages/Home/VisionDetailDialog.tsx)" = 405ed70fe47ddd595da7c3a8d14dd3a95a6179b7
+          git diff --name-only 7155b334f04ada2e3ec1d00678638d89d10a8921 HEAD | grep -Ev '^(.github/scripts/apply-mobile-vision.py|.github/workflows/vision-mobile-layout-apply.yml|tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts)$' > /tmp/unexpected-paths || true
+          test ! -s /tmp/unexpected-paths
+      - name: Apply and inspect the migration
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply-mobile-vision.py
+          git rm .github/scripts/apply-mobile-vision.py .github/workflows/vision-mobile-layout-apply.yml
+          git add src/pages/Home tests/e2e scripts/quality/check-public-vision-production.mjs playwright.vision.config.ts .github/workflows/public-vision.yml
+          git diff --cached --check
+          git diff --cached --stat
+          git diff --cached > /tmp/vision-mobile-layout.diff
+      - name: Commit to the working branch only
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(vision): mobile pillar grid, live counts and on-demand catalogs'
+          git push origin HEAD:refs/heads/fix/vision-mobile-catalogs-20261113
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-mobile-layout-source
+          path: |
+            /tmp/vision-mobile-layout.diff
+            src/pages/Home/VisionDialog.tsx
+            src/pages/Home/VisionDetailDialog.tsx
+            src/pages/Home/PublicAstridVision.tsx
+            src/pages/Home/VisionMobileLayout.css
+            tests/e2e/public-astrid-vision-content.spec.ts
+          retention-days: 7

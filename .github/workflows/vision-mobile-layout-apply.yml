@@ -35,9 +35,9 @@ jobs:
           python3 /tmp/apply-mobile-vision.py
           python3 - <<'PY'
           from pathlib import Path
-          def edit(path, old, new, required=True):
+          def edit(path, old, new):
               p=Path(path); s=p.read_text()
-              if required: assert old in s, (path,old)
+              assert old in s, (path,old)
               p.write_text(s.replace(old,new))
           css='src/pages/Home/VisionMobileLayout.css'
           edit(css,'.astrid-vision-details { max-height:', '.astrid-vision > .astrid-vision-details { max-height:')
@@ -60,8 +60,12 @@ jobs:
           mobile='tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts'
           edit(mobile,'expect(bounds!.height).toBeGreaterThan(830);', 'expect(await dialog.evaluate(el => Number.parseFloat(getComputedStyle(el).maxHeight))).toBeGreaterThan(830);')
           PY
-          git rm .github/scripts/apply-mobile-vision.py .github/workflows/vision-mobile-layout-apply.yml
-          git add src/pages/Home tests/e2e scripts/quality/check-public-vision-production.mjs playwright.vision.config.ts .github/workflows/public-vision.yml
+          cp .github/workflows/public-vision.yml /tmp/public-vision-candidate.yml
+          # The runner's content token cannot edit workflows. The connector will
+          # apply the permanent gate update and remove this temporary workflow.
+          git restore .github/workflows/public-vision.yml
+          git rm .github/scripts/apply-mobile-vision.py
+          git add src/pages/Home tests/e2e scripts/quality/check-public-vision-production.mjs playwright.vision.config.ts
           git diff --cached --check
           git diff --cached --stat
           git diff --cached > /tmp/vision-mobile-layout.diff
@@ -78,10 +82,10 @@ jobs:
           name: vision-mobile-layout-source
           path: |
             /tmp/vision-mobile-layout.diff
+            /tmp/public-vision-candidate.yml
             src/pages/Home/VisionDialog.tsx
             src/pages/Home/VisionDetailDialog.tsx
             src/pages/Home/PublicAstridVision.tsx
             src/pages/Home/VisionMobileLayout.css
             tests/e2e/public-astrid-vision-*.spec.ts
-            .github/workflows/public-vision.yml
           retention-days: 7

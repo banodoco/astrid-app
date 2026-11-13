@@ -166,7 +166,7 @@ test('phone status controls stay right-aligned under descriptions and within hal
   }
 });
 
-test('every chapter, Help us included, opens with one shared rule, pixel eyebrow and title', async ({ page }) => {
+test('every chapter, Help included, opens with one shared rule, pixel eyebrow and title', async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const heads = page.locator('.astrid-vision-north-star > .astrid-vision-section-head, .astrid-vision-standards > .astrid-vision-section-head, .astrid-vision-parts > .astrid-vision-section-head, .astrid-vision-projects > .astrid-vision-section-head, .astrid-vision-contribute');
@@ -215,7 +215,7 @@ test('hero keeps the vision narrative separate from website source attribution',
   const attribution = page.locator('.astrid-vision-source-attribution');
   await expect(attribution).toContainText('Astrid Dev repository');
   await expect(attribution.getByRole('link', { name: 'Astrid Dev repository' })).toHaveAttribute('href', source);
-  await expect(attribution.getByRole('link', { name: 'Help us build it' })).toHaveCount(0);
+  await expect(attribution.getByRole('link', { name: 'Help build it' })).toHaveCount(0);
   await expect.poll(() => attribution.evaluate(element => getComputedStyle(element).fontSize)).toBe('14px');
 });
 
@@ -237,7 +237,7 @@ test('the copy button confirms in place, preserves its dimensions, and resets', 
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: 900 });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-    await expect(page.getByRole('link', { name: 'Help us build it' })).toHaveCount(0);
+    await expect(page.getByRole('link', { name: 'Help build it' })).toHaveCount(0);
     const contribution = page.locator('#astrid-vision-contribute');
     await expect(contribution.getByRole('link', { name: 'Give these instructions to your agent' })).toHaveCount(0);
     const button = contribution.getByRole('button', { name: 'Copy instructions for agents' });

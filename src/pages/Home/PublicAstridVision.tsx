@@ -535,8 +535,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
                   ? <p className="astrid-vision-principle-statement">{principle.statement}</p>
                   : <MarkdownText value={principle.bodyMarkdown} />}
               </div>
-              <span className="astrid-vision-principle-corner" aria-hidden="true">
-                Details <span className="astrid-vision-card-arrow"><PixelArrow /></span>
+              <span className="astrid-vision-principle-corner">
+                <SubjectCounts content={content} subject={{ kind: 'principle', id: principle.id }} /> <span className="astrid-vision-card-arrow"><PixelArrow /></span>
               </span>
               <button type="button" className="astrid-vision-card-open"
                 aria-label={'Explore ' + principle.title + ': gaps and projects'}
@@ -626,7 +626,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"
           aria-labelledby="astrid-vision-contribute-title" data-reveal>
           <div className="astrid-vision-contribute-copy">
-            <p className="astrid-vision-eyebrow" data-index="04">Help us</p>
+            <p className="astrid-vision-eyebrow" data-index="04">Help</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
             <MarkdownText value={contributionIntro} />
             {content.vision.agentPrompt ? (
@@ -640,9 +640,10 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             )}
             <div className="astrid-vision-catalog-actions">
               <button id="astrid-see-all-projects" type="button" aria-haspopup="dialog"
-                onClick={event => openCatalog('projects', event.currentTarget)}>See all projects <PixelArrow /></button>
+                onClick={event => openCatalog('projects', event.currentTarget)}>See all projects</button>
+              <span className="astrid-vision-catalog-divider" aria-hidden="true">|</span>
               <button id="astrid-see-all-gaps" type="button" aria-haspopup="dialog"
-                onClick={event => openCatalog('gaps', event.currentTarget)}>See all gaps <PixelArrow /></button>
+                onClick={event => openCatalog('gaps', event.currentTarget)}>See all gaps</button>
             </div>
             {agentCopyState === 'failed' && (
               <p className="astrid-vision-copy-agent-status" role="alert">

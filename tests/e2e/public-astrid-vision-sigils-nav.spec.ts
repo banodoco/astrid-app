@@ -143,7 +143,7 @@ test('mobile hero gets breathing room and the editorial cues and pillar numbers 
     for (let index = 0; index < 8; index++) {
       const cue = cues.nth(index);
       await expect(cue.locator('.astrid-vision-card-arrow svg[viewBox="0 0 18 18"]')).toHaveCount(1);
-      await expect(cue).toHaveText(index < 4 ? /\d+ gaps?.*\d+ projects?/i : /Details/i);
+      await expect(cue).toHaveText(/\d+ gaps?.*\d+ projects?/i);
       await expect(cue).toHaveCSS('font-family', /Departure Mono/);
       await expect(cue).toHaveCSS('font-size', '11px');
       await expect(cue).toHaveCSS('border-top-width', '0px');
@@ -223,7 +223,7 @@ test('principles sit in the reading column: copy and cue on the left, a larger s
       const rect = (selector: string) => card.querySelector(selector)!.getBoundingClientRect().toJSON();
       return {
         card: card.getBoundingClientRect().toJSON(),
-        text: rect('div'),
+        text: rect('.astrid-vision-principle-statement, .astrid-vision-markdown'),
         sigil: rect('.astrid-vision-principle-sigil'),
         arrow: rect('.astrid-vision-principle-corner'),
         radius: getComputedStyle(card).borderTopLeftRadius,
@@ -290,7 +290,7 @@ test('sticky header navigation tracks sections and folds the wordmark to its ico
   for (const [label, id] of [
     ['Pillars', 'astrid-vision-pillars'],
     ['Principles', 'astrid-vision-standards'],
-    ['Help us', 'astrid-vision-contribute'],
+    ['Help', 'astrid-vision-contribute'],
   ]) {
     const link = nav.getByRole('link', { name: new RegExp(label + '$') });
     await link.click();
@@ -327,7 +327,7 @@ test('phones get one compact sticky header with navigation beside a folding Astr
   expect(size).not.toBeNull();
   expect(size!.x).toBeGreaterThanOrEqual(0);
   expect(size!.x + size!.width).toBeLessThanOrEqual(391);
-  const link = nav.getByRole('link', { name: /Help us$/ });
+  const link = nav.getByRole('link', { name: /Help$/ });
   await link.click();
   await expect(link).toHaveAttribute('aria-current', 'location');
   await expect(page).toHaveURL(/#astrid-vision-contribute$/);
@@ -512,7 +512,7 @@ test('phone header centers the active section when horizontal scroll bounds perm
   const nav = page.getByRole('navigation', { name: 'Vision page sections' });
   await expect(nav).toBeVisible();
 
-  for (const label of ['Pillars', 'Principles', 'Help us']) {
+  for (const label of ['Pillars', 'Principles', 'Help']) {
     const active = nav.getByRole('link', { name: new RegExp(label + '$') });
     await active.click();
     await expect(active).toHaveAttribute('aria-current', 'location');
@@ -553,7 +553,7 @@ test('desktop section clicks keep the chosen highlight throughout smooth page sc
     }).observe(nav, { subtree: true, attributes: true, attributeFilter: ['aria-current'] });
   });
 
-  const destination = nav.getByRole('link', { name: /Help us$/ });
+  const destination = nav.getByRole('link', { name: /Help$/ });
   await destination.click();
   await expect(destination).toHaveAttribute('aria-current', 'location');
   await expect.poll(() => page.evaluate(() => {

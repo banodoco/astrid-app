@@ -106,7 +106,9 @@ test('legacy section bookmarks open the right dialog and leave no dead hash on d
     await expect(page.getByRole('dialog', { name: label })).toBeVisible();
     await page.getByRole('button', { name: 'Close details' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
-    expect(new URL(page.url()).hash).toBe('');
+    // Native close removes the dialog from the accessibility tree before its
+    // asynchronous close event finishes the route cleanup. Assert that outcome.
+    await expect(page).toHaveURL(/\/vision$/);
   }
 });
 

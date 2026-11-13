@@ -512,27 +512,25 @@ test('phone header centers the active section when horizontal scroll bounds perm
   const nav = page.getByRole('navigation', { name: 'Vision page sections' });
   await expect(nav).toBeVisible();
 
-  let centered = 0;
   for (const label of ['Pillars', 'Principles', 'Help us']) {
     const active = nav.getByRole('link', { name: new RegExp(label + '$') });
     await active.click();
     await expect(active).toHaveAttribute('aria-current', 'location');
-    const state = await nav.evaluate(el => {
+    // Four links can all fit, or leave only edge-clamped positions. Assert the
+    // actual bounded center rather than requiring a fictitious interior slot.
+    await expect.poll(() => nav.evaluate(el => {
       const selected = el.querySelector('a[aria-current="location"]')!;
       const a = selected.getBoundingClientRect();
       const n = el.getBoundingClientRect();
-      return {
-        offset: a.left + a.width / 2 - (n.left + n.width / 2),
-        scrollLeft: el.scrollLeft,
-        maxScroll: el.scrollWidth - el.clientWidth,
-      };
-    });
-    if (state.scrollLeft > 2 && state.scrollLeft < state.maxScroll - 2) {
-      centered++;
-      expect(Math.abs(state.offset)).toBeLessThan(10);
-    }
+      const desired = el.scrollLeft + a.left - n.left + a.width / 2 - el.clientWidth / 2;
+      const bounded = Math.max(0, Math.min(el.scrollWidth - el.clientWidth, desired));
+      return Math.abs(el.scrollLeft - bounded);
+    })).toBeLessThan(10);
+    const activeBox = await active.boundingBox();
+    const navBox = await nav.boundingBox();
+    expect(activeBox!.x).toBeGreaterThanOrEqual(navBox!.x - 1);
+    expect(activeBox!.x + activeBox!.width).toBeLessThanOrEqual(navBox!.x + navBox!.width + 1);
   }
-  expect(centered).toBeGreaterThan(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(321);
 });
 
@@ -558,9 +556,13 @@ test('desktop section clicks keep the chosen highlight throughout smooth page sc
   const destination = nav.getByRole('link', { name: /Help us$/ });
   await destination.click();
   await expect(destination).toHaveAttribute('aria-current', 'location');
-  await expect.poll(() => page.evaluate(() =>
-    document.getElementById('astrid-vision-contribute')?.getBoundingClientRect().top ?? 9999))
-    .toBeLessThan(230);
+  await expect.poll(() => page.evaluate(() => {
+    const target = document.getElementById('astrid-vision-contribute')!;
+    const margin = Number.parseFloat(getComputedStyle(target).scrollMarginTop) || 0;
+    const requested = window.scrollY + target.getBoundingClientRect().top - margin;
+    const maximum = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+    return Math.abs(window.scrollY - Math.min(maximum, Math.max(0, requested)));
+  })).toBeLessThan(3);
   await page.waitForTimeout(200);
   const selections = await page.evaluate(() =>
     (window as typeof window & { __astridNavSelections?: string[] }).__astridNavSelections ?? []);

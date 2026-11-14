@@ -8,6 +8,7 @@ describe('shared pixel underline', () => {
     expect(screen.getByRole('heading')).toHaveTextContent('A tool to unlock artistic potential.');
     const path = container.querySelector('path')!;
     expect(path.getAttribute('d')).not.toMatch(/[CQSA]/i);
+    expect(path).toHaveAttribute('d', 'M1 7H99');
     expect(path).toHaveAttribute('stroke-linecap', 'square');
     expect(path).toHaveAttribute('stroke-linejoin', 'miter');
     expect(path.closest('svg')).toHaveAttribute('shape-rendering', 'crispEdges');

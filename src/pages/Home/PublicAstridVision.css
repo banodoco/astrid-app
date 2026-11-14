@@ -290,7 +290,8 @@
   image-rendering: pixelated;
   pointer-events: none;
 }
-.astrid-vision-tinkerer[data-shown] .astrid-vision-sparks { animation: astrid-vision-sparks 3.1s steps(44) 1.2s infinite; }
+.astrid-vision-sparks { animation: astrid-vision-sparks 3.1s steps(44) infinite; animation-play-state: paused; }
+.astrid-vision-tinkerer[data-animating] .astrid-vision-sparks { animation-play-state: running; }
 @keyframes astrid-vision-sparks { to { background-position-x: calc(-36 * 44 * var(--px)); } }
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-juggled, .astrid-vision-juggler-mink { animation: none; }

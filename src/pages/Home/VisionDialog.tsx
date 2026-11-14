@@ -58,6 +58,8 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
     const root = document.documentElement;
     const body = document.body;
     const x = window.scrollX, y = window.scrollY;
+    const previousScrollLock = root.dataset.astridScrollLockY;
+    root.dataset.astridScrollLockY = String(y);
     const changes: { style: CSSStyleDeclaration; key: string; value: string; priority: string }[] = [];
     const set = (style: CSSStyleDeclaration, key: string, value: string) => {
       changes.push({ style, key, value: style.getPropertyValue(key), priority: style.getPropertyPriority(key) });
@@ -101,6 +103,8 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
         else item.style.removeProperty(item.key);
       }
       window.scrollTo({ left: x, top: y, behavior: 'instant' });
+      if (previousScrollLock === undefined) delete root.dataset.astridScrollLockY;
+      else root.dataset.astridScrollLockY = previousScrollLock;
       const behavior = changes[0];
       if (behavior.value) behavior.style.setProperty(behavior.key, behavior.value, behavior.priority);
       else behavior.style.removeProperty(behavior.key);
@@ -113,7 +117,9 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
     // Locking the body resets document scroll. WebKit's top-layer placement can
     // still use the old scroll offset in that same rendering turn (71px in the
     // regression trace). Give the lock one frame to settle before opening once.
-    const frame = window.requestAnimationFrame(() => {
+    let frame = 0;
+    let disposed = false;
+    frame = window.requestAnimationFrame(() => {
       const dialog = dialogRef.current;
       if (!dialog?.isConnected || dialog.open) return;
       const viewport = window.visualViewport;
@@ -125,8 +131,25 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
       titleRef.current?.setAttribute('autofocus', '');
       dialog.showModal();
       if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
+      // Let the native top layer and any toolbar resize settle before revealing
+      // it. Never animate position/height or re-open the modal. The bounded
+      // fallback still opens while a keyboard or browser toolbar keeps moving.
+      let previousBounds = '';
+      let stableFrames = 0;
+      let attempts = 0;
+      const reveal = () => {
+        if (disposed || !dialog.open) return;
+        const bounds = dialog.getBoundingClientRect();
+        const key = [bounds.x, bounds.y, bounds.width, bounds.height].map(Math.round).join(':');
+        stableFrames = key === previousBounds ? stableFrames + 1 : 0;
+        previousBounds = key;
+        attempts += 1;
+        if (stableFrames >= 2 || attempts >= 12) dialog.dataset.ready = 'true';
+        else frame = window.requestAnimationFrame(reveal);
+      };
+      frame = window.requestAnimationFrame(reveal);
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => { disposed = true; window.cancelAnimationFrame(frame); };
   }, []);
 
   // Keep the native modal/top layer, but reset disclosures and scroll per subject.

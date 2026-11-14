@@ -19,7 +19,9 @@
 .astrid-vision-catalog :is(.astrid-vision-parts, .astrid-vision-projects) { width: 100%; margin: 0; padding: 0; }
 .astrid-vision-catalog .astrid-vision-context-row { margin-top: 0; }
 /* Catalogs scroll inside the native dialog, not on the page's reveal timeline. */
-.astrid-vision-catalog [data-reveal] { opacity: 1; transform: none; }
+.astrid-vision .astrid-vision-catalog [data-reveal] {
+  opacity: 1; transform: none; translate: none; transition: none;
+}
 @media (max-width: 760px) {
   .astrid-vision .astrid-vision-principles,
   .astrid-vision .astrid-vision-loading-pillars { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
@@ -187,6 +189,23 @@
 .astrid-vision .astrid-vision-standards-list > li h3 { color: var(--principle-heading); }
 .astrid-vision .astrid-vision-standards-list > li :is(.astrid-vision-principle-statement, .astrid-vision-markdown, .astrid-vision-markdown p) { color: var(--principle-copy); }
 .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner { color: var(--principle-copy); opacity: 1; }
+
+/* Geometry and focus settle while the native modal is transparent, then only
+   its opacity changes. No second opening, slide, scale or content reveal. */
+.astrid-vision-details { opacity: 0; transition: opacity 120ms ease-out; }
+.astrid-vision-details[data-ready="true"] { opacity: 1; }
+.astrid-vision-details::backdrop { opacity: 0; transition: opacity 120ms ease-out; }
+.astrid-vision-details[data-ready="true"]::backdrop { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .astrid-vision-details, .astrid-vision-details::backdrop { transition: none; }
+}
+
+/* The marks have different internal SVG whitespace. Offset the art, not the
+   full-height common frame or the reading column, for optical alignment. */
+@media (max-width: 760px) {
+  .astrid-vision-standards-list > li[data-principle="in-the-creators-control"] .astrid-vision-sigil-art { transform: translateX(12.5%); }
+  .astrid-vision-standards-list > li[data-principle="eliminate-needless-technical-wrangling"] .astrid-vision-sigil-art { transform: translateX(7.5%); }
+}
 
 /* The whole panel owns navigation, so wrapping titles and disclosures cannot move it. */
 .astrid-vision-details-shell { position: relative; }

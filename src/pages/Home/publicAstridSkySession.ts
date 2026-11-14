@@ -160,7 +160,9 @@ function wrapHours(value: number): number {
 }
 
 function scrollDrift(): number {
-  return -Math.min(window.scrollY, SCROLL_DRIFT_SPAN) / SCROLL_DRIFT_SPAN;
+  const locked = document.documentElement.dataset.astridScrollLockY;
+  const y = locked === undefined ? window.scrollY : Number(locked);
+  return -Math.min(Number.isFinite(y) ? y : window.scrollY, SCROLL_DRIFT_SPAN) / SCROLL_DRIFT_SPAN;
 }
 
 /** The place whose sky is shown: the visitor's own, or an explicit location. */

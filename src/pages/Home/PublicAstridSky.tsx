@@ -96,7 +96,11 @@ export function PublicAstridSky({ session, active = true, geometryRoot, geometry
       const settings = snapshot.settings;
       const bleed = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches ? TOUCH_SKY_BLEED : 0;
       const columns = Math.ceil((window.innerWidth + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
-      const viewRows = Math.ceil((window.innerHeight + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
+      // Read the CSS large-viewport frame, not toolbar-sensitive innerHeight.
+      // The fallback also supports non-layout test environments and older engines.
+      const viewHeight = skyRef.current?.clientHeight
+        ? Math.max(1, skyRef.current.clientHeight - 2 * bleed) : window.innerHeight;
+      const viewRows = Math.ceil((viewHeight + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
       const rows = viewRows + 2 * Math.ceil(bleed / PUBLIC_ASTRID_SKY_PIXEL);
       // The sun and moon are sized from the canvas height; keep them the size the window alone would give.
       const bodyScale = viewRows / rows;
@@ -122,7 +126,6 @@ export function PublicAstridSky({ session, active = true, geometryRoot, geometry
       const bleedOffset = `${-(rows - viewRows) / 2 * PUBLIC_ASTRID_SKY_PIXEL}px`;
       if (skyRef.current && skyRef.current.style.top !== bleedOffset) {
         skyRef.current.style.top = bleedOffset;
-        skyRef.current.style.bottom = bleedOffset;
       }
       for (const layer of SKY_LAYERS) {
         const canvas = canvasRefs.current[layer];

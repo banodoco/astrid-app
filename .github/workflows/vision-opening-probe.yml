@@ -1,51 +1,63 @@
-name: Diagnose WebKit opening geometry
+name: Repair WebKit first-frame placement
 on:
   push:
     branches: [fix/vision-polish-opening-20261114]
     paths: [.github/workflows/vision-opening-probe.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  probe:
+  apply:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: fc71af9f678d214f5e2e500b18375e8121ed569a
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20.19.0'
-          cache: npm
-      - name: Install focused browser dependencies
-        run: |
-          npm ci --legacy-peer-deps
-          npx playwright install --with-deps webkit
-      - name: Record detailed viewport and focus trace without changing assertions
+          ref: fix/vision-polish-opening-20261114
+      - name: Apply measured ordering repair and retain failure evidence
         run: |
           python3 - <<'PY'
           from pathlib import Path
+          p=Path('src/pages/Home/VisionDialog.tsx');s=p.read_text()
+          old="""  useLayoutEffect(() => {
+              if (dialogRef.current && !dialogRef.current.open) {
+                // Let native dialog focusing choose the title once, rather than first
+                // scrolling to the footer X and then correcting focus and geometry.
+                titleRef.current?.setAttribute('autofocus', '');
+                dialogRef.current.showModal();
+                if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
+              }
+            }, []);"""
+          new="""  useLayoutEffect(() => {
+              // Locking the body resets document scroll. WebKit's top-layer placement can
+              // still use the old scroll offset in that same rendering turn (71px in the
+              // regression trace). Give the lock one frame to settle before opening once.
+              const frame = window.requestAnimationFrame(() => {
+                const dialog = dialogRef.current;
+                if (!dialog?.isConnected || dialog.open) return;
+                const viewport = window.visualViewport;
+                if (!viewport || viewport.scale <= 1.05) {
+                  dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
+                  dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
+                }
+                // Native focusing chooses the heading directly, not the footer X first.
+                titleRef.current?.setAttribute('autofocus', '');
+                dialog.showModal();
+                if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
+              });
+              return () => window.cancelAnimationFrame(frame);
+            }, []);"""
+          assert old in s;p.write_text(s.replace(old,new))
           p=Path('tests/e2e/public-astrid-vision-polish.spec.ts');s=p.read_text()
-          old='record.frames.push({ y: b.y, height: b.height, scroll:'
-          new="record.frames.push({ phase: record.frames.length, pageY: window.scrollY, visualTop: window.visualViewport?.offsetTop, visualHeight: window.visualViewport?.height, innerHeight: window.innerHeight, rootHeight: document.documentElement.clientHeight, cssTop: getComputedStyle(this).top, cssHeight: getComputedStyle(this).height, bodyTop: document.body.style.top, viewportVar: this.style.getPropertyValue('--vision-viewport-top'), focused: document.activeElement?.tagName, y: b.y, height: b.height, scroll:"
-          assert old in s;s=s.replace(old,new)
           old='    expect(log).toHaveLength(index + 1);'
-          new="    mkdirSync('test-results/opening-probe', { recursive: true });\n    writeFileSync(`test-results/opening-probe/trace-${info.project.name}.json`, JSON.stringify({ source: 'fc71af9f678d214f5e2e500b18375e8121ed569a', name, index, log }, null, 2));\n"+old
-          assert old in s;s=s.replace(old,new)
-          s += "\n test.beforeAll(async ({ browser }) => { const p = await browser.newPage(); await p.goto(process.env.BASE_URL + '/vision'); await p.locator('.astrid-vision-principles > li').first().waitFor({ timeout: 60000 }); await p.close(); });\n"
-          p.write_text(s)
+          new="""    // Keep the frame trace even when a first-paint regression fails below.
+              mkdirSync(folder, { recursive: true });
+              writeFileSync(`${folder}/opening-frames-${info.project.name}.json`,
+                JSON.stringify({ source: feed.source, openings: log }, null, 2));
+              expect(log).toHaveLength(index + 1);"""
+          assert old in s;p.write_text(s.replace(old,new))
           PY
-          set +e
-          PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/opening-probe/results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-polish.spec.ts --grep 'opening prepares viewport' --reporter=line,json > opening-probe.log 2>&1
-          code=$?
-          cat opening-probe.log
-          echo "$code" > opening-probe.exit
-          test -f test-results/opening-probe/results.json
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: vision-opening-probe
-          path: |
-            test-results/
-            opening-probe.log
-            opening-probe.exit
-          retention-days: 3
+          git diff --check
+          git add src/pages/Home/VisionDialog.tsx tests/e2e/public-astrid-vision-polish.spec.ts
+          git config user.name 'POM'
+          git config user.email 'peter@omalley.io'
+          git commit -m 'fix(vision): settle the page lock before native popup placement'
+          git push origin HEAD:fix/vision-polish-opening-20261114

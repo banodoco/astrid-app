@@ -17,8 +17,11 @@ jobs:
         run: |
           python3 scripts/.vision-entry-repair.py
           git diff --check
-          git rm scripts/.vision-entry-repair.py .github/workflows/vision-entry-apply.yml .github/workflows/vision-entry-workbench.yml
-          git add src/pages/Home .github/workflows/public-vision.yml playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts
+          # Actions has contents permission, not workflows permission. Leave
+          # workflow changes/cleanup to the existing authorized GitHub connector.
+          git restore --worktree .github/workflows/public-vision.yml
+          git rm scripts/.vision-entry-repair.py
+          git add src/pages/Home playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(vision): preserve popup backdrop header and share stable hero loading'

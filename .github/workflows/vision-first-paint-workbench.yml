@@ -1,0 +1,22 @@
+name: Vision first-paint source context
+on:
+  push:
+    branches: [fix/vision-mobile-first-paint-20261114]
+    paths: [.github/workflows/vision-first-paint-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export source context
+        run: |
+          mkdir -p /tmp/vision-context
+          git rev-parse HEAD > /tmp/vision-context/source-head.txt
+          tar -cf /tmp/vision-context/source.tar src/pages/Home src/shared/components/PixelUnderline* src/tools/video-editor/tour/card/TourCard* tests/e2e/public-astrid-vision* tests/fixtures/public-vision.ts playwright*.ts .github/workflows/public-vision.yml package.json package-lock.json config/testing AGENTS.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vision-first-paint-source
+          path: /tmp/vision-context
+          retention-days: 3

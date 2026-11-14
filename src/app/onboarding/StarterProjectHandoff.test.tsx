@@ -14,6 +14,15 @@ beforeEach(() => {
 });
 
 describe('StarterProjectHandoff', () => {
+  it('ends the brief and the card at the one hand-off sentence', () => {
+    const sentence = 'Ask your agent: set up my generation with the astrid-setup skill.';
+    vi.mocked(prepareStarterProject).mockReturnValue(new Promise(() => {}));
+    render(<StarterProjectHandoff onReady={vi.fn()} />);
+    expect(setUpGenerationInstructions().split('\n').at(-1)).toBe(sentence);
+    const card = screen.getByRole('heading', { name: 'Set up image generation' }).closest('section')!;
+    expect(card.querySelector('p')?.textContent).toBe(sentence);
+  });
+
   it('offers generation setup instructions to copy for an agent', async () => {
     vi.mocked(prepareStarterProject).mockReturnValue(new Promise(() => {}));
     render(<StarterProjectHandoff onReady={vi.fn()} />);

@@ -1,0 +1,48 @@
+name: Vision entry regression workbench
+on:
+  push:
+    branches: [fix/vision-entry-header-20261114]
+    paths: [.github/workflows/vision-entry-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  reproduce:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Scoped two-engine configuration
+        run: |
+          cat > playwright.entry.config.ts <<'EOF'
+          import { defineConfig, devices } from '@playwright/test';
+          import base from './playwright.config';
+          export default defineConfig({ ...base, workers: 1, timeout: 90000,
+            testMatch: '**/public-astrid-vision-entry.spec.ts',
+            projects: [
+              { name: 'entry-chromium', use: { ...devices['Desktop Chrome'] } },
+              { name: 'entry-webkit', use: { ...devices['iPhone 13'], launchOptions: {} } },
+            ] });
+          EOF
+      - name: Reproduce on baseline product
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/entry-results.json
+        run: npx playwright test --config playwright.entry.config.ts --output=test-results/entry --reporter=line,json
+      - name: Exact source context
+        if: always()
+        run: |
+          mkdir -p entry-artifact
+          git rev-parse HEAD > entry-artifact/head.txt
+          git archive HEAD src/pages/Home src/shared/components/PixelUnderline.tsx src/shared/components/PixelUnderline.css tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/fixtures/public-vision.ts .github/workflows/public-vision.yml playwright.vision.config.ts > entry-artifact/source.tar
+          cp -r test-results/vision-captures entry-artifact/captures || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-entry-baseline
+          path: entry-artifact/
+          retention-days: 7

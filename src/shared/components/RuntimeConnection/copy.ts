@@ -307,7 +307,7 @@ export const SETUP_SKILL_POINTER = `Read the \`astrid-setup\` skill: ${SETUP_GUI
  * The hand-off sentence every door ends at (Plan 20 P4.8). The setup skill owns it; the installer's
  * success output, the README banner, the Pinokio README and this card quote it verbatim.
  */
-export const SET_UP_GENERATION_SENTENCE = 'Ask your agent: set up my generation with the astrid-setup skill.';
+export const SET_UP_GENERATION_SENTENCE = 'Next: set up generation with the astrid-setup skill.';
 
 /** The "Set up generation" card's brief: where the skill is, then the shared sentence, last. */
 export function setUpGenerationInstructions(): string {

@@ -161,7 +161,7 @@ describe('update command by surface', () => {
 describe('onboarding instructions', () => {
   it('ends the generation brief at the one hand-off sentence, after the astrid-setup pointer', () => {
     const text = setUpGenerationInstructions();
-    expect(SET_UP_GENERATION_SENTENCE).toBe('Ask your agent: set up my generation with the astrid-setup skill.');
+    expect(SET_UP_GENERATION_SENTENCE).toBe('Next: set up generation with the astrid-setup skill.');
     expect(text.split('\n')).toEqual([`Read the \`astrid-setup\` skill: ${setupGuideUrl}`, SET_UP_GENERATION_SENTENCE]);
     expect(text.endsWith(SET_UP_GENERATION_SENTENCE)).toBe(true);
     expect(text).not.toContain('Setup choices:');

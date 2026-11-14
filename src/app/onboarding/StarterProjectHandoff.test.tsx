@@ -15,7 +15,7 @@ beforeEach(() => {
 
 describe('StarterProjectHandoff', () => {
   it('ends the brief and the card at the one hand-off sentence', () => {
-    const sentence = 'Ask your agent: set up my generation with the astrid-setup skill.';
+    const sentence = 'Next: set up generation with the astrid-setup skill.';
     vi.mocked(prepareStarterProject).mockReturnValue(new Promise(() => {}));
     render(<StarterProjectHandoff onReady={vi.fn()} />);
     expect(setUpGenerationInstructions().split('\n').at(-1)).toBe(sentence);

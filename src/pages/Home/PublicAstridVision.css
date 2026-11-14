@@ -618,8 +618,8 @@
   padding: 0;
   list-style: none;
 }
-/* Principles use the same card structure with a quiet transparent surface.
-   Accent color belongs to the future sigil, not a whole-card tint. */
+/* Shared principle structure. VisionMobileLayout owns the translucent colour
+   surface and heading/body hierarchy at every viewport size. */
 .astrid-vision .astrid-vision-standards-list > li {
   --sigil-ink: #a94714;
   --sigil-bg: #f2dcca;
@@ -1846,9 +1846,7 @@
   .astrid-vision-section-nav a { transition: none !important; }
 }
 
-/* The page's dusk transition changes ink and lines, never the transparent
-   surfaces of the joined principles or their little corner controls. */
-.astrid-vision[data-dusk] .astrid-vision-standards-list > li,
+/* The corner controls remain transparent over the principle's tinted surface. */
 .astrid-vision[data-dusk] .astrid-vision-principle-corner,
 .astrid-vision[data-dusk] .astrid-vision-standards-list > li:hover .astrid-vision-principle-corner {
   background: transparent;

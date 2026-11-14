@@ -1,0 +1,39 @@
+name: Refine principle colour contrast
+on:
+  push:
+    branches: [fix/vision-polish-opening-20261114]
+    paths: [.github/workflows/vision-colour-refinement.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-polish-opening-20261114
+      - name: Apply isolated contrast correction
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/pages/Home/VisionMobileLayout.css')
+          s = p.read_text()
+          for old,new in [('var(--sigil-ink) 65%, #25241f','var(--sigil-ink) 38%, #25241f'),('var(--sigil-ink) 88%, #25241f','var(--sigil-ink) 60%, #25241f')]:
+              assert s.count(old) == 1
+              s=s.replace(old,new)
+          p.write_text(s)
+          p = Path('src/pages/Home/PublicAstridVision.css')
+          s=p.read_text()
+          old='.astrid-vision[data-dusk] .astrid-vision-standards-list > li,\n'
+          assert s.count(old) == 1
+          s=s.replace(old,'')
+          s=s.replace('/* Principles use the same card structure with a quiet transparent surface.\n   Accent color belongs to the future sigil, not a whole-card tint. */','/* Shared principle structure. VisionMobileLayout owns the translucent colour\n   surface and heading/body hierarchy at every viewport size. */')
+          s=s.replace("/* The page's dusk transition changes ink and lines, never the transparent\n   surfaces of the joined principles or their little corner controls. */","/* The corner controls remain transparent over the principle's tinted surface. */")
+          p.write_text(s)
+          PY
+          git diff --check
+          git config user.name 'POM'
+          git config user.email 'peter@omalley.io'
+          git add src/pages/Home/VisionMobileLayout.css src/pages/Home/PublicAstridVision.css
+          git commit -m 'fix(vision): preserve tinted surfaces and readable colour hierarchy over sigils'
+          git push origin HEAD:fix/vision-polish-opening-20261114

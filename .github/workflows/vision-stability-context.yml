@@ -1,0 +1,21 @@
+name: Vision stability source context
+on:
+  push:
+    branches: [fix/vision-mobile-stability-20261114]
+    paths: [.github/workflows/vision-stability-context.yml]
+permissions:
+  contents: read
+jobs:
+  context:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: |
+          mkdir -p /tmp/vision-stability-context
+          git rev-parse HEAD > /tmp/vision-stability-context/source-head.txt
+          tar -cf /tmp/vision-stability-context/source.tar src/pages/Home src/shared/components/PixelUnderline* src/tools/video-editor/tour/card tests/e2e/public-astrid* tests/fixtures/public-vision.ts playwright*.ts .github/workflows/public-vision.yml package.json package-lock.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vision-stability-context
+          path: /tmp/vision-stability-context/
+          retention-days: 3

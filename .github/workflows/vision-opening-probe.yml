@@ -25,15 +25,12 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('tests/e2e/public-astrid-vision-polish.spec.ts');s=p.read_text()
-          s=s.replace('record.frames.push({ y: b.y, height: b.height, scroll:', '''record.frames.push({ phase: record.frames.length, pageY: window.scrollY, visualTop: window.visualViewport?.offsetTop, visualHeight: window.visualViewport?.height, innerHeight: window.innerHeight, rootHeight: document.documentElement.clientHeight, cssTop: getComputedStyle(this).top, cssHeight: getComputedStyle(this).height, bodyTop: document.body.style.top, viewportVar: this.style.getPropertyValue('--vision-viewport-top'), focused: document.activeElement?.tagName, y: b.y, height: b.height, scroll:''')
-          s += '''\n
-test.afterEach(async ({ page }, info) => {
-  mkdirSync('test-results/opening-probe', { recursive: true });
-  const trace = await page.evaluate(() => (window as typeof window & { __visionOpenings?: unknown }).__visionOpenings);
-  writeFileSync(`test-results/opening-probe/trace-${info.project.name}.json`, JSON.stringify({ source: 'fc71af9f678d214f5e2e500b18375e8121ed569a', trace }, null, 2));
-  await page.screenshot({ path: `test-results/opening-probe/screen-${info.project.name}.png` });
-});
-''';p.write_text(s)
+          old='record.frames.push({ y: b.y, height: b.height, scroll:'
+          new="record.frames.push({ phase: record.frames.length, pageY: window.scrollY, visualTop: window.visualViewport?.offsetTop, visualHeight: window.visualViewport?.height, innerHeight: window.innerHeight, rootHeight: document.documentElement.clientHeight, cssTop: getComputedStyle(this).top, cssHeight: getComputedStyle(this).height, bodyTop: document.body.style.top, viewportVar: this.style.getPropertyValue('--vision-viewport-top'), focused: document.activeElement?.tagName, y: b.y, height: b.height, scroll:"
+          assert old in s;s=s.replace(old,new)
+          old='    expect(log).toHaveLength(index + 1);'
+          new="    mkdirSync('test-results/opening-probe', { recursive: true });\n    writeFileSync(`test-results/opening-probe/trace-${info.project.name}.json`, JSON.stringify({ source: 'fc71af9f678d214f5e2e500b18375e8121ed569a', name, index, log }, null, 2));\n"+old
+          assert old in s;s=s.replace(old,new);p.write_text(s)
           PY
           set +e
           PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/opening-probe/results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-polish.spec.ts --grep 'opening prepares viewport' --reporter=line,json > opening-probe.log 2>&1

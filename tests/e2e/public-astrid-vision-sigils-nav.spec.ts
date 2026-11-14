@@ -399,35 +399,36 @@ test('the enlarged header spans the viewport while navigation stays aligned in o
     await expect(pillars).toHaveAttribute('href', '#astrid-vision-pillars');
     await pillars.click();
     await expect(pillars).toHaveAttribute('aria-current', 'location');
-    await expect(page.getByRole('heading', { name: 'The pillars of our vision' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What we’re building towards' })).toBeVisible();
     await expect(page).toHaveURL(/#astrid-vision-pillars$/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
   }
 });
 
-test('the joined principle panels and corner arrows never gain light fills, even on hover in dusk', async ({ page, request }) => {
+test('principle panels retain their distinct tints and corner arrows stay transparent through dusk hover', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const cards = page.locator('.astrid-vision-standards-list > li');
   await expect(cards).toHaveCount(4);
-  const checkTransparent = async () => {
+  const checkTinted = async () => {
     const surfaces = await cards.evaluateAll(elements => elements.map(el => ({
       card: getComputedStyle(el).backgroundColor,
       arrow: getComputedStyle(el.querySelector('.astrid-vision-principle-corner')!).backgroundColor,
     })));
-    expect(surfaces).toEqual(Array.from({ length: 4 }, () =>
-      ({ card: 'rgba(0, 0, 0, 0)', arrow: 'rgba(0, 0, 0, 0)' })));
+    expect(surfaces).toHaveLength(4);
+    expect(new Set(surfaces.map(surface => surface.card)).size).toBe(4);
+    expect(surfaces.every(surface => surface.card !== 'rgba(0, 0, 0, 0)' && surface.arrow === 'rgba(0, 0, 0, 0)')).toBe(true);
   };
-  await checkTransparent();
+  await checkTinted();
   await page.locator('main.astrid-vision').evaluate(element => {
     element.style.setProperty('--astrid-dusk', '1');
     element.style.setProperty('--astrid-dusk-ink', '1');
     element.style.setProperty('--astrid-dusk-firm', '1');
   });
-  await checkTransparent();
+  await checkTinted();
   await cards.last().hover();
-  await checkTransparent();
+  await checkTinted();
 });
 
 

@@ -1,5 +1,6 @@
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import './TourCard.css';
+import { PixelUnderline } from '@/shared/components/PixelUnderline';
 import { EDITOR_TOUR_SCRIPT as SCRIPT } from '../tourScript';
 import { TOUR_FINALE_ENTRANCE_MS, TourStrip } from './TourStrip';
 import { TourVisual } from './TourVisual';
@@ -335,7 +336,7 @@ function Feedback({ onPrimary, onBack, fit }: { onPrimary: () => void; onBack?: 
 const feedbackTitle = () => [SCRIPT.feedback.title.before, SCRIPT.feedback.title.emphasis, SCRIPT.feedback.title.after].join(' ');
 
 /**
- * "We really need your feedback", with the emphasised word underlined by a pen stroke that draws in once the card has landed
+ * "We really need your feedback", with the emphasised word underlined by a pixel-stepped stroke that draws in once the card has landed
  * (TourCard.css) and then stays; at rest, under reduced motion and on Back it is simply there. The stroke hangs just under the
  * baseline, outside the line box's flow, so the title neither moves nor grows, and it stays with its word when the title wraps.
  */
@@ -344,28 +345,10 @@ function FeedbackTitle() {
   return (
     <>
       {before}{' '}
-      <span data-tour-emphasis className="relative whitespace-nowrap">
+      <PixelUnderline data-tour-emphasis className="text-inherit" strokeClassName="editor-tour-underline"
+        strokeStyle={{ '--tour-delay': '350ms' } as CSSProperties}>
         {emphasis}
-        <svg
-          aria-hidden="true"
-          className="pointer-events-none absolute -left-[0.06em] top-[calc(100%-0.16em)] h-[0.32em] w-[calc(100%+0.12em)] overflow-visible text-primary"
-          viewBox="0 0 100 10"
-          preserveAspectRatio="none"
-        >
-          {/* A slight rise and dip, like a pen's, never a ruler's line. */}
-          <path
-            className="editor-tour-underline"
-            style={{ '--tour-delay': '350ms' } as CSSProperties}
-            d="M1 6.2 C 18 4.6, 40 4.2, 60 5 S 88 6.4, 99 4.4"
-            pathLength={1}
-            strokeDasharray={1}
-            fill="none"
-            stroke="currentColor"
-            strokeWidth={2.6}
-            strokeLinecap="round"
-          />
-        </svg>
-      </span>{' '}
+      </PixelUnderline>{' '}
       {after}
     </>
   );

@@ -1,7 +1,7 @@
 import { visionFixture, legacyVisionFixture } from '../../../tests/fixtures/public-vision';
 import { describe, expect, it } from 'vitest';
 import type { PublicVisionContent } from './publicVisionContent';
-import { aspirationsForSubject, findAspiration, currentGapsForSubject } from './visionHierarchy';
+import { aspirationsForSubject, findAspiration, currentGapsForSubject, splitAspirationDetails } from './visionHierarchy';
 
 const content = {
   gaps: [
@@ -69,5 +69,37 @@ describe('aspiration grouping', () => {
   it('resolves supporting labels without inventing a name for a broken reference', () => {
     expect(findAspiration(visionFixture(), 'principle:open-by-design/agency')?.title).toBe('Creative agency');
     expect(findAspiration(visionFixture(), 'pillar:art/missing')).toBeUndefined();
+  });
+});
+
+
+describe('optional aspiration guidance', () => {
+  const prose = 'Keep the full authored explanation, including its examples and tradeoffs.';
+  const rules = '**We should:**\n\n- Preserve [the source](https://example.com).\n\n**We should never:**\n\n- Hide a consequential decision.';
+  it('separates both terminal lists without rewriting either block', () => {
+    expect(splitAspirationDetails(prose + '\n\n' + rules)).toEqual({
+      explanation: prose, guidance: rules, label: 'We should / We should never',
+    });
+  });
+  it('leaves a plain explanation untouched with no empty disclosure', () => {
+    expect(splitAspirationDetails(prose)).toEqual({ explanation: prose, guidance: '', label: '' });
+  });
+  it('does not interpret inline, quoted, indented or fenced examples as guidance', () => {
+    for (const text of [prose + ' **We should:** keep this inline.', '> **We should:**\n> - A quoted example.',
+      '    **We should:**\n    - An indented example.', '```md\n' + rules + '\n```', '~~~~md\n' + rules + '\n~~~~']) {
+      expect(splitAspirationDetails(text)).toEqual({ explanation: text, guidance: '', label: '' });
+    }
+  });
+  it('recognizes real lists following a fenced example and normalizes CRLF safely', () => {
+    const introduction = '```md\n**We should:**\n```\n\n' + prose;
+    expect(splitAspirationDetails((introduction + '\n\n' + rules).replaceAll('\n', '\r\n')))
+      .toEqual({ explanation: introduction, guidance: rules, label: 'We should / We should never' });
+  });
+  it('preserves a partial legacy guidance block and ignores empty labels', () => {
+    const legacy = '**We should never:**\n\n- Lose the artist’s work.';
+    expect(splitAspirationDetails(prose + '\n\n' + legacy)).toEqual({ explanation: prose, guidance: legacy, label: 'We should never' });
+    const empty = prose + '\n\n**We should:**';
+    expect(splitAspirationDetails(empty).guidance).toBe('');
+    expect(splitAspirationDetails(empty).explanation).toBe(empty);
   });
 });

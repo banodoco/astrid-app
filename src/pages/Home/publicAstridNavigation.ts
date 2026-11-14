@@ -36,6 +36,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     if (markerOwnerRef.current !== id) return;
     markerOwnerRef.current = null;
     delete document.documentElement.dataset.astridPageTransition;
+    delete document.documentElement.dataset.astridPageTransitionStyle;
   }, []);
 
   const invalidate = useCallback(() => {
@@ -48,7 +49,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     }
   }, [clearMarker]);
 
-  const run = useCallback((commit: () => void, page?: 'home' | 'vision') => {
+  const run = useCallback((commit: () => void, page?: 'home' | 'vision', presentation: 'shared' | 'crossfade' = 'shared') => {
     invalidate();
     const id = operationRef.current;
     const pending = { id, commit, committed: false, transition: undefined as PublicViewTransition | undefined };
@@ -68,6 +69,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     if (page) {
       markerOwnerRef.current = id;
       document.documentElement.dataset.astridPageTransition = page;
+      document.documentElement.dataset.astridPageTransitionStyle = presentation;
     }
     const finish = () => {
       // A rejected/skipped transition must still apply the current navigation exactly once.

@@ -20,6 +20,34 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
   const releasePageRef = useRef<(() => void) | null>(null);
 
 
+  // Chrome on iPhone changes its visible viewport as browser controls move.
+  // Bind panel position and height to that same viewport; CSS applies safe areas
+  // once with max(), rather than adding a second home-indicator-sized gap.
+  useLayoutEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    const viewport = window.visualViewport;
+    let frame = 0;
+    const update = () => {
+      frame = 0;
+      // Do not undo the user's pinch zoom by continually shrinking the dialog.
+      if (viewport && viewport.scale > 1.05) return;
+      dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
+      dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
+    };
+    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };
+    update();
+    viewport?.addEventListener('resize', schedule);
+    viewport?.addEventListener('scroll', schedule);
+    window.addEventListener('resize', schedule);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      viewport?.removeEventListener('resize', schedule);
+      viewport?.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
+    };
+  }, []);
+
   // Native modality makes the page inert, but does not itself lock scrolling.
   // Freeze its exact visual position on iOS as well as desktop, and restore
   // only the inline properties we own. Next/previous never release this lock.
@@ -82,40 +110,23 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
   }, []);
 
   useLayoutEffect(() => {
-    if (dialogRef.current && !dialogRef.current.open) {
-      dialogRef.current.showModal();
-      // Focus the descriptive heading rather than the X: Safari otherwise
-      // paints a strong focus ring on the auto-focused close button at open.
-      titleRef.current?.focus({ preventScroll: true });
-    }
-  }, []);
-
-  // Chrome on iPhone changes its visible viewport as browser controls move.
-  // Bind panel position and height to that same viewport; CSS applies safe areas
-  // once with max(), rather than adding a second home-indicator-sized gap.
-  useLayoutEffect(() => {
-    const dialog = dialogRef.current;
-    if (!dialog) return;
-    const viewport = window.visualViewport;
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      // Do not undo the user's pinch zoom by continually shrinking the dialog.
-      if (viewport && viewport.scale > 1.05) return;
-      dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
-      dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
-    };
-    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };
-    update();
-    viewport?.addEventListener('resize', schedule);
-    viewport?.addEventListener('scroll', schedule);
-    window.addEventListener('resize', schedule);
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      viewport?.removeEventListener('resize', schedule);
-      viewport?.removeEventListener('scroll', schedule);
-      window.removeEventListener('resize', schedule);
-    };
+    // Locking the body resets document scroll. WebKit's top-layer placement can
+    // still use the old scroll offset in that same rendering turn (71px in the
+    // regression trace). Give the lock one frame to settle before opening once.
+    const frame = window.requestAnimationFrame(() => {
+      const dialog = dialogRef.current;
+      if (!dialog?.isConnected || dialog.open) return;
+      const viewport = window.visualViewport;
+      if (!viewport || viewport.scale <= 1.05) {
+        dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
+        dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
+      }
+      // Native focusing chooses the heading directly, not the footer X first.
+      titleRef.current?.setAttribute('autofocus', '');
+      dialog.showModal();
+      if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
   }, []);
 
   // Keep the native modal/top layer, but reset disclosures and scroll per subject.
@@ -226,6 +237,11 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
               {children}
             </div>
           </div>
+          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"
+            data-visible={scrollEdges.top || undefined} aria-hidden="true" />
+          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"
+            data-visible={scrollEdges.bottom || undefined} aria-hidden="true" />
+        </div>
           {(previous || next) && <>
             <button type="button" className="astrid-vision-details-navigation astrid-vision-details-previous"
               disabled={!previous} aria-label={previous?.label ?? 'Previous item'} title={previous?.label}
@@ -238,11 +254,6 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
               <ChevronRight size={24} aria-hidden="true" />
             </button>
           </>}
-          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"
-            data-visible={scrollEdges.top || undefined} aria-hidden="true" />
-          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"
-            data-visible={scrollEdges.bottom || undefined} aria-hidden="true" />
-        </div>
       </div>
     </dialog>
   );

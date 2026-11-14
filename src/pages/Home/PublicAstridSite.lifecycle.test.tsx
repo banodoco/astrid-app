@@ -119,6 +119,7 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/home?experience=app');
   delete (document as Document & { startViewTransition?: unknown }).startViewTransition;
   delete document.documentElement.dataset.astridPageTransition;
+  delete document.documentElement.dataset.astridPageTransitionStyle;
   vi.spyOn(document, 'hidden', 'get').mockImplementation(() => hidden);
   vi.spyOn(window, 'matchMedia').mockImplementation((media) => {
     if (!queries.has(media)) queries.set(media, new Set());
@@ -209,7 +210,7 @@ describe('public Site lifecycle and navigation ownership', () => {
       expect(home).toHaveAttribute('data-audience', 'agent');
       expect(home.parentElement).not.toHaveAttribute('inert');
       expect(home).toHaveFocus();
-      expect(window.scrollTo).toHaveBeenLastCalledWith(0, 427);
+      expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 427, behavior: 'instant' });
       expect(document.title).toBe(PUBLIC_ASTRID_SHARE_PAGES.home.title);
       await paint();
     }
@@ -360,5 +361,38 @@ describe('public Site lifecycle and navigation ownership', () => {
     expect(window.location.pathname).toBe('/');
     expect(document.querySelector('.astrid-public-site')).toHaveAttribute('data-astrid-lifecycle', 'active');
     expect(screen.getAllByTestId('sky')).toHaveLength(1);
+  });
+});
+
+
+describe('room scroll snapshot ownership', () => {
+  it('uses manual history restoration only for the lifetime of the public site', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(window.history, 'scrollRestoration');
+    Object.defineProperty(window.history, 'scrollRestoration', { configurable: true, writable: true, value: 'auto' });
+    const view = await mountedHome();
+    expect(window.history.scrollRestoration).toBe('manual');
+    view.unmount();
+    expect(window.history.scrollRestoration).toBe('auto');
+    if (descriptor) Object.defineProperty(window.history, 'scrollRestoration', descriptor);
+    else delete (window.history as Partial<History>).scrollRestoration;
+  });
+  it('restores instant scroll inside the snapshot callback and retires only its own transition style', async () => {
+    await mountedHome();
+    deferTransitions();
+    const scrollY = vi.spyOn(window, 'scrollY', 'get').mockReturnValue(427);
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
+    expect(document.documentElement.dataset.astridPageTransitionStyle).toBe('crossfade');
+    await update(transitions[0]);
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 0, behavior: 'instant' });
+    scrollY.mockReturnValue(1500);
+    historyAt('/home?experience=app');
+    const returning = transitions[1];
+    await finish(transitions[0]);
+    expect(document.documentElement.dataset.astridPageTransitionStyle).toBe('crossfade');
+    await update(returning);
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 427, behavior: 'instant' });
+    expect(document.querySelector('.astrid-public-site')).toHaveFocus();
+    await finish(returning);
+    expect(document.documentElement).not.toHaveAttribute('data-astrid-page-transition-style');
   });
 });

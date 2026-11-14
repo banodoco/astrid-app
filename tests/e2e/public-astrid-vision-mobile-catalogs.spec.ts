@@ -118,6 +118,8 @@ test('catalog backdrop consumes the closing tap without activating the button be
   try {
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'See all gaps', exact: true }).tap();
+    // Closing gestures target the visible modal after its one-frame preparation.
+    await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();
     const behind = page.getByRole('button', { name: 'See all projects', exact: true });
     await behind.evaluate(node => {
       document.getElementById('root')!.appendChild(node);
@@ -344,6 +346,7 @@ for (const width of [390, 1440]) {
       const next = dialog.locator('.astrid-vision-details-next');
       const previous = dialog.locator('.astrid-vision-details-previous');
       const initialWidth = await scroll.evaluate(node => node.clientWidth);
+      const navigationY = (await next.boundingBox())!.y;
       for (let index = 0; index < subjects.length; index++) {
         await expect(dialog).toHaveAccessibleName(subjects[index].title);
         await expect(dialog).toHaveAttribute('data-same-modal', 'yes');
@@ -358,11 +361,12 @@ for (const width of [390, 1440]) {
         else await expect(previous).toHaveAccessibleName('Previous ' + kind + ': ' + subjects[index - 1].title);
         if (index === subjects.length - 1) await expect(next).toBeDisabled();
         else await expect(next).toHaveAccessibleName('Next ' + kind + ': ' + subjects[index + 1].title);
-        const frame = (await dialog.locator('.astrid-vision-details-scroll-frame').boundingBox())!;
+        const frame = (await dialog.locator('.astrid-vision-details-shell').boundingBox())!;
         for (const arrow of [previous, next]) {
           const box = (await arrow.boundingBox())!;
           expect(Math.abs(box.y + box.height / 2 - frame.y - frame.height / 2)).toBeLessThan(2);
           expect(box.width).toBeGreaterThanOrEqual(44);
+          expect(Math.abs(box.y - navigationY)).toBeLessThan(1);
           await expect(arrow).toHaveCSS('position', 'absolute');
         }
         // The overlay must not reserve a rail or change the underlying text width.
@@ -384,6 +388,8 @@ for (const width of [390, 1440]) {
       for (let index = subjects.length - 2; index >= 0; index--) {
         await previous.click();
         await expect(dialog).toHaveAccessibleName(subjects[index].title);
+        expect(Math.abs((await previous.boundingBox())!.y - navigationY)).toBeLessThan(1);
+        expect(Math.abs((await next.boundingBox())!.y - navigationY)).toBeLessThan(1);
         await expect.poll(() => scroll.evaluate(node => node.scrollTop)).toBe(0);
         await expect(dialog).toHaveAttribute('data-same-modal', 'yes');
       }

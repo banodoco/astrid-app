@@ -29,7 +29,8 @@ async function expectGapPresentation(row: Locator) {
   // Assert both reading order and visual order, including the empty-project case.
   expect(await row.evaluate(node => {
     const desired = node.querySelector('.astrid-vision-details-gap-description')!;
-    const projects = node.querySelector('.astrid-vision-details-projects, .astrid-vision-details-empty')!;
+    const projects = node.querySelector('.astrid-vision-details-projects');
+    if (!projects) return !node.querySelector('.astrid-vision-details-empty');
     return Boolean(desired.compareDocumentPosition(projects) & Node.DOCUMENT_POSITION_FOLLOWING) &&
       desired.getBoundingClientRect().bottom <= projects.getBoundingClientRect().top + 1;
   })).toBe(true);
@@ -72,14 +73,19 @@ for (const width of [1440, 390]) {
     await expect(aspirations.nth(2).locator('.astrid-vision-details-gap-group')).toHaveCount(0);
     await expect(dialog.getByRole('region', { name: 'Current gaps and projects' })).toHaveCount(0);
     await expect(gaps.first().locator('.astrid-vision-details-gap-body')).toBeHidden();
-    await expect(gaps.first().locator('.astrid-vision-project-summary').first()).toBeHidden();
+    await expect(gaps.first().locator('.astrid-vision-project').first()).toBeHidden();
 
-    await disclosure.locator('summary').focus();
+    await disclosure.locator(':scope > summary').focus();
     await page.keyboard.press('Enter');
     await expect(dialog).toBeVisible();
     await expect(disclosure).toHaveAttribute('open', '');
-    await expect(disclosure.locator('.astrid-vision-details-characteristic-body strong')).toHaveText(['We should:', 'We should never:']);
-    await expect(disclosure.locator('ul').first()).toHaveCSS('list-style-type', 'disc');
+    const guidance = disclosure.locator('.astrid-vision-guidance');
+    await expect(guidance).not.toHaveAttribute('open', '');
+    await expect(guidance.locator('.astrid-vision-guidance-body')).toBeHidden();
+    await guidance.locator(':scope > summary').focus();
+    await page.keyboard.press('Enter');
+    await expect(guidance.locator('strong')).toHaveText(['We should:', 'We should never:']);
+    await expect(guidance.locator('ul').first()).toHaveCSS('list-style-type', 'disc');
     await gapSummary.click();
     await expect(gaps.first()).toHaveAttribute('open', '');
     await expectGapPresentation(gaps.first());
@@ -101,37 +107,29 @@ for (const width of [1440, 390]) {
       await expect(card).not.toHaveAttribute('open', '');
       await expect(card.locator('.astrid-vision-project-intro')).toHaveText(intros[index]);
       await expect(card.locator('.astrid-vision-project-intro')).toBeVisible();
-      await expect(card.locator('.astrid-vision-project-body')).toBeHidden();
+      await expect(card.locator('.astrid-vision-project-body, .astrid-vision-project-metadata, summary')).toHaveCount(0);
+      await expect(card.getByRole('link', { name: 'Read the full project plan: ' + project.title })).toBeVisible();
       await expect(card.locator('summary a')).toHaveCount(0);
       await expect(card.locator('.astrid-vision-details-project-heading a')).toHaveAttribute('href', project.githubUrl);
     }
-    await projects.first().locator('summary').click();
-    await expect(projects.first()).toHaveAttribute('open', '');
-    await expect(projects.first().locator('.astrid-vision-project-body')).toBeVisible();
-    await expect(projects.first().locator('.astrid-vision-details-project-goal'))
-      .toHaveText('A separate detailed explanation stays behind the project disclosure.');
-    await expect(projects.first().locator('.astrid-vision-project-metadata dt'))
-      .toHaveText(['Status', 'Owner', 'Estimate', 'Waiting on']);
-    await expect(projects.first().locator('.astrid-vision-project-metadata dd'))
-      .toHaveText(['queued', 'Project owner 0', '1 days', 'Dependency 0']);
+    // Projects need no extra toggle: their authored intro and full-plan link
+    // are available immediately, with technical details left in the source plan.
     await expect(gaps.first()).toHaveAttribute('open', '');
-    await expect(projects.nth(1)).not.toHaveAttribute('open', '');
-    await projects.nth(1).locator('summary').focus();
-    await page.keyboard.press('Enter');
-    await expect(projects.nth(1)).toHaveAttribute('open', '');
-    await expect(projects.first()).toHaveAttribute('open', '');
-    await expect(projects.nth(2)).not.toHaveAttribute('open', '');
-    await projects.first().locator('summary').focus();
-    await page.keyboard.press('Space');
-    await expect(projects.first()).not.toHaveAttribute('open', '');
-    await expect(projects.nth(1)).toHaveAttribute('open', '');
+    await expect(projects.locator('details, summary, .astrid-vision-project-metadata')).toHaveCount(0);
+    await expect(projects.first()).not.toContainText('A separate detailed explanation stays behind the project disclosure.');
+    for (const card of await projects.all()) {
+      const link = card.getByRole('link', { name: /^Read the full project plan:/ });
+      await link.focus();
+      await expect(link).toBeFocused();
+      await expect(link).toHaveAttribute('target', '_blank');
+    }
     await expect(dialog.locator('[data-gap-id="AA-001"]')).toHaveCount(1);
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     for (const card of await projects.all()) {
       expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     }
     mkdirSync('test-results/vision-captures', { recursive: true });
-    await projects.first().locator('summary').scrollIntoViewIfNeeded();
+    await projects.first().scrollIntoViewIfNeeded();
     await page.screenshot({ path: `test-results/vision-captures/fixture-project-disclosures-${info.project.name}-${width}.png` });
     await page.keyboard.press('Escape');
     await expect(dialog).toHaveCount(0);
@@ -178,13 +176,9 @@ for (const width of [1440, 390]) {
       viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 8;
     });
     await page.screenshot({ path: `test-results/vision-captures/real-projects-${info.project.name}-${width}.png` });
-    await cards.first().locator('summary').click();
-    await expect(cards.first().locator('.astrid-vision-project-body')).toBeVisible();
-    await expect(cards.first().locator('.astrid-vision-project-metadata dd')).toHaveText([
-      plans[0].status, plans[0].owner, plans[0].estimate, plans[0].waitingOn,
-    ]);
+    await expect(cards.locator('summary, .astrid-vision-project-body, .astrid-vision-project-metadata')).toHaveCount(0);
+    await expect(cards.first().getByRole('link', { name: /^Read the full project plan:/ })).toBeVisible();
     await expect(row).toHaveAttribute('open', '');
-    await expect(cards.nth(1)).not.toHaveAttribute('open', '');
     expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     await cards.first().evaluate(node => {
       const viewport = node.closest('.astrid-vision-details-scroll')!;
@@ -224,6 +218,10 @@ test('exported candidate feed renders real Packs rules and real aspiration links
   const packs = pillar.characteristics.find((item: { title: string }) => item.title.startsWith('Packs')) ?? pillar.characteristics[0];
   const aspiration = dialog.locator('.astrid-vision-details-aspiration').filter({ has: page.locator('summary strong', { hasText: packs.title }) });
   await aspiration.locator('.astrid-vision-details-characteristic > summary').click();
+  const rules = aspiration.locator('.astrid-vision-guidance');
+  await expect(rules.locator('.astrid-vision-guidance-body')).toBeHidden();
+  await rules.locator('summary').click();
+  await expect(rules.locator('.astrid-vision-guidance-body')).toBeVisible();
   await expect(aspiration.locator('.astrid-vision-details-characteristic-body')).toContainText('We should never:');
   await expect(aspiration.locator('.astrid-vision-details-characteristic-body ul')).toHaveCount(2);
   mkdirSync('test-results/vision-captures', { recursive: true });
@@ -286,7 +284,7 @@ test.describe('a dismissal consumes precisely one gesture', () => {
       await expect(dialog).toBeVisible();
     }
     const disclosure = dialog.locator('.astrid-vision-details-characteristic').first();
-    await disclosure.locator('summary').focus();
+    await disclosure.locator(':scope > summary').focus();
     await page.keyboard.press('Enter');
     await expect(disclosure).toHaveAttribute('open', '');
     await expect(dialog).toBeVisible();

@@ -40,9 +40,11 @@ const PROJECT_FILTERS: ReadonlyArray<{ value: ProjectFilter; label: string }> = 
   { value: 'done', label: 'Done' }, { value: 'cancelled', label: 'Cancelled' },
 ];
 
-function MarkdownText({ value, className }: { value: string; className?: string }) {
+function MarkdownText({ value, className, loading = false }: { value: string; className?: string; loading?: boolean }) {
   return <div className={className ? 'astrid-vision-markdown ' + className : 'astrid-vision-markdown'}>
-    <ReactMarkdown>{value}</ReactMarkdown>
+    <ReactMarkdown components={loading ? {
+      p: ({ children }) => <p><span className="astrid-vision-skeleton-text">{children}</span></p>,
+    } : undefined}>{value}</ReactMarkdown>
   </div>;
 }
 
@@ -259,6 +261,15 @@ const VISION_QUIET_TEXT = '.astrid-vision-hero-copy, .astrid-vision-section-head
 
 export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment, skySession: suppliedSkySession }: { onGoHome?: () => void; environment?: PublicAstridEnvironment; skySession?: PublicAstridSkySession } = {}) {
   const { content, error, retry } = usePublicVisionContent();
+  const loading = !content && !error;
+  const [showSkeleton, setShowSkeleton] = useState(false);
+  useEffect(() => {
+    if (!loading) { setShowSkeleton(false); return; }
+    // Reserve layout immediately, but do not flash placeholder bars for fast
+    // responses. A genuinely slow first load retains its accessible status.
+    const timer = window.setTimeout(() => setShowSkeleton(true), 150);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
   const SOURCE_URL = content ? PUBLIC_VISION_REPO_URL + '/tree/' + content.source.revision : PUBLIC_VISION_REPO_URL;
   const PILLARS = content?.pillars.map((pillar, i) => ({ ...pillar, art: PILLAR_ART[i] })) ?? [];
   const CURRENT_GAPS = content?.gaps.filter(gap => gap.assessment !== 'closed') ?? [];
@@ -511,36 +522,38 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
         <div className="astrid-vision-hero">
           <div className="astrid-vision-hero-copy">
             <p className="astrid-vision-eyebrow" data-index="01">Vision</p>
-            {content
-              ? <>
-                  <h1 id="astrid-vision-title"><VisionTitle value={content.vision.title} /></h1>
-                  <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
-                  <p className="astrid-vision-source-attribution">
-                    Populated by the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
-                  </p>
-                </>
-              : error
-                ? <>
-                    <h1 id="astrid-vision-title">Astrid’s vision</h1>
-                    <p className="astrid-vision-lead" role="alert">
-                      The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
-                    </p>
-                  </>
-                : <div className="astrid-vision-skeleton-hero" role="status" aria-label="Loading Astrid's vision">
-                    {/* The real headline and intro elements, holding invisible stand-in text of about the
-                        usual length: each wrapped line is drawn as a bar, so the skeleton has the shape
-                        the text will have at this width and nothing shifts when the text arrives. */}
-                    <h1 aria-hidden="true"><span className="astrid-vision-skeleton-text">{SKELETON_TITLE}</span></h1>
-                    <div className="astrid-vision-lead" aria-hidden="true"><p><span className="astrid-vision-skeleton-text">{SKELETON_LEAD}</span></p></div>
-                    <p className="astrid-vision-source-attribution" aria-hidden="true"><span className="astrid-vision-skeleton-text">{SKELETON_ATTRIBUTION}</span></p>
-                  </div>}
+            <div className={'astrid-vision-hero-text' + (loading ? ' astrid-vision-skeleton-hero' : '')}
+              role={loading ? 'status' : undefined}
+              aria-label={loading ? "Loading Astrid's vision" : undefined}
+              data-skeleton-visible={loading && showSkeleton || undefined}>
+              {/* Keep one title node and exactly the same word grouping during
+                  loading and navigation; do not remount an entrance animation. */}
+              <h1 id={loading ? undefined : 'astrid-vision-title'} aria-hidden={loading || undefined}>
+                <span className={loading ? 'astrid-vision-skeleton-text' : undefined}>
+                  <VisionTitle value={content?.vision.title ?? (error ? 'Astrid’s vision' : SKELETON_TITLE)} />
+                </span>
+              </h1>
+              {!content && error ? (
+                <p className="astrid-vision-lead" role="alert">
+                  The live vision is temporarily unavailable. <button type="button" onClick={retry}>Try again</button> · <a href={PUBLIC_VISION_REPO_URL + '/blob/main/vision/README.md'} target="_blank" rel="noreferrer">Read on GitHub</a>
+                </p>
+              ) : <div aria-hidden={loading || undefined}>
+                <MarkdownText className="astrid-vision-lead" loading={loading}
+                  value={content?.vision.introMarkdown ?? SKELETON_LEAD} />
+              </div>}
+              {(!error || content) && <p className="astrid-vision-source-attribution" aria-hidden={loading || undefined}>
+                <span className={loading ? 'astrid-vision-skeleton-text' : undefined}>
+                  {loading ? SKELETON_ATTRIBUTION : <>Populated by the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.</>}
+                </span>
+              </p>}
+            </div>
           </div>
           <Juggler />
         </div>
       </section>
 
       {!content && !error && (
-        <div className="astrid-vision-loading-sections" aria-hidden="true">
+        <div className="astrid-vision-loading-sections" aria-hidden="true" data-skeleton-visible={showSkeleton || undefined}>
           <section className="astrid-vision-loading-group">
             <div className="astrid-vision-skeleton-line astrid-vision-skeleton-section-title" />
             <div className="astrid-vision-loading-pillars">

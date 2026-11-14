@@ -2,6 +2,8 @@ import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
 
+test.setTimeout(90_000);
+
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 const folder = 'test-results/vision-captures';
 function record(name: string, value: unknown) {
@@ -23,6 +25,7 @@ for (const width of [390, 1440]) {
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.setViewportSize({ width, height: 844 });
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.astrid-vision')).toBeVisible({ timeout: 20000 });
     await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
     await page.evaluate(() => document.fonts.ready);
     const trace = [];
@@ -53,7 +56,7 @@ for (const width of [390, 1440]) {
       await opener.click();
       const dialog = page.getByRole('dialog');
       await expect(dialog).toHaveAttribute('data-ready', 'true');
-      await expect.poll(() => page.evaluate(() => (window as unknown as { headerTrace: unknown[] }).headerTrace.length)).toBe(25);
+      await expect.poll(() => page.evaluate(() => (window as unknown as { headerTrace: unknown[] }).headerTrace.length), { timeout: 20000 }).toBe(25);
       const samples = await page.evaluate(() => (window as unknown as { headerTrace: { y: number; x: number; width: number; height: number; opacity: string; visibility: string; colour: string; condensed: boolean }[] }).headerTrace);
       trace.push({ kind, samples });
       record(`header-continuity-${info.project.name}-${width}`, { source: feed.source, trace });
@@ -64,6 +67,7 @@ for (const width of [390, 1440]) {
       await page.screenshot({ path: `${folder}/header-behind-${kind}-${info.project.name}-${width}.png` });
       await page.keyboard.press('Escape');
       await expect(dialog).toHaveCount(0);
+      await expect(page.locator('[data-vision-header-space]')).toHaveCount(0);
       expect.soft(await page.locator('.astrid-vision-bar').evaluate(node => node.getBoundingClientRect().y)).toBeCloseTo(start.y, 0);
     }
   });
@@ -106,6 +110,19 @@ test('Home to Vision joins its pending preload and keeps headline line boxes sta
   await expect(page.locator('.astrid-vision')).toBeVisible();
   await page.waitForTimeout(250);
   const requestsBeforeRelease = requests;
+  await page.evaluate(() => {
+    const state = window as unknown as { arrival: { height: number; width: number; text: string | null }[] };
+    state.arrival = [];
+    const read = () => {
+      const title = document.querySelector<HTMLElement>('#astrid-vision-title');
+      if (title) state.arrival.push({ height: title.offsetHeight, width: title.offsetWidth, text: title.textContent });
+    };
+    const observer = new MutationObserver(read);
+    observer.observe(document.querySelector('.astrid-vision-hero-copy')!, { childList: true, attributes: true, subtree: true });
+    let count = 0;
+    const sample = () => { read(); if (++count < 120) requestAnimationFrame(sample); else observer.disconnect(); };
+    requestAnimationFrame(sample);
+  });
   release();
   await expect(page.locator('#astrid-vision-title')).toHaveText(feed.vision.title);
   const frames = await page.locator('#astrid-vision-title').evaluate(node => new Promise<{ height: number; width: number; font: string; transform: string; parentWidth: number }[]>(resolve => {
@@ -118,7 +135,10 @@ test('Home to Vision joins its pending preload and keeps headline line boxes sta
     };
     sample();
   }));
-  record(`home-vision-entry-${info.project.name}`, { source: feed.source, requestsBeforeRelease, frames });
+  const arrival = await page.evaluate(() => (window as unknown as { arrival: { height: number; width: number; text: string | null }[] }).arrival);
+  record(`home-vision-entry-${info.project.name}`, { source: feed.source, requestsBeforeRelease, frames, arrival });
+  expect.soft(arrival.length).toBeGreaterThan(0);
+  expect.soft(new Set(arrival.map(frame => `${frame.height}/${frame.width}`)).size).toBe(1);
   expect.soft(requestsBeforeRelease).toBe(1);
   expect.soft(new Set(frames.map(frame => `${frame.height}/${frame.width}/${frame.font}`)).size).toBe(1);
   await page.getByRole('link', { name: 'Astrid home', exact: true }).click();

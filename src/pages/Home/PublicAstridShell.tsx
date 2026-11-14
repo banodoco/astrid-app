@@ -580,13 +580,13 @@ export function PublicAstridShell({ onOpenVision, lifecycle = 'active', environm
     window.location.reload();
   }, []);
 
-  // Once the demo has settled, fetch the Vision page's text in the background so it opens without a
-  // loading skeleton.
+  // Warm Vision independently of the heavy editor's readiness. Opening it
+  // during this request joins the same promise instead of flashing a second load.
   useEffect(() => {
-    if (!visualActive || readiness.phase !== 'settled') return undefined;
-    const timer = window.setTimeout(preloadPublicVisionContent, 1_200);
+    if (!visualActive) return undefined;
+    const timer = window.setTimeout(preloadPublicVisionContent, 150);
     return () => window.clearTimeout(timer);
-  }, [readiness.phase, visualActive]);
+  }, [visualActive]);
 
   // Before callouts mount, size the preview for readiness. Once revealed, their stage pass owns it.
   usePublicAstridPlayerHeight(editorStageRef, visualActive && !editorRevealed);

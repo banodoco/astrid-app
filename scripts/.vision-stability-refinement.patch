@@ -1,0 +1,118 @@
+--- a/src/pages/Home/PublicAstridSky.tsx
++++ b/src/pages/Home/PublicAstridSky.tsx
+@@ -68,6 +68,7 @@
+ export function PublicAstridSky({ session, active = true, geometryRoot, geometryOwner = 'sky', quietBehind }: PublicAstridSkyProps) {
+   const canvasRefs = useRef<Record<SkyLayer, HTMLCanvasElement | null>>({ sky: null, stars: null, far: null, near: null });
+   const skyRef = useRef<HTMLDivElement>(null);
++  const sceneFrame = useRef<{ width: number; height: number; orientation: number; touch: boolean } | null>(null);
+   const { settings } = useSkyControls(session, active);
+   useSkyGeometry(session, settings.enabled && active, geometryRoot, quietBehind, geometryOwner);
+ 
+@@ -98,8 +99,16 @@
+       const columns = Math.ceil((window.innerWidth + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
+       // Read the CSS large-viewport frame, not toolbar-sensitive innerHeight.
+       // The fallback also supports non-layout test environments and older engines.
+-      const viewHeight = skyRef.current?.clientHeight
++      const measuredHeight = skyRef.current?.clientHeight
+         ? Math.max(1, skyRef.current.clientHeight - 2 * bleed) : window.innerHeight;
++      const orientation = window.screen.orientation?.angle ?? 0;
++      const previousFrame = sceneFrame.current;
++      // Some embedded iOS browsers resize even the large-viewport frame as
++      // their controls move. Keep one scene at a given touch width/orientation;
++      // bleed covers the exposed strip without moving or rescaling the clouds.
++      const viewHeight = bleed && previousFrame?.touch && previousFrame.width === window.innerWidth &&
++        previousFrame.orientation === orientation ? previousFrame.height : measuredHeight;
++      sceneFrame.current = { width: window.innerWidth, height: viewHeight, orientation, touch: bleed > 0 };
+       const viewRows = Math.ceil((viewHeight + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
+       const rows = viewRows + 2 * Math.ceil(bleed / PUBLIC_ASTRID_SKY_PIXEL);
+       // The sun and moon are sized from the canvas height; keep them the size the window alone would give.
+--- a/src/pages/Home/PublicAstridVision.css
++++ b/src/pages/Home/PublicAstridVision.css
+@@ -2115,14 +2115,16 @@
+ .astrid-vision .astrid-vision-project-goal {
+   --goal-line: calc(14px * 1.55);
+   --goal-lines: 5;
++  /* Reserve the same preview height before a closed dialog can be measured.
++     data-clamped adds only the fade, never a second layout on opening. */
++  max-height: calc(var(--goal-line) * (var(--goal-lines) + 1));
++  overflow: hidden;
+   position: relative;
+   font-size: 14px;
+   line-height: 1.55;
+ }
+ .astrid-vision .astrid-vision-project-goal :is(p, li) { line-height: inherit; }
+ .astrid-vision .astrid-vision-project-goal[data-clamped] {
+-  max-height: calc(var(--goal-line) * (var(--goal-lines) + 1));
+-  overflow: hidden;
+   -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * (var(--goal-lines) - .15)), rgb(0 0 0 / .45) calc(var(--goal-line) * (var(--goal-lines) + .45)), transparent);
+   mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * (var(--goal-lines) - .15)), rgb(0 0 0 / .45) calc(var(--goal-line) * (var(--goal-lines) + .45)), transparent);
+ }
+--- a/src/pages/Home/VisionMobileLayout.css
++++ b/src/pages/Home/VisionMobileLayout.css
+@@ -168,6 +168,7 @@
+    blurs over a repainting canvas on phones. Soft edge gradients stay intact. */
+ @media (max-width: 760px) {
+   .astrid-vision-details::backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
++  .astrid-vision .astrid-vision-project-goal[data-clamped]::after { backdrop-filter: none; -webkit-backdrop-filter: none; }
+   .astrid-vision-details-scroll-fade {
+     backdrop-filter: none; -webkit-backdrop-filter: none;
+     mask-image: none; -webkit-mask-image: none;
+--- a/tests/e2e/public-astrid-vision-stability.spec.ts
++++ b/tests/e2e/public-astrid-vision-stability.spec.ts
+@@ -13,7 +13,9 @@
+   await page.route(FEED, route => route.fulfill({ json: feed }));
+   await page.setViewportSize({ width: 390, height: 844 });
+   await page.emulateMedia({ reducedMotion: 'no-preference' });
++  const feedLoaded = page.waitForResponse(response => response.url() === FEED);
+   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
++  await feedLoaded;
+   await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+   await page.evaluate(() => document.fonts.ready);
+   return feed;
+@@ -46,6 +48,12 @@
+     const descriptor = (window as typeof window & { __heightDescriptor?: PropertyDescriptor }).__heightDescriptor;
+     if (descriptor) Object.defineProperty(window, 'innerHeight', descriptor);
+   });
++  // Embedded iOS browsers can resize their actual frame as well as innerHeight.
++  for (const height of [680, 844]) {
++    await page.setViewportSize({ width: 390, height });
++    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
++    expect(await dimensions()).toEqual(initial);
++  }
+   // A real orientation/layout-width change still gets a newly sized scene.
+   await page.setViewportSize({ width: 844, height: 390 });
+   await expect.poll(async () => (await dimensions())[0].width).not.toBe(initial[0].width);
+@@ -82,7 +90,7 @@
+ test('deep-scrolled catalogs open once with no internal reveal or vertical slide', async ({ page }, info) => {
+   const feed = await live(page);
+   await page.evaluate(() => {
+-    type Sample = { y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string };
++    type Sample = { y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string; rowPositions: number[] };
+     const state = window as typeof window & { __catalogOpenings: Sample[][] };
+     state.__catalogOpenings = [];
+     const original = HTMLDialogElement.prototype.showModal;
+@@ -96,7 +104,8 @@
+         const row = this.querySelector('.astrid-vision-part, .astrid-vision-project-row')!;
+         const style = getComputedStyle(row);
+         samples.push({ y: b.y, height: b.height, scroll: this.querySelector('.astrid-vision-details-scroll')!.scrollTop,
+-          rowY: row.getBoundingClientRect().y - b.y, rowOpacity: style.opacity, rowTranslate: style.translate });
++          rowY: row.getBoundingClientRect().y - b.y, rowOpacity: style.opacity, rowTranslate: style.translate,
++          rowPositions: [...this.querySelectorAll('.astrid-vision-part, .astrid-vision-project-row')].slice(0, 3).map(item => item.getBoundingClientRect().y - b.y) });
+         if (samples.length < 18) requestAnimationFrame(sample);
+       };
+       sample();
+@@ -113,9 +122,13 @@
+     await expect.poll(() => page.evaluate(index => (window as typeof window & {
+       __catalogOpenings: unknown[][] }).__catalogOpenings[index]?.length ?? 0, index)).toBe(18);
+     const samples = await page.evaluate(index => (window as typeof window & { __catalogOpenings: {
+-      y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string }[][] }).__catalogOpenings[index], index);
++      y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string; rowPositions: number[] }[][] }).__catalogOpenings[index], index);
+     expect(Math.max(...samples.map(s => s.y)) - Math.min(...samples.map(s => s.y))).toBeLessThan(2);
+     expect(Math.max(...samples.map(s => s.rowY)) - Math.min(...samples.map(s => s.rowY))).toBeLessThan(2);
++    for (let row = 0; row < samples[0].rowPositions.length; row += 1) {
++      const positions = samples.map(s => s.rowPositions[row]);
++      expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(2);
++    }
+     expect(samples.every(s => s.scroll === 0 && s.rowOpacity === '1' && ['none', '0px', '0px 0px'].includes(s.rowTranslate))).toBe(true);
+     await expect(dialog.locator('[data-reveal]')).toHaveCount(0);
+     if (index < 2) await page.screenshot({ path: `${folder}/real-stable-catalog-${index}-${info.project.name}.png` });

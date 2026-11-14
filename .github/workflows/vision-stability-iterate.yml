@@ -8,61 +8,53 @@ permissions:
 jobs:
   iterate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/vision-mobile-stability-20261114
+      - name: Apply reviewed refinement
+        run: |
+          echo 'a7db4157c971273baebd029ae26d3735f0665fe61102d638af490384db3382d7  scripts/.vision-stability-refinement.patch' | sha256sum --check
+          git apply --check scripts/.vision-stability-refinement.patch
+          git apply scripts/.vision-stability-refinement.patch
+          git diff --check
+          git config user.name 'astrid-vision-workbench[bot]'
+          git config user.email 'astrid-vision-workbench[bot]@users.noreply.github.com'
+          git add src/pages/Home/PublicAstridSky.tsx src/pages/Home/PublicAstridVision.css src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-stability.spec.ts
+          git rm scripts/.vision-stability-refinement.patch
+          git commit -m 'fix(vision): hold touch sky frame and pre-size catalog previews'
+          git push origin HEAD:fix/vision-mobile-stability-20261114
+          mkdir -p /tmp/stability-proof
+          git rev-parse HEAD > /tmp/stability-proof/source-head.txt
       - uses: actions/setup-node@v4
         with:
           node-version: '20.19.0'
           cache: npm
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium webkit
-      - name: Reproduce unchanged product regressions
+      - name: Focused contracts
         run: |
-          mkdir -p /tmp/stability-proof/baseline
-          git rev-parse HEAD > /tmp/stability-proof/baseline/source-head.txt
-          set +e
-          PLAYWRIGHT_JSON_OUTPUT_FILE=/tmp/stability-proof/baseline/results.json npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --project=chromium-desktop --workers=1 --grep 'mobile sky|partially visible|deep-scrolled|bottom mink' --output=test-results/stability-baseline --reporter=line,json > /tmp/stability-proof/baseline/output.txt 2>&1
-          result=$?
-          echo "$result" > /tmp/stability-proof/baseline/exit.txt
-          set -e
-          cat /tmp/stability-proof/baseline/output.txt
-          if [ -d test-results/vision-captures ]; then cp -r test-results/vision-captures /tmp/stability-proof/baseline/captures; fi
-      - name: Apply only the reviewed source changes
-        run: |
-          python3 scripts/.vision-stability-edit.py
-          git diff --check
-          git config user.name 'astrid-vision-workbench[bot]'
-          git config user.email 'astrid-vision-workbench[bot]@users.noreply.github.com'
-          git add src/pages/Home src/shared/components/PixelUnderline* tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts playwright.vision.config.ts
-          git rm scripts/.vision-stability-edit.py
-          git commit -m 'fix(vision): stabilize mobile sky and reveals, restore footer animation'
-          git push origin HEAD:fix/vision-mobile-stability-20261114
-          mkdir -p /tmp/stability-proof/candidate
-          git rev-parse HEAD > /tmp/stability-proof/candidate/source-head.txt
-          tar -cf /tmp/stability-proof/candidate/source.tar src/pages/Home src/shared/components/PixelUnderline* tests/e2e/public-astrid-vision-stability.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts playwright.vision.config.ts .github/workflows/public-vision.yml
-      - name: Check scoped source contracts and syntax
-        run: |
-          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSky.scheduling.test.tsx src/pages/Home/publicAstridSkySession.test.ts src/pages/Home/publicAstridSkyGeometry.test.ts src/pages/Home/publicAstridSkyRenderer.test.ts src/pages/Home/publicAstridSkyRender.test.ts src/shared/components/PixelUnderline.test.tsx
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSky.scheduling.test.tsx src/pages/Home/PublicAstridSky.test.ts src/pages/Home/publicAstridSkySession.test.ts src/pages/Home/publicAstridSkyGeometry.test.ts src/pages/Home/publicAstridSkyRenderer.test.ts src/pages/Home/publicAstridSkyRender.test.ts src/shared/components/PixelUnderline.test.tsx
           npx eslint src/pages/Home/PublicAstridSky.tsx src/pages/Home/publicAstridSkySession.ts src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/VisionDetailDialog.tsx src/shared/components/PixelUnderline.tsx --max-warnings 0
       - name: Focused Chromium behavior
         env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/stability-proof/candidate/chromium-results.json
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --project=chromium-desktop --workers=1 --output=test-results/stability-candidate-chromium --reporter=line,json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/stability-proof/chromium-results.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --project=chromium-desktop --workers=1 --output=test-results/stability-chromium --reporter=line,json
       - name: Focused WebKit behavior
         if: ${{ !cancelled() }}
         env:
-          PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/stability-proof/candidate/webkit-results.json
-        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --output=test-results/stability-candidate-webkit --reporter=line,json
+          PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/stability-proof/webkit-results.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --output=test-results/stability-webkit --reporter=line,json
       - name: Gather focused evidence
         if: always()
         run: |
-          if [ -d test-results/vision-captures ]; then cp -r test-results/vision-captures /tmp/stability-proof/candidate/captures; fi
+          mkdir -p /tmp/stability-proof
+          if [ -d test-results/vision-captures ]; then cp -r test-results/vision-captures /tmp/stability-proof/captures; fi
+          tar -cf /tmp/stability-proof/source.tar src/pages/Home src/shared/components/PixelUnderline* tests/e2e/public-astrid-vision-stability.spec.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vision-stability-iteration
+          name: vision-stability-refined
           path: /tmp/stability-proof/
           retention-days: 7

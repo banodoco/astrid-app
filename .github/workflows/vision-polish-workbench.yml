@@ -1,0 +1,33 @@
+name: Vision polish source context
+on:
+  push:
+    branches: [fix/vision-polish-opening-20261114]
+    paths: [.github/workflows/vision-polish-workbench.yml]
+permissions:
+  contents: read
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: d6ee9af20936fab0787ea4ea1d8237cd190cffef
+          path: app
+      - uses: actions/checkout@v4
+        with:
+          repository: banodoco/astrid-dev
+          ref: 99b1b9cd06e8c1c99d3f3ea9bf98fd613daed9b5
+          path: dev
+      - name: Capture tracked source and identity
+        run: |
+          mkdir -p evidence
+          git -C app rev-parse HEAD > evidence/app-head.txt
+          git -C dev rev-parse HEAD > evidence/dev-head.txt
+          git -C app archive HEAD src tests docs config scripts .github AGENTS.md package.json package-lock.json playwright.config.ts playwright.vision.config.ts vite.config.ts > evidence/app-source.tar
+          git -C dev archive HEAD > evidence/dev-source.tar
+          python3 dev/scripts/astrid_dev.py check
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vision-polish-context
+          path: evidence/
+          retention-days: 3

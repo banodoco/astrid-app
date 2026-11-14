@@ -169,3 +169,19 @@
     mask-image: none; -webkit-mask-image: none;
   }
 }
+
+/* One colour identity per principle. Keep the surface translucent,
+   not the whole card: text remains fully opaque and readable. */
+.astrid-vision .astrid-vision-standards-list > li {
+  --principle-heading-day: color-mix(in srgb, var(--sigil-ink) 65%, #25241f);
+  --principle-copy-day: color-mix(in srgb, var(--sigil-ink) 88%, #25241f);
+  --principle-copy-night: color-mix(in srgb, var(--sigil-bg) 80%, #aca395);
+  --principle-tint: color-mix(in oklab, var(--sigil-ink), var(--sigil-bg) calc(var(--astrid-dusk-ink, 0) * 100%));
+  --principle-heading: color-mix(in oklab, color-mix(in oklab, var(--principle-heading-day), var(--sigil-bg) calc(var(--astrid-dusk-ink, 0) * 100%)), var(--astrid-ink) calc(var(--astrid-dusk-firm, 0) * 100%));
+  --principle-copy: color-mix(in oklab, color-mix(in oklab, var(--principle-copy-day), var(--principle-copy-night) calc(var(--astrid-dusk-ink, 0) * 100%)), var(--astrid-ink) calc(var(--astrid-dusk-firm, 0) * 100%));
+  background: color-mix(in srgb, var(--principle-tint) 9%, transparent);
+  border-color: color-mix(in srgb, var(--principle-tint) 30%, transparent);
+}
+.astrid-vision .astrid-vision-standards-list > li h3 { color: var(--principle-heading); }
+.astrid-vision .astrid-vision-standards-list > li :is(.astrid-vision-principle-statement, .astrid-vision-markdown, .astrid-vision-markdown p) { color: var(--principle-copy); }
+.astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner { color: var(--principle-copy); opacity: 1; }

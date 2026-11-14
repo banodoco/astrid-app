@@ -56,7 +56,7 @@ test('vision displays the GitHub-published pillars and operating principles', as
     return { border: style.borderTopStyle, background: style.backgroundColor };
   }));
   expect(cardSurfaces).toHaveLength(4);
-  expect(cardSurfaces.every(card => card.border === 'solid' && card.background === 'rgba(0, 0, 0, 0)')).toBeTruthy();
+  expect(cardSurfaces.every(card => card.border === 'solid' && card.background !== 'rgba(0, 0, 0, 0)')).toBeTruthy();
   await expect(principleCards.locator('.astrid-vision-principle-sigil')).toHaveCount(4);
 });
 

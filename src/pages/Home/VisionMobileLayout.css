@@ -187,3 +187,6 @@
 .astrid-vision .astrid-vision-standards-list > li h3 { color: var(--principle-heading); }
 .astrid-vision .astrid-vision-standards-list > li :is(.astrid-vision-principle-statement, .astrid-vision-markdown, .astrid-vision-markdown p) { color: var(--principle-copy); }
 .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner { color: var(--principle-copy); opacity: 1; }
+
+/* The whole panel owns navigation, so wrapping titles and disclosures cannot move it. */
+.astrid-vision-details-shell { position: relative; }

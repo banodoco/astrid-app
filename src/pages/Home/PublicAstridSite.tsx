@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { PublicAstridShell } from './PublicAstridShell.tsx';
 import { PublicAstridVision } from './PublicAstridVision.tsx';
 import { VISION_PATH } from './publicAstridLinks';
@@ -39,11 +39,26 @@ export function PublicAstridSite() {
   const homeUrlRef = useRef(page === 'home' ? window.location.href : '/');
   const homeScrollRef = useRef(0);
 
+  // This room switch owns its scroll targets. Native history restoration
+  // must not move the outgoing page before its transition snapshot.
+  useLayoutEffect(() => {
+    if (!('scrollRestoration' in window.history)) return;
+    const previous = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
+    return () => {
+      if (window.history.scrollRestoration === 'manual') window.history.scrollRestoration = previous;
+    };
+  }, []);
+
   const show = useCallback((next: PublicAstridPage) => {
     const nextExperience = next === 'home' ? readPublicAstridExperience() : null;
+    const outgoingScroll = window.scrollY;
+    const incomingScroll = next === 'vision' ? 0 : homeScrollRef.current;
+    // Off-screen heroes are not useful morphing anchors. Crossfade instead.
+    const presentation = outgoingScroll > 72 || incomingScroll > 72 ? 'crossfade' : 'shared';
     const commit = () => {
       const previous = pageRef.current;
-      if (previous === 'home' && next === 'vision') homeScrollRef.current = window.scrollY;
+      if (previous === 'home' && next === 'vision') homeScrollRef.current = outgoingScroll;
       pageRef.current = next;
       document.title = PUBLIC_ASTRID_SHARE_PAGES[next].title;
       setPage(next);
@@ -55,17 +70,19 @@ export function PublicAstridSite() {
       // Focus the incoming room after React commits it, without changing its scroll target.
       pendingFocusRef.current = next;
     };
-    run(commit, pageRef.current !== next ? next : undefined);
+    run(commit, pageRef.current !== next ? next : undefined, presentation);
   }, [run]);
   const pendingFocusRef = useRef<PublicAstridPage | null>(null);
 
-  useEffect(() => {
+  // run() flushes React inside the update callback. Settle focus and scroll
+  // in the layout phase, before paint and before the incoming snapshot.
+  useLayoutEffect(() => {
     document.title = PUBLIC_ASTRID_SHARE_PAGES[page].title;
     if (!environment.visible || pendingFocusRef.current !== page) return;
     pendingFocusRef.current = null;
     const target = document.querySelector<HTMLElement>(page === 'vision' ? '.astrid-vision' : '.astrid-public-site');
     target?.focus({ preventScroll: true });
-    window.scrollTo(0, page === 'vision' ? 0 : homeScrollRef.current);
+    window.scrollTo({ left: 0, top: page === 'vision' ? 0 : homeScrollRef.current, behavior: 'instant' });
   }, [page, environment.visible]);
 
   useEffect(() => {

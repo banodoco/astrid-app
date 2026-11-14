@@ -78,3 +78,17 @@
    the overscroll is as dark as the page. */
 :root:has(:is(.astrid-public-site, .astrid-vision)),
 :root:has(:is(.astrid-public-site, .astrid-vision)) body { background-color: var(--astrid-root-paper, #f7f4ed); }
+
+/* Scrolled switches use one snapshot pair, not off-screen moving anchors. */
+:root[data-astrid-page-transition-style="crossfade"] :is(.astrid-public-site, .astrid-vision),
+:root[data-astrid-page-transition-style="crossfade"] :is(.astrid-public-site, .astrid-vision) * {
+  view-transition-name: none !important;
+}
+@keyframes astrid-room-fade-in { from { opacity: 0; } }
+:root[data-astrid-page-transition-style="crossfade"]::view-transition-group(root) { animation: none; }
+:root[data-astrid-page-transition-style="crossfade"]::view-transition-old(root) {
+  animation: none; opacity: 1; mix-blend-mode: normal;
+}
+:root[data-astrid-page-transition-style="crossfade"]::view-transition-new(root) {
+  animation: astrid-room-fade-in 220ms ease-out both; mix-blend-mode: normal;
+}

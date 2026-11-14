@@ -278,3 +278,87 @@ for (const width of [390, 1440]) {
     writeFileSync(`${folder}/principle-colours-${info.project.name}-${width}.json`, JSON.stringify({ source: feed.source, measurements }, null, 2));
   });
 }
+
+
+for (const width of [390, 1440]) {
+  test(`scrolled Vision returns to the retained main page without moving its snapshot at ${width}px`, async ({ page }, info) => {
+    await pinLive(page);
+    await page.setViewportSize({ width, height: 844 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.addInitScript(() => {
+      type Frame = { scroll: number; top: number };
+      type Record = { destination?: string; presentation?: string; outgoing: number; snapshot?: Frame; frames: Frame[]; named: string[] };
+      const state = window as typeof window & { __roomTransitions: Record[]; __homeTapY?: number };
+      state.__roomTransitions = [];
+      document.addEventListener('pointerdown', event => {
+        if ((event.target as Element)?.closest('.astrid-public-site a[href="/vision"]')) state.__homeTapY = window.scrollY;
+      }, true);
+      const native = document.startViewTransition?.bind(document);
+      if (!native) return;
+      document.startViewTransition = ((callback: () => void) => {
+        const record: Record = { destination: document.documentElement.dataset.astridPageTransition,
+          presentation: document.documentElement.dataset.astridPageTransitionStyle,
+          outgoing: window.scrollY, frames: [], named: [] };
+        state.__roomTransitions.push(record);
+        return native(() => {
+          callback();
+          const home = document.querySelector<HTMLElement>('.astrid-public-site');
+          if (record.destination !== 'home' || !home) return;
+          const read = () => ({ scroll: window.scrollY, top: home.getBoundingClientRect().top });
+          record.snapshot = read();
+          record.named = [home, ...home.querySelectorAll('*')].map(node => getComputedStyle(node).viewTransitionName)
+            .filter(name => name && name !== 'none');
+          const sample = () => {
+            record.frames.push(read());
+            if (record.frames.length < 12) requestAnimationFrame(sample);
+          };
+          requestAnimationFrame(sample);
+        });
+      }) as typeof document.startViewTransition;
+    });
+    await page.goto('/home', { waitUntil: 'domcontentloaded' });
+    const home = page.locator('.astrid-public-site');
+    await expect(home).toBeVisible();
+    await home.evaluate(node => node.setAttribute('data-retained-proof', 'same'));
+    await page.addStyleTag({ content: 'html { scroll-behavior: smooth !important; }' });
+    await page.getByRole('link', { name: 'Vision', exact: true }).first().click();
+    await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+    await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+    const expectedHomeY = await page.evaluate(() => (window as typeof window & { __homeTapY: number }).__homeTapY);
+    expect(Number.isFinite(expectedHomeY)).toBe(true);
+    const outgoing = await page.evaluate(() => new Promise<number>(resolve => {
+      window.scrollTo({ top: 900, behavior: 'instant' });
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY)));
+    }));
+    expect(outgoing).toBeGreaterThan(500);
+    await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+    await expect(home).toBeVisible();
+    await expect(home).toHaveAttribute('data-retained-proof', 'same');
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(expectedHomeY, 0);
+    const supported = await page.evaluate(() => typeof document.startViewTransition === 'function');
+    if (supported) {
+      await expect.poll(() => page.evaluate(() => (window as typeof window & {
+        __roomTransitions: { destination?: string; frames: unknown[] }[];
+      }).__roomTransitions.filter(r => r.destination === 'home').at(-1)?.frames.length ?? 0)).toBe(12);
+      const record = await page.evaluate(() => (window as typeof window & {
+        __roomTransitions: { destination?: string; presentation?: string; outgoing: number;
+          snapshot: { scroll: number; top: number }; frames: { scroll: number; top: number }[]; named: string[] }[];
+      }).__roomTransitions.filter(r => r.destination === 'home').at(-1)!);
+      expect(record.presentation).toBe('crossfade');
+      expect(record.outgoing).toBeGreaterThan(500);
+      expect(record.snapshot.scroll).toBeCloseTo(expectedHomeY, 0);
+      expect(record.named).toEqual([]);
+      for (const frame of record.frames) {
+        expect(frame.scroll).toBeCloseTo(expectedHomeY, 0);
+        expect(Math.abs(frame.top - record.snapshot.top)).toBeLessThan(1);
+      }
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(`${folder}/room-transition-${info.project.name}-${width}.json`, JSON.stringify(record, null, 2));
+    }
+    await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+    await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition-style');
+    expect(await page.evaluate(() => history.scrollRestoration)).toBe('manual');
+    mkdirSync(folder, { recursive: true });
+    await page.screenshot({ path: `${folder}/real-main-after-vision-${info.project.name}-${width}.png` });
+  });
+}

@@ -237,6 +237,11 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
               {children}
             </div>
           </div>
+          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"
+            data-visible={scrollEdges.top || undefined} aria-hidden="true" />
+          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"
+            data-visible={scrollEdges.bottom || undefined} aria-hidden="true" />
+        </div>
           {(previous || next) && <>
             <button type="button" className="astrid-vision-details-navigation astrid-vision-details-previous"
               disabled={!previous} aria-label={previous?.label ?? 'Previous item'} title={previous?.label}
@@ -249,11 +254,6 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
               <ChevronRight size={24} aria-hidden="true" />
             </button>
           </>}
-          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--top"
-            data-visible={scrollEdges.top || undefined} aria-hidden="true" />
-          <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"
-            data-visible={scrollEdges.bottom || undefined} aria-hidden="true" />
-        </div>
       </div>
     </dialog>
   );

@@ -1,0 +1,65 @@
+name: Apply and qualify vision entry repair
+on:
+  push:
+    branches: [fix/vision-entry-header-20261114]
+    paths: [.github/workflows/vision-entry-apply.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-entry-header-20261114
+      - name: Apply bounded exact-source edits
+        run: |
+          python3 scripts/.vision-entry-repair.py
+          git diff --check
+          git rm scripts/.vision-entry-repair.py .github/workflows/vision-entry-apply.yml .github/workflows/vision-entry-workbench.yml
+          git add src/pages/Home .github/workflows/public-vision.yml playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(vision): preserve popup backdrop header and share stable hero loading'
+          git push origin HEAD:fix/vision-entry-header-20261114
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - name: Loading and lifecycle contract
+        run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/publicVisionContent.test.ts src/pages/Home/publicVisionContent.loading.test.tsx src/pages/Home/PublicAstridSite.lifecycle.test.tsx
+      - name: Lint changed components
+        run: npx eslint src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/publicVisionContent.ts --max-warnings 0
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Scoped two-engine configuration
+        run: |
+          cat > playwright.entry.config.ts <<'EOF'
+          import { defineConfig, devices } from '@playwright/test';
+          import base from './playwright.config';
+          export default defineConfig({ ...base, workers: 1, timeout: 90000,
+            testMatch: '**/public-astrid-vision-entry.spec.ts',
+            projects: [
+              { name: 'entry-chromium', use: { ...devices['Desktop Chrome'] } },
+              { name: 'entry-webkit', use: { ...devices['iPhone 13'], launchOptions: {} } },
+            ] });
+          EOF
+      - name: Re-run the reproduced defects
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/entry-results.json
+        run: npx playwright test --config playwright.entry.config.ts --output=test-results/entry --reporter=line,json
+      - name: Exact candidate and traces
+        if: always()
+        run: |
+          mkdir -p entry-artifact
+          git rev-parse HEAD > entry-artifact/head.txt
+          git diff --stat > entry-artifact/uncommitted.txt
+          git archive HEAD src/pages/Home tests/e2e/public-astrid-vision-entry.spec.ts .github/workflows/public-vision.yml playwright.vision.config.ts > entry-artifact/source.tar
+          cp -r test-results/vision-captures entry-artifact/captures || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-entry-repaired
+          path: entry-artifact/
+          retention-days: 7

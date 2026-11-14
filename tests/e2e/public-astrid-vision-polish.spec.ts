@@ -64,6 +64,10 @@ test('opening prepares viewport before the native top layer and never double-ope
     const log = await page.evaluate(() => (window as typeof window & {
       __visionOpenings: { prepared: boolean; autofocus: boolean; frames: { y: number; height: number; scroll: number }[] }[];
     }).__visionOpenings);
+    // Keep the frame trace even when a first-paint regression fails below.
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(`${folder}/opening-frames-${info.project.name}.json`,
+      JSON.stringify({ source: feed.source, openings: log }, null, 2));
     expect(log).toHaveLength(index + 1);
     expect(log[index].prepared).toBe(true);
     expect(log[index].autofocus).toBe(true);

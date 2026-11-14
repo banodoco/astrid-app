@@ -68,6 +68,7 @@ function useSkyGeometry(
 export function PublicAstridSky({ session, active = true, geometryRoot, geometryOwner = 'sky', quietBehind }: PublicAstridSkyProps) {
   const canvasRefs = useRef<Record<SkyLayer, HTMLCanvasElement | null>>({ sky: null, stars: null, far: null, near: null });
   const skyRef = useRef<HTMLDivElement>(null);
+  const viewportRef = useRef<HTMLSpanElement>(null);
   const { settings } = useSkyControls(session, active);
   useSkyGeometry(session, settings.enabled && active, geometryRoot, quietBehind, geometryOwner);
 
@@ -96,7 +97,13 @@ export function PublicAstridSky({ session, active = true, geometryRoot, geometry
       const settings = snapshot.settings;
       const bleed = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches ? TOUCH_SKY_BLEED : 0;
       const columns = Math.ceil((window.innerWidth + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
-      const viewRows = Math.ceil((window.innerHeight + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
+      // A toolbar changes innerHeight, not the scene. A CSS large-viewport
+      // probe is stable through that change, yet follows real rotation/resizing.
+      // Keep desktop resizing dynamic and retain a fallback for older engines.
+      const sceneHeight = bleed > 0
+        ? viewportRef.current?.clientHeight || window.innerHeight
+        : window.innerHeight;
+      const viewRows = Math.ceil((sceneHeight + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
       const rows = viewRows + 2 * Math.ceil(bleed / PUBLIC_ASTRID_SKY_PIXEL);
       // The sun and moon are sized from the canvas height; keep them the size the window alone would give.
       const bodyScale = viewRows / rows;
@@ -171,6 +178,7 @@ export function PublicAstridSky({ session, active = true, geometryRoot, geometry
   );
   return (
     <div ref={skyRef} className="astrid-sky" aria-hidden="true">
+      <span ref={viewportRef} className="astrid-sky-viewport" />
       {SKY_LAYERS.map(renderLayer)}
     </div>
   );

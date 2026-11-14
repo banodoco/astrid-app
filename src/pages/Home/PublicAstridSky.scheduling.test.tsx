@@ -135,3 +135,39 @@ describe('active sky scheduling', () => {
     owner.destroy();
   });
 });
+
+
+it('holds mobile sky raster dimensions through toolbar resizes but follows orientation changes', () => {
+  const owner = session();
+  owner.setEnvironment({ visible: true, reducedMotion: true, phone: true });
+  vi.spyOn(window, 'matchMedia').mockImplementation((media) => ({
+    media, matches: media === '(pointer: coarse)', onchange: null,
+    addListener: vi.fn(), removeListener: vi.fn(), addEventListener: vi.fn(), removeEventListener: vi.fn(), dispatchEvent: () => true,
+  }));
+  let largeHeight = 844;
+  const originalHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')?.get;
+  vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: HTMLElement) {
+    return this.classList.contains('astrid-sky-viewport') ? largeHeight : originalHeight?.call(this) ?? 0;
+  });
+  vi.stubGlobal('innerWidth', 390);
+  vi.stubGlobal('innerHeight', 700);
+  const view = render(<PublicAstridSky session={owner} />);
+  settle();
+  const sizes = () => [...view.container.querySelectorAll('canvas')].map(canvas => [canvas.width, canvas.height]);
+  const initial = sizes();
+  for (const height of [630, 790, 700]) {
+    vi.stubGlobal('innerHeight', height);
+    act(() => window.dispatchEvent(new Event('resize')));
+    settle();
+    expect(sizes()).toEqual(initial);
+  }
+  largeHeight = 390;
+  vi.stubGlobal('innerWidth', 844);
+  vi.stubGlobal('innerHeight', 390);
+  act(() => window.dispatchEvent(new Event('resize')));
+  settle();
+  expect(sizes()).not.toEqual(initial);
+  view.unmount();
+  expect(frames.size).toBe(0);
+  owner.destroy();
+});

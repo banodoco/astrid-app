@@ -64,7 +64,7 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   const content = await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'What we’re building towards' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What we’re building' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'What guides us' })).toBeVisible();
 
   const principleTitles = page.locator('.astrid-vision-standards-list h3');

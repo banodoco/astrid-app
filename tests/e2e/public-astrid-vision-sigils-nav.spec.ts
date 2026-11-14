@@ -399,7 +399,7 @@ test('the enlarged header spans the viewport while navigation stays aligned in o
     await expect(pillars).toHaveAttribute('href', '#astrid-vision-pillars');
     await pillars.click();
     await expect(pillars).toHaveAttribute('aria-current', 'location');
-    await expect(page.getByRole('heading', { name: 'What we’re building towards' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'What we’re building' })).toBeVisible();
     await expect(page).toHaveURL(/#astrid-vision-pillars$/);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width + 1);
   }

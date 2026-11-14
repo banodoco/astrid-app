@@ -461,6 +461,8 @@
     translate 560ms cubic-bezier(.22, .61, .36, 1) var(--reveal-delay, 0ms);
 }
 .astrid-vision [data-reveal]:not([data-shown]) { opacity: 0; translate: 0 14px; }
+/* Initial-viewport content is rendered before paint, not animated in late. */
+.astrid-vision [data-reveal][data-shown="initial"] { transition: none; }
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-bar > *,
   .astrid-vision-hero-copy > *,

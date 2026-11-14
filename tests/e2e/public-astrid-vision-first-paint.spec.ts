@@ -50,7 +50,7 @@ test('mobile sky keeps the same scene extent through toolbar height oscillation'
   await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
   expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
   const sky = page.locator('.astrid-vision .astrid-sky');
-  await expect.poll(() => sky.locator('canvas').first().evaluate(node => (node as HTMLCanvasElement).height)).toBeGreaterThan(200);
+  await expect.poll(() => sky.locator('canvas').evaluateAll(nodes => nodes.length > 0 && nodes.every(node => (node as HTMLCanvasElement).style.width !== ''))).toBe(true);
   const size = () => sky.locator('canvas').evaluateAll(nodes => nodes.map(node => {
     const canvas = node as HTMLCanvasElement;
     return { layer: canvas.dataset.layer, width: canvas.width, height: canvas.height,

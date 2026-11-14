@@ -110,23 +110,28 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
   }, []);
 
   useLayoutEffect(() => {
-    // Locking the body resets document scroll. WebKit's top-layer placement can
-    // still use the old scroll offset in that same rendering turn (71px in the
-    // regression trace). Give the lock one frame to settle before opening once.
-    const frame = window.requestAnimationFrame(() => {
-      const dialog = dialogRef.current;
-      if (!dialog?.isConnected || dialog.open) return;
-      const viewport = window.visualViewport;
-      if (!viewport || viewport.scale <= 1.05) {
-        dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
-        dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
-      }
-      // Native focusing chooses the heading directly, not the footer X first.
-      titleRef.current?.setAttribute('autofocus', '');
-      dialog.showModal();
-      if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
+    // A RAF runs *before* paint, so a single RAF can still open in the body's
+    // scroll-lock rendering turn. Cross a painted frame before creating the
+    // native top layer, particularly when opening catalogs from the page bottom.
+    let alive = true;
+    let frame = window.requestAnimationFrame(() => {
+      if (!alive) return;
+      frame = window.requestAnimationFrame(() => {
+        if (!alive) return;
+        const dialog = dialogRef.current;
+        if (!dialog?.isConnected || dialog.open) return;
+        const viewport = window.visualViewport;
+        if (!viewport || viewport.scale <= 1.05) {
+          dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
+          dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
+        }
+        // Native focusing chooses the heading directly, not the footer X first.
+        titleRef.current?.setAttribute('autofocus', '');
+        dialog.showModal();
+        if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
+      });
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => { alive = false; window.cancelAnimationFrame(frame); };
   }, []);
 
   // Keep the native modal/top layer, but reset disclosures and scroll per subject.

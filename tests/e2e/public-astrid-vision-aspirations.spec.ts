@@ -67,7 +67,7 @@ for (const width of [1440, 390]) {
     await expect(gapSummary).toContainText('3 projects');
     await expect(gapSummary).not.toContainText('Live composition');
     await expect(aspiration.locator('.astrid-vision-details-gap-group-label')).toHaveText('Gaps');
-    await expect(gaps.nth(1).locator(':scope > summary')).toContainText('No project yet');
+    await expect(gaps.nth(1).locator('.astrid-vision-details-gap-preview')).toHaveCount(0);
     await expect(dialog.locator('.astrid-vision-details-aspiration-empty')).toHaveCount(0);
     await expect(aspirations.nth(1).locator('.astrid-vision-details-gap-group')).toHaveCount(0);
     await expect(aspirations.nth(2).locator('.astrid-vision-details-gap-group')).toHaveCount(0);

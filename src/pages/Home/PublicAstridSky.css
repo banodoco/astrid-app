@@ -7,6 +7,12 @@
   overflow: hidden;
   pointer-events: none;
 }
+/* Measure the stable scene extent independently of mobile browser controls.
+   The probe never participates in layout or receives input. */
+.astrid-sky-viewport {
+  position: absolute; width: 0; height: 100vh; height: 100lvh;
+  visibility: hidden; pointer-events: none;
+}
 .astrid-sky canvas {
   position: absolute;
   image-rendering: pixelated;

@@ -123,23 +123,32 @@ function Tinkerer() {
   );
 }
 
-function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined, listKey: string) {
+function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined) {
   const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const targets = [...(ref.current?.querySelectorAll<HTMLElement>('[data-reveal]') ?? [])];
+  useLayoutEffect(() => {
+    const targets = [...(ref.current?.querySelectorAll<HTMLElement>('[data-reveal]') ?? [])]
+      .filter(target => !target.closest('.astrid-vision-details'));
     const show = (element: Element) => element.setAttribute('data-shown', 'true');
     if (reducedMotion || typeof IntersectionObserver !== 'function') { targets.forEach(show); return; }
     if (!active) return;
+    // Content can arrive after the loading skeleton. Anything already visible
+    // must be present on that first paint, without waiting for a scroll/IO tick.
+    const top = window.visualViewport?.offsetTop ?? 0;
+    const bottom = top + (window.visualViewport?.height ?? window.innerHeight);
+    for (const target of targets) {
+      const bounds = target.getBoundingClientRect();
+      if (bounds.bottom > top && bounds.top < bottom) target.setAttribute('data-shown', 'initial');
+    }
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         show(entry.target);
         observer.unobserve(entry.target);
       }
-    }, { rootMargin: '0px 0px -8% 0px' });
-    targets.forEach((target) => observer.observe(target));
+    });
+    targets.filter(target => !target.hasAttribute('data-shown')).forEach(target => observer.observe(target));
     return () => observer.disconnect();
-  }, [active, reducedMotion, contentRevision, listKey]);
+  }, [active, reducedMotion, contentRevision]);
   return ref;
 }
 
@@ -150,7 +159,7 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
   const bodyId = useId();
   const plans = openProjects.filter(project => (project.primaryGapId ?? project.gapIds[0]) === gap.id).slice(0, 3);
   return (
-    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={open || undefined}>
+    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-open={open || undefined}>
       <h3>
         <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(value => !value)}>
           <span className="astrid-vision-part-number" aria-hidden="true">{gap.id}</span>
@@ -342,9 +351,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     window.clearTimeout(agentCopyTimer.current);
     return () => window.clearTimeout(agentCopyTimer.current);
   }, [content?.source.revision]);
-  // Newly filtered rows must still receive reveal observation.
-  const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision,
-    gapFilter + ':' + showAllGaps + ':' + projectFilter + ':' + showAllProjects + ':' + selectedCatalog);
+  // Catalogs are modal content, not part of the page's scroll-reveal sequence.
+  const pageRef = useScrollReveal(visible, reducedMotion, content?.source.revision);
   useLayoutEffect(() => {
     if (!visible) return undefined;
     return skySession.registerPaletteTarget(pageRef.current, 'vision');
@@ -545,7 +553,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow" data-index="02">Pillars</p>
-          <h2 id="astrid-vision-north-star-title">What we’re building towards</h2>
+          <h2 id="astrid-vision-north-star-title">What we’re building</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -663,7 +671,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             Show fewer projects
           </button>
         )}
-        <p className="astrid-vision-issues-more" data-reveal>
+        <p className="astrid-vision-issues-more">
           <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Explore every plan and its technical details on GitHub</a>
         </p>
       </section>

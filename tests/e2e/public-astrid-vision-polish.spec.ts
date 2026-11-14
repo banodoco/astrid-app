@@ -198,7 +198,7 @@ test('mobile sigils share full-height alignment and the footer illustration need
   await expect(underline.locator('path')).toHaveAttribute('stroke-linecap', 'square');
   await expect(page.locator('#astrid-vision-title')).toHaveText(feed.vision.title);
   await expect(page.locator('#astrid-vision-standards-title')).toHaveText('What guides us');
-  await expect(page.locator('#astrid-vision-north-star-title')).toHaveText('What we’re building towards');
+  await expect(page.locator('#astrid-vision-north-star-title')).toHaveText('What we’re building');
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const cards = page.locator('.astrid-vision-standards-list > li');
   const layouts = await cards.evaluateAll(nodes => nodes.map(card => {

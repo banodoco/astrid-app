@@ -7,6 +7,7 @@ describe('shared pixel underline', () => {
     const { container } = render(<h1>A tool to unlock <PixelUnderline>artistic potential</PixelUnderline>.</h1>);
     expect(screen.getByRole('heading')).toHaveTextContent('A tool to unlock artistic potential.');
     const path = container.querySelector('path')!;
+    expect(path).toHaveAttribute('d', 'M1 6H99');
     expect(path.getAttribute('d')).not.toMatch(/[CQSA]/i);
     expect(path).toHaveAttribute('stroke-linecap', 'square');
     expect(path).toHaveAttribute('stroke-linejoin', 'miter');

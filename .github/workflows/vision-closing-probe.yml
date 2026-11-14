@@ -1,0 +1,55 @@
+name: Trace ready WebKit dialog restoration
+on:
+  push:
+    branches: [fix/vision-polish-opening-20261114]
+    paths: [.github/workflows/vision-closing-probe.yml]
+permissions:
+  contents: read
+jobs:
+  trace:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps webkit
+      - name: Trace native close after cold module readiness
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-polish.spec.ts');s=p.read_text()
+          anchor="  await page.goto('/vision', { waitUntil: 'domcontentloaded' });"
+          extra=r'''
+            await page.addInitScript(() => {
+              const w=window as typeof window & { __closeMotion: unknown[] }; w.__closeMotion=[];
+              const record=(event:string) => {
+                if(w.__closeMotion.length>500) return;
+                w.__closeMotion.push({event,time:performance.now(),y:window.scrollY,bodyTop:document.body?.style.top,bodyPosition:document.body?.style.position,bodyScroll:document.body?.scrollTop,rootScroll:document.documentElement.scrollTop,max:document.documentElement.scrollHeight-window.innerHeight,active:document.activeElement?.outerHTML.slice(0,200)});
+              };
+              const original=window.scrollTo.bind(window);
+              window.scrollTo=((...args:unknown[])=>{record('scrollTo '+JSON.stringify(args));Reflect.apply(original,window,args);record('after scrollTo');}) as typeof window.scrollTo;
+              for(const type of ['scroll','focusin','pointerdown','close']) window.addEventListener(type,()=>record(type),true);
+              window.addEventListener('DOMContentLoaded',()=>new MutationObserver(()=>record('body style')).observe(document.body,{attributes:true,attributeFilter:['style']}));
+            });
+          '''
+          # Diagnostic readiness only. Product regression assertions and the permanent gate remain unchanged.
+          s=s.replace(anchor,extra+anchor+"\n  await page.waitForSelector('.astrid-vision-principles > li', { timeout: 60000 });",1)
+          anchor='    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(before, 0);'
+          assert s.count(anchor)==1
+          s=s.replace(anchor,'    try {\n'+anchor+'\n    } finally {\n      writeFileSync(`${folder}/close-motion-${index}.json`, JSON.stringify(await page.evaluate(()=>(window as typeof window & { __closeMotion: unknown }).__closeMotion),null,2));\n    }')
+          p.write_text(s)
+          PY
+          mkdir -p test-results/vision-captures
+          git rev-parse HEAD > test-results/vision-captures/probe-source.txt
+          npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-polish.spec.ts --grep 'opening prepares' --timeout=120000 --output=test-results/closing-probe --reporter=line
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-closing-probe
+          path: |
+            test-results/vision-captures
+            test-results/closing-probe
+          retention-days: 3

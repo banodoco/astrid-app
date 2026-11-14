@@ -24,7 +24,11 @@ async function live(page: Page) {
 test('mobile sky keeps its raster size when browser controls change innerHeight', async ({ page }, info) => {
   const feed = await live(page);
   const canvases = page.locator('.astrid-vision .astrid-sky canvas');
-  await expect.poll(() => canvases.first().evaluate(node => (node as HTMLCanvasElement).height)).toBeGreaterThan(100);
+  // A canvas defaults to 300×150 before paint; buffer height alone is not readiness.
+  await expect.poll(() => canvases.evaluateAll(nodes => nodes.length === 4 && nodes.every(node => {
+    const canvas = node as HTMLCanvasElement;
+    return canvas.style.width !== '' && canvas.style.height !== '';
+  }))).toBe(true);
   const dimensions = () => canvases.evaluateAll(nodes => nodes.map(node => {
     const canvas = node as HTMLCanvasElement;
     return { width: canvas.width, height: canvas.height, cssWidth: canvas.style.width, cssHeight: canvas.style.height };

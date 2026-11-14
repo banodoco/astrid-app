@@ -1,0 +1,29 @@
+name: Align requested vision heading assertions
+on:
+  push:
+    branches: [fix/vision-mobile-stability-20261114]
+    paths: [.github/workflows/vision-heading-contract.yml]
+permissions:
+  contents: write
+jobs:
+  align:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-mobile-stability-20261114
+      - run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          for name in ['tests/e2e/public-astrid-vision-content.spec.ts', 'tests/e2e/public-astrid-vision-sigils-nav.spec.ts']:
+              p = Path(name)
+              s = p.read_text()
+              assert s.count('What we’re building towards') == 1
+              p.write_text(s.replace('What we’re building towards', 'What we’re building'))
+          PY
+          git diff --check
+          git config user.name 'astrid-vision-workbench[bot]'
+          git config user.email 'astrid-vision-workbench[bot]@users.noreply.github.com'
+          git add tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts
+          git commit -m 'test(vision): expect the owner-requested shorter pillar heading'
+          git push origin HEAD:fix/vision-mobile-stability-20261114

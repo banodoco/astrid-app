@@ -35,8 +35,29 @@ describe('StarterProjectHandoff while Runtime is slow', () => {
     expect(signal.aborted).toBe(false);
 
     await act(async () => result.resolve({ projectId: 'ready-project', timelineId: 'main' }));
+    expect(ready).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open editor' })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(RUNTIME_REQUEST_WAIT_MS * 2); });
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open editor' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Open your project' }));
     expect(ready).toHaveBeenCalledWith({ projectId: 'ready-project', timelineId: 'main' });
     expect(localStorage.getItem(PENDING_STARTER_PROJECT_KEY)).toBeNull();
+  });
+
+  it('does not show recovery actions when setup succeeds before the attention deadline', async () => {
+    const result = deferred<StarterProjectSelection>();
+    vi.mocked(prepareStarterProject).mockReturnValue(result.promise);
+    render(<StarterProjectHandoff onReady={vi.fn()} onContinueWithoutProject={vi.fn()} />);
+
+    await act(async () => result.resolve({ projectId: 'ready-project', timelineId: 'main' }));
+    expect(screen.getByRole('button', { name: 'Open your project' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open editor' })).not.toBeInTheDocument();
+    await act(async () => { await vi.advanceTimersByTimeAsync(RUNTIME_REQUEST_WAIT_MS * 2); });
+    expect(screen.queryByRole('button', { name: 'Try again' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Open editor' })).not.toBeInTheDocument();
   });
 
   it('aborts retry predecessor, retains its intent, and ignores its late success', async () => {
@@ -60,6 +81,7 @@ describe('StarterProjectHandoff while Runtime is slow', () => {
     expect(localStorage.getItem(PENDING_STARTER_PROJECT_KEY)).toBe(intentId);
 
     await act(async () => second.resolve({ projectId: 'current-project', timelineId: 'main' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open your project' }));
     expect(ready).toHaveBeenCalledExactlyOnceWith({ projectId: 'current-project', timelineId: 'main' });
     expect(localStorage.getItem(PENDING_STARTER_PROJECT_KEY)).toBeNull();
   });

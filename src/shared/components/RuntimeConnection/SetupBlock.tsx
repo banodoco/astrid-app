@@ -3,7 +3,7 @@ import { Check, Copy } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import type { ServiceStatus } from '@/integrations/runtime/generated.ts';
 import { detectPlatform } from '@/shared/hooks/platformInstall/platformDetection.ts';
-import { agentInstructions, hasPendingSetupState, installCommand, localSetupInstructions, readPendingSetupState, RECOMMENDED_SETUP_CHOICES, RUNTIME_CONNECTION_COPY, UPDATE_ROUTES, writePendingSetupState, type CommandMode, type SetupChoices, withCommandShell } from './copy.ts';
+import { agentInstructions, hasPendingSetupState, installCommand, localSetupInstructions, readPendingSetupState, RECOMMENDED_SETUP_CHOICES, RUNTIME_CONNECTION_COPY, SETUP_SKILL_POINTER, UPDATE_ROUTES, writePendingSetupState, type CommandMode, type SetupChoices, withCommandShell } from './copy.ts';
 import { CopyCommandRow, CopyFallback, useCopyAction } from './CopyInstallCommand.tsx';
 
 const CHOICE_ROWS = [
@@ -74,6 +74,7 @@ export function SetupBlock({ initiallySetUp, initialChoices, mode = 'install', s
         <span aria-live="polite">{agentCopy.status === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : 'Copy instructions for your agent'}</span>
         {agentCopy.status === 'copied' ? <Check aria-hidden="true" className="h-4 w-4" /> : <Copy aria-hidden="true" className="h-4 w-4" />}
       </Button>
+      {mode === 'install' && <p className="text-xs text-muted-foreground">{SETUP_SKILL_POINTER}</p>}
       {agentCopy.status === 'failed' && <CopyFallback text={instructions} label={RUNTIME_CONNECTION_COPY.agent.copyFailed} />}
       <p className="text-xs font-medium text-muted-foreground">{mode === 'update' || localBuild && detectPlatform() !== 'windows' ? 'Run it yourself' : withCommandShell(RUNTIME_CONNECTION_COPY.agent.terminalAlternative)}</p>
       {mode === 'update' && <p className="text-xs text-muted-foreground">{withCommandShell(RUNTIME_CONNECTION_COPY.agent.terminalAlternativeUpdate)}</p>}

@@ -30,7 +30,9 @@ jobs:
           assert old in s;s=s.replace(old,new)
           old='    expect(log).toHaveLength(index + 1);'
           new="    mkdirSync('test-results/opening-probe', { recursive: true });\n    writeFileSync(`test-results/opening-probe/trace-${info.project.name}.json`, JSON.stringify({ source: 'fc71af9f678d214f5e2e500b18375e8121ed569a', name, index, log }, null, 2));\n"+old
-          assert old in s;s=s.replace(old,new);p.write_text(s)
+          assert old in s;s=s.replace(old,new)
+          s += "\n test.beforeAll(async ({ browser }) => { const p = await browser.newPage(); await p.goto(process.env.BASE_URL + '/vision'); await p.locator('.astrid-vision-principles > li').first().waitFor({ timeout: 60000 }); await p.close(); });\n"
+          p.write_text(s)
           PY
           set +e
           PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/opening-probe/results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-polish.spec.ts --grep 'opening prepares viewport' --reporter=line,json > opening-probe.log 2>&1
@@ -43,7 +45,7 @@ jobs:
         with:
           name: vision-opening-probe
           path: |
-            test-results/opening-probe/
+            test-results/
             opening-probe.log
             opening-probe.exit
           retention-days: 3

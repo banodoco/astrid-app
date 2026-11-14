@@ -6,10 +6,10 @@
 .editor-tour-card-playing .editor-tour-reveal { animation: editor-tour-reveal 640ms var(--tour-ease) var(--tour-delay, 0ms) both; }
 .editor-tour-card-playing .editor-tour-grow { animation: editor-tour-grow 520ms var(--tour-ease) var(--tour-delay, 0ms) both; }
 .editor-tour-card-playing .editor-tour-travel { animation: editor-tour-travel 560ms var(--tour-ease) var(--tour-delay, 0ms) both; }
-/* The feedback title's emphasis: once the card has landed, a pen stroke draws under the word from left to right and stays.
-   Quick out of the start, slowing as it reaches the end, as a hand does. (Act 2's comparison sweep is script-driven:
+/* The feedback title's emphasis: once the card has landed, a stepped pixel stroke draws under the word from left to right and stays.
+   Square steps trace the line at a steady pixel cadence. (Act 2's comparison sweep is script-driven:
    TourCompare, so a grab can stop it.) */
-.editor-tour-card-playing .editor-tour-underline { animation: editor-tour-underline 650ms cubic-bezier(0.3, 0.1, 0.25, 1) var(--tour-delay, 0ms) both; }
+.editor-tour-card-playing .editor-tour-underline { animation: editor-tour-underline 650ms steps(18, end) var(--tour-delay, 0ms) both; }
 /* The finale's chain (TourStrip's large strip; its timings match these lengths): a node's border flashes
    and stays lit, and the line to the next draws across at an even pace so it visibly lands. */
 .editor-tour-card-playing .editor-tour-light { animation: editor-tour-light 480ms ease-out var(--tour-delay, 0ms) both; }
@@ -45,3 +45,5 @@
   .editor-tour-card-playing * { animation: none !important; }
   .editor-tour-playhead { animation: none; }
 }
+
+.editor-tour-card .pixel-underline-mark { color: hsl(var(--primary)); }

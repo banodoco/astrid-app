@@ -313,6 +313,9 @@ describe('TourCard', () => {
       expect(emphasis(container)).toHaveClass('whitespace-nowrap');
       // Drawn as a dash of the whole path: hidden by the playing entrance's offset, whole at rest.
       expect(stroke(container)).toHaveAttribute('pathLength', '1');
+      expect(stroke(container)).toHaveClass('pixel-underline-stroke');
+      expect(stroke(container)).toHaveAttribute('stroke-linecap', 'square');
+      expect(stroke(container).getAttribute('d')).not.toMatch(/[CQSA]/i);
       expect(stroke(container)).toHaveAttribute('stroke-dasharray', '1');
       expect(parseInt(stroke(container).style.getPropertyValue('--tour-delay'), 10)).toBeGreaterThan(0);
       // The stroke hangs out of flow, never part of the title's line box.

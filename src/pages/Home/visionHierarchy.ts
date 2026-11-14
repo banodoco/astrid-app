@@ -69,3 +69,33 @@ export function findAspiration(content: PublicVisionContent, reference: string):
   const subjects = kind === 'pillar' ? content.pillars : kind === 'principle' ? content.principles : [];
   return subjects.find(subject => subject.id === id)?.characteristics?.find(item => item.id === aspirationId);
 }
+
+/** The template's optional decision lists are a terminal Markdown block.
+ * Keep the public feed and authored text intact, separating only their presentation. */
+export function splitAspirationDetails(markdown: string): {
+  explanation: string; guidance: string; label: string;
+} {
+  const lines = markdown.split(/\r?\n/);
+  let fence: { char: string; length: number } | null = null;
+  let first = -1;
+  const labels: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    const marker = lines[i].match(/^ {0,3}(`{3,}|~{3,})/);
+    if (marker) {
+      if (!fence) fence = { char: marker[1][0], length: marker[1].length };
+      else if (marker[1][0] === fence.char && marker[1].length >= fence.length) fence = null;
+      continue;
+    }
+    if (fence) continue;
+    const heading = lines[i].match(/^\*\*(We should(?: never)?):\*\*[ \t]*$/);
+    if (heading) {
+      if (first < 0) first = i;
+      labels.push(heading[1]);
+    }
+  }
+  if (first < 0 || !lines.slice(first + 1).some(line => /^[-*] \S/.test(line))) {
+    return { explanation: markdown, guidance: '', label: '' };
+  }
+  return { explanation: lines.slice(0, first).join('\n').trimEnd(),
+    guidance: lines.slice(first).join('\n').trim(), label: [...new Set(labels)].join(' / ') };
+}

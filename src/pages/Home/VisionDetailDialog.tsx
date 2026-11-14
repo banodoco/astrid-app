@@ -2,76 +2,47 @@ import { VisionDialog } from './VisionDialog';
 import ReactMarkdown from 'react-markdown';
 import { ChevronDown, ExternalLink } from 'lucide-react';
 import type { PublicVisionContent, PublicVisionProject } from './publicVisionContent';
-import { aspirationsForSubject, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
+import { aspirationsForSubject, splitAspirationDetails, type VisionGapProjects, type VisionSubject } from './visionHierarchy';
 import './VisionProjectDisclosure.css';
 
 // Editorial accents retain the same identity across pillar and principle dialogs.
 const GAP_TONES = ['clay', 'ochre', 'sage', 'teal', 'blue', 'plum'] as const;
 
 function GapProjects({ projects }: { projects: PublicVisionProject[] }) {
-  if (projects.length === 0) {
-    return <p className="astrid-vision-details-empty">No current projects linked yet.</p>;
-  }
+  if (projects.length === 0) return null;
   return (
     <div className="astrid-vision-details-projects astrid-vision-project-disclosures">
       <p>Projects addressing this gap</p>
-      <ul>
-        {projects.map(project => {
-          // Use the authored introduction, not a rewritten slogan or a clipped sentence.
-          const [intro, ...remaining] = project.goalMarkdown.trim().split(/\r?\n\s*\r?\n/);
-          return (
-            <li key={project.id}>
-              <details className="astrid-vision-project" data-project-id={project.id}>
-                <summary className="astrid-vision-project-summary">
-                  <span className="astrid-vision-project-summary-copy">
-                    <strong className="astrid-vision-project-title">{project.title}</strong>
-                    <span className="astrid-vision-project-intro">
-                      <ReactMarkdown
-                        allowedElements={['p', 'strong', 'em', 'del', 'code', 'a', 'br']}
-                        unwrapDisallowed
-                        components={{
-                          p: ({ children }) => <span>{children}</span>,
-                          // The entire summary toggles the project; source links belong below it.
-                          a: ({ children }) => <span>{children}</span>,
-                        }}
-                      >{intro}</ReactMarkdown>
-                    </span>
-                  </span>
-                  <ChevronDown size={17} strokeWidth={1.75} aria-hidden="true" />
-                </summary>
-                <div className="astrid-vision-project-body">
-                  {remaining.length > 0 && (
-                    <div className="astrid-vision-details-project-goal">
-                      <ReactMarkdown>{remaining.join('\n\n')}</ReactMarkdown>
-                    </div>
-                  )}
-                  <dl className="astrid-vision-project-metadata">
-                    {([
-                      ['Status', project.status],
-                      ['Owner', project.owner],
-                      ['Estimate', project.estimate],
-                      ['Waiting on', project.waitingOn],
-                    ] as const).map(([label, value]) => (
-                      <div key={label}>
-                        <dt>{label}</dt>
-                        <dd><ReactMarkdown>{value}</ReactMarkdown></dd>
-                      </div>
-                    ))}
-                  </dl>
-                  <div className="astrid-vision-details-project-heading">
-                    <a href={project.githubUrl} target="_blank" rel="noreferrer"
-                      aria-label={'Read the full project plan: ' + project.title}>
-                      Read the full project plan<ExternalLink size={14} aria-hidden="true" />
-                    </a>
-                  </div>
-                </div>
-              </details>
-            </li>
-          );
-        })}
-      </ul>
+      <ul>{projects.map(project => {
+        const [intro] = project.goalMarkdown.trim().split(/\r?\n\s*\r?\n/);
+        return <li key={project.id}>
+          <article className="astrid-vision-project" data-project-id={project.id}>
+            <div className="astrid-vision-project-summary-copy">
+              <strong className="astrid-vision-project-title">{project.title}</strong>
+              <div className="astrid-vision-project-intro"><ReactMarkdown>{intro}</ReactMarkdown></div>
+            </div>
+            <div className="astrid-vision-details-project-heading">
+              <a href={project.githubUrl} target="_blank" rel="noreferrer"
+                aria-label={'Read the full project plan: ' + project.title}>
+                Read the full project plan<ExternalLink size={14} aria-hidden="true" />
+              </a>
+            </div>
+          </article>
+        </li>;
+      })}</ul>
     </div>
   );
+}
+
+function AspirationDetails({ markdown }: { markdown: string }) {
+  const { explanation, guidance, label } = splitAspirationDetails(markdown);
+  return <>
+    {explanation && <ReactMarkdown>{explanation}</ReactMarkdown>}
+    {guidance && <details className="astrid-vision-guidance">
+      <summary><span>{label}</span><ChevronDown size={16} aria-hidden="true" /></summary>
+      <div className="astrid-vision-guidance-body"><ReactMarkdown>{guidance}</ReactMarkdown></div>
+    </details>}
+  </>;
 }
 
 function GapDesiredState({ markdown }: { markdown: string }) {
@@ -128,7 +99,7 @@ export function VisionDetailDialog({
   const next = siblings[index + 1];
   return (
     <VisionDialog title={entry.title}
-      eyebrow={subject.kind === 'pillar' ? 'What we’re building towards' : 'The principles that guide us'}
+      eyebrow={subject.kind === 'pillar' ? 'What we’re building towards' : 'What guides us'}
       identity={content.source.revision + ':' + subject.kind + ':' + subject.id} onClose={onClose}
       previous={previous ? { label: 'Previous ' + subject.kind + ': ' + previous.title,
         onClick: () => onSelect({ kind: subject.kind, id: previous.id }) } : undefined}
@@ -153,7 +124,7 @@ export function VisionDetailDialog({
                               <ChevronDown size={18} strokeWidth={1.75} aria-hidden="true" />
                             </summary>
                             <div className="astrid-vision-details-characteristic-body">
-                              <ReactMarkdown>{aspiration.detailsMarkdown}</ReactMarkdown>
+                              <AspirationDetails markdown={aspiration.detailsMarkdown} />
                             </div>
                           </details>
                           {gaps.length > 0 && (

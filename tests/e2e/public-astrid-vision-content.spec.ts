@@ -48,7 +48,7 @@ test('vision displays the GitHub-published pillars and operating principles', as
     await expect(pillars.nth(index)).toHaveText(pillar.title);
   }
   await expect(page.locator('.astrid-vision-standards .astrid-vision-eyebrow')).toHaveText('Principles');
-  await expect(page.getByRole('heading', { name: 'The principles that guide us' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What guides us' })).toBeVisible();
   await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
   const principleCards = page.locator('.astrid-vision-standards-list > li');
   const cardSurfaces = await principleCards.evaluateAll(elements => elements.map(element => {
@@ -64,8 +64,8 @@ test('desktop vision has compact, accessible gaps and aligned principle headings
   const content = await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-  await expect(page.getByRole('heading', { name: 'The pillars of our vision' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'The principles that guide us' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What we’re building towards' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'What guides us' })).toBeVisible();
 
   const principleTitles = page.locator('.astrid-vision-standards-list h3');
   await expect(principleTitles).toHaveText(content.principles.map(principle => principle.title));

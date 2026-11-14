@@ -17,6 +17,7 @@ import { aspirationsForSubject, type VisionSubject } from './visionHierarchy';
 import type { PublicVisionContent } from './publicVisionContent';
 import './PublicAstridVision.css';
 import './VisionMobileLayout.css';
+import { PixelUnderline } from '@/shared/components/PixelUnderline';
 
 const PILLAR_ART: readonly NorthStarArt[] = [
   NORTH_STAR_ART.art,
@@ -49,6 +50,14 @@ function MarkdownText({ value, className }: { value: string; className?: string 
 function KeepHyphenated({ value }: { value: string }) {
   return <>{value.split(/(\S+-\S+)/).map((part, i) =>
     i % 2 ? <span key={i} className="astrid-vision-nowrap">{part}</span> : part)}</>;
+}
+
+function VisionTitle({ value }: { value: string }) {
+  const phrase = 'artistic potential';
+  const at = value.indexOf(phrase);
+  if (at < 0) return <KeepHyphenated value={value} />;
+  return <><KeepHyphenated value={value.slice(0, at)} /><PixelUnderline>{phrase}</PixelUnderline>
+    <KeepHyphenated value={value.slice(at + phrase.length)} /></>;
 }
 
 /** One little crisp pixel arrow shared by the pillar and principle cards. */
@@ -107,7 +116,7 @@ function Juggler() {
 /** The mink at its workbench; the sparks are a looping sprite sheet anchored to the soldering iron's tip. */
 function Tinkerer() {
   return (
-    <div className="astrid-vision-tinkerer" aria-hidden="true" data-reveal style={{ '--reveal-delay': '180ms' } as CSSProperties}>
+    <div className="astrid-vision-tinkerer" aria-hidden="true">
       <img src="/astrid-mink-tinkering.png" alt="" />
       <span className="astrid-vision-sparks" />
     </div>
@@ -174,7 +183,7 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
 }
 
 /** Stand-ins for the loading skeleton: never shown, only measured, so they match the usual copy's length. */
-const SKELETON_TITLE = 'A tool to unlock the collective artistic ambition of the open-source AI community';
+const SKELETON_TITLE = 'A tool to unlock the artistic potential of the open-source AI community';
 const SKELETON_LEAD = 'Astrid aims to help individuals and the community as a whole pursue artistic work beyond what they thought possible.';
 const SKELETON_ATTRIBUTION = 'Populated by the Astrid Dev repository.';
 
@@ -248,14 +257,13 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   useEffect(() => {
     if (!visible) return;
     const update = () => {
-      if (!document.querySelector('.astrid-vision-details[open]')) setHeaderCondensed(window.scrollY > 72);
+      if (!document.querySelector('.astrid-vision[data-dialog-open]')) setHeaderCondensed(window.scrollY > 72);
     };
     update();
     window.addEventListener('scroll', update, { passive: true });
     return () => window.removeEventListener('scroll', update);
   }, [visible]);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
-  const detailScrollY = useRef(0);
   // Restore keyboard focus after a dialog, but don't leave touch users with
   // a persistent WebKit focus rectangle around the whole card.
   const lastInteractionWasPointer = useRef(false);
@@ -263,13 +271,11 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
   const openSubject = (subject: VisionSubject, trigger: HTMLButtonElement) => {
     detailOpenedByPointer.current = lastInteractionWasPointer.current;
     detailTrigger.current = trigger;
-    detailScrollY.current = window.scrollY;
     setSelectedCatalog(null);
     setSelectedSubject(subject);
   };
   const closeSubject = () => {
     const trigger = detailTrigger.current;
-    const previousScrollY = detailScrollY.current;
     setSelectedSubject(null);
     setSelectedCatalog(null);
     if (['#astrid-vision-parts', '#astrid-vision-projects'].includes(window.location.hash)) {
@@ -282,13 +288,11 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     else trigger?.focus({ preventScroll: true });
     window.requestAnimationFrame(() => {
       if (pointerClose && document.activeElement === trigger) trigger?.blur();
-      window.scrollTo(0, previousScrollY);
     });
   };
   const openCatalog = (catalog: 'gaps' | 'projects', trigger: HTMLButtonElement) => {
     detailOpenedByPointer.current = lastInteractionWasPointer.current;
     detailTrigger.current = trigger;
-    detailScrollY.current = window.scrollY;
     setSelectedSubject(null);
     setGapFilter('all');
     setProjectFilter('all');
@@ -303,7 +307,6 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       const catalog = window.location.hash === '#astrid-vision-parts' ? 'gaps'
         : window.location.hash === '#astrid-vision-projects' ? 'projects' : null;
       if (!catalog) return;
-      detailScrollY.current = window.scrollY;
       detailOpenedByPointer.current = false;
       detailTrigger.current = document.getElementById('astrid-see-all-' + catalog) as HTMLButtonElement | null;
       setSelectedSubject(null);
@@ -455,6 +458,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     ? selectedProjects : selectedProjects.slice(0, 8);
   return (
     <main className="astrid-vision" ref={pageRef} tabIndex={-1}
+      data-dialog-open={Boolean(selectedSubject || selectedCatalog) || undefined}
       onPointerDownCapture={() => { lastInteractionWasPointer.current = true; }}
       onKeyDownCapture={() => { lastInteractionWasPointer.current = false; }}
       data-astrid-visual-active={visible} data-dusk style={{
@@ -467,7 +471,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     } as CSSProperties}>
       {visible && <PublicAstridSky
         session={skySession}
-        active={visible}
+        active={visible && !selectedSubject && !selectedCatalog}
         geometryRoot={pageRef}
         geometryOwner="vision"
         reducedMotion={reducedMotion}
@@ -488,7 +492,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             <p className="astrid-vision-eyebrow" data-index="01">Vision</p>
             {content
               ? <>
-                  <h1 id="astrid-vision-title"><KeepHyphenated value={content.vision.title} /></h1>
+                  <h1 id="astrid-vision-title"><VisionTitle value={content.vision.title} /></h1>
                   <MarkdownText className="astrid-vision-lead" value={content.vision.introMarkdown} />
                   <p className="astrid-vision-source-attribution">
                     Populated by the <a href={PUBLIC_VISION_REPO_URL} target="_blank" rel="noreferrer">Astrid Dev repository</a>.
@@ -541,7 +545,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow" data-index="02">Pillars</p>
-          <h2 id="astrid-vision-north-star-title">The pillars of our vision</h2>
+          <h2 id="astrid-vision-north-star-title">What we’re building towards</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -567,7 +571,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section id="astrid-vision-standards" className="astrid-vision-standards" aria-labelledby="astrid-vision-standards-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow" data-index="03">Principles</p>
-          <h2 id="astrid-vision-standards-title">The principles that guide us</h2>
+          <h2 id="astrid-vision-standards-title">What guides us</h2>
         </div>
         <ol className="astrid-vision-standards-list" ref={sigilsRef}>
           {content.principles.map(principle => (
@@ -669,8 +673,8 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       )}
       {content && (
         <section className="astrid-vision-contribute" id="astrid-vision-contribute"
-          aria-labelledby="astrid-vision-contribute-title" data-reveal>
-          <div className="astrid-vision-contribute-copy">
+          aria-labelledby="astrid-vision-contribute-title">
+          <div className="astrid-vision-contribute-copy" data-reveal>
             <p className="astrid-vision-eyebrow" data-index="04">Help</p>
             <h2 id="astrid-vision-contribute-title">Want to help build Astrid?</h2>
             <MarkdownText value={contributionIntro} />

@@ -1,0 +1,6 @@
+.pixel-underline { position: relative; display: inline-block; white-space: nowrap; }
+.pixel-underline-mark {
+  position: absolute; pointer-events: none; left: -.025em; top: calc(100% - .12em);
+  width: calc(100% + .05em); height: .28em; overflow: visible;
+  color: var(--pixel-underline-color, currentColor);
+}

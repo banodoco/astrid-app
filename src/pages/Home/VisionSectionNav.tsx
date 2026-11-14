@@ -26,7 +26,7 @@ export function VisionSectionNav({ reducedMotion, includeHelp }: {
       frame = 0;
       // A programmatic smooth jump passes through several sections. Do not
       // light up each intermediate link before arriving at the clicked one.
-      if (pendingJumpRef.current) return;
+      if (pendingJumpRef.current || document.querySelector('.astrid-vision[data-dialog-open]')) return;
       const targets = sections.map(({ id }) => document.getElementById(id)).filter(
         (element): element is HTMLElement => element !== null);
       if (!targets.length) return;

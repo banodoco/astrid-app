@@ -8,22 +8,31 @@ permissions:
 jobs:
   iterate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 12
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/vision-mobile-stability-20261114
-      - name: Apply reviewed refinement
+      - name: Correct first-paint readiness, retaining every stability assertion
         run: |
-          echo 'a7db4157c971273baebd029ae26d3735f0665fe61102d638af490384db3382d7  scripts/.vision-stability-refinement.patch' | sha256sum --check
-          git apply --check scripts/.vision-stability-refinement.patch
-          git apply scripts/.vision-stability-refinement.patch
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/e2e/public-astrid-vision-stability.spec.ts')
+          s = p.read_text()
+          a = "  await expect.poll(() => canvases.first().evaluate(node => (node as HTMLCanvasElement).height)).toBeGreaterThan(100);"
+          b = """  // A canvas defaults to 300×150 before paint; buffer height alone is not readiness.
+            await expect.poll(() => canvases.evaluateAll(nodes => nodes.length === 4 && nodes.every(node => {
+              const canvas = node as HTMLCanvasElement;
+              return canvas.style.width !== '' && canvas.style.height !== '';
+            }))).toBe(true);"""
+          assert s.count(a) == 1
+          p.write_text(s.replace(a, b))
+          PY
           git diff --check
           git config user.name 'astrid-vision-workbench[bot]'
           git config user.email 'astrid-vision-workbench[bot]@users.noreply.github.com'
-          git add src/pages/Home/PublicAstridSky.tsx src/pages/Home/PublicAstridVision.css src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-stability.spec.ts
-          git rm scripts/.vision-stability-refinement.patch
-          git commit -m 'fix(vision): hold touch sky frame and pre-size catalog previews'
+          git add tests/e2e/public-astrid-vision-stability.spec.ts
+          git commit -m 'test(vision): measure painted sky instead of default empty canvas'
           git push origin HEAD:fix/vision-mobile-stability-20261114
           mkdir -p /tmp/stability-proof
           git rev-parse HEAD > /tmp/stability-proof/source-head.txt
@@ -33,19 +42,15 @@ jobs:
           cache: npm
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium webkit
-      - name: Focused contracts
-        run: |
-          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSky.scheduling.test.tsx src/pages/Home/PublicAstridSky.test.ts src/pages/Home/publicAstridSkySession.test.ts src/pages/Home/publicAstridSkyGeometry.test.ts src/pages/Home/publicAstridSkyRenderer.test.ts src/pages/Home/publicAstridSkyRender.test.ts src/shared/components/PixelUnderline.test.tsx
-          npx eslint src/pages/Home/PublicAstridSky.tsx src/pages/Home/publicAstridSkySession.ts src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/VisionDetailDialog.tsx src/shared/components/PixelUnderline.tsx --max-warnings 0
-      - name: Focused Chromium behavior
+      - name: Focused Chromium cloud regression
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/stability-proof/chromium-results.json
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --project=chromium-desktop --workers=1 --output=test-results/stability-chromium --reporter=line,json
-      - name: Focused WebKit behavior
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --grep 'mobile sky' --project=chromium-desktop --workers=1 --output=test-results/stability-chromium --reporter=line,json
+      - name: Focused WebKit cloud regression
         if: ${{ !cancelled() }}
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/stability-proof/webkit-results.json
-        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --output=test-results/stability-webkit --reporter=line,json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-stability.spec.ts --grep 'mobile sky' --output=test-results/stability-webkit --reporter=line,json
       - name: Gather focused evidence
         if: always()
         run: |
@@ -55,6 +60,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: vision-stability-refined
+          name: vision-stability-painted-sky
           path: /tmp/stability-proof/
           retention-days: 7

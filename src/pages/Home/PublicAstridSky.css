@@ -3,9 +3,18 @@
 .astrid-sky {
   position: fixed;
   inset: 0;
+  bottom: auto;
+  --astrid-sky-bleed: 0px;
+  /* Browser toolbars may change innerHeight on every scroll. The artwork uses
+     the large, stable viewport; only genuine layout/orientation changes resize it. */
+  height: calc(100vh + 2 * var(--astrid-sky-bleed));
+  height: calc(100lvh + 2 * var(--astrid-sky-bleed));
   z-index: 0;
   overflow: hidden;
   pointer-events: none;
+}
+@media (pointer: coarse) {
+  .astrid-sky { --astrid-sky-bleed: 120px; }
 }
 .astrid-sky canvas {
   position: absolute;

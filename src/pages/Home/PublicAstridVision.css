@@ -290,7 +290,8 @@
   image-rendering: pixelated;
   pointer-events: none;
 }
-.astrid-vision-tinkerer[data-shown] .astrid-vision-sparks { animation: astrid-vision-sparks 3.1s steps(44) 1.2s infinite; }
+.astrid-vision-sparks { animation: astrid-vision-sparks 3.1s steps(44) infinite; animation-play-state: paused; }
+.astrid-vision-tinkerer[data-animating] .astrid-vision-sparks { animation-play-state: running; }
 @keyframes astrid-vision-sparks { to { background-position-x: calc(-36 * 44 * var(--px)); } }
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-juggled, .astrid-vision-juggler-mink { animation: none; }
@@ -2114,14 +2115,16 @@
 .astrid-vision .astrid-vision-project-goal {
   --goal-line: calc(14px * 1.55);
   --goal-lines: 5;
+  /* Reserve the same preview height before a closed dialog can be measured.
+     data-clamped adds only the fade, never a second layout on opening. */
+  max-height: calc(var(--goal-line) * (var(--goal-lines) + 1));
+  overflow: hidden;
   position: relative;
   font-size: 14px;
   line-height: 1.55;
 }
 .astrid-vision .astrid-vision-project-goal :is(p, li) { line-height: inherit; }
 .astrid-vision .astrid-vision-project-goal[data-clamped] {
-  max-height: calc(var(--goal-line) * (var(--goal-lines) + 1));
-  overflow: hidden;
   -webkit-mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * (var(--goal-lines) - .15)), rgb(0 0 0 / .45) calc(var(--goal-line) * (var(--goal-lines) + .45)), transparent);
   mask-image: linear-gradient(to bottom, #000 calc(var(--goal-line) * (var(--goal-lines) - .15)), rgb(0 0 0 / .45) calc(var(--goal-line) * (var(--goal-lines) + .45)), transparent);
 }

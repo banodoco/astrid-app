@@ -114,9 +114,20 @@ function Juggler() {
 }
 
 /** The mink at its workbench; the sparks are a looping sprite sheet anchored to the soldering iron's tip. */
-function Tinkerer() {
+function Tinkerer({ active }: { active: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    const element = ref.current;
+    if (!active || !element) return;
+    if (typeof IntersectionObserver !== 'function') { setInView(true); return; }
+    const observer = new IntersectionObserver(([entry]) => setInView(entry.isIntersecting),
+      { rootMargin: '80px 0px' });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [active]);
   return (
-    <div className="astrid-vision-tinkerer" aria-hidden="true">
+    <div className="astrid-vision-tinkerer" ref={ref} aria-hidden="true" data-animating={active && inView || undefined}>
       <img src="/astrid-mink-tinkering.png" alt="" />
       <span className="astrid-vision-sparks" />
     </div>
@@ -125,19 +136,29 @@ function Tinkerer() {
 
 function useScrollReveal(active: boolean, reducedMotion: boolean, contentRevision: string | undefined, listKey: string) {
   const ref = useRef<HTMLElement>(null);
-  useEffect(() => {
-    const targets = [...(ref.current?.querySelectorAll<HTMLElement>('[data-reveal]') ?? [])];
+  useLayoutEffect(() => {
+    const targets = [...(ref.current?.querySelectorAll<HTMLElement>('[data-reveal]') ?? [])]
+      .filter(element => !element.closest('dialog'));
     const show = (element: Element) => element.setAttribute('data-shown', 'true');
     if (reducedMotion || typeof IntersectionObserver !== 'function') { targets.forEach(show); return; }
     if (!active) return;
+    // Reveal what is already in view before the first paint. A short phone can
+    // show the top of a card without crossing the old -8% observation margin.
+    const top = window.visualViewport?.offsetTop ?? 0;
+    const bottom = top + (window.visualViewport?.height ?? window.innerHeight);
+    const initiallyVisible = targets.filter(element => {
+      const bounds = element.getBoundingClientRect();
+      return bounds.height > 0 && bounds.bottom > top && bounds.top < bottom;
+    });
+    initiallyVisible.forEach(show);
     const observer = new IntersectionObserver((entries) => {
       for (const entry of entries) {
         if (!entry.isIntersecting) continue;
         show(entry.target);
         observer.unobserve(entry.target);
       }
-    }, { rootMargin: '0px 0px -8% 0px' });
-    targets.forEach((target) => observer.observe(target));
+    }, { rootMargin: '0px' });
+    targets.filter(target => !target.hasAttribute('data-shown')).forEach(target => observer.observe(target));
     return () => observer.disconnect();
   }, [active, reducedMotion, contentRevision, listKey]);
   return ref;
@@ -150,7 +171,7 @@ function GapPoint({ gap, openProjects }: { gap: PublicVisionGap; openProjects: P
   const bodyId = useId();
   const plans = openProjects.filter(project => (project.primaryGapId ?? project.gapIds[0]) === gap.id).slice(0, 3);
   return (
-    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-reveal data-open={open || undefined}>
+    <li className="astrid-vision-part" id={'gap-' + gap.id.toLowerCase()} data-open={open || undefined}>
       <h3>
         <button type="button" aria-expanded={open} aria-controls={bodyId} onClick={() => setOpen(value => !value)}>
           <span className="astrid-vision-part-number" aria-hidden="true">{gap.id}</span>
@@ -545,7 +566,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
       <section id="astrid-vision-pillars" className="astrid-vision-north-star" aria-labelledby="astrid-vision-north-star-title">
         <div className="astrid-vision-section-head" data-reveal>
           <p className="astrid-vision-eyebrow" data-index="02">Pillars</p>
-          <h2 id="astrid-vision-north-star-title">What we’re building towards</h2>
+          <h2 id="astrid-vision-north-star-title">What we’re building</h2>
         </div>
         <ol className="astrid-vision-principles" ref={principlesRef}>
           {PILLARS.map((pillar, index) => (
@@ -663,7 +684,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
             Show fewer projects
           </button>
         )}
-        <p className="astrid-vision-issues-more" data-reveal>
+        <p className="astrid-vision-issues-more">
           <a href={SOURCE_URL + '/plans'} target="_blank" rel="noreferrer">Explore every plan and its technical details on GitHub</a>
         </p>
       </section>
@@ -701,7 +722,7 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
               </p>
             )}
           </div>
-          <Tinkerer />
+          <Tinkerer active={visible && !reducedMotion && !selectedSubject && !selectedCatalog} />
         </section>
       )}
       <footer className="astrid-vision-footer">

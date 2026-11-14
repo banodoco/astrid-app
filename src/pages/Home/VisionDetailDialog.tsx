@@ -64,11 +64,9 @@ function AspirationGap({ content, item }: { content: PublicVisionContent; item: 
       <summary className="astrid-vision-details-gap-heading astrid-vision-details-gap-summary">
         <span className="astrid-vision-details-gap-summary-copy">
           <span className="astrid-vision-details-gap-title">{gap.title}</span>
-          <span className="astrid-vision-details-gap-preview">
-            {projects.length > 0 ? (
-              <strong>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</strong>
-            ) : 'No project yet'}
-          </span>
+          {projects.length > 0 && <span className="astrid-vision-details-gap-preview">
+            <strong>{projects.length} {projects.length === 1 ? 'project' : 'projects'}</strong>
+          </span>}
         </span>
         <ChevronDown size={17} strokeWidth={1.75} aria-hidden="true" />
       </summary>
@@ -99,7 +97,7 @@ export function VisionDetailDialog({
   const next = siblings[index + 1];
   return (
     <VisionDialog title={entry.title}
-      eyebrow={subject.kind === 'pillar' ? 'What we’re building towards' : 'What guides us'}
+      eyebrow={subject.kind === 'pillar' ? 'What we’re building' : 'What guides us'}
       identity={content.source.revision + ':' + subject.kind + ':' + subject.id} onClose={onClose}
       previous={previous ? { label: 'Previous ' + subject.kind + ': ' + previous.title,
         onClick: () => onSelect({ kind: subject.kind, id: previous.id }) } : undefined}

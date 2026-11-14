@@ -68,6 +68,7 @@ function useSkyGeometry(
 export function PublicAstridSky({ session, active = true, geometryRoot, geometryOwner = 'sky', quietBehind }: PublicAstridSkyProps) {
   const canvasRefs = useRef<Record<SkyLayer, HTMLCanvasElement | null>>({ sky: null, stars: null, far: null, near: null });
   const skyRef = useRef<HTMLDivElement>(null);
+  const sceneFrame = useRef<{ width: number; height: number; orientation: number; touch: boolean } | null>(null);
   const { settings } = useSkyControls(session, active);
   useSkyGeometry(session, settings.enabled && active, geometryRoot, quietBehind, geometryOwner);
 
@@ -96,7 +97,19 @@ export function PublicAstridSky({ session, active = true, geometryRoot, geometry
       const settings = snapshot.settings;
       const bleed = typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches ? TOUCH_SKY_BLEED : 0;
       const columns = Math.ceil((window.innerWidth + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
-      const viewRows = Math.ceil((window.innerHeight + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
+      // Read the CSS large-viewport frame, not toolbar-sensitive innerHeight.
+      // The fallback also supports non-layout test environments and older engines.
+      const measuredHeight = skyRef.current?.clientHeight
+        ? Math.max(1, skyRef.current.clientHeight - 2 * bleed) : window.innerHeight;
+      const orientation = window.screen.orientation?.angle ?? 0;
+      const previousFrame = sceneFrame.current;
+      // Some embedded iOS browsers resize even the large-viewport frame as
+      // their controls move. Keep one scene at a given touch width/orientation;
+      // bleed covers the exposed strip without moving or rescaling the clouds.
+      const viewHeight = bleed && previousFrame?.touch && previousFrame.width === window.innerWidth &&
+        previousFrame.orientation === orientation ? previousFrame.height : measuredHeight;
+      sceneFrame.current = { width: window.innerWidth, height: viewHeight, orientation, touch: bleed > 0 };
+      const viewRows = Math.ceil((viewHeight + 2 * PARALLAX_MARGIN) / PUBLIC_ASTRID_SKY_PIXEL);
       const rows = viewRows + 2 * Math.ceil(bleed / PUBLIC_ASTRID_SKY_PIXEL);
       // The sun and moon are sized from the canvas height; keep them the size the window alone would give.
       const bodyScale = viewRows / rows;
@@ -122,7 +135,6 @@ export function PublicAstridSky({ session, active = true, geometryRoot, geometry
       const bleedOffset = `${-(rows - viewRows) / 2 * PUBLIC_ASTRID_SKY_PIXEL}px`;
       if (skyRef.current && skyRef.current.style.top !== bleedOffset) {
         skyRef.current.style.top = bleedOffset;
-        skyRef.current.style.bottom = bleedOffset;
       }
       for (const layer of SKY_LAYERS) {
         const canvas = canvasRefs.current[layer];

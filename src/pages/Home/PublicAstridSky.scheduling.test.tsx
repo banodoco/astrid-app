@@ -134,4 +134,41 @@ describe('active sky scheduling', () => {
     expect(frames.size).toBe(0);
     owner.destroy();
   });
+
+  it('uses the stable CSS frame instead of toolbar-sensitive window height', () => {
+    const owner = session();
+    const view = render(<PublicAstridSky session={owner} />);
+    const element = view.container.querySelector<HTMLElement>('.astrid-sky')!;
+    let height = 80;
+    vi.spyOn(element, 'clientHeight', 'get').mockImplementation(() => height);
+    settle();
+    const canvas = view.container.querySelector('canvas')!;
+    const original = { width: canvas.width, height: canvas.height };
+    vi.stubGlobal('innerHeight', 40);
+    act(() => window.dispatchEvent(new Event('resize')));
+    settle();
+    expect({ width: canvas.width, height: canvas.height }).toEqual(original);
+    height = 100;
+    act(() => window.dispatchEvent(new Event('resize')));
+    settle();
+    expect(canvas.height).toBeGreaterThan(original.height);
+    view.unmount(); owner.destroy();
+  });
+
+  it('holds scroll parallax while a dialog fixes the page body', () => {
+    const owner = session();
+    const view = render(<PublicAstridSky session={owner} />);
+    vi.stubGlobal('scrollY', 600);
+    act(() => window.dispatchEvent(new Event('scroll')));
+    settle();
+    const before = owner.getSnapshot().parallaxY;
+    document.documentElement.dataset.astridScrollLockY = '600';
+    vi.stubGlobal('scrollY', 0);
+    act(() => window.dispatchEvent(new Event('scroll')));
+    settle();
+    expect(owner.getSnapshot().parallaxY).toBeCloseTo(before, 2);
+    delete document.documentElement.dataset.astridScrollLockY;
+    view.unmount(); owner.destroy();
+  });
+
 });

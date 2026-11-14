@@ -8,15 +8,15 @@ const connection_id = 'local-test-connection';
 
 test('setup catalogs meet the app contract, and control flips sign-in and installation', () => {
   const fake = createFakeAcp(['demo'], 'A');
-  for (const scenario of ['A', 'B', 'C', 'D', 'E', 'F', 'G']) {
+  for (const scenario of ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']) {
     fake.handle('POST', '/__test/agent-setup', { scenario });
     const catalog = localAgentCatalogSchema.parse(fake.handle('GET', '/agents', null)!.body);
-    assert.equal(catalog.agents.length, 4);
+    assert.equal(catalog.agents.length, 5);
     for (const agent of catalog.agents) assert(agent.steps?.length);
-    if (scenario === 'C' || scenario === 'D') {
+    if (scenario === 'C' || scenario === 'D' || scenario === 'H') {
       fake.handle('POST', '/__test/agent-setup', { ready: true });
       const updated = localAgentCatalogSchema.parse(fake.handle('GET', '/agents', null)!.body);
-      assert.equal(updated.agents.find(agent => agent.id === (scenario === 'C' ? 'claude-code' : 'hermes'))?.signIn, 'signed-in');
+      assert.equal(updated.agents.find(agent => agent.id === (scenario === 'C' ? 'claude-code' : scenario === 'D' ? 'hermes' : 'octop'))?.signIn, 'signed-in');
     }
   }
 });

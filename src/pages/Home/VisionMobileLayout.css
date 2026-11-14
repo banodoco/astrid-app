@@ -168,6 +168,7 @@
    blurs over a repainting canvas on phones. Soft edge gradients stay intact. */
 @media (max-width: 760px) {
   .astrid-vision-details::backdrop { backdrop-filter: none; -webkit-backdrop-filter: none; }
+  .astrid-vision .astrid-vision-project-goal[data-clamped]::after { backdrop-filter: none; -webkit-backdrop-filter: none; }
   .astrid-vision-details-scroll-fade {
     backdrop-filter: none; -webkit-backdrop-filter: none;
     mask-image: none; -webkit-mask-image: none;

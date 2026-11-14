@@ -13,7 +13,9 @@ async function live(page: Page) {
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const feedLoaded = page.waitForResponse(response => response.url() === FEED);
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await feedLoaded;
   await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
   await page.evaluate(() => document.fonts.ready);
   return feed;
@@ -46,6 +48,12 @@ test('mobile sky keeps its raster size when browser controls change innerHeight'
     const descriptor = (window as typeof window & { __heightDescriptor?: PropertyDescriptor }).__heightDescriptor;
     if (descriptor) Object.defineProperty(window, 'innerHeight', descriptor);
   });
+  // Embedded iOS browsers can resize their actual frame as well as innerHeight.
+  for (const height of [680, 844]) {
+    await page.setViewportSize({ width: 390, height });
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    expect(await dimensions()).toEqual(initial);
+  }
   // A real orientation/layout-width change still gets a newly sized scene.
   await page.setViewportSize({ width: 844, height: 390 });
   await expect.poll(async () => (await dimensions())[0].width).not.toBe(initial[0].width);
@@ -82,7 +90,7 @@ test('partially visible first-row pillars show on arrival without scrolling', as
 test('deep-scrolled catalogs open once with no internal reveal or vertical slide', async ({ page }, info) => {
   const feed = await live(page);
   await page.evaluate(() => {
-    type Sample = { y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string };
+    type Sample = { y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string; rowPositions: number[] };
     const state = window as typeof window & { __catalogOpenings: Sample[][] };
     state.__catalogOpenings = [];
     const original = HTMLDialogElement.prototype.showModal;
@@ -96,7 +104,8 @@ test('deep-scrolled catalogs open once with no internal reveal or vertical slide
         const row = this.querySelector('.astrid-vision-part, .astrid-vision-project-row')!;
         const style = getComputedStyle(row);
         samples.push({ y: b.y, height: b.height, scroll: this.querySelector('.astrid-vision-details-scroll')!.scrollTop,
-          rowY: row.getBoundingClientRect().y - b.y, rowOpacity: style.opacity, rowTranslate: style.translate });
+          rowY: row.getBoundingClientRect().y - b.y, rowOpacity: style.opacity, rowTranslate: style.translate,
+          rowPositions: [...this.querySelectorAll('.astrid-vision-part, .astrid-vision-project-row')].slice(0, 3).map(item => item.getBoundingClientRect().y - b.y) });
         if (samples.length < 18) requestAnimationFrame(sample);
       };
       sample();
@@ -113,9 +122,13 @@ test('deep-scrolled catalogs open once with no internal reveal or vertical slide
     await expect.poll(() => page.evaluate(index => (window as typeof window & {
       __catalogOpenings: unknown[][] }).__catalogOpenings[index]?.length ?? 0, index)).toBe(18);
     const samples = await page.evaluate(index => (window as typeof window & { __catalogOpenings: {
-      y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string }[][] }).__catalogOpenings[index], index);
+      y: number; height: number; scroll: number; rowY: number; rowOpacity: string; rowTranslate: string; rowPositions: number[] }[][] }).__catalogOpenings[index], index);
     expect(Math.max(...samples.map(s => s.y)) - Math.min(...samples.map(s => s.y))).toBeLessThan(2);
     expect(Math.max(...samples.map(s => s.rowY)) - Math.min(...samples.map(s => s.rowY))).toBeLessThan(2);
+    for (let row = 0; row < samples[0].rowPositions.length; row += 1) {
+      const positions = samples.map(s => s.rowPositions[row]);
+      expect(Math.max(...positions) - Math.min(...positions)).toBeLessThan(2);
+    }
     expect(samples.every(s => s.scroll === 0 && s.rowOpacity === '1' && ['none', '0px', '0px 0px'].includes(s.rowTranslate))).toBe(true);
     await expect(dialog.locator('[data-reveal]')).toHaveCount(0);
     if (index < 2) await page.screenshot({ path: `${folder}/real-stable-catalog-${index}-${info.project.name}.png` });

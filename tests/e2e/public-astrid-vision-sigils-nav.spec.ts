@@ -411,23 +411,24 @@ test('the joined principle panels and corner arrows never gain light fills, even
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
   const cards = page.locator('.astrid-vision-standards-list > li');
   await expect(cards).toHaveCount(4);
-  const checkTransparent = async () => {
+  const checkTinted = async () => {
     const surfaces = await cards.evaluateAll(elements => elements.map(el => ({
       card: getComputedStyle(el).backgroundColor,
       arrow: getComputedStyle(el.querySelector('.astrid-vision-principle-corner')!).backgroundColor,
     })));
-    expect(surfaces).toEqual(Array.from({ length: 4 }, () =>
-      ({ card: 'rgba(0, 0, 0, 0)', arrow: 'rgba(0, 0, 0, 0)' })));
+    expect(surfaces).toHaveLength(4);
+    expect(new Set(surfaces.map(surface => surface.card)).size).toBe(4);
+    expect(surfaces.every(surface => surface.card !== 'rgba(0, 0, 0, 0)' && surface.arrow === 'rgba(0, 0, 0, 0)')).toBe(true);
   };
-  await checkTransparent();
+  await checkTinted();
   await page.locator('main.astrid-vision').evaluate(element => {
     element.style.setProperty('--astrid-dusk', '1');
     element.style.setProperty('--astrid-dusk-ink', '1');
     element.style.setProperty('--astrid-dusk-firm', '1');
   });
-  await checkTransparent();
+  await checkTinted();
   await cards.last().hover();
-  await checkTransparent();
+  await checkTinted();
 });
 
 

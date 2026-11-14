@@ -84,7 +84,12 @@ test('opening prepares viewport before the native top layer and never double-ope
     await dialog.getByRole('button', { name: 'Close details' }).click();
     await expect(dialog).toHaveCount(0);
     writeFileSync(`${folder}/closing-restoration-${info.project.name}-${index}.json`, JSON.stringify({ before, state: await page.evaluate(() => ({ scrollY: window.scrollY, openerScroll: (window as typeof window & { __openerScroll?: number }).__openerScroll, maxScroll: document.documentElement.scrollHeight - window.innerHeight, active: document.activeElement?.outerHTML.slice(0, 300), body: document.body.getAttribute('style') })) }, null, 2));
-    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(before, 0);
+    // Playwright may scroll again while making the opener actionable. The
+    // modal must restore the page position at the actual opening gesture,
+    // not the earlier scrollIntoView helper's intermediate position.
+    const openedAt = await page.evaluate(() => (window as typeof window & { __openerScroll?: number }).__openerScroll);
+    expect(typeof openedAt).toBe('number');
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(openedAt!, 0);
   }
   mkdirSync(folder, { recursive: true });
   writeFileSync(`${folder}/opening-frames-${info.project.name}.json`, JSON.stringify({ source: feed.source,

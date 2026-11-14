@@ -118,6 +118,8 @@ test('catalog backdrop consumes the closing tap without activating the button be
   try {
     await page.goto('/vision', { waitUntil: 'domcontentloaded' });
     await page.getByRole('button', { name: 'See all gaps', exact: true }).tap();
+    // Closing gestures target the visible modal after its one-frame preparation.
+    await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();
     const behind = page.getByRole('button', { name: 'See all projects', exact: true });
     await behind.evaluate(node => {
       document.getElementById('root')!.appendChild(node);

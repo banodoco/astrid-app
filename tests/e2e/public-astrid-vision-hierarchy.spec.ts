@@ -172,7 +172,7 @@ test('mobile principle card has no redundant footer CTA, fills the touch target 
 });
 
 
-test('principle cards use four reserved sigil colors, transparent panels and border-only hover feedback', async ({ page, request }) => {
+test('principle cards use four reserved sigil colors, tinted panels and border-only hover feedback', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
@@ -193,7 +193,7 @@ test('principle cards use four reserved sigil colors, transparent panels and bor
     elements.map(el => getComputedStyle(el).color));
   expect(new Set(colors).size).toBe(4);
   expect(await cards.first().evaluate(el => getComputedStyle(el).backgroundColor))
-    .toBe('rgba(0, 0, 0, 0)');
+    .not.toBe('rgba(0, 0, 0, 0)');
   const first = cards.first();
   await first.hover();
   await expect(first.locator('h3')).toHaveCSS('text-decoration-line', 'none');

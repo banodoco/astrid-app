@@ -405,7 +405,7 @@ test('the enlarged header spans the viewport while navigation stays aligned in o
   }
 });
 
-test('the joined principle panels and corner arrows never gain light fills, even on hover in dusk', async ({ page, request }) => {
+test('principle panels retain their distinct tints and corner arrows stay transparent through dusk hover', async ({ page, request }) => {
   await pinnedFeed(page, request);
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });

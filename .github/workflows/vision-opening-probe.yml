@@ -1,0 +1,52 @@
+name: Diagnose WebKit opening geometry
+on:
+  push:
+    branches: [fix/vision-polish-opening-20261114]
+    paths: [.github/workflows/vision-opening-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fc71af9f678d214f5e2e500b18375e8121ed569a
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Install focused browser dependencies
+        run: |
+          npm ci --legacy-peer-deps
+          npx playwright install --with-deps webkit
+      - name: Record detailed viewport and focus trace without changing assertions
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-polish.spec.ts');s=p.read_text()
+          s=s.replace('record.frames.push({ y: b.y, height: b.height, scroll:', '''record.frames.push({ phase: record.frames.length, pageY: window.scrollY, visualTop: window.visualViewport?.offsetTop, visualHeight: window.visualViewport?.height, innerHeight: window.innerHeight, rootHeight: document.documentElement.clientHeight, cssTop: getComputedStyle(this).top, cssHeight: getComputedStyle(this).height, bodyTop: document.body.style.top, viewportVar: this.style.getPropertyValue('--vision-viewport-top'), focused: document.activeElement?.tagName, y: b.y, height: b.height, scroll:''')
+          s += '''\n
+test.afterEach(async ({ page }, info) => {
+  mkdirSync('test-results/opening-probe', { recursive: true });
+  const trace = await page.evaluate(() => (window as typeof window & { __visionOpenings?: unknown }).__visionOpenings);
+  writeFileSync(`test-results/opening-probe/trace-${info.project.name}.json`, JSON.stringify({ source: 'fc71af9f678d214f5e2e500b18375e8121ed569a', trace }, null, 2));
+  await page.screenshot({ path: `test-results/opening-probe/screen-${info.project.name}.png` });
+});
+''';p.write_text(s)
+          PY
+          set +e
+          PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/opening-probe/results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-polish.spec.ts --grep 'opening prepares viewport' --reporter=line,json > opening-probe.log 2>&1
+          code=$?
+          cat opening-probe.log
+          echo "$code" > opening-probe.exit
+          test -f test-results/opening-probe/results.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-opening-probe
+          path: |
+            test-results/opening-probe/
+            opening-probe.log
+            opening-probe.exit
+          retention-days: 3

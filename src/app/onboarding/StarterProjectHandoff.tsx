@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { CardDisclosure, EditorCard } from '@/shared/components/RuntimeConnection/EditorCard.tsx';
 import { EditorCardLayer } from '@/shared/components/RuntimeConnection/EditorCardLayer.tsx';
-import { setUpGenerationInstructions, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
+import { SET_UP_GENERATION_SENTENCE, setUpGenerationInstructions, RUNTIME_CONNECTION_COPY } from '@/shared/components/RuntimeConnection/copy.ts';
 import { useRuntimeRequestWait } from '@/integrations/runtime/useRuntimeRequestWait.ts';
 import { prepareStarterProject, type StarterProjectSelection } from './prepareStarterProject.ts';
 import { CopyFallback, useCopyAction } from '@/shared/components/RuntimeConnection/CopyInstallCommand.tsx';
@@ -96,7 +96,7 @@ export function StarterProjectHandoff({ onReady, onContinueWithoutProject }: {
         </div>}
         <section className="mt-4 rounded-xl border border-border/70 bg-muted/30 p-4 text-left">
           <h2 className="font-medium">Set up image generation</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Ask your agent to set up generation on this computer.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{SET_UP_GENERATION_SENTENCE}</p>
           <Button className="mt-3 h-10 w-full rounded-xl" variant="outline" onClick={copyGenerationInstructions}>
             {generationCopy.status === 'copied' ? RUNTIME_CONNECTION_COPY.agent.copied : RUNTIME_CONNECTION_COPY.agent.copy}
           </Button>

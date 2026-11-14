@@ -3,7 +3,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StarterProjectHandoff, PENDING_STARTER_PROJECT_KEY } from './StarterProjectHandoff.tsx';
 import { prepareStarterProject, type StarterProjectSelection } from './prepareStarterProject.ts';
-import { RUNTIME_CONNECTION_COPY, setUpGenerationInstructions } from '@/shared/components/RuntimeConnection/copy.ts';
+import { RUNTIME_CONNECTION_COPY, SET_UP_GENERATION_SENTENCE, setUpGenerationInstructions } from '@/shared/components/RuntimeConnection/copy.ts';
 
 vi.mock('./prepareStarterProject.ts', () => ({ prepareStarterProject: vi.fn() }));
 const selection = { projectId: 'project', timelineId: 'main' };
@@ -18,6 +18,8 @@ describe('StarterProjectHandoff', () => {
     vi.mocked(prepareStarterProject).mockReturnValue(new Promise(() => {}));
     render(<StarterProjectHandoff onReady={vi.fn()} />);
     expect(screen.getByRole('heading', { name: 'Set up image generation' })).toBeInTheDocument();
+    const card = screen.getByRole('heading', { name: 'Set up image generation' }).closest('section')!;
+    expect(card.querySelector('p')).toHaveTextContent(SET_UP_GENERATION_SENTENCE);
     fireEvent.click(screen.getByRole('button', { name: 'Copy for your agent' }));
     await waitFor(() => expect(navigator.clipboard.writeText).toHaveBeenCalledWith(setUpGenerationInstructions()));
     expect(await screen.findByRole('button', { name: 'Copied. Paste them into your agent.' })).toBeInTheDocument();

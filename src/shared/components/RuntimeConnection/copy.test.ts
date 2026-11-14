@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { agentInstructions, autostartOffAgentBrief, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, setUpGenerationInstructions, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
+import { agentInstructions, autostartOffAgentBrief, ASTRID_COMMANDS, describeFailure, DIAGNOSTICS_FALLBACK_COPY, healthCheckCommand, installCommand, localSetupInstructions, localSetupSteps, LOCAL_SETUP, refusedAgentInstructions, RUNTIME_CONNECTION_COPY, SET_UP_GENERATION_SENTENCE, setUpGenerationInstructions, withOrigin, RECOMMENDED_SETUP_CHOICES } from './copy.ts';
 import fixture from './installArgv.fixture.json';
 
 const setupGuideUrl = 'https://github.com/banodoco/astrid-agent/blob/main/docs/setup/SKILL.md';
@@ -159,10 +159,11 @@ describe('update command by surface', () => {
 });
 
 describe('onboarding instructions', () => {
-  it('names the installed generation skill and its setup section', () => {
+  it('ends the generation brief at the one hand-off sentence, after the astrid-setup pointer', () => {
     const text = setUpGenerationInstructions();
-    expect(text).toContain('generation');
-    expect(text).toContain('https://github.com/banodoco/astrid-agent/blob/main/astrid/packs/generation/docs/SKILL.md#set-up-my-generation');
+    expect(SET_UP_GENERATION_SENTENCE).toBe('Ask your agent: set up my generation with the astrid-setup skill.');
+    expect(text.split('\n')).toEqual([`Read the \`astrid-setup\` skill: ${setupGuideUrl}`, SET_UP_GENERATION_SENTENCE]);
+    expect(text.endsWith(SET_UP_GENERATION_SENTENCE)).toBe(true);
     expect(text).not.toContain('Setup choices:');
   });
 
@@ -300,7 +301,7 @@ describe('fully local brief for a set-up user', () => {
     vi.spyOn(navigator, 'platform', 'get').mockReturnValue('MacIntel');
     vi.spyOn(navigator, 'userAgent', 'get').mockReturnValue('Macintosh');
     const text = localSetupInstructions({ autostart: false, command: true, skills: false, skillCopies: true }, true);
-    expect(text).toContain(`Run this official installer command: \`${ASTRID_COMMANDS.macLinux}\``);
+    expect(text).toContain(`The official installer command is: \`${ASTRID_COMMANDS.macLinux}\``);
     expect(text).not.toMatch(/--(autostart|command|skills|skill-copies|yes)/);
     expect(text).not.toContain('Setup choices:');
   });

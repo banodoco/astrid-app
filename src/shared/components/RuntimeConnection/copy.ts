@@ -121,10 +121,6 @@ export const PINOKIO_UPDATE_INSTRUCTION = 'Update in Pinokio';
 export const ASTRID_REPO_URL = 'https://github.com/banodoco/astrid-app';
 const LOCAL_SETUP_DIRECTORY = 'astrid-app';
 
-/** A short agent handoff for setting up image generation with the installed skill. */
-export function setUpGenerationInstructions(): string {
-  return 'Please use the installed generation skill to set up image generation. Follow “Set up my generation” here: https://github.com/banodoco/astrid-agent/blob/main/astrid/packs/generation/docs/SKILL.md#set-up-my-generation';
-}
 
 /** The fully local setup: the editor's source, how to start it, and where it serves. */
 export const LOCAL_SETUP = {
@@ -306,6 +302,17 @@ export function installCommand(mode: CommandMode, choices?: SetupChoices, explic
 
 const SETUP_GUIDE_URL = 'https://github.com/banodoco/astrid-agent/blob/main/docs/setup/SKILL.md';
 export const SETUP_SKILL_POINTER = `Read the \`astrid-setup\` skill: ${SETUP_GUIDE_URL}`;
+
+/**
+ * The hand-off sentence every door ends at (Plan 20 P4.8). The setup skill owns it; the installer's
+ * success output, the README banner, the Pinokio README and this card quote it verbatim.
+ */
+export const SET_UP_GENERATION_SENTENCE = 'Ask your agent: set up my generation with the astrid-setup skill.';
+
+/** The "Set up generation" card's brief: where the skill is, then the shared sentence, last. */
+export function setUpGenerationInstructions(): string {
+  return [SETUP_SKILL_POINTER, SET_UP_GENERATION_SENTENCE].join('\n');
+}
 
 /** The two ways to update, since this page can't tell an installer install from source checkouts. */
 export const UPDATE_ROUTES = {

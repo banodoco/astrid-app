@@ -1,0 +1,35 @@
+name: Align retained principle surface assertions
+on:
+  push:
+    branches: [fix/vision-polish-opening-20261114]
+    paths: [.github/workflows/vision-colour-contract.yml]
+permissions:
+  contents: write
+jobs:
+  apply:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-polish-opening-20261114
+      - name: Preserve hover assertions with the requested tinted surface
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-hierarchy.spec.ts');s=p.read_text()
+          old="  expect(await cards.first().evaluate(el => getComputedStyle(el).backgroundColor))\n    .toBe('rgba(0, 0, 0, 0)');"
+          assert s.count(old)==1
+          s=s.replace(old,"  expect(await cards.first().evaluate(el => getComputedStyle(el).backgroundColor))\n    .not.toBe('rgba(0, 0, 0, 0)');")
+          s=s.replace('principle cards use four reserved sigil colors, transparent panels and border-only hover feedback','principle cards use four reserved sigil colors, tinted panels and border-only hover feedback')
+          p.write_text(s)
+          p=Path('tests/e2e/public-astrid-vision-sigils-nav.spec.ts');s=p.read_text()
+          old='the joined principle panels and corner arrows never gain light fills, even on hover in dusk'
+          assert s.count(old)==1
+          p.write_text(s.replace(old,'principle panels retain their distinct tints and corner arrows stay transparent through dusk hover'))
+          PY
+          git diff --check
+          git config user.name 'POM'
+          git config user.email 'peter@omalley.io'
+          git add tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts
+          git commit -m 'test(vision): preserve surface and hover coverage for tinted principle cards'
+          git push origin HEAD:fix/vision-polish-opening-20261114

@@ -19,57 +19,62 @@ async function hero(page: Page) {
 }
 
 for (const width of [390, 1440]) {
-  test(`opening every popup keeps the header and background stationary at ${width}px`, async ({ page, request }, info) => {
-    const response = await request.get(FEED); expect(response.ok()).toBe(true);
-    const feed = await response.json() as PublicVisionContent;
-    await page.route(FEED, route => route.fulfill({ json: feed }));
-    await page.setViewportSize({ width, height: 844 });
-    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
-    await expect(page.locator('.astrid-vision')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
-    await page.evaluate(() => document.fonts.ready);
-    const trace = [];
-    for (const kind of ['pillar', 'principle', 'gaps', 'projects']) {
-      const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').last().getByRole('button')
-        : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').last().getByRole('button')
-        : page.getByRole('button', { name: 'See all ' + kind, exact: true });
-      await opener.scrollIntoViewIfNeeded();
-      await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
-      await page.evaluate(() => {
-        const read = () => {
-          const header = document.querySelector<HTMLElement>('.astrid-vision-bar')!;
-          const box = header.getBoundingClientRect();
-          const main = document.querySelector<HTMLElement>('.astrid-vision')!;
-          return { y: box.y, x: box.x, width: box.width, height: box.height,
-            opacity: getComputedStyle(header).opacity, visibility: getComputedStyle(header).visibility,
-            colour: getComputedStyle(main).backgroundColor,
-            condensed: header.hasAttribute('data-condensed') };
-        };
-        const state = window as unknown as { headerTrace: ReturnType<typeof read>[] };
-        document.addEventListener('pointerdown', () => {
-          state.headerTrace = [read()];
-          let remaining = 24;
-          const sample = () => { state.headerTrace.push(read()); if (--remaining) requestAnimationFrame(sample); };
-          requestAnimationFrame(sample);
-        }, { once: true, capture: true });
-      });
-      await opener.click();
-      const dialog = page.getByRole('dialog');
-      await expect(dialog).toHaveAttribute('data-ready', 'true');
-      await expect.poll(() => page.evaluate(() => (window as unknown as { headerTrace: unknown[] }).headerTrace.length), { timeout: 20000 }).toBe(25);
-      const samples = await page.evaluate(() => (window as unknown as { headerTrace: { y: number; x: number; width: number; height: number; opacity: string; visibility: string; colour: string; condensed: boolean }[] }).headerTrace);
-      trace.push({ kind, samples });
-      record(`header-continuity-${info.project.name}-${width}`, { source: feed.source, trace });
-      const start = samples[0];
-      expect.soft(Math.max(...samples.map(sample => Math.abs(sample.y - start.y))), kind + ' header Y drift').toBeLessThan(1);
-      expect.soft(samples.every(sample => sample.visibility === 'visible' && sample.opacity === '1')).toBe(true);
-      expect.soft(samples.every(sample => sample.colour === start.colour && sample.condensed === start.condensed)).toBe(true);
-      await page.screenshot({ path: `${folder}/header-behind-${kind}-${info.project.name}-${width}.png` });
-      await page.keyboard.press('Escape');
-      await expect(dialog).toHaveCount(0);
-      await expect(page.locator('[data-vision-header-space]')).toHaveCount(0);
-      expect.soft(await page.locator('.astrid-vision-bar').evaluate(node => node.getBoundingClientRect().y)).toBeCloseTo(start.y, 0);
-    }
+  test.describe(`header continuity at ${width}px`, () => {
+    // A desktop-sized WebKit window should not retain an iPhone's 3x raster
+    // and mobile screen. Phone coverage keeps the project's real device profile.
+    if (width === 1440) test.use({ isMobile: false, deviceScaleFactor: 1, hasTouch: false });
+    test(`opening every popup keeps the header and background stationary at ${width}px`, async ({ page, request }, info) => {
+      const response = await request.get(FEED); expect(response.ok()).toBe(true);
+      const feed = await response.json() as PublicVisionContent;
+      await page.route(FEED, route => route.fulfill({ json: feed }));
+      await page.setViewportSize({ width, height: 844 });
+      await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('.astrid-vision')).toBeVisible({ timeout: 20000 });
+      await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+      await page.evaluate(() => document.fonts.ready);
+      const trace = [];
+      for (const kind of ['pillar', 'principle', 'gaps', 'projects']) {
+        const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').last().getByRole('button')
+          : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').last().getByRole('button')
+          : page.getByRole('button', { name: 'See all ' + kind, exact: true });
+        await opener.scrollIntoViewIfNeeded();
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await page.evaluate(() => {
+          const read = () => {
+            const header = document.querySelector<HTMLElement>('.astrid-vision-bar')!;
+            const box = header.getBoundingClientRect();
+            const main = document.querySelector<HTMLElement>('.astrid-vision')!;
+            return { y: box.y, x: box.x, width: box.width, height: box.height,
+              opacity: getComputedStyle(header).opacity, visibility: getComputedStyle(header).visibility,
+              colour: getComputedStyle(main).backgroundColor,
+              condensed: header.hasAttribute('data-condensed') };
+          };
+          const state = window as unknown as { headerTrace: ReturnType<typeof read>[] };
+          document.addEventListener('pointerdown', () => {
+            state.headerTrace = [read()];
+            let remaining = 24;
+            const sample = () => { state.headerTrace.push(read()); if (--remaining) requestAnimationFrame(sample); };
+            requestAnimationFrame(sample);
+          }, { once: true, capture: true });
+        });
+        await opener.click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog).toHaveAttribute('data-ready', 'true');
+        await expect.poll(() => page.evaluate(() => (window as unknown as { headerTrace: unknown[] }).headerTrace.length), { timeout: 20000 }).toBe(25);
+        const samples = await page.evaluate(() => (window as unknown as { headerTrace: { y: number; x: number; width: number; height: number; opacity: string; visibility: string; colour: string; condensed: boolean }[] }).headerTrace);
+        trace.push({ kind, samples });
+        record(`header-continuity-${info.project.name}-${width}`, { source: feed.source, trace });
+        const start = samples[0];
+        expect.soft(Math.max(...samples.map(sample => Math.abs(sample.y - start.y))), kind + ' header Y drift').toBeLessThan(1);
+        expect.soft(samples.every(sample => sample.visibility === 'visible' && sample.opacity === '1')).toBe(true);
+        expect.soft(samples.every(sample => sample.colour === start.colour && sample.condensed === start.condensed)).toBe(true);
+        await page.screenshot({ path: `${folder}/header-behind-${kind}-${info.project.name}-${width}.png` });
+        await page.keyboard.press('Escape');
+        await expect(dialog).toHaveCount(0);
+        await expect(page.locator('[data-vision-header-space]')).toHaveCount(0);
+        expect.soft(await page.locator('.astrid-vision-bar').evaluate(node => node.getBoundingClientRect().y)).toBeCloseTo(start.y, 0);
+      }
+    });
   });
 }
 

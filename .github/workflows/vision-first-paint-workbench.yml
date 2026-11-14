@@ -1,22 +1,63 @@
-name: Vision first-paint source context
+name: Vision first-paint baseline and repair
 on:
   push:
     branches: [fix/vision-mobile-first-paint-20261114]
     paths: [.github/workflows/vision-first-paint-workbench.yml]
 permissions:
-  contents: read
+  contents: write
 jobs:
-  source:
+  repair:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - name: Export source context
-        run: |
-          mkdir -p /tmp/vision-context
-          git rev-parse HEAD > /tmp/vision-context/source-head.txt
-          tar -cf /tmp/vision-context/source.tar src/pages/Home src/shared/components/PixelUnderline* src/tools/video-editor/tour/card/TourCard* tests/e2e/public-astrid-vision* tests/fixtures/public-vision.ts playwright*.ts .github/workflows/public-vision.yml package.json package-lock.json config/testing AGENTS.md
-      - uses: actions/upload-artifact@v4
         with:
-          name: vision-first-paint-source
-          path: /tmp/vision-context
-          retention-days: 3
+          ref: fix/vision-mobile-first-paint-20261114
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Confirm frozen product source
+        run: |
+          git diff --exit-code c07f5fc9b48c98bfac19f95f29aa0e9f18169646 -- src .github/workflows/public-vision.yml playwright.vision.config.ts
+      - name: Install baseline test dependencies
+        run: npm ci --legacy-peer-deps
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+      - name: Reproduce the three new defects on unchanged product source
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: /tmp/vision-baseline/results.json
+        run: |
+          mkdir -p /tmp/vision-baseline
+          set +e
+          npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-first-paint.spec.ts --project=chromium-desktop --grep 'already-visible pillars|mobile sky keeps|bottom catalogs' --workers=1 --retries=0 --reporter=line,json > /tmp/vision-baseline/raw.log 2>&1
+          result=$?
+          echo "$result" > /tmp/vision-baseline/exit-code.txt
+          cat /tmp/vision-baseline/raw.log
+          test "$result" -eq 1
+      - name: Apply only the scoped source repair
+        run: |
+          python .vision-first-paint-apply.py
+          rm .vision-first-paint-apply.py .vision-first-paint.patch.b64
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src tests .github/workflows/public-vision.yml playwright.vision.config.ts .vision-first-paint-apply.py .vision-first-paint.patch.b64
+          git commit -m 'fix(vision): stabilize mobile sky, initial reveals and catalog opening'
+          git push origin HEAD:fix/vision-mobile-first-paint-20261114
+          mkdir -p /tmp/vision-candidate
+          git rev-parse HEAD > /tmp/vision-candidate/source-head.txt
+          tar -cf /tmp/vision-candidate/source.tar src/pages/Home src/shared/components/PixelUnderline* tests/e2e/public-astrid-vision* playwright.vision.config.ts .github/workflows/public-vision.yml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-first-paint-baseline
+          path: /tmp/vision-baseline
+          retention-days: 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-first-paint-candidate
+          path: /tmp/vision-candidate
+          retention-days: 7

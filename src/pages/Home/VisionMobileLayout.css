@@ -94,6 +94,9 @@
     position: absolute; right: 8px; top: 0; bottom: 0; transform: none;
     grid-area: auto; align-self: stretch; justify-self: auto;
     width: auto; height: 100%; aspect-ratio: 1; opacity: .13; z-index: -1;
+    /* Contain the shifted SVG viewport so its empty edge cannot widen the card.
+       The optical offsets and common full-height frame remain unchanged. */
+    overflow: clip;
     pointer-events: none;
   }
   .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner {

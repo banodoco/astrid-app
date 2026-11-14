@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm ci:*)",
+      "Bash(npm test:*)",
+      "Bash(npm run test:sdk-boundary:*)",
+      "Bash(npm run test:e2e:timeline:*)",
+      "Bash(npm run test:e2e:chrome-export:*)",
+      "Bash(npm run test:e2e:extension-accessibility:*)",
+      "Bash(npm run test:e2e:extension-visual:*)",
+      "Bash(npm run test:e2e:extension-cross-browser:*)",
+      "Bash(npx playwright install:*)",
+      "Bash(npx playwright test:*)"
+    ]
+  }
+}

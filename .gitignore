@@ -104,6 +104,8 @@ type_safety_review*.json
 localhost-*.log
 
 .claude/worktrees/
+.claude/*
+!.claude/settings.json
 
 this.env
 

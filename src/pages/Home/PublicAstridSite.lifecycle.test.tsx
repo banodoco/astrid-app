@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { StrictMode } from 'react';
+import { visionFixture } from '../../../tests/fixtures/public-vision';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublicAstridSite } from './PublicAstridSite';
@@ -110,6 +111,7 @@ async function mountedHome() {
 
 beforeEach(() => {
   vi.useFakeTimers();
+  vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify(visionFixture()), { status: 200 })));
   transitions = [];
   frames = new Map();
   queries = new Map();
@@ -149,6 +151,7 @@ afterEach(() => {
   delete (document as Document & { startViewTransition?: unknown }).startViewTransition;
   delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).showModal;
   delete (HTMLDialogElement.prototype as Partial<HTMLDialogElement>).close;
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
@@ -193,10 +196,18 @@ describe('public Site lifecycle and navigation ownership', () => {
       expect(screen.getAllByTestId('sky')).toHaveLength(1);
       expect(frames.size).toBe(0);
       const reads = vi.spyOn(home, 'getBoundingClientRect');
+      const visionReads = vi.spyOn(document.getElementById('astrid-vision-manifesto')!, 'getBoundingClientRect');
       fireEvent(window, new Event('resize'));
       await act(async () => { await vi.advanceTimersByTimeAsync(4_000); });
+      // Loaded Vision owns exactly one resize measurement. Prove it
+      // measures the active page, then leaves no recurring frames;
+      // retained Home must still perform no geometry work at all.
+      expect(frames.size).toBe(1);
+      await paint();
+      expect(visionReads).toHaveBeenCalled();
       expect(frames.size).toBe(0);
       expect(reads).not.toHaveBeenCalled();
+      visionReads.mockRestore();
       reads.mockRestore();
       expect(document.activeElement).toHaveClass('astrid-vision');
       expect(document.title).toBe(PUBLIC_ASTRID_SHARE_PAGES.vision.title);

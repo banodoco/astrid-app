@@ -69,12 +69,12 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(nudge).toBeVisible();
     }
 
-    test('A: nothing configured locks the composer and reports all four agents honestly and offers another', async ({ page }) => {
+    test('A: nothing configured locks the composer and reports all five agents honestly and offers another', async ({ page }) => {
       await open(page, 'A');
-      await expect(card(page).getByRole('option')).toHaveCount(5); // the four catalog agents plus "Another agent" (c77c8971f)
+      await expect(card(page).getByRole('option')).toHaveCount(6); // the five catalog agents plus "Another agent" (c77c8971f)
       await expect(card(page).getByRole('option', { name: /Another agent/ })).toBeVisible();
       await expect(card(page).getByRole('option', { name: /Astrid's agent/ })).toContainText('Set up');
-      for (const name of ['Claude Code', 'Codex', 'Hermes']) await expect(card(page).getByRole('option', { name: new RegExp(name) })).toContainText('Not installed');
+      for (const name of ['Claude Code', 'Codex', 'Hermes', 'DeepSeek Harness']) await expect(card(page).getByRole('option', { name: new RegExp(name) })).toContainText('Not installed');
       await expect(composer(page)).toBeDisabled();
     });
 

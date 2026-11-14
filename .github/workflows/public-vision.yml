@@ -3,6 +3,10 @@ name: Public vision content
 on:
   pull_request:
     paths:
+      - "src/pages/Home/PublicAstridSite.tsx"
+      - "src/pages/Home/PublicAstridSite.css"
+      - "src/pages/Home/PublicAstridSite.lifecycle.test.tsx"
+      - "src/pages/Home/publicAstridNavigation.ts"
       - "src/shared/components/PixelUnderline.tsx"
       - "src/shared/components/PixelUnderline.css"
       - "src/shared/components/PixelUnderline.test.tsx"
@@ -60,7 +64,7 @@ jobs:
       - name: Check production vision canary syntax
         run: node --check scripts/quality/check-public-vision-production.mjs
       - name: Check changed vision code
-        run: npx eslint src/shared/components/PixelUnderline.tsx src/tools/video-editor/tour/card/TourCard.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx src/pages/Home/VisionPrincipleSigil.tsx src/pages/Home/VisionSectionNav.tsx src/pages/Home/visionHierarchy.ts src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
+        run: npx eslint src/pages/Home/PublicAstridSite.tsx src/pages/Home/publicAstridNavigation.ts src/shared/components/PixelUnderline.tsx src/tools/video-editor/tour/card/TourCard.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx src/pages/Home/VisionPrincipleSigil.tsx src/pages/Home/VisionSectionNav.tsx src/pages/Home/visionHierarchy.ts src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
       - name: Preserve public page lifecycle and share metadata
         run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts
       - name: Verify shared pixel emphasis and tour feedback

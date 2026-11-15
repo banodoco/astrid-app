@@ -42,7 +42,7 @@ for (const width of [320, 390, 760, 1440]) {
       const gaps = new Set(groups.map(item => item.gap.id)).size;
       const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
       await expect(cards.nth(i).locator('.astrid-vision-subject-counts'))
-        .toHaveText(`${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
+        .toHaveText(`${hierarchy.aspirations.length} ${hierarchy.aspirations.length === 1 ? 'goal' : 'goals'} · ${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
       await expect(cards.nth(i).locator('h3')).toHaveText(pillar.title);
       await expect(cards.nth(i).locator(':scope > p')).toHaveText(pillar.descriptor);
       expect(await cards.nth(i).evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
@@ -160,7 +160,11 @@ async function expectReachableFrame(page: Page, width: number) {
   const before = closeBox!.y;
   await dialog.locator('.astrid-vision-details-scroll').evaluate(node => { node.scrollTop = node.scrollHeight; });
   expect(Math.abs((await close.boundingBox())!.y - before)).toBeLessThan(1);
-  expect(await dialog.evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  expect(await dialog.evaluate(dialog => {
+      const surfaces = Array.from(dialog.querySelectorAll<HTMLElement>('.astrid-vision-details-shell, .astrid-vision-details-scroll, .astrid-vision-details-scroll-inner'));
+      return surfaces.length === 3 && surfaces.every(surface => surface.scrollWidth <= surface.clientWidth + 1)
+        && document.documentElement.scrollWidth <= window.innerWidth + 1;
+    })).toBe(true);
 }
 
 for (const width of [320, 390]) {
@@ -193,7 +197,7 @@ for (const width of [320, 390]) {
       const gaps = new Set(groups.map(item => item.gap.id)).size;
       const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
       await expect(card.locator('.astrid-vision-subject-counts'))
-        .toHaveText(`${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
+        .toHaveText(`${hierarchy.aspirations.length} ${hierarchy.aspirations.length === 1 ? 'goal' : 'goals'} · ${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
       await expect(card.locator('h3')).toHaveText(principle.title);
       await expect(card.locator('.astrid-vision-principle-statement')).toHaveText(principle.statement!);
       const geometry = await card.evaluate(node => {
@@ -371,8 +375,20 @@ for (const width of [390, 1440]) {
         }
         // The overlay must not reserve a rail or change the underlying text width.
         const text = (await dialog.locator('.astrid-vision-details-scroll-inner').boundingBox())!;
-        expect(text.x).toBeLessThan((await previous.boundingBox())!.x + 44);
-        expect(text.x + text.width).toBeGreaterThan((await next.boundingBox())!.x);
+        if (await dialog.evaluate(node => node.hasAttribute('data-exterior-nav'))) {
+          const bounds = (await dialog.boundingBox())!;
+          const left = (await previous.boundingBox())!;
+          const right = (await next.boundingBox())!;
+          expect(left.x + left.width).toBeLessThan(bounds.x);
+          expect(right.x).toBeGreaterThan(bounds.x + bounds.width);
+          expect(left.x).toBeGreaterThanOrEqual(0);
+          expect(right.x + right.width).toBeLessThanOrEqual(width);
+          expect(text.x).toBeGreaterThan(bounds.x);
+          expect(text.x + text.width).toBeLessThan(bounds.x + bounds.width);
+        } else {
+          expect(text.x).toBeLessThan((await previous.boundingBox())!.x + 44);
+          expect(text.x + text.width).toBeGreaterThan((await next.boundingBox())!.x);
+        }
         if (index === 1) {
           mkdirSync(folder, { recursive: true });
           await page.screenshot({ path: `${folder}/real-floating-${kind}-${info.project.name}-${width}.png` });

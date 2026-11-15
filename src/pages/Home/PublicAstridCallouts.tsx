@@ -421,7 +421,7 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
   const phone = usePhoneLayout();
   const bodyIdPrefix = useId();
   const [openId, setOpenId] = useState<string | null>(null);
-  useEffect(() => { setOpenId(null); }, [audience, phone]);
+  useLayoutEffect(() => { setOpenId(null); }, [audience, phone]);
   useEffect(() => {
     if (!openId) return undefined;
     const onPointerDown = (event: PointerEvent) => {
@@ -1043,7 +1043,10 @@ export function PublicAstridCallouts({ stageRef, audience, reducedMotion, active
             else cardRefs.current.delete(callout.id);
           }}
         >
-          <div className="astrid-callout-content">
+          {/* Slots persist for the position/connector morph. Disclosure DOM belongs to
+              its subject: inheriting an outgoing grid-row transition gives another
+              slot a temporary expanded destination and a snap at the end. */}
+          <div key={callout.id} className="astrid-callout-content">
             <h2>
               <button
                 type="button"

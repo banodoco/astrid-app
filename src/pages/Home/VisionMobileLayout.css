@@ -138,13 +138,13 @@
 }
 .astrid-vision-details-previous { left: 8px; }
 .astrid-vision-details-next { right: 8px; }
-.astrid-vision-details-navigation { opacity: .36; border-width: 2px; box-shadow: none; }
+.astrid-vision-details-navigation { opacity: calc(.36 * var(--vision-open-progress, 0)); border-width: 2px; box-shadow: none; }
 .astrid-vision-details-navigation svg { stroke-width: 3; }
-.astrid-vision-details-navigation:disabled { opacity: .25; border-width: 1px; cursor: default; }
+.astrid-vision-details-navigation:disabled { opacity: calc(.25 * var(--vision-open-progress, 0)); border-width: 1px; cursor: default; }
 .astrid-vision-details-navigation:disabled svg { stroke-width: 1.5; }
-.astrid-vision-details-navigation:not(:disabled):focus-visible { opacity: .65; }
+.astrid-vision-details-navigation:not(:disabled):focus-visible { opacity: calc(.65 * var(--vision-open-progress, 0)); }
 @media (hover: hover) and (pointer: fine) {
-  .astrid-vision-details-navigation:not(:disabled):hover { opacity: .65; color: var(--astrid-accent); border-color: var(--astrid-accent); }
+  .astrid-vision-details-navigation:not(:disabled):hover { opacity: calc(.65 * var(--vision-open-progress, 0)); color: var(--astrid-accent); border-color: var(--astrid-accent); }
 }
 .astrid-vision-details-navigation:focus-visible { outline: 2px solid var(--astrid-accent); outline-offset: 2px; }
 .astrid-vision-details-scroll { overscroll-behavior: none; }
@@ -229,3 +229,11 @@
 
 /* The whole panel owns navigation, so wrapping titles and disclosures cannot move it. */
 .astrid-vision-details-shell { position: relative; }
+
+/* The reading surface keeps its width. Wide gutters carry the controls;
+   narrower windows keep the established unobtrusive overlay placement. */
+@media (min-width: 761px) {
+  .astrid-vision-details[data-exterior-nav] > .astrid-vision-details-previous { left: -60px; }
+  .astrid-vision-details[data-exterior-nav] > .astrid-vision-details-next { right: -60px; }
+}
+.astrid-vision-subject-counts > span:not([aria-hidden]) { white-space: nowrap; }

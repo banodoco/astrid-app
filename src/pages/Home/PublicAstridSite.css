@@ -80,16 +80,16 @@
 :root:has(:is(.astrid-public-site, .astrid-vision)) body { background-color: var(--astrid-root-paper, #f7f4ed); }
 
 /* Scrolled switches use one snapshot pair, not off-screen moving anchors. */
-:root[data-astrid-page-transition-style="crossfade"] :is(.astrid-public-site, .astrid-vision),
-:root[data-astrid-page-transition-style="crossfade"] :is(.astrid-public-site, .astrid-vision) * {
+:root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"]) :is(.astrid-public-site, .astrid-vision),
+:root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"]) :is(.astrid-public-site, .astrid-vision) * {
   view-transition-name: none !important;
 }
 @keyframes astrid-room-fade-in { from { opacity: 0; } }
-:root[data-astrid-page-transition-style="crossfade"]::view-transition-group(root) { animation: none; }
-:root[data-astrid-page-transition-style="crossfade"]::view-transition-old(root) {
+:root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"])::view-transition-group(root) { animation: none; }
+:root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"])::view-transition-old(root) {
   animation: none; opacity: 1; mix-blend-mode: normal;
 }
-:root[data-astrid-page-transition-style="crossfade"]::view-transition-new(root) {
+:root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"])::view-transition-new(root) {
   animation: astrid-room-fade-in 220ms ease-out both; mix-blend-mode: normal;
 }
 
@@ -111,4 +111,11 @@
     overflow: clip;
     overscroll-behavior-y: none;
   }
+}
+
+/* Keep just the visible mink shared on a scrolled desktop return. Retained
+   Home must not acquire the same name before the navigation commit. */
+:root[data-astrid-page-transition-style="brand"] .astrid-vision .astrid-vision-brand img,
+:root[data-astrid-page-transition-style="brand"] .astrid-public-site[data-astrid-lifecycle="active"] .astrid-brand-mink:not(.astrid-brand-mink-glint) {
+  view-transition-name: astrid-brand-mink !important;
 }

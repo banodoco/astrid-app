@@ -80,7 +80,9 @@ function SubjectCounts({ content, subject }: { content: PublicVisionContent; sub
   const groups = [...hierarchy.aspirations.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
   const gaps = new Set(groups.map(item => item.gap.id)).size;
   const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
+  const goals = hierarchy.aspirations.length;
   return <span className="astrid-vision-subject-counts">
+    <span>{goals} {goals === 1 ? 'goal' : 'goals'}</span><span aria-hidden="true"> · </span>
     <span>{gaps} {gaps === 1 ? 'gap' : 'gaps'}</span><span aria-hidden="true"> · </span>
     <span>{projects} {projects === 1 ? 'project' : 'projects'}</span>
   </span>;

@@ -1,6 +1,18 @@
 import { useLayoutEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 
+// Use actual gutters, not a guessed device breakpoint. These controls remain
+// in the native modal's top layer, including outside its visual surface.
+function placeDialogNavigation(dialog: HTMLDialogElement) {
+  if (!dialog.open) return;
+  const viewport = window.visualViewport;
+  const left = viewport?.offsetLeft ?? 0;
+  const right = left + (viewport?.width ?? window.innerWidth);
+  const box = dialog.getBoundingClientRect();
+  const room = Math.min(box.left - left, right - box.right);
+  dialog.toggleAttribute('data-exterior-nav', window.innerWidth > 760 && room >= 72);
+}
+
 export function VisionDialog({ title, eyebrow, identity, className = '', children, onClose, previous, next }: {
   title: string;
   eyebrow: string;
@@ -30,18 +42,23 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
     let frame = 0;
     const update = () => {
       frame = 0;
-      // Do not undo the user's pinch zoom by continually shrinking the dialog.
+      // Keep navigation reachable during viewport changes, including zoom.
+      // Only height/position tracking must yield to the user's pinch zoom.
+      placeDialogNavigation(dialog);
       if (viewport && viewport.scale > 1.05) return;
       dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
       dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
     };
     const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };
     update();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
+    observer?.observe(dialog);
     viewport?.addEventListener('resize', schedule);
     viewport?.addEventListener('scroll', schedule);
     window.addEventListener('resize', schedule);
     return () => {
       if (frame) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
       viewport?.removeEventListener('resize', schedule);
       viewport?.removeEventListener('scroll', schedule);
       window.removeEventListener('resize', schedule);
@@ -151,6 +168,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
       // Native focusing chooses the heading directly, not the footer X first.
       titleRef.current?.setAttribute('autofocus', '');
       dialog.showModal();
+      placeDialogNavigation(dialog);
       if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
       // Let the native top layer and any toolbar resize settle before revealing
       // the inner surface. Never animate position/height or re-open the modal. The bounded
@@ -302,6 +320,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
           <div className="astrid-vision-details-scroll-fade astrid-vision-details-scroll-fade--bottom"
             data-visible={scrollEdges.bottom || undefined} aria-hidden="true" />
         </div>
+      </div>
           {(previous || next) && <>
             <button type="button" className="astrid-vision-details-navigation astrid-vision-details-previous"
               disabled={!previous} aria-label={previous?.label ?? 'Previous item'} title={previous?.label}
@@ -314,7 +333,6 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
               <ChevronRight size={24} aria-hidden="true" />
             </button>
           </>}
-      </div>
     </dialog>
   );
 }

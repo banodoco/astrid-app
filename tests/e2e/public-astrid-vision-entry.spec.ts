@@ -542,3 +542,146 @@ test('shared popup reveal respects reduced motion and cancels on early close', a
   await page.keyboard.press('Escape');
   await expect(dialog).toHaveCount(0);
 });
+
+// Follow-up feedback: closed capability chips, scrolled brand return, exterior
+// navigation and explicit Goals counts. Sample motion, not just its end state.
+test.describe('feedback follow-up desktop navigation', () => {
+  test.use({ isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
+  test('scrolled Vision return keeps a visible shared mink without shifting Home', async ({ page, request }, info) => {
+    const response = await request.get(FEED); expect(response.ok()).toBe(true);
+    const feed = await response.json() as PublicVisionContent;
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto('/home', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('link', { name: 'Vision', exact: true })).toBeVisible({ timeout: 30000 });
+    await page.getByRole('link', { name: 'Vision', exact: true }).click();
+    await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+    await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+    await page.evaluate(() => window.scrollTo({ top: 1000, behavior: 'instant' }));
+    await page.waitForTimeout(400);
+    await page.evaluate(() => {
+      type Native = { ready: Promise<void>; finished: Promise<void> };
+      const doc = document as unknown as { startViewTransition: (update: () => void | Promise<void>) => Native };
+      const original = doc.startViewTransition.bind(doc);
+      const state = window as unknown as { brandTrace: Record<string, unknown> };
+      const trace: Record<string, unknown> = { frames: [], done: false };
+      state.brandTrace = trace;
+      doc.startViewTransition = update => {
+        const old = document.querySelector<HTMLElement>('.astrid-vision-brand img')!;
+        trace.style = document.documentElement.dataset.astridPageTransitionStyle;
+        trace.oldName = getComputedStyle(old).viewTransitionName;
+        trace.oldBox = old.getBoundingClientRect().toJSON();
+        const transition = original(async () => {
+          await update();
+          const next = document.querySelector<HTMLElement>('.astrid-public-site[data-astrid-lifecycle="active"] .astrid-brand-mink:not(.astrid-brand-mink-glint)')!;
+          trace.newName = getComputedStyle(next).viewTransitionName;
+          trace.newBox = next.getBoundingClientRect().toJSON();
+        });
+        void transition.ready.then(() => {
+          trace.ready = true;
+          const sample = () => {
+            const css = getComputedStyle(document.documentElement, '::view-transition-group(astrid-brand-mink)');
+            (trace.frames as unknown[]).push({ scroll: scrollY, transform: css.transform, duration: css.animationDuration,
+              homeTop: document.querySelector('.astrid-public-site')!.getBoundingClientRect().top });
+            if (!trace.done) requestAnimationFrame(sample);
+          };
+          sample();
+        }, error => { trace.error = String(error); });
+        void transition.finished.then(() => { trace.done = true; }, error => { trace.done = true; trace.error = String(error); });
+        return transition;
+      };
+    });
+    await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => (window as unknown as { brandTrace: { done: boolean } }).brandTrace.done), { timeout: 15000 }).toBe(true);
+    const trace = await page.evaluate(() => (window as unknown as { brandTrace: { style: string; oldName: string; newName: string; ready: boolean; error?: string; oldBox: { y: number; height: number }; newBox: { y: number; height: number }; frames: { scroll: number; homeTop: number; transform: string; duration: string }[] } }).brandTrace);
+    record(`feedback-scrolled-brand-${info.project.name}`, trace);
+    expect.soft(trace.style).toBe('brand');
+    expect.soft(trace.oldName).toBe('astrid-brand-mink');
+    expect.soft(trace.newName).toBe('astrid-brand-mink');
+    expect.soft(trace.ready).toBe(true);
+    expect.soft(trace.error).toBeUndefined();
+    expect.soft(trace.oldBox.height).toBeGreaterThan(1);
+    expect.soft(trace.newBox.height).toBeGreaterThan(1);
+    expect.soft(trace.oldBox.y).toBeGreaterThanOrEqual(0);
+    expect.soft(trace.newBox.y).toBeGreaterThanOrEqual(0);
+    expect.soft(trace.frames.length).toBeGreaterThan(5);
+    expect.soft(new Set(trace.frames.map(frame => frame.transform)).size, 'mink travels through intermediate positions').toBeGreaterThan(3);
+    expect.soft(trace.frames.some(frame => frame.duration.split(',').some(value => parseFloat(value) > .5))).toBe(true);
+    expect.soft(trace.frames.every(frame => frame.scroll === 0)).toBe(true);
+    expect.soft(Math.max(...trace.frames.map(frame => frame.homeTop)) - Math.min(...trace.frames.map(frame => frame.homeTop))).toBeLessThan(1);
+    await page.screenshot({ path: `${folder}/feedback-scrolled-home-${info.project.name}.png` });
+  });
+});
+
+test('feedback follow-up arrows use free gutters and fall back on narrow screens', async ({ page, request }, info) => {
+  const response = await request.get(FEED); expect(response.ok()).toBe(true);
+  const feed = await response.json() as PublicVisionContent;
+  await page.route(FEED, route => route.fulfill({ json: feed }));
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  await page.locator('.astrid-vision-principles > li').first().getByRole('button').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toHaveAttribute('data-ready', 'true');
+  const records = [];
+  for (const width of [1440, 920, 820, 390, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.waitForTimeout(150);
+    const rects = await dialog.evaluate(node => {
+      const rect = (element: Element) => element.getBoundingClientRect().toJSON();
+      return { dialog: rect(node), previous: rect(node.querySelector('.astrid-vision-details-previous')!),
+        next: rect(node.querySelector('.astrid-vision-details-next')!), exterior: node.hasAttribute('data-exterior-nav'),
+        textWidth: node.querySelector('.astrid-vision-details-scroll')!.clientWidth };
+    });
+    records.push({ width, ...rects });
+    const wide = width >= 920;
+    expect.soft(rects.exterior).toBe(wide);
+    if (wide) {
+      expect.soft(rects.previous.right).toBeLessThan(rects.dialog.left - 8);
+      expect.soft(rects.next.left).toBeGreaterThan(rects.dialog.right + 8);
+    } else {
+      expect.soft(rects.previous.left).toBeGreaterThanOrEqual(rects.dialog.left);
+      expect.soft(rects.next.right).toBeLessThanOrEqual(rects.dialog.right);
+    }
+    expect.soft(rects.previous.left).toBeGreaterThanOrEqual(0);
+    expect.soft(rects.next.right).toBeLessThanOrEqual(width);
+    expect.soft(Math.abs(rects.previous.y - rects.next.y)).toBeLessThan(1);
+  }
+  record(`feedback-arrow-gutters-${info.project.name}`, records);
+  await dialog.locator('.astrid-vision-details-next').click();
+  await expect(dialog).toHaveAccessibleName(feed.pillars[1].title);
+  await dialog.locator('.astrid-vision-details-previous').click();
+  await expect(dialog).toHaveAccessibleName(feed.pillars[0].title);
+  await expect(dialog.locator('.astrid-vision-details-previous')).toBeDisabled();
+  await page.screenshot({ path: `${folder}/feedback-exterior-arrows-${info.project.name}.png` });
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('feedback follow-up every pillar and principle counts Goals and labels the popup', async ({ page, request }, info) => {
+  const response = await request.get(FEED); expect(response.ok()).toBe(true);
+  const feed = await response.json() as PublicVisionContent;
+  await page.route(FEED, route => route.fulfill({ json: feed }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  for (const kind of ['pillar', 'principle'] as const) {
+    const entries = kind === 'pillar' ? feed.pillars : feed.principles;
+    const cards = page.locator(kind === 'pillar' ? '.astrid-vision-principles > li' : '.astrid-vision-standards-list > li');
+    await expect(cards).toHaveCount(entries.length);
+    for (const [index, entry] of entries.entries()) {
+      const count = entry.characteristics?.length ?? 0;
+      await expect.soft(cards.nth(index).locator('.astrid-vision-subject-counts')).toContainText(`${count} ${count === 1 ? 'goal' : 'goals'}`);
+      expect.soft(await cards.nth(index).evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+    }
+    await cards.first().getByRole('button').click();
+    const dialog = page.getByRole('dialog');
+    await expect.soft(dialog.getByRole('region', { name: 'Goals', exact: true })).toBeVisible();
+    await expect.soft(dialog.getByRole('heading', { name: 'Goals', exact: true })).toBeVisible();
+    await expect(dialog.locator('.astrid-vision-details-aspiration')).toHaveCount(entries[0].characteristics!.length);
+    await page.keyboard.press('Escape');
+  }
+  await page.locator('.astrid-vision-standards-list').scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${folder}/feedback-goals-counts-${info.project.name}.png` });
+});

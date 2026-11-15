@@ -1,0 +1,73 @@
+name: Trace WebKit popup focus ownership
+on:
+  push:
+    branches: [fix/vision-entry-header-20261114]
+    paths: [.github/workflows/vision-focus-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: 9893611298a5174ad62afac680dbf1404a842903
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps webkit
+      - name: Instrument only the diagnostic test copy
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts')
+          s=p.read_text()
+          s += '''
+          test.beforeEach(async ({ page }) => {
+            await page.addInitScript(() => {
+              const state = window as unknown as { focusTrace: unknown[] };
+              state.focusTrace = [];
+              const label = (node: EventTarget | null) => node instanceof Element
+                ? node.tagName + ':' + (node.getAttribute('aria-label') || node.id || node.className) : String(node);
+              const record = (event: string, target: EventTarget | null) => {
+                state.focusTrace.push({ time: performance.now(), event, target: label(target),
+                  active: label(document.activeElement), y: scrollY,
+                  title: document.querySelector('dialog h2')?.textContent,
+                  open: document.querySelector('dialog')?.hasAttribute('open') });
+              };
+              for (const type of ['focusin','focusout','keydown','keyup','click','cancel','close']) {
+                document.addEventListener(type, event => record(type + ('key' in event ? ':' + (event as KeyboardEvent).key : ''), event.target), true);
+              }
+              const focus = HTMLElement.prototype.focus;
+              HTMLElement.prototype.focus = function(options) {
+                record('focus-call-before', this); focus.call(this, options); record('focus-call-after', this);
+              };
+              const show = HTMLDialogElement.prototype.showModal;
+              HTMLDialogElement.prototype.showModal = function() {
+                record('show-before', this); show.call(this); record('show-after', this);
+              };
+            });
+          });
+          test.afterEach(async ({ page }, info) => {
+            mkdirSync(folder, { recursive: true });
+            const trace = await page.evaluate(() => (window as unknown as { focusTrace: unknown[] }).focusTrace);
+            writeFileSync(`${folder}/focus-${info.project.name}-${info.repeatEachIndex}.json`, JSON.stringify(trace, null, 2));
+          });
+          '''
+          p.write_text(s)
+          PY
+      - name: Repeat exact retained keyboard case with focus tracing
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/focus-results.json
+        run: npx playwright test --config playwright.vision.config.ts --grep 'next subject cycles.*1440px' --repeat-each=5 --reporter=line,json --output=test-results/focus-traces
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-focus-probe
+          path: |
+            test-results/vision-captures/
+            test-results/focus-traces/
+          retention-days: 7

@@ -194,14 +194,30 @@
 .astrid-vision .astrid-vision-standards-list > li :is(.astrid-vision-principle-statement, .astrid-vision-markdown, .astrid-vision-markdown p) { color: var(--principle-copy); }
 .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner { color: var(--principle-copy); opacity: 1; }
 
-/* Geometry and focus settle while the native modal is transparent, then only
-   its opacity changes. No second opening, slide, scale or content reveal. */
-.astrid-vision-details { opacity: 0; transition: opacity 120ms ease-out; }
-.astrid-vision-details[data-ready="true"] { opacity: 1; }
-.astrid-vision-details::backdrop { opacity: 0; transition: opacity 120ms ease-out; }
-.astrid-vision-details[data-ready="true"]::backdrop { opacity: 1; }
+/* The native top layer remains opaque; only its ordinary inner surface fades.
+   Both surface opacity and backdrop alpha consume one frame-owned progress.
+   Separate CSS/compositor timelines can rewind during WebKit modal opening.
+   The transparent outer border preserves the existing measured geometry. */
+.astrid-vision-details {
+  overflow: visible; border-color: transparent; background: transparent;
+  box-shadow: none; opacity: 1; transition: none;
+}
+.astrid-vision-details-shell {
+  overflow: hidden; border-radius: inherit; background: var(--astrid-paper);
+  outline: 1px solid var(--astrid-line);
+  box-shadow: 0 22px 88px rgba(20, 20, 18, .28);
+  opacity: var(--vision-open-progress, 0); transition: none;
+}
+.astrid-vision-details::backdrop {
+  opacity: 1; background-color: rgba(22, 20, 18, 0); transition: none;
+}
+.astrid-vision-details[data-ready="true"]::backdrop {
+  /* Older engines without backdrop inheritance fall back to steady dimming. */
+  background-color: rgba(22, 20, 18, calc(.58 * var(--vision-open-progress, 1)));
+}
 @media (prefers-reduced-motion: reduce) {
-  .astrid-vision-details, .astrid-vision-details::backdrop { transition: none; }
+  .astrid-vision-details[data-ready="true"] > .astrid-vision-details-shell { opacity: 1; }
+  .astrid-vision-details[data-ready="true"]::backdrop { background-color: rgba(22, 20, 18, .58); }
 }
 
 /* The marks have different internal SVG whitespace. Offset the art, not the

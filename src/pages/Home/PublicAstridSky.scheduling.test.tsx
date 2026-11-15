@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { useLayoutEffect } from 'react';
 import { act, cleanup, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PublicAstridSky } from './PublicAstridSky';
@@ -171,4 +172,38 @@ describe('active sky scheduling', () => {
     view.unmount(); owner.destroy();
   });
 
+});
+
+it('cancels queued sky paint synchronously when geometry is released for a dialog', () => {
+  const owner = session();
+  const geometry = root();
+  let queued: FrameRequestCallback[] = [];
+  function HandoffBoundary({ active }: { active: boolean }) {
+    useLayoutEffect(() => {
+      if (!active) queued.forEach(callback => callback(performance.now()));
+    }, [active]);
+    return <PublicAstridSky session={owner} active={active} geometryRoot={geometry}
+      geometryOwner="vision" quietBehind=".reading" />;
+  }
+  const view = render(<HandoffBoundary active />);
+  settle();
+  expect(owner.getGeometrySnapshot().quiet).not.toBeNull();
+  const raster = vi.spyOn(owner.renderer, 'paint');
+  contexts.forEach(context => context.putImageData.mockClear());
+  act(() => window.dispatchEvent(new Event('resize')));
+  queued = [...frames.values()];
+  expect(queued.length).toBeGreaterThan(0);
+  // Simulate an already-dispatched frame arriving after the child's
+  // layout cleanup but before its passive cleanup. It must be inert.
+  view.rerender(<HandoffBoundary active={false} />);
+  expect(owner.getGeometrySnapshot().owner).toBeNull();
+  expect(raster).not.toHaveBeenCalled();
+  contexts.forEach(context => expect(context.putImageData).not.toHaveBeenCalled());
+  settle();
+  expect(raster).not.toHaveBeenCalled();
+  view.rerender(<HandoffBoundary active />);
+  settle();
+  expect(owner.getGeometrySnapshot().owner).toBe('vision');
+  expect(raster).toHaveBeenCalled();
+  view.unmount(); owner.destroy();
 });

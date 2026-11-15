@@ -37,6 +37,13 @@ async function checkPage(browser, content) {
     await expect(page.locator('.astrid-vision > #astrid-vision-parts')).toHaveCount(0);
     await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();
+    const gapDialog = page.getByRole('dialog', { name: 'All gaps' });
+    await expect(gapDialog).toHaveCSS('opacity', '1');
+    await expect.poll(() => gapDialog.evaluate(node => node.style.getPropertyValue('--vision-open-progress'))).toBe('1');
+    await expect(gapDialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
+    await expect.poll(() => gapDialog.evaluate(node => getComputedStyle(node, '::backdrop').opacity)).toBe('1');
+    await expect.poll(() => gapDialog.evaluate(node => getComputedStyle(node, '::backdrop').backgroundColor)).toBe('rgba(22, 20, 18, 0.58)');
+    console.log('Production popup uses an opaque native layer, inner-surface reveal and shared-progress backdrop shading.');
     await expect(page.locator('#gap-aa-001')).toBeAttached();
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'See all projects', exact: true }).click();

@@ -251,3 +251,116 @@ test('iPad returns from scrolled Vision at the top without a second adjustment',
     await page.screenshot({ path: `${folder}/ipad-home-return-${info.project.name}.png` });
   } finally { await context.close(); }
 });
+
+// The previous entry test deliberately held the feed pending. Cover a
+// ready preload too, starting before the incoming title is inserted.
+async function beginHeadlineTrace(page: Page) {
+  await page.evaluate(() => {
+    type Sample = { source: string; text: string; width: number; column: number; height: number; wrap: string; lines: string[]; transition: string | null };
+    const samples: Sample[] = [];
+    let stopped = false;
+    let frame = 0;
+    const read = (source: string) => {
+      const title = document.querySelector<HTMLElement>('.astrid-vision-hero-copy h1');
+      if (!title || !title.getBoundingClientRect().width) return;
+      const rows: { y: number; words: string[] }[] = [];
+      const walker = document.createTreeWalker(title, NodeFilter.SHOW_TEXT);
+      let node: Node | null;
+      while ((node = walker.nextNode())) {
+        for (const match of (node.textContent ?? '').matchAll(/\S+/g)) {
+          const range = document.createRange();
+          range.setStart(node, match.index!);
+          range.setEnd(node, match.index! + match[0].length);
+          const box = range.getBoundingClientRect();
+          if (!box.width) continue;
+          let row = rows.find(item => Math.abs(item.y - box.y) < 2);
+          if (!row) { row = { y: box.y, words: [] }; rows.push(row); }
+          row.words.push(match[0]);
+        }
+      }
+      samples.push({ source, text: title.textContent ?? '', width: title.offsetWidth,
+        column: title.closest<HTMLElement>('.astrid-vision-hero-copy')!.clientWidth,
+        height: title.offsetHeight, wrap: getComputedStyle(title).getPropertyValue('text-wrap'),
+        lines: rows.map(row => row.words.join(' ')),
+        transition: document.documentElement.getAttribute('data-astrid-page-transition') });
+    };
+    const observer = new MutationObserver(() => read('mutation'));
+    observer.observe(document.body, { childList: true, subtree: true });
+    const tick = () => { if (stopped) return; read('frame'); frame = requestAnimationFrame(tick); };
+    frame = requestAnimationFrame(tick);
+    (window as unknown as { finishHeadlineTrace: () => Sample[]; headlineSamples: Sample[] }).headlineSamples = samples;
+    (window as unknown as { finishHeadlineTrace: () => Sample[] }).finishHeadlineTrace = () => {
+      stopped = true; cancelAnimationFrame(frame); observer.disconnect(); return samples;
+    };
+  });
+}
+
+for (const width of [375, 390, 414]) {
+  test(`ready Home entry keeps full-width headline word lines at ${width}px`, async ({ page, request }, info) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.setViewportSize({ width, height: 844 });
+    const response = await request.get(FEED); expect(response.ok()).toBe(true);
+    const feed = await response.json() as PublicVisionContent;
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    const preloaded = page.waitForResponse(FEED);
+    await page.goto('/home', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('link', { name: 'Vision', exact: true })).toBeVisible({ timeout: 30000 });
+    await (await preloaded).finished();
+    // Let the completed response reach the shared cache, not a pending-feed fixture.
+    await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+    const traces = [];
+    for (let trip = 0; trip < 2; trip++) {
+      await beginHeadlineTrace(page);
+      await page.getByRole('link', { name: 'Vision', exact: true }).click();
+      await expect(page.locator('#astrid-vision-title')).toHaveText(feed.vision.title);
+      await expect(page.getByRole('status', { name: "Loading Astrid's vision" })).toHaveCount(0);
+      await expect.poll(() => page.evaluate(() =>
+        (window as unknown as { headlineSamples: { source: string }[] }).headlineSamples.filter(s => s.source === 'frame').length),
+        { timeout: 20000 }).toBeGreaterThanOrEqual(72);
+      const samples = await page.evaluate(() => (window as unknown as { finishHeadlineTrace: () => {
+        source: string; text: string; width: number; column: number; height: number; wrap: string; lines: string[]; transition: string | null;
+      }[] }).finishHeadlineTrace());
+      traces.push({ trip, samples });
+      record(`ready-headline-${info.project.name}-${width}`, { source: feed.source, traces });
+      expect.soft(samples.some(sample => sample.source === 'mutation'), 'observe first insertion, not only settled frames').toBe(true);
+      expect.soft(samples.every(sample => sample.wrap === 'wrap'), 'never invoke paragraph balancing for this heading').toBe(true);
+      expect.soft(samples.every(sample => Math.abs(sample.width - sample.column) <= 1), 'use the whole mobile reading column').toBe(true);
+      expect.soft(new Set(samples.map(sample => JSON.stringify(sample.lines))).size, 'word-to-line assignment is invariant from insertion').toBe(1);
+      expect.soft(samples.every(sample => sample.text === feed.vision.title)).toBe(true);
+      expect.soft(samples.every(sample => sample.lines.join(' ') === feed.vision.title)).toBe(true);
+      if (width === 390) await page.screenshot({ path: `${folder}/ready-headline-${info.project.name}-${trip}.png` });
+      await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+      await expect(page.locator('.astrid-vision')).toHaveCount(0);
+    }
+  });
+}
+
+test('headline remains normal full-column flow on cold entry, reload and viewport changes', async ({ page, request }, info) => {
+  const response = await request.get(FEED); expect(response.ok()).toBe(true);
+  const feed = await response.json() as PublicVisionContent;
+  await page.route(FEED, route => route.fulfill({ json: feed }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const snapshots = [];
+  for (const viewport of [{ width: 390, height: 844 }, { width: 390, height: 664 },
+    { width: 320, height: 664 }, { width: 414, height: 844 }, { width: 390, height: 844 }]) {
+    await page.setViewportSize(viewport);
+    await expect(page.locator('#astrid-vision-title')).toHaveText(feed.vision.title);
+    const before = await hero(page);
+    const style = await page.locator('#astrid-vision-title').evaluate(node => ({
+      wrap: getComputedStyle(node).getPropertyValue('text-wrap'),
+      width: (node as HTMLElement).offsetWidth,
+      column: node.closest<HTMLElement>('.astrid-vision-hero-copy')!.clientWidth,
+      overflow: document.documentElement.scrollWidth > innerWidth + 1,
+    }));
+    expect.soft(style.wrap).toBe('wrap');
+    expect.soft(Math.abs(style.width - style.column)).toBeLessThanOrEqual(1);
+    expect.soft(style.overflow).toBe(false);
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await expect(page.locator('#astrid-vision-title')).toHaveText(feed.vision.title);
+    const after = await hero(page);
+    expect.soft(after).toEqual(before);
+    snapshots.push({ viewport, before, after, style });
+  }
+  record(`cold-headline-flow-${info.project.name}`, { source: feed.source, snapshots });
+});

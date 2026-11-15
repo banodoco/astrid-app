@@ -28,27 +28,39 @@ jobs:
           assert 'feedback follow-up' not in s
           p.write_text(s+Path('scripts/quality/vision-feedback-cases-20261115.txt').read_text())
           PY
+          python3 scripts/quality/vision-feedback-refine-20261115.py --baseline
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium webkit
-      - name: Observe all four requests on unchanged product in WebKit
+      - name: Observe chip transitions on unchanged product in both engines
         run: |
           set +e
-          PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/vision-captures/baseline-webkit-results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'feedback follow-up' --retries=0 --output=test-results/baseline-webkit --reporter=line,json > qualification-evidence/baseline-webkit.log 2>&1
-          echo "$?" > qualification-evidence/baseline-exit.txt
+          PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/vision-captures/baseline-chromium-results.json npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'feedback follow-up mobile' --project=chromium-desktop --retries=0 --output=test-results/baseline-chromium --reporter=line,json > qualification-evidence/baseline-chromium.log 2>&1
+          echo "$?" > qualification-evidence/baseline-chromium-exit.txt
           cp test-results/vision-captures/feedback-*.json qualification-evidence/ 2>/dev/null || true
-          cat qualification-evidence/baseline-webkit.log
+          PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/vision-captures/baseline-webkit-results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'feedback follow-up mobile' --retries=0 --output=test-results/baseline-webkit --reporter=line,json > qualification-evidence/baseline-webkit.log 2>&1
+          echo "$?" > qualification-evidence/baseline-webkit-exit.txt
+          cp test-results/vision-captures/feedback-*.json qualification-evidence/ 2>/dev/null || true
+          cat qualification-evidence/baseline-chromium.log qualification-evidence/baseline-webkit.log
           exit 0
+      - name: Preserve early readiness diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: astrid-feedback-readiness-baseline
+          path: |
+            qualification-evidence/
+            test-results/vision-captures/baseline-*.json
+            test-results/vision-captures/feedback-home-*.png
+          retention-days: 14
       - name: Apply bounded product changes and retain the new regressions
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          # Permanent workflow wiring is applied through the connector after
-          # qualification; Actions does not need workflow-write permission.
           recipe=Path('scripts/quality/vision-feedback-apply-20261115.py').read_text().split('# Include the nearby Home scheduling regression in the established gate.')[0]
           recipe=recipe.replace("document.querySelector('[data-callout=\"effects\"]')", "document.querySelector('article[data-callout=\"effects\"]')")
           exec(compile(recipe,'<scoped-feedback-repair>','exec'))
           PY
-          git add src/pages/Home/PublicAstridCallouts.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx src/pages/Home/publicAstridNavigation.ts src/pages/Home/PublicAstridSite.tsx src/pages/Home/PublicAstridSite.css src/pages/Home/VisionDialog.tsx src/pages/Home/VisionMobileLayout.css src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts
+          python3 scripts/quality/vision-feedback-refine-20261115.py
+          git add src/pages/Home/PublicAstridCallouts.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx src/pages/Home/publicAstridNavigation.ts src/pages/Home/PublicAstridSite.tsx src/pages/Home/PublicAstridSite.css src/pages/Home/VisionDialog.tsx src/pages/Home/VisionMobileLayout.css src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts
           git write-tree > qualification-evidence/tested-tree.txt
           git diff --cached > qualification-evidence/candidate.patch
       - name: Parsing, lifecycle, callouts, sky, onboarding and lint
@@ -58,6 +70,7 @@ jobs:
           npx eslint src/pages/Home/PublicAstridCallouts.tsx src/pages/Home/PublicAstridSite.tsx src/pages/Home/publicAstridNavigation.ts src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx --max-warnings 0
           npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx src/pages/Home/visionHierarchy.test.ts src/pages/Home/publicVisionContent.loading.test.tsx src/test/viteShareMeta.test.ts src/shared/components/PixelUnderline.test.tsx src/tools/video-editor/tour/card/TourCard.test.tsx src/pages/Home/PublicAstridSky.scheduling.test.tsx src/pages/Home/PublicAstridSky.test.ts src/pages/Home/publicAstridSkySession.test.ts src/pages/Home/publicAstridSkyGeometry.test.ts src/pages/Home/publicAstridSkyRenderer.test.ts src/pages/Home/publicAstridSkyRender.test.ts
       - name: Build hosted website
+        id: build
         env:
           NODE_OPTIONS: --max-old-space-size=4096
         run: npm run build:hosted
@@ -66,6 +79,7 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/chromium-results.json
         run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-vision-stability.spec.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-roundtrip.spec.ts --project=chromium-desktop --output=test-results/chromium --reporter=line,json
       - name: Full WebKit native modal and touch gate
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/webkit-results.json
         run: npx playwright test --config playwright.vision.config.ts --output=test-results/webkit --reporter=line,json
@@ -85,7 +99,7 @@ jobs:
           cp qualification-evidence/* test-results/vision-captures/evidence/ || true
           git diff --cached > test-results/vision-captures/staged.patch
           git diff > test-results/vision-captures/unstaged.patch
-          tar -cf test-results/vision-captures/feedback-source.tar src/pages/Home tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts .github/workflows/public-vision.yml playwright.vision.config.ts
+          tar -cf test-results/vision-captures/feedback-source.tar src/pages/Home tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts .github/workflows/public-vision.yml playwright.vision.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

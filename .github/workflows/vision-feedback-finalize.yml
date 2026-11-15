@@ -7,7 +7,7 @@ permissions:
   contents: write
 jobs:
   prepare:
-    runs-on: ubuntu-24.04
+    runs-on: macos-15
     timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
@@ -38,12 +38,6 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           p=Path('src/pages/Home/VisionDialog.tsx');s=p.read_text()
-          old="""      // Do not undo the user's pinch zoom by continually shrinking the dialog.
-                if (viewport && viewport.scale > 1.05) return;
-                dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
-                dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
-                placeDialogNavigation(dialog);""".replace('          ', '')
-          # Exact source lines, rather than depending on YAML block indentation.
           old="      // Do not undo the user's pinch zoom by continually shrinking the dialog.\n      if (viewport && viewport.scale > 1.05) return;\n      dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');\n      dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');\n      placeDialogNavigation(dialog);"
           new="      // Keep navigation reachable during viewport changes, including zoom.\n      // Only height/position tracking must yield to the user's pinch zoom.\n      placeDialogNavigation(dialog);\n      if (viewport && viewport.scale > 1.05) return;\n      dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');\n      dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');"
           assert s.count(old)==1;p.write_text(s.replace(old,new))

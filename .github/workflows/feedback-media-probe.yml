@@ -1,0 +1,76 @@
+name: Diagnose WebKit feedback-test media readiness
+on:
+  push:
+    branches: [diagnose/feedback-media-readiness-20261115]
+    paths: [.github/workflows/feedback-media-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps webkit
+      - name: Append temporary read-only media observation
+        run: |
+          cat >> tests/e2e/public-astrid-vision-entry.spec.ts <<'TEST'
+          test('diagnostic WebKit first-frame prerequisite without changing app', async ({ page }, info) => {
+            test.setTimeout(120000);
+            await page.setViewportSize({width:390,height:844});
+            await page.emulateMedia({reducedMotion:'no-preference'});
+            const logs: string[] = [];
+            page.on('console', msg => { if (msg.type() === 'error' || msg.type() === 'warning') logs.push(msg.type()+': '+msg.text()); });
+            page.on('pageerror', err => logs.push('pageerror: '+err.message));
+            page.on('requestfailed', req => logs.push('requestfailed: '+req.url()+' '+req.failure()?.errorText));
+            const shots: unknown[] = [];
+            const sample = async (label: string) => {
+              const value = await page.evaluate(async () => {
+                const root = document.querySelector<HTMLElement>('.astrid-editor-stage');
+                const decoder = (window as unknown as {VideoDecoder?: {isConfigSupported: (config: unknown) => Promise<unknown>}}).VideoDecoder;
+                const support: Record<string, unknown> = {};
+                for (const codec of ['avc1.42001e','avc1.64001f','vp8','vp09.00.10.08']) {
+                  try { support[codec] = decoder ? await decoder.isConfigSupported({codec,codedWidth:1280,codedHeight:720}) : 'no VideoDecoder'; }
+                  catch (error) { support[codec] = String(error); }
+                }
+                return { stage: root?.dataset, chips: document.querySelectorAll('.astrid-callouts > article').length,
+                  media: Array.from(document.querySelectorAll<HTMLElement>('[data-preview-media-src]')).map(el => ({...el.dataset})),
+                  videos: Array.from(document.querySelectorAll('video')).map(v => ({src:v.currentSrc,ready:v.readyState,network:v.networkState,error:v.error?.message})),
+                  canvases: Array.from(document.querySelectorAll('.astrid-player-surface canvas')).map(canvas => {
+                    const c=canvas as HTMLCanvasElement; let sample: unknown; try {sample=Array.from(c.getContext('2d')!.getImageData(100,100,1,1).data);} catch(e){sample=String(e);}
+                    return {width:c.width,height:c.height,sample};
+                  }), support, body:document.body.innerText };
+              });
+              shots.push({label,value});
+              record(`media-prerequisite-${info.project.name}`, {shots,logs});
+            };
+            await page.goto('/home',{waitUntil:'domcontentloaded'});
+            await expect(page.locator('[data-editor-load-state="ready"]')).toBeAttached({timeout:60000});
+            await page.waitForTimeout(8000);
+            await sample('initial');
+            const play=page.getByRole('button',{name:'Play',exact:true});
+            try { await play.click({force:true,timeout:5000}); } catch(error) { logs.push('play: '+String(error)); }
+            await page.waitForTimeout(8000);
+            await sample('after-play');
+            await page.locator('.astrid-audience-switch button[data-audience="agent"]').tap();
+            await page.waitForTimeout(6000);
+            await sample('after-agent');
+            await page.locator('.astrid-audience-switch button[data-audience="app"]').tap();
+            await page.waitForTimeout(6000);
+            await sample('after-app');
+            await page.screenshot({path:`${folder}/media-prerequisite-${info.project.name}.png`});
+          });
+          TEST
+      - name: Observe actual hosted WebKit readiness
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'diagnostic WebKit first-frame prerequisite' --retries=0 --reporter=line
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: feedback-media-prerequisite
+          path: test-results/vision-captures/
+          retention-days: 7

@@ -1,0 +1,53 @@
+name: Wordmark follow focused repair
+on:
+  push:
+    branches: [fix/scrolled-brand-wordmark-20261116]
+    paths: [.github/workflows/wordmark-follow-apply.yml]
+permissions:
+  contents: write
+jobs:
+  wordmark:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Apply reviewed recipe and run its unchanged focused checks
+        run: |
+          mkdir -p wordmark-evidence
+          git rev-parse HEAD > wordmark-evidence/input-source.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text=Path('.github/workflows/wordmark-follow-workbench.yml').read_text()
+          names=['Add exact scrolled-wordmark regression', 'Apply paired capture without changing live header layout',
+            'Focused Chromium movement and scroll checks', 'Focused WebKit movement and scroll checks',
+            'Commit only passing scoped repair']
+          commands=[]
+          for name in names:
+            m=re.search(r'^      - name: '+re.escape(name)+r'\n        run: \|\n((?:(?:          .*|)\n)+)',text,re.M)
+            assert m, name
+            commands.append('\n'.join(line[10:] if line.startswith('          ') else line for line in m[1].splitlines()))
+          Path('/tmp/wordmark-repair.sh').write_text('#!/usr/bin/env bash\nset -euo pipefail\n'+'\n'.join(commands)+'\n')
+          PY
+          bash /tmp/wordmark-repair.sh
+      - name: Preserve source and all actual results
+        if: always()
+        run: |
+          mkdir -p wordmark-evidence
+          git diff > wordmark-evidence/uncommitted.patch
+          tar -cf wordmark-evidence/source.tar src/pages/Home/PublicAstridSite.css tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts scripts/quality/check-public-vision-production.mjs
+          cp -R test-results/vision-captures wordmark-evidence/last-captures 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: astrid-wordmark-repaired
+          path: wordmark-evidence/
+          if-no-files-found: error

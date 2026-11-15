@@ -1,0 +1,47 @@
+name: Player projection Apple workbench
+on:
+  push:
+    branches: [fix/vision-home-player-projection-20261115]
+    paths: [.github/workflows/player-projection-apple-workbench.yml]
+permissions:
+  contents: write
+jobs:
+  projection:
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install webkit
+      - name: Reuse the reviewed focused recipe with original Apple media
+        run: |
+          ruby -ryaml <<'RUBY'
+          workflow = YAML.load_file('.github/workflows/player-projection-workbench.yml')
+          names = ['Add scoped original-media regressions', 'Reproduce unchanged-product failures', 'Apply the bounded projection repair', 'Verify repaired original-media geometry', 'Commit only qualified source and regression tests']
+          steps = workflow.fetch('jobs').fetch('projection').fetch('steps').select { |s| names.include?(s['name']) }
+          raise 'Missing recipe step' unless steps.size == names.size
+          script = steps.map { |s| s.fetch('run') }.join("\n")
+          script = script.gsub('--config playwright.config.ts', '--config playwright.home-webkit.config.ts').gsub('--project=chromium-desktop', '--project=vision-webkit-phone')
+          File.write('/tmp/player-projection-recipe.sh', "#!/usr/bin/env bash\nset -euo pipefail\n" + script)
+          RUBY
+          bash /tmp/player-projection-recipe.sh
+      - name: Preserve exact evidence and source
+        if: always()
+        run: |
+          mkdir -p projection-evidence
+          git diff > projection-evidence/uncommitted.patch
+          tar -cf projection-evidence/source.tar src/pages/Home/PublicAstridShell.css src/pages/Home/PublicAstridSite.css tests/e2e/public-astrid-home-chips.spec.ts
+          cp -R test-results/projection-baseline projection-evidence/ 2>/dev/null || true
+          cp -R test-results/projection-repaired projection-evidence/ 2>/dev/null || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: astrid-player-projection-apple-focused
+          path: projection-evidence/
+          if-no-files-found: error

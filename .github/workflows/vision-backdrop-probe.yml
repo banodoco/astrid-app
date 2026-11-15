@@ -1,0 +1,105 @@
+name: Trace Vision backdrop flash
+on:
+  push:
+    branches: [fix/vision-backdrop-flash-20261115]
+    paths: [.github/workflows/vision-backdrop-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Add diagnostic-only pixel trace
+        run: |
+          cat >> tests/e2e/public-astrid-vision-entry.spec.ts <<'TEST'
+
+          test('opening pixel probe records sky and backdrop stages', async ({ page, request }, info) => {
+            test.setTimeout(180000);
+            await page.setViewportSize({ width: 390, height: 844 });
+            await page.emulateMedia({ reducedMotion: 'no-preference' });
+            await page.clock.setFixedTime(new Date('2026-11-15T10:00:00Z'));
+            const response = await request.get(FEED); expect(response.ok()).toBe(true);
+            await page.route(FEED, route => route.fulfill({ json: response.json ? undefined : null, body: '' }));
+            await page.unroute(FEED);
+            const feed = await response.json();
+            await page.route(FEED, route => route.fulfill({ json: feed }));
+            await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+            await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4, { timeout: 30000 });
+            await page.evaluate(() => document.fonts.ready);
+            await page.waitForTimeout(2200);
+            const results = [];
+            for (const kind of ['pillar', 'principle', 'gaps', 'projects']) {
+              const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').last().getByRole('button')
+                : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').last().getByRole('button')
+                : page.getByRole('button', { name: 'See all ' + kind, exact: true });
+              await opener.scrollIntoViewIfNeeded();
+              await page.waitForTimeout(450);
+              await page.evaluate(() => {
+                const w = window as any;
+                w.openingFrames = [];
+                const read = (stage: string) => {
+                  const main = document.querySelector('.astrid-vision')!;
+                  const dialog = main.querySelector('dialog');
+                  const sky = main.querySelector('.astrid-sky');
+                  const header = main.querySelector('.astrid-vision-bar')!;
+                  const ds = dialog && getComputedStyle(dialog);
+                  const bs = dialog && getComputedStyle(dialog, '::backdrop');
+                  const hash = (canvas: HTMLCanvasElement) => {
+                    const data = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+                    let h = 2166136261;
+                    for (let i = 0; i < data.length; i++) h = Math.imul(h ^ data[i], 16777619);
+                    return h >>> 0;
+                  };
+                  w.openingFrames.push({ stage, t: performance.now(), y: scrollY,
+                    main: getComputedStyle(main).backgroundColor, paper: (main as HTMLElement).style.getPropertyValue('--astrid-paper'),
+                    body: getComputedStyle(document.body).backgroundColor, root: getComputedStyle(document.documentElement).backgroundColor,
+                    lock: document.documentElement.dataset.astridScrollLockY, headerY: header.getBoundingClientRect().y,
+                    headerFilter: getComputedStyle(header).backdropFilter, skyY: sky?.getBoundingClientRect().y,
+                    open: dialog?.hasAttribute('open'), ready: (dialog as HTMLElement)?.dataset.ready,
+                    panelOpacity: ds?.opacity, backdropOpacity: bs?.opacity, backdropColor: bs?.backgroundColor,
+                    canvases: Array.from(main.querySelectorAll<HTMLCanvasElement>('.astrid-sky canvas')).map(c => ({
+                      layer: c.dataset.layer, hash: hash(c), transform: c.style.transform,
+                      x: c.getBoundingClientRect().x, y: c.getBoundingClientRect().y, width: c.width, height: c.height,
+                    })) });
+                };
+                document.addEventListener('pointerdown', () => {
+                  read('pointerdown');
+                  let frames = 0;
+                  const tick = () => { read('frame'); if (++frames < 40) requestAnimationFrame(tick); };
+                  requestAnimationFrame(tick);
+                }, { once: true, capture: true });
+              });
+              await opener.click();
+              await expect(page.getByRole('dialog')).toHaveAttribute('data-ready', 'true');
+              await expect.poll(() => page.evaluate(() => (window as any).openingFrames.length), { timeout: 20000 }).toBe(41);
+              results.push({ kind, frames: await page.evaluate(() => (window as any).openingFrames) });
+              record(`backdrop-probe-${info.project.name}`, { source: feed.source, results });
+              await page.screenshot({ path: `${folder}/backdrop-probe-${kind}-${info.project.name}.png` });
+              await page.keyboard.press('Escape');
+              await expect(page.getByRole('dialog')).toHaveCount(0);
+            }
+          });
+          TEST
+      - name: Chromium opening trace
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/probe-chromium.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --project=chromium-desktop --grep 'opening pixel probe' --output=test-results/probe-chromium --reporter=line,json
+      - name: WebKit opening trace
+        if: ${{ !cancelled() }}
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/probe-webkit.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'opening pixel probe' --output=test-results/probe-webkit --reporter=line,json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-backdrop-baseline
+          path: test-results/vision-captures/
+          retention-days: 7

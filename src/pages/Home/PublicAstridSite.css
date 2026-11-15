@@ -84,6 +84,13 @@
 :root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"]) :is(.astrid-public-site, .astrid-vision) * {
   view-transition-name: none !important;
 }
+/* The usual astrid-panels capture name implicitly flattens the tilt boundary.
+   These modes remove that name, so preserve its projection explicitly: otherwise
+   the nested Z offsets enlarge the player until the transition marker clears.
+   Keep the child composition's 3D transforms and pointer rotation unchanged. */
+:root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"]) .astrid-editor-tilt {
+  transform-style: flat;
+}
 @keyframes astrid-room-fade-in { from { opacity: 0; } }
 :root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"])::view-transition-group(root) { animation: none; }
 :root:is([data-astrid-page-transition-style="crossfade"], [data-astrid-page-transition-style="brand"])::view-transition-old(root) {

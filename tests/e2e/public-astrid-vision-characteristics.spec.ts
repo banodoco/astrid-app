@@ -48,7 +48,7 @@ test('pillars and principles use the same progressive disclosure of characterist
       await expect(dialog).toBeVisible();
       await expect(dialog.locator('.astrid-vision-details-statement'))
         .toHaveText(entry.statement);
-      await expect(dialog.getByRole('region', { name: 'Aspirations' })).toBeVisible();
+      await expect(dialog.getByRole('region', { name: 'Goals' })).toBeVisible();
       const characteristics = dialog.locator('.astrid-vision-details-characteristic');
       await expect(characteristics).toHaveCount(2);
       // One rule separates the characteristics from the gaps. The final

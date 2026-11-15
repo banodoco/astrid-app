@@ -49,7 +49,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     }
   }, [clearMarker]);
 
-  const run = useCallback((commit: () => void, page?: 'home' | 'vision', presentation: 'shared' | 'crossfade' = 'shared') => {
+  const run = useCallback((commit: () => void, page?: 'home' | 'vision', presentation: 'shared' | 'brand' | 'crossfade' = 'shared') => {
     invalidate();
     const id = operationRef.current;
     const pending = { id, commit, committed: false, transition: undefined as PublicViewTransition | undefined };

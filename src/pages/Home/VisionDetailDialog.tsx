@@ -109,8 +109,8 @@ export function VisionDetailDialog({
                     <p className="astrid-vision-details-statement">{entry.statement}</p>
                     <ReactMarkdown>{entry.explanationMarkdown}</ReactMarkdown>
                   </div>
-                  <section className="astrid-vision-details-characteristics" aria-label="Aspirations">
-                    <h3>Aspirations</h3>
+                  <section className="astrid-vision-details-characteristics" aria-label="Goals">
+                    <h3>Goals</h3>
                     <div className="astrid-vision-details-characteristic-list">
                       {hierarchy.aspirations.map(({ aspiration, gaps }) => (
                         <section className="astrid-vision-details-aspiration" key={aspiration.id} data-aspiration-id={aspiration.id}>

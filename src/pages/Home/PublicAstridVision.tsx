@@ -80,7 +80,9 @@ function SubjectCounts({ content, subject }: { content: PublicVisionContent; sub
   const groups = [...hierarchy.aspirations.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
   const gaps = new Set(groups.map(item => item.gap.id)).size;
   const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
+  const goals = hierarchy.aspirations.length;
   return <span className="astrid-vision-subject-counts">
+    <span>{goals} {goals === 1 ? 'goal' : 'goals'}</span><span aria-hidden="true"> · </span>
     <span>{gaps} {gaps === 1 ? 'gap' : 'gaps'}</span><span aria-hidden="true"> · </span>
     <span>{projects} {projects === 1 ? 'project' : 'projects'}</span>
   </span>;
@@ -316,11 +318,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     const pointerClose = detailOpenedByPointer.current;
     // Keyboard users get focus back. Touch users don't inherit the large
     // outline caused by Safari restoring focus to a full-card button.
-    if (pointerClose) trigger?.blur();
-    else trigger?.focus({ preventScroll: true });
-    window.requestAnimationFrame(() => {
-      if (pointerClose && document.activeElement === trigger) trigger?.blur();
-    });
+    const active = document.activeElement;
+    // A queued native close must not steal a newer explicit focus choice.
+    const ownsFocus = !active || active === document.body || active === document.documentElement ||
+      active === trigger || active.closest('dialog.astrid-vision-details') !== null;
+    if (ownsFocus) {
+      if (pointerClose) trigger?.blur();
+      else if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+      window.requestAnimationFrame(() => {
+        if (pointerClose && document.activeElement === trigger) trigger?.blur();
+      });
+    }
   };
   const openCatalog = (catalog: 'gaps' | 'projects', trigger: HTMLButtonElement) => {
     detailOpenedByPointer.current = lastInteractionWasPointer.current;

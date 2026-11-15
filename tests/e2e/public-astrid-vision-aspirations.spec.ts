@@ -125,7 +125,11 @@ for (const width of [1440, 390]) {
       await expect(link).toHaveAttribute('target', '_blank');
     }
     await expect(dialog.locator('[data-gap-id="AA-001"]')).toHaveCount(1);
-    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await dialog.evaluate(dialog => {
+      const surfaces = Array.from(dialog.querySelectorAll<HTMLElement>('.astrid-vision-details-shell, .astrid-vision-details-scroll, .astrid-vision-details-scroll-inner'));
+      return surfaces.length === 3 && surfaces.every(surface => surface.scrollWidth <= surface.clientWidth + 1)
+        && document.documentElement.scrollWidth <= window.innerWidth + 1;
+    })).toBe(true);
     for (const card of await projects.all()) {
       expect(await card.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
     }
@@ -180,7 +184,11 @@ for (const width of [1440, 390]) {
     await expect(cards.locator('summary, .astrid-vision-project-body, .astrid-vision-project-metadata')).toHaveCount(0);
     await expect(cards.first().getByRole('link', { name: /^Read the full project plan:/ })).toBeVisible();
     await expect(row).toHaveAttribute('open', '');
-    expect(await dialog.evaluate(el => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
+    expect(await dialog.evaluate(dialog => {
+      const surfaces = Array.from(dialog.querySelectorAll<HTMLElement>('.astrid-vision-details-shell, .astrid-vision-details-scroll, .astrid-vision-details-scroll-inner'));
+      return surfaces.length === 3 && surfaces.every(surface => surface.scrollWidth <= surface.clientWidth + 1)
+        && document.documentElement.scrollWidth <= window.innerWidth + 1;
+    })).toBe(true);
     await cards.first().evaluate(node => {
       const viewport = node.closest('.astrid-vision-details-scroll')!;
       viewport.scrollTop += node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - 8;
@@ -212,7 +220,7 @@ test('exported candidate feed renders real Packs rules and real aspiration links
   const pillar = feed.pillars.find((item: { id: string }) => item.id === 'liquid-software') ?? feed.pillars[0];
   await page.getByRole('button', { name: 'Explore ' + pillar.title + ': gaps and projects' }).click();
   const dialog = page.getByRole('dialog');
-  await expect(dialog.getByRole('region', { name: 'Aspirations', exact: true })).toBeVisible();
+  await expect(dialog.getByRole('region', { name: 'Goals', exact: true })).toBeVisible();
   const expected = feed.gaps.filter((gap: { assessment: string; primaryAppliesTo: string }) =>
     gap.assessment !== 'closed' && gap.primaryAppliesTo === 'pillar:' + pillar.id);
   await expect(dialog.locator('[data-gap-id]')).toHaveCount(expected.length);

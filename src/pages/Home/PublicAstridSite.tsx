@@ -63,8 +63,12 @@ export function PublicAstridSite() {
     const nextExperience = next === 'home' ? readPublicAstridExperience() : null;
     const outgoingScroll = window.scrollY;
     const incomingScroll = next === 'vision' ? 0 : homeScrollTarget(homeScrollRef.current);
-    // Off-screen heroes are not useful morphing anchors. Crossfade instead.
-    const presentation = outgoingScroll > 72 || incomingScroll > 72 ? 'crossfade' : 'shared';
+    // A scrolled Vision header is still a visible brand anchor. On desktop,
+    // glide that mink home while the off-screen document content crossfades.
+    // Do not restore off-screen hero/label morphs or change scroll ownership.
+    const scrolled = outgoingScroll > 72 || incomingScroll > 72;
+    const presentation = !scrolled ? 'shared'
+      : next === 'home' && incomingScroll <= 72 && !environment.phone ? 'brand' : 'crossfade';
     const commit = () => {
       const previous = pageRef.current;
       if (previous === 'home' && next === 'vision') homeScrollRef.current = homeScrollTarget(outgoingScroll);
@@ -80,7 +84,7 @@ export function PublicAstridSite() {
       pendingFocusRef.current = next;
     };
     run(commit, pageRef.current !== next ? next : undefined, presentation);
-  }, [run]);
+  }, [run, environment.phone]);
   const pendingFocusRef = useRef<PublicAstridPage | null>(null);
 
   // run() flushes React inside the update callback. Settle focus and scroll

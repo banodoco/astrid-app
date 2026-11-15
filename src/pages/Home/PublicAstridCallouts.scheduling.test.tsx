@@ -603,3 +603,21 @@ describe('bounded stage passes', () => {
     expect(frames.size).toBe(0);
   });
 });
+
+// Keep slot and connector identity, but not an unrelated subject's disclosure.
+it('owns mobile disclosure content by subject across audience changes', () => {
+  phone = true;
+  const view = render(<Stage audience="app" />);
+  const slots = [...document.querySelectorAll('article.astrid-callout')];
+  const before = slots.map(slot => slot.querySelector('.astrid-callout-content'));
+  fireEvent.click(document.querySelector('[data-callout="effects"] .astrid-callout-toggle')!);
+  expect(document.querySelector('article[data-callout="effects"]')).toHaveAttribute('data-open', 'true');
+  view.rerender(<Stage audience="agent" />);
+  expect([...document.querySelectorAll('article.astrid-callout')]).toEqual(slots);
+  for (const [index, slot] of slots.entries()) {
+    expect(slot.querySelector('.astrid-callout-content')).not.toBe(before[index]);
+    expect(slot.querySelector('.astrid-callout-toggle')).toHaveAttribute('aria-expanded', 'false');
+  }
+  view.rerender(<Stage audience="app" />);
+  expect(document.querySelectorAll('article[data-open="true"]')).toHaveLength(0);
+});

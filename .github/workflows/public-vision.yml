@@ -3,6 +3,11 @@ name: Public vision content
 on:
   pull_request:
     paths:
+      - "src/pages/Home/PublicAstridCallouts.tsx"
+      - "src/pages/Home/PublicAstridCallouts.scheduling.test.tsx"
+      - "tests/e2e/public-astrid-home-chips.spec.ts"
+      - "tests/e2e/public-astrid-roundtrip.spec.ts"
+      - "playwright.home-webkit.config.ts"
       - "tests/e2e/public-astrid-vision-entry.spec.ts"
       - "src/pages/Home/publicVisionContent.loading.test.tsx"
       - "src/pages/Home/PublicAstridShell.tsx"
@@ -72,9 +77,9 @@ jobs:
       - name: Check production vision canary syntax
         run: node --check scripts/quality/check-public-vision-production.mjs
       - name: Check changed vision code
-        run: npx eslint src/pages/Home/PublicAstridSky.tsx src/pages/Home/publicAstridSkySession.ts src/pages/Home/PublicAstridSite.tsx src/pages/Home/publicAstridNavigation.ts src/shared/components/PixelUnderline.tsx src/tools/video-editor/tour/card/TourCard.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx src/pages/Home/VisionPrincipleSigil.tsx src/pages/Home/VisionSectionNav.tsx src/pages/Home/visionHierarchy.ts src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
+        run: npx eslint src/pages/Home/PublicAstridCallouts.tsx src/pages/Home/PublicAstridSky.tsx src/pages/Home/publicAstridSkySession.ts src/pages/Home/PublicAstridSite.tsx src/pages/Home/publicAstridNavigation.ts src/shared/components/PixelUnderline.tsx src/tools/video-editor/tour/card/TourCard.tsx src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx src/pages/Home/VisionPrincipleSigil.tsx src/pages/Home/VisionSectionNav.tsx src/pages/Home/visionHierarchy.ts src/pages/Home/publicVisionContent.ts src/pages/Home/publicAstridShare.ts --max-warnings 0
       - name: Preserve public page lifecycle and share metadata
-        run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts
+        run: npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/test/viteShareMeta.test.ts src/pages/Home/PublicAstridCallouts.scheduling.test.tsx
       - name: Verify shared pixel emphasis and tour feedback
         run: npx vitest run --config config/testing/vitest.config.ts src/shared/components/PixelUnderline.test.tsx src/tools/video-editor/tour/card/TourCard.test.tsx
       - name: Preserve shared sky rendering and scheduling
@@ -89,7 +94,7 @@ jobs:
       - name: Verify vision content on desktop and phone
         env:
           PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/chromium-results.json
-        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-vision-stability.spec.ts tests/e2e/public-astrid-vision-entry.spec.ts --project=chromium-desktop --output=test-results/chromium --reporter=line,json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-content.spec.ts tests/e2e/public-astrid-vision-captures.spec.ts tests/e2e/public-astrid-vision-mobile-feedback.spec.ts tests/e2e/public-astrid-vision-layout-feedback.spec.ts tests/e2e/public-astrid-vision-hierarchy.spec.ts tests/e2e/public-astrid-vision-sigils-nav.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-vision-stability.spec.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-home-chips.spec.ts tests/e2e/public-astrid-roundtrip.spec.ts --project=chromium-desktop --output=test-results/chromium --reporter=line,json
       - name: Verify native dialog touch behavior in WebKit
         if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
         env:
@@ -100,5 +105,36 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: astrid-vision-screenshots
+          path: test-results/vision-captures/
+          if-no-files-found: warn
+
+  home-apple-webkit:
+    # Original demo media currently hits a WebKitGTK decoder bug on Linux
+    # (astrid-dev#668). Run the exact card-motion gate on Apple WebKit instead,
+    # without altering media, readiness, motion assertions or retry policy.
+    runs-on: macos-15
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install webkit
+      - name: Verify mobile Home disclosure transitions with original media
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/apple-webkit-results.json
+        run: npx playwright test --config playwright.home-webkit.config.ts --output=test-results/apple-webkit --reporter=line,json
+      - name: Record source and unmodified production assets
+        if: always()
+        run: |
+          mkdir -p test-results/vision-captures
+          git rev-parse HEAD > test-results/vision-captures/apple-source.txt
+          shasum -a 256 public/astrid/light-study/*.mp4 > test-results/vision-captures/apple-media-identities.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: astrid-home-apple-webkit
           path: test-results/vision-captures/
           if-no-files-found: warn

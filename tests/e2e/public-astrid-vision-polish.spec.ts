@@ -348,10 +348,11 @@ for (const width of [390, 1440]) {
         __roomTransitions: { destination?: string; presentation?: string; outgoing: number;
           snapshot: { scroll: number; top: number }; frames: { scroll: number; top: number }[]; named: string[] }[];
       }).__roomTransitions.filter(r => r.destination === 'home').at(-1)!);
-      expect(record.presentation).toBe('crossfade');
+      const sharedBrand = width > 640 && expectedHomeY <= 72;
+      expect(record.presentation).toBe(sharedBrand ? 'brand' : 'crossfade');
       expect(record.outgoing).toBeGreaterThan(500);
       expect(record.snapshot.scroll).toBeCloseTo(expectedHomeY, 0);
-      expect(record.named).toEqual([]);
+      expect(record.named).toEqual(sharedBrand ? ['astrid-brand-mink'] : []);
       for (const frame of record.frames) {
         expect(frame.scroll).toBeCloseTo(expectedHomeY, 0);
         expect(Math.abs(frame.top - record.snapshot.top)).toBeLessThan(1);

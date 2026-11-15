@@ -1,0 +1,202 @@
+name: Qualify Vision backdrop repair
+on:
+  push:
+    branches: [fix/vision-backdrop-flash-20261115]
+    paths: [.github/workflows/vision-backdrop-repair.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-backdrop-flash-20261115
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Apply reviewed native-layer repair
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import hashlib
+          p = Path('src/pages/Home/VisionMobileLayout.css')
+          b = p.read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(b)).encode()+b'\0'+b).hexdigest() == '7017a63fca009b1436123ad0349514c3b02f73c7'
+          s = b.decode()
+          old = '''/* Geometry and focus settle while the native modal is transparent, then only
+          its opacity changes. No second opening, slide, scale or content reveal. */'''
+          # Match exact source including its comment indentation.
+          start = s.index('/* Geometry and focus settle while the native modal is transparent')
+          end = s.index('\n/* The marks have different internal SVG whitespace.', start)
+          s = s[:start] + '''/* Keep the native dialog/backdrop at opacity 1. WebKit can resynchronize
+             their accelerated opacity transitions backwards when entering the top
+             layer, briefly exposing the page again. Only the ordinary inner surface
+             fades; the backdrop darkens by background alpha, never group opacity.
+             The transparent outer border preserves the existing measured geometry. */
+          .astrid-vision-details {
+            overflow: visible; border-color: transparent; background: transparent;
+            box-shadow: none; opacity: 1; transition: none;
+          }
+          .astrid-vision-details-shell {
+            overflow: hidden; border-radius: inherit; background: var(--astrid-paper);
+            outline: 1px solid var(--astrid-line);
+            box-shadow: 0 22px 88px rgba(20, 20, 18, .28);
+            opacity: 0; transition: opacity 120ms ease-out;
+          }
+          .astrid-vision-details[data-ready="true"] > .astrid-vision-details-shell { opacity: 1; }
+          .astrid-vision-details::backdrop {
+            opacity: 1; background-color: rgba(22, 20, 18, 0);
+            transition: background-color 120ms ease-out;
+          }
+          .astrid-vision-details[data-ready="true"]::backdrop { background-color: rgba(22, 20, 18, .58); }
+          @media (prefers-reduced-motion: reduce) {
+            .astrid-vision-details-shell, .astrid-vision-details::backdrop { transition: none; }
+          }
+          ''' + s[end:]
+          p.write_text(s)
+          p = Path('scripts/quality/check-public-vision-production.mjs')
+          s = p.read_text()
+          old = "    await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();"
+          assert s.count(old) == 1
+          s = s.replace(old, old + '''
+              const gapDialog = page.getByRole('dialog', { name: 'All gaps' });
+              await expect(gapDialog).toHaveCSS('opacity', '1');
+              await expect(gapDialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
+              await expect.poll(() => gapDialog.evaluate(node => getComputedStyle(node, '::backdrop').opacity)).toBe('1');
+              await expect.poll(() => gapDialog.evaluate(node => getComputedStyle(node, '::backdrop').backgroundColor)).toBe('rgba(22, 20, 18, 0.58)');
+              console.log('Production popup uses an opaque native layer, inner-surface reveal and alpha-only backdrop shading.');''')
+          p.write_text(s)
+          PY
+      - name: Add permanent opening-colour regressions
+        run: |
+          cat >> tests/e2e/public-astrid-vision-entry.spec.ts <<'TEST'
+
+          // Track the shade itself, not only the panel's settled geometry. The
+          // previous native-opacity fade reversed in WebKit while every sky pixel
+          // and page colour stayed unchanged (owner's light/dark flash).
+          for (const scenario of [
+            { width: 390, hour: '10', label: 'phone-day' },
+            { width: 390, hour: '01', label: 'phone-night' },
+            { width: 1440, hour: '10', label: 'desktop-day' },
+          ]) {
+            test.describe(`backdrop continuity ${scenario.label}`, () => {
+              test.use({ timezoneId: 'Europe/Berlin', ...(scenario.width === 1440
+                ? { isMobile: false, deviceScaleFactor: 1, hasTouch: false } : {}) });
+              test('popup shading never reverses or repaints the underlying page', async ({ page, request }, info) => {
+                test.setTimeout(150000);
+                await page.setViewportSize({ width: scenario.width, height: 844 });
+                await page.emulateMedia({ reducedMotion: 'no-preference' });
+                await page.clock.setFixedTime(new Date(`2026-11-15T${scenario.hour}:00:00Z`));
+                const response = await request.get(FEED); expect(response.ok()).toBe(true);
+                const feed = await response.json() as PublicVisionContent;
+                await page.route(FEED, route => route.fulfill({ json: feed }));
+                await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+                await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4, { timeout: 30000 });
+                await page.evaluate(() => document.fonts.ready);
+                await expect.poll(() => page.locator('.astrid-sky canvas').first().evaluate(c => c.style.width)).not.toBe('');
+                // Allow the existing initial sky reveal to complete before opening.
+                await page.waitForTimeout(2000);
+                const results = [];
+                for (const kind of ['pillar', 'principle', 'gaps', 'projects', 'pillar']) {
+                  const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').last().getByRole('button')
+                    : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').last().getByRole('button')
+                    : page.getByRole('button', { name: 'See all ' + kind, exact: true });
+                  await opener.scrollIntoViewIfNeeded();
+                  await page.waitForTimeout(400);
+                  await page.evaluate(() => {
+                    type Frame = { t: number; native: number | null; shade: number; surface: number;
+                      colours: string; headerY: number; sky: string };
+                    const state = window as unknown as { backdropFrames: Frame[] };
+                    state.backdropFrames = [];
+                    const read = () => {
+                      const main = document.querySelector<HTMLElement>('.astrid-vision')!;
+                      const dialog = main.querySelector<HTMLDialogElement>('dialog');
+                      const backdrop = dialog?.open ? getComputedStyle(dialog, '::backdrop') : null;
+                      const rgba = backdrop?.backgroundColor.match(/[\d.]+/g)?.map(Number) ?? [];
+                      const alpha = rgba.length === 4 ? rgba[3] : rgba.length === 3 ? 1 : 0;
+                      const shell = dialog?.querySelector('.astrid-vision-details-shell');
+                      const sky = Array.from(main.querySelectorAll<HTMLCanvasElement>('.astrid-sky canvas')).map(canvas => {
+                        const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+                        let hash = 2166136261;
+                        for (const pixel of pixels) hash = Math.imul(hash ^ pixel, 16777619);
+                        const rect = canvas.getBoundingClientRect();
+                        return [canvas.dataset.layer, hash >>> 0, canvas.width, canvas.height, rect.x, rect.y, canvas.style.transform];
+                      });
+                      state.backdropFrames.push({ t: performance.now(),
+                        native: dialog?.open ? Number(getComputedStyle(dialog).opacity) : null,
+                        shade: alpha * Number(backdrop?.opacity ?? 0),
+                        surface: dialog?.open && shell ? Number(getComputedStyle(shell).opacity) : 0,
+                        colours: [main, document.body, document.documentElement].map(e => getComputedStyle(e).backgroundColor).join('|'),
+                        headerY: main.querySelector('.astrid-vision-bar')!.getBoundingClientRect().y,
+                        sky: JSON.stringify(sky) });
+                    };
+                    document.addEventListener('pointerdown', () => {
+                      read();
+                      let count = 0;
+                      const tick = () => { read(); if (++count < 40) requestAnimationFrame(tick); };
+                      requestAnimationFrame(tick);
+                    }, { once: true, capture: true });
+                  });
+                  await opener.click();
+                  const dialog = page.getByRole('dialog');
+                  await expect(dialog).toHaveAttribute('data-ready', 'true');
+                  await expect.poll(() => page.evaluate(() => (window as unknown as { backdropFrames: unknown[] }).backdropFrames.length), { timeout: 20000 }).toBe(41);
+                  const frames = await page.evaluate(() => (window as unknown as { backdropFrames: {
+                    t: number; native: number | null; shade: number; surface: number; colours: string; headerY: number; sky: string;
+                  }[] }).backdropFrames);
+                  results.push({ kind, frames });
+                  record(`backdrop-continuity-${info.project.name}-${scenario.label}`, { source: feed.source, results });
+                  expect.soft(frames.filter(f => f.native !== null).every(f => f.native === 1), 'native dialog opacity is never animated').toBe(true);
+                  expect.soft(frames.every((f, i) => !i || f.shade + .002 >= frames[i - 1].shade), 'the page never gets lighter during opening').toBe(true);
+                  expect.soft(frames.every((f, i) => !i || f.surface + .002 >= frames[i - 1].surface), 'the inner surface never fades backwards').toBe(true);
+                  expect.soft(frames.at(-1)!.shade).toBeCloseTo(.58, 2);
+                  expect.soft(frames.at(-1)!.surface).toBe(1);
+                  expect.soft(new Set(frames.map(f => f.colours)).size, 'page palette remains unchanged').toBe(1);
+                  expect.soft(new Set(frames.map(f => f.sky)).size, 'sky pixels and placement remain unchanged').toBe(1);
+                  expect.soft(Math.max(...frames.map(f => f.headerY)) - Math.min(...frames.map(f => f.headerY))).toBeLessThan(1);
+                  if (kind === 'gaps') await page.screenshot({ path: `${folder}/stable-backdrop-${info.project.name}-${scenario.label}.png` });
+                  await page.keyboard.press('Escape');
+                  await expect(dialog).toHaveCount(0);
+                }
+              });
+            });
+          }
+          TEST
+      - run: npm ci --legacy-peer-deps
+      - name: Check syntax and focused lifecycle
+        run: |
+          node --check scripts/quality/check-public-vision-production.mjs
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Chromium colour continuity
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/backdrop-chromium.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --project=chromium-desktop --grep 'popup shading never' --output=test-results/backdrop-chromium --reporter=line,json
+      - name: WebKit colour continuity
+        if: ${{ !cancelled() }}
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/backdrop-webkit.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'popup shading never' --output=test-results/backdrop-webkit --reporter=line,json
+      - name: Commit only qualified source and regression tests
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+          git commit -m 'fix(vision): separate native backdrop shading from panel opacity'
+          git push origin HEAD:fix/vision-backdrop-flash-20261115
+      - name: Preserve exact candidate and diff
+        if: always()
+        run: |
+          mkdir -p test-results/vision-captures
+          git rev-parse HEAD > test-results/vision-captures/backdrop-head.txt
+          git diff > test-results/vision-captures/backdrop-working.patch
+          tar -cf test-results/vision-captures/backdrop-source.tar src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-backdrop-repaired
+          path: test-results/vision-captures/
+          retention-days: 7

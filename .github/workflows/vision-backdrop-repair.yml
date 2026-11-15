@@ -17,11 +17,8 @@ jobs:
         with:
           node-version: '20.19.0'
           cache: npm
-      - name: Apply verified source recipe on the cleaned delivery branch
+      - name: Apply verified scoped source recipe
         run: |
-          test ! -e .github/workflows/vision-backdrop-probe.yml
-          test ! -e .github/workflows/vision-cloud-handoff-probe.yml
-          test ! -e .github/workflows/vision-backdrop-repair.yml
           git fetch --no-tags --depth=1 origin f8f1a152b2df2028d05bf168f7136cbc20611ad4 cac7adaecf44df67e8805ba79d9097984f1631c6 d3593ab83f90c877c29b2be08efabfe27e2443e6
           python3 - <<'PY'
           from pathlib import Path
@@ -50,10 +47,6 @@ jobs:
                       Number.isFinite(animation.effect?.getComputedTiming().iterations ?? 1)).length),
                     { timeout: 10000 }).toBe(0);
           ''' + needle)
-          old = """            const transforms = Array.from(document.querySelectorAll<HTMLCanvasElement>('.astrid-vision .astrid-sky canvas'))
-                        .map(canvas => canvas.style.transform).join('|');"""
-          old = textwrap.dedent(old)
-          # Match the exact existing two lines without touching the opening oracle.
           needle = "const transforms = Array.from(document.querySelectorAll<HTMLCanvasElement>('.astrid-vision .astrid-sky canvas'))\n              .map(canvas => canvas.style.transform).join('|');"
           assert added.count(needle) == 1
           added = added.replace(needle, """const transforms = JSON.stringify(Array.from(document.querySelectorAll<HTMLCanvasElement>('.astrid-vision .astrid-sky canvas')).map(canvas => {

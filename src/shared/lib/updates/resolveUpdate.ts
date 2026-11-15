@@ -17,6 +17,8 @@ export type UpdateResolution = {
   readonly primary: UpdateAction | null;
   readonly secondary: UpdateAction | null;
   readonly updateReason?: InstallerUpdateReason;
+  /** The manifest's required release triggered this card (K6 rule 6), not a schema, recovery or repair reason. */
+  readonly required?: true;
 };
 
 export type InstallType = 'pinokio' | 'source' | 'fully-local' | 'installer';
@@ -111,6 +113,7 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
       body: `${required ? `This update is required: ${input.requiredReason ?? 'A required update is available.'} ` : ''}You have Release ${input.installedRelease}. ${INSTALLER_UPDATE_REASON_MESSAGES['self-update-too-old']}`,
       ...(required ? COMMAND_ACTIONS : updateActions(input, context, true)),
       updateReason: 'self-update-too-old',
+      ...(required ? { required: true as const } : {}),
     };
   }
   // A setup refusal on an install that is already current has no update to offer: it shows no card and no command.
@@ -146,7 +149,7 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
       ...updateActions(input, context) };
   }
   if (releaseRules && input.requiredRelease !== undefined && input.installedRelease !== undefined && input.installedRelease < input.requiredRelease) {
-    return { card: 'update', title: 'Update Astrid', body: `This update is required: ${input.requiredReason ?? 'A required update is available.'}`, ...updateActions(input, context) };
+    return { card: 'update', title: 'Update Astrid', body: `This update is required: ${input.requiredReason ?? 'A required update is available.'}`, ...updateActions(input, context), required: true };
   }
   if (releaseRules && input.releaseBehind) {
     return { card: 'notice', title: 'Update available', body: 'A newer release of Astrid is available.', ...updateActions(input, context, true) };

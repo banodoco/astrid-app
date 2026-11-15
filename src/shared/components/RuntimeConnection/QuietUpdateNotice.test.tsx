@@ -4,6 +4,7 @@ import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 import { ASTRID_STATUS_COPY } from '@/shared/components/SettingsModal/sections/astridStatusCopy.ts';
+import { INSTALLER_UPDATE_REASON_MESSAGES } from '@/integrations/runtime/installerUpdateReasons.ts';
 
 const { readStatusMock, hostedCheckMock, localCheckMock } = vi.hoisted(() => ({ readStatusMock: vi.fn(), hostedCheckMock: vi.fn(), localCheckMock: vi.fn() }));
 vi.mock('@/integrations/runtime/client.ts', () => ({ AstridRuntimeClient: class { readInstallerUpdateHealth = async () => (await readStatusMock()).health; } }));
@@ -53,10 +54,15 @@ describe('quiet Update available notice', () => {
     const notice = await screen.findByTestId('quiet-update-notice');
 
     expect(notice).toHaveTextContent('This update is required: security fix');
+    // The required card is collapsed: open it, so the absence checks below look at the actions it would show.
+    fireEvent.click(within(notice).getByText('Show how'));
+    expect(within(notice).getByTestId('required-update-reason')).toHaveAttribute('open');
+    expect(within(notice).getByText('Update in Pinokio')).toBeVisible();
     expect(notice).toHaveTextContent('Update in Pinokio');
     expect(notice.querySelector('code')).toBeNull();
     for (const name of ['Copy instructions for your agent', 'Copy for your agent', 'Copy command', 'See updates', 'Update now']) {
-      expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
+      // hidden: true also finds buttons that are present but not shown, so a hidden action still fails this.
+      expect(screen.queryByRole('button', { name, hidden: true })).not.toBeInTheDocument();
     }
     expect(notice.textContent).not.toContain('Run it yourself');
   });
@@ -90,6 +96,10 @@ describe('quiet Update available notice', () => {
     const collapsed = ['Copy instructions for your agent', 'Run it yourself', 'Details'].map((text) => within(notice).getByText(text));
     expect(reasonLine).not.toBeVisible();
     for (const element of collapsed) expect(element).not.toBeVisible();
+    // A hidden-inclusive query still finds a collapsed action, so the Pinokio absence checks can't pass vacuously.
+    expect(within(notice).getByRole('button', { name: 'Copy instructions for your agent', hidden: true })).toBeInTheDocument();
+    // Open, the card is capped and scrolls rather than growing over most of the editor.
+    expect(notice).toHaveClass('max-h-[min(60vh,32rem)]', 'overflow-y-auto');
 
     // Reachable: one click reveals the reason and the unchanged actions.
     fireEvent.click(summary);
@@ -177,24 +187,75 @@ describe('required notice while an update is under way', () => {
     }
   });
 
-  it('keeps the user\u2019s own toggle when the update state changes afterwards', async () => {
+  it('keeps the user\u2019s own toggle for the state it was made in, and reopens for a new one', async () => {
     const state: Record<string, unknown> = {};
     const mount = await requiredPage(state);
     const { view, element, notice } = await mount();
     const disclosure = within(notice).getByTestId('required-update-reason');
+    const summary = disclosure.querySelector('summary')!;
     const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
-    // The user opens it, then closes it again.
-    fireEvent.click(disclosure.querySelector('summary')!);
+    const rerender = async () => { view.rerender(cloneElement(element)); await settle(); };
+    // Idle: the user opens it, then closes it again, and a re-render keeps it closed.
+    fireEvent.click(summary);
     await settle();
     expect(disclosure).toHaveAttribute('open');
-    fireEvent.click(disclosure.querySelector('summary')!);
+    fireEvent.click(summary);
     await settle();
     expect(disclosure).not.toHaveAttribute('open');
-    // An update starting afterwards does not reopen what the user closed.
+    await rerender();
+    expect(disclosure).not.toHaveAttribute('open');
+    // An update starting is a new state: the card reopens with its status line.
     state.pending = true;
-    view.rerender(cloneElement(element));
+    await rerender();
+    expect(disclosure).toHaveAttribute('open');
+    expect(within(notice).getByText('Update in progress. Astrid may disconnect while it restarts.')).toBeVisible();
+    // Closed during that run, it stays closed for that run.
+    fireEvent.click(summary);
     await settle();
-    expect(within(notice).getByText('Update in progress. Astrid may disconnect while it restarts.')).toBeInTheDocument();
     expect(disclosure).not.toHaveAttribute('open');
+    await rerender();
+    expect(disclosure).not.toHaveAttribute('open');
+  });
+
+  it('reopens with the failure when an update the user closed while it ran then fails', async () => {
+    const state: Record<string, unknown> = { pending: true };
+    const mount = await requiredPage(state);
+    const { view, element, notice } = await mount();
+    const disclosure = within(notice).getByTestId('required-update-reason');
+    const summary = disclosure.querySelector('summary')!;
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    const rerender = async () => { view.rerender(cloneElement(element)); await settle(); };
+    expect(disclosure).toHaveAttribute('open');
+    fireEvent.click(summary);
+    await settle();
+    expect(disclosure).not.toHaveAttribute('open');
+    // The run ends in failure: a new problem the closed card must not hide.
+    state.pending = false;
+    state.status = { state: 'terminal', outcome: 'failed' };
+    await rerender();
+    expect(disclosure).toHaveAttribute('open');
+    expect(within(notice).getByText(ASTRID_STATUS_COPY.repairDescription)).toBeVisible();
+    // Closed during the failure, it stays closed for that failure.
+    fireEvent.click(summary);
+    await settle();
+    await rerender();
+    expect(disclosure).not.toHaveAttribute('open');
+  });
+
+  it.each([
+    ['schema incompatibility', { releaseStatus: { resolution: { installedRelease: 12, servedRelease: 12, compatibility: { kind: 'schema', detail: 'This Astrid speaks an older schema.' } } } }, 'This Astrid speaks an older schema.'],
+    ['repair', { releaseStatus: { resolution: { installedRelease: 12, servedRelease: 12 } }, updateReason: 'needs-repair' }, INSTALLER_UPDATE_REASON_MESSAGES['needs-repair']],
+  ] as const)('keeps a %s update card expanded, as before, with no Required badge', async (_label, state, body) => {
+    const mount = await requiredPage(state);
+    const { notice } = await mount();
+    expect(within(notice).queryByTestId('required-update-reason')).not.toBeInTheDocument();
+    expect(notice.querySelector('details')).toBeNull();
+    expect(within(notice).queryByText('Required')).not.toBeInTheDocument();
+    expect(within(notice).queryByText('Show how')).not.toBeInTheDocument();
+    expect(notice).not.toHaveClass('max-h-[min(60vh,32rem)]');
+    expect(within(notice).getByText('Update Astrid')).toBeVisible();
+    expect(within(notice).getByText(body)).toBeVisible();
+    expect(within(notice).getByText('Copy instructions for your agent')).toBeVisible();
+    expect(within(notice).getByText('Run it yourself')).toBeVisible();
   });
 });

@@ -9,7 +9,7 @@ export default defineConfig({
   // allow the complete capture-and-interaction case to finish, without retries.
   workers: 1,
   timeout: 90_000,
-  testMatch: ['**/public-astrid-vision-aspirations.spec.ts', '**/public-astrid-vision-mobile-catalogs.spec.ts', '**/public-astrid-vision-polish.spec.ts', '**/public-astrid-vision-stability.spec.ts'],
+  testMatch: ['**/public-astrid-vision-aspirations.spec.ts', '**/public-astrid-vision-mobile-catalogs.spec.ts', '**/public-astrid-vision-polish.spec.ts', '**/public-astrid-vision-stability.spec.ts', '**/public-astrid-vision-entry.spec.ts'],
   use: { ...base.use, launchOptions: {} },
   projects: [
     { name: 'vision-webkit-phone', use: { ...devices['iPhone 13'], launchOptions: {} } },

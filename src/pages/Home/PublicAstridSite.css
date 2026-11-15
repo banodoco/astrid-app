@@ -92,3 +92,23 @@
 :root[data-astrid-page-transition-style="crossfade"]::view-transition-new(root) {
   animation: astrid-room-fade-in 220ms ease-out both; mix-blend-mode: normal;
 }
+
+/* The phone/tablet Home is an application-sized scene, not a document.
+   Contain viewport/3D overflow at the document boundary as well as the scene;
+   retaining Home behind Vision must never apply this policy to Vision itself.
+   Inner editor/chat scrollers and native top-layer dialogs keep their behavior. */
+@media (max-width: 640px), (min-width: 641px) and (max-width: 1099px) and (min-height: 600px) {
+  .astrid-public-site { --astrid-home-single-screen: 1; }
+  :root:has(.astrid-public-site[data-astrid-lifecycle="active"]) {
+    height: 100vh;
+    height: 100dvh;
+    overflow: clip;
+    overscroll-behavior-y: none;
+  }
+  :root:has(.astrid-public-site[data-astrid-lifecycle="active"]) :is(body, #root) {
+    height: 100%;
+    min-height: 0;
+    overflow: clip;
+    overscroll-behavior-y: none;
+  }
+}

@@ -281,6 +281,10 @@ for (const width of [390, 1440]) {
 
 
 for (const width of [390, 1440]) {
+  test.describe(`room transition context at ${width}px`, () => {
+    // Match the desktop case to a desktop raster/input context. The 390px
+    // case retains the project's iPhone profile and all frame assertions.
+    if (width === 1440) test.use({ isMobile: false, deviceScaleFactor: 1, hasTouch: false });
   test(`scrolled Vision returns to the retained main page without moving its snapshot at ${width}px`, async ({ page }, info) => {
     await pinLive(page);
     await page.setViewportSize({ width, height: 844 });
@@ -360,5 +364,6 @@ for (const width of [390, 1440]) {
     expect(await page.evaluate(() => history.scrollRestoration)).toBe('manual');
     mkdirSync(folder, { recursive: true });
     await page.screenshot({ path: `${folder}/real-main-after-vision-${info.project.name}-${width}.png` });
+  });
   });
 }

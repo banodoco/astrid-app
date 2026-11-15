@@ -2218,3 +2218,15 @@
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-details-gap-summary > svg { transition: none; }
 }
+
+/* Loading and live copy share one layout. Navigation already owns its fade;
+   starting another translated text entrance after the feed arrives looks like
+   a second layout. Keep text sizing stable in mobile transition snapshots. */
+.astrid-vision-hero-copy { min-width: 0; -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+.astrid-vision-hero-copy > .astrid-vision-hero-text { animation: none; }
+.astrid-vision-skeleton-hero .astrid-vision-skeleton-text * { color: transparent; }
+.astrid-vision-skeleton-hero .pixel-underline-mark { visibility: hidden; }
+.astrid-vision-skeleton-hero:not([data-skeleton-visible]) .astrid-vision-skeleton-text {
+  background: none; animation: none;
+}
+.astrid-vision-loading-sections:not([data-skeleton-visible]) { visibility: hidden; }

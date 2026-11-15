@@ -68,6 +68,25 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
     const gap = window.innerWidth - root.clientWidth;
     const padding = Number.parseFloat(getComputedStyle(body).paddingRight) || 0;
     set(root.style, 'scroll-behavior', 'auto');
+    // Fixing the body changes a sticky header's scrolling ancestor. Keep the
+    // existing header in its exact viewport box (behind the native backdrop),
+    // and reserve its flow space until the page position has been restored.
+    const header = dialog.closest('.astrid-vision')?.querySelector<HTMLElement>(':scope > .astrid-vision-bar');
+    let headerSpace: HTMLDivElement | null = null;
+    if (header) {
+      const bounds = header.getBoundingClientRect();
+      headerSpace = document.createElement('div');
+      headerSpace.setAttribute('aria-hidden', 'true');
+      headerSpace.dataset.visionHeaderSpace = '';
+      headerSpace.style.height = bounds.height + 'px';
+      header.before(headerSpace);
+      set(header.style, 'position', 'fixed');
+      set(header.style, 'top', bounds.top + 'px');
+      set(header.style, 'left', bounds.left + 'px');
+      set(header.style, 'right', (window.innerWidth - bounds.right) + 'px');
+      set(header.style, 'width', 'auto');
+      for (const edge of ['top', 'right', 'bottom', 'left']) set(header.style, 'margin-' + edge, '0px');
+    }
     set(root.style, 'overflow-x', 'hidden');
     set(root.style, 'overflow-y', 'hidden');
     set(root.style, 'overscroll-behavior-x', 'none');
@@ -102,6 +121,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
         if (item.value) item.style.setProperty(item.key, item.value, item.priority);
         else item.style.removeProperty(item.key);
       }
+      headerSpace?.remove();
       window.scrollTo({ left: x, top: y, behavior: 'instant' });
       if (previousScrollLock === undefined) delete root.dataset.astridScrollLockY;
       else root.dataset.astridScrollLockY = previousScrollLock;

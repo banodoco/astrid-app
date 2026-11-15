@@ -165,28 +165,34 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
   return value as unknown as PublicVisionContent;
 }
 
-// In-memory stale-while-revalidate: returning from Home doesn't flash an empty
-// page, and a failed refresh never discards the last validated content.
+// One validated snapshot and one request owner for both Home preloading and
+// Vision. Joining an in-flight preload must not start a second cold request.
 let lastGood: PublicVisionContent | null = null;
+let pending: Promise<PublicVisionContent> | null = null;
 
-let preloading = false;
+function requestPublicVisionContent(): Promise<PublicVisionContent> {
+  if (pending) return pending;
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 10_000);
+  pending = fetch(PUBLIC_VISION_URL, {
+    signal: controller.signal, credentials: 'omit', mode: 'cors', cache: 'default',
+  }).then(async response => {
+    if (!response.ok) throw new Error('Vision feed unavailable');
+    return parsePublicVisionContent(await response.json());
+  }).then(next => {
+    lastGood = next;
+    return next;
+  }).finally(() => {
+    window.clearTimeout(timeout);
+    pending = null;
+  });
+  return pending;
+}
 
-/**
- * Fetches the vision ahead of need (Home calls this once it has settled), so opening the Vision page
- * shows its text at once instead of a loading skeleton. Failures are silent: the page fetches for
- * itself, with its own error state, when it opens.
- */
+/** Warm the same bounded request the Vision page will join. */
 export function preloadPublicVisionContent() {
-  if (lastGood || preloading || typeof fetch !== 'function') return;
-  preloading = true;
-  void fetch(PUBLIC_VISION_URL, { credentials: 'omit', mode: 'cors', cache: 'default' })
-    .then(async response => {
-      if (!response.ok) throw new Error('Vision feed unavailable');
-      return parsePublicVisionContent(await response.json());
-    })
-    .then(next => { lastGood ??= next; })
-    .catch(() => {})
-    .finally(() => { preloading = false; });
+  if (lastGood || typeof fetch !== 'function') return;
+  void requestPublicVisionContent().catch(() => {});
 }
 
 export function usePublicVisionContent() {
@@ -197,28 +203,15 @@ export function usePublicVisionContent() {
 
   useEffect(() => {
     let mounted = true;
-    const controller = new AbortController();
-    const timeout = window.setTimeout(() => controller.abort(), 10_000);
     setError(false);
-    void fetch(PUBLIC_VISION_URL, {
-      signal: controller.signal, credentials: 'omit', mode: 'cors', cache: 'default',
-    }).then(async response => {
-      if (!response.ok) throw new Error('Vision feed unavailable');
-      return parsePublicVisionContent(await response.json());
-    }).then(next => {
-      if (!mounted) return;
-      lastGood = next;
-      setContent(next);
+    // The request belongs to the shared cache, not an individual mount. A
+    // route change or StrictMode cleanup must not abort another subscriber.
+    void requestPublicVisionContent().then(next => {
+      if (mounted) setContent(next);
     }).catch(() => {
       if (mounted) setError(true);
-    }).finally(() => {
-      window.clearTimeout(timeout);
     });
-    return () => {
-      mounted = false;
-      controller.abort();
-      window.clearTimeout(timeout);
-    };
+    return () => { mounted = false; };
   }, [attempt]);
 
   return { content, error, retry };

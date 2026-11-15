@@ -17,59 +17,87 @@ jobs:
         with:
           node-version: '20.19.0'
           cache: npm
-      - name: Apply the unchanged hash-verified product repair
+      - name: Apply exact prior candidate and add deterministic handoff regression
         run: |
-          git fetch --no-tags --depth=1 origin f8f1a152b2df2028d05bf168f7136cbc20611ad4
+          git fetch --no-tags --depth=1 origin f8f1a152b2df2028d05bf168f7136cbc20611ad4 cac7adaecf44df67e8805ba79d9097984f1631c6
           python3 - <<'PY'
-          import hashlib, subprocess, textwrap
-          donor = subprocess.check_output(['git', 'show', 'f8f1a152b2df2028d05bf168f7136cbc20611ad4:.github/workflows/vision-backdrop-repair.yml'])
-          assert hashlib.sha1(b'blob '+str(len(donor)).encode()+b'\0'+donor).hexdigest() == 'e8f61ab0dcf5eb6c6f43f75ba9627c88ff327d3c'
-          text = donor.decode()
-          start = text.index('          import base64, gzip, hashlib, subprocess\n')
-          end = text.index('\n          PY', start)
-          # This exact immutable recipe checks SHA-256 before git apply --check.
-          exec(compile(textwrap.dedent(text[start:end]), '<verified-backdrop-recipe>', 'exec'))
+          from pathlib import Path
+          import re, textwrap, subprocess, hashlib
+          recipe = subprocess.check_output(['git', 'show', 'cac7adaecf44df67e8805ba79d9097984f1631c6:.github/workflows/vision-backdrop-repair.yml'])
+          assert hashlib.sha1(b'blob '+str(len(recipe)).encode()+b'\0'+recipe).hexdigest() == 'c57b78b06aba5eb0c96b7ee56a7ea348af2199da'
+          for block in re.findall(r"          python3 - <<'PY'\n(.*?)\n          PY", recipe.decode(), re.S):
+            exec(compile(textwrap.dedent(block), '<prior-qualified-recipe>', 'exec'))
+          p = Path('src/pages/Home/PublicAstridSky.scheduling.test.tsx')
+          s = p.read_text().replace("import { act, cleanup, render }", "import { useLayoutEffect } from 'react';\nimport { act, cleanup, render }")
+          s += '''
+          it('cancels queued sky paint synchronously when geometry is released for a dialog', () => {
+            const owner = session();
+            const geometry = root();
+            let queued: FrameRequestCallback[] = [];
+            function HandoffBoundary({ active }: { active: boolean }) {
+              useLayoutEffect(() => {
+                if (!active) queued.forEach(callback => callback(performance.now()));
+              }, [active]);
+              return <PublicAstridSky session={owner} active={active} geometryRoot={geometry}
+                geometryOwner="vision" quietBehind=".reading" />;
+            }
+            const view = render(<HandoffBoundary active />);
+            settle();
+            expect(owner.getGeometrySnapshot().quiet).not.toBeNull();
+            const raster = vi.spyOn(owner.renderer, 'paint');
+            contexts.forEach(context => context.putImageData.mockClear());
+            act(() => window.dispatchEvent(new Event('resize')));
+            queued = [...frames.values()];
+            expect(queued.length).toBeGreaterThan(0);
+            // Simulate an already-dispatched frame arriving after the child's
+            // layout cleanup but before its passive cleanup. It must be inert.
+            view.rerender(<HandoffBoundary active={false} />);
+            expect(owner.getGeometrySnapshot().owner).toBeNull();
+            expect(raster).not.toHaveBeenCalled();
+            contexts.forEach(context => expect(context.putImageData).not.toHaveBeenCalled());
+            settle();
+            expect(raster).not.toHaveBeenCalled();
+            view.rerender(<HandoffBoundary active />);
+            settle();
+            expect(owner.getGeometrySnapshot().owner).toBe('vision');
+            expect(raster).toHaveBeenCalled();
+            view.unmount(); owner.destroy();
+          });
+          '''
+          p.write_text(s)
           PY
-      - name: Settle the preceding gesture without changing opening assertions
+      - run: npm ci --legacy-peer-deps
+      - name: Record the new handoff regression on unchanged sky source
+        run: |
+          mkdir -p diagnostic-evidence
+          set +e
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSky.scheduling.test.tsx -t 'cancels queued sky paint synchronously' > diagnostic-evidence/sky-handoff-baseline.log 2>&1
+          result=$?
+          echo "$result" > diagnostic-evidence/sky-handoff-baseline-exit.txt
+          cat diagnostic-evidence/sky-handoff-baseline.log
+          exit 0
+      - name: Cancel raster ownership in the same layout phase as geometry
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
-          s = p.read_text()
-          old = '''        await opener.scrollIntoViewIfNeeded();
-                  await page.waitForTimeout(400);
-          '''
-          new = '''        await opener.scrollIntoViewIfNeeded();
-                  if (scenario.width === 1440) {
-                    const bounds = await opener.boundingBox();
-                    expect(bounds).not.toBeNull();
-                    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
-                  }
-                  // Finish the preceding scroll/pointer parallax before measuring a new
-                  // action. A fixed delay can leave subpixel easing in the first frame.
-                  await page.evaluate(() => new Promise<void>((resolve, reject) => {
-                    let previous = '', stable = 0, attempts = 0;
-                    const settle = () => {
-                      const transforms = Array.from(document.querySelectorAll<HTMLCanvasElement>('.astrid-vision .astrid-sky canvas'))
-                        .map(canvas => canvas.style.transform).join('|');
-                      stable = transforms === previous ? stable + 1 : 0;
-                      previous = transforms;
-                      if (stable >= 4) resolve();
-                      else if (++attempts >= 240) reject(new Error('Sky parallax did not settle before the opening gesture'));
-                      else requestAnimationFrame(settle);
-                    };
-                    requestAnimationFrame(settle);
-                  }));
-          '''
-          assert s.count(old) == 1, 'Unexpected regression source; stop'
-          p.write_text(s.replace(old, new))
+          import hashlib
+          p = Path('src/pages/Home/PublicAstridSky.tsx')
+          raw = p.read_bytes()
+          assert hashlib.sha1(b'blob '+str(len(raw)).encode()+b'\0'+raw).hexdigest() == '65d81286ad254a26bc56b532592e4f17eb74c2ef'
+          s = raw.decode()
+          assert s.count('  useEffect(() => {') == 1
+          s = s.replace('import { useEffect, useLayoutEffect,', 'import { useLayoutEffect,')
+          s = s.replace('  useEffect(() => {', '''  // Geometry releases its reading mask in layout cleanup. Cancel raster work
+            // in that same commit, before a queued frame can paint the cleared mask
+            // behind a dialog. Passive cleanup leaves a one-frame repaint window.
+            useLayoutEffect(() => {''')
+          p.write_text(s)
           PY
-      - run: npm ci --legacy-peer-deps
-      - name: Verify syntax, lifecycle and lint
+      - name: Verify syntax, lifecycle, sky scheduling and lint
         run: |
           node --check scripts/quality/check-public-vision-production.mjs
-          npx eslint src/pages/Home/VisionDialog.tsx --max-warnings 0
-          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx
+          npx eslint src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridSky.tsx src/pages/Home/PublicAstridSky.scheduling.test.tsx --max-warnings 0
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/pages/Home/PublicAstridSky.scheduling.test.tsx
       - run: npx playwright install --with-deps chromium webkit
       - name: Chromium colour continuity
         env:
@@ -84,8 +112,8 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/pages/Home/VisionMobileLayout.css src/pages/Home/VisionDialog.tsx tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
-          git commit -m 'fix(vision): drive popup and backdrop from one monotonic reveal'
+          git add src/pages/Home/VisionMobileLayout.css src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridSky.tsx src/pages/Home/PublicAstridSky.scheduling.test.tsx tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+          git commit -m 'fix(vision): synchronize popup fade and freeze sky before layout handoff'
           git push origin HEAD:fix/vision-backdrop-flash-20261115
       - name: Preserve exact candidate and diff
         if: always()
@@ -93,7 +121,8 @@ jobs:
           mkdir -p test-results/vision-captures
           git rev-parse HEAD > test-results/vision-captures/backdrop-head.txt
           git diff > test-results/vision-captures/backdrop-working.patch
-          tar -cf test-results/vision-captures/backdrop-source.tar src/pages/Home/VisionMobileLayout.css src/pages/Home/VisionDialog.tsx tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+          cp diagnostic-evidence/* test-results/vision-captures/ || true
+          tar -cf test-results/vision-captures/backdrop-source.tar src/pages/Home/VisionMobileLayout.css src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridSky.tsx src/pages/Home/PublicAstridSky.scheduling.test.tsx tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
       - uses: actions/upload-artifact@v4
         if: always()
         with:

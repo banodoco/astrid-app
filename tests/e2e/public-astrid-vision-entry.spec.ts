@@ -165,7 +165,9 @@ test('iPad single-screen Home rejects document overflow and remains fitted', asy
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.goto('/home', { waitUntil: 'domcontentloaded' });
     const home = page.locator('.astrid-public-site');
-    await expect(home).toBeVisible();
+    // Cold Vite compilation is not layout readiness. Keep geometry assertions
+    // strict, but wait explicitly for the application to mount first.
+    await expect(home).toBeVisible({ timeout: 30000 });
     await page.evaluate(() => document.fonts.ready);
     const samples = [];
     for (const viewport of [{ width: 820, height: 1180 }, { width: 820, height: 1024 },
@@ -214,7 +216,7 @@ test('iPad returns from scrolled Vision at the top without a second adjustment',
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.goto('/home', { waitUntil: 'domcontentloaded' });
     const home = page.locator('.astrid-public-site');
-    await expect(home).toBeVisible();
+    await expect(home).toBeVisible({ timeout: 30000 });
     const traces = [];
     for (const height of [1180, 1024, 1180]) {
       await page.setViewportSize({ width: 820, height });

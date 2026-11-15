@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { useAppEventListener } from '@/shared/lib/typedEvents.ts';
 
@@ -57,6 +57,38 @@ describe('quiet Update available notice', () => {
       expect(screen.queryByRole('button', { name })).not.toBeInTheDocument();
     }
     expect(notice.textContent).not.toContain('Run it yourself');
+  });
+
+  it('keeps a required update to its one title line, with the reason behind Why?', async () => {
+    const reason = 'This update fixes problems that could keep a rented machine billing after a job, or lose a finished result.';
+    readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 12 } });
+    hostedCheckMock.mockResolvedValue({
+      release: 12, app: 'app-a', servedRelease: 13, servedApp: 'app-b', behind: true,
+      resolution: { installedRelease: 12, servedRelease: 13, requiredRelease: 13, requiredReason: reason, releaseBehind: true },
+    });
+    vi.resetModules();
+    const { QuietUpdateNotice: RequiredPageNotice } = await import('./QuietUpdateNotice.tsx');
+    render(<RequiredPageNotice connection={{ isConnected: true, managedByPinokio: false } as never} />);
+    await act(async () => { await Promise.resolve(); await Promise.resolve(); });
+    const notice = await screen.findByTestId('quiet-update-notice');
+
+    // Compact: the title and Why? are visible on one line; the reason paragraph is collapsed.
+    const disclosure = within(notice).getByTestId('required-update-reason');
+    expect(disclosure.tagName).toBe('DETAILS');
+    expect(disclosure).not.toHaveAttribute('open');
+    expect(within(notice).getByText('Update Astrid')).toBeVisible();
+    const why = within(notice).getByText('Why?');
+    expect(why).toBeVisible();
+    expect(why.closest('summary')).toBe(disclosure.querySelector('summary'));
+    const reasonLine = within(notice).getByText(`This update is required: ${reason}`);
+    expect(reasonLine).not.toBeVisible();
+    // The actions stay on the card, outside the disclosure.
+    expect(within(notice).getByText('Copy instructions for your agent')).toBeVisible();
+
+    // Reachable: opening the disclosure shows the reason.
+    fireEvent.click(disclosure.querySelector('summary')!);
+    expect(disclosure).toHaveAttribute('open');
+    expect(reasonLine).toBeVisible();
   });
 
   it('sits under the editor tour\u2019s dimming shield, inert, while the tour runs', async () => {

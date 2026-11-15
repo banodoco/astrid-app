@@ -49,6 +49,30 @@ async function checkPage(browser, content) {
   }
 }
 
+async function checkHeadlineEntry(browser, content) {
+  const page = await browser.newPage({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  try {
+    const response = await page.goto(new URL('/', PAGE).href, { waitUntil: 'domcontentloaded', timeout: 25_000 });
+    if (!response?.ok()) throw new Error(`Production Home HTTP ${response?.status() ?? 'no response'}`);
+    for (let trip = 0; trip < 2; trip++) {
+      const link = page.getByRole('link', { name: 'Vision', exact: true });
+      await expect(link).toBeVisible({ timeout: 30_000 });
+      await link.click();
+      const title = page.locator('#astrid-vision-title');
+      await expect(title).toHaveText(content.vision.title, { timeout: 15_000 });
+      await expect(title).toHaveCSS('text-wrap', 'wrap');
+      await expect.poll(() => title.evaluate(node => Math.abs(
+        node.getBoundingClientRect().width - node.closest('.astrid-vision-hero-copy').getBoundingClientRect().width
+      ))).toBeLessThan(1);
+      await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+      await expect(page.locator('.astrid-vision')).toHaveCount(0);
+    }
+    console.log('Production Home → Vision uses full-column, non-balanced heading flow on first entry and cached return at 390px.');
+  } finally {
+    await page.close();
+  }
+}
+
 async function main() {
   const browser = await chromium.launch();
   try {
@@ -57,6 +81,7 @@ async function main() {
       try {
         const content = await publishedVision();
         await checkPage(browser, content);
+        await checkHeadlineEntry(browser, content);
         return;
       } catch (error) {
         lastError = error;

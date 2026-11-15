@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { connectionFor, CONNECTED_REALM } from './connectionFixture.ts';
 
@@ -46,6 +46,10 @@ describe('required update on the connected page', () => {
     const card = await waitFor(() => screen.getByTestId('quiet-update-notice'));
     expect(within(card).getByText('Update Astrid')).toBeVisible();
     expect(card).toHaveTextContent('This update is required: security fix');
+    // Collapsed, the card is one line: its commands sit behind Show how.
+    expect(within(card).getByText('Copy instructions for your agent')).not.toBeVisible();
+    expect(within(card).getByText('Run it yourself')).not.toBeVisible();
+    fireEvent.click(within(card).getByText('Show how'));
     expect(within(card).getByText('Copy instructions for your agent')).toBeVisible();
     expect(within(card).getByText('Run it yourself')).toBeVisible();
     expect(screen.getByTestId('settings-update-indicator')).toBeVisible();

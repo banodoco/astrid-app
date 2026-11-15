@@ -23,16 +23,22 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
   }
   if (pageStale || !decision || (decision.card !== 'notice' && decision.card !== 'update')) return null;
   // A required update (K6 rule 6) uses this same card, with its own title and reason.
-  // Its title stays one line like the optional notice; the reason sits behind "Why?" so the card doesn't cover editor controls.
-  const required = decision.card === 'update';
+  // Collapsed it is one line, like the optional notice, so it doesn't cover editor controls; "Show how" reveals its reason
+  // and the full actions, unchanged.
+  const dot = <span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />;
   return <div role="status" data-testid="quiet-update-notice" style={layer.style} {...(layer.inert === undefined ? {} : { inert: layer.inert })} className="fixed bottom-4 left-4 z-[100110] max-w-[min(28rem,calc(100%-2rem))] space-y-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-md">
-    {required
+    {decision.card === 'update'
       ? <details data-testid="required-update-reason">
-        <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden"><span className="font-medium"><span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />{decision.title}</span> <span className="text-xs text-muted-foreground underline underline-offset-2">Why?</span></summary>
-        <p className="mt-1 text-muted-foreground">{decision.body}</p>
+        <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden"><span className="font-medium">{dot}{decision.title}</span> <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">Required</span> <span className="ml-1 text-xs text-muted-foreground underline underline-offset-2">Show how</span></summary>
+        <div className="mt-2 space-y-2">
+          <p className="text-muted-foreground">{decision.body}</p>
+          <UpdateResolutionActions resolution={decision} operation={operation} />
+        </div>
       </details>
-      : <span><span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />Update available: Release {current?.servedRelease ?? page?.status.servedRelease}</span>}
-    <UpdateResolutionActions resolution={decision} operation={operation} />
+      : <>
+        <span>{dot}Update available: Release {current?.servedRelease ?? page?.status.servedRelease}</span>
+        <UpdateResolutionActions resolution={decision} operation={operation} />
+      </>}
   </div>;
 
 }

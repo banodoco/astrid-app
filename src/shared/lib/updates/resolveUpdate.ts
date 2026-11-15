@@ -100,8 +100,9 @@ export function resolveUpdate(input: UpdateResolutionInput, context: ActionConte
   }
   // A release before the first self-updating one cannot report why it can't update itself; its release says why.
   // A reason the Runtime did report wins; only the generic fallback is replaced.
-  // A required update keeps its precedence (an update card with the command, its reason first); otherwise the page
-  // routes to Settings like any release notice, and Settings shows the command.
+  // A required update keeps its precedence (an update card with the command and its reason; on the page both sit behind
+  // one click, "Show how", so the collapsed card is one line); otherwise the page routes to Settings like any release
+  // notice, and Settings shows the command.
   if (selfUpdateTooOld(input)) {
     const required = input.requiredRelease !== undefined && input.installedRelease! < input.requiredRelease;
     return {

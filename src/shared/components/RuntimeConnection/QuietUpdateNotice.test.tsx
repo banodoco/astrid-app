@@ -59,7 +59,7 @@ describe('quiet Update available notice', () => {
     expect(notice.textContent).not.toContain('Run it yourself');
   });
 
-  it('keeps a required update to its one title line, with the reason behind Why?', async () => {
+  it('keeps a required update to one line, with its reason and actions behind Show how', async () => {
     const reason = 'This update fixes problems that could keep a rented machine billing after a job, or lose a finished result.';
     readStatusMock.mockResolvedValue({ health: { status: 'ok', release: 12 } });
     hostedCheckMock.mockResolvedValue({
@@ -72,23 +72,28 @@ describe('quiet Update available notice', () => {
     await act(async () => { await Promise.resolve(); await Promise.resolve(); });
     const notice = await screen.findByTestId('quiet-update-notice');
 
-    // Compact: the title and Why? are visible on one line; the reason paragraph is collapsed.
+    // Compact: only the summary line (title, Required, Show how) is visible; the reason and every action are collapsed.
     const disclosure = within(notice).getByTestId('required-update-reason');
     expect(disclosure.tagName).toBe('DETAILS');
     expect(disclosure).not.toHaveAttribute('open');
-    expect(within(notice).getByText('Update Astrid')).toBeVisible();
-    const why = within(notice).getByText('Why?');
-    expect(why).toBeVisible();
-    expect(why.closest('summary')).toBe(disclosure.querySelector('summary'));
+    const summary = disclosure.querySelector('summary')!;
+    expect(notice.children).toHaveLength(1);
+    expect(summary).toHaveTextContent('Update Astrid Required Show how');
+    for (const text of ['Update Astrid', 'Required', 'Show how']) {
+      const element = within(notice).getByText(text);
+      expect(element).toBeVisible();
+      expect(element.closest('summary')).toBe(summary);
+    }
     const reasonLine = within(notice).getByText(`This update is required: ${reason}`);
+    const collapsed = ['Copy instructions for your agent', 'Run it yourself', 'Details'].map((text) => within(notice).getByText(text));
     expect(reasonLine).not.toBeVisible();
-    // The actions stay on the card, outside the disclosure.
-    expect(within(notice).getByText('Copy instructions for your agent')).toBeVisible();
+    for (const element of collapsed) expect(element).not.toBeVisible();
 
-    // Reachable: opening the disclosure shows the reason.
-    fireEvent.click(disclosure.querySelector('summary')!);
+    // Reachable: one click reveals the reason and the unchanged actions.
+    fireEvent.click(summary);
     expect(disclosure).toHaveAttribute('open');
     expect(reasonLine).toBeVisible();
+    for (const element of collapsed) expect(element).toBeVisible();
   });
 
   it('sits under the editor tour\u2019s dimming shield, inert, while the tour runs', async () => {

@@ -1,0 +1,66 @@
+name: Verify Home card motion on Apple WebKit
+on:
+  push:
+    branches: [diagnose/feedback-media-readiness-20261115]
+    paths: [.github/workflows/feedback-apple-webkit.yml]
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: macos-15
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install webkit
+      - name: Collect exact mobile interaction case using unchanged production media
+        run: |
+          git fetch --depth=1 origin fix/home-cards-vision-controls-20261115
+          git show FETCH_HEAD:scripts/quality/vision-feedback-cases-20261115.txt > /tmp/feedback-cases.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          cases=Path('/tmp/feedback-cases.txt').read_text().split("test.describe('feedback follow-up desktop navigation'")[0]
+          assert "test('other chips do not inherit" in cases
+          p.write_text(p.read_text()+cases)
+          PY
+          mkdir -p apple-evidence
+          git rev-parse HEAD > apple-evidence/source.txt
+          shasum -a 256 public/astrid/light-study/*.mp4 > apple-evidence/unchanged-media.txt
+      - name: Record old UI motion against original assets on Apple WebKit
+        run: |
+          set +e
+          PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/vision-captures/apple-baseline-report.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'feedback follow-up mobile' --retries=0 --output=test-results/apple-baseline --reporter=line,json > apple-evidence/baseline.log 2>&1
+          status=$?
+          echo "$status" > apple-evidence/baseline-exit.txt
+          cp test-results/vision-captures/feedback-chip-switch-vision-webkit-phone.json apple-evidence/baseline-card-frames.json
+          test "$status" = 1
+      - name: Apply only the reviewed card identity fix
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/Home/PublicAstridCallouts.tsx');s=p.read_text()
+          old='  useEffect(() => { setOpenId(null); }, [audience, phone]);';assert s.count(old)==1
+          s=s.replace(old,'  useLayoutEffect(() => { setOpenId(null); }, [audience, phone]);')
+          old='<div className="astrid-callout-content">';assert s.count(old)==1
+          p.write_text(s.replace(old,'<div key={callout.id} className="astrid-callout-content">'))
+          PY
+      - name: Verify repaired mobile motion without replacing assets or readiness
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/apple-repaired-report.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'feedback follow-up mobile' --retries=0 --output=test-results/apple-repaired --reporter=line,json
+      - name: Preserve exact diff and raw observations
+        if: always()
+        run: |
+          git diff > apple-evidence/candidate.patch
+          cp -R test-results/vision-captures apple-evidence/captures || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: feedback-apple-webkit-proof
+          path: apple-evidence/
+          retention-days: 14

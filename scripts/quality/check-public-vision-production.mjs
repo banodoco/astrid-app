@@ -38,6 +38,17 @@ async function checkPage(browser, content) {
     const firstPillar = page.locator('.astrid-vision-principles > li').first();
     const goalCount = content.pillars[0].characteristics?.length ?? 0;
     await expect(firstPillar.locator('.astrid-vision-subject-counts')).toContainText(`${goalCount} ${goalCount === 1 ? 'goal' : 'goals'}`);
+    await page.evaluate(() => {
+      const original = HTMLDialogElement.prototype.showModal;
+      window.__visionShadeStarts = [];
+      HTMLDialogElement.prototype.showModal = function () {
+        original.call(this);
+        const style = getComputedStyle(this, '::backdrop');
+        window.__visionShadeStarts.push({ ready: this.dataset.ready ?? null,
+          colour: style.backgroundColor, opacity: style.opacity,
+          animation: style.animationName, transition: style.transitionDuration });
+      };
+    });
     await firstPillar.getByRole('button').click();
     const subjectDialog = page.getByRole('dialog');
     await expect(subjectDialog.getByRole('heading', { name: 'Goals', exact: true })).toBeVisible();
@@ -60,13 +71,20 @@ async function checkPage(browser, content) {
     await expect(gapDialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
     await expect.poll(() => gapDialog.evaluate(node => getComputedStyle(node, '::backdrop').opacity)).toBe('1');
     await expect.poll(() => gapDialog.evaluate(node => getComputedStyle(node, '::backdrop').backgroundColor)).toBe('rgba(22, 20, 18, 0.58)');
-    console.log('Production popup uses an opaque native layer, inner-surface reveal and shared-progress backdrop shading.');
+    console.log('Production popup uses an opaque native layer, inner-surface reveal and constant backdrop shading.');
     await expect(page.locator('#gap-aa-001')).toBeAttached();
     await page.keyboard.press('Escape');
     await page.getByRole('button', { name: 'See all projects', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'All projects' })).toBeVisible();
     await expect(page.locator('.astrid-vision-project-row')).toHaveCount(content.projects.length);
     await expect(page.getByRole('alert')).toHaveCount(0);
+    const initialShades = await page.evaluate(() => window.__visionShadeStarts);
+    expect(initialShades).toHaveLength(3);
+    for (const shade of initialShades) {
+      expect(shade).toEqual({ ready: null, colour: 'rgba(22, 20, 18, 0.58)',
+        opacity: '1', animation: 'none', transition: '0s' });
+    }
+    console.log('Production dimmer is already fixed at native opening, before popup readiness.');
     console.log(`Production vision page renders ${content.pillars.length} pillars, ${content.principles.length} principles, and the first live gap.`);
   } finally {
     await page.close();

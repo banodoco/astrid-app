@@ -724,3 +724,98 @@ test('closing native dialog preserves a subsequent explicit focus handoff', asyn
   await page.keyboard.press('Enter');
   await expect(page.getByRole('dialog')).toHaveAccessibleName(feed.principles[0].title);
 });
+
+
+// The page dimmer must not depend on readiness or the surface animation.
+// Capture the native open call, before data-ready or any later RAF.
+for (const width of [390, 1440]) {
+  test.describe(`steady shade at ${width}px`, () => {
+    test.use(width === 1440 ? { isMobile: false, hasTouch: false, deviceScaleFactor: 1 }
+      : { isMobile: true, hasTouch: true });
+    test('shade is independent of popup readiness and surface progress', async ({ page, request }, info) => {
+      test.setTimeout(150000);
+      await page.setViewportSize({ width, height: 844 });
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      const response = await request.get(FEED); expect(response.ok()).toBe(true);
+      const feed = await response.json() as PublicVisionContent;
+      await page.route(FEED, route => route.fulfill({ json: feed }));
+      await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4, { timeout: 30000 });
+      const records = [];
+      for (const [index, kind] of ['pillar', 'principle', 'gaps', 'projects', 'pillar'].entries()) {
+        const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').first().getByRole('button')
+          : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').first().getByRole('button')
+          : page.getByRole('button', { name: 'See all ' + kind, exact: true });
+        await opener.scrollIntoViewIfNeeded();
+        await page.evaluate(() => {
+          const original = HTMLDialogElement.prototype.showModal;
+          const state = window as unknown as { steadyShade: { first?: Record<string, unknown>; frames: Record<string, unknown>[]; done: boolean } };
+          state.steadyShade = { frames: [], done: false };
+          HTMLDialogElement.prototype.showModal = function () {
+            HTMLDialogElement.prototype.showModal = original;
+            original.call(this);
+            const read = () => {
+              const shade = getComputedStyle(this, '::backdrop');
+              return { ready: this.dataset.ready ?? null, progress: this.style.getPropertyValue('--vision-open-progress'),
+                shade: shade.backgroundColor, opacity: shade.opacity, transition: shade.transitionDuration,
+                animation: shade.animationName, native: getComputedStyle(this).opacity,
+                surface: getComputedStyle(this.querySelector('.astrid-vision-details-shell')!).opacity };
+            };
+            state.steadyShade.first = read();
+            let count = 0;
+            const tick = () => {
+              if (!this.open) { state.steadyShade.done = true; return; }
+              state.steadyShade.frames.push(read());
+              if (++count < 40) requestAnimationFrame(tick);
+              else state.steadyShade.done = true;
+            };
+            requestAnimationFrame(tick);
+          };
+        });
+        if (width === 390) await opener.tap(); else await opener.click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog).toHaveAttribute('data-ready', 'true');
+        await expect.poll(() => page.evaluate(() => (window as unknown as { steadyShade: { done: boolean } }).steadyShade.done), { timeout: 30000 }).toBe(true);
+        const trace = await page.evaluate(() => (window as unknown as { steadyShade: { first: { ready: string | null; progress: string; shade: string; surface: string }; frames: { shade: string; opacity: string; native: string; transition: string; animation: string; surface: string }[] } }).steadyShade);
+        records.push({ kind, trace });
+        record(`steady-shade-${info.project.name}-${width}`, { source: feed.source, records });
+        expect.soft(trace.first.ready, 'measure before panel readiness').toBeNull();
+        expect.soft(trace.first.progress).toBe('0');
+        expect.soft(trace.first.shade, 'native dimmer is already complete at showModal').toBe('rgba(22, 20, 18, 0.58)');
+        expect.soft(trace.frames).toHaveLength(40);
+        for (const frame of trace.frames) {
+          expect.soft(frame.shade).toBe('rgba(22, 20, 18, 0.58)');
+          expect.soft(frame.opacity).toBe('1');
+          expect.soft(frame.native).toBe('1');
+          expect.soft(frame.animation).toBe('none');
+          expect.soft(frame.transition).toBe('0s');
+        }
+        expect.soft(trace.first.surface, 'the panel still has its own reveal').toBe('0');
+        await expect(dialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
+        if (index === 0) {
+          // Compare actual painted backdrop pixels, not just computed styles.
+          // The top-left gutter is outside the surface at both widths.
+          // Isolate the native dimmer from the intentional foreground/shadow fade.
+await dialog.locator('.astrid-vision-details-shell').evaluate(node => (node as HTMLElement).style.opacity = '1');
+const reference = await page.screenshot({ clip: { x: 0, y: 0, width: 8, height: 8 }, scale: 'css' });
+          const painted = [];
+          for (const state of [{ ready: false, progress: '0' }, { ready: true, progress: '0.5' }, { ready: true, progress: '1' }]) {
+            await dialog.evaluate((node, state) => {
+              if (state.ready) node.setAttribute('data-ready', 'true'); else node.removeAttribute('data-ready');
+              (node as HTMLElement).style.setProperty('--vision-open-progress', state.progress);
+            }, state);
+            const pixels = await page.screenshot({ clip: { x: 0, y: 0, width: 8, height: 8 }, scale: 'css' });
+            const unchanged = pixels.equals(reference);
+            painted.push({ ...state, unchanged });
+            expect.soft(unchanged, 'surface readiness/progress cannot change painted dimmer pixels').toBe(true);
+          }
+          record(`steady-shade-pixels-${info.project.name}-${width}`, painted);
+await dialog.locator('.astrid-vision-details-shell').evaluate(node => (node as HTMLElement).style.removeProperty('opacity'));
+          await page.screenshot({ path: `${folder}/steady-shade-${info.project.name}-${width}.png` });
+        }
+        await page.keyboard.press('Escape');
+        await expect(page.locator('dialog.astrid-vision-details')).toHaveCount(0);
+      }
+    });
+  });
+}

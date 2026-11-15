@@ -195,8 +195,8 @@
 .astrid-vision .astrid-vision-standards-list > li .astrid-vision-principle-corner { color: var(--principle-copy); opacity: 1; }
 
 /* The native top layer remains opaque; only its ordinary inner surface fades.
-   Both surface opacity and backdrop alpha consume one frame-owned progress.
-   Separate CSS/compositor timelines can rewind during WebKit modal opening.
+   The dimmer is constant from native opening, independent of readiness,
+   inherited animation variables or the inner surface reveal.
    The transparent outer border preserves the existing measured geometry. */
 .astrid-vision-details {
   overflow: visible; border-color: transparent; background: transparent;
@@ -209,15 +209,13 @@
   opacity: var(--vision-open-progress, 0); transition: none;
 }
 .astrid-vision-details::backdrop {
-  opacity: 1; background-color: rgba(22, 20, 18, 0); transition: none;
-}
-.astrid-vision-details[data-ready="true"]::backdrop {
-  /* Older engines without backdrop inheritance fall back to steady dimming. */
-  background-color: rgba(22, 20, 18, calc(.58 * var(--vision-open-progress, 1)));
+  /* No transparent preparation frame or animated shade to interrupt. Keep
+     the page at one dim level while the surface settles and fades in. */
+  opacity: 1; background-color: rgba(22, 20, 18, .58);
+  animation: none; transition: none;
 }
 @media (prefers-reduced-motion: reduce) {
   .astrid-vision-details[data-ready="true"] > .astrid-vision-details-shell { opacity: 1; }
-  .astrid-vision-details[data-ready="true"]::backdrop { background-color: rgba(22, 20, 18, .58); }
 }
 
 /* The marks have different internal SVG whitespace. Offset the art, not the

@@ -207,8 +207,8 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
         attempts += 1;
         if (stableFrames >= 2 || attempts >= 12) {
           dialog.dataset.ready = 'true';
-          // One short, monotonic timeline owns both the panel and shade. CSS
-          // opacity transitions can resynchronize backwards in WebKit's top layer.
+          // Animate only the inner panel and its controls. The native
+          // backdrop stays at one fixed shade throughout preparation/reveal.
           const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
           let startedAt: number | null = null;
           let progress = 0;

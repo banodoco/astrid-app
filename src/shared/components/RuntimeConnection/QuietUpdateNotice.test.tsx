@@ -242,6 +242,72 @@ describe('required notice while an update is under way', () => {
     expect(disclosure).not.toHaveAttribute('open');
   });
 
+  /** Mounts a required page in `state`, with helpers to toggle the card and re-render after `state` changes. */
+  async function steppedPage(state: Record<string, unknown>) {
+    const mount = await requiredPage(state);
+    const { view, element, notice } = await mount();
+    const disclosure = within(notice).getByTestId('required-update-reason');
+    const settle = () => act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    return {
+      notice, disclosure,
+      toggle: async () => { fireEvent.click(disclosure.querySelector('summary')!); await settle(); },
+      rerender: async () => { view.rerender(cloneElement(element)); await settle(); },
+    };
+  }
+  const FAILED = { pending: false, status: { state: 'terminal', outcome: 'failed' } };
+
+  it('reopens when a retry fails the same way again', async () => {
+    const state: Record<string, unknown> = { ...FAILED };
+    const page = await steppedPage(state);
+    expect(page.disclosure).toHaveAttribute('open');
+    await page.toggle();
+    expect(page.disclosure).not.toHaveAttribute('open');
+    // The user retries: the run is a new state, so the card opens again.
+    Object.assign(state, { pending: true, status: null });
+    await page.rerender();
+    expect(page.disclosure).toHaveAttribute('open');
+    // The retry ends in the identical failure: the close was made for the first failure, so the card stays open.
+    Object.assign(state, FAILED);
+    await page.rerender();
+    expect(page.disclosure).toHaveAttribute('open');
+    expect(within(page.notice).getByText(ASTRID_STATUS_COPY.repairDescription)).toBeVisible();
+  });
+
+  it('reopens when an error appears while the update is still pending', async () => {
+    const state: Record<string, unknown> = { pending: true };
+    const page = await steppedPage(state);
+    await page.toggle();
+    expect(page.disclosure).not.toHaveAttribute('open');
+    state.error = 'Astrid could not start the update. Check its status before trying again.';
+    await page.rerender();
+    expect(page.disclosure).toHaveAttribute('open');
+    expect(within(page.notice).getByText('Astrid could not start the update. Check its status before trying again.')).toBeVisible();
+  });
+
+  it('opens for a rolled-back update, with its line', async () => {
+    const page = await steppedPage({ status: { state: 'terminal', outcome: 'rolled_back' } });
+    expect(page.disclosure).toHaveAttribute('open');
+    expect(within(page.notice).getByText('The update did not finish. Astrid was restored to its previous version.')).toBeVisible();
+    expect(within(page.notice).getByRole('button', { name: 'Reload' })).toBeVisible();
+  });
+
+  it('opens for a finished update that offers Reload', async () => {
+    const page = await steppedPage({ status: { state: 'terminal', outcome: 'updated' } });
+    expect(page.disclosure).toHaveAttribute('open');
+    expect(within(page.notice).getByRole('button', { name: 'Reload' })).toBeVisible();
+  });
+
+  it('keeps a close made during a failure through re-renders that change nothing', async () => {
+    const state: Record<string, unknown> = { ...FAILED };
+    const page = await steppedPage(state);
+    expect(page.disclosure).toHaveAttribute('open');
+    await page.toggle();
+    for (let pass = 0; pass < 3; pass += 1) {
+      await page.rerender();
+      expect(page.disclosure, `re-render ${pass + 1}`).not.toHaveAttribute('open');
+    }
+  });
+
   it.each([
     ['schema incompatibility', { releaseStatus: { resolution: { installedRelease: 12, servedRelease: 12, compatibility: { kind: 'schema', detail: 'This Astrid speaks an older schema.' } } } }, 'This Astrid speaks an older schema.'],
     ['repair', { releaseStatus: { resolution: { installedRelease: 12, servedRelease: 12 } }, updateReason: 'needs-repair' }, INSTALLER_UPDATE_REASON_MESSAGES['needs-repair']],

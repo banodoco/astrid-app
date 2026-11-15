@@ -1,0 +1,81 @@
+name: Qualify real-decoded card-test media fixture
+on:
+  push:
+    branches: [diagnose/feedback-media-readiness-20261115]
+    paths: [.github/workflows/feedback-media-fixture.yml]
+permissions:
+  contents: read
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps webkit
+      - name: Label only the test copy and prove unchanged decoded pictures
+        run: |
+          mkdir -p test-results/vision-captures/media-evidence tests/fixtures/vision
+          command -v ffmpeg
+          ffprobe -v error -show_streams -of json public/astrid/light-study/first-light.mp4 > test-results/vision-captures/media-evidence/original-stream.json
+          ffmpeg -v error -i public/astrid/light-study/first-light.mp4 -map 0 -c copy -bsf:v h264_metadata=colour_primaries=1:transfer_characteristics=1:matrix_coefficients=1 -color_primaries bt709 -color_trc bt709 -colorspace bt709 -movflags +faststart tests/fixtures/vision/first-light-bt709.mp4
+          ffmpeg -v error -i public/astrid/light-study/first-light.mp4 -map 0:v:0 -f framemd5 test-results/vision-captures/media-evidence/original-frames.md5
+          ffmpeg -v error -i tests/fixtures/vision/first-light-bt709.mp4 -map 0:v:0 -f framemd5 test-results/vision-captures/media-evidence/fixture-frames.md5
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('test-results/vision-captures/media-evidence')
+          def frames(name): return [s for s in (p/name).read_text().splitlines() if not s.startswith('#')]
+          assert frames('original-frames.md5')==frames('fixture-frames.md5')
+          (p/'pixel-equivalence.txt').write_text(f'{len(frames("original-frames.md5"))} decoded frames have identical plane hashes, timestamps and sizes. Only test-copy colour metadata changed.\n')
+          PY
+          sha256sum public/astrid/light-study/first-light.mp4 tests/fixtures/vision/first-light-bt709.mp4 > test-results/vision-captures/media-evidence/asset-identities.txt
+          cp tests/fixtures/vision/first-light-bt709.mp4 test-results/vision-captures/media-evidence/
+      - name: Use the same strict motion test with a real-decoded prerequisite
+        run: |
+          git fetch --depth=1 origin fix/home-cards-vision-controls-20261115
+          git show FETCH_HEAD:scripts/quality/vision-feedback-cases-20261115.txt > /tmp/feedback-cases.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          s=p.read_text().replace("import { mkdirSync, writeFileSync }", "import { mkdirSync, writeFileSync, readFileSync }")
+          cases=Path('/tmp/feedback-cases.txt').read_text().split("test.describe('feedback follow-up desktop navigation'")[0]
+          needle="    await page.goto('/home', { waitUntil: 'domcontentloaded' });"
+          assert cases.count(needle)==1
+          cases=cases.replace(needle,"    await page.route('**/astrid/light-study/first-light.mp4', route => route.fulfill({ contentType: 'video/mp4', body: readFileSync('tests/fixtures/vision/first-light-bt709.mp4') }));\n"+needle)
+          needle="    await expect(page.locator('.astrid-callouts > article')).toHaveCount(3, { timeout: 60000 });"
+          assert cases.count(needle)==1
+          cases=cases.replace(needle,needle+"\n    await expect(page.locator('[data-preview-decoded-frame=\"true\"]')).toBeAttached();")
+          p.write_text(s+cases)
+          PY
+      - name: Capture unchanged-product behavior with this exact prerequisite
+        run: |
+          set +e
+          PLAYWRIGHT_JSON_OUTPUT_FILE=test-results/vision-captures/fixture-baseline-report.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'feedback follow-up mobile' --retries=0 --output=test-results/fixture-baseline --reporter=line,json > test-results/vision-captures/media-evidence/baseline.log 2>&1
+          status=$?
+          echo "$status" > test-results/vision-captures/media-evidence/baseline-exit.txt
+          cp test-results/vision-captures/feedback-chip-switch-vision-webkit-phone.json test-results/vision-captures/media-evidence/baseline-card-frames.json
+          test "$status" = 1
+      - name: Apply only the two-line card repair, not media or readiness code
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/Home/PublicAstridCallouts.tsx');s=p.read_text()
+          old='  useEffect(() => { setOpenId(null); }, [audience, phone]);';assert s.count(old)==1
+          s=s.replace(old,'  useLayoutEffect(() => { setOpenId(null); }, [audience, phone]);')
+          old='<div className="astrid-callout-content">';assert s.count(old)==1
+          p.write_text(s.replace(old,'<div key={callout.id} className="astrid-callout-content">'))
+          PY
+      - name: Prove repaired motion with the identical real-decoded prerequisite
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/fixture-repaired-report.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'feedback follow-up mobile' --retries=0 --output=test-results/fixture-repaired --reporter=line,json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: feedback-media-fixture-proof
+          path: test-results/vision-captures/
+          retention-days: 14

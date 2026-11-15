@@ -2,7 +2,7 @@
   "schema_version": 1,
   "release": 13,
   "agent": {
-    "sha": "34fee0cf40b3fb203491c3c2f5b756ac83bcf777"
+    "sha": "8e0006f5b350a4e9850e75f0a37f396d27249e41"
   },
   "runtime": {
     "sha": "6855dfa8df65cf8ae4c002b57134d6505493c17c",
@@ -120,5 +120,9 @@
     "repo": "https://github.com/banodoco/runpod-lifecycle.git",
     "sha": "7f0b025e9391baac9f5c2fb7393617ea6fef0704",
     "version": "0.3.1.dev0"
+  },
+  "required": {
+    "release": 13,
+    "reason": "This update fixes problems that could keep a rented machine billing after a job, or lose a finished result."
   }
 }

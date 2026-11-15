@@ -364,3 +364,181 @@ test('headline remains normal full-column flow on cold entry, reload and viewpor
   }
   record(`cold-headline-flow-${info.project.name}`, { source: feed.source, snapshots });
 });
+
+// Track the shade itself, not only the panel's settled geometry. The
+// previous native-opacity fade reversed in WebKit while every sky pixel
+// and page colour stayed unchanged (owner's light/dark flash).
+for (const scenario of [
+  { width: 390, hour: '10', label: 'phone-day', touch: false },
+  { width: 390, hour: '01', label: 'phone-night', touch: false },
+  { width: 1440, hour: '10', label: 'desktop-day', touch: false },
+  { width: 390, hour: '10', label: 'phone-touch', touch: true },
+]) {
+  test.describe(`backdrop continuity ${scenario.label}`, () => {
+    test.use({ timezoneId: 'Europe/Berlin', ...(scenario.width === 1440
+      ? { isMobile: false, deviceScaleFactor: 1, hasTouch: false } : scenario.touch ? { isMobile: true, hasTouch: true } : {}) });
+    test('popup shading never reverses or repaints the underlying page', async ({ page, request }, info) => {
+      test.setTimeout(150000);
+      await page.setViewportSize({ width: scenario.width, height: 844 });
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      await page.clock.setFixedTime(new Date(`2026-11-15T${scenario.hour}:00:00Z`));
+      const response = await request.get(FEED); expect(response.ok()).toBe(true);
+      const feed = await response.json() as PublicVisionContent;
+      await page.route(FEED, route => route.fulfill({ json: feed }));
+      await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4, { timeout: 30000 });
+      await page.evaluate(() => document.fonts.ready);
+      await expect.poll(() => page.locator('.astrid-sky canvas').first().evaluate(c => c.style.width)).not.toBe('');
+      // Allow the existing initial sky reveal to complete before opening.
+      await page.waitForTimeout(2000);
+      const results = [];
+      for (const kind of ['pillar', 'principle', 'gaps', 'projects', 'pillar']) {
+        const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').last().getByRole('button')
+          : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').last().getByRole('button')
+          : page.getByRole('button', { name: 'See all ' + kind, exact: true });
+        await opener.scrollIntoViewIfNeeded();
+        if (!scenario.touch) {
+          const bounds = await opener.boundingBox();
+          expect(bounds).not.toBeNull();
+          await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+        }
+        // Scrolling reveals nearby reading text; let that earlier gesture finish
+        // before measuring a new opening. Ignore ongoing decorative loops.
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await expect.poll(() => page.evaluate(() => document.querySelector('.astrid-vision')!
+          .getAnimations({ subtree: true }).filter(animation =>
+            (animation.playState === 'running' || animation.pending) &&
+            Number.isFinite(animation.effect?.getComputedTiming().iterations ?? 1)).length),
+          { timeout: 10000 }).toBe(0);
+        // Finish the preceding scroll/pointer parallax before measuring a new
+        // action. A fixed delay can leave subpixel easing in the first frame.
+        await page.evaluate(() => new Promise<void>((resolve, reject) => {
+          let previous = '', stable = 0, attempts = 0;
+          const settle = () => {
+            const transforms = JSON.stringify(Array.from(document.querySelectorAll<HTMLCanvasElement>('.astrid-vision .astrid-sky canvas')).map(canvas => {
+              let hash = 2166136261;
+              for (const pixel of canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data)
+                hash = Math.imul(hash ^ pixel, 16777619);
+              return [canvas.style.transform, canvas.width, canvas.height, hash >>> 0];
+            }));
+            stable = transforms === previous ? stable + 1 : 0;
+            previous = transforms;
+            if (stable >= 4) resolve();
+            else if (++attempts >= 240) reject(new Error('Sky parallax did not settle before the opening gesture'));
+            else requestAnimationFrame(settle);
+          };
+          requestAnimationFrame(settle);
+        }));
+        await page.evaluate(() => {
+          type Frame = { t: number; native: number | null; shade: number; surface: number;
+            colours: string; headerY: number; sky: string };
+          const state = window as unknown as { backdropFrames: Frame[]; backdropInput: string };
+          state.backdropFrames = [];
+          const read = () => {
+            const main = document.querySelector<HTMLElement>('.astrid-vision')!;
+            const dialog = main.querySelector<HTMLDialogElement>('dialog');
+            const backdrop = dialog?.open ? getComputedStyle(dialog, '::backdrop') : null;
+            const rgba = backdrop?.backgroundColor.match(/[\d.]+/g)?.map(Number) ?? [];
+            const alpha = rgba.length === 4 ? rgba[3] : rgba.length === 3 ? 1 : 0;
+            const shell = dialog?.querySelector('.astrid-vision-details-shell');
+            const sky = Array.from(main.querySelectorAll<HTMLCanvasElement>('.astrid-sky canvas')).map(canvas => {
+              const pixels = canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data;
+              let hash = 2166136261;
+              for (const pixel of pixels) hash = Math.imul(hash ^ pixel, 16777619);
+              const rect = canvas.getBoundingClientRect();
+              return [canvas.dataset.layer, hash >>> 0, canvas.width, canvas.height, rect.x, rect.y, canvas.style.transform];
+            });
+            state.backdropFrames.push({ t: performance.now(),
+              native: dialog?.open ? Number(getComputedStyle(dialog).opacity) : null,
+              shade: alpha * Number(backdrop?.opacity ?? 0),
+              surface: dialog?.open && shell ? Number(getComputedStyle(shell).opacity) : 0,
+              colours: [main, document.body, document.documentElement].map(e => getComputedStyle(e).backgroundColor).join('|'),
+              headerY: main.querySelector('.astrid-vision-bar')!.getBoundingClientRect().y,
+              sky: JSON.stringify(sky) });
+          };
+          document.addEventListener('pointerdown', event => {
+            state.backdropInput = event.pointerType;
+            read();
+            let count = 0;
+            const tick = () => { read(); if (++count < 40) requestAnimationFrame(tick); };
+            requestAnimationFrame(tick);
+          }, { once: true, capture: true });
+        });
+        if (scenario.touch) await opener.tap();
+        else await opener.click();
+        const dialog = page.getByRole('dialog');
+        await expect(dialog).toHaveAttribute('data-ready', 'true');
+        await expect.poll(() => page.evaluate(() => (window as unknown as { backdropFrames: unknown[] }).backdropFrames.length), { timeout: 20000 }).toBe(41);
+        const frames = await page.evaluate(() => (window as unknown as { backdropFrames: {
+          t: number; native: number | null; shade: number; surface: number; colours: string; headerY: number; sky: string;
+        }[] }).backdropFrames);
+        results.push({ kind, frames });
+        const input = await page.evaluate(() => (window as unknown as { backdropInput: string }).backdropInput);
+        expect.soft(input).toBe(scenario.touch ? 'touch' : 'mouse');
+        record(`backdrop-continuity-${info.project.name}-${scenario.label}`, { source: feed.source, input, results });
+        expect.soft(frames.filter(f => f.native !== null).every(f => f.native === 1), 'native dialog opacity is never animated').toBe(true);
+        expect.soft(frames.every((f, i) => !i || f.shade + .002 >= frames[i - 1].shade), 'the page never gets lighter during opening').toBe(true);
+        expect.soft(frames.every((f, i) => !i || f.surface + .002 >= frames[i - 1].surface), 'the inner surface never fades backwards').toBe(true);
+        expect.soft(frames.at(-1)!.shade).toBeCloseTo(.58, 2);
+        expect.soft(frames.at(-1)!.surface).toBe(1);
+        expect.soft(new Set(frames.map(f => f.colours)).size, 'page palette remains unchanged').toBe(1);
+        const skies = frames.map(f => JSON.parse(f.sky) as [string, number, number, number, number, number, string][]);
+        expect.soft(new Set(skies.map(layers => JSON.stringify(layers.map(layer => layer.slice(0, 4))))).size,
+          'raster bytes and dimensions remain exactly unchanged').toBe(1);
+        // Viewport coordinates lose a few binary digits when body scroll is
+        // locked; pre-click pointer easing may also advance by <0.001px.
+        for (let layer = 0; layer < skies[0].length; layer++) {
+          for (const axis of [4, 5]) {
+            const values = skies.map(sky => sky[layer][axis] as number);
+            expect.soft(Math.max(...values) - Math.min(...values), 'no visible canvas displacement').toBeLessThan(.01);
+          }
+        }
+        const modalTransforms = frames.flatMap((f, i) => f.native === null ? [] :
+          [JSON.stringify(skies[i].map(layer => layer[6]))]);
+        expect.soft(new Set(modalTransforms).size, 'compositor transforms freeze while open').toBe(1);
+        expect.soft(Math.max(...frames.map(f => f.headerY)) - Math.min(...frames.map(f => f.headerY))).toBeLessThan(1);
+        if (kind === 'gaps') await page.screenshot({ path: `${folder}/stable-backdrop-${info.project.name}-${scenario.label}.png` });
+        await page.keyboard.press('Escape');
+        await expect(dialog).toHaveCount(0);
+      }
+    });
+  });
+}
+
+
+test('shared popup reveal respects reduced motion and cancels on early close', async ({ page, request }) => {
+  const response = await request.get(FEED); expect(response.ok()).toBe(true);
+  const feed = await response.json() as PublicVisionContent;
+  await page.route(FEED, route => route.fulfill({ json: feed }));
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const opener = page.getByRole('button', { name: 'See all gaps', exact: true });
+  await opener.click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toHaveAttribute('data-ready', 'true');
+  expect(await dialog.evaluate(node => node.style.getPropertyValue('--vision-open-progress'))).toBe('1');
+  await expect(dialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // End native modality before its pending geometry/reveal callback runs.
+  await page.evaluate(() => {
+    const original = HTMLDialogElement.prototype.showModal;
+    HTMLDialogElement.prototype.showModal = function () {
+      HTMLDialogElement.prototype.showModal = original;
+      original.call(this);
+      this.close();
+    };
+  });
+  await opener.click();
+  await expect(dialog).toHaveCount(0);
+  await expect(page.locator('[data-vision-header-space]')).toHaveCount(0);
+  expect(await page.evaluate(() => document.documentElement.dataset.astridScrollLockY)).toBeUndefined();
+  await opener.click();
+  await expect(dialog).toHaveAttribute('data-ready', 'true');
+  await expect(dialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
+  expect(await dialog.evaluate(node => node.style.getPropertyValue('--vision-open-progress'))).toBe('1');
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});

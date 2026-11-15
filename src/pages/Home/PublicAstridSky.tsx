@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
+import { useLayoutEffect, useRef, useSyncExternalStore } from 'react';
 import {
   PUBLIC_ASTRID_SKY_PIXEL,
 } from './publicAstridSkyRender';
@@ -74,7 +74,10 @@ export function PublicAstridSky({ session, active = true, geometryRoot, geometry
 
   // A single active-view pass consumes the latest values from the independent channels. Parallax
   // wakes only compositor writes; raster/geometry/resize signals coalesce without React frame renders.
-  useEffect(() => {
+  // Geometry releases its reading mask in layout cleanup. Cancel raster work
+  // in that same commit, before a queued frame can paint the cleared mask
+  // behind a dialog. Passive cleanup leaves a one-frame repaint window.
+  useLayoutEffect(() => {
     if (!active || !settings.enabled) return undefined;
     let alive = true;
     let frame = 0;

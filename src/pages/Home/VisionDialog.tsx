@@ -147,12 +147,13 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
         dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
         dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
       }
+      dialog.style.setProperty('--vision-open-progress', '0');
       // Native focusing chooses the heading directly, not the footer X first.
       titleRef.current?.setAttribute('autofocus', '');
       dialog.showModal();
       if (document.activeElement !== titleRef.current) titleRef.current?.focus({ preventScroll: true });
       // Let the native top layer and any toolbar resize settle before revealing
-      // it. Never animate position/height or re-open the modal. The bounded
+      // the inner surface. Never animate position/height or re-open the modal. The bounded
       // fallback still opens while a keyboard or browser toolbar keeps moving.
       let previousBounds = '';
       let stableFrames = 0;
@@ -164,8 +165,24 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
         stableFrames = key === previousBounds ? stableFrames + 1 : 0;
         previousBounds = key;
         attempts += 1;
-        if (stableFrames >= 2 || attempts >= 12) dialog.dataset.ready = 'true';
-        else frame = window.requestAnimationFrame(reveal);
+        if (stableFrames >= 2 || attempts >= 12) {
+          dialog.dataset.ready = 'true';
+          // One short, monotonic timeline owns both the panel and shade. CSS
+          // opacity transitions can resynchronize backwards in WebKit's top layer.
+          const motion = window.matchMedia('(prefers-reduced-motion: reduce)');
+          let startedAt: number | null = null;
+          let progress = 0;
+          const advance = (time: number) => {
+            if (disposed || !dialog.isConnected || !dialog.open) return;
+            startedAt ??= time;
+            progress = motion.matches ? 1 : Math.min(1, Math.max(progress, (time - startedAt) / 120));
+            const eased = 1 - (1 - progress) ** 3;
+            dialog.style.setProperty('--vision-open-progress', String(eased));
+            if (progress < 1) frame = window.requestAnimationFrame(advance);
+          };
+          if (motion.matches) dialog.style.setProperty('--vision-open-progress', '1');
+          else frame = window.requestAnimationFrame(advance);
+        } else frame = window.requestAnimationFrame(reveal);
       };
       frame = window.requestAnimationFrame(reveal);
     });

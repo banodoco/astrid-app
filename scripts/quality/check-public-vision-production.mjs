@@ -115,6 +115,72 @@ async function checkHeadlineEntry(browser, content) {
   }
 }
 
+async function checkPlayerReturn(browser) {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, reducedMotion: 'no-preference' });
+  try {
+    const response = await page.goto(new URL('/', PAGE).href, { waitUntil: 'domcontentloaded', timeout: 25_000 });
+    if (!response?.ok()) throw new Error(`Production Home HTTP ${response?.status() ?? 'no response'}`);
+    await expect(page.locator('.astrid-callouts > article')).toHaveCount(3, { timeout: 60_000 });
+    await expect(page.locator('.astrid-editor-stage')).toHaveAttribute('data-revealed', 'true');
+    await page.mouse.move(0, 0);
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(1800);
+    const reference = await page.locator('.astrid-player-surface').evaluate(async node => {
+      const read = () => { const r = node.getBoundingClientRect(); return [r.x, r.y, r.width, r.height]; };
+      let previous = read(), stable = 0;
+      for (let n = 0; n < 300; n++) {
+        await new Promise(resolve => requestAnimationFrame(resolve));
+        const next = read();
+        stable = next.every((value, i) => Math.abs(value - previous[i]) < .02) ? stable + 1 : 0;
+        previous = next;
+        if (stable >= 12) return next;
+      }
+      throw new Error('Production player did not settle');
+    });
+    await page.getByRole('link', { name: 'Vision', exact: true }).click();
+    await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+    await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+    await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+    expect(await page.evaluate(() => scrollY)).toBeGreaterThan(500);
+    await page.evaluate(() => {
+      const trace = window.__playerReturn = { frames: [], done: false };
+      let finished = 0;
+      const started = performance.now();
+      const read = () => {
+        const home = document.querySelector('.astrid-public-site[data-astrid-lifecycle="active"]');
+        if (!home) return;
+        const r = home.querySelector('.astrid-player-surface').getBoundingClientRect();
+        trace.frames.push({ rect: [r.x, r.y, r.width, r.height], scroll: scrollY,
+          phase: document.documentElement.getAttribute('data-astrid-page-transition-style') });
+      };
+      const observer = new MutationObserver(read);
+      observer.observe(document.documentElement, { attributes: true, subtree: true,
+        attributeFilter: ['data-astrid-page-transition', 'data-astrid-page-transition-style', 'data-astrid-lifecycle'] });
+      const sample = () => {
+        read();
+        if (trace.frames.length && !document.documentElement.hasAttribute('data-astrid-page-transition')) finished++;
+        if (finished >= 8 || performance.now() - started > 12000) {
+          observer.disconnect(); trace.done = true; return;
+        }
+        requestAnimationFrame(sample);
+      };
+      requestAnimationFrame(sample);
+    });
+    await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+    await expect.poll(() => page.evaluate(() => window.__playerReturn.done), { timeout: 20000 }).toBe(true);
+    const { frames } = await page.evaluate(() => window.__playerReturn);
+    expect(frames.filter(frame => frame.phase === 'brand').length).toBeGreaterThan(5);
+    expect(frames.some(frame => frame.phase === null)).toBe(true);
+    for (const frame of frames) {
+      expect(frame.scroll).toBe(0);
+      for (const [i, value] of frame.rect.entries()) expect(Math.abs(value - reference[i])).toBeLessThan(1);
+    }
+    console.log('Production desktop player keeps its bounds throughout bottom-of-Vision return and transition cleanup.');
+  } finally {
+    await page.close();
+  }
+}
+
 async function main() {
   const browser = await chromium.launch();
   try {
@@ -124,6 +190,7 @@ async function main() {
         const content = await publishedVision();
         await checkPage(browser, content);
         await checkHeadlineEntry(browser, content);
+        await checkPlayerReturn(browser);
         return;
       } catch (error) {
         lastError = error;

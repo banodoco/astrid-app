@@ -126,3 +126,29 @@
 :root[data-astrid-page-transition-style="brand"] .astrid-public-site[data-astrid-lifecycle="active"] .astrid-brand-mink:not(.astrid-brand-mink-glint) {
   view-transition-name: astrid-brand-mink !important;
 }
+
+/* The wordmark travels with the mink on scrolled desktop returns too.
+   Name only active Home, never the retained copy behind Vision. */
+:root[data-astrid-page-transition-style="brand"] .astrid-vision .astrid-vision-brand-name,
+:root[data-astrid-page-transition-style="brand"] .astrid-public-site[data-astrid-lifecycle="active"] .astrid-brand-name {
+  view-transition-name: astrid-brand-name !important;
+}
+/* The condensed header has a zero-width, transparent name. Give its capture
+   a natural-sized origin beside the mink without widening or revealing the
+   live header. A zero-width origin would squash the arriving wordmark. */
+:root[data-astrid-page-transition-style="brand"] .astrid-vision-bar[data-condensed] .astrid-vision-brand {
+  position: relative;
+}
+:root[data-astrid-page-transition-style="brand"] .astrid-vision-bar[data-condensed] .astrid-vision-brand-name {
+  position: absolute;
+  left: calc(100% + 12px);
+  max-width: none;
+  opacity: 0;
+  transition: none;
+}
+/* Reveal beside the moving mink, not in Home's already-settled root snapshot.
+   Position and size keep the same 900ms curve as the mink's shared group. */
+@keyframes astrid-brand-name-emerge { from { opacity: 0; } to { opacity: 1; } }
+:root[data-astrid-page-transition-style="brand"]::view-transition-new(astrid-brand-name) {
+  animation: astrid-brand-name-emerge 160ms ease-out both;
+}

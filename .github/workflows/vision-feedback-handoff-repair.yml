@@ -1,0 +1,167 @@
+name: Qualify Vision focus and resize repair
+on:
+  push:
+    branches: [fix/home-cards-vision-controls-20261115]
+    paths: [.github/workflows/vision-feedback-handoff-repair.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/home-cards-vision-controls-20261115
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+      - name: Apply bounded source repair and preserve the reproducing case
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          def replace(path, old, new):
+              p = Path(path); s = p.read_text()
+              assert s.count(old) == 1, 'Source mismatch: ' + path + ' ' + old[:80]
+              p.write_text(s.replace(old, new))
+          path = 'src/pages/Home/VisionDialog.tsx'
+          replace(path, "    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };", """    const schedule = () => {
+                // Arrow reachability must not wait for a throttled animation frame.
+                // Geometry changes can precede WebKit's next painted frame.
+                placeDialogNavigation(dialog);
+                if (!frame) frame = window.requestAnimationFrame(update);
+              };""")
+          replace(path, '    observer?.observe(dialog);', '''    observer?.observe(dialog);
+              // A fixed-width panel can move without changing its own size.
+              observer?.observe(document.documentElement);''')
+          replace(path, '  const releasePageRef = useRef<(() => void) | null>(null);', '''  const releasePageRef = useRef<(() => void) | null>(null);
+            const closeNotifiedRef = useRef(false);
+            const finishClose = () => {
+              if (closeNotifiedRef.current) return;
+              closeNotifiedRef.current = true;
+              releasePageRef.current?.();
+              onClose();
+            };
+            const requestClose = () => {
+              const dialog = dialogRef.current;
+              if (!dialog?.open) return;
+              // Native close events are queued. Finish the owning interaction now,
+              // before another trigger can receive focus or begin a new opening.
+              dialog.close();
+              finishClose();
+            };''')
+          replace(path, '      onClose={() => { releasePageRef.current?.(); onClose(); }}', '''      onClose={finishClose}
+                onCancel={event => { event.preventDefault(); requestClose(); }}''')
+          replace(path, '        if (beganOnBackdrop) dialogRef.current?.close();', '        if (beganOnBackdrop) requestClose();')
+          replace(path, '            onClick={event => { event.stopPropagation(); dialogRef.current?.close(); }}>', '            onClick={event => { event.stopPropagation(); requestClose(); }}>')
+          path = 'src/pages/Home/PublicAstridVision.tsx'
+          replace(path, '''    if (pointerClose) trigger?.blur();
+              else trigger?.focus({ preventScroll: true });
+              window.requestAnimationFrame(() => {
+                if (pointerClose && document.activeElement === trigger) trigger?.blur();
+              });''', '''    const active = document.activeElement;
+              // A queued native close must not steal a newer explicit focus choice.
+              const ownsFocus = !active || active === document.body || active === document.documentElement ||
+                active === trigger || active.closest('dialog.astrid-vision-details') !== null;
+              if (ownsFocus) {
+                if (pointerClose) trigger?.blur();
+                else if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+                window.requestAnimationFrame(() => {
+                  if (pointerClose && document.activeElement === trigger) trigger?.blur();
+                });
+              }''')
+          path = 'src/pages/Home/VisionMobileLayout.css'
+          replace(path, '''@media (min-width: 761px) {
+            .astrid-vision-details[data-exterior-nav] > .astrid-vision-details-previous''', '''/* 740px surface + two 72px control gutters. CSS is the immediate safety
+             boundary even before a resize event updates the measured attribute. */
+          @media (min-width: 884px) {
+            .astrid-vision-details[data-exterior-nav] > .astrid-vision-details-previous''')
+          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          p.write_text(p.read_text() + '''
+
+          test('closing native dialog preserves a subsequent explicit focus handoff', async ({ page, request }, info) => {
+            const response = await request.get(FEED); expect(response.ok()).toBe(true);
+            const feed = await response.json() as PublicVisionContent;
+            await page.route(FEED, route => route.fulfill({ json: feed }));
+            await page.setViewportSize({ width: 1440, height: 900 });
+            await page.emulateMedia({ reducedMotion: 'reduce' });
+            await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+            const opener = page.locator('.astrid-vision-principles > li').first().getByRole('button');
+            const target = page.locator('.astrid-vision-standards-list > li').first().getByRole('button');
+            await expect(target).toBeAttached({ timeout: 30000 });
+            await opener.focus(); await page.keyboard.press('Enter');
+            await expect(page.getByRole('dialog')).toHaveAttribute('data-ready', 'true');
+            const handoff = await page.evaluate(() => {
+              const target = document.querySelector<HTMLButtonElement>('.astrid-vision-standards-list > li button')!;
+              const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+              dialog.close();
+              target.focus({ preventScroll: true });
+              return { focused: document.activeElement === target, open: dialog.open };
+            });
+            expect(handoff).toEqual({ focused: true, open: false });
+            // Wait for React removal, not just the disappearance of native modality.
+            await expect(page.locator('dialog.astrid-vision-details')).toHaveCount(0);
+            const result = await target.evaluate(node => ({ active: document.activeElement?.getAttribute('aria-label'), intended: node.getAttribute('aria-label'), preserved: document.activeElement === node }));
+            record(`focus-handoff-${info.project.name}`, result);
+            await expect(target).toBeFocused();
+            await page.keyboard.press('Enter');
+            await expect(page.getByRole('dialog')).toHaveAccessibleName(feed.principles[0].title);
+          });
+          ''')
+          path = 'scripts/quality/check-public-vision-production.mjs'
+          replace(path, "    await expect(page.locator('.astrid-vision > #astrid-vision-parts')).toHaveCount(0);", """    await expect(page.locator('.astrid-vision > #astrid-vision-parts')).toHaveCount(0);
+              const firstPillar = page.locator('.astrid-vision-principles > li').first();
+              await expect(firstPillar.locator('.astrid-vision-subject-counts')).toContainText('goals');
+              await firstPillar.getByRole('button').click();
+              const subjectDialog = page.getByRole('dialog');
+              await expect(subjectDialog.getByRole('heading', { name: 'Goals', exact: true })).toBeVisible();
+              await expect(subjectDialog).toHaveAttribute('data-exterior-nav', '');
+              const navigation = await subjectDialog.evaluate(node => ({
+                left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right,
+                previous: node.querySelector('.astrid-vision-details-previous').getBoundingClientRect().right,
+                next: node.querySelector('.astrid-vision-details-next').getBoundingClientRect().left,
+              }));
+              expect(navigation.previous).toBeLessThan(navigation.left);
+              expect(navigation.next).toBeGreaterThan(navigation.right);
+              await page.keyboard.press('Escape');
+              await expect(page.locator('dialog.astrid-vision-details')).toHaveCount(0);
+              console.log('Production subject cards show goal counts; Goals and exterior desktop arrows are present.');""")
+          PY
+      - run: npm ci --legacy-peer-deps
+      - name: Check changed source and lifecycle
+        run: |
+          npx eslint src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx --max-warnings 0
+          node --check scripts/quality/check-public-vision-production.mjs
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Chromium exact failing cases and focus regression
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: evidence/chromium.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts --project=chromium-desktop --grep 'closing native dialog preserves|feedback follow-up arrows|next subject cycles inside one modal with reset content at 1440px' --output=test-results/focused-chromium --reporter=line,json
+      - name: WebKit exact failing cases and focus regression
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: evidence/webkit.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts --grep 'closing native dialog preserves|feedback follow-up arrows|next subject cycles inside one modal with reset content at 1440px' --output=test-results/focused-webkit --reporter=line,json
+      - name: Commit only qualified source and regression
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+          git diff --cached --check
+          git commit -m 'fix(vision): finish close ownership before focus handoff and keep arrows responsive'
+          git push origin HEAD:fix/home-cards-vision-controls-20261115
+      - name: Preserve source and results
+        if: always()
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source.txt
+          git diff HEAD~1 > evidence/candidate.patch
+          cp -R test-results/vision-captures evidence/captures 2>/dev/null || true
+          tar -czf evidence/source.tar.gz src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-feedback-handoff-repaired
+          path: evidence/
+          retention-days: 7

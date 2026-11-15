@@ -21,7 +21,7 @@ jobs:
         run: |
           mkdir -p test-results/ipad-probe
           npm run dev -- --host 127.0.0.1 --port 4173 >test-results/ipad-probe/vite.log 2>&1 &
-          for i in $(seq 1 60); do curl -sf http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:4173/home >/dev/null && break; sleep 1; done
           cat > .ipad-probe.mjs <<'JS'
           import { chromium, webkit, devices } from '@playwright/test';
           import { writeFileSync } from 'node:fs';
@@ -49,14 +49,14 @@ jobs:
             const browser = await type.launch();
             try {
               for (const viewport of [{width:820,height:1180},{width:820,height:1024}]) {
-                const context = await browser.newContext({...devices['iPad Air'], viewport, deviceScaleFactor: 1, reducedMotion:'reduce'});
+                const context = await browser.newContext({...devices['iPad Air'], viewport, deviceScaleFactor: 1, reducedMotion:'no-preference'});
                 const page = await context.newPage();
                 const item={engine,viewport,errors:[]};
                 page.on('pageerror',e=>item.errors.push(e.message));
-                await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded'});
+                await page.goto('http://127.0.0.1:4173/home',{waitUntil:'domcontentloaded'});
                 await page.locator('.astrid-public-site').waitFor({timeout:60000});
                 await page.evaluate(()=>document.fonts.ready);
-                await page.waitForTimeout(5000);
+                await page.waitForTimeout(6000);
                 item.initial=await read(page);
                 await page.evaluate(()=>scrollTo({top:2000,behavior:'instant'}));
                 item.scrolled=await read(page);
@@ -65,16 +65,17 @@ jobs:
                 const style=await page.addStyleTag({content:'.astrid-sky { display:none !important; }'});
                 item.withoutSky=await read(page);
                 await style.evaluate(n=>n.remove());
+                report.push(item); writeFileSync(`${out}/report.json`,JSON.stringify(report,null,2));
                 await page.getByRole('link',{name:'Vision',exact:true}).click();
                 await page.locator('.astrid-vision-principles > li').first().waitFor({timeout:30000});
                 await page.evaluate(()=>scrollTo({top:900,behavior:'instant'}));
                 item.vision=await read(page);
                 await page.getByRole('link',{name:'Astrid home',exact:true}).click();
                 await page.locator('.astrid-vision').waitFor({state:'detached'});
-                await page.waitForTimeout(500);
+                await page.waitForTimeout(1500);
                 item.returned=await read(page);
                 await page.screenshot({path:`${out}/${engine}-${viewport.height}-home-return.png`});
-                report.push(item); writeFileSync(`${out}/report.json`,JSON.stringify(report,null,2));
+                writeFileSync(`${out}/report.json`,JSON.stringify(report,null,2));
                 await context.close();
               }
             } finally { await browser.close(); }
@@ -85,7 +86,7 @@ jobs:
         if: always()
         run: |
           git rev-parse HEAD > test-results/ipad-probe/head.txt
-          tar -cf test-results/ipad-probe/source.tar src/pages/Home src/shared/components/PixelUnderline* tests/e2e/public-astrid-vision* playwright.config.ts playwright.vision.config.ts .github/workflows/public-vision.yml
+          tar -cf test-results/ipad-probe/source.tar src/pages/Home src/shared/components/PixelUnderline* tests/e2e/public-astrid-vision* playwright.config.ts playwright.vision.config.ts .github/workflows/public-vision.yml src/index.css
       - uses: actions/upload-artifact@v4
         if: always()
         with:

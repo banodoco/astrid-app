@@ -232,7 +232,9 @@
 
 /* The reading surface keeps its width. Wide gutters carry the controls;
    narrower windows keep the established unobtrusive overlay placement. */
-@media (min-width: 761px) {
+/* 740px surface + two 72px control gutters. CSS is the immediate safety
+   boundary even before a resize event updates the measured attribute. */
+@media (min-width: 884px) {
   .astrid-vision-details[data-exterior-nav] > .astrid-vision-details-previous { left: -60px; }
   .astrid-vision-details[data-exterior-nav] > .astrid-vision-details-next { right: -60px; }
 }

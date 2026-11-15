@@ -30,6 +30,21 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
   const [scrollEdges, setScrollEdges] = useState({ top: false, bottom: false });
   const titleId = useId();
   const releasePageRef = useRef<(() => void) | null>(null);
+  const closeNotifiedRef = useRef(false);
+  const finishClose = () => {
+    if (closeNotifiedRef.current) return;
+    closeNotifiedRef.current = true;
+    releasePageRef.current?.();
+    onClose();
+  };
+  const requestClose = () => {
+    const dialog = dialogRef.current;
+    if (!dialog?.open) return;
+    // Native close events are queued. Finish the owning interaction now,
+    // before another trigger can receive focus or begin a new opening.
+    dialog.close();
+    finishClose();
+  };
 
 
   // Chrome on iPhone changes its visible viewport as browser controls move.
@@ -49,10 +64,17 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
       dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
       dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
     };
-    const schedule = () => { if (!frame) frame = window.requestAnimationFrame(update); };
+    const schedule = () => {
+      // Arrow reachability must not wait for a throttled animation frame.
+      // Geometry changes can precede WebKit's next painted frame.
+      placeDialogNavigation(dialog);
+      if (!frame) frame = window.requestAnimationFrame(update);
+    };
     update();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(schedule);
     observer?.observe(dialog);
+    // A fixed-width panel can move without changing its own size.
+    observer?.observe(document.documentElement);
     viewport?.addEventListener('resize', schedule);
     viewport?.addEventListener('scroll', schedule);
     window.addEventListener('resize', schedule);
@@ -258,7 +280,8 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
       ref={dialogRef}
       className={'astrid-vision-details ' + className}
       aria-labelledby={titleId}
-      onClose={() => { releasePageRef.current?.(); onClose(); }}
+      onClose={finishClose}
+      onCancel={event => { event.preventDefault(); requestClose(); }}
       onPointerDownCapture={event => {
         // Keep the native modal top layer until the gesture's final click.
         // A requestAnimationFrame after pointerup can precede Safari's click.
@@ -293,7 +316,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
         event.preventDefault();
         event.stopPropagation();
         // This click already has a fixed target. It cannot activate a card beneath.
-        if (beganOnBackdrop) dialogRef.current?.close();
+        if (beganOnBackdrop) requestClose();
       }}
     >
       <div className="astrid-vision-details-shell">
@@ -305,7 +328,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
             <h2 id={titleId} ref={titleRef} tabIndex={-1} aria-live="polite">{title}</h2>
           </div>
           <button type="button" className="astrid-vision-details-close" aria-label="Close details"
-            onClick={event => { event.stopPropagation(); dialogRef.current?.close(); }}>
+            onClick={event => { event.stopPropagation(); requestClose(); }}>
             <X size={20} aria-hidden="true" />
           </button>
         </header>

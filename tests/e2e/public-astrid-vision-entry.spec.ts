@@ -627,14 +627,23 @@ test('feedback follow-up arrows use free gutters and fall back on narrow screens
   const records = [];
   for (const width of [1440, 920, 820, 390, 1440]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.waitForTimeout(150);
+    const beforePaint = await dialog.evaluate(node => ({
+      exterior: node.hasAttribute('data-exterior-nav'),
+      panel: node.getBoundingClientRect().toJSON(),
+      previous: node.querySelector('.astrid-vision-details-previous')!.getBoundingClientRect().toJSON(),
+      next: node.querySelector('.astrid-vision-details-next')!.getBoundingClientRect().toJSON(),
+    }));
+    // Resize/observer delivery belongs to rendering, not a guessed wall-clock
+    // interval on a busy 3x WebKit runner. Retain the pre-paint measurements.
+    await page.evaluate(() => new Promise<void>(resolve =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
     const rects = await dialog.evaluate(node => {
       const rect = (element: Element) => element.getBoundingClientRect().toJSON();
       return { dialog: rect(node), previous: rect(node.querySelector('.astrid-vision-details-previous')!),
         next: rect(node.querySelector('.astrid-vision-details-next')!), exterior: node.hasAttribute('data-exterior-nav'),
         textWidth: node.querySelector('.astrid-vision-details-scroll')!.clientWidth };
     });
-    records.push({ width, ...rects });
+    records.push({ width, beforePaint, ...rects });
     const wide = width >= 920;
     expect.soft(rects.exterior).toBe(wide);
     if (wide) {
@@ -684,4 +693,34 @@ test('feedback follow-up every pillar and principle counts Goals and labels the 
   }
   await page.locator('.astrid-vision-standards-list').scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${folder}/feedback-goals-counts-${info.project.name}.png` });
+});
+
+
+test('closing native dialog preserves a subsequent explicit focus handoff', async ({ page, request }, info) => {
+  const response = await request.get(FEED); expect(response.ok()).toBe(true);
+  const feed = await response.json() as PublicVisionContent;
+  await page.route(FEED, route => route.fulfill({ json: feed }));
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+  const opener = page.locator('.astrid-vision-principles > li').first().getByRole('button');
+  const target = page.locator('.astrid-vision-standards-list > li').first().getByRole('button');
+  await expect(target).toBeAttached({ timeout: 30000 });
+  await opener.focus(); await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toHaveAttribute('data-ready', 'true');
+  const handoff = await page.evaluate(() => {
+    const target = document.querySelector<HTMLButtonElement>('.astrid-vision-standards-list > li button')!;
+    const dialog = document.querySelector<HTMLDialogElement>('dialog')!;
+    dialog.close();
+    target.focus({ preventScroll: true });
+    return { focused: document.activeElement === target, open: dialog.open };
+  });
+  expect(handoff).toEqual({ focused: true, open: false });
+  // Wait for React removal, not just the disappearance of native modality.
+  await expect(page.locator('dialog.astrid-vision-details')).toHaveCount(0);
+  const result = await target.evaluate(node => ({ active: document.activeElement?.getAttribute('aria-label'), intended: node.getAttribute('aria-label'), preserved: document.activeElement === node }));
+  record(`focus-handoff-${info.project.name}`, result);
+  await expect(target).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('dialog')).toHaveAccessibleName(feed.principles[0].title);
 });

@@ -35,6 +35,23 @@ async function checkPage(browser, content) {
     await expect(page.locator('.astrid-vision-principles h3')).toHaveCount(content.pillars.length);
     await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
     await expect(page.locator('.astrid-vision > #astrid-vision-parts')).toHaveCount(0);
+    const firstPillar = page.locator('.astrid-vision-principles > li').first();
+    const goalCount = content.pillars[0].characteristics?.length ?? 0;
+    await expect(firstPillar.locator('.astrid-vision-subject-counts')).toContainText(`${goalCount} ${goalCount === 1 ? 'goal' : 'goals'}`);
+    await firstPillar.getByRole('button').click();
+    const subjectDialog = page.getByRole('dialog');
+    await expect(subjectDialog.getByRole('heading', { name: 'Goals', exact: true })).toBeVisible();
+    await expect(subjectDialog).toHaveAttribute('data-exterior-nav', '');
+    const navigation = await subjectDialog.evaluate(node => ({
+      left: node.getBoundingClientRect().left, right: node.getBoundingClientRect().right,
+      previous: node.querySelector('.astrid-vision-details-previous').getBoundingClientRect().right,
+      next: node.querySelector('.astrid-vision-details-next').getBoundingClientRect().left,
+    }));
+    expect(navigation.previous).toBeLessThan(navigation.left);
+    expect(navigation.next).toBeGreaterThan(navigation.right);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('dialog.astrid-vision-details')).toHaveCount(0);
+    console.log('Production subject cards show goal counts; Goals and exterior desktop arrows are present.');
     await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();
     const gapDialog = page.getByRole('dialog', { name: 'All gaps' });

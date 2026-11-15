@@ -318,11 +318,17 @@ export function PublicAstridVision({ onGoHome, environment: suppliedEnvironment,
     const pointerClose = detailOpenedByPointer.current;
     // Keyboard users get focus back. Touch users don't inherit the large
     // outline caused by Safari restoring focus to a full-card button.
-    if (pointerClose) trigger?.blur();
-    else trigger?.focus({ preventScroll: true });
-    window.requestAnimationFrame(() => {
-      if (pointerClose && document.activeElement === trigger) trigger?.blur();
-    });
+    const active = document.activeElement;
+    // A queued native close must not steal a newer explicit focus choice.
+    const ownsFocus = !active || active === document.body || active === document.documentElement ||
+      active === trigger || active.closest('dialog.astrid-vision-details') !== null;
+    if (ownsFocus) {
+      if (pointerClose) trigger?.blur();
+      else if (trigger?.isConnected) trigger.focus({ preventScroll: true });
+      window.requestAnimationFrame(() => {
+        if (pointerClose && document.activeElement === trigger) trigger?.blur();
+      });
+    }
   };
   const openCatalog = (catalog: 'gaps' | 'projects', trigger: HTMLButtonElement) => {
     detailOpenedByPointer.current = lastInteractionWasPointer.current;

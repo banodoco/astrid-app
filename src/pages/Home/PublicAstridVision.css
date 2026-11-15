@@ -138,7 +138,9 @@
   font-size: clamp(38px, 5vw, 68px);
   font-weight: 400;
   line-height: 1;
-  text-wrap: balance;
+  /* Normal wrapping avoids stale WebKit balance constraints around inline
+     emphasis during Home-to-Vision insertion. Do not rebalance after paint. */
+  text-wrap: wrap;
   letter-spacing: -0.045em;
 }
 .astrid-vision-nowrap { white-space: nowrap; }
@@ -1900,10 +1902,15 @@
 
 /* Hero: the authored vision title is a sentence, so it sits a step smaller. */
 .astrid-vision-manifesto h1 {
+  width: 100%;
   max-width: 23ch;
   font-size: clamp(34px, 4vw, 56px);
   line-height: 1.04;
   letter-spacing: -0.04em;
+}
+@media (max-width: 760px) {
+  /* No intrinsic/ch-sized intermediate width on mobile navigation. */
+  .astrid-vision-manifesto h1 { max-width: 100%; }
 }
 .astrid-vision-hero-copy > .astrid-vision-eyebrow { margin-bottom: clamp(18px, 2vw, 26px); }
 

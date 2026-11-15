@@ -1,3 +1,4 @@
+import { useState, useSyncExternalStore } from 'react';
 import type { RuntimeConnectionValue } from '@/integrations/runtime/RuntimeConnectionProvider.tsx';
 import { usePageUpdateResolution } from '@/shared/lib/updates/usePageUpdateResolution.ts';
 import { usePageStale } from './AppBuildProvider.tsx';
@@ -5,6 +6,7 @@ import { UpdateResolutionActions } from './UpdateResolutionActions.tsx';
 import { useInstallerUpdate } from '@/shared/lib/updates/useInstallerUpdate.ts';
 import { resolveUpdate } from '@/shared/lib/updates/resolveUpdate.ts';
 import { updatedLine } from '@/shared/lib/updates/liveUpdate.ts';
+import { installerUpdateFailed, pageLocalUpdate } from '@/shared/lib/updates/updateOperation.ts';
 import { useUnderEditorTour } from './useUnderEditorTour.ts';
 
 export function QuietUpdateNotice({ connection }: { readonly connection: RuntimeConnectionValue }) {
@@ -12,6 +14,10 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
   const operation = useInstallerUpdate(connection);
   const page = usePageUpdateResolution(connection);
   const layer = useUnderEditorTour();
+  const localUpdate = pageLocalUpdate();
+  const localState = useSyncExternalStore(localUpdate.subscribe, localUpdate.getSnapshot, localUpdate.getSnapshot);
+  // The user's own Show how toggle wins; until they use it, the card opens while an update runs, fails or needs a restart.
+  const [manualOpen, setManualOpen] = useState<boolean | null>(null);
 
   const current = operation.releaseStatus;
   const decision = current ? resolveUpdate({ ...current.resolution, installType: operation.installType, updateNowAvailable: operation.available, updateReason: operation.updateReason }) : page?.resolution ?? null;
@@ -25,10 +31,13 @@ export function QuietUpdateNotice({ connection }: { readonly connection: Runtime
   // A required update (K6 rule 6) uses this same card, with its own title and reason.
   // Collapsed it is one line, like the optional notice, so it doesn't cover editor controls; "Show how" reveals its reason
   // and the full actions, unchanged.
+  const updateActive = !!operation.pending || !!operation.error || !!operation.restartRequired || installerUpdateFailed(operation) || localState.phase !== 'idle';
+  const open = manualOpen ?? updateActive;
   const dot = <span aria-hidden="true" className="mr-1 inline-block h-2 w-2 rounded-full bg-amber-500" />;
   return <div role="status" data-testid="quiet-update-notice" style={layer.style} {...(layer.inert === undefined ? {} : { inert: layer.inert })} className="fixed bottom-4 left-4 z-[100110] max-w-[min(28rem,calc(100%-2rem))] space-y-2 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground shadow-md">
     {decision.card === 'update'
-      ? <details data-testid="required-update-reason">
+      // A toggle that doesn't match what was rendered is the user's; one React made itself is not.
+      ? <details data-testid="required-update-reason" open={open} onToggle={(event) => { if (event.currentTarget.open !== open) setManualOpen(event.currentTarget.open); }}>
         <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden"><span className="font-medium">{dot}{decision.title}</span> <span className="ml-1 rounded bg-amber-500/15 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:text-amber-300">Required</span> <span className="ml-1 text-xs text-muted-foreground underline underline-offset-2">Show how</span></summary>
         <div className="mt-2 space-y-2">
           <p className="text-muted-foreground">{decision.body}</p>

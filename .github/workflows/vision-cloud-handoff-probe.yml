@@ -1,0 +1,87 @@
+name: Diagnose popup cloud handoff
+on:
+  push:
+    branches: [fix/vision-backdrop-flash-20261115]
+    paths: [.github/workflows/vision-cloud-handoff-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Apply unchanged candidate and instrument only the diagnostic working copy
+        run: |
+          git fetch --no-tags --depth=1 origin f8f1a152b2df2028d05bf168f7136cbc20611ad4
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, textwrap
+          recipe = Path('.github/workflows/vision-backdrop-repair.yml').read_text()
+          for block in re.findall(r"          python3 - <<'PY'\n(.*?)\n          PY", recipe, re.S):
+            exec(compile(textwrap.dedent(block), '<existing-repair>', 'exec'))
+          p = Path('src/pages/Home/PublicAstridSky.tsx')
+          s = p.read_text()
+          needle = '      if (rasterDirty) session.renderer.paint({'
+          assert s.count(needle) == 1
+          s = s.replace(needle, '''      if (rasterDirty) {
+                  const trace = (window as any).__cloudHandoff;
+                  if (trace) {
+                    let hash = 2166136261;
+                    for (const value of quiet ?? []) hash = Math.imul(hash ^ value, 16777619);
+                    const main = document.querySelector('.astrid-vision');
+                    trace.push({ stage: 'raster', t: performance.now(), geometryOwner: geometry.owner,
+                      revision: geometry.revision, quiet: quiet ? hash >>> 0 : null, reveal: snapshot.reveal,
+                      tick: snapshot.tick, hours: snapshot.cloudHours, active, mounted: !!main?.querySelector('dialog'),
+                      open: main?.querySelector('dialog')?.hasAttribute('open'), selected: main?.hasAttribute('data-dialog-open'),
+                      lock: document.documentElement.dataset.astridScrollLockY,
+                      animations: Array.from(main?.querySelectorAll('[data-reveal]') ?? []).flatMap(node =>
+                        node.getAnimations().filter(animation => animation.playState === 'running').map(animation =>
+                          ({ text: node.textContent?.slice(0, 50), time: animation.currentTime,
+                            property: (animation as CSSTransition).transitionProperty }))) });
+                  }
+                }
+          ''' + needle)
+          p.write_text(s)
+          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          s = p.read_text()
+          needle = '      await page.setViewportSize({ width: scenario.width, height: 844 });'
+          assert s.count(needle) == 1
+          s = s.replace(needle, '''      await page.addInitScript(() => {
+                  const trace: unknown[] = [];
+                  (window as any).__cloudHandoff = trace;
+                  for (const name of ['pointerdown', 'pointerup', 'click', 'transitionend']) {
+                    document.addEventListener(name, event => {
+                      const target = event.target as HTMLElement;
+                      if (target?.closest?.('.astrid-vision')) trace.push({ stage: name, t: performance.now(),
+                        target: target.tagName + '.' + target.className, text: target.textContent?.slice(0, 70),
+                        property: (event as TransitionEvent).propertyName,
+                        mounted: !!document.querySelector('.astrid-vision dialog'),
+                        lock: document.documentElement.dataset.astridScrollLockY });
+                    }, true);
+                  }
+                });
+          ''' + needle)
+          needle = '        record(`backdrop-continuity-${info.project.name}-${scenario.label}`, { source: feed.source, results });'
+          assert s.count(needle) == 1
+          s = s.replace(needle, needle + '''
+                  record(`cloud-handoff-${info.project.name}-${scenario.label}-${info.repeatEachIndex}`, {
+                    kind, results, events: await page.evaluate(() => (window as any).__cloudHandoff) });''')
+          p.write_text(s)
+          PY
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps webkit
+      - name: Repeat phone-day trace without changing assertions
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/cloud-handoff-report.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'backdrop continuity phone-day' --repeat-each=3 --output=test-results/cloud-handoff --reporter=line,json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-cloud-handoff-probe
+          path: test-results/vision-captures/
+          retention-days: 7

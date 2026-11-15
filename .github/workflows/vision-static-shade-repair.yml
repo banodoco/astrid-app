@@ -1,0 +1,215 @@
+name: Qualify static Vision shade
+on:
+  push:
+    branches: [fix/vision-static-shade-20261115]
+    paths: [.github/workflows/vision-static-shade-repair.yml]
+permissions:
+  contents: write
+jobs:
+  shade:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-static-shade-20261115
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Guard exact source and add independent shade proof
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+          expected = {
+            'src/pages/Home/VisionMobileLayout.css': '003e88f47719473d737590f9403daefc46d70cec',
+            'src/pages/Home/VisionDialog.tsx': 'de0d390be7d40ce5ceb0f2b98a3142ace994f3d3',
+            'tests/e2e/public-astrid-vision-entry.spec.ts': '41444394e4a4b6ec110ceea0799f2a3913d581c9',
+            'scripts/quality/check-public-vision-production.mjs': '2e512923e3a4b1600b27e10549d76ec89139de69',
+          }
+          for name, sha in expected.items():
+            assert subprocess.check_output(['git', 'hash-object', name], text=True).strip() == sha, name
+          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          p.write_text(p.read_text() + '''
+
+          // The page dimmer must not depend on readiness or the surface animation.
+          // Capture the native open call, before data-ready or any later RAF.
+          for (const width of [390, 1440]) {
+            test.describe(`steady shade at ${width}px`, () => {
+              test.use(width === 1440 ? { isMobile: false, hasTouch: false, deviceScaleFactor: 1 }
+                : { isMobile: true, hasTouch: true });
+              test('shade is independent of popup readiness and surface progress', async ({ page, request }, info) => {
+                test.setTimeout(150000);
+                await page.setViewportSize({ width, height: 844 });
+                await page.emulateMedia({ reducedMotion: 'no-preference' });
+                const response = await request.get(FEED); expect(response.ok()).toBe(true);
+                const feed = await response.json() as PublicVisionContent;
+                await page.route(FEED, route => route.fulfill({ json: feed }));
+                await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+                await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4, { timeout: 30000 });
+                const records = [];
+                for (const [index, kind] of ['pillar', 'principle', 'gaps', 'projects', 'pillar'].entries()) {
+                  const opener = kind === 'pillar' ? page.locator('.astrid-vision-principles > li').first().getByRole('button')
+                    : kind === 'principle' ? page.locator('.astrid-vision-standards-list > li').first().getByRole('button')
+                    : page.getByRole('button', { name: 'See all ' + kind, exact: true });
+                  await opener.scrollIntoViewIfNeeded();
+                  await page.evaluate(() => {
+                    const original = HTMLDialogElement.prototype.showModal;
+                    const state = window as unknown as { steadyShade: { first?: Record<string, unknown>; frames: Record<string, unknown>[]; done: boolean } };
+                    state.steadyShade = { frames: [], done: false };
+                    HTMLDialogElement.prototype.showModal = function () {
+                      HTMLDialogElement.prototype.showModal = original;
+                      original.call(this);
+                      const read = () => {
+                        const shade = getComputedStyle(this, '::backdrop');
+                        return { ready: this.dataset.ready ?? null, progress: this.style.getPropertyValue('--vision-open-progress'),
+                          shade: shade.backgroundColor, opacity: shade.opacity, transition: shade.transitionDuration,
+                          animation: shade.animationName, native: getComputedStyle(this).opacity,
+                          surface: getComputedStyle(this.querySelector('.astrid-vision-details-shell')!).opacity };
+                      };
+                      state.steadyShade.first = read();
+                      let count = 0;
+                      const tick = () => {
+                        if (!this.open) { state.steadyShade.done = true; return; }
+                        state.steadyShade.frames.push(read());
+                        if (++count < 40) requestAnimationFrame(tick);
+                        else state.steadyShade.done = true;
+                      };
+                      requestAnimationFrame(tick);
+                    };
+                  });
+                  if (width === 390) await opener.tap(); else await opener.click();
+                  const dialog = page.getByRole('dialog');
+                  await expect(dialog).toHaveAttribute('data-ready', 'true');
+                  await expect.poll(() => page.evaluate(() => (window as unknown as { steadyShade: { done: boolean } }).steadyShade.done), { timeout: 30000 }).toBe(true);
+                  const trace = await page.evaluate(() => (window as unknown as { steadyShade: { first: { ready: string | null; progress: string; shade: string; surface: string }; frames: { shade: string; opacity: string; native: string; transition: string; animation: string; surface: string }[] } }).steadyShade);
+                  records.push({ kind, trace });
+                  record(`steady-shade-${info.project.name}-${width}`, { source: feed.source, records });
+                  expect.soft(trace.first.ready, 'measure before panel readiness').toBeNull();
+                  expect.soft(trace.first.progress).toBe('0');
+                  expect.soft(trace.first.shade, 'native dimmer is already complete at showModal').toBe('rgba(22, 20, 18, 0.58)');
+                  expect.soft(trace.frames).toHaveLength(40);
+                  for (const frame of trace.frames) {
+                    expect.soft(frame.shade).toBe('rgba(22, 20, 18, 0.58)');
+                    expect.soft(frame.opacity).toBe('1');
+                    expect.soft(frame.native).toBe('1');
+                    expect.soft(frame.animation).toBe('none');
+                    expect.soft(frame.transition).toBe('0s');
+                  }
+                  expect.soft(trace.first.surface, 'the panel still has its own reveal').toBe('0');
+                  await expect(dialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
+                  if (index === 0) {
+                    // Compare actual painted backdrop pixels, not just computed styles.
+                    // The top-left gutter is outside the surface at both widths.
+                    const reference = await page.screenshot({ clip: { x: 0, y: 0, width: 8, height: 8 }, scale: 'css' });
+                    const painted = [];
+                    for (const state of [{ ready: false, progress: '0' }, { ready: true, progress: '0.5' }, { ready: true, progress: '1' }]) {
+                      await dialog.evaluate((node, state) => {
+                        if (state.ready) node.setAttribute('data-ready', 'true'); else node.removeAttribute('data-ready');
+                        (node as HTMLElement).style.setProperty('--vision-open-progress', state.progress);
+                      }, state);
+                      const pixels = await page.screenshot({ clip: { x: 0, y: 0, width: 8, height: 8 }, scale: 'css' });
+                      const unchanged = pixels.equals(reference);
+                      painted.push({ ...state, unchanged });
+                      expect.soft(unchanged, 'surface readiness/progress cannot change painted dimmer pixels').toBe(true);
+                    }
+                    record(`steady-shade-pixels-${info.project.name}-${width}`, painted);
+                    await page.screenshot({ path: `${folder}/steady-shade-${info.project.name}-${width}.png` });
+                  }
+                  await page.keyboard.press('Escape');
+                  await expect(page.locator('dialog.astrid-vision-details')).toHaveCount(0);
+                }
+              });
+            });
+          }
+          ''')
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Record unchanged-product baseline
+        run: |
+          mkdir -p static-shade-evidence/baseline
+          set +e
+          PLAYWRIGHT_JSON_OUTPUT_FILE=static-shade-evidence/baseline/report.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'steady shade at 390px' --output=test-results/shade-baseline --reporter=line,json > static-shade-evidence/baseline/output.log 2>&1
+          result=$?
+          set -e
+          echo "$result" > static-shade-evidence/baseline/exit.txt
+          cp -r test-results/vision-captures static-shade-evidence/baseline/captures
+          test "$result" -ne 0
+      - name: Remove backdrop animation dependency
+        shell: python
+        run: |
+          from pathlib import Path
+          def replace(path, old, new):
+            p = Path(path); s = p.read_text()
+            assert s.count(old) == 1, (path, old)
+            p.write_text(s.replace(old, new))
+          replace('src/pages/Home/VisionMobileLayout.css',
+            '   Both surface opacity and backdrop alpha consume one frame-owned progress.\n   Separate CSS/compositor timelines can rewind during WebKit modal opening.',
+            '   The dimmer is constant from native opening, independent of readiness,\n   inherited animation variables or the inner surface reveal.')
+          replace('src/pages/Home/VisionMobileLayout.css',
+            '.astrid-vision-details::backdrop {\n  opacity: 1; background-color: rgba(22, 20, 18, 0); transition: none;\n}\n.astrid-vision-details[data-ready="true"]::backdrop {\n  /* Older engines without backdrop inheritance fall back to steady dimming. */\n  background-color: rgba(22, 20, 18, calc(.58 * var(--vision-open-progress, 1)));\n}',
+            '.astrid-vision-details::backdrop {\n  /* No transparent preparation frame or animated shade to interrupt. Keep\n     the page at one dim level while the surface settles and fades in. */\n  opacity: 1; background-color: rgba(22, 20, 18, .58);\n  animation: none; transition: none;\n}')
+          replace('src/pages/Home/VisionMobileLayout.css',
+            '  .astrid-vision-details[data-ready="true"]::backdrop { background-color: rgba(22, 20, 18, .58); }\n', '')
+          replace('src/pages/Home/VisionDialog.tsx',
+            '          // One short, monotonic timeline owns both the panel and shade. CSS\n          // opacity transitions can resynchronize backwards in WebKit\'s top layer.',
+            '          // Animate only the inner panel and its controls. The native\n          // backdrop stays at one fixed shade throughout preparation/reveal.')
+          replace('scripts/quality/check-public-vision-production.mjs',
+            '    await firstPillar.getByRole(\'button\').click();',
+            '''    await page.evaluate(() => {
+                const original = HTMLDialogElement.prototype.showModal;
+                window.__visionShadeStarts = [];
+                HTMLDialogElement.prototype.showModal = function () {
+                  original.call(this);
+                  const style = getComputedStyle(this, '::backdrop');
+                  window.__visionShadeStarts.push({ ready: this.dataset.ready ?? null,
+                    colour: style.backgroundColor, opacity: style.opacity,
+                    animation: style.animationName, transition: style.transitionDuration });
+                };
+              });
+              await firstPillar.getByRole('button').click();''')
+          replace('scripts/quality/check-public-vision-production.mjs',
+            "Production popup uses an opaque native layer, inner-surface reveal and shared-progress backdrop shading.",
+            "Production popup uses an opaque native layer, inner-surface reveal and constant backdrop shading.")
+          replace('scripts/quality/check-public-vision-production.mjs',
+            "    await expect(page.getByRole('alert')).toHaveCount(0);",
+            '''    await expect(page.getByRole('alert')).toHaveCount(0);
+              const initialShades = await page.evaluate(() => window.__visionShadeStarts);
+              expect(initialShades).toHaveLength(3);
+              for (const shade of initialShades) {
+                expect(shade).toEqual({ ready: null, colour: 'rgba(22, 20, 18, 0.58)',
+                  opacity: '1', animation: 'none', transition: '0s' });
+              }
+              console.log('Production dimmer is already fixed at native opening, before popup readiness.');''')
+      - name: Save exact patch before testing
+        run: |
+          git diff > static-shade-evidence/candidate.patch
+          git rev-parse HEAD > static-shade-evidence/base-with-workbench.txt
+      - name: Verify Chromium fixed shade
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: static-shade-evidence/chromium-report.json
+        run: |
+          npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'steady shade at' --project=chromium-desktop --output=test-results/shade-chromium --reporter=line,json
+          cp -r test-results/vision-captures static-shade-evidence/chromium-captures
+      - name: Verify WebKit fixed shade
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: static-shade-evidence/webkit-report.json
+        run: |
+          npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'steady shade at' --output=test-results/shade-webkit --reporter=line,json
+          cp -r test-results/vision-captures static-shade-evidence/webkit-captures
+      - name: Commit only qualified source and regression tests
+        run: |
+          node --check scripts/quality/check-public-vision-production.mjs
+          git add src/pages/Home/VisionMobileLayout.css src/pages/Home/VisionDialog.tsx tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(vision): keep backdrop shade constant while the popup reveals'
+          git push origin HEAD:fix/vision-static-shade-20261115
+          git rev-parse HEAD > static-shade-evidence/candidate.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-static-shade-focused
+          path: static-shade-evidence/
+          if-no-files-found: error

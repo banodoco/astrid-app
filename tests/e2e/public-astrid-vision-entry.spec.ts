@@ -152,3 +152,100 @@ test('Home to Vision joins its pending preload and keeps headline line boxes sta
   await expect(page.locator('#astrid-vision-title')).toHaveText(feed.vision.title);
   await expect(page.getByRole('status', { name: "Loading Astrid's vision" })).toHaveCount(0);
 });
+
+// Use tablet emulation explicitly rather than resizing a 3x phone context.
+test('iPad single-screen Home rejects document overflow and remains fitted', async ({ browser, baseURL, request }, info) => {
+  const response = await request.get(FEED); expect(response.ok()).toBe(true);
+  const feed = await response.json() as PublicVisionContent;
+  const context = await browser.newContext({ baseURL, viewport: { width: 820, height: 1180 },
+    screen: { width: 820, height: 1180 }, isMobile: true, hasTouch: true,
+    deviceScaleFactor: 1, reducedMotion: 'reduce' });
+  try {
+    const page = await context.newPage();
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    await page.goto('/home', { waitUntil: 'domcontentloaded' });
+    const home = page.locator('.astrid-public-site');
+    await expect(home).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    const samples = [];
+    for (const viewport of [{ width: 820, height: 1180 }, { width: 820, height: 1024 },
+      { width: 834, height: 1194 }, { width: 768, height: 1024 }, { width: 1024, height: 1366 }]) {
+      await page.setViewportSize(viewport);
+      for (const audience of ['App', 'Agent']) {
+        await home.getByRole('button', { name: audience, exact: true }).click();
+        await expect(home).toHaveAttribute('data-audience', audience.toLowerCase());
+        await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflowY)).toBe('clip');
+        await page.evaluate(() => window.scrollTo({ left: 0, top: 3000, behavior: 'instant' }));
+        await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+        const geometry = await home.evaluate(node => ({
+          height: innerHeight, y: scrollY, scrollHeight: document.documentElement.scrollHeight,
+          bodyHeight: document.body.scrollHeight, home: node.getBoundingClientRect().toJSON(),
+          controls: ['.astrid-brand', 'h1', '.astrid-audience-switch', '.astrid-hero-actions'].map(selector => {
+            const box = node.querySelector(selector)!.getBoundingClientRect();
+            return { selector, top: box.top, bottom: box.bottom, left: box.left, right: box.right };
+          }),
+        }));
+        expect(geometry.scrollHeight).toBeLessThanOrEqual(viewport.height + 1);
+        expect(geometry.bodyHeight).toBeLessThanOrEqual(viewport.height + 1);
+        expect(geometry.home.y).toBe(0);
+        for (const box of geometry.controls) {
+          expect(box.top).toBeGreaterThanOrEqual(-1);
+          expect(box.bottom).toBeLessThanOrEqual(viewport.height + 1);
+          expect(box.left).toBeGreaterThanOrEqual(-1);
+          expect(box.right).toBeLessThanOrEqual(viewport.width + 1);
+        }
+        samples.push({ viewport, audience, ...geometry });
+      }
+    }
+    record(`ipad-home-fit-${info.project.name}`, { source: feed.source, samples });
+    await page.setViewportSize({ width: 820, height: 1180 });
+    await page.screenshot({ path: `${folder}/ipad-home-fit-${info.project.name}.png` });
+  } finally { await context.close(); }
+});
+
+test('iPad returns from scrolled Vision at the top without a second adjustment', async ({ browser, baseURL, request }, info) => {
+  const response = await request.get(FEED); expect(response.ok()).toBe(true);
+  const feed = await response.json() as PublicVisionContent;
+  const context = await browser.newContext({ baseURL, viewport: { width: 820, height: 1180 },
+    screen: { width: 820, height: 1180 }, isMobile: true, hasTouch: true,
+    deviceScaleFactor: 1, reducedMotion: 'no-preference' });
+  try {
+    const page = await context.newPage();
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    await page.goto('/home', { waitUntil: 'domcontentloaded' });
+    const home = page.locator('.astrid-public-site');
+    await expect(home).toBeVisible();
+    const traces = [];
+    for (const height of [1180, 1024, 1180]) {
+      await page.setViewportSize({ width: 820, height });
+      await home.getByRole('link', { name: 'Vision', exact: true }).click();
+      await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+      await expect.poll(() => page.evaluate(() => getComputedStyle(document.documentElement).overflowY)).not.toBe('clip');
+      await page.evaluate(() => window.scrollTo({ top: 900, behavior: 'instant' }));
+      await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThanOrEqual(899);
+      await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+      await expect(page.locator('.astrid-vision')).toHaveCount(0);
+      await expect(home).toHaveAttribute('data-astrid-lifecycle', 'active');
+      const frames = await page.evaluate(() => new Promise<{ y: number; top: number; overflow: number }[]>(resolve => {
+        const samples: { y: number; top: number; overflow: number }[] = [];
+        const sample = () => {
+          samples.push({ y: scrollY, top: document.querySelector('.astrid-public-site')!.getBoundingClientRect().top,
+            overflow: document.documentElement.scrollHeight - innerHeight });
+          if (samples.length < 16) requestAnimationFrame(sample); else resolve(samples);
+        };
+        sample();
+      }));
+      expect(frames.every(frame => frame.y === 0 && Math.abs(frame.top) < 1 && frame.overflow <= 1)).toBe(true);
+      traces.push({ height, frames });
+    }
+    // A direct Vision entry has no previous Home scroll or retained DOM.
+    await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+    await page.evaluate(() => window.scrollTo({ top: 900, behavior: 'instant' }));
+    await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+    await expect(home).toBeVisible();
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0);
+    record(`ipad-home-return-${info.project.name}`, { source: feed.source, traces });
+    await page.screenshot({ path: `${folder}/ipad-home-return-${info.project.name}.png` });
+  } finally { await context.close(); }
+});

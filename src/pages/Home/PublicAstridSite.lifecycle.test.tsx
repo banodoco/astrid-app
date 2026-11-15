@@ -406,4 +406,26 @@ describe('room scroll snapshot ownership', () => {
     await finish(returning);
     expect(document.documentElement).not.toHaveAttribute('data-astrid-page-transition-style');
   });
+
+  it('discards accidental scroll offsets in single-screen Home layouts', async () => {
+    await mountedHome();
+    const home = document.querySelector<HTMLElement>('.astrid-public-site')!;
+    home.style.setProperty('--astrid-home-single-screen', '1');
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(427);
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
+    historyAt('/home?experience=app');
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 0, behavior: 'instant' });
+    expect(home).toHaveFocus();
+  });
+
+  it('drops saved desktop scroll when Home becomes single-screen while in Vision', async () => {
+    await mountedHome();
+    const home = document.querySelector<HTMLElement>('.astrid-public-site')!;
+    vi.spyOn(window, 'scrollY', 'get').mockReturnValue(427);
+    fireEvent.click(screen.getByRole('link', { name: 'Vision' }));
+    home.style.setProperty('--astrid-home-single-screen', '1');
+    historyAt('/home?experience=app');
+    expect(window.scrollTo).toHaveBeenLastCalledWith({ left: 0, top: 0, behavior: 'instant' });
+    expect(home).toHaveFocus();
+  });
 });

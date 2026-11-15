@@ -13,6 +13,15 @@ import './PublicAstridSite.css';
 
 type PublicAstridPage = 'home' | 'vision';
 
+// CSS owns which layouts fit one screen. Never carry a toolbar/overscroll
+// offset into those layouts, including after an orientation change in Vision.
+// Larger or short stacked layouts still restore their meaningful Home scroll.
+function homeScrollTarget(saved: number): number {
+  const home = document.querySelector<HTMLElement>('.astrid-public-site');
+  return home && getComputedStyle(home).getPropertyValue('--astrid-home-single-screen').trim() === '1'
+    ? 0 : saved;
+}
+
 function pageAtLocation(): PublicAstridPage {
   return window.location.pathname === VISION_PATH ? 'vision' : 'home';
 }
@@ -53,12 +62,12 @@ export function PublicAstridSite() {
   const show = useCallback((next: PublicAstridPage) => {
     const nextExperience = next === 'home' ? readPublicAstridExperience() : null;
     const outgoingScroll = window.scrollY;
-    const incomingScroll = next === 'vision' ? 0 : homeScrollRef.current;
+    const incomingScroll = next === 'vision' ? 0 : homeScrollTarget(homeScrollRef.current);
     // Off-screen heroes are not useful morphing anchors. Crossfade instead.
     const presentation = outgoingScroll > 72 || incomingScroll > 72 ? 'crossfade' : 'shared';
     const commit = () => {
       const previous = pageRef.current;
-      if (previous === 'home' && next === 'vision') homeScrollRef.current = outgoingScroll;
+      if (previous === 'home' && next === 'vision') homeScrollRef.current = homeScrollTarget(outgoingScroll);
       pageRef.current = next;
       document.title = PUBLIC_ASTRID_SHARE_PAGES[next].title;
       setPage(next);
@@ -82,7 +91,7 @@ export function PublicAstridSite() {
     pendingFocusRef.current = null;
     const target = document.querySelector<HTMLElement>(page === 'vision' ? '.astrid-vision' : '.astrid-public-site');
     target?.focus({ preventScroll: true });
-    window.scrollTo({ left: 0, top: page === 'vision' ? 0 : homeScrollRef.current, behavior: 'instant' });
+    window.scrollTo({ left: 0, top: page === 'vision' ? 0 : homeScrollTarget(homeScrollRef.current), behavior: 'instant' });
   }, [page, environment.visible]);
 
   useEffect(() => {

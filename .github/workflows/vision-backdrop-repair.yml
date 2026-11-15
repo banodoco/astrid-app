@@ -17,14 +17,52 @@ jobs:
         with:
           node-version: '20.19.0'
           cache: npm
-      - name: Verify and apply exact reviewed repair
+      - name: Apply the unchanged hash-verified product repair
+        run: |
+          git fetch --no-tags --depth=1 origin f8f1a152b2df2028d05bf168f7136cbc20611ad4
+          python3 - <<'PY'
+          import hashlib, subprocess, textwrap
+          donor = subprocess.check_output(['git', 'show', 'f8f1a152b2df2028d05bf168f7136cbc20611ad4:.github/workflows/vision-backdrop-repair.yml'])
+          assert hashlib.sha1(b'blob '+str(len(donor)).encode()+b'\0'+donor).hexdigest() == 'e8f61ab0dcf5eb6c6f43f75ba9627c88ff327d3c'
+          text = donor.decode()
+          start = text.index('          import base64, gzip, hashlib, subprocess\n')
+          end = text.index('\n          PY', start)
+          # This exact immutable recipe checks SHA-256 before git apply --check.
+          exec(compile(textwrap.dedent(text[start:end]), '<verified-backdrop-recipe>', 'exec'))
+          PY
+      - name: Settle the preceding gesture without changing opening assertions
         run: |
           python3 - <<'PY'
-          import base64, gzip, hashlib, subprocess
-          data = gzip.decompress(base64.b64decode('''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'''))
-          assert hashlib.sha256(data).hexdigest() == '5e54f0e0f4cae8c27de9a2db06e39b593a92a431338228fc8194f3c03ec66603', 'Transport mismatch; do not apply'
-          subprocess.run(['git','apply','--check','-'],input=data,check=True)
-          subprocess.run(['git','apply','-'],input=data,check=True)
+          from pathlib import Path
+          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          s = p.read_text()
+          old = '''        await opener.scrollIntoViewIfNeeded();
+                  await page.waitForTimeout(400);
+          '''
+          new = '''        await opener.scrollIntoViewIfNeeded();
+                  if (scenario.width === 1440) {
+                    const bounds = await opener.boundingBox();
+                    expect(bounds).not.toBeNull();
+                    await page.mouse.move(bounds!.x + bounds!.width / 2, bounds!.y + bounds!.height / 2);
+                  }
+                  // Finish the preceding scroll/pointer parallax before measuring a new
+                  // action. A fixed delay can leave subpixel easing in the first frame.
+                  await page.evaluate(() => new Promise<void>((resolve, reject) => {
+                    let previous = '', stable = 0, attempts = 0;
+                    const settle = () => {
+                      const transforms = Array.from(document.querySelectorAll<HTMLCanvasElement>('.astrid-vision .astrid-sky canvas'))
+                        .map(canvas => canvas.style.transform).join('|');
+                      stable = transforms === previous ? stable + 1 : 0;
+                      previous = transforms;
+                      if (stable >= 4) resolve();
+                      else if (++attempts >= 240) reject(new Error('Sky parallax did not settle before the opening gesture'));
+                      else requestAnimationFrame(settle);
+                    };
+                    requestAnimationFrame(settle);
+                  }));
+          '''
+          assert s.count(old) == 1, 'Unexpected regression source; stop'
+          p.write_text(s.replace(old, new))
           PY
       - run: npm ci --legacy-peer-deps
       - name: Verify syntax, lifecycle and lint

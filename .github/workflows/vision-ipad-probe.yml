@@ -1,0 +1,94 @@
+name: Diagnose iPad Home overflow
+on:
+  push:
+    branches: [fix/vision-entry-header-20261114]
+    paths: [.github/workflows/vision-ipad-probe.yml]
+permissions:
+  contents: read
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Measure unchanged app in tablet contexts
+        run: |
+          mkdir -p test-results/ipad-probe
+          npm run dev -- --host 127.0.0.1 --port 4173 >test-results/ipad-probe/vite.log 2>&1 &
+          for i in $(seq 1 60); do curl -sf http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          cat > .ipad-probe.mjs <<'JS'
+          import { chromium, webkit, devices } from '@playwright/test';
+          import { writeFileSync } from 'node:fs';
+          const out = 'test-results/ipad-probe';
+          const report = [];
+          const read = async page => page.evaluate(() => {
+            const box = selector => {
+              const node = document.querySelector(selector);
+              if (!node) return null;
+              const b = node.getBoundingClientRect(), s = getComputedStyle(node);
+              return { selector, x: b.x, y: b.y, width: b.width, height: b.height, bottom: b.bottom,
+                scrollHeight: node.scrollHeight, clientHeight: node.clientHeight,
+                overflow: s.overflow, position: s.position, transform: s.transform,
+                minHeight: s.minHeight, padding: s.padding, margin: s.margin };
+            };
+            return { path: location.pathname, y: scrollY, innerHeight, innerWidth,
+              vv: { height: visualViewport?.height, offsetTop: visualViewport?.offsetTop },
+              root: { scrollHeight: document.documentElement.scrollHeight, clientHeight: document.documentElement.clientHeight },
+              boxes: ['body','#root','.astrid-public-site','.astrid-landing-grid','.astrid-showcase','.astrid-editor-stage','.astrid-sky','.astrid-hero-copy h1','.astrid-hero-actions','.astrid-hero-note'].map(box),
+              outside: [...document.querySelectorAll('body *')].filter(n => {
+                const b=n.getBoundingClientRect(); return b.width && b.height && b.bottom > innerHeight + 2;
+              }).slice(0,35).map(n=>({tag:n.tagName,class:n.className?.baseVal??n.className,bottom:n.getBoundingClientRect().bottom,position:getComputedStyle(n).position})) };
+          });
+          for (const [engine, type] of [['chromium',chromium],['webkit',webkit]]) {
+            const browser = await type.launch();
+            try {
+              for (const viewport of [{width:820,height:1180},{width:820,height:1024}]) {
+                const context = await browser.newContext({...devices['iPad Air'], viewport, deviceScaleFactor: 1, reducedMotion:'reduce'});
+                const page = await context.newPage();
+                const item={engine,viewport,errors:[]};
+                page.on('pageerror',e=>item.errors.push(e.message));
+                await page.goto('http://127.0.0.1:4173/',{waitUntil:'domcontentloaded'});
+                await page.locator('.astrid-public-site').waitFor({timeout:60000});
+                await page.evaluate(()=>document.fonts.ready);
+                await page.waitForTimeout(5000);
+                item.initial=await read(page);
+                await page.evaluate(()=>scrollTo({top:2000,behavior:'instant'}));
+                item.scrolled=await read(page);
+                await page.screenshot({path:`${out}/${engine}-${viewport.height}-home-before.png`});
+                await page.evaluate(()=>scrollTo({top:0,behavior:'instant'}));
+                const style=await page.addStyleTag({content:'.astrid-sky { display:none !important; }'});
+                item.withoutSky=await read(page);
+                await style.evaluate(n=>n.remove());
+                await page.getByRole('link',{name:'Vision',exact:true}).click();
+                await page.locator('.astrid-vision-principles > li').first().waitFor({timeout:30000});
+                await page.evaluate(()=>scrollTo({top:900,behavior:'instant'}));
+                item.vision=await read(page);
+                await page.getByRole('link',{name:'Astrid home',exact:true}).click();
+                await page.locator('.astrid-vision').waitFor({state:'detached'});
+                await page.waitForTimeout(500);
+                item.returned=await read(page);
+                await page.screenshot({path:`${out}/${engine}-${viewport.height}-home-return.png`});
+                report.push(item); writeFileSync(`${out}/report.json`,JSON.stringify(report,null,2));
+                await context.close();
+              }
+            } finally { await browser.close(); }
+          }
+          JS
+          node .ipad-probe.mjs
+      - name: Preserve exact source and measurements
+        if: always()
+        run: |
+          git rev-parse HEAD > test-results/ipad-probe/head.txt
+          tar -cf test-results/ipad-probe/source.tar src/pages/Home src/shared/components/PixelUnderline* tests/e2e/public-astrid-vision* playwright.config.ts playwright.vision.config.ts .github/workflows/public-vision.yml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-ipad-probe
+          path: test-results/ipad-probe/
+          retention-days: 7

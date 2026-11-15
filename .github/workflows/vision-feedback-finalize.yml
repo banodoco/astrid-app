@@ -1,0 +1,95 @@
+name: Qualify repaired Vision controls on rendered frames
+on:
+  push:
+    branches: [fix/home-cards-vision-controls-20261115]
+    paths: [.github/workflows/vision-feedback-finalize.yml]
+permissions:
+  contents: write
+jobs:
+  qualify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/home-cards-vision-controls-20261115
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20.19.0"
+          cache: npm
+      - name: Reuse reviewed exact repair recipe
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess, textwrap
+          source = Path('.github/workflows/vision-feedback-handoff-repair.yml').read_text()
+          marker = '      - name: Apply bounded source repair and preserve the reproducing case\n        run: |\n'
+          assert source.count(marker) == 1
+          script = source.split(marker, 1)[1].split('\n      - run: npm ci', 1)[0]
+          subprocess.run(['bash', '-e'], input=textwrap.dedent(script), text=True, check=True)
+          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          s = p.read_text()
+          start = s.index("test('feedback follow-up arrows use free gutters")
+          end = s.index("test('feedback follow-up every pillar", start)
+          block = s[start:end]
+          assert block.count('    await page.waitForTimeout(150);') == 1
+          block = block.replace('    await page.waitForTimeout(150);', '''    const beforePaint = await dialog.evaluate(node => ({
+                exterior: node.hasAttribute('data-exterior-nav'),
+                panel: node.getBoundingClientRect().toJSON(),
+                previous: node.querySelector('.astrid-vision-details-previous')!.getBoundingClientRect().toJSON(),
+                next: node.querySelector('.astrid-vision-details-next')!.getBoundingClientRect().toJSON(),
+              }));
+              // Resize/observer delivery belongs to rendering, not a guessed wall-clock
+              // interval on a busy 3x WebKit runner. Retain the pre-paint measurements.
+              await page.evaluate(() => new Promise<void>(resolve =>
+                requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));''')
+          assert block.count('    records.push({ width, ...rects });') == 1
+          block = block.replace('    records.push({ width, ...rects });', '    records.push({ width, beforePaint, ...rects });')
+          p.write_text(s[:start] + block + s[end:])
+          p = Path('scripts/quality/check-public-vision-production.mjs')
+          s = p.read_text()
+          old = "    await expect(firstPillar.locator('.astrid-vision-subject-counts')).toContainText('goals');"
+          assert s.count(old) == 1
+          s = s.replace(old, "    const goalCount = content.pillars[0].characteristics?.length ?? 0;\n    await expect(firstPillar.locator('.astrid-vision-subject-counts')).toContainText(`${goalCount} ${goalCount === 1 ? 'goal' : 'goals'}`);")
+          p.write_text(s)
+          PY
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/base.txt
+          git diff > evidence/candidate.patch
+      - run: npm ci --legacy-peer-deps
+      - name: Verify focused source and lifecycle
+        run: |
+          npx eslint src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx --max-warnings 0
+          node --check scripts/quality/check-public-vision-production.mjs
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Chromium focused regressions
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: evidence/chromium.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts --project=chromium-desktop --grep 'closing native dialog preserves|feedback follow-up arrows|next subject cycles inside one modal with reset content at 1440px' --output=test-results/focused-chromium --reporter=line,json
+      - name: WebKit focused regressions
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: evidence/webkit.json
+        run: npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts --grep 'closing native dialog preserves|feedback follow-up arrows|next subject cycles inside one modal with reset content at 1440px' --output=test-results/focused-webkit --reporter=line,json
+      - name: Commit exact qualified source
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+          git diff --cached --check
+          git commit -m 'fix(vision): preserve new focus choices and responsive exterior control placement'
+          git push origin HEAD:fix/home-cards-vision-controls-20261115
+      - name: Preserve exact source and evidence
+        if: always()
+        run: |
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/source.txt
+          git diff > evidence/uncommitted.patch
+          cp -R test-results/vision-captures evidence/captures 2>/dev/null || true
+          tar -czf evidence/source.tar.gz src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionMobileLayout.css tests/e2e/public-astrid-vision-entry.spec.ts scripts/quality/check-public-vision-production.mjs
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-feedback-focus-resize-qualified
+          path: evidence/
+          retention-days: 7

@@ -1,0 +1,66 @@
+name: Verify and qualify iPad source repair
+on:
+  push:
+    branches: [fix/vision-entry-header-20261114]
+    paths: [.github/workflows/vision-ipad-verified-apply.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/vision-entry-header-20261114
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Verify transport and apply exact scoped patch
+        run: |
+          python - <<'PY'
+          import pathlib,re,base64,gzip,hashlib,subprocess
+          source=pathlib.Path('.github/workflows/vision-ipad-probe.yml').read_text()
+          encoded=re.search(r'PATCH_GZIP: (\S+)',source).group(1).replace('NrZz2Cog','NrZ2Cog')
+          data=gzip.decompress(base64.b64decode(encoded))
+          assert hashlib.sha256(data).hexdigest()=='c341d87b547ed2fe58b374fbbcab623806d1bf0218b893aa160307080e8c80dd'
+          subprocess.run(['git','apply','--check','-'],input=data,check=True)
+          subprocess.run(['git','apply','-'],input=data,check=True)
+          PY
+      - run: npm ci --legacy-peer-deps
+      - name: Verify lifecycle and syntax
+        run: |
+          npx eslint src/pages/Home/PublicAstridSite.tsx --max-warnings 0
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx
+      - name: Commit only scoped source and regressions
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/pages/Home/PublicAstridSite.css src/pages/Home/PublicAstridSite.tsx src/pages/Home/PublicAstridSite.lifecycle.test.tsx tests/e2e/public-astrid-vision-entry.spec.ts
+          git commit -m 'fix(vision): contain single-screen Home overflow and reset tablet return scroll'
+          git push origin HEAD:fix/vision-entry-header-20261114
+      - run: npx playwright install --with-deps chromium webkit
+        id: browsers
+      - name: Tablet Chromium regressions
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/ipad-chromium-results.json
+        run: npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --project=chromium-desktop --grep 'iPad' --reporter=line,json
+      - name: Tablet WebKit regressions
+        if: ${{ !cancelled() && steps.browsers.outcome == 'success' }}
+        env:
+          PLAYWRIGHT_JSON_OUTPUT_FILE: test-results/vision-captures/ipad-webkit-results.json
+        run: npx playwright test --config playwright.vision.config.ts --grep 'iPad' --reporter=line,json
+      - name: Preserve source and results
+        if: always()
+        run: |
+          mkdir -p test-results/vision-captures
+          git rev-parse HEAD > test-results/vision-captures/ipad-head.txt
+          tar -cf test-results/vision-captures/ipad-source.tar src/pages/Home/PublicAstridSite* tests/e2e/public-astrid-vision-entry.spec.ts
+          git diff > test-results/vision-captures/uncommitted.patch
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vision-ipad-repaired
+          path: test-results/vision-captures/
+          retention-days: 7

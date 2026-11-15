@@ -1,0 +1,78 @@
+name: Prepare final Home and Vision feedback candidate
+on:
+  push:
+    branches: [fix/home-cards-vision-controls-20261115]
+    paths: [.github/workflows/vision-feedback-finalize.yml]
+permissions:
+  contents: write
+jobs:
+  prepare:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/home-cards-vision-controls-20261115
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - name: Apply already reviewed source and exact retained cases
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+          s=p.read_text();assert 'feedback follow-up' not in s
+          p.write_text(s+Path('scripts/quality/vision-feedback-cases-20261115.txt').read_text())
+          PY
+          python3 scripts/quality/vision-feedback-refine-20261115.py --baseline
+          python3 - <<'PY'
+          from pathlib import Path
+          recipe=Path('scripts/quality/vision-feedback-apply-20261115.py').read_text().split('# Include the nearby Home scheduling regression in the established gate.')[0]
+          recipe=recipe.replace("document.querySelector('[data-callout=\"effects\"]')", "document.querySelector('article[data-callout=\"effects\"]')")
+          exec(compile(recipe,'<scoped-feedback-repair>','exec'))
+          PY
+          python3 scripts/quality/vision-feedback-refine-20261115.py
+      - name: Correct zoom-time navigation reachability and isolate unchanged Home motion case
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/pages/Home/VisionDialog.tsx');s=p.read_text()
+          old="""      // Do not undo the user's pinch zoom by continually shrinking the dialog.
+                if (viewport && viewport.scale > 1.05) return;
+                dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');
+                dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');
+                placeDialogNavigation(dialog);""".replace('          ', '')
+          # Exact source lines, rather than depending on YAML block indentation.
+          old="      // Do not undo the user's pinch zoom by continually shrinking the dialog.\n      if (viewport && viewport.scale > 1.05) return;\n      dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');\n      dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');\n      placeDialogNavigation(dialog);"
+          new="      // Keep navigation reachable during viewport changes, including zoom.\n      // Only height/position tracking must yield to the user's pinch zoom.\n      placeDialogNavigation(dialog);\n      if (viewport && viewport.scale > 1.05) return;\n      dialog.style.setProperty('--vision-viewport-top', (viewport?.offsetTop ?? 0) + 'px');\n      dialog.style.setProperty('--vision-viewport-height', (viewport?.height ?? window.innerHeight) + 'px');"
+          assert s.count(old)==1;p.write_text(s.replace(old,new))
+          p=Path('src/pages/Home/VisionMobileLayout.css');s=p.read_text()
+          old='.astrid-vision-details[data-exterior-nav] > .astrid-vision-details-previous { left: -60px; }\n.astrid-vision-details[data-exterior-nav] > .astrid-vision-details-next { right: -60px; }'
+          assert s.count(old)==1
+          p.write_text(s.replace(old,'@media (min-width: 761px) {\n  '+old.replace('\n','\n  ')+'\n}'))
+          p=Path('tests/e2e/public-astrid-vision-entry.spec.ts');s=p.read_text()
+          start=s.index("test.describe('feedback follow-up mobile capability cards'")
+          end=s.index("test.describe('feedback follow-up desktop navigation'",start)
+          case=s[start:end]
+          header="import { expect, test } from '@playwright/test';\nimport { mkdirSync, writeFileSync } from 'node:fs';\n\n// Exercise the production Home and original decoded media. Apple WebKit owns\n// this gate because Linux WebKitGTK currently cannot decode the source's colour\n// metadata (astrid-dev#668); do not bypass the real readiness gate.\nconst folder = 'test-results/vision-captures';\nfunction record(name: string, value: unknown) {\n  mkdirSync(folder, { recursive: true });\n  writeFileSync(`${folder}/${name}.json`, JSON.stringify(value, null, 2));\n}\n\n"
+          q=Path('tests/e2e/public-astrid-home-chips.spec.ts');assert not q.exists()
+          q.write_text(header+case)
+          p.write_text(s[:start]+s[end:])
+          assert q.read_text()[len(header):]==case,'The existing case body must remain byte-for-byte unchanged'
+          q=Path('playwright.home-webkit.config.ts');assert not q.exists()
+          q.write_text("import { defineConfig } from '@playwright/test';\nimport vision from './playwright.vision.config';\n\n/** Real Home media and mobile disclosure motion, run on Apple-platform WebKit. */\nexport default defineConfig({\n  ...vision,\n  testMatch: ['**/public-astrid-home-chips.spec.ts'],\n});\n")
+          PY
+      - run: npm ci --legacy-peer-deps
+      - name: Validate scoped lifecycle and source before branch-only commit
+        run: |
+          npx eslint src/pages/Home/PublicAstridCallouts.tsx src/pages/Home/PublicAstridSite.tsx src/pages/Home/publicAstridNavigation.ts src/pages/Home/VisionDialog.tsx src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx --max-warnings 0
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx src/pages/Home/visionHierarchy.test.ts
+      - name: Commit the candidate; production promotion requires the final cross-platform gate
+        run: |
+          git add src/pages/Home/PublicAstridCallouts.tsx src/pages/Home/PublicAstridCallouts.scheduling.test.tsx src/pages/Home/publicAstridNavigation.ts src/pages/Home/PublicAstridSite.tsx src/pages/Home/PublicAstridSite.css src/pages/Home/VisionDialog.tsx src/pages/Home/VisionMobileLayout.css src/pages/Home/PublicAstridVision.tsx src/pages/Home/VisionDetailDialog.tsx tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-mobile-catalogs.spec.ts tests/e2e/public-astrid-vision-aspirations.spec.ts tests/e2e/public-astrid-vision-characteristics.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-home-chips.spec.ts playwright.home-webkit.config.ts
+          git diff --exit-code
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(ui): isolate Home disclosures, glide scrolled mink, place gutter arrows and count goals'
+          git push origin HEAD:fix/home-cards-vision-controls-20261115

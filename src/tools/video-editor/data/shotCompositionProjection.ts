@@ -535,10 +535,10 @@ function projectClip(
       : {}),
     ...(hasTrim ? { to: Math.max(0, rawTo + sourceOffsetSeconds) } : {}),
     ...(speed !== 1 ? { speed } : {}),
-    // Transport clips expose duration_ms; editor-form clips with `from`/`to`
-    // retain those trim bounds instead of being converted to a parent-sized
-    // hold. Hold remains the deterministic fallback for duration-only clips.
-    ...(!hasTrim || (clipType === 'image' && rawClip.hold !== undefined)
+    // Stills use a hold for rendering. Preserve the same duration precedence
+    // as shot extent (duration_ms, duration, hold, then trim), in source units.
+    // Other trimmed media retain their source window.
+    ...(!hasTrim || clipType === 'image' || clipType === 'hold'
       ? { hold: durationMs / 1000 } : {}),
     ...(muted || hasAuthoredGain ? { volume: muted ? 0 : gain } : {}),
     ...preservedGeometry,
@@ -573,7 +573,7 @@ function projectClip(
   if (clampToOccurrenceDuration && isActiveTimelineClip(rawClip)) {
     const remainingSeconds = occurrence.durationMs / 1000 - projected.at + occurrence.atMs / 1000;
     if (remainingSeconds <= 0) return null;
-    if (clipType === 'image' && projected.hold !== undefined) {
+    if ((clipType === 'image' || clipType === 'hold') && projected.hold !== undefined) {
       projected.hold = Math.min(projected.hold, remainingSeconds * speed);
     } else if (hasTrim && projected.from !== undefined && projected.to !== undefined) {
       const maxTrimmedTo = projected.from + remainingSeconds * speed;

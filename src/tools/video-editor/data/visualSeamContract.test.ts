@@ -26,6 +26,15 @@ function media(id: string, at: number, hold: number, asset: string, extra: Parti
 }
 
 describe('visual seam contract', () => {
+  it('reports the same one-frame picture gap for native holds and images', () => {
+    const gaps = ['image', 'hold'].map((clipType) => analyzeVisualSeams(config([
+      media('a', 0, 1, 'a', { clipType }),
+      media('b', 1 + 1 / 30, 1, 'b', { clipType }),
+    ])).structuralIssues);
+    expect(gaps[0]).toHaveLength(1);
+    expect(gaps[1]).toEqual(gaps[0]);
+  });
+
   it('admits custom picture owners only on declared picture tracks, independently of continuity tracks', () => {
     const base = config([
       media('picture-a', 0, 1, 'a'),

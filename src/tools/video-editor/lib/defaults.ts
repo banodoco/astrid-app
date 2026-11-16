@@ -1,3 +1,4 @@
+import { normalizeClipPlacementWithFindings, type PlacementMigrationFinding } from '@banodoco/timeline-composition';
 import type { TimelineConfig, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import { resolveTimelineRenderTheme } from '@/tools/video-editor/compositions/installed-themes.ts';
 
@@ -65,8 +66,16 @@ export function createDefaultTimelineConfig(): TimelineConfig {
  * (slug or overrides); otherwise nothing changes.
  */
 export function withDefaultTimelineOutput(
-  config: Partial<TimelineConfig> & { output?: Partial<TimelineConfig['output']> },
+  input: Partial<TimelineConfig> & { output?: Partial<TimelineConfig['output']> },
+  onMigration?: (findings: PlacementMigrationFinding[]) => void,
 ): TimelineConfig {
+  let config = input;
+  if (config.output?.resolution === undefined && config.theme_overrides?.visual?.canvas !== undefined) {
+    const result = normalizeClipPlacementWithFindings({...config, clips: config.clips ?? [], tracks: config.tracks ?? []} as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0]);
+    config = result.config as unknown as typeof config;
+    if (input.tracks === undefined) config = {...config, tracks: undefined};
+    onMigration?.(result.findings);
+  }
   const existingOutput = config.output ?? ({} as Partial<TimelineConfig['output']>);
 
   const themeBound = config.theme !== undefined || config.theme_overrides !== undefined;

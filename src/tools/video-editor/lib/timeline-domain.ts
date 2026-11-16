@@ -1,4 +1,4 @@
-import { normalizeClipPlacementWithFindings } from '@banodoco/timeline-composition';
+import { normalizeClipPlacementWithFindings, type PlacementMigrationFinding } from '@banodoco/timeline-composition';
 import type {
   AssetRegistry,
   AssetRegistryEntry,
@@ -1162,19 +1162,19 @@ const canonicalizeNonHoldTrim = (
  */
 export const TRACK_SCALE_BAKE_MARKER = 'scaleAppliesToPositionedClips';
 
+export const placementFindingsToIssues = (findings: PlacementMigrationFinding[], level: TimelineDomainContractLevel): TimelineDomainIssue[] => findings.map(finding => createIssue(
+  level, 'warning', finding.kind === 'scale-bake' ? 'track_scale_positions_baked' : 'clip_placement_migrated',
+  finding.kind === 'canvas' ? 'Materialized canvas from timeline settings.' : `Placement migration ${finding.kind} on track '${finding.trackId}'${finding.clipId ? ` clip '${finding.clipId}'` : ''}.`,
+  {trackId: finding.trackId, clipId: finding.clipId, repairApplied: true, details: {...finding}},
+));
+
 export const applyTrackScaleBakeMigration = (
   config: TimelineConfig,
   issues?: TimelineDomainIssue[],
   level: TimelineDomainContractLevel = 'config-only',
 ): TimelineConfig => {
   const result = normalizeClipPlacementWithFindings(config as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0]);
-  for (const finding of result.findings) {
-    issues?.push(createIssue(level, 'warning',
-      finding.kind === 'scale-bake' ? 'track_scale_positions_baked' : 'clip_placement_migrated',
-      `Placement migration ${finding.kind} on track '${finding.trackId}'${finding.clipId ? ` clip '${finding.clipId}'` : ''}.`,
-      {trackId: finding.trackId, clipId: finding.clipId, repairApplied: true, details: {...finding}},
-    ));
-  }
+  issues?.push(...placementFindingsToIssues(result.findings, level));
   return result.config as unknown as TimelineConfig;
 };
 
@@ -1193,7 +1193,8 @@ export const canonicalizeTimelineConfigSnapshot = (
   config: TimelineConfig,
 ): CanonicalTimelineConfigSnapshot => {
   const issues: TimelineDomainIssue[] = [];
-  const repairedConfig = repairConfig(config, issues, 'config-only');
+  const input = config.output?.resolution === undefined && config.theme_overrides?.visual?.canvas !== undefined ? applyTrackScaleBakeMigration(config, issues, 'config-only') : config;
+  const repairedConfig = repairConfig(input, issues, 'config-only');
   const contiguousConfig = repairShotGroupContiguity(repairedConfig, issues, 'config-only');
   const migratedConfig = applyTrackScaleBakeMigration(
     migrateToFlatTracks(contiguousConfig, issues, 'config-only'),
@@ -1224,7 +1225,8 @@ export const canonicalizeTimelinePair = (
   registry: AssetRegistry,
 ): CanonicalTimelinePair => {
   const issues: TimelineDomainIssue[] = [];
-  const repairedConfig = repairConfig(config, issues, 'pair-aware');
+  const input = config.output?.resolution === undefined && config.theme_overrides?.visual?.canvas !== undefined ? applyTrackScaleBakeMigration(config, issues, 'pair-aware') : config;
+  const repairedConfig = repairConfig(input, issues, 'pair-aware');
   const contiguousConfig = repairShotGroupContiguity(repairedConfig, issues, 'pair-aware');
   const migratedConfig = applyTrackScaleBakeMigration(
     migrateToFlatTracks(contiguousConfig, issues, 'pair-aware'),

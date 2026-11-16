@@ -27,12 +27,12 @@ test('root and lock use the approved immutable source-commit artifact', () => {
   const root = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
   const lock = JSON.parse(fs.readFileSync(path.join(appRoot, 'package-lock.json'), 'utf8'));
   const installed = lock.packages[`node_modules/${packageName}`];
-  assert.equal(bytes.length, 75969);
-  assert.equal(createHash('sha256').update(bytes).digest('hex'), 'e85dd333a1bb1d04c58a4ca5c8299afbe1f7e805f19edc0b88023ef3cecdfec1');
+  assert.equal(bytes.length, 76308);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), '17487222eeb9bd1e2dba5a2edf7c30d79a06727d70bacb06df752525e21669ee');
   assert.equal(root.dependencies[packageName], `file:${artifact}`);
   assert.equal(lock.packages[''].dependencies[packageName], root.dependencies[packageName]);
   assert.equal(installed.version, '0.0.19');
-  assert.equal(manifest.gitHead, '95f4e0e495cd4c32470a5e1d5d06a5e45b6aa101');
+  assert.equal(manifest.gitHead, '561710fa0f9be252b13e0ae695bf1d00257afdcf');
   assert.equal(installed.resolved, `file:${artifact}`);
   assert.equal(installed.integrity, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
   assert.equal(root.devDependencies['@remotion/layout-utils'], '4.0.509');

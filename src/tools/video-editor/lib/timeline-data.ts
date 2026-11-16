@@ -36,6 +36,8 @@ import {
   canonicalizeTimelinePair,
   cloneTimelineExtras,
   projectTimelineTracksForDisplay,
+  placementFindingsToIssues,
+  type TimelineDomainIssue,
   serializeTimelineConfigSnapshot,
 } from '@/tools/video-editor/lib/timeline-domain.ts';
 import { buildAssetReferenceMap } from '@/tools/video-editor/lib/asset-registry.ts';
@@ -96,6 +98,8 @@ export type TimelineEditProjection =
 export interface TimelineData {
   config: TimelineConfig;
   configVersion: number;
+  /** Transient load diagnostics; never authored or serialized. */
+  migrationIssues?: TimelineDomainIssue[];
   head?: import('../data/DataProvider.ts').TimelineHeadRevision;
   /** Fact about this displayed snapshot; never part of authored config. */
   editProjection?: TimelineEditProjection;
@@ -569,11 +573,15 @@ export const buildTimelineData = async (
   head?: import('../data/DataProvider.ts').TimelineHeadRevision,
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
-  const canonical = canonicalizeTimelinePair(config, registry);
+  const priorIssues: TimelineDomainIssue[] = [];
+  const input = config.output?.resolution == null
+    ? withDefaultTimelineOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')))
+    : config;
+  const canonical = canonicalizeTimelinePair(input, registry);
   const displayConfig = projectTimelineTracksForDisplay(canonical.config);
   const resolvedConfig = await resolveTimelineConfig(displayConfig, canonical.registry, urlResolver);
 
-  return assembleTimelineData({
+  return {...assembleTimelineData({
     config: displayConfig,
     configVersion,
     head,
@@ -583,7 +591,7 @@ export const buildTimelineData = async (
     assetMap: buildAssetMap(canonical.registry),
     sourceItemsBySchemaRef,
     transcriptReferences,
-  });
+  }), migrationIssues: [...priorIssues, ...canonical.issues]};
 };
 
 function isAssetResolverArg(value: unknown): value is AssetResolver {
@@ -610,7 +618,11 @@ export const buildTimelineDataWithResolver = async (
   head?: import('../data/DataProvider.ts').TimelineHeadRevision,
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
-  const canonical = canonicalizeTimelinePair(config, registry);
+  const priorIssues: TimelineDomainIssue[] = [];
+  const input = config.output?.resolution == null
+    ? withDefaultTimelineOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')))
+    : config;
+  const canonical = canonicalizeTimelinePair(input, registry);
   const displayConfig = projectTimelineTracksForDisplay(canonical.config);
 
   const urlResolver: UrlResolver = (file, entry, assetId) => {
@@ -646,7 +658,7 @@ export const buildTimelineDataWithResolver = async (
     }
   }
 
-  return assembleTimelineData({
+  return {...assembleTimelineData({
     config: displayConfig,
     configVersion,
     head,
@@ -656,7 +668,7 @@ export const buildTimelineDataWithResolver = async (
     assetMap: buildAssetMap(canonical.registry),
     sourceItemsBySchemaRef,
     transcriptReferences,
-  });
+  }), migrationIssues: [...priorIssues, ...canonical.issues]};
 };
 
 export function loadTimelineJsonFromProvider(

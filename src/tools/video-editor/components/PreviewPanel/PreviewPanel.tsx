@@ -147,6 +147,15 @@ function PreviewPanelComponent({
               {' '}
               Mode {interactionMode}.
             </div>
+            {data.migrationIssues?.some(issue => issue.details?.kind === 'canvas' || issue.details?.kind === 'explicit-fit' || issue.details?.kind === 'scale-bake') && (() => {
+              const findings = data.migrationIssues!.filter(issue => issue.details?.kind === 'canvas' || issue.details?.kind === 'explicit-fit' || issue.details?.kind === 'scale-bake');
+              const clips = new Set(findings.map(issue => issue.clipId).filter(Boolean)).size;
+              const canvas = findings.find(issue => issue.details?.kind === 'canvas');
+              return <div role="status" title={JSON.stringify(findings)}>
+                {clips > 0 ? `Updated legacy framing for ${clips} ${clips === 1 ? 'clip' : 'clips'}. ` : ''}
+                {canvas ? `Canvas ${data.output.resolution.replace('x', ' × ')} from timeline settings.` : ''}
+              </div>;
+            })()}
             {overlay}
             <div
               ref={surface.slotRef}

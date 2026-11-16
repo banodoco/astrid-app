@@ -730,3 +730,22 @@ describe('timeline data lanes duration neutrality', () => {
     expect(withLanesEnds).toEqual(baseEnds);
   });
 });
+
+it('materializes authored canvas before defaults and keeps migration findings transient through save', async () => {
+  const input = {
+    theme_overrides: {visual: {canvas: {width: 1280, height: 720, fps: 24}}},
+    tracks: [{id: 'V1', kind: 'visual', label: 'V1', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}}],
+    clips: [{id: 'c', at: 0, track: 'V1', clipType: 'media', asset: 'a', x: 10, width: 640, height: 360, fit: 'contain'}],
+  } as unknown as TimelineConfig;
+  const original = structuredClone(input);
+  const data = await buildTimelineData(input, {assets: {a: {file: 'a.png', type: 'image/png', resolution: '1920x800'}}});
+  expect(input).toEqual(original);
+  expect(data.output).toMatchObject({resolution: '1280x720', fps: 24});
+  expect(data.config.clips[0]).toMatchObject({x: 10, width: 640, height: 360, fit: 'contain'});
+  expect(data.config.tracks?.[0].app).toMatchObject({scaleAppliesToPositionedClips: true, clipPlacementVersion: 1});
+  expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({message: 'Materialized canvas from timeline settings.', details: expect.objectContaining({kind: 'canvas', source: 'theme_overrides.visual.canvas', before: undefined, after: expect.objectContaining({resolution: '1280x720', fps: 24})})})]));
+  const saved = rowsToConfig(data.rows, data.meta, data.output, data.clipOrder, data.tracks, data.config.pinnedShotGroups, data.config);
+  expect(saved.output).toMatchObject({resolution: '1280x720', fps: 24});
+  expect(saved.clips[0]).toMatchObject({x: 10, width: 640, height: 360, fit: 'contain'});
+  expect(saved).not.toHaveProperty('migrationIssues');
+});

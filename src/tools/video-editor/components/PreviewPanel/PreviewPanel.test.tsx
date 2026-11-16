@@ -28,3 +28,13 @@ describe('preview reading-surface boundary', () => {
     expect(panel.style.filter).toBe('');
   });
 });
+
+it('shows a transient authored canvas migration status', () => {
+  Object.assign(state.data.data, {output: {resolution: '1280x720'}, migrationIssues: [{message: 'Materialized canvas from timeline settings.', details: {kind: 'canvas', source: 'theme_overrides.visual.canvas'}}]});
+  try {
+    render(<PreviewPanel surface={{hasConfig: true, slotRef: vi.fn(), portal: null}} showOverlayEditor={false} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Canvas 1280 × 720 from timeline settings.');
+  } finally {
+    delete (state.data.data as {migrationIssues?: unknown}).migrationIssues;
+  }
+});

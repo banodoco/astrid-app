@@ -65,7 +65,7 @@ async function checkPage(browser, content) {
     console.log('Production subject cards show goal counts; Goals and exterior desktop arrows are present.');
     await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();
-    const gapDialog = page.getByRole('dialog', { name: 'All gaps' });
+    const gapDialog = page.getByRole('dialog');
     await expect(gapDialog).toHaveCSS('opacity', '1');
     await expect.poll(() => gapDialog.evaluate(node => node.style.getPropertyValue('--vision-open-progress'))).toBe('1');
     await expect(gapDialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');
@@ -182,6 +182,40 @@ async function checkPlayerReturn(browser) {
     }
     console.log('Production desktop player keeps its bounds throughout bottom-of-Vision return and transition cleanup.');
     console.log('Production Astrid wordmark travels with the mink instead of appearing in the root crossfade.');
+
+    // Wide landscape tablets use this composition, outside the <=1099px layout.
+    // Read the delivered sizing rule too: headless Chromium has no browser bars,
+    // so its vh and dvh would otherwise look identical in a settled screenshot.
+    await page.setViewportSize({ width: 1180, height: 700 });
+    const dynamicMinimum = await page.evaluate(() => {
+      const find = rules => Array.from(rules).some(rule =>
+        (rule instanceof CSSStyleRule && rule.selectorText === '.astrid-public-site' && rule.style.minHeight === '100dvh') ||
+        ('cssRules' in rule && find(rule.cssRules)));
+      return Array.from(document.styleSheets).filter(sheet => !sheet.href || new URL(sheet.href).origin === location.origin)
+        .some(sheet => find(sheet.cssRules));
+    });
+    expect(dynamicMinimum, 'served wide Home uses the visible viewport minimum').toBe(true);
+    for (const audience of ['App', 'Agent']) {
+      await page.locator('.astrid-public-site').getByRole('button', { name: audience, exact: true }).click();
+      await expect(page.locator('.astrid-public-site')).toHaveAttribute('data-audience', audience.toLowerCase());
+      await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight - innerHeight)).toBeLessThanOrEqual(1);
+      await page.evaluate(() => scrollTo({ top: 10000, behavior: 'instant' }));
+      expect(await page.evaluate(() => scrollY)).toBe(0);
+      await page.getByRole('link', { name: 'Vision', exact: true }).click();
+      await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+      await page.evaluate(() => scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+      expect(await page.evaluate(() => scrollY)).toBeGreaterThan(500);
+      await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+      await expect(page.locator('.astrid-vision')).toHaveCount(0);
+      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+      const fit = await page.locator('.astrid-public-site').evaluate(node => ({ y: scrollY, top: node.getBoundingClientRect().top,
+        overflow: document.documentElement.scrollHeight - innerHeight }));
+      expect(fit.y).toBe(0);
+      expect(Math.abs(fit.top)).toBeLessThan(1);
+      expect(fit.overflow).toBeLessThanOrEqual(1);
+    }
+    console.log('Production landscape Home uses the dynamic viewport minimum; App and Agent fit and return from scrolled Vision at zero.');
   } finally {
     await page.close();
   }

@@ -823,7 +823,7 @@ await dialog.locator('.astrid-vision-details-shell').evaluate(node => (node as H
 
 type BrandFollowFrame = { minkY: number; wordY: number; minkTransform: string; wordTransform: string;
   minkDuration: string; wordDuration: string; minkCurve: string; wordCurve: string; wordOpacity: number; scroll: number; wordWidth: number; wordHeight: number;
-  betaTransform: string; betaDuration: string; betaCurve: string; betaOpacity: number };
+  betaTransform: string; betaDuration: string; betaCurve: string; betaOpacity: number; minkWidth: number; minkHeight: number };
 type BrandFollowBox = { x: number; y: number; width: number; height: number; right: number };
 type BrandFollowTrace = { ready: boolean; done: boolean; error?: string; frames: BrandFollowFrame[];
   old?: { name: string; opacity: string; box: BrandFollowBox; mink: BrandFollowBox; headerWidth: number };
@@ -896,7 +896,7 @@ test.describe('paired scrolled desktop brand', () => {
               const betaTransform = beta.transform;
               const minkTransform = mink.transform;
               trace.frames.push({ minkY: new DOMMatrix(minkTransform).f, wordY: new DOMMatrix(wordTransform).f,
-                minkTransform, wordTransform,
+                minkTransform, wordTransform, minkWidth: Number.parseFloat(mink.width), minkHeight: Number.parseFloat(mink.height),
                 minkDuration: mink.animationDuration, wordDuration: word.animationDuration,
                 minkCurve: mink.animationTimingFunction, wordCurve: word.animationTimingFunction,
                 wordOpacity: Number(image.opacity), scroll: scrollY,
@@ -950,10 +950,18 @@ test.describe('paired scrolled desktop brand', () => {
       expect(new Set(badgeFrames.map(f => f.betaTransform)).size).toBeGreaterThan(4);
       const destination = trace.incoming!;
       for (const frame of badgeFrames) {
-        const [word, beta] = await page.evaluate(transforms => transforms.map(transform => {
+        const [word, beta, mink] = await page.evaluate(transforms => transforms.map(transform => {
           const matrix = new DOMMatrix(transform);
           return { a: matrix.a, d: matrix.d, e: matrix.e, f: matrix.f };
-        }), [frame.wordTransform, frame.betaTransform]);
+        }), [frame.wordTransform, frame.betaTransform, frame.minkTransform]);
+        // All three captures follow the same path, with the mink's actual
+        // visible bounds preserved at both ends (including its CSS scale).
+        const progress = (word.f - trace.old!.box.y) / (destination.word.y - trace.old!.box.y);
+        const interpolate = (from: number, to: number) => from + (to - from) * progress;
+        expect(Math.abs(mink.e - interpolate(trace.old!.mink.x, destination.mink.x)), 'mink x stays on the lockup path').toBeLessThan(1);
+        expect(Math.abs(mink.f - interpolate(trace.old!.mink.y, destination.mink.y)), 'mink y stays on the lockup path').toBeLessThan(1);
+        expect(Math.abs(mink.a * frame.minkWidth - interpolate(trace.old!.mink.width, destination.mink.width)), 'mink visible width is preserved').toBeLessThan(1);
+        expect(Math.abs(mink.d * frame.minkHeight - interpolate(trace.old!.mink.height, destination.mink.height)), 'mink visible height is preserved').toBeLessThan(1);
         const sx = word.a * frame.wordWidth / destination.word.width;
         const sy = word.d * frame.wordHeight / destination.word.height;
         expect(frame.betaCurve).toBe(frame.wordCurve);
@@ -969,7 +977,7 @@ test.describe('paired scrolled desktop brand', () => {
       expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--astrid-brand-beta-from'))).toBe('');
       expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--astrid-brand-beta-to'))).toBe('');
       expect(await page.evaluate(() => Array.from(document.documentElement.style)
-        .filter(property => property.startsWith('--astrid-brand-word-')))).toEqual([]);
+        .filter(property => property.startsWith('--astrid-brand-word-') || property.startsWith('--astrid-brand-mink-')))).toEqual([]);
       await expect(page.locator('.astrid-beta-tag')).toHaveText('BETA');
     }
   });

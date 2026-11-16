@@ -172,20 +172,23 @@
 }
 
 @keyframes astrid-brand-word-follow {
-  from {
-    transform: var(--astrid-brand-word-from);
-
-
-  }
-  to {
-    transform: var(--astrid-brand-word-to);
-
-
-  }
+  from { transform: var(--astrid-brand-word-from); }
+  to { transform: var(--astrid-brand-word-to); }
 }
 :root[data-astrid-page-transition-style="brand"][data-astrid-brand-beta-follow]::view-transition-group(astrid-brand-name) {
   transform-origin: 0 0;
   width: var(--astrid-brand-word-to-width);
-            height: var(--astrid-brand-word-to-height);
-            animation: astrid-brand-word-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
+  height: var(--astrid-brand-word-to-height);
+  animation: astrid-brand-word-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
+}
+
+@keyframes astrid-brand-mink-follow {
+  from { transform: var(--astrid-brand-mink-from); }
+  to { transform: var(--astrid-brand-mink-to); }
+}
+:root[data-astrid-page-transition-style="brand"][data-astrid-brand-beta-follow]::view-transition-group(astrid-brand-mink) {
+  transform-origin: 0 0;
+  width: var(--astrid-brand-mink-width);
+  height: var(--astrid-brand-mink-height);
+  animation: astrid-brand-mink-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
 }

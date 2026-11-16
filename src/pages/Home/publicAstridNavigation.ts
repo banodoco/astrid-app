@@ -26,11 +26,18 @@ type TransitionDocument = Document & { startViewTransition?: (update: () => void
 /** The badge has no counterpart in the scrolled header. Map its destination
  * offset through the wordmark's captured box so both travel as one lockup,
  * without inserting a duplicate badge or changing either page's layout. */
-function prepareBrandBeta(origin: DOMRect) {
+function prepareBrandBeta(origin: DOMRect, minkOrigin: DOMRect) {
   const home = document.querySelector('.astrid-public-site[data-astrid-lifecycle="active"]');
   const word = home?.querySelector('.astrid-brand-name')?.getBoundingClientRect();
   const beta = home?.querySelector('.astrid-beta')?.getBoundingClientRect();
-  if (!word || !beta || !origin.width || !origin.height || !word.width || !word.height || !beta.width || !beta.height) return;
+  const mink = home?.querySelector<HTMLElement>('.astrid-brand-mink:not(.astrid-brand-mink-glint)');
+  const minkBox = mink?.getBoundingClientRect();
+  const minkStyle = mink ? getComputedStyle(mink) : null;
+  const minkWidth = Number.parseFloat(minkStyle?.width ?? '');
+  const minkHeight = Number.parseFloat(minkStyle?.height ?? '');
+  if (!word || !beta || !minkBox || !origin.width || !origin.height || !word.width || !word.height ||
+      !beta.width || !beta.height || !minkOrigin.width || !minkOrigin.height ||
+      !Number.isFinite(minkWidth) || minkWidth <= 0 || !Number.isFinite(minkHeight) || minkHeight <= 0) return;
   const sx = origin.width / word.width;
   const sy = origin.height / word.height;
   const x = origin.x + (beta.x - word.x) * sx;
@@ -42,10 +49,15 @@ function prepareBrandBeta(origin: DOMRect) {
   // size-changing morph with a transform-only badge can drift between frames.
   root.style.setProperty('--astrid-brand-word-from', `translate(${origin.x}px, ${origin.y}px) scale(${sx}, ${sy})`);
   root.style.setProperty('--astrid-brand-word-to', `translate(${word.x}px, ${word.y}px) scale(1, 1)`);
-
-
   root.style.setProperty('--astrid-brand-word-to-width', `${word.width}px`);
   root.style.setProperty('--astrid-brand-word-to-height', `${word.height}px`);
+  // The mink's native group morph can advance on a different WebKit clock.
+  // Keep its capture at the destination's untransformed size and map its
+  // visible bounds with the same transform-only mechanism as the text.
+  root.style.setProperty('--astrid-brand-mink-from', `translate(${minkOrigin.x}px, ${minkOrigin.y}px) scale(${minkOrigin.width / minkWidth}, ${minkOrigin.height / minkHeight})`);
+  root.style.setProperty('--astrid-brand-mink-to', `translate(${minkBox.x}px, ${minkBox.y}px) scale(${minkBox.width / minkWidth}, ${minkBox.height / minkHeight})`);
+  root.style.setProperty('--astrid-brand-mink-width', `${minkWidth}px`);
+  root.style.setProperty('--astrid-brand-mink-height', `${minkHeight}px`);
   root.dataset.astridBrandBetaFollow = '';
 }
 
@@ -69,6 +81,9 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     for (const property of ['from', 'to', 'to-width', 'to-height']) {
       document.documentElement.style.removeProperty(`--astrid-brand-word-${property}`);
     }
+    for (const property of ['from', 'to', 'width', 'height']) {
+      document.documentElement.style.removeProperty(`--astrid-brand-mink-${property}`);
+    }
   }, []);
 
   const invalidate = useCallback(() => {
@@ -85,13 +100,14 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     invalidate();
     const id = operationRef.current;
     let wordmarkOrigin: DOMRect | null = null;
+    let minkOrigin: DOMRect | null = null;
     const pending = { id, commit, committed: false, transition: undefined as PublicViewTransition | undefined };
     pendingRef.current = pending;
     const apply = () => {
       if (!mountedRef.current || operationRef.current !== id || pending.committed) return;
       pending.committed = true;
       flushSync(commit);
-      if (markerOwnerRef.current === id && wordmarkOrigin) prepareBrandBeta(wordmarkOrigin);
+      if (markerOwnerRef.current === id && wordmarkOrigin && minkOrigin) prepareBrandBeta(wordmarkOrigin, minkOrigin);
     };
     const doc = document as TransitionDocument;
     const inputs = environmentRef.current;
@@ -107,6 +123,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
       if (page === 'home' && presentation === 'brand') {
         // The marker gives the hidden wordmark its nonzero capture box.
         wordmarkOrigin = document.querySelector('.astrid-vision-brand-name')?.getBoundingClientRect() ?? null;
+        minkOrigin = document.querySelector('.astrid-vision-brand img')?.getBoundingClientRect() ?? null;
       }
     }
     const finish = () => {

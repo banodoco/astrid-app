@@ -533,7 +533,7 @@ describe('timeline data extension project data round trip', () => {
 
     const data = await buildTimelineData(config, registry);
     expect(data.config.app).toEqual(config.app);
-    expect(data.config.tracks[0].app).toEqual({ scaleAppliesToPositionedClips: true });
+    expect(data.config.tracks[0].app).toEqual({ scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
     expect(data.meta['shot-1']).toMatchObject({ label: 'Shot 1', app: { managedBy: extensionId }, hold: 2 });
 
     const roundTripped = rowsToConfig(
@@ -547,7 +547,7 @@ describe('timeline data extension project data round trip', () => {
     );
 
     expect(roundTripped.app).toEqual(config.app);
-    expect(roundTripped.tracks[0].app).toEqual({ scaleAppliesToPositionedClips: true });
+    expect(roundTripped.tracks[0].app).toEqual({ scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
     expect(roundTripped.clips[0]).toMatchObject({ id: 'shot-1', label: 'Shot 1', hold: 2, app: { managedBy: extensionId } });
   });
 

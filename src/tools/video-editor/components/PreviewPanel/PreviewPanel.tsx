@@ -162,6 +162,7 @@ function PreviewPanelComponent({
                 currentTime={currentTime}
                 playerContainerRef={playerContainerRef}
                 trackScaleMap={trackScaleMap}
+                tracks={resolvedConfig.tracks}
                 compositionWidth={compositionSize.width}
                 compositionHeight={compositionSize.height}
                 selectedClipId={selectedClipId}

@@ -1,5 +1,5 @@
 import { getEffectiveClipVolume } from '@/tools/video-editor/lib/clip-volume.ts';
-import { useMemo, useState, type CSSProperties, type FC, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties, type FC, type ReactNode } from 'react';
 import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment, useVideoConfig } from 'remotion';
 import { ReadinessImage } from '@astrid/packs/rendering/shared/readiness-image';
 import { ReadinessVideo } from './ReadinessVideo.tsx';
@@ -9,7 +9,6 @@ import {
   getSanitizedMediaTrimProps,
   getSanitizedPlaybackRate,
   getSanitizedVolume,
-  parseResolution,
 } from '@/tools/video-editor/lib/config-utils.ts';
 import { wrapWithClipEffects } from '@/tools/video-editor/effects/index.tsx';
 import { ClipTransition, clipSequenceTiming } from './ClipTransition.tsx';
@@ -18,7 +17,7 @@ import {
   type EffectRegistrySnapshot,
 } from '@/tools/video-editor/effects/registry/index.ts';
 import { useOptionalPreviewMediaFailure } from '@/tools/video-editor/compositions/PreviewMediaFailureContext.tsx';
-import { computeViewportMediaLayout } from '@/tools/video-editor/lib/render-bounds.ts';
+import { intrinsicMediaSize, resolveClipPlacement } from '@banodoco/timeline-composition';
 import type { ResolvedTimelineClip, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import { getTimelineClipShader } from '@/tools/video-editor/lib/timeline-domain.ts';
 import { PendingMaterialPlaceholder } from '@/tools/video-editor/components/PendingMaterialPlaceholder.tsx';
@@ -155,70 +154,6 @@ type VisualClipProps = {
   materialDiagnostics?: readonly CapabilityFinding[];
 };
 
-const getClipBoxStyle = (
-  clip: ResolvedTimelineClip,
-  track: TrackDefinition,
-  compositionWidth: number,
-  compositionHeight: number,
-): CSSProperties => {
-  const hasPositionOverride = (
-    clip.x !== undefined
-    || clip.y !== undefined
-    || clip.width !== undefined
-    || clip.height !== undefined
-    || clip.cropTop !== undefined
-    || clip.cropBottom !== undefined
-    || clip.cropLeft !== undefined
-    || clip.cropRight !== undefined
-  );
-  const fit = track.fit ?? 'contain';
-  const style: CSSProperties = fit === 'manual' || hasPositionOverride
-    ? {
-        position: 'absolute',
-        left: clip.x ?? 0,
-        top: clip.y ?? 0,
-        width: clip.width ?? compositionWidth,
-        height: clip.height ?? compositionHeight,
-        objectFit: 'cover',
-        opacity: clip.opacity ?? 1,
-      }
-    : {
-        width: '100%',
-        height: '100%',
-        objectFit: fit,
-        opacity: clip.opacity ?? 1,
-      };
-  const cropTop = clip.cropTop ?? 0;
-  const cropRight = clip.cropRight ?? 0;
-  const cropBottom = clip.cropBottom ?? 0;
-  const cropLeft = clip.cropLeft ?? 0;
-
-  if (cropTop || cropRight || cropBottom || cropLeft) {
-    style.clipPath = `inset(${cropTop * 100}% ${cropRight * 100}% ${cropBottom * 100}% ${cropLeft * 100}%)`;
-  }
-
-  return style;
-};
-
-const getIntrinsicMediaSize = (
-  clip: ResolvedTimelineClip,
-  compositionWidth: number,
-  compositionHeight: number,
-): { width: number; height: number } => {
-  const resolution = clip.assetEntry?.resolution;
-  if (resolution) {
-    const parsed = parseResolution(resolution);
-    if (Number.isFinite(parsed.width) && Number.isFinite(parsed.height) && parsed.width > 0 && parsed.height > 0) {
-      return parsed;
-    }
-  }
-
-  return {
-    width: clip.width ?? compositionWidth,
-    height: clip.height ?? compositionHeight,
-  };
-};
-
 const isRecord = (value: unknown): value is Record<string, unknown> => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
@@ -249,6 +184,29 @@ function shouldRenderMaterialPlaceholder(status: RenderPlannerMaterialStatus): b
 const VisualAsset: FC<VisualClipProps> = ({ clip, track, fps }) => {
   const { width: compositionWidth, height: compositionHeight } = useVideoConfig();
   const previewMediaFailure = useOptionalPreviewMediaFailure();
+  const [naturalSize, setNaturalSize] = useState<{width: number; height: number} | null>(null);
+  const [sizeFailed, setSizeFailed] = useState(false);
+  const declaredSize = intrinsicMediaSize(clip.assetEntry);
+  const resolution = clip.assetEntry?.resolution;
+  const source = clip.assetEntry?.src;
+  const type = clip.assetEntry?.type;
+  useEffect(() => {
+    setNaturalSize(null);
+    setSizeFailed(false);
+    if ((Number.isFinite(declaredSize.width) && Number.isFinite(declaredSize.height)) || !source || typeof document === 'undefined') return;
+    const media = document.createElement(type?.startsWith('image') ? 'img' : 'video');
+    const loaded = () => {
+      const width = media instanceof HTMLImageElement ? media.naturalWidth : media.videoWidth;
+      const height = media instanceof HTMLImageElement ? media.naturalHeight : media.videoHeight;
+      if (width > 0 && height > 0) setNaturalSize({width, height});
+      else setSizeFailed(true);
+    };
+    const failed = () => setSizeFailed(true);
+    media.addEventListener('error', failed);
+    media.addEventListener(type?.startsWith('image') ? 'load' : 'loadedmetadata', loaded);
+    media.src = source;
+    return () => { media.removeEventListener('error', failed); media.removeEventListener(type?.startsWith('image') ? 'load' : 'loadedmetadata', loaded); media.removeAttribute('src'); };
+  }, [source, type, resolution]);
   // Never silent-null when a built-in clip is missing its asset.
   // Render a labeled red band so the gap is obvious in preview/export.
   if (!clip.assetEntry) {
@@ -296,90 +254,29 @@ const VisualAsset: FC<VisualClipProps> = ({ clip, track, fps }) => {
       />
     );
   }
-  const hasPositionOverride = (
-    clip.x !== undefined
-    || clip.y !== undefined
-    || clip.width !== undefined
-    || clip.height !== undefined
-    || clip.cropTop !== undefined
-    || clip.cropBottom !== undefined
-    || clip.cropLeft !== undefined
-    || clip.cropRight !== undefined
-  );
-  const fit = track.fit ?? 'contain';
-  const useViewportLayout = fit === 'manual' || hasPositionOverride;
-
-  if (!useViewportLayout) {
-    const style = getClipBoxStyle(clip, track, compositionWidth, compositionHeight);
-    const sharedStyle: CSSProperties = {
-      ...style,
-      mixBlendMode: track.blendMode && track.blendMode !== 'normal' ? track.blendMode : undefined,
-    };
-
-    if (isImage) {
-      return <ReadinessImage src={mediaSrc} mediaId={clip.id} style={sharedStyle} crossOrigin="anonymous" />;
-    }
-
-    return (
-      <ReadinessVideo
-        clipId={clip.id}
-        resetKey={`${clip.id}:${mediaSrc}:${trimProps.trimBefore}:${trimProps.trimAfter ?? 'none'}:${playbackRate}:${effectiveVolume}:${retryToken}`}
-        fallback={mediaFailure?.fallback(sharedStyle) ?? null}
-        onError={mediaFailure?.onError}
-        src={mediaSrc}
-        trimBefore={trimProps.trimBefore}
-        trimAfter={trimProps.trimAfter}
-        playbackRate={playbackRate}
-        volume={effectiveVolume}
-        muted={effectiveVolume <= 0}
-        style={sharedStyle}
-        data-astrid-retry-token={String(retryToken)}
-        onVideoFrame={mediaFailure?.onVideoFrame}
-        onLoadedData={mediaFailure?.onLoadedData}
-      />
-    );
-  }
-
-  const fullBounds = {
-    x: clip.x ?? 0,
-    y: clip.y ?? 0,
-    width: clip.width ?? compositionWidth,
-    height: clip.height ?? compositionHeight,
-  };
-  const intrinsicSize = getIntrinsicMediaSize(clip, compositionWidth, compositionHeight);
-  const viewportLayout = computeViewportMediaLayout({
-    fullBounds,
-    cropValues: {
-      cropTop: clip.cropTop,
-      cropBottom: clip.cropBottom,
-      cropLeft: clip.cropLeft,
-      cropRight: clip.cropRight,
-    },
-    compositionWidth,
-    compositionHeight,
-    intrinsicWidth: intrinsicSize.width,
-    intrinsicHeight: intrinsicSize.height,
-  });
-
-  if (!viewportLayout) {
-    return null;
-  }
+  const size = Number.isFinite(declaredSize.width) && Number.isFinite(declaredSize.height) ? declaredSize : naturalSize;
+  if (!size && sizeFailed) return <div role="alert" data-testid="preview-media-error">{`Clip '${clip.id}' asset '${clip.asset ?? clip.assetEntry.id}' could not load intrinsic dimensions`}</div>;
+  if (!size) return null;
+  const placement = resolveClipPlacement({clip, track, canvas: {width: compositionWidth, height: compositionHeight}, intrinsic: size});
+  const renderBounds = placement.local.clip;
+  const mediaBounds = placement.local.media;
+  if (renderBounds.width <= 0 || renderBounds.height <= 0) return null;
 
   const viewportStyle: CSSProperties = {
     position: 'absolute',
-    left: viewportLayout.renderBounds.x,
-    top: viewportLayout.renderBounds.y,
-    width: viewportLayout.renderBounds.width,
-    height: viewportLayout.renderBounds.height,
+    left: renderBounds.x,
+    top: renderBounds.y,
+    width: renderBounds.width,
+    height: renderBounds.height,
     overflow: 'hidden',
     opacity: clip.opacity ?? 1,
   };
   const mediaStyle: CSSProperties = {
     position: 'absolute',
-    left: viewportLayout.mediaBounds.x,
-    top: viewportLayout.mediaBounds.y,
-    width: viewportLayout.mediaBounds.width,
-    height: viewportLayout.mediaBounds.height,
+    left: (mediaBounds.x - renderBounds.x),
+    top: (mediaBounds.y - renderBounds.y),
+    width: mediaBounds.width,
+    height: mediaBounds.height,
     // Override Tailwind preflight's `img { max-width: 100%; height: auto; }`
     // which would squash the media to fit the viewport container. The media
     // must overflow the container (clipped by overflow:hidden) for the

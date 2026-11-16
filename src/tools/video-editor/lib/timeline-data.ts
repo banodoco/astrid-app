@@ -59,6 +59,7 @@ export interface ClipMeta {
   y?: number;
   width?: number;
   height?: number;
+  fit?: TimelineClip['fit'];
   cropTop?: number;
   cropBottom?: number;
   cropLeft?: number;
@@ -186,6 +187,7 @@ const getDefaultClipMeta = (clip: TimelineClip): ClipMeta => {
     y: clip.y,
     width: clip.width,
     height: clip.height,
+    fit: clip.fit,
     cropTop: clip.cropTop,
     cropBottom: clip.cropBottom,
     cropLeft: clip.cropLeft,
@@ -358,6 +360,7 @@ export const rowsToConfig = (
         y: clipMeta.y,
         width: clipMeta.width,
         height: clipMeta.height,
+        fit: clipMeta.fit,
         cropTop: clipMeta.cropTop,
         cropBottom: clipMeta.cropBottom,
         cropLeft: clipMeta.cropLeft,

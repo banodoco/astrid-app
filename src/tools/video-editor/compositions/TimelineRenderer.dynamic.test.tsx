@@ -147,3 +147,17 @@ describe('TimelineRenderer — dynamic registry dispatch (FLAG-001/002)', () => 
     expect(descriptor?.source).toBe('db-sequence-component');
   });
 });
+
+describe('visual track group placement', () => {
+  it('applies the shared track transform and group opacity once', () => {
+    const config = buildConfig('custom:my-seq');
+    config.tracks[0] = {...config.tracks[0], scale: 0.5, opacity: 0.6, blendMode: 'multiply'};
+    const {container} = render(<TimelineRenderer astridElementHost={INSTALLED_ASTRID_ELEMENT_HOST} config={config} />);
+    const group = [...container.querySelectorAll<HTMLElement>('[data-testid="absolute-fill"]')].find(node => node.style.transform === 'translate(480px, 270px) scale(0.5)');
+    expect(group).toBeDefined();
+    expect(group!.style.transformOrigin).toBe('0 0');
+    expect(group!.style.opacity).toBe('0.6');
+    expect(group!.style.mixBlendMode).toBe('multiply');
+    expect(group!.style.overflow).toBe('hidden');
+  });
+});

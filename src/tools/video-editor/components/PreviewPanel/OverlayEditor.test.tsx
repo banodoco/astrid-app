@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import React from 'react';
+import * as composition from '@banodoco/timeline-composition';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import OverlayEditor, { overlayEditorPropsAreEqual } from '@/tools/video-editor/components/PreviewPanel/OverlayEditor';
@@ -60,7 +61,7 @@ const baseProps = (meta: Record<string, ClipMeta>, rows: TimelineRow[] = baseRow
     props: {
       rows,
       meta,
-      registry: {},
+      registry: {'asset-1': {id: 'asset-1', src: '/asset-1.png', type: 'image/png', resolution: '1920x1080'}},
       currentTime: 1,
       playerContainerRef: { current: player },
       trackScaleMap: { V1: 1 },
@@ -291,4 +292,15 @@ describe('OverlayEditor — track scale agreement (decree: scale scales everythi
     expect(overlay.style.width).toBe('480px');
     expect(overlay.style.height).toBe('270px');
   });
+});
+
+
+it('passes the authored track appearance to shared placement', () => {
+  const spy = vi.spyOn(composition, 'resolveClipPlacement');
+  const {props, cleanup} = baseProps({'clip-1': {track: 'V1', clipType: 'media', asset: 'asset-1', hold: 4}});
+  const track = {id: 'V1', kind: 'visual' as const, label: 'V1', fit: 'cover' as const, opacity: 0.4, scale: 1};
+  render(<OverlayEditor {...props} tracks={[track]} />);
+  expect(spy).toHaveBeenCalledWith(expect.objectContaining({track}));
+  spy.mockRestore();
+  cleanup();
 });

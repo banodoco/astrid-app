@@ -84,6 +84,7 @@ export const addTrack = (
     fit: kind === 'visual' ? 'manual' : 'contain',
     opacity: 1,
     blendMode: 'normal',
+    ...(kind === 'visual' ? { app: { scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 } } : {}),
   };
 
   const nextTracks = [...config.tracks];

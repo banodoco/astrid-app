@@ -468,6 +468,7 @@ describe('video-editor serialization', () => {
     expect(serialized.tracks?.[0].app).toEqual({
       'x-host': { mutedByPreset: true },
       scaleAppliesToPositionedClips: true,
+      clipPlacementVersion: 1,
     });
     expect(serialized.tracks?.[0].app).not.toBe(config.tracks?.[0].app);
     expect(serialized.tracks?.[0].app?.['x-host']).not.toBe(config.tracks?.[0].app?.['x-host']);

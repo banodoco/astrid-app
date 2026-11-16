@@ -321,9 +321,9 @@ describe('mounted track reorder persistence through A2', () => {
       expect(mounted.hook.result.current.save.dataRef.current?.config.clips?.[0]?.app)
         .toEqual({ opaque: { keep: null, false: false, zero: 0 } });
       expect(mounted.hook.result.current.save.dataRef.current?.config.tracks?.find((track) => track.id === 'audio')?.app)
-        .toEqual({ nullValue: null, falseValue: false, zeroValue: 0, scaleAppliesToPositionedClips: true });
+        .toEqual({ nullValue: null, falseValue: false, zeroValue: 0, scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
       expect(mounted.hook.result.current.save.dataRef.current?.config.tracks?.find((track) => track.id === 'overlay')?.app)
-        .toEqual({ opaque: [null, false, 0], scaleAppliesToPositionedClips: true });
+        .toEqual({ opaque: [null, false, 0], scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
       expect(request.steps?.[0]).not.toHaveProperty('reads');
 
       const [stored] = await createCommitOutbox().list(scope);

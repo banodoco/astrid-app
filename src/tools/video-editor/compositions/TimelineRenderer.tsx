@@ -1,3 +1,4 @@
+import { resolveTrackTransform } from '@banodoco/timeline-composition';
 import { getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
 import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment } from 'remotion';
 import { Component, createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type FC, type ReactNode } from 'react';
@@ -1318,7 +1319,8 @@ const VisualTrack: FC<VisualTrackProps> = ({
   // preserve their on-screen appearance (see `applyTrackScaleBakeMigration`
   // in `lib/timeline-domain.ts`). OverlayEditor mirrors this transform in
   // both directions so gizmo and render agree.
-  const effectiveScale = track.scale ?? 1;
+  const { forward } = resolveTrackTransform(track, parseResolution(resolution));
+  const effectiveScale = forward.scale;
   return (
     <AbsoluteFill
       key={track.id}
@@ -1327,8 +1329,8 @@ const VisualTrack: FC<VisualTrackProps> = ({
         mixBlendMode: track.blendMode && track.blendMode !== 'normal' ? track.blendMode : undefined,
         ...(effectiveScale !== 1
           ? {
-              transform: `scale(${effectiveScale})`,
-              transformOrigin: 'center center',
+              transform: `translate(${forward.tx}px, ${forward.ty}px) scale(${effectiveScale})`,
+              transformOrigin: '0 0',
               overflow: 'hidden',
             }
           : {}),

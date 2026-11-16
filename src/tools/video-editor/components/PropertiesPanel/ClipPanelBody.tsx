@@ -1,3 +1,4 @@
+import { intrinsicMediaSize, resolveClipPlacement } from '@banodoco/timeline-composition';
 import { getEffectiveClipVolume } from '@/tools/video-editor/lib/clip-volume.ts';
 import { useMemo, useRef, useState, type ComponentType } from 'react';
 import { RefreshCw, Trash2, Volume2, X } from 'lucide-react';
@@ -412,6 +413,24 @@ export function ClipPanelBody({
 
         {visibleTabs.includes('position') && (
           <TabsContent value="position" className="space-y-3">
+            {clip.assetEntry && track && (() => {
+              const intrinsic = intrinsicMediaSize(clip.assetEntry);
+              const placement = Number.isFinite(intrinsic.width) && Number.isFinite(intrinsic.height)
+                ? resolveClipPlacement({clip, track, canvas: {width: compositionWidth, height: compositionHeight}, intrinsic}) : null;
+              return <div className="space-y-2">
+                <label htmlFor="clip-fit">Fit</label>
+                <select id="clip-fit" value={clip.fit ?? ''} disabled={readOnly} onChange={event => { if (!readOnly) onChange({fit: (event.target.value || undefined) as ClipMeta['fit']}); }}>
+                  <option value="">Inherit</option><option value="contain">Fit</option><option value="cover">Fill</option>
+                </select>
+                <span>{placement ? `${placement.fit === 'cover' ? 'Fill' : 'Fit'} (${placement.provenance.fit})` : 'Effective fit unavailable until media size is known'}</span>
+                {placement && <p>Track scale {placement.scale} ({placement.provenance.scale}); track opacity {placement.opacity.track} ({placement.provenance.trackOpacity}). Box {placement.local.full.x}, {placement.local.full.y}, {placement.local.full.width} × {placement.local.full.height} (x: {placement.provenance.x}, y: {placement.provenance.y}, width: {placement.provenance.width}, height: {placement.provenance.height}). Canvas {compositionWidth} × {compositionHeight}; media {intrinsic.width} × {intrinsic.height}.</p>}
+                {placement && <p>Crop sources: Top {placement.provenance.cropTop}, Right {placement.provenance.cropRight}, Bottom {placement.provenance.cropBottom}, Left {placement.provenance.cropLeft}.</p>}
+                {(['cropTop', 'cropRight', 'cropBottom', 'cropLeft'] as const).map(edge => <label key={edge}>{edge.slice(4)}
+                  <NumberInput disabled={readOnly} value={clip[edge] ?? 0} min={0} max={1} step={0.01} onChange={value => { if (!readOnly && value !== null) onChange({[edge]: value}); }} />
+                </label>)}
+              </div>;
+            })()}
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <FieldLabel>X</FieldLabel>

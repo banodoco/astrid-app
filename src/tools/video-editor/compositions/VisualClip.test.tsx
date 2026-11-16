@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import type { FC, PropsWithChildren } from 'react';
+import * as composition from '@banodoco/timeline-composition';
 import { useEffect } from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -14,6 +15,8 @@ import { VisualClip, VisualClipSequence } from '@/tools/video-editor/composition
 import type { ResolvedTimelineClip, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import type { RenderMaterialRef } from '@astrid/editor-sdk';
 import type { ShaderEffectRegistryRecord, ShaderEffectRegistrySnapshot } from '@/tools/video-editor/shaders/registry/types.ts';
+
+afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
 // Remotion mocks (mirrors ClipEffectsSnapshot.test.tsx)
@@ -838,4 +841,19 @@ describe('shared media placement', () => {
     spy.mockRestore();
   });
 
+});
+
+
+it('draws the exact viewport and media rectangles returned by shared placement', async () => {
+  const actual = composition.resolveClipPlacement;
+  const spy = vi.spyOn(composition, 'resolveClipPlacement').mockImplementation(input => {
+    const result = actual(input);
+    return {...result, local: {...result.local, clip: {x: 100, y: 50, width: 300, height: 200}, media: {x: 80, y: 30, width: 500, height: 400}}};
+  });
+  const clip = mediaClip({assetEntry: {id: 'a', type: 'image/png', src: '/a', resolution: '1920x800'}});
+  render(<VisualClip clip={clip} track={track} fps={30} />);
+  const media = await screen.findByTestId('image-asset');
+  expect(media.parentElement).toHaveStyle({left: '100px', top: '50px', width: '300px', height: '200px', overflow: 'hidden'});
+  expect(media).toHaveStyle({left: '-20px', top: '-20px', width: '500px', height: '400px'});
+  spy.mockRestore();
 });

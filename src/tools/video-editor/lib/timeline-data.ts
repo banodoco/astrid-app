@@ -497,10 +497,15 @@ export const assembleTimelineData = ({
   // and spurious 409 version conflicts. Configs that already carry a valid
   // `resolution` pass through verbatim (identity preserved).
   const outputMissingResolution = config.output?.resolution == null;
-  const canonicalConfig = outputMissingResolution ? withDefaultTimelineOutput(config) : config;
+  const migrationIssues: TimelineDomainIssue[] = [];
+  const canonicalConfig = outputMissingResolution
+    ? withDefaultTimelineOutput(config, findings => migrationIssues.push(...placementFindingsToIssues(findings, 'pair-aware')))
+    : config;
   const canonicalOutput = outputMissingResolution ? canonicalConfig.output : resolvedConfig.output;
+  const normalizedClips = new Map(canonicalConfig.clips.map(clip => [clip.id, clip]));
   const canonicalResolvedConfig = outputMissingResolution
-    ? { ...resolvedConfig, output: canonicalOutput }
+    ? {...resolvedConfig, output: canonicalOutput, tracks: canonicalConfig.tracks ?? resolvedConfig.tracks,
+      clips: resolvedConfig.clips.map(clip => ({...clip, ...normalizedClips.get(clip.id)}))}
     : resolvedConfig;
   const nameBasis = deriveClipNameBasis(
     canonicalResolvedConfig.clips,
@@ -542,6 +547,7 @@ export const assembleTimelineData = ({
   return {
     config: canonicalConfig,
     configVersion,
+    ...(migrationIssues.length ? {migrationIssues} : {}),
     ...(head ? { head } : {}),
     registry,
     resolvedConfig: canonicalResolvedConfig,

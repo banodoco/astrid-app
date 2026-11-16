@@ -47,3 +47,13 @@ it('shows transient child framing findings with occurrence context', () => {
   expect(status).toHaveAttribute('title', expect.stringContaining('shot-1'));
   expect(status).toHaveAttribute('title', expect.stringContaining('480'));
 });
+
+it('describes an editor-resolved legacy canvas without claiming it was authored', () => {
+  Object.assign(state.data.data, {output: {resolution: '1280x720'}, migrationIssues: [{message: 'Materialized the editor’s previous canvas.', details: {kind: 'canvas', source: 'app-resolved'}}]});
+  try {
+    render(<PreviewPanel surface={{hasConfig: true, slotRef: vi.fn(), portal: null}} showOverlayEditor={false} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Canvas 1280 × 720 restored from the editor’s previous rendering.');
+  } finally {
+    delete (state.data.data as {migrationIssues?: unknown}).migrationIssues;
+  }
+});

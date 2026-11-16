@@ -645,6 +645,14 @@ export function projectCanonicalComposition(
     } catch (error) {
       throw new CanonicalCompositionProjectionError('unsupported_placement', `Occurrence '${occurrence.occurrenceId}' child timeline: ${error instanceof Error ? error.message : String(error)}`, occurrence.occurrenceId);
     }
+    if (!record(result.config.output)?.resolution) {
+      if (!result.findings.some(finding => finding.kind === 'canvas-not-required')) {
+        throw new CanonicalCompositionProjectionError('unsupported_placement', `Occurrence '${occurrence.occurrenceId}' child timeline property output.resolution is required`, occurrence.occurrenceId);
+      }
+      if (!authoredBaseConfig?.output?.resolution) {
+        throw new CanonicalCompositionProjectionError('unsupported_placement', 'Parent timeline property output.resolution is required for visual media', occurrence.occurrenceId);
+      }
+    }
     placementFindings.push(...result.findings.map(finding => ({...finding, scope: 'child' as const, occurrenceId: occurrence.occurrenceId, shotId: occurrence.shotId, revisionId: occurrence.revisionId})));
     return {...occurrence, revision: {...occurrence.revision, internal_timeline_revision: {...internal, timeline: result.config}}};
   })};

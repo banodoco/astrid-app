@@ -1,5 +1,7 @@
+import {resolveClipPlacement} from '@banodoco/timeline-composition';
 import { describe, expect, it, vi } from 'vitest';
 import {
+  assembleTimelineData,
   buildTimelineData,
   buildTimelineDataWithResolver,
   configToRows,
@@ -748,4 +750,44 @@ it('materializes authored canvas before defaults and keeps migration findings tr
   expect(saved.output).toMatchObject({resolution: '1280x720', fps: 24});
   expect(saved.clips[0]).toMatchObject({x: 10, width: 640, height: 360, fit: 'contain'});
   expect(saved).not.toHaveProperty('migrationIssues');
+});
+
+
+it('opens legacy canvasless media at the editor default and saves that canvas with provenance', async () => {
+  const input = {tracks: [{id: 'V1', kind: 'visual', label: 'V1', scale: 1, app: {scaleAppliesToPositionedClips: true}}], clips: [{id: 'opening', at: 0, track: 'V1', clipType: 'image', asset: 'a', hold: 1}]} as unknown as TimelineConfig;
+  const original = structuredClone(input);
+  const data = await buildTimelineData(input, {assets: {a: {file: 'a.png', type: 'image/png', resolution: '1920x1080'}}});
+  expect(data.output).toMatchObject({resolution: '1280x720', fps: 30});
+  expect(data.config.clips[0]).toMatchObject({id: 'opening', asset: 'a'});
+  const canvas = {width: 1280, height: 720};
+  const intrinsic = {width: 1920, height: 1080};
+  const beforePlacement = resolveClipPlacement({clip: input.clips[0], track: input.tracks![0], canvas, intrinsic});
+  const afterPlacement = resolveClipPlacement({clip: data.config.clips[0], track: data.config.tracks![0], canvas, intrinsic});
+  expect(afterPlacement.local).toEqual(beforePlacement.local);
+  expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({details: expect.objectContaining({kind: 'canvas', source: 'app-resolved', before: undefined, after: expect.objectContaining({resolution: '1280x720', fps: 30})})})]));
+  const saved = rowsToConfig(data.rows, data.meta, data.output, data.clipOrder, data.tracks, data.config.pinnedShotGroups, data.config);
+  expect(saved.output).toMatchObject({resolution: '1280x720', fps: 30});
+  expect(saved).not.toHaveProperty('migrationIssues');
+  expect(input).toEqual(original);
+});
+
+it.each([
+  ['installed theme', {theme: '2rp'}, '1920x1080'],
+  ['partial theme override', {theme: '2rp', theme_overrides: {visual: {canvas: {width: 1280}}}}, '1280x1080'],
+])('materializes the legacy %s canvas supplied by the editor', async (_label, extras, resolution) => {
+  const input = {...extras, tracks: [{id: 'V1', kind: 'visual', label: 'V1', app: {scaleAppliesToPositionedClips: true}}], clips: [{id: 'c', at: 0, track: 'V1', clipType: 'media', asset: 'a', hold: 1}]} as unknown as TimelineConfig;
+  const data = await buildTimelineData(input, {assets: {a: {file: 'a.png', type: 'image/png', resolution: '1920x1080'}}});
+  expect(data.output.resolution).toBe(resolution);
+  expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({details: expect.objectContaining({kind: 'canvas', source: 'app-resolved', after: expect.objectContaining({resolution})})})]));
+});
+
+
+it('keeps a canvas migration visible and synchronized during direct data assembly', async () => {
+  const source = {tracks: [{id: 'V1', kind: 'visual', label: 'V1', scale: 2}], clips: [{id: 'c', at: 0, track: 'V1', clipType: 'image', asset: 'a', hold: 1, x: 0, y: 0, width: 1280, height: 720}]} as unknown as TimelineConfig;
+  const registry = {assets: {a: {file: 'a.png', type: 'image/png', resolution: '1920x1080'}}};
+  const baseline = await buildTimelineData({...source, output: {resolution: '1280x720', fps: 30, file: 'output.mp4'}} as TimelineConfig, registry);
+  const data = assembleTimelineData({config: source, configVersion: 1, registry, resolvedConfig: baseline.resolvedConfig, output: baseline.output, assetMap: baseline.assetMap});
+  expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({details: expect.objectContaining({kind: 'canvas', source: 'app-resolved'})})]));
+  expect(data.config.clips[0]).toMatchObject({x: 320, y: 180, width: 640, height: 360, fit: 'cover'});
+  expect(data.resolvedConfig.clips[0]).toMatchObject({x: 320, y: 180, width: 640, height: 360, fit: 'cover'});
 });

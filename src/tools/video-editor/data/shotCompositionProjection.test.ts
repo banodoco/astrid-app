@@ -1174,3 +1174,29 @@ describe('child placement normalization before projection', () => {
     expect(() => projectCanonicalComposition({...prepared, occurrences: prepared.occurrences.slice(0, 1)}, parent)).toThrow(/Parent timeline property output\.resolution/);
   });
 });
+
+it('projects four positionless opening images without inventing a child canvas', () => {
+  const source = withOccurrenceRevision(prepared, 0, timeline => {
+    const {output: _output, ...rest} = timeline;
+    return {...rest,
+      tracks: [{id: 'video', kind: 'visual', fit: 'contain', scale: 1, app: {scaleAppliesToPositionedClips: true}}],
+      clips: Array.from({length: 4}, (_, index) => ({id: `opening-${index}`, clipType: 'image', asset: 'alpha-image', track: 'video', at: index, hold: 1})),
+    };
+  });
+  const graph = {...source, occurrences: source.occurrences.slice(0, 1)};
+  const original = structuredClone(graph);
+  const parent = {theme_overrides: {visual: {canvas: {width: 1280, height: 720, fps: 24}}}, tracks: [{id: 'picture', kind: 'visual', label: 'Picture', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}}], clips: [], registry: {}} as unknown as ResolvedTimelineConfig;
+  const projection = projectCanonicalComposition(graph, parent);
+  expect(projection.config.output).toMatchObject({resolution: '1280x720', fps: 24});
+  expect(projection.config.clips.filter(clip => clip.id.startsWith('occ-1:opening-'))).toHaveLength(4);
+  for (const clip of projection.config.clips.filter(clip => clip.id.startsWith('occ-1:opening-'))) {
+    expect(clip).not.toHaveProperty('x');
+    expect(clip).not.toHaveProperty('width');
+    expect(clip).not.toHaveProperty('fit');
+  }
+  expect(graph).toEqual(original);
+  const timeline = (graph.occurrences[0].revision.internal_timeline_revision as {timeline: Record<string, unknown>}).timeline;
+  expect(timeline).not.toHaveProperty('output');
+  expect(projection.placementFindings.filter(finding => finding.scope === 'child' && finding.kind === 'canvas')).toEqual([]);
+  expect(projection.placementFindings).toEqual(expect.arrayContaining([expect.objectContaining({scope: 'child', occurrenceId: 'occ-1', kind: 'canvas-not-required', source: 'no-canvas-dependent-scale-bake'})]));
+});

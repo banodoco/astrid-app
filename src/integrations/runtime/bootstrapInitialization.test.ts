@@ -4,7 +4,7 @@ import type { MutationReceipt, MutationResult } from './generated.ts';
 import type { CanonicalDocument, CommandRecord, CommitRequest, HistoryPage, JSON } from './timeline-commit-types.ts';
 import type { TimelineCommandBasis, TimelineCommitResult } from '@/tools/video-editor/data/DataProvider.ts';
 import { createCommitOutbox, type ClaimedOutbox } from '@/tools/video-editor/commands/commitOutbox.ts';
-import fixture from '@/tools/video-editor/commands/fixtures/recipe_m2_app_bootstrap.json';
+import fixture from '@/tools/video-editor/commands/fixtures/recipe_m2_app_bootstrap_current.json';
 import { reserveBootstrapInitialization, resumeBootstrapInitialization } from './bootstrapInitialization.ts';
 import { acceptedCommit, fixtureDigest } from './__tests__/timelineCommitFixture.ts';
 import { ApiError } from './generated.ts';

@@ -153,7 +153,7 @@ function PreviewPanelComponent({
               const canvas = findings.find(issue => issue.details?.kind === 'canvas');
               return <div role="status" title={JSON.stringify(findings)}>
                 {clips > 0 ? `Updated legacy framing for ${clips} ${clips === 1 ? 'clip' : 'clips'}. ` : ''}
-                {canvas ? `Canvas ${data.output.resolution.replace('x', ' × ')} from timeline settings.` : ''}
+                {canvas ? `Canvas ${data.output.resolution.replace('x', ' × ')} ${canvas.details?.source === 'app-resolved' ? 'restored from the editor’s previous rendering' : 'from timeline settings'}.` : ''}
               </div>;
             })()}
             {surface.placementFindings?.some(finding => finding.scope === 'child' && (finding.kind === 'canvas' || finding.kind === 'explicit-fit' || finding.kind === 'scale-bake')) && (() => {

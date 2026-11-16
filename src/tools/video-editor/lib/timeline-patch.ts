@@ -1,3 +1,4 @@
+import {newTrackPlacementMarkers} from '@/tools/video-editor/lib/placement-markers.ts';
 /**
  * TimelinePatch pure validation, compilation, and preview.
  *
@@ -1156,10 +1157,10 @@ export function compileTimelinePatch(
               detail: { missingTrack: track, autoCreated: true },
             }),
           );
-          const newTrack: TrackDefinition = { id: track, kind: 'visual', label: track };
+          const newTrack: TrackDefinition = { id: track, kind: 'visual', label: track, app: newTrackPlacementMarkers() };
           tracks = [...tracks, newTrack];
           clipOrder[track] = [];
-          trackAppSnapshots.set(track, undefined);
+          trackAppSnapshots.set(track, {...newTrack.app});
         }
 
         // Ensure clipOrder entry exists for track
@@ -1373,10 +1374,10 @@ export function compileTimelinePatch(
               detail: { missingTrack: newTrack, autoCreated: true },
             }),
           );
-          const newTrackDef: TrackDefinition = { id: newTrack, kind: 'visual', label: newTrack };
+          const newTrackDef: TrackDefinition = { id: newTrack, kind: 'visual', label: newTrack, app: newTrackPlacementMarkers() };
           tracks = [...tracks, newTrackDef];
           clipOrder[newTrack] = [];
-          trackAppSnapshots.set(newTrack, undefined);
+          trackAppSnapshots.set(newTrack, {...newTrackDef.app});
         }
 
         // Update clip position
@@ -1476,6 +1477,7 @@ export function compileTimelinePatch(
           id: op.target,
           kind,
           label,
+          app: newTrackPlacementMarkers(),
           ...(op.payload?.role === 'output' || op.payload?.role === 'source'
             ? { role: op.payload.role }
             : {}),
@@ -1487,7 +1489,7 @@ export function compileTimelinePatch(
           ? [...tracks.slice(0, beforeIndex), newTrack, ...tracks.slice(beforeIndex)]
           : [...tracks, newTrack];
         clipOrder[op.target] = [];
-        trackAppSnapshots.set(op.target, undefined);
+        trackAppSnapshots.set(op.target, {...newTrack.app});
 
         affectedIds.add(op.target);
         diffEntries.push({
@@ -1573,6 +1575,15 @@ export function compileTimelinePatch(
           }
         }
 
+        // Replacement can reset extension data, but cannot undo placement migration custody.
+        const markers = before.app;
+        if (markers?.scaleAppliesToPositionedClips === true || markers?.clipPlacementVersion === 1) {
+          const supplied = payload.app && typeof payload.app === 'object' && !Array.isArray(payload.app)
+            ? payload.app as Record<string, unknown> : {};
+          updatedTrack.app = {...updatedTrack.app,
+            ...(markers.scaleAppliesToPositionedClips === true && !Object.prototype.hasOwnProperty.call(supplied, 'scaleAppliesToPositionedClips') ? {scaleAppliesToPositionedClips: true} : {}),
+            ...(markers.clipPlacementVersion === 1 && !Object.prototype.hasOwnProperty.call(supplied, 'clipPlacementVersion') ? {clipPlacementVersion: 1} : {})};
+        }
         tracks[trackIdx] = updatedTrack;
         trackAppSnapshots.set(op.target, updatedTrack.app ? { ...updatedTrack.app } : undefined);
 
@@ -1969,15 +1980,11 @@ export function compileTimelinePatch(
     nextConfig.app = configApp;
   }
 
-  // Attach track-level app data
-  const nextTracksWithApp = tracks.map((t) => {
-    const app = trackAppSnapshots.get(t.id);
-    if (app !== undefined && Object.keys(app).length > 0) {
-      return { ...t, app };
-    }
-    return t;
+  // Preserve authored extension metadata while keeping markers written by normalization.
+  nextConfig.tracks = (nextConfig.tracks ?? []).map(track => {
+    const app = trackAppSnapshots.get(track.id);
+    return app ? {...track, app: {...app, ...track.app}} : track;
   });
-  nextConfig.tracks = nextTracksWithApp;
 
   // Build full TimelineData through assembleTimelineData (via buildDataFromCurrentRegistry)
   const nextData = buildDataFromCurrentRegistry(nextConfig, data);

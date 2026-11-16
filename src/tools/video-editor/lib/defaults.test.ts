@@ -236,3 +236,11 @@ describe('withDefaultTimelineOutput', () => {
     expect(result.output).not.toBe(input.output);
   });
 });
+
+it('stamps newly created tracks without treating later placement as legacy', () => {
+  const config = createDefaultTimelineConfig();
+  expect(config.tracks?.map(track => track.app)).toEqual([
+    {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1},
+    {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1},
+  ]);
+});

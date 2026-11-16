@@ -304,3 +304,19 @@ it('passes the authored track appearance to shared placement', () => {
   spy.mockRestore();
   cleanup();
 });
+
+
+it('draws the exact output bounds returned by shared placement', () => {
+  const actual = composition.resolveClipPlacement;
+  const spy = vi.spyOn(composition, 'resolveClipPlacement').mockImplementation(input => {
+    const result = actual(input);
+    const box = {x: 200, y: 100, width: 400, height: 200};
+    return {...result, output: {...result.output, full: box, visible: box}};
+  });
+  const {props, cleanup} = baseProps({'clip-1': {track: 'V1', clipType: 'media', asset: 'asset-1', hold: 4}});
+  render(<OverlayEditor {...props} />);
+  const overlay = document.querySelector('[data-overlay-hit="true"]') as HTMLElement;
+  expect(overlay).toHaveStyle({left: '100px', top: '50px', width: '200px', height: '100px'});
+  spy.mockRestore();
+  cleanup();
+});

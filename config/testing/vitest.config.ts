@@ -65,7 +65,9 @@ export default defineConfig({
     globals: true,
     // No invisible skips: `.only` fails the run, and SkipGuardReporter fails it on any undeclared skip.
     allowOnly: false,
-    reporters: ['default', new SkipGuardReporter()],
+    reporters: process.env.VITEST_JUNIT_OUTPUT
+      ? ['default', new SkipGuardReporter(), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
+      : ['default', new SkipGuardReporter()],
     // Hang guard only (testing plan R-10): durations never fail a run, so the
     // per-test and per-hook ceilings are generous; only a genuine hang trips them.
     testTimeout: 120_000,

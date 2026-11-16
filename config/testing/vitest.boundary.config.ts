@@ -41,7 +41,9 @@ export default defineConfig({
   test: {
     globals: true,
     allowOnly: false,
-    reporters: ['default', new SkipGuardReporter()],
+    reporters: process.env.VITEST_JUNIT_OUTPUT
+      ? ['default', new SkipGuardReporter(), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
+      : ['default', new SkipGuardReporter()],
     environment: 'jsdom',
     include: ['src/sdk/__tests__/*.test.{ts,tsx}'],
     setupFiles: [path.resolve(projectRoot, 'src/test/setup.ts')],

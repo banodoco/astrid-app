@@ -1,9 +1,9 @@
-# Default vitest run per push (testing plan UP.1). The checkout lane (npm run test:checkout) needs sibling repos and does not run here.
+# Default Vitest run per push, including Release 14's plan branch (testing plan UP.1). The checkout lane (npm run test:checkout) needs sibling repos and does not run here.
 name: Tests
 
 on:
   push:
-    branches: [main, release-1, "int/**", "release/*/main"]
+    branches: [main, release-1, "int/**", "release/*/main", "release/14/plan-39"]
   pull_request:
     branches: [main, "release/*/main"]
   workflow_dispatch:
@@ -63,7 +63,7 @@ jobs:
           echo "::error::A pull request into a release branch must name the plan or the astrid-dev issue it belongs to, for example 'Plan 55' or 'banodoco/astrid-dev#721'."
           exit 1
 
-  # Pull requests into main run only release-guard above. Pull requests into a release branch also run vitest and
+  # Pull requests into main run only release-guard above. Pull requests into a release main also run vitest and
   # boundary; release-tooling-macos stays push-only (macOS runner cost) and runs on the push to the release branch.
   vitest:
     if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/') && endsWith(github.base_ref, '/main')) }}
@@ -106,10 +106,50 @@ jobs:
       # Browser-backed unit tests launch Playwright's Chromium from the default cache.
       - name: Install Playwright Chromium
         run: npx playwright install chromium
+      - name: Prepare Vitest result directory
+        run: mkdir -p "$RUNNER_TEMP/vitest-results"
+        shell: bash
       - run: npm test
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
-      - run: npm run test:sdk-boundary
+          VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-app.xml
+      - name: Run SDK boundary Vitest suite
+        run: npm run test:sdk-boundary
+        env:
+          VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-sdk-boundary.xml
+      - name: Summarize Vitest result XML
+        if: always()
+        env:
+          TEST_RESULTS_DIR: ${{ runner.temp }}/vitest-results
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          files = sorted(Path(os.environ['TEST_RESULTS_DIR']).glob('*.xml'))
+          if not files:
+              print('JUnit: no XML files; no test result available')
+              raise SystemExit(1)
+          totals = [0, 0, 0, 0]
+          for path in files:
+              root = ET.parse(path).getroot()
+              suites = [root] if root.tag == 'testsuite' else list(root.iter('testsuite'))
+              counts = [sum(int(suite.get(key, '0')) for suite in suites) for key in ('tests', 'failures', 'errors', 'skipped')]
+              print(f'{path.name}: tests={counts[0]} failures={counts[1]} errors={counts[2]} skipped={counts[3]}')
+              totals = [left + right for left, right in zip(totals, counts)]
+          line = f'JUnit total: tests={totals[0]} failures={totals[1]} errors={totals[2]} skipped={totals[3]}'
+          print(line)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
+              summary.write(line + '\n')
+          PY
+      - name: Upload Vitest results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-vitest-all-${{ runner.os }}
+          path: ${{ runner.temp }}/vitest-results/*.xml
+          retention-days: 90
+          if-no-files-found: warn
 
   # The release tooling is macOS-only by design (lockf broker, BSD ps eww, darwin-pinned attestation), so the vitest job
   # declares these cases as skipped (config/testing/skipRegistry.mjs: macos-release-process-containment, macos-lockf-broker)

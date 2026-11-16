@@ -1,0 +1,149 @@
+name: Qualify unified brand lockup
+on:
+  push:
+    branches: [diag/beta-brand-lockup-20261116]
+    paths: [.github/workflows/beta-lockup-clock.yml]
+permissions:
+  contents: write
+jobs:
+  repair:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/beta-brand-follow-20261116
+          fetch-depth: 2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+          cache: npm
+      - run: npm ci --legacy-peer-deps
+      - run: npx playwright install --with-deps chromium webkit
+      - name: Preserve the mink bounds on the same transform-only timeline
+        shell: bash
+        run: |
+          mkdir -p beta-lockup-evidence
+          test "$(git rev-parse HEAD)" = '912d672ba6e117480f2fd0962c72416923a9f1a6'
+          git rev-parse HEAD HEAD^{tree} > beta-lockup-evidence/base-source.txt
+          python3 - <<'PY'
+          from pathlib import Path
+          def replace(s, old, new):
+              assert s.count(old) == 1, (old[:100], s.count(old))
+              return s.replace(old, new)
+          p = Path('src/pages/Home/publicAstridNavigation.ts'); s = p.read_text()
+          s = replace(s, 'function prepareBrandBeta(origin: DOMRect) {', 'function prepareBrandBeta(origin: DOMRect, minkOrigin: DOMRect) {')
+          s = replace(s, "  const beta = home?.querySelector('.astrid-beta')?.getBoundingClientRect();", """  const beta = home?.querySelector('.astrid-beta')?.getBoundingClientRect();
+            const mink = home?.querySelector<HTMLElement>('.astrid-brand-mink:not(.astrid-brand-mink-glint)');
+            const minkBox = mink?.getBoundingClientRect();
+            const minkStyle = mink ? getComputedStyle(mink) : null;
+            const minkWidth = Number.parseFloat(minkStyle?.width ?? '');
+            const minkHeight = Number.parseFloat(minkStyle?.height ?? '');""")
+          s = replace(s, '  if (!word || !beta || !origin.width || !origin.height || !word.width || !word.height || !beta.width || !beta.height) return;', """  if (!word || !beta || !minkBox || !origin.width || !origin.height || !word.width || !word.height ||
+                !beta.width || !beta.height || !minkOrigin.width || !minkOrigin.height ||
+                !Number.isFinite(minkWidth) || minkWidth <= 0 || !Number.isFinite(minkHeight) || minkHeight <= 0) return;""")
+          s = replace(s, "  root.dataset.astridBrandBetaFollow = '';", """  // The mink's native group morph can advance on a different WebKit clock.
+            // Keep its capture at the destination's untransformed size and map its
+            // visible bounds with the same transform-only mechanism as the text.
+            root.style.setProperty('--astrid-brand-mink-from', `translate(${minkOrigin.x}px, ${minkOrigin.y}px) scale(${minkOrigin.width / minkWidth}, ${minkOrigin.height / minkHeight})`);
+            root.style.setProperty('--astrid-brand-mink-to', `translate(${minkBox.x}px, ${minkBox.y}px) scale(${minkBox.width / minkWidth}, ${minkBox.height / minkHeight})`);
+            root.style.setProperty('--astrid-brand-mink-width', `${minkWidth}px`);
+            root.style.setProperty('--astrid-brand-mink-height', `${minkHeight}px`);
+            root.dataset.astridBrandBetaFollow = '';""")
+          s = replace(s, "    for (const property of ['from', 'to', 'to-width', 'to-height']) {\n      document.documentElement.style.removeProperty(`--astrid-brand-word-${property}`);\n    }", """    for (const property of ['from', 'to', 'to-width', 'to-height']) {
+                document.documentElement.style.removeProperty(`--astrid-brand-word-${property}`);
+              }
+              for (const property of ['from', 'to', 'width', 'height']) {
+                document.documentElement.style.removeProperty(`--astrid-brand-mink-${property}`);
+              }""")
+          s = replace(s, '    let wordmarkOrigin: DOMRect | null = null;', '    let wordmarkOrigin: DOMRect | null = null;\n    let minkOrigin: DOMRect | null = null;')
+          s = replace(s, '      if (markerOwnerRef.current === id && wordmarkOrigin) prepareBrandBeta(wordmarkOrigin);', '      if (markerOwnerRef.current === id && wordmarkOrigin && minkOrigin) prepareBrandBeta(wordmarkOrigin, minkOrigin);')
+          s = replace(s, "        wordmarkOrigin = document.querySelector('.astrid-vision-brand-name')?.getBoundingClientRect() ?? null;", """        wordmarkOrigin = document.querySelector('.astrid-vision-brand-name')?.getBoundingClientRect() ?? null;
+                  minkOrigin = document.querySelector('.astrid-vision-brand img')?.getBoundingClientRect() ?? null;""")
+          s = s.replace('\n\n\n  root.style', '\n  root.style'); p.write_text(s)
+          p = Path('src/pages/Home/PublicAstridSite.css'); s = p.read_text()
+          s = replace(s, """@keyframes astrid-brand-word-follow {
+            from {
+              transform: var(--astrid-brand-word-from);
+
+
+            }
+            to {
+              transform: var(--astrid-brand-word-to);
+
+
+            }
+          }""", """@keyframes astrid-brand-word-follow {
+            from { transform: var(--astrid-brand-word-from); }
+            to { transform: var(--astrid-brand-word-to); }
+          }""")
+          s = s.replace('            height: var(--astrid-brand-word-to-height);', '  height: var(--astrid-brand-word-to-height);').replace('            animation: astrid-brand-word-follow', '  animation: astrid-brand-word-follow')
+          s += '''
+          @keyframes astrid-brand-mink-follow {
+            from { transform: var(--astrid-brand-mink-from); }
+            to { transform: var(--astrid-brand-mink-to); }
+          }
+          :root[data-astrid-page-transition-style="brand"][data-astrid-brand-beta-follow]::view-transition-group(astrid-brand-mink) {
+            transform-origin: 0 0;
+            width: var(--astrid-brand-mink-width);
+            height: var(--astrid-brand-mink-height);
+            animation: astrid-brand-mink-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
+          }
+          '''
+          p.write_text(s)
+          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts'); s = p.read_text()
+          s = replace(s, 'betaTransform: string; betaDuration: string; betaCurve: string; betaOpacity: number };', 'betaTransform: string; betaDuration: string; betaCurve: string; betaOpacity: number; minkWidth: number; minkHeight: number };')
+          s = replace(s, 'minkTransform, wordTransform,', 'minkTransform, wordTransform, minkWidth: Number.parseFloat(mink.width), minkHeight: Number.parseFloat(mink.height),')
+          s = replace(s, 'const [word, beta] = await page.evaluate(transforms => transforms.map(transform => {', 'const [word, beta, mink] = await page.evaluate(transforms => transforms.map(transform => {')
+          s = replace(s, '}), [frame.wordTransform, frame.betaTransform]);', '}), [frame.wordTransform, frame.betaTransform, frame.minkTransform]);')
+          s = replace(s, 'const sx = word.a * frame.wordWidth / destination.word.width;', '''// All three captures follow the same path, with the mink's actual
+                  // visible bounds preserved at both ends (including its CSS scale).
+                  const progress = (word.f - trace.old!.box.y) / (destination.word.y - trace.old!.box.y);
+                  const interpolate = (from: number, to: number) => from + (to - from) * progress;
+                  expect(Math.abs(mink.e - interpolate(trace.old!.mink.x, destination.mink.x)), 'mink x stays on the lockup path').toBeLessThan(1);
+                  expect(Math.abs(mink.f - interpolate(trace.old!.mink.y, destination.mink.y)), 'mink y stays on the lockup path').toBeLessThan(1);
+                  expect(Math.abs(mink.a * frame.minkWidth - interpolate(trace.old!.mink.width, destination.mink.width)), 'mink visible width is preserved').toBeLessThan(1);
+                  expect(Math.abs(mink.d * frame.minkHeight - interpolate(trace.old!.mink.height, destination.mink.height)), 'mink visible height is preserved').toBeLessThan(1);
+                  const sx = word.a * frame.wordWidth / destination.word.width;''')
+          s = replace(s, ".filter(property => property.startsWith('--astrid-brand-word-')))", ".filter(property => property.startsWith('--astrid-brand-word-') || property.startsWith('--astrid-brand-mink-')))")
+          p.write_text(s)
+          PY
+          git diff --check
+          npx eslint src/pages/Home/publicAstridNavigation.ts --max-warnings 0
+          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx
+      - name: Verify brand and retained player viewport regressions in Chromium
+        shell: bash
+        run: |
+          PLAYWRIGHT_JSON_OUTPUT_FILE=beta-lockup-evidence/chromium-results.json npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-home-chips.spec.ts --project=chromium-desktop --grep 'wordmark accompanies|scrolled Vision return|player projection stays|toolbar-sized tail' --output=beta-lockup-evidence/chromium-traces --reporter=line,json | tee beta-lockup-evidence/chromium.log
+          cp -r test-results/vision-captures beta-lockup-evidence/chromium-captures
+      - name: Verify WebKit and repeat the exact previously failing brand case
+        shell: bash
+        run: |
+          PLAYWRIGHT_JSON_OUTPUT_FILE=beta-lockup-evidence/webkit-results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts --grep 'wordmark accompanies|scrolled Vision returns' --output=beta-lockup-evidence/webkit-traces --reporter=line,json | tee beta-lockup-evidence/webkit.log
+          cp -r test-results/vision-captures beta-lockup-evidence/webkit-captures
+          PLAYWRIGHT_JSON_OUTPUT_FILE=beta-lockup-evidence/webkit-repeat-results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --grep 'wordmark accompanies' --repeat-each=3 --workers=1 --output=beta-lockup-evidence/webkit-repeat-traces --reporter=line,json | tee beta-lockup-evidence/webkit-repeat.log
+          cp -r test-results/vision-captures beta-lockup-evidence/webkit-repeat-captures
+      - name: Commit the qualified source to the existing feature branch
+        run: |
+          git diff --check
+          git config user.name 'POM'
+          git config user.email 'peter@omalley.io'
+          git diff > beta-lockup-evidence/repair.patch
+          git add src/pages/Home/publicAstridNavigation.ts src/pages/Home/PublicAstridSite.css tests/e2e/public-astrid-vision-entry.spec.ts
+          git commit -m 'fix(vision): keep mink name and Beta on one animation mechanism'
+          git rev-parse HEAD HEAD^{tree} > beta-lockup-evidence/candidate-source.txt
+          git push origin HEAD:fix/beta-brand-follow-20261116
+      - name: Preserve source and diagnostics
+        if: always()
+        run: |
+          git diff > beta-lockup-evidence/uncommitted.patch
+          mkdir -p beta-lockup-evidence/source/src/pages/Home beta-lockup-evidence/source/tests/e2e
+          cp src/pages/Home/publicAstridNavigation.ts src/pages/Home/PublicAstridSite.css beta-lockup-evidence/source/src/pages/Home/
+          cp tests/e2e/public-astrid-vision-entry.spec.ts beta-lockup-evidence/source/tests/e2e/
+          if [ -d test-results/vision-captures ]; then cp -r test-results/vision-captures beta-lockup-evidence/latest-captures; fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: astrid-beta-unified-lockup
+          path: beta-lockup-evidence/
+          if-no-files-found: error

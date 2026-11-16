@@ -310,6 +310,6 @@ test('the CLI with --pins refuses a head whose runtime.sha disagrees with the Ap
 
 test('a later push to main never cancels the release guard for an earlier one', async () => {
   const workflow = await readFile(fileURLToPath(new URL('../../.github/workflows/test.yml', import.meta.url)), 'utf8');
-  assert.match(workflow, /cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' \}\}/);
+  assert.match(workflow, /cancel-in-progress: \$\{\{ github\.ref != 'refs\/heads\/main' && !\(startsWith\(github\.ref, 'refs\/heads\/release\/'\) && endsWith\(github\.ref, '\/main'\)\) \}\}/);
   assert.doesNotMatch(workflow, /cancel-in-progress: true/);
 });

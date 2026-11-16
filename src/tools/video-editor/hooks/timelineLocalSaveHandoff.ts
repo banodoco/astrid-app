@@ -292,8 +292,8 @@ export function createTimelineLocalSaveHandoff(options: {
       if (finding.kind === 'canvas' || finding.kind === 'canvas-not-required') continue;
       if (finding.kind === 'markers') {
         const row = unique(tracks, finding.trackId);
-        const expected = normalized.tracks.find(track => track.id === finding.trackId);
-        const view = displayed.tracks.find(track => track.id === finding.trackId);
+        const expected = normalized.tracks?.find(track => track.id === finding.trackId);
+        const view = displayed.tracks?.find(track => track.id === finding.trackId);
         if (!expected || !view || !object(expected.app) || !object(view.app)) refuse('placement migration track is unavailable');
         const app = object(row.app) ? structuredClone(row.app) : {};
         for (const key of ['scaleAppliesToPositionedClips', 'clipPlacementVersion'] as const) {
@@ -301,7 +301,7 @@ export function createTimelineLocalSaveHandoff(options: {
           app[key] = expected.app[key];
         }
         row.app = app;
-      } else {
+      } else if (finding.kind === 'scale-bake' || finding.kind === 'explicit-fit') {
         const row = unique(clips, finding.clipId);
         const expected = normalized.clips.find(clip => clip.id === finding.clipId && clip.track === finding.trackId);
         const view = displayed.clips.find(clip => clip.id === finding.clipId && clip.track === finding.trackId);
@@ -311,6 +311,8 @@ export function createTimelineLocalSaveHandoff(options: {
           if (!same(expected[key], view[key])) refuse('placement migration differs from verified display');
           row[key] = expected[key];
         }
+      } else {
+        refuse('unsupported placement migration finding');
       }
     }
     return baseline;
@@ -341,11 +343,11 @@ export function createTimelineLocalSaveHandoff(options: {
         if (gestureBasis?.kind === 'element' && topLevelClips && !source.config.clips.length
           && Array.isArray(parent.clips) && parent.clips.length) refuse('element parent clips are not present in the mounted source');
         const appearanceChanged = !gestureBasis && (next.config.clips.some(clip => {
-          const previous = configSource.clips.find(item => item.id === clip.id);
+          const previous = source.config.clips.find(item => item.id === clip.id);
           return previous && ['x', 'y', 'width', 'height', 'fit', 'cropTop', 'cropRight', 'cropBottom', 'cropLeft'].some(
             key => !same(field(previous, key), field(clip, key)));
-        }) || next.config.tracks.some(track => {
-          const previous = configSource.tracks.find(item => item.id === track.id);
+        }) || (next.config.tracks ?? []).some(track => {
+          const previous = source.config.tracks?.find(item => item.id === track.id);
           return previous && ['scale', 'fit'].some(key => !same(field(previous, key), field(track, key)));
         }));
         const baseline = appearanceChanged ? placementBaseline(configBefore, configSource as TimelineConfig) : configBefore;

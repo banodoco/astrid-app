@@ -50,6 +50,19 @@ interface PendingOriginalSaveRead {
   settled: boolean;
 }
 
+// Rejections the user must be told about; a conflict keeps its own choice dialog.
+const REJECTED_SAVE_KINDS = ['validation', 'authorization', 'too_large', 'unsupported_route', 'rejected_request'];
+/** The reason to show for a local save that was rejected or removed from the queue, or null. */
+function localSaveNotice(state: LocalSaveState | null): string | null {
+  if (!state) return null;
+  if (state.notice) return state.notice;
+  const error = state.error;
+  if (state.status === 'error' && error && typeof error === 'object' && !Array.isArray(error)
+    && typeof error.kind === 'string' && REJECTED_SAVE_KINDS.includes(error.kind)
+    && typeof error.message === 'string') return error.message;
+  return null;
+}
+
 const elementParameterOwners = new WeakMap<ElementTimelineRoutes, { context: AstridAgentElementContext; adapter: AstridElementOperationAdapter }>();
 
 /** Share the mounted adapter's authority with its exact Inspector source. */
@@ -910,9 +923,10 @@ export function useTimelineSave(
     data: commit.data,
     dataRef: commit.dataRef,
     isConflictExhausted: persistence.isConflictExhausted,
+    saveNotice: localSaveNotice(localSaveState),
     selectedClipId: commit.selectedClipId,
     selectedTrackId: commit.selectedTrackId,
-    saveStatus: localSaveState && ['blocked', 'conflict', 'error', 'recovery', 'retry'].includes(localSaveState.status)
+    saveStatus: localSaveState && (['blocked', 'conflict', 'error', 'recovery', 'retry'].includes(localSaveState.status) || localSaveState.notice)
       ? 'error' : localSaveState?.status === 'saving' ? 'saving' : localSaveState?.status === 'dirty' ? 'dirty' : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty' : persistence.saveStatus,
     schemaIncompatible: persistence.schemaIncompatible,
     flushPendingSave: persistence.flushPendingSave,

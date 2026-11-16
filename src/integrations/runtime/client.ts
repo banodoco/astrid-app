@@ -308,7 +308,13 @@ export type RuntimeCommitFailureKind =
   | 'validation'
   | 'authorization'
   | 'storage'
-  | 'unknown';
+  | 'unknown'
+  /** 413: the exact request body can never be accepted; retrying cannot help. */
+  | 'too_large'
+  /** 404/405: this Runtime has no commit route for the request; retrying cannot help. */
+  | 'unsupported_route'
+  /** Any other 4xx except 408/409/429: a permanent refusal of the exact request. */
+  | 'rejected_request';
 
 /** Classify commit failures from the typed Runtime status/reason fields. */
 export function classifyRuntimeCommitFailure(error: unknown): RuntimeCommitFailureKind {
@@ -323,6 +329,14 @@ export function classifyRuntimeCommitFailure(error: unknown): RuntimeCommitFailu
   if (error.status === 400 || error.status === 422) return 'validation';
   if (/storage|disk|space/i.test(error.code) || /storage|disk|space/i.test(String(error.details?.reason ?? ''))) return 'storage';
   if (error.status >= 500) return 'unknown';
+  // Permanent client errors: the same bytes will be refused again, so they must
+  // not stay at the outbox head as "retry". 408 (timeout), 409 (untyped head
+  // contention, see isRuntimeConflict) and 429 (rate limit) stay retryable.
+  if (error.status === 413) return 'too_large';
+  if (error.status === 404 || error.status === 405) return 'unsupported_route';
+  if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 409 && error.status !== 429) {
+    return 'rejected_request';
+  }
   return 'unknown';
 }
 

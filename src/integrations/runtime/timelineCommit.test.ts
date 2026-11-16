@@ -123,6 +123,17 @@ describe('Runtime timeline commit capability', () => {
     expect(classifyRuntimeCommitFailure(new ApiError(503, 'not_ready', 'unknown'))).toBe('unknown');
   });
 
+  it('classifies permanent client rejections and keeps transient ones retryable', () => {
+    expect(classifyRuntimeCommitFailure(new ApiError(413, 'http_error', 'HTTP 413'))).toBe('too_large');
+    expect(classifyRuntimeCommitFailure(new ApiError(404, 'http_error', 'HTTP 404'))).toBe('unsupported_route');
+    expect(classifyRuntimeCommitFailure(new ApiError(405, 'http_error', 'HTTP 405'))).toBe('unsupported_route');
+    expect(classifyRuntimeCommitFailure(new ApiError(418, 'http_error', 'HTTP 418'))).toBe('rejected_request');
+    expect(classifyRuntimeCommitFailure(new ApiError(409, 'http_error', 'HTTP 409'))).toBe('unknown');
+    expect(classifyRuntimeCommitFailure(new ApiError(408, 'http_error', 'HTTP 408'))).toBe('unknown');
+    expect(classifyRuntimeCommitFailure(new ApiError(429, 'http_error', 'HTTP 429'))).toBe('unknown');
+    expect(classifyRuntimeCommitFailure(new TypeError('Failed to fetch'))).toBe('unknown');
+  });
+
   it('accepts the v2 merged status in the shared commit decoder', () => {
     const response = accepted('r1', 'p1', 'r0', 'p0');
     response.data.status = 'merged';

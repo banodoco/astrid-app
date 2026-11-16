@@ -401,6 +401,7 @@ function createInitialChromeSlice(): TimelineChromeContextValue {
     retrySaveAfterConflict: noopAsync,
     watchdogTripped: false,
     watchdogReason: null,
+    saveNotice: null,
     retryWatchdog: noop,
     retryPendingSave: noop,
     flushPendingSave: () => Promise.resolve(0),

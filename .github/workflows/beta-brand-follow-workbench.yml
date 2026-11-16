@@ -13,14 +13,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/beta-brand-follow-20261116
-          fetch-depth: 3
+          fetch-depth: 4
       - uses: actions/setup-node@v4
         with:
           node-version: '20.19.0'
           cache: npm
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium webkit
-      - name: Resume the same repair with browser-native matrix decoding
+      - name: Check synchronized native frames without interleaving live style reads
         shell: bash
         run: |
           python3 - <<'PY'
@@ -33,21 +33,46 @@ jobs:
               return textwrap.dedent(block.split('        run: |\n', 1)[1])
           def run(name):
               print('Running:', name, flush=True)
-              subprocess.run(['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script(name)], check=True)
+              body = script(name)
+              if name.startswith('Verify '):
+                  body = re.sub(r"--grep '[^']+'", "--grep 'wordmark accompanies'", body)
+              subprocess.run(['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', body], check=True)
           try:
               run('Add the requested badge contract to the existing brand test')
-              p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
-              s = p.read_text()
-              # DOMMatrix belongs to the browser, not Node's test process. This
-              # changes only decoding of the already recorded transforms.
+              p = Path('tests/e2e/public-astrid-vision-entry.spec.ts'); s = p.read_text()
               replacement = '''const [word, beta] = await page.evaluate(transforms => transforms.map(transform => {
                     const matrix = new DOMMatrix(transform);
                     return { a: matrix.a, d: matrix.d, e: matrix.e, f: matrix.f };
                   }), [frame.wordTransform, frame.betaTransform]);'''
               s, count = re.subn(r'const word = new DOMMatrix\(frame\.wordTransform\);\s+const beta = new DOMMatrix\(frame\.betaTransform\);', replacement, s)
               assert count == 1, count
+              old = 'betaCurve: string; betaOpacity: number };'
+              assert s.count(old) == 1
+              s = s.replace(old, 'betaCurve: string; betaOpacity: number; transformReadMs: number; clocks: { name: string; start: string; time: string; pseudo: string | null }[] };')
+              old = 'trace.frames.push({ minkY: new DOMMatrix(mink.transform).f, wordY: new DOMMatrix(word.transform).f,'
+              assert s.count(old) == 1
+              s = s.replace(old, '''// CSSStyleDeclaration is live. Copy the moving transforms together,
+                        // before opacity/size reads can trigger another animation update.
+                        const readStart = performance.now();
+                        const wordTransform = word.transform;
+                        const betaTransform = beta.transform;
+                        const minkTransform = mink.transform;
+                        const transformReadMs = performance.now() - readStart;
+                        const clocks = document.getAnimations().filter(animation =>
+                          /astrid-brand-(name|beta)/.test((animation as CSSAnimation).animationName || '')
+                        ).map(animation => ({ name: (animation as CSSAnimation).animationName,
+                          start: String(animation.startTime), time: String(animation.currentTime),
+                          pseudo: (animation.effect as KeyframeEffect | null)?.pseudoElement ?? null }));
+                        trace.frames.push({ minkY: new DOMMatrix(minkTransform).f, wordY: new DOMMatrix(wordTransform).f,
+                          transformReadMs, clocks,''')
+              old = 'minkTransform: mink.transform, wordTransform: word.transform,'
+              assert s.count(old) == 1
+              s = s.replace(old, 'minkTransform, wordTransform,')
+              old = 'betaTransform: beta.transform, betaDuration: beta.animationDuration,'
+              assert s.count(old) == 1
+              s = s.replace(old, 'betaTransform, betaDuration: beta.animationDuration,')
               p.write_text(s)
-              (evidence/'prior-failure.txt').write_text('Run43857461802 reproduced the original missing Beta capture, then 8/9 focused Chromium cases passed; the new geometry oracle stopped because DOMMatrix was called in Node. No product assertion failed and no candidate was committed. The original failure artifact14222730421 is retained. Correct only the decoder context; preserve every assertion, tolerance and source repair. Baseline missing-capture proof remains applicable because it fails before matrix decoding.\n')
+              (evidence/'prior-failures.txt').write_text('Retain43857461802/artifact14222730421: old product missing Beta capture; new oracle initially used DOMMatrix in Node. Corrected decoder in43858204435/artifact14222521723;9 Chromium passes,2 WebKit passes,1 WebKit alignment failure8.88px. This run changes only the sampling order/diagnostic clocks and keeps all1px/scale/movement assertions and product repair unchanged. No waived result.\n')
               run('Apply the bounded badge animation and preserve existing guards')
               run('Verify movement, retained player and viewport behavior in Chromium')
               run('Verify the native wordmark and badge journey in WebKit')

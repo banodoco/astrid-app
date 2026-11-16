@@ -819,3 +819,121 @@ await dialog.locator('.astrid-vision-details-shell').evaluate(node => (node as H
     });
   });
 }
+
+
+type BrandFollowFrame = { minkY: number; wordY: number; minkTransform: string; wordTransform: string;
+  minkDuration: string; wordDuration: string; minkCurve: string; wordCurve: string; wordOpacity: number; scroll: number };
+type BrandFollowBox = { x: number; y: number; width: number; height: number; right: number };
+type BrandFollowTrace = { ready: boolean; done: boolean; error?: string; frames: BrandFollowFrame[];
+  old?: { name: string; opacity: string; box: BrandFollowBox; mink: BrandFollowBox; headerWidth: number };
+  incoming?: { names: string[]; word: BrandFollowBox; mink: BrandFollowBox } };
+test.describe('paired scrolled desktop brand', () => {
+  test.use({ isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
+  test('wordmark accompanies the mink from the condensed Vision header', async ({ page, request }, info) => {
+    test.setTimeout(120000);
+    const response = await request.get(FEED); expect(response.ok()).toBe(true);
+    const feed = await response.json();
+    await page.route(FEED, route => route.fulfill({ json: feed }));
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.goto('/home', { waitUntil: 'domcontentloaded' });
+    await expect(page.getByRole('link', { name: 'Vision', exact: true })).toBeVisible({ timeout: 30000 });
+    const records = [];
+    for (const fraction of [1, .5]) {
+      await page.getByRole('link', { name: 'Vision', exact: true }).click();
+      await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+      await page.evaluate(fraction => window.scrollTo({ top: (document.documentElement.scrollHeight - innerHeight) * fraction,
+        behavior: 'instant' }), fraction);
+      const header = page.locator('.astrid-vision-bar');
+      await expect(header).toHaveAttribute('data-condensed');
+      await expect(header.locator('.astrid-vision-brand-name')).toHaveCSS('opacity', '0');
+      await expect(header.locator('.astrid-vision-brand-name')).toHaveCSS('max-width', '0px');
+      const before = await header.locator('.astrid-vision-brand').evaluate(node => ({
+        width: node.getBoundingClientRect().width,
+        mink: node.querySelector('img')!.getBoundingClientRect().toJSON(),
+      }));
+      await page.evaluate(() => {
+        const state = window as unknown as { brandFollow: BrandFollowTrace };
+        const trace: BrandFollowTrace = { ready: false, done: false, frames: [] };
+        state.brandFollow = trace;
+        type Native = { ready: Promise<void>; finished: Promise<void> };
+        const doc = document as unknown as { startViewTransition: (update: () => void | Promise<void>) => Native };
+        const original = doc.startViewTransition.bind(doc);
+        doc.startViewTransition = update => {
+          doc.startViewTransition = original;
+          const name = document.querySelector<HTMLElement>('.astrid-vision-brand-name')!;
+          const mink = document.querySelector<HTMLElement>('.astrid-vision-brand img')!;
+          trace.old = { name: getComputedStyle(name).viewTransitionName, opacity: getComputedStyle(name).opacity,
+            box: name.getBoundingClientRect().toJSON(), mink: mink.getBoundingClientRect().toJSON(),
+            headerWidth: name.parentElement!.getBoundingClientRect().width };
+          const transition = original(async () => {
+            await update();
+            const home = document.querySelector('.astrid-public-site[data-astrid-lifecycle="active"]')!;
+            trace.incoming = {
+              names: [home, ...home.querySelectorAll('*')].map(n => getComputedStyle(n).viewTransitionName)
+                .filter(n => n && n !== 'none'),
+              word: home.querySelector('.astrid-brand-name')!.getBoundingClientRect().toJSON(),
+              mink: home.querySelector('.astrid-brand-mink:not(.astrid-brand-mink-glint)')!.getBoundingClientRect().toJSON(),
+            };
+          });
+          void transition.ready.then(() => {
+            trace.ready = true;
+            const sample = () => {
+              if (trace.done) return;
+              const root = document.documentElement;
+              const mink = getComputedStyle(root, '::view-transition-group(astrid-brand-mink)');
+              const word = getComputedStyle(root, '::view-transition-group(astrid-brand-name)');
+              const image = getComputedStyle(root, '::view-transition-new(astrid-brand-name)');
+              trace.frames.push({ minkY: new DOMMatrix(mink.transform).f, wordY: new DOMMatrix(word.transform).f,
+                minkTransform: mink.transform, wordTransform: word.transform,
+                minkDuration: mink.animationDuration, wordDuration: word.animationDuration,
+                minkCurve: mink.animationTimingFunction, wordCurve: word.animationTimingFunction,
+                wordOpacity: Number(image.opacity), scroll: scrollY });
+              requestAnimationFrame(sample);
+            };
+            sample();
+          }, error => { trace.error = String(error); });
+          void transition.finished.then(() => { trace.done = true; }, error => {
+            trace.error = String(error); trace.done = true;
+          });
+          return transition;
+        };
+      });
+      await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+      await expect.poll(() => page.evaluate(() => (window as unknown as { brandFollow: BrandFollowTrace }).brandFollow.ready)).toBe(true);
+      await page.waitForTimeout(350);
+      await page.screenshot({ path: `${folder}/wordmark-moving-${info.project.name}-${fraction}.png` });
+      await expect.poll(() => page.evaluate(() => (window as unknown as { brandFollow: BrandFollowTrace }).brandFollow.done), { timeout: 15000 }).toBe(true);
+      const trace = await page.evaluate(() => (window as unknown as { brandFollow: BrandFollowTrace }).brandFollow);
+      records.push({ fraction, before, trace });
+      record(`wordmark-follow-${info.project.name}`, records);
+      expect(trace.error).toBeUndefined();
+      expect(trace.old!.name, 'the hidden wordmark needs an outgoing capture origin').toBe('astrid-brand-name');
+      expect(trace.incoming!.names).toEqual(['astrid-brand-mink', 'astrid-brand-name']);
+      expect(trace.old!.opacity, 'do not flash the collapsed header text before the transition').toBe('0');
+      expect(trace.old!.box.width, 'avoid a zero-width wordmark morph').toBeGreaterThan(30);
+      expect(Math.abs(trace.old!.headerWidth - before.width), 'no header expansion at capture').toBeLessThan(.5);
+      for (const axis of ['x', 'y', 'width', 'height'] as const) expect(Math.abs(trace.old!.mink[axis] - before.mink[axis])).toBeLessThan(.5);
+      expect(Math.abs(trace.old!.box.x - trace.old!.mink.right), 'wordmark starts beside the current mink').toBeLessThan(24);
+      const frames = trace.frames.filter(f => f.minkTransform !== 'none' && f.wordTransform !== 'none'
+        && f.minkDuration === '0.9s' && f.wordDuration === '0.9s');
+      expect(frames.length).toBeGreaterThan(5);
+      expect(new Set(frames.map(f => f.wordTransform)).size).toBeGreaterThan(4);
+      const first = frames[0], last = frames.at(-1)!;
+      expect(Math.abs(last.wordY - first.wordY)).toBeGreaterThan(30);
+      expect(Math.abs(first.wordY - trace.old!.box.y)).toBeLessThan(5);
+      expect(Math.abs(last.wordY - trace.incoming!.word.y)).toBeLessThan(2);
+      for (const frame of frames) {
+        expect(frame.scroll).toBe(0);
+        expect(frame.wordCurve).toBe(frame.minkCurve);
+        const minkProgress = (frame.minkY - first.minkY) / (last.minkY - first.minkY);
+        const wordProgress = (frame.wordY - first.wordY) / (last.wordY - first.wordY);
+        expect(Math.abs(wordProgress - minkProgress), 'wordmark and mink travel together').toBeLessThan(.04);
+      }
+      expect(frames.some(f => f.wordOpacity > .99)).toBe(true);
+      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition-style');
+    }
+  });
+});

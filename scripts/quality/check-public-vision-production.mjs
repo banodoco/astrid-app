@@ -151,7 +151,9 @@ async function checkPlayerReturn(browser) {
         if (!home) return;
         const r = home.querySelector('.astrid-player-surface').getBoundingClientRect();
         trace.frames.push({ rect: [r.x, r.y, r.width, r.height], scroll: scrollY,
-          phase: document.documentElement.getAttribute('data-astrid-page-transition-style') });
+          phase: document.documentElement.getAttribute('data-astrid-page-transition-style'),
+          wordmark: getComputedStyle(home.querySelector('.astrid-brand-name')).viewTransitionName,
+          wordmarkTransform: getComputedStyle(document.documentElement, '::view-transition-group(astrid-brand-name)').transform });
       };
       const observer = new MutationObserver(read);
       observer.observe(document.documentElement, { attributes: true, subtree: true,
@@ -169,13 +171,17 @@ async function checkPlayerReturn(browser) {
     await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
     await expect.poll(() => page.evaluate(() => window.__playerReturn.done), { timeout: 20000 }).toBe(true);
     const { frames } = await page.evaluate(() => window.__playerReturn);
-    expect(frames.filter(frame => frame.phase === 'brand').length).toBeGreaterThan(5);
+    const movingBrand = frames.filter(frame => frame.phase === 'brand');
+    expect(movingBrand.length).toBeGreaterThan(5);
+    expect(movingBrand.every(frame => frame.wordmark === 'astrid-brand-name')).toBe(true);
+    expect(new Set(movingBrand.map(frame => frame.wordmarkTransform).filter(value => value !== 'none')).size).toBeGreaterThan(3);
     expect(frames.some(frame => frame.phase === null)).toBe(true);
     for (const frame of frames) {
       expect(frame.scroll).toBe(0);
       for (const [i, value] of frame.rect.entries()) expect(Math.abs(value - reference[i])).toBeLessThan(1);
     }
     console.log('Production desktop player keeps its bounds throughout bottom-of-Vision return and transition cleanup.');
+    console.log('Production Astrid wordmark travels with the mink instead of appearing in the root crossfade.');
   } finally {
     await page.close();
   }

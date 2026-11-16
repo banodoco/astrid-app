@@ -367,7 +367,7 @@ for (const width of [390, 1440]) {
       expect(record.outgoing).toBeGreaterThan(500);
       expect(record.outgoing).toBeCloseTo(outgoing, 0);
       expect(record.snapshot.scroll).toBeCloseTo(expectedHomeY, 0);
-      expect(record.named).toEqual(sharedBrand ? ['astrid-brand-mink', 'astrid-brand-name'] : []);
+      expect(record.named).toEqual(sharedBrand ? ['astrid-brand-mink', 'astrid-brand-name', 'astrid-brand-beta'] : []);
       for (const frame of record.frames) {
         expect(frame.scroll).toBeCloseTo(expectedHomeY, 0);
         expect(Math.abs(frame.top - record.snapshot.top)).toBeLessThan(1);

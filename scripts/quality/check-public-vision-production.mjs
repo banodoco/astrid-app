@@ -153,6 +153,8 @@ async function checkPlayerReturn(browser) {
         trace.frames.push({ rect: [r.x, r.y, r.width, r.height], scroll: scrollY,
           phase: document.documentElement.getAttribute('data-astrid-page-transition-style'),
           wordmark: getComputedStyle(home.querySelector('.astrid-brand-name')).viewTransitionName,
+          beta: getComputedStyle(home.querySelector('.astrid-beta')).viewTransitionName,
+          betaTransform: getComputedStyle(document.documentElement, '::view-transition-group(astrid-brand-beta)').transform,
           wordmarkTransform: getComputedStyle(document.documentElement, '::view-transition-group(astrid-brand-name)').transform });
       };
       const observer = new MutationObserver(read);
@@ -174,6 +176,8 @@ async function checkPlayerReturn(browser) {
     const movingBrand = frames.filter(frame => frame.phase === 'brand');
     expect(movingBrand.length).toBeGreaterThan(5);
     expect(movingBrand.every(frame => frame.wordmark === 'astrid-brand-name')).toBe(true);
+    expect(movingBrand.every(frame => frame.beta === 'astrid-brand-beta')).toBe(true);
+    expect(new Set(movingBrand.map(frame => frame.betaTransform).filter(value => value !== 'none')).size).toBeGreaterThan(3);
     expect(new Set(movingBrand.map(frame => frame.wordmarkTransform).filter(value => value !== 'none')).size).toBeGreaterThan(3);
     expect(frames.some(frame => frame.phase === null)).toBe(true);
     for (const frame of frames) {
@@ -182,6 +186,7 @@ async function checkPlayerReturn(browser) {
     }
     console.log('Production desktop player keeps its bounds throughout bottom-of-Vision return and transition cleanup.');
     console.log('Production Astrid wordmark travels with the mink instead of appearing in the root crossfade.');
+    console.log('Production Beta/Vision badge travels with the brand instead of appearing at its destination early.');
 
     // Wide landscape tablets use this composition, outside the <=1099px layout.
     // Read the delivered sizing rule too: headless Chromium has no browser bars,

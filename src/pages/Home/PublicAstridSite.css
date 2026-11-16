@@ -152,3 +152,40 @@
 :root[data-astrid-page-transition-style="brand"]::view-transition-new(astrid-brand-name) {
   animation: astrid-brand-name-emerge 160ms ease-out both;
 }
+
+/* Beta and its Vision link share the wordmark's journey on scrolled
+   returns. The measured origin is relative to the same wordmark box;
+   no offscreen Vision label or extra live header element is needed. */
+:root[data-astrid-page-transition-style="brand"][data-astrid-brand-beta-follow] .astrid-public-site[data-astrid-lifecycle="active"] .astrid-beta {
+  view-transition-name: astrid-brand-beta !important;
+}
+@keyframes astrid-brand-beta-follow {
+  from { transform: var(--astrid-brand-beta-from); }
+  to { transform: var(--astrid-brand-beta-to); }
+}
+:root[data-astrid-page-transition-style="brand"]::view-transition-group(astrid-brand-beta) {
+  transform-origin: 0 0;
+  animation: astrid-brand-beta-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
+}
+:root[data-astrid-page-transition-style="brand"]::view-transition-new(astrid-brand-beta) {
+  animation: astrid-brand-name-emerge 160ms ease-out both;
+}
+
+@keyframes astrid-brand-word-follow {
+  from {
+    transform: var(--astrid-brand-word-from);
+
+
+  }
+  to {
+    transform: var(--astrid-brand-word-to);
+
+
+  }
+}
+:root[data-astrid-page-transition-style="brand"][data-astrid-brand-beta-follow]::view-transition-group(astrid-brand-name) {
+  transform-origin: 0 0;
+  width: var(--astrid-brand-word-to-width);
+            height: var(--astrid-brand-word-to-height);
+            animation: astrid-brand-word-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
+}

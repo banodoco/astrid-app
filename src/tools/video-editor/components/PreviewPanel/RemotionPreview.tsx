@@ -59,7 +59,7 @@ const UNKNOWN_PREVIEW_REVISION: PreviewRevision = Object.freeze({ kind: 'unknown
  * none. Then it fades once and stays gone for this mount, so seeking and playback never
  * bring it back. The composition's own black ground is render output and stays untouched.
  */
-function FirstFrameCover({ settling, children }: { settling: boolean; children: ReactNode }) {
+export function FirstFrameCover({ settling, children, getCurrentFrame }: { settling: boolean; children: ReactNode; getCurrentFrame: () => number | undefined }) {
   const rootRef = useRef<HTMLDivElement>(null);
   const [revealed, setRevealed] = useState(false);
   useEffect(() => {
@@ -70,6 +70,16 @@ function FirstFrameCover({ settling, children }: { settling: boolean; children: 
     const revealOnPicture = (event: Event) => {
       if (event.target instanceof HTMLImageElement || event.target instanceof HTMLVideoElement) reveal();
     };
+    const inspectDecodedFrame = () => {
+      const currentFrame = getCurrentFrame();
+      if (currentFrame !== undefined && [...root.querySelectorAll('[data-preview-decoded-frame="true"]')].some(
+        element => element.getAttribute('data-preview-presented-frame') === String(currentFrame),
+      )) reveal();
+    };
+    const observer = new MutationObserver(inspectDecodedFrame);
+    observer.observe(root, {childList: true, subtree: true, attributes: true,
+      attributeFilter: ['data-preview-decoded-frame', 'data-preview-presented-frame']});
+    inspectDecodedFrame();
     // The clips' media mount in the commit that settles the shots; give it a frame before
     // deciding that the first frame has no media (or that it has already loaded).
     let frame = requestAnimationFrame(() => {
@@ -88,11 +98,12 @@ function FirstFrameCover({ settling, children }: { settling: boolean; children: 
     root.addEventListener('error', revealOnPicture, true);
     return () => {
       cancelAnimationFrame(frame);
+      observer.disconnect();
       root.removeEventListener('load', revealOnPicture, true);
       root.removeEventListener('loadeddata', revealOnPicture, true);
       root.removeEventListener('error', revealOnPicture, true);
     };
-  }, [revealed, settling]);
+  }, [revealed, settling, getCurrentFrame]);
   return (
     <>
       <div ref={rootRef} style={{ position: 'absolute', inset: 0 }}>{children}</div>
@@ -103,10 +114,10 @@ function FirstFrameCover({ settling, children }: { settling: boolean; children: 
 
 // Both branches use Remotion's composition viewport, so loading occupies the
 // exact video bounds at every resolution and stage size without a second fit.
-function PreviewComposition({ preparing, settling, previewRevision: _previewRevision, ...props }: ComponentProps<typeof TimelineRenderer> & { preparing: boolean; settling: boolean; previewRevision: PreviewRevision }) {
+function PreviewComposition({ preparing, settling, getCurrentFrame, previewRevision: _previewRevision, ...props }: ComponentProps<typeof TimelineRenderer> & { preparing: boolean; settling: boolean; getCurrentFrame: () => number | undefined; previewRevision: PreviewRevision }) {
   if (preparing) return <PreviewLoadingPlaceholder />;
   return (
-    <FirstFrameCover settling={settling}>
+    <FirstFrameCover settling={settling} getCurrentFrame={getCurrentFrame}>
       <TimelineRenderer {...props} />
     </FirstFrameCover>
   );
@@ -265,13 +276,15 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
   // nothing, and the demo cannot depend on this decoder working on the visitor's browser.
   const tourIdle = useEditorTourRunning();
   const renderedConfig = useMemo(() => (tourIdle ? { ...outputConfig, clips: [] } : outputConfig), [outputConfig, tourIdle]);
+  const getCurrentFrame = useCallback(() => playerRef.current?.getCurrentFrame(), []);
   const inputProps = useMemo(() => ({
     config: renderedConfig,
+    getCurrentFrame,
     preparing,
     settling: shotsSettling,
     previewRevision: delivery.revision,
     ...(runtime?.astridElementHost ? { astridElementHost: runtime.astridElementHost } : {}),
-  }), [delivery.revision, renderedConfig, preparing, shotsSettling, runtime?.astridElementHost]);
+  }), [delivery.revision, renderedConfig, preparing, shotsSettling, runtime?.astridElementHost, getCurrentFrame]);
   // The tour's demo timeline can never be saved, so "Unsaved local" and "Preview unavailable" would only be noise.
   const touring = tourIdle;
   const displayedRevisionLabel = touring ? '' : previewRevisionLabel(delivery.revision);

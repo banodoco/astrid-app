@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { applyRequiredPin, checkManifest } from './pin.mjs';
+import { applyRequiredPin, checkLocalPins, checkManifest } from './pin.mjs';
 import * as guard from './release-guard.mjs';
 import { checkReleaseGuard, readSnapshot } from './release-guard.mjs';
 import { servedMismatches } from './served-manifest.mjs';
@@ -264,6 +265,26 @@ test('the App runtime.lock.json source_commit must be the runtime.sha the manife
   );
 });
 
+test('manifest pins agree with both App locks and reject a one-sided pin change', () => {
+  const SHA_C = 'c'.repeat(40);
+  const localPins = {
+    agentVendorLock: { producer: 'astrid-agent', source_commit: SHA_A },
+    appRuntimeLock: { source_commit: SHA_B },
+  };
+  assert.match(
+    checkLocalPins(manifestOf(), localPins),
+    /agent\.sha matches config\/astrid-cli-surface\/vendor\.lock\.json source_commit a{40}; runtime\.sha matches runtime\.lock\.json source_commit b{40}/,
+  );
+  assert.throws(
+    () => checkLocalPins(manifestOf(), { ...localPins, agentVendorLock: { ...localPins.agentVendorLock, source_commit: SHA_C } }),
+    { message: `install-manifest.json agent.sha ${SHA_A} does not match config/astrid-cli-surface/vendor.lock.json source_commit ${SHA_C}` },
+  );
+  assert.throws(
+    () => checkLocalPins(manifestOf(), { ...localPins, appRuntimeLock: { source_commit: SHA_C } }),
+    { message: `install-manifest.json runtime.sha ${SHA_B} does not match runtime.lock.json source_commit ${SHA_C}` },
+  );
+});
+
 test('the pin check refuses a manifest runtime.sha that disagrees with the Agent runtime.lock.json', async () => {
   const SHA_C = 'c'.repeat(40);
   const reader = async (repository, sha, file) => {
@@ -274,6 +295,38 @@ test('the pin check refuses a manifest runtime.sha that disagrees with the Agent
     () => checkManifest(manifestOf(), reader),
     { message: `install-manifest.json runtime.sha ${SHA_B} does not match agent ${SHA_A} runtime.lock.json source_commit ${SHA_C}` },
   );
+});
+
+test('a coherent served tuple is independent of the current checkout locks', async () => {
+  const schemaPath = Buffer.from('contract/openapi.json');
+  const schemaBytes = Buffer.from('{"openapi":"3.1.0"}\n');
+  const pathLength = Buffer.alloc(4);
+  const dataLength = Buffer.alloc(8);
+  pathLength.writeUInt32BE(schemaPath.length);
+  dataLength.writeBigUInt64BE(BigInt(schemaBytes.length));
+  const digest = `sha256:${createHash('sha256').update(pathLength).update(schemaPath).update(dataLength).update(schemaBytes).digest('hex')}`;
+  const sources = {
+    vibecomfy: { revision: 'c'.repeat(40) },
+    lifecycle: { repository: 'https://github.com/banodoco/runpod-lifecycle', revision: 'd'.repeat(40), version: '1.0.0' },
+  };
+  const manifest = manifestOf({
+    runtime: { sha: SHA_B, schema_digest: digest },
+    vibecomfy: { sha: sources.vibecomfy.revision },
+    lifecycle: { repo: sources.lifecycle.repository, sha: sources.lifecycle.revision, version: sources.lifecycle.version },
+  });
+  const files = new Map([
+    [`banodoco/astrid-agent/${SHA_A}/runtime.lock.json`, Buffer.from(JSON.stringify({ source_commit: SHA_B }))],
+    [`banodoco/astrid-agent/${SHA_A}/astrid/packs/runpod/pins.json`, Buffer.from(JSON.stringify({ sources }))],
+    [`banodoco/astrid-runtime/${SHA_B}/contract/manifest.json`, Buffer.from(JSON.stringify({ openapi: 'openapi.json', schemas: [] }))],
+    [`banodoco/astrid-runtime/${SHA_B}/contract/openapi.json`, schemaBytes],
+  ]);
+  const reader = async (repository, sha, file) => {
+    const key = `${repository}/${sha}/${file}`;
+    assert.ok(files.has(key), `unexpected remote read: ${key}`);
+    return files.get(key);
+  };
+  assert.throws(() => checkLocalPins(manifest), /does not match config\/astrid-cli-surface\/vendor\.lock\.json/);
+  assert.match(await checkManifest(manifest, reader), /Manifest pins agent a{40}, Runtime b{40}/);
 });
 
 test('the CLI with --pins refuses a head whose runtime.sha disagrees with the App runtime.lock.json', async (t) => {
@@ -304,6 +357,33 @@ test('the CLI with --pins refuses a head whose runtime.sha disagrees with the Ap
   assert.equal(result.status, 1, result.stdout);
   assert.ok(
     result.stderr.includes(`release guard refused: install-manifest.json runtime.sha ${SHA_C} does not match App runtime.lock.json source_commit ${SHA_B}`),
+    result.stderr,
+  );
+});
+
+test('the --pins CLI compares against lock files at the selected head ref', async (t) => {
+  const SHA_C = 'c'.repeat(40);
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'release-guard-head-pins-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }).toString().trim();
+  const files = {
+    'public/install-manifest.json': Buffer.from(`${JSON.stringify(manifestOf(), null, 2)}\n`),
+    'runtime.lock.json': Buffer.from(`${JSON.stringify({ source_commit: SHA_B }, null, 2)}\n`),
+    'config/astrid-cli-surface/vendor.lock.json': Buffer.from(`${JSON.stringify({ producer: 'astrid-agent', source_commit: SHA_C }, null, 2)}\n`),
+    ...bootstrapDefaults,
+  };
+  git('init', '-q', '-b', 'main');
+  for (const [file, bytes] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(repo, file)), { recursive: true });
+    await writeFile(path.join(repo, file), bytes);
+  }
+  git('add', '.');
+  git('-c', 'user.name=Release guard test', '-c', 'user.email=release-guard-test@example.invalid', 'commit', '-q', '-m', 'head pins');
+  const head = git('rev-parse', 'HEAD');
+  const result = spawnSync(process.execPath, [releaseGuardPath, '--pins', head, 'HEAD'], { cwd: repo, encoding: 'utf8' });
+  assert.equal(result.status, 1, result.stdout);
+  assert.ok(
+    result.stderr.includes(`release guard refused: install-manifest.json agent.sha ${SHA_A} does not match config/astrid-cli-surface/vendor.lock.json source_commit ${SHA_C}`),
     result.stderr,
   );
 });

@@ -35,7 +35,7 @@ vi.mock('@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx', async imp
 }));
 
 const contractFixture = vi.hoisted(() => ({ digest: 'sha256:unsupported-test-fixture' }));
-const CURRENT_V2_DIGEST = 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c';
+const CURRENT_V2_DIGEST = 'sha256:9c9e746eb5138f5e92baf5bcd87e8598c6aa92597c92083956b24517c4071923';
 
 vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
@@ -68,7 +68,7 @@ async function environment(children = false, raw: boolean | 'property' = false, 
     }
   }
   if (trackMarker) {
-    source.config.tracks = source.config.tracks.map(track => ({ ...track, app: { scaleAppliesToPositionedClips: true } }));
+    source.config.tracks = source.config.tracks.map(track => ({ ...track, app: { scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 } }));
     (document.parent_revision.payload.config as Record<string, unknown>).tracks = structuredClone(source.config.tracks);
   }
   if (topLevel) delete document.parent_revision.payload.config.clips;

@@ -538,7 +538,8 @@ function projectClip(
     // Transport clips expose duration_ms; editor-form clips with `from`/`to`
     // retain those trim bounds instead of being converted to a parent-sized
     // hold. Hold remains the deterministic fallback for duration-only clips.
-    ...(hasTrim ? {} : { hold: durationMs / 1000 }),
+    ...(!hasTrim || (clipType === 'image' && rawClip.hold !== undefined)
+      ? { hold: durationMs / 1000 } : {}),
     ...(muted || hasAuthoredGain ? { volume: muted ? 0 : gain } : {}),
     ...preservedGeometry,
     ...(params ? { params } : {}),
@@ -572,7 +573,9 @@ function projectClip(
   if (clampToOccurrenceDuration && isActiveTimelineClip(rawClip)) {
     const remainingSeconds = occurrence.durationMs / 1000 - projected.at + occurrence.atMs / 1000;
     if (remainingSeconds <= 0) return null;
-    if (hasTrim && projected.from !== undefined && projected.to !== undefined) {
+    if (clipType === 'image' && projected.hold !== undefined) {
+      projected.hold = Math.min(projected.hold, remainingSeconds * speed);
+    } else if (hasTrim && projected.from !== undefined && projected.to !== undefined) {
       const maxTrimmedTo = projected.from + remainingSeconds * speed;
       if (projected.to > maxTrimmedTo) {
         projected.to = maxTrimmedTo;
@@ -729,7 +732,12 @@ export function projectCanonicalComposition(
     // still-image renderer and export contract call them `hold`. Normalize the
     // read model only, retaining the canonical document and its clip identity.
     const clipType = clip.clipType === 'image' ? 'hold' : clip.clipType;
-    return { ...clip, clipType, ...(asset ? { asset } : {}), assetEntry: asset ? registry[asset] : undefined };
+    const hold = clip.clipType === 'image' && clip.hold === undefined
+      && typeof clip.from === 'number' && Number.isFinite(clip.from)
+      && typeof clip.to === 'number' && Number.isFinite(clip.to) && clip.to > clip.from
+      ? clip.to - clip.from
+      : clip.hold;
+    return { ...clip, clipType, ...(hold !== undefined ? { hold } : {}), ...(asset ? { asset } : {}), assetEntry: asset ? registry[asset] : undefined };
   });
   const output = outputBaseConfig?.output ?? { resolution: '1920x1080', fps: 30, file: `timeline-${composition.parentDocumentId}.mp4` };
   const baseApp = record(outputBaseConfig?.app) ?? {};

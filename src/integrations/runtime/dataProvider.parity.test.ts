@@ -502,3 +502,18 @@ describe('load freshness', () => {
       && request.path.endsWith('/composition-revisions/parent-r1'))).toHaveLength(1);
   });
 });
+
+it.each(['legacy', 'resolver'] as const)('keeps canvas migration findings through RuntimeDataProvider %s load and save serialization', async mode => {
+  const clips = [{id: 'canvasless', track: 'V1', at: 0, clipType: 'media', asset: 'asset-video', hold: 1}];
+  const fixture = runtimeFixture({parentComposition: composition({config: {clips, tracks: [track]}, clips, registry: {assets: {'asset-video': {file: 'clips/demo.mp4', media_id: MANAGED_OBJECT_ID, type: 'video/mp4', resolution: '1920x1080'}}} as AssetRegistry})});
+  const provider = providerFor(fixture);
+  const {loadTimelineJsonFromProvider, rowsToConfig} = await import('@/tools/video-editor/lib/timeline-data.ts');
+  const data = mode === 'legacy'
+    ? await loadTimelineJsonFromProvider(provider, TIMELINE_ID)
+    : await loadTimelineJsonFromProvider(provider, {resolveAssetUrl: async file => file}, TIMELINE_ID);
+  expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({details: expect.objectContaining({kind: 'canvas', source: 'app-resolved', before: undefined, after: expect.objectContaining({resolution: '1280x720', fps: 30})})})]));
+  const saved = rowsToConfig(data.rows, data.meta, data.output, data.clipOrder, data.tracks, data.config.pinnedShotGroups, data.config);
+  expect(saved.output).toMatchObject({resolution: '1280x720', fps: 30});
+  expect(saved).not.toHaveProperty('migrationIssues');
+  expect(saved).not.toHaveProperty('placementFindings');
+});

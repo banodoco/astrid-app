@@ -1,6 +1,6 @@
 import { resolveTrackTransform } from '@banodoco/timeline-composition';
 import { getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
-import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment } from 'remotion';
+import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment, useVideoConfig } from 'remotion';
 import { Component, createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type FC, type ReactNode } from 'react';
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
 import { getAudioTracks, getVisualTracks } from '@/tools/video-editor/lib/editor-utils.ts';
@@ -50,6 +50,7 @@ import type {
 import { applyAutomationOverrides, resolveAnimatedParams } from '@/tools/video-editor/keyframes/index.ts';
 import { VideoEditorRuntimeContext } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import {
+  canonicalizeTimelinePair,
   getTimelinePostprocessShader,
   scanTimelineLiveBindings,
   type TimelineLiveBindingRecord,
@@ -137,7 +138,7 @@ type ShotChildCacheEntry = {
   /** Notify all subscribers (used after the entry resolves or is dropped). */
   readonly notify: () => void;
   /** Latest settled outcome: resolved config, or `null` when the load failed. */
-  resolved: ResolvedTimelineConfig | null;
+  resolved: {config: ResolvedTimelineConfig; sourceCanvasMissing: boolean} | null;
   settled: boolean;
 };
 
@@ -172,8 +173,10 @@ const loadReferencedTimelineIntoCache = (
   // Note: `promise` is intentionally not returned — dedup relies on the
   // entry living in the cache Map from the moment creation starts.
   provider.loadReferencedTimeline?.(timelineId).then(async ({ timeline, registry, resolveAssetUrl }) => {
-    const resolved = await resolveTimelineConfig(timeline.config, registry, resolveAssetUrl);
-    entry.resolved = resolved;
+    const canonical = canonicalizeTimelinePair(timeline.config, registry);
+    const resolved = await resolveTimelineConfig(canonical.config, canonical.registry, resolveAssetUrl);
+    const sourceCanvasMissing = !timeline.config.output?.resolution || Boolean(timeline.placementFindings?.some(finding => finding.kind === 'canvas' && finding.source === 'app-resolved'));
+    entry.resolved = {config: resolved, sourceCanvasMissing};
     entry.settled = true;
     entry.notify();
     return resolved;
@@ -210,12 +213,13 @@ export const invalidateReferencedTimelineCache = (
   entry.notify();
 };
 
-const getShotChildSnapshot = (entry: ShotChildCacheEntry | null): ResolvedTimelineConfig | null => (
+const getShotChildSnapshot = (entry: ShotChildCacheEntry | null): ShotChildCacheEntry['resolved'] => (
   entry?.settled ? entry.resolved : null
 );
 
 const ShotClipSequence: FC<{ clip: ResolvedTimelineClip; fps: number }> = ({ clip, fps }) => {
   const runtime = useContext(VideoEditorRuntimeContext);
+  const playerCanvas = useVideoConfig();
   const timelineDocumentId = isRecord(clip.params) && typeof clip.params.timeline_document_id === 'string'
     ? clip.params.timeline_document_id
     : null;
@@ -228,7 +232,7 @@ const ShotClipSequence: FC<{ clip: ResolvedTimelineClip; fps: number }> = ({ cli
   // it kicks off the (deduplicated) load and then subscribes to that entry,
   // so the arriving config triggers the re-render. Concurrent/repeated
   // mounts of the same (provider, timeline) pair share one entry.
-  const childConfig = useSyncExternalStore(
+  const childSnapshot = useSyncExternalStore(
     provider && timelineDocumentId && provider.loadReferencedTimeline
       ? (listener) => {
           const byTimeline = shotChildCacheByProvider.get(provider);
@@ -247,6 +251,12 @@ const ShotClipSequence: FC<{ clip: ResolvedTimelineClip; fps: number }> = ({ cli
     () => null,
   );
 
+  const childConfig = childSnapshot?.config;
+  const resolutionText = childConfig?.output?.resolution;
+  const childCanvas = resolutionText && /^\d+x\d+$/.test(resolutionText) ? parseResolution(resolutionText) : null;
+  const incompatibleCanvas = childSnapshot && (childSnapshot.sourceCanvasMissing || !childCanvas
+    || childCanvas.width !== playerCanvas.width || childCanvas.height !== playerCanvas.height);
+
   return (
     <Sequence
       key={clip.id}
@@ -259,7 +269,9 @@ const ShotClipSequence: FC<{ clip: ResolvedTimelineClip; fps: number }> = ({ cli
       // still mounts on the boundary and can flash while loading/decoding.
       premountFor={Math.ceil(fps * 2)}
     >
-      {childConfig ? (
+      {incompatibleCanvas ? (
+        <AbsoluteFill role="alert" data-testid="shot-preview-unsupported-canvas">{`Shot clip '${clip.id}' child '${timelineDocumentId ?? 'unknown'}' property output.resolution must match the Player canvas (${playerCanvas.width}x${playerCanvas.height}) before preview.`}</AbsoluteFill>
+      ) : childConfig ? (
         <TimelineRenderer config={childConfig} />
       ) : (
         <AbsoluteFill

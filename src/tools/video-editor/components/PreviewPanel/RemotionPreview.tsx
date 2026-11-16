@@ -88,7 +88,8 @@ export function FirstFrameCover({ settling, children, getCurrentFrame }: { settl
         const painted = (element: HTMLImageElement | HTMLVideoElement) => (
           element instanceof HTMLImageElement ? element.complete : element.readyState >= 2
         );
-        if (media.length === 0 || media.some(painted)) reveal();
+        const pendingVideo = root.querySelector('[data-preview-decoded-frame]');
+        if ((!pendingVideo && media.length === 0) || media.some(painted)) reveal();
       });
     });
     // Media load events do not bubble; listen in the capture phase. A failed picture

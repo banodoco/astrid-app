@@ -20,3 +20,12 @@ describe('first frame cover', () => {
     disconnect.mockRestore();
   });
 });
+
+it('keeps a video-only canvas covered until the current frame is decoded', async () => {
+  const currentFrame = () => 12;
+  const view = render(<FirstFrameCover settling={false} getCurrentFrame={currentFrame}><span data-preview-decoded-frame="false" /><canvas /></FirstFrameCover>);
+  await new Promise(resolve => setTimeout(resolve, 60));
+  expect(screen.getByTestId('preview-first-frame-cover')).not.toHaveClass('opacity-0');
+  view.rerender(<FirstFrameCover settling={false} getCurrentFrame={currentFrame}><span data-preview-decoded-frame="true" data-preview-presented-frame="12" /><canvas /></FirstFrameCover>);
+  await waitFor(() => expect(screen.getByTestId('preview-first-frame-cover')).toHaveClass('opacity-0'));
+});

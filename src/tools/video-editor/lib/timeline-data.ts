@@ -706,7 +706,7 @@ export function loadTimelineJsonFromProvider(
       } : assetResolver;
       // E4 seam 4/5: the loaded bundle's SOURCE items ride into assembly
       // data so lanes repaint after reload (views still derive render-side).
-      return buildTimelineDataWithResolver(
+      const data = await buildTimelineDataWithResolver(
         loadedTimeline.config,
         registry,
         loadResolver,
@@ -716,6 +716,7 @@ export function loadTimelineJsonFromProvider(
         loadedTimeline.head,
         loadedTimeline.bundle?.transcriptReferences,
       );
+      return {...data, migrationIssues: [...placementFindingsToIssues(loadedTimeline.placementFindings ?? [], 'pair-aware'), ...(data.migrationIssues ?? [])]};
     })();
   }
 
@@ -737,7 +738,7 @@ export function loadTimelineJsonFromProvider(
     const urlResolver = loaded.resolveAssetUrl
       ?? explicitUrlResolver
       ?? ((file: string) => provider.resolveAssetUrl(file));
-    return buildTimelineData(
+    const data = await buildTimelineData(
       loadedTimeline.config,
       registry,
       urlResolver,
@@ -746,6 +747,7 @@ export function loadTimelineJsonFromProvider(
       loadedTimeline.head,
       loadedTimeline.bundle?.transcriptReferences,
     );
+    return {...data, migrationIssues: [...placementFindingsToIssues(loadedTimeline.placementFindings ?? [], 'pair-aware'), ...(data.migrationIssues ?? [])]};
   })();
 }
 

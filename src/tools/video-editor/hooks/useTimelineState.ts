@@ -391,6 +391,7 @@ function useTimelineChromeContextValue({
   retryLoad,
   watchdogTripped,
   watchdogReason,
+  saveNotice,
   retryWatchdog,
   retryPendingSave,
   flushPendingSave,
@@ -418,6 +419,7 @@ function useTimelineChromeContextValue({
   startRender: ReturnType<typeof useRenderState>['startRender'];
   watchdogTripped: boolean;
   watchdogReason: 'timeout' | 'lost-edit' | null;
+  saveNotice: string | null;
   retryWatchdog: () => void;
   retryPendingSave: () => void;
   flushPendingSave: () => Promise<number>;
@@ -473,6 +475,7 @@ function useTimelineChromeContextValue({
     retrySaveAfterConflict,
     watchdogTripped,
     watchdogReason,
+    saveNotice,
     retryWatchdog,
     retryPendingSave,
     flushPendingSave,
@@ -539,6 +542,7 @@ function useTimelineChromeContextValue({
     trackManagement.unusedTrackCount,
     watchdogReason,
     watchdogTripped,
+    saveNotice,
     recoveryDraft,
     retryRecoveredDraft,
     discardRecoveredDraft,
@@ -1230,6 +1234,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     retrySaveAfterConflict,
     watchdogTripped: save.watchdogTripped,
     watchdogReason: save.watchdogReason,
+    saveNotice: save.saveNotice,
     retryWatchdog: save.retryWatchdog,
     retryPendingSave: save.retryPendingSave,
     flushPendingSave: save.flushPendingSave,

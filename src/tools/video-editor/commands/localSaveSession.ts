@@ -1,6 +1,6 @@
 import type { CommitRequest } from '@/integrations/runtime/timeline-commit-types.ts';
 import { ApiError } from '@/integrations/runtime/generated.ts';
-import { classifyRuntimeCommitFailure } from '@/integrations/runtime/client.ts';
+import { classifyRuntimeCommitFailure, type RuntimeCommitFailureKind } from '@/integrations/runtime/client.ts';
 import { supportsFullV2Commit } from '@/integrations/runtime/contract-metadata.ts';
 import type { TimelineCommandBasis, TimelineCommitResult } from '../data/DataProvider.ts';
 import { documentPatchIntent } from './documentPatchIntent.ts';
@@ -31,6 +31,8 @@ export interface LocalSaveState {
   ownerId?: string;
   recoverableOwners: string[];
   error?: OutboxJson;
+  /** User-facing reason for a change that was removed from the queue; cleared by the next acknowledged save. */
+  notice?: string;
 }
 
 interface Options {
@@ -56,6 +58,23 @@ const same = (a: OutboxJson, b: OutboxJson): boolean => {
 };
 const clone = <T>(value: T): T => structuredClone(value);
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
+const rejectionKind = (error: OutboxJson | undefined): string | undefined => error && typeof error === 'object' && !Array.isArray(error) && typeof error.kind === 'string'
+  ? error.kind : undefined;
+const rejectionMessage = (error: OutboxJson | undefined): string => error && typeof error === 'object' && !Array.isArray(error) && typeof error.message === 'string'
+  ? error.message : 'This change could not be saved.';
+
+/** User-facing reason for a permanent rejection; undefined keeps the raw error message. */
+function permanentRejectionMessage(kind: RuntimeCommitFailureKind, error: unknown): string | undefined {
+  if (kind === 'too_large') {
+    const details = error instanceof ApiError ? error.details : undefined;
+    const limit = typeof details?.max_bytes === 'number' ? ` The limit is ${details.max_bytes} bytes.`
+      : typeof details?.limit === 'number' ? ` The limit is ${details.limit}.` : '';
+    return `This change is too large to save.${limit}`;
+  }
+  if (kind === 'unsupported_route') return 'This version of Astrid does not support this save. Your changes are kept but not saved until Astrid is updated.';
+  if (kind === 'rejected_request') return 'The Runtime refused this save, and sending it again would not change the result. Your changes are kept but not saved.';
+  return undefined;
+}
 const dtoGap = { code: 'commit_contract_unavailable',
   message: 'Local edit retained. Saving this edit requires the generated v2 doc.patch contract.' };
 
@@ -122,9 +141,38 @@ export async function createLocalSaveSession(options: Options) {
   }
   checkBasis(basis);
 
+  // Reload the canonical head into the display and basis. Shared by every rejected path.
+  async function resetToCanonical(at: number) {
+    const latest = await options.loadLatest();
+    checkBasis(latest);
+    if (closed || at !== generation) return;
+    const prepared = await options.prepareDisplay(clone(latest));
+    if (closed || at !== generation) return;
+    basis = clone(latest);
+    displayBasis = clone(latest);
+    document = toOutboxJson(prepared.document);
+    prepared.adopt();
+  }
+
+  // A payload the Runtime will never accept cannot succeed on retry, and left at the
+  // head it blocks every later edit. Remove it from the queue and tell the user what
+  // was dropped. Edits built on top of it depend on it, so they are removed too.
+  async function discardOversized(failure: OutboxJson): Promise<boolean> {
+    const at = generation;
+    const current = record!;
+    record = await box!.resolveRejected(current.intents.map((intent) => intent.id), undefined, () => !closed);
+    state = { ...state, notice: `${rejectionMessage(failure)} It was not saved and has been removed from the save queue, `
+      + 'so later edits can save. Edits made on top of it were removed with it.' };
+    publish('saved');
+    try { await resetToCanonical(at); }
+    catch (error) { publish('error', { message: `Removed change; reload failed: ${errorMessage(error)}` }); }
+    return false;
+  }
+
   async function rollback() {
     const failure = record?.pending?.outcome;
     if (failure?.kind !== 'rejected') return false;
+    if (rejectionKind(failure.error) === 'too_large') return discardOversized(failure.error);
     const inverse = record?.intents.some((intent) => {
       const commands = saveOf(intent.payload).commands;
       return commands?.some((command) => command.op === 'timeline.inverse') ?? false;
@@ -141,15 +189,7 @@ export async function createLocalSaveSession(options: Options) {
     // of the newer Runtime head or resend it automatically.
     if (conflict && record && isSingleTrackLabelDraft(record)) return true;
     try {
-      const latest = await options.loadLatest();
-      checkBasis(latest);
-      if (closed || at !== generation) return true;
-      const prepared = await options.prepareDisplay(clone(latest));
-      if (closed || at !== generation) return true;
-      basis = clone(latest);
-      displayBasis = clone(latest);
-      document = toOutboxJson(prepared.document);
-      prepared.adopt();
+      await resetToCanonical(at);
     } catch (error) {
       publish('error', { failure: failure.error, message: `Draft retained; reload failed: ${errorMessage(error)}` });
     }
@@ -224,7 +264,7 @@ export async function createLocalSaveSession(options: Options) {
           } catch (error) {
             const kind = error instanceof ApiError && error.status >= 500 ? 'unknown' : classifyRuntimeCommitFailure(error);
             return { kind: kind === 'unknown' || kind === 'storage' ? 'retry' : 'rejected',
-              error: toOutboxJson({ kind, message: errorMessage(error),
+              error: toOutboxJson({ kind, message: permanentRejectionMessage(kind, error) ?? errorMessage(error),
                 ...(error instanceof ApiError ? { code: error.code, details: error.details ?? null } : {}) }) };
           }
         });
@@ -232,6 +272,7 @@ export async function createLocalSaveSession(options: Options) {
         if (record.accepted && record.accepted.intentId !== acceptedId) {
           const result = record.accepted.value as unknown as TimelineCommitResult;
           basis = { head: result.accepted, canonicalDocument: result.canonicalDocument, graph: result.graph };
+          delete state.notice;
         }
         if (await rollback()) return;
         if (record.pending) { publish('retry', record.pending.outcome?.kind === 'retry' ? record.pending.outcome.error : undefined); return; }

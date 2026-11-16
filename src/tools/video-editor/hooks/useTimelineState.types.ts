@@ -240,6 +240,8 @@ export interface TimelineChromeContextValue {
    */
   watchdogTripped: boolean;
   watchdogReason: 'timeout' | 'lost-edit' | null;
+  /** Why a local change was rejected or removed from the save queue; null when there is nothing to say. */
+  saveNotice: string | null;
   retryWatchdog: () => void;
   /**
    * Astrid answered again after a stop: sends the save that never got an answer now (does nothing when none waits, or

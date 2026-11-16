@@ -821,6 +821,16 @@ function TimelineEditorShellCoreComponent({
     </div>
   ) : null;
 
+  /** A local save the Runtime rejected, or removed from the queue: the reason, so the change is never dropped silently. */
+  const saveNoticeBanner = chrome.saveNotice ? (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    >
+      <span>{chrome.saveNotice}</span>
+    </div>
+  ) : null;
+
   /** Diverged banner (B4): a 409 means the document changed elsewhere. No
    *  silent overwrite — explicit Reload or Save as copy. */
   // A save conflict is a choice between two versions, not an error: neutral, not destructive red.
@@ -904,6 +914,7 @@ function TimelineEditorShellCoreComponent({
       {conflictBanner}
       {incompatibleBanner}
       {watchdogBanner}
+      {saveNoticeBanner}
       {recoveryBanner}
       {chrome.loadError && !(recoveryCardShowing && hasLoadedTimeline) ? (
         // The hosted build's "Astrid stopped" / "restarted" card already says what to do about the same failure.

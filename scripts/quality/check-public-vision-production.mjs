@@ -65,7 +65,7 @@ async function checkPage(browser, content) {
     console.log('Production subject cards show goal counts; Goals and exterior desktop arrows are present.');
     await page.getByRole('button', { name: 'See all gaps', exact: true }).click();
     await expect(page.getByRole('dialog', { name: 'All gaps' })).toBeVisible();
-    const gapDialog = page.getByRole('dialog');
+    const gapDialog = page.getByRole('dialog', { name: 'All gaps' });
     await expect(gapDialog).toHaveCSS('opacity', '1');
     await expect.poll(() => gapDialog.evaluate(node => node.style.getPropertyValue('--vision-open-progress'))).toBe('1');
     await expect(gapDialog.locator('.astrid-vision-details-shell')).toHaveCSS('opacity', '1');

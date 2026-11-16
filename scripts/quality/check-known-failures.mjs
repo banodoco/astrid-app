@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-// Expected failures are forbidden except for the three audited drag requirements below and the named Direct Journey
-// exceptions in config/testing/direct-journey-expected-failures.json (the same list the Direct Journey workflow enforces).
+// Expected failures are forbidden except for named Direct Journey exceptions in
+// config/testing/direct-journey-expected-failures.json (the same list the Direct Journey workflow enforces).
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -12,22 +12,11 @@ const EXCEPTIONS_FILE = path.join(DEFAULT_REPO_ROOT, 'config/testing/direct-jour
 // Plan 39 quarantine rule. Each entry: { id (the Plan 39 item), file, title, issue, owner, expiry }. A marker is allowed
 // only inside the test with exactly that title, in that file, directly under a comment line naming the entry id; no other
 // marker in the file is. The guard fails on a missing field, an expired entry (or one more than 14 days out), or more than
-// MAX_QUARANTINE_ENTRIES allowed markers in total (these entries plus the audited drag cases below).
+// MAX_QUARANTINE_ENTRIES allowed markers in total.
 export const MAX_QUARANTINE_ENTRIES = 10;
 export const MAX_EXPIRY_DAYS = 14;
 export const REQUIRED_FIELDS = ['id', 'file', 'title', 'issue', 'owner', 'expiry'];
 export const DIRECT_JOURNEY_EXCEPTIONS = Object.values(JSON.parse(fs.readFileSync(EXCEPTIONS_FILE, 'utf8'))).flat();
-const AUTHORIZED_PATH = 'src/tools/video-editor/hooks/useClipDrag.test.tsx';
-
-// AUDIT REDIRECT (2026-10-19): these are the exact three requirements from the
-// drag audit. Remove this allowlist when M2 EditCommand implementations make
-// the tests ordinary passing tests.
-const AUTHORIZED_NAMES = new Set([
-  'commits a config edit when a free multi-clip drag drops onto a new bottom track',
-  'updates pinnedShotGroupsOverride when a pinned group is dragged across tracks',
-  'updates pinnedShotGroupsOverride when a pinned group is dragged onto a new track',
-]);
-
 function listFiles(dir, namePattern) {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
@@ -56,17 +45,10 @@ function scanFile(file, repoRoot, exceptions) {
         enclosingTitle,
         previousLine: lines[index - 1] ?? '',
         name: call?.[2],
-        hasRequirementComment: /\/\/.*\bEditCommand\b.*\bM[12]\b/.test(lines[index - 1] ?? ''),
       };
     });
   });
 
-  const names = new Map();
-  for (const marker of markers) {
-    if (marker.name === undefined) continue;
-    const key = `${rel}\0${marker.name}`;
-    names.set(key, (names.get(key) ?? 0) + 1);
-  }
   const perException = new Map();
   const exceptionOf = (marker) => exceptions.find((item) => item.file === rel
     && item.title === marker.enclosingTitle && marker.previousLine.includes(item.id));
@@ -84,18 +66,6 @@ function scanFile(file, repoRoot, exceptions) {
         detail: `named exception ${item.id}`,
         name: item.title,
         exceptionId: item.id,
-      };
-    }
-    const isAuthorized = rel === AUTHORIZED_PATH
-      && AUTHORIZED_NAMES.has(marker.name)
-      && marker.hasRequirementComment
-      && (names.get(`${rel}\0${marker.name}`) ?? 0) === 1;
-    if (isAuthorized) {
-      return {
-        where: marker.where,
-        status: 'ALLOWED',
-        detail: 'audited expected-failure marker',
-        name: marker.name,
       };
     }
     return {

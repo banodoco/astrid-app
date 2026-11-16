@@ -48,6 +48,26 @@ jobs:
           ref: ${{ steps.pins.outputs.agent_sha }}
           path: astrid-agent
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+      - name: Verify and summarize manifest-pinned checkouts
+        env:
+          EXPECTED_AGENT_SHA: ${{ steps.pins.outputs.agent_sha }}
+          EXPECTED_RUNTIME_SHA: ${{ steps.pins.outputs.runtime_sha }}
+        run: |
+          actual_agent_sha=$(git -C astrid-agent rev-parse HEAD)
+          actual_runtime_sha=$(git -C astrid-runtime rev-parse HEAD)
+          if [ "$actual_agent_sha" != "$EXPECTED_AGENT_SHA" ]; then
+            echo "Agent checkout $actual_agent_sha does not match manifest pin $EXPECTED_AGENT_SHA" >&2
+            exit 1
+          fi
+          if [ "$actual_runtime_sha" != "$EXPECTED_RUNTIME_SHA" ]; then
+            echo "Runtime checkout $actual_runtime_sha does not match manifest pin $EXPECTED_RUNTIME_SHA" >&2
+            exit 1
+          fi
+          {
+            echo "### Manifest-pinned checkouts"
+            echo "- Agent: \`$actual_agent_sha\`"
+            echo "- Runtime: \`$actual_runtime_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Restore npm cache (C-08)
         id: c08-app-lanes-1
         uses: actions/cache/restore@v4
@@ -153,6 +173,26 @@ jobs:
           fetch-depth: 0
           filter: blob:none
           token: ${{ secrets.ASTRID_READ_TOKEN || github.token }}
+      - name: Verify and summarize manifest-pinned checkouts
+        env:
+          EXPECTED_AGENT_SHA: ${{ steps.pins.outputs.agent_sha }}
+          EXPECTED_RUNTIME_SHA: ${{ steps.pins.outputs.runtime_sha }}
+        run: |
+          actual_agent_sha=$(git -C astrid-agent rev-parse HEAD)
+          actual_runtime_sha=$(git -C astrid-runtime rev-parse HEAD)
+          if [ "$actual_agent_sha" != "$EXPECTED_AGENT_SHA" ]; then
+            echo "Agent checkout $actual_agent_sha does not match manifest pin $EXPECTED_AGENT_SHA" >&2
+            exit 1
+          fi
+          if [ "$actual_runtime_sha" != "$EXPECTED_RUNTIME_SHA" ]; then
+            echo "Runtime checkout $actual_runtime_sha does not match manifest pin $EXPECTED_RUNTIME_SHA" >&2
+            exit 1
+          fi
+          {
+            echo "### Manifest-pinned checkouts"
+            echo "- Agent: \`$actual_agent_sha\`"
+            echo "- Runtime: \`$actual_runtime_sha\`"
+          } >> "$GITHUB_STEP_SUMMARY"
       # The renderer's Node is pinned by astrid-agent/remotion (=20.19.4); the journey refuses any other.
       - uses: actions/setup-node@v4
         with:

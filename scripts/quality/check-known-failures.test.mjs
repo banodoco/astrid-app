@@ -26,13 +26,13 @@ function makeRepo(files) {
   return root;
 }
 
-const auditedNames = [
+const formerDragAllowlistNames = [
   'commits a config edit when a free multi-clip drag drops onto a new bottom track',
   'updates pinnedShotGroupsOverride when a pinned group is dragged across tracks',
   'updates pinnedShotGroupsOverride when a pinned group is dragged onto a new track',
 ];
 const auditedPath = 'src/tools/video-editor/hooks/useClipDrag.test.tsx';
-const auditedSource = (names = auditedNames) => names.map((name) => [
+const formerlyAllowedDragMarkers = (names = formerDragAllowlistNames) => names.map((name) => [
   '// EditCommand support required by M2.',
   `it.fails('${name}', () => {});`,
 ].join('\n')).join('\n');
@@ -47,16 +47,16 @@ describe('expected-failure marker ban', () => {
     assert.match(result.problems.join('\n'), /expected-failure markers are forbidden/);
   });
 
-  it('allows exactly the three audited drag callsites', () => {
-    const result = checkKnownFailures({ repoRoot: makeRepo({ [auditedPath]: auditedSource() }) });
-    assert.equal(result.allowedEntries.length, 3);
-    assert.deepEqual(result.forbiddenEntries, []);
-    assert.deepEqual(result.problems, []);
+  it('rejects the three former drag allowlist names without current registry metadata', () => {
+    const result = checkKnownFailures({ repoRoot: makeRepo({ [auditedPath]: formerlyAllowedDragMarkers() }) });
+    assert.equal(result.allowedEntries.length, 0);
+    assert.equal(result.forbiddenEntries.length, 3);
+    assert.equal(result.problems.length, 3);
   });
 
   it('rejects an audited name in a different path', () => {
     const result = checkKnownFailures({
-      repoRoot: makeRepo({ 'src/other.test.ts': auditedSource([auditedNames[0]]) }),
+      repoRoot: makeRepo({ 'src/other.test.ts': formerlyAllowedDragMarkers([formerDragAllowlistNames[0]]) }),
     });
     assert.equal(result.allowedEntries.length, 0);
     assert.equal(result.forbiddenEntries.length, 1);
@@ -65,7 +65,7 @@ describe('expected-failure marker ban', () => {
 
   it('rejects a changed audited name', () => {
     const result = checkKnownFailures({
-      repoRoot: makeRepo({ [auditedPath]: auditedSource(['commits a different drag case']) }),
+      repoRoot: makeRepo({ [auditedPath]: formerlyAllowedDragMarkers(['commits a different drag case']) }),
     });
     assert.equal(result.allowedEntries.length, 0);
     assert.equal(result.forbiddenEntries.length, 1);
@@ -74,16 +74,16 @@ describe('expected-failure marker ban', () => {
   it('rejects a fourth marker at the audited path', () => {
     const result = checkKnownFailures({
       repoRoot: makeRepo({
-        [auditedPath]: auditedSource([...auditedNames, 'a fourth drag case']),
+        [auditedPath]: formerlyAllowedDragMarkers([...formerDragAllowlistNames, 'a fourth drag case']),
       }),
     });
-    assert.equal(result.allowedEntries.length, 3);
-    assert.equal(result.forbiddenEntries.length, 1);
+    assert.equal(result.allowedEntries.length, 0);
+    assert.equal(result.forbiddenEntries.length, 4);
   });
 
   it('rejects duplicate audited callsites', () => {
     const result = checkKnownFailures({
-      repoRoot: makeRepo({ [auditedPath]: auditedSource([auditedNames[0], auditedNames[0]]) }),
+      repoRoot: makeRepo({ [auditedPath]: formerlyAllowedDragMarkers([formerDragAllowlistNames[0], formerDragAllowlistNames[0]]) }),
     });
     assert.equal(result.allowedEntries.length, 0);
     assert.equal(result.forbiddenEntries.length, 2);

@@ -7,10 +7,11 @@
 // is validated on its own.
 import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
-import { checkManifest } from './pin.mjs';
+import { checkLocalPins, checkManifest } from './pin.mjs';
 
 export const MANIFEST_PATH = 'public/install-manifest.json';
 export const BOOTSTRAP_PATHS = ['public/install', 'public/install.ps1', 'public/install.sh'];
+export const APP_AGENT_VENDOR_LOCK_PATH = 'config/astrid-cli-surface/vendor.lock.json';
 export const APP_RUNTIME_LOCK_PATH = 'runtime.lock.json';
 
 const SHA = /^[0-9a-f]{40}$/;
@@ -154,8 +155,11 @@ async function checkHeadPins(repo, headRef, headSnapshot) {
   const manifest = parseManifest(headSnapshot.manifest, 'head install-manifest.json');
   const lockBytes = readAtRef(repo, headRef, APP_RUNTIME_LOCK_PATH);
   const lockMessage = checkAppRuntimeLock(manifest, lockBytes);
+  const agentVendorLock = parseManifest(readAtRef(repo, headRef, APP_AGENT_VENDOR_LOCK_PATH), 'head Agent vendor.lock.json');
+  const appRuntimeLock = parseManifest(lockBytes, 'head runtime.lock.json');
+  const localPinMessage = checkLocalPins(manifest, { agentVendorLock, appRuntimeLock });
   const pinMessage = await checkManifest(manifest);
-  return `${lockMessage} ${pinMessage}`;
+  return `${lockMessage} ${localPinMessage} ${pinMessage}`;
 }
 
 async function main(argv) {

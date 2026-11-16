@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const agentRepo = 'banodoco/astrid-agent';
+const agentVendorProducer = 'astrid-agent';
 const runtimeRepo = 'banodoco/astrid-runtime';
 const manifestPath = path.join(process.cwd(), 'public/install-manifest.json');
+const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const agentVendorLockPath = path.join(appRoot, 'config/astrid-cli-surface/vendor.lock.json');
+const appRuntimeLockPath = path.join(appRoot, 'runtime.lock.json');
 
 function rawUrl(repository, sha, file) {
   return `https://raw.githubusercontent.com/${repository}/${sha}/${file}`;
@@ -107,6 +112,28 @@ async function pin(agentSha, reason) {
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
+export function checkLocalPins(manifest, localPins = undefined) {
+  const agentSha = manifest?.agent?.sha;
+  if (!/^[0-9a-f]{40}$/.test(agentSha ?? '')) throw new Error('install-manifest.json agent.sha must be a full commit SHA');
+  const agentVendorLock = localPins?.agentVendorLock ?? JSON.parse(readFileSync(agentVendorLockPath, 'utf8'));
+  if (agentVendorLock.producer !== agentVendorProducer || !/^[0-9a-f]{40}$/.test(agentVendorLock.source_commit ?? '')) {
+    throw new Error(`config/astrid-cli-surface/vendor.lock.json needs producer ${agentVendorProducer} and a full source_commit`);
+  }
+  if (agentSha !== agentVendorLock.source_commit) {
+    throw new Error(`install-manifest.json agent.sha ${agentSha} does not match config/astrid-cli-surface/vendor.lock.json source_commit ${agentVendorLock.source_commit}`);
+  }
+  const appRuntimeLock = localPins?.appRuntimeLock ?? JSON.parse(readFileSync(appRuntimeLockPath, 'utf8'));
+  if (!/^[0-9a-f]{40}$/.test(appRuntimeLock.source_commit ?? '')) {
+    throw new Error('runtime.lock.json needs a full source_commit');
+  }
+  if (manifest.runtime?.sha !== appRuntimeLock.source_commit) {
+    throw new Error(`install-manifest.json runtime.sha ${manifest.runtime?.sha ?? '(missing)'} does not match runtime.lock.json source_commit ${appRuntimeLock.source_commit}`);
+  }
+  return `install-manifest.json agent.sha matches config/astrid-cli-surface/vendor.lock.json source_commit ${agentVendorLock.source_commit}; runtime.sha matches runtime.lock.json source_commit ${appRuntimeLock.source_commit}.`;
+}
+
+// Validate the manifest's own producer tuple. Served releases may legitimately
+// differ from this checkout; local lock agreement is a separate caller check.
 export async function checkManifest(manifest, reader = readRaw) {
   const agentSha = manifest?.agent?.sha;
   if (!/^[0-9a-f]{40}$/.test(agentSha ?? '')) throw new Error('install-manifest.json agent.sha must be a full commit SHA');
@@ -134,7 +161,9 @@ export async function checkManifest(manifest, reader = readRaw) {
 }
 
 async function check() {
-  process.stdout.write(`${await checkManifest(JSON.parse(await readFile(manifestPath, 'utf8')))}\n`);
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const localPinMessage = checkLocalPins(manifest);
+  process.stdout.write(`${localPinMessage} ${await checkManifest(manifest)}\n`);
 }
 
 async function main() {

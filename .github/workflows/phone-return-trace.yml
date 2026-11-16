@@ -27,84 +27,75 @@ jobs:
           cache: npm
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium
-      - name: Trace the unmodified failing case under bounded CPU delay
+      - name: Compare real pointer navigation with explicit retry scroll alignments
         shell: bash
         run: |
           mkdir -p phone-return-evidence
           git rev-parse HEAD HEAD^{tree} > phone-return-evidence/source.txt
+          node -p 'require("playwright-core/package.json").version' > phone-return-evidence/playwright-version.txt
+          find node_modules/playwright-core/lib -name dom.js -exec cp '{}' phone-return-evidence/playwright-dom.js \;
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('tests/e2e/public-astrid-vision-polish.spec.ts')
+          s = p.read_text()
+          old = "    await page.getByRole('link', { name: 'Astrid home', exact: true }).click();"
+          assert s.count(old) == 1
+          new = """    const homeLink = page.getByRole('link', { name: 'Astrid home', exact: true });
+              await expect(homeLink.locator('img')).toBeInViewport({ ratio: 1 });
+              const point = await homeLink.locator('img').evaluate(node => {
+                const box = node.getBoundingClientRect();
+                const x = box.x + box.width / 2, y = box.y + box.height / 2;
+                return { x, y, hit: document.elementFromPoint(x, y)?.closest('a') === node.closest('a') };
+              });
+              expect(point.hit).toBe(true);
+              await page.mouse.click(point.x, point.y);"""
+          p.write_text(s.replace(old, new))
+          PY
           cat >> tests/e2e/public-astrid-vision-polish.spec.ts <<'SPEC'
 
           test.beforeEach(async ({ page }, info) => {
             const session = await page.context().newCDPSession(page);
             await session.send('Emulation.setCPUThrottlingRate', { rate: info.repeatEachIndex % 2 ? 4 : 1 });
-            await page.addInitScript(() => {
-              const w = window as unknown as { phoneScrollLog: unknown[] };
-              const logs = w.phoneScrollLog = [] as unknown[];
-              const target = (n: EventTarget | null) => n instanceof Element ? `${n.tagName}.${n.className}` : String(n);
-              let watching = false;
-              const read = (kind: string, detail: unknown = null) => {
-                if (logs.length > 5000) return;
-                const header = document.querySelector<HTMLElement>('.astrid-vision-bar');
-                const link = document.querySelector<HTMLElement>('.astrid-vision-brand');
-                const hero = document.querySelector<HTMLElement>('.astrid-vision-manifesto');
-                logs.push({ at: performance.now(), kind, detail, y: scrollY, height: innerHeight,
-                  documentHeight: document.documentElement?.scrollHeight, fonts: document.fonts.status,
-                  active: target(document.activeElement), restoration: history.scrollRestoration,
-                  page: location.pathname, phase: document.documentElement?.dataset.astridPageTransition,
-                  condensed: header?.hasAttribute('data-condensed'),
-                  header: header?.getBoundingClientRect().toJSON(), link: link?.getBoundingClientRect().toJSON(),
-                  hero: hero?.getBoundingClientRect().toJSON() });
-              };
-              for (const event of ['scroll','scrollend','pointerdown','pointerup','click','focusin','popstate','hashchange','resize']) {
-                window.addEventListener(event, e => read(event, { target: target(e.target), trusted: e.isTrusted }), true);
-              }
-              document.fonts.addEventListener('loadingdone', () => read('fonts-ready'));
-              const originalScroll = window.scrollTo;
-              window.scrollTo = function (...args: Parameters<typeof originalScroll>) {
-                read('window.scrollTo', { args, stack: new Error().stack });
-                const options = args[0];
-                if (typeof options === 'object' && options?.top === 900 && !watching) {
-                  watching = true;
-                  const started = performance.now();
-                  const tick = () => { read('frame'); if (performance.now() - started < 8000) requestAnimationFrame(tick); };
-                  requestAnimationFrame(tick);
-                }
-                return originalScroll.apply(this, args);
-              } as typeof originalScroll;
-              const originalFocus = HTMLElement.prototype.focus;
-              HTMLElement.prototype.focus = function (...args) { read('focus-call', { target: target(this), args, stack: new Error().stack }); return originalFocus.apply(this, args); };
-              const originalIntoView = Element.prototype.scrollIntoView;
-              Element.prototype.scrollIntoView = function (...args) { read('scrollIntoView-call', { target: target(this), args, stack: new Error().stack }); return originalIntoView.apply(this, args); };
-              const originalBack = history.back;
-              history.back = function () { read('history.back'); return originalBack.call(this); };
-              document.addEventListener('DOMContentLoaded', () => {
-                const observer = new MutationObserver(records => {
-                  for (const r of records) if (r.target === document.documentElement || (r.target as Element).matches?.('.astrid-vision-bar'))
-                    read('attribute', { target: target(r.target), attribute: r.attributeName });
-                });
-                observer.observe(document.documentElement, { subtree: true, attributes: true,
-                  attributeFilter: ['data-condensed','data-astrid-page-transition','data-astrid-page-transition-style'] });
-                read('ready');
-              });
-            });
           });
           test.afterEach(async ({ page }, info) => {
-            const state = await page.evaluate(() => ({
-              events: (window as unknown as { phoneScrollLog: unknown[] }).phoneScrollLog,
-              transitions: (window as unknown as { __roomTransitions: unknown[] }).__roomTransitions,
-            })).catch(error => ({ error: String(error) }));
-            writeFileSync(`phone-return-evidence/trace-${info.repeatEachIndex}.json`, JSON.stringify(state, null, 2));
+            const records = await page.evaluate(() => (window as unknown as { __roomTransitions: unknown[] }).__roomTransitions).catch(error => ({ error: String(error) }));
+            writeFileSync(`phone-return-evidence/transitions-${info.repeatEachIndex}-${info.title.includes('diagnostic') ? 'probe' : 'return'}.json`, JSON.stringify(records, null, 2));
+          });
+          test('sticky alignment diagnostic', async ({ page }, info) => {
+            test.setTimeout(60000);
+            await pinLive(page);
+            await page.setViewportSize({ width: 390, height: 844 });
+            await page.emulateMedia({ reducedMotion: 'no-preference' });
+            await page.goto('/vision', { waitUntil: 'domcontentloaded' });
+            await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+            await page.addStyleTag({ content: 'html { scroll-behavior: smooth !important; }' });
+            const records = [];
+            for (const block of ['end', 'center', 'nearest'] as const) {
+              await page.evaluate(() => window.scrollTo({ top: 900, behavior: 'instant' }));
+              await page.waitForTimeout(400);
+              const result = await page.locator('.astrid-vision-brand').evaluate(async (node, block) => {
+                const before = scrollY, box = node.getBoundingClientRect().toJSON();
+                node.scrollIntoView({ block, inline: block });
+                await new Promise(resolve => setTimeout(resolve, 900));
+                return { block, before, after: scrollY, beforeBox: box, afterBox: node.getBoundingClientRect().toJSON() };
+              }, block);
+              records.push(result);
+            }
+            writeFileSync(`phone-return-evidence/alignments-${info.repeatEachIndex}.json`, JSON.stringify(records, null, 2));
+            expect(records.every(record => record.before === 900)).toBe(true);
+            expect(records.find(record => record.block === 'nearest')!.after).toBe(900);
+            expect(records.find(record => record.block === 'end')!.after).toBeLessThan(500);
           });
           SPEC
           git diff > phone-return-evidence/instrumentation.patch
           set +e
-          PLAYWRIGHT_OUTPUT_DIR=phone-return-evidence/playwright PLAYWRIGHT_JSON_OUTPUT_FILE=phone-return-evidence/results.json npx playwright test tests/e2e/public-astrid-vision-polish.spec.ts --config playwright.config.ts --project=chromium-desktop --grep 'snapshot at 390px' --repeat-each=6 --workers=2 --trace=on --reporter=line,json > phone-return-evidence/raw.log 2>&1
+          PLAYWRIGHT_OUTPUT_DIR=phone-return-evidence/playwright PLAYWRIGHT_JSON_OUTPUT_FILE=phone-return-evidence/results.json npx playwright test tests/e2e/public-astrid-vision-polish.spec.ts --config playwright.config.ts --project=chromium-desktop --grep 'snapshot at 390px|sticky alignment diagnostic' --repeat-each=4 --workers=2 --trace=on --reporter=line,json > phone-return-evidence/raw.log 2>&1
           result=$?
           echo "$result" > phone-return-evidence/exit.txt
           exit "$result"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: phone-return-delay-${{ matrix.label }}
+          name: phone-pointer-control-${{ matrix.label }}
           path: phone-return-evidence/
           if-no-files-found: error

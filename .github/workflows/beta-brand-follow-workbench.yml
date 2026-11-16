@@ -13,14 +13,14 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/beta-brand-follow-20261116
-          fetch-depth: 4
+          fetch-depth: 5
       - uses: actions/setup-node@v4
         with:
           node-version: '20.19.0'
           cache: npm
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium webkit
-      - name: Check synchronized native frames without interleaving live style reads
+      - name: Keep the wordmark and badge on the same measured animation path
         shell: bash
         run: |
           python3 - <<'PY'
@@ -33,10 +33,10 @@ jobs:
               return textwrap.dedent(block.split('        run: |\n', 1)[1])
           def run(name):
               print('Running:', name, flush=True)
-              body = script(name)
-              if name.startswith('Verify '):
-                  body = re.sub(r"--grep '[^']+'", "--grep 'wordmark accompanies'", body)
-              subprocess.run(['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', body], check=True)
+              subprocess.run(['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script(name)], check=True)
+          def replace(s, old, new):
+              assert s.count(old) == 1, (old[:100], s.count(old))
+              return s.replace(old, new)
           try:
               run('Add the requested badge contract to the existing brand test')
               p = Path('tests/e2e/public-astrid-vision-entry.spec.ts'); s = p.read_text()
@@ -46,34 +46,62 @@ jobs:
                   }), [frame.wordTransform, frame.betaTransform]);'''
               s, count = re.subn(r'const word = new DOMMatrix\(frame\.wordTransform\);\s+const beta = new DOMMatrix\(frame\.betaTransform\);', replacement, s)
               assert count == 1, count
-              old = 'betaCurve: string; betaOpacity: number };'
-              assert s.count(old) == 1
-              s = s.replace(old, 'betaCurve: string; betaOpacity: number; transformReadMs: number; clocks: { name: string; start: string; time: string; pseudo: string | null }[] };')
-              old = 'trace.frames.push({ minkY: new DOMMatrix(mink.transform).f, wordY: new DOMMatrix(word.transform).f,'
-              assert s.count(old) == 1
-              s = s.replace(old, '''// CSSStyleDeclaration is live. Copy the moving transforms together,
-                        // before opacity/size reads can trigger another animation update.
-                        const readStart = performance.now();
+              s = replace(s, 'betaCurve: string; betaOpacity: number };', 'betaCurve: string; betaOpacity: number };')
+              s = replace(s, 'trace.frames.push({ minkY: new DOMMatrix(mink.transform).f, wordY: new DOMMatrix(word.transform).f,', '''// Copy the moving transforms together before reading other live styles.
                         const wordTransform = word.transform;
                         const betaTransform = beta.transform;
                         const minkTransform = mink.transform;
-                        const transformReadMs = performance.now() - readStart;
-                        const clocks = document.getAnimations().filter(animation =>
-                          /astrid-brand-(name|beta)/.test((animation as CSSAnimation).animationName || '')
-                        ).map(animation => ({ name: (animation as CSSAnimation).animationName,
-                          start: String(animation.startTime), time: String(animation.currentTime),
-                          pseudo: (animation.effect as KeyframeEffect | null)?.pseudoElement ?? null }));
-                        trace.frames.push({ minkY: new DOMMatrix(minkTransform).f, wordY: new DOMMatrix(wordTransform).f,
-                          transformReadMs, clocks,''')
-              old = 'minkTransform: mink.transform, wordTransform: word.transform,'
-              assert s.count(old) == 1
-              s = s.replace(old, 'minkTransform, wordTransform,')
-              old = 'betaTransform: beta.transform, betaDuration: beta.animationDuration,'
-              assert s.count(old) == 1
-              s = s.replace(old, 'betaTransform, betaDuration: beta.animationDuration,')
+                        trace.frames.push({ minkY: new DOMMatrix(minkTransform).f, wordY: new DOMMatrix(wordTransform).f,''')
+              s = replace(s, 'minkTransform: mink.transform, wordTransform: word.transform,', 'minkTransform, wordTransform,')
+              s = replace(s, 'betaTransform: beta.transform, betaDuration: beta.animationDuration,', 'betaTransform, betaDuration: beta.animationDuration,')
               p.write_text(s)
-              (evidence/'prior-failures.txt').write_text('Retain43857461802/artifact14222730421: old product missing Beta capture; new oracle initially used DOMMatrix in Node. Corrected decoder in43858204435/artifact14222521723;9 Chromium passes,2 WebKit passes,1 WebKit alignment failure8.88px. This run changes only the sampling order/diagnostic clocks and keeps all1px/scale/movement assertions and product repair unchanged. No waived result.\n')
               run('Apply the bounded badge animation and preserve existing guards')
+              p = Path('src/pages/Home/publicAstridNavigation.ts'); s = p.read_text()
+              anchor = "  root.dataset.astridBrandBetaFollow = '';"
+              additions = '''  // Use the same authored geometry path for both captures. Mixing a
+            // native group morph with an independent transform can drift in WebKit.
+            root.style.setProperty('--astrid-brand-word-from', `translate(${origin.x}px, ${origin.y}px)`);
+            root.style.setProperty('--astrid-brand-word-to', `translate(${word.x}px, ${word.y}px)`);
+            root.style.setProperty('--astrid-brand-word-from-width', `${origin.width}px`);
+            root.style.setProperty('--astrid-brand-word-from-height', `${origin.height}px`);
+            root.style.setProperty('--astrid-brand-word-to-width', `${word.width}px`);
+            root.style.setProperty('--astrid-brand-word-to-height', `${word.height}px`);
+          '''
+              s = replace(s, anchor, additions + anchor)
+              anchor = "    document.documentElement.style.removeProperty('--astrid-brand-beta-to');"
+              s = replace(s, anchor, anchor + '''
+              for (const property of ['from', 'to', 'from-width', 'from-height', 'to-width', 'to-height']) {
+                document.documentElement.style.removeProperty(`--astrid-brand-word-${property}`);
+              }''')
+              p.write_text(s)
+              p = Path('src/pages/Home/PublicAstridSite.css'); s = p.read_text()
+              s += '''
+          @keyframes astrid-brand-word-follow {
+            from {
+              transform: var(--astrid-brand-word-from);
+              width: var(--astrid-brand-word-from-width);
+              height: var(--astrid-brand-word-from-height);
+            }
+            to {
+              transform: var(--astrid-brand-word-to);
+              width: var(--astrid-brand-word-to-width);
+              height: var(--astrid-brand-word-to-height);
+            }
+          }
+          :root[data-astrid-page-transition-style="brand"][data-astrid-brand-beta-follow]::view-transition-group(astrid-brand-name) {
+            transform-origin: 0 0;
+            animation: astrid-brand-word-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
+          }
+          '''
+              p.write_text(s)
+              p = Path('tests/e2e/public-astrid-vision-entry.spec.ts'); s = p.read_text()
+              anchor = "      await expect(page.locator('.astrid-beta-tag')).toHaveText('BETA');"
+              s = replace(s, anchor, '''      expect(await page.evaluate(() => Array.from(document.documentElement.style)
+                  .filter(property => property.startsWith('--astrid-brand-word-')))).toEqual([]);
+          ''' + anchor)
+              p.write_text(s)
+              (evidence/'prior-failures.txt').write_text('Original missing Beta capture:43857461802/artifact14222730421. Initial test decoder incorrectly used DOMMatrix in Node, corrected without assertion changes. Previous mixed native/custom candidate:43858204435/artifact14222521723 failed WebKit alignment8.88px;43859716405/artifact14221524311 failed1.159px despite equal animation clocks. This repair changes product wordmark geometry to the same authored animation path as Beta. Preserve all movement,1px alignment,scale,scroll and cleanup assertions. No unchanged retry or waived failure.\n')
+              subprocess.run(['npx', 'eslint', 'src/pages/Home/publicAstridNavigation.ts', '--max-warnings', '0'], check=True)
               run('Verify movement, retained player and viewport behavior in Chromium')
               run('Verify the native wordmark and badge journey in WebKit')
               run('Commit only the proven feature and remove this temporary workbench')

@@ -35,7 +35,7 @@ vi.mock('@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx', async imp
 }));
 
 const contractFixture = vi.hoisted(() => ({ digest: 'sha256:unsupported-test-fixture' }));
-const CURRENT_V2_DIGEST = 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c';
+const CURRENT_V2_DIGEST = 'sha256:9c9e746eb5138f5e92baf5bcd87e8598c6aa92597c92083956b24517c4071923';
 
 vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
@@ -56,6 +56,17 @@ async function environment(children = false, raw: boolean | 'property' = false, 
       ...(raw === 'property' ? {} : Object.fromEntries([['__proto__', { keep: null }], ['constructor', null]])),
       opaque: { keep: [null, false] }, clips: rawIds.map((id, index) => ({ id, track: 'V1', at: index * 2, hold: 2, clipType: raw === 'property' ? 'hold' : null,
         opaque: { keep: null }, ...(transitions && index < 2 ? { transition: transitions === 'null' ? null : { type: 'crossfade', duration: 0.5, opaque: null } } : {}), ...(rawApp ? { app: rawApp } : {}), ...(asset ? { asset: asset.key } : {}) })) };
+    if (rawApp?.cropRegressionFixture) {
+      authored.tracks = authored.tracks.map(track => ({ ...track, app: { scaleAppliesToPositionedClips: true } }));
+      authored.clips[0].clipType = 'image';
+      if (rawApp.canvaslessRegressionFixture) delete (authored as Partial<typeof authored>).output;
+      if (rawApp.positionedRegressionFixture) {
+        authored.tracks[0].scale = 2;
+        authored.tracks[0].app = {};
+        Object.assign(authored.clips[0], { x: 0, y: 0, width: 960, height: 540 });
+        authored.clips.push({ ...authored.clips[0], id: 'second', at: 2 });
+      }
+    }
     document.parent_revision.payload.config = authored;
     if (asset?.mirror) document.parent_revision.payload.config.registry = structuredClone(asset.mirror === true ? source.registry : asset.mirror);
     document.parent_revision.payload.clips = structuredClone(authored.clips);
@@ -68,7 +79,7 @@ async function environment(children = false, raw: boolean | 'property' = false, 
     }
   }
   if (trackMarker) {
-    source.config.tracks = source.config.tracks.map(track => ({ ...track, app: { scaleAppliesToPositionedClips: true } }));
+    source.config.tracks = source.config.tracks.map(track => ({ ...track, app: { scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 } }));
     (document.parent_revision.payload.config as Record<string, unknown>).tracks = structuredClone(source.config.tracks);
   }
   if (topLevel) delete document.parent_revision.payload.config.clips;
@@ -1104,3 +1115,114 @@ describe('Undo/Redo target only this actor\'s own publications', () => {
     await env.session.dispose();
   });
 });
+
+
+it('retains inherited fit when a crop edit saves legacy placement normalization', async () => {
+  const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true }, {
+    key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+  });
+  const { normalizeClipPlacementWithFindings, resolveClipPlacement } = await import('@banodoco/timeline-composition');
+  const fit = (config: TimelineConfig) => resolveClipPlacement({ clip: config.clips[0], track: config.tracks[0],
+    canvas: { width: 1920, height: 1080 }, intrinsic: { width: 1920, height: 1080 } }).fit;
+  expect(fit(env.source.config)).toBe('contain');
+  const next = structuredClone(env.source);
+  next.config.clips[0].cropLeft = 0.1;
+  await env.handoff.capture(next);
+  const saved = env.session.getDocument().parent_revision.payload.config as unknown as TimelineConfig;
+  expect(saved.output).toEqual(env.initial.canonicalDocument.parent_revision.payload.config.output);
+  expect(saved.clips[0]).toMatchObject({ cropLeft: 0.1 });
+  expect(saved.clips[0].fit).toBeUndefined();
+  expect(saved.tracks[0].app).toMatchObject({ scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
+  expect(fit(normalizeClipPlacementWithFindings(saved).config as unknown as TimelineConfig)).toBe('contain');
+  await env.session.dispose();
+});
+
+
+it('atomically preserves legacy positioned clips when editing another crop', async () => {
+  const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true, positionedRegressionFixture: true }, {
+    key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+  });
+  const next = structuredClone(env.source);
+  next.config.clips[1].cropLeft = 0.1;
+  await env.handoff.capture(next);
+  const saved = env.session.getDocument().parent_revision.payload.config as unknown as TimelineConfig;
+  expect(saved.output).toEqual(env.initial.canonicalDocument.parent_revision.payload.config.output);
+  expect(saved.tracks[0]).toMatchObject({ fit: 'contain', scale: 2, app: { scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 } });
+  expect(saved.clips[0]).toMatchObject({ ...Object.fromEntries(['x','y','width','height','fit'].map(k => [k, env.source.config.clips[0][k as keyof typeof env.source.config.clips[0]]])) });
+  expect(saved.clips[1]).toMatchObject({ cropLeft: 0.1, fit: 'cover' });
+  const [stored] = await env.outboxes.list(env.scope);
+  expect(stored.intents).toHaveLength(1);
+  await env.session.dispose();
+});
+
+
+it('preserves absent output when canvasless migration needs no scale bake', async () => {
+  const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true, canvaslessRegressionFixture: true }, {
+    key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+  });
+  const next = structuredClone(env.source);
+  next.config.clips[0].cropLeft = 0.1;
+  await env.handoff.capture(next);
+  const saved = env.session.getDocument().parent_revision.payload.config as unknown as TimelineConfig;
+  expect(saved.output).toBeUndefined();
+  expect(saved.tracks[0].app).toMatchObject({ clipPlacementVersion: 1 });
+  await env.session.dispose();
+});
+
+it('refuses scale migration based only on an unstated canvas', async () => {
+  const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true, canvaslessRegressionFixture: true, positionedRegressionFixture: true }, {
+    key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+  });
+  const next = structuredClone(env.source);
+  next.config.clips[0].cropLeft = 0.1;
+  await expect(env.handoff.capture(next)).rejects.toThrow('legacy scale migration needs an authored timeline canvas');
+  expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
+  await env.session.dispose();
+});
+
+it('migrates the physical top-level parent clip without inventing a config clip mirror', async () => {
+  const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true }, {
+    key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+  }, true);
+  const next = structuredClone(env.source);
+  next.config.clips[0].cropLeft = 0.1;
+  await env.handoff.capture(next);
+  const parent = env.session.getDocument().parent_revision.payload;
+  expect(parent.config).not.toHaveProperty('clips');
+  expect(parent.clips).toMatchObject([{ id: 'authored', cropLeft: 0.1 }]);
+  expect((parent.config as unknown as TimelineConfig).tracks[0].app).toMatchObject({ clipPlacementVersion: 1 });
+  await env.session.dispose();
+});
+
+it('does not write placement migrations for a no-op', async () => {
+  const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true }, {
+    key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+  });
+  await env.handoff.capture(structuredClone(env.source));
+  expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
+  await env.session.dispose();
+});
+
+it.each(['fit', 'x', 'y', 'width', 'height', 'track.fit', 'track.scale'])
+  ('treats omitted %s as a partial view on no-op and unrelated edit', async omitted => {
+    const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true, positionedRegressionFixture: true }, {
+      key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+    });
+    const next = structuredClone(env.source);
+    if (omitted.startsWith('track.')) delete (next.config.tracks![0] as unknown as Record<string, unknown>)[omitted.slice(6)];
+    else delete (next.config.clips[0] as unknown as Record<string, unknown>)[omitted];
+    const original = structuredClone(env.initial.canonicalDocument);
+    await env.handoff.capture(next);
+    expect(env.session.getDocument()).toEqual(original);
+    next.config.tracks![0].label = 'Renamed';
+    await env.handoff.capture(next);
+    const actual = env.session.getDocument();
+    const expected = structuredClone(original);
+    (expected.parent_revision.payload.config as unknown as TimelineConfig).tracks![0].label = 'Renamed';
+    expect(actual).toEqual(expected);
+    const [stored] = await env.outboxes.list(env.scope);
+    expect(stored.intents).toHaveLength(1);
+    expect(stored.intents[0].payload.commands).toBeUndefined();
+    expect(stored.intents[0].payload.documentIntent).not.toHaveProperty('merge');
+    await env.session.dispose();
+  });

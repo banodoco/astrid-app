@@ -473,3 +473,10 @@ describe('shot-group-commands', () => {
     });
   });
 });
+
+it('preserves clip fit in the image snapshot when switching to a final video', () => {
+  const currentData = makeStaleImageGroupData();
+  currentData.meta['clip-1'].fit = 'cover';
+  const mutation = buildSwitchShotGroupToFinalVideoMutation({currentData, shotId: 'shot-1', rowId: 'V2', clipIds: ['clip-1', 'clip-2'], assetKey: 'asset-final'});
+  expect(mutation?.pinnedShotGroupsOverride?.[0].imageClipSnapshot?.[0].meta.fit).toBe('cover');
+});

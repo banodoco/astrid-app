@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 
 import type { FC, PropsWithChildren } from 'react';
+import * as composition from '@banodoco/timeline-composition';
 import { useEffect } from 'react';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   createTransitionRegistry,
@@ -14,6 +15,8 @@ import { VisualClip, VisualClipSequence } from '@/tools/video-editor/composition
 import type { ResolvedTimelineClip, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import type { RenderMaterialRef } from '@astrid/editor-sdk';
 import type { ShaderEffectRegistryRecord, ShaderEffectRegistrySnapshot } from '@/tools/video-editor/shaders/registry/types.ts';
+
+afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
 // Remotion mocks (mirrors ClipEffectsSnapshot.test.tsx)
@@ -47,6 +50,7 @@ vi.mock('remotion', async () => ({
   Sequence: ({ children, ...props }: PropsWithChildren<Record<string, unknown>>) => (
     <div data-testid="sequence" {...props}>{children}</div>
   ),
+  Internals: {useTimelinePosition: () => 0},
   interpolate: () => 0.5,
   useCurrentFrame: () => currentFrame,
   useRemotionEnvironment: () => currentEnvironment,
@@ -94,6 +98,7 @@ function mediaClip(overrides?: Partial<ResolvedTimelineClip>): ResolvedTimelineC
       id: 'asset-1',
       type: 'image/png',
       src: 'https://example.test/image.png',
+      resolution: '1920x1080',
     },
     ...overrides,
   };
@@ -769,4 +774,86 @@ describe('VisualClip transition rendering', () => {
       expect(screen.getByTestId('missing-transition-placeholder')).toBeInTheDocument();
     });
   });
+});
+
+describe('shared media placement', () => {
+  it('uses inherited fit and a clip override without changing crop', async () => {
+    const clip = mediaClip({cropLeft: 0.25, assetEntry: {id: 'a', type: 'image/png', src: 'https://example.test/a.png', resolution: '1920x800'}});
+    const visualTrack = {...track, kind: 'visual' as const, label: 'V1', fit: 'contain' as const};
+    const {rerender} = render(<VisualClip clip={clip} track={visualTrack} fps={30} />);
+    const image = await screen.findByTestId('image-asset');
+    expect(image.style.width).toBe('1920px');
+    const viewport = image.parentElement!;
+    expect(viewport.style.left).toBe('480px');
+    expect(viewport.style.width).toBe('1440px');
+    rerender(<VisualClip clip={{...clip, fit: 'cover'}} track={visualTrack} fps={30} />);
+    expect(image.style.width).toBe('2592px');
+    expect(viewport.style.left).toBe('480px');
+    expect(viewport.style.width).toBe('1440px');
+  });
+  it.each([undefined, 'invalid'])('loads natural dimensions when resolution is %s', async (resolution) => {
+    const create = document.createElement.bind(document);
+    let probe: HTMLImageElement | undefined;
+    const spy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+      const element = create(tag, options);
+      if (tag === 'img' && !probe) probe = element as HTMLImageElement;
+      return element;
+    }) as typeof document.createElement);
+    const clip = mediaClip({assetEntry: {id: 'a', type: 'image/png', src: 'https://example.test/a.png', resolution}});
+    const visualTrack = {...track, kind: 'visual' as const, label: 'V1', fit: 'contain' as const};
+    const view = render(<VisualClip clip={clip} track={visualTrack} fps={30} />);
+    expect(probe).toBeDefined();
+    Object.defineProperties(probe!, {naturalWidth: {value: 1920}, naturalHeight: {value: 800}});
+    fireEvent.load(probe!);
+    const image = await screen.findByTestId('image-asset');
+    expect(image.style.height).toBe('800px');
+    view.rerender(<VisualClip clip={{...clip, fit: 'cover'}} track={visualTrack} fps={30} />);
+    expect(image.style.width).toBe('2592px');
+    spy.mockRestore();
+  });
+
+  it('shows a named failure when intrinsic metadata cannot load', () => {
+    const create = document.createElement.bind(document);
+    let probe: HTMLImageElement | undefined;
+    const spy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+      const element = create(tag, options);
+      if (tag === 'img' && !probe) probe = element as HTMLImageElement;
+      return element;
+    }) as typeof document.createElement);
+    render(<VisualClip clip={mediaClip({asset: 'missing-size', assetEntry: {id: 'missing-size', type: 'image/png', src: '/missing'}})} track={track} fps={30} />);
+    fireEvent.error(probe!);
+    expect(screen.getByRole('alert')).toHaveTextContent("Clip 'clip-1' asset 'missing-size'");
+    spy.mockRestore();
+  });
+
+  it('uses natural video metadata when resolution is missing', async () => {
+    const create = document.createElement.bind(document);
+    let probe: HTMLVideoElement | undefined;
+    const spy = vi.spyOn(document, 'createElement').mockImplementation(((tag: string, options?: ElementCreationOptions) => {
+      const element = create(tag, options);
+      if (tag === 'video' && !probe) probe = element as HTMLVideoElement;
+      return element;
+    }) as typeof document.createElement);
+    render(<VisualClip clip={mediaClip({assetEntry: {id: 'video', type: 'video/mp4', src: '/video'}})} track={track} fps={30} />);
+    Object.defineProperties(probe!, {videoWidth: {value: 1920}, videoHeight: {value: 800}});
+    fireEvent.loadedMetadata(probe!);
+    expect((await screen.findByTestId('video-asset')).style.height).toBe('800px');
+    spy.mockRestore();
+  });
+
+});
+
+
+it('draws the exact viewport and media rectangles returned by shared placement', async () => {
+  const actual = composition.resolveClipPlacement;
+  const spy = vi.spyOn(composition, 'resolveClipPlacement').mockImplementation(input => {
+    const result = actual(input);
+    return {...result, local: {...result.local, clip: {x: 100, y: 50, width: 300, height: 200}, media: {x: 80, y: 30, width: 500, height: 400}}};
+  });
+  const clip = mediaClip({assetEntry: {id: 'a', type: 'image/png', src: '/a', resolution: '1920x800'}});
+  render(<VisualClip clip={clip} track={track} fps={30} />);
+  const media = await screen.findByTestId('image-asset');
+  expect(media.parentElement).toHaveStyle({left: '100px', top: '50px', width: '300px', height: '200px', overflow: 'hidden'});
+  expect(media).toHaveStyle({left: '-20px', top: '-20px', width: '500px', height: '400px'});
+  spy.mockRestore();
 });

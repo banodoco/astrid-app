@@ -1,5 +1,5 @@
 import type { PreparedShotComposition } from './shotCompositionAdapter.ts';
-import { projectCanonicalComposition } from './shotCompositionProjection.ts';
+import { projectCanonicalComposition, type ShotPlacementFinding } from './shotCompositionProjection.ts';
 import type { ResolvedTimelineConfig } from '@/tools/video-editor/types/index.ts';
 
 export type CanonicalCompositionResolution = Readonly<{
@@ -7,6 +7,7 @@ export type CanonicalCompositionResolution = Readonly<{
   status: 'ready' | 'loading' | 'error';
   config: ResolvedTimelineConfig | null;
   error: Error | null;
+  placementFindings?: readonly ShotPlacementFinding[];
 }>;
 
 /**
@@ -55,11 +56,13 @@ export function resolveCanonicalComposition({
   }
 
   try {
+    const projection = projectCanonicalComposition(composition, baseConfig);
     return {
       source: 'canonical',
       status: 'ready',
-      config: projectCanonicalComposition(composition, baseConfig).config,
+      config: projection.config,
       error: null,
+      placementFindings: projection.placementFindings,
     };
   } catch (error) {
     return {

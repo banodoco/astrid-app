@@ -1,4 +1,5 @@
 import { createContext } from 'react';
+import { normalizeClipPlacementWithFindings } from '@banodoco/timeline-composition';
 import type { CanonicalDocument, CommitRequest, EditCommand, HistoryPage } from '@/integrations/runtime/timeline-commit-types.ts';
 import type { LocalSaveSession } from '../commands/localSaveSession.ts';
 import { toOutboxJson, type OutboxJson } from '../commands/commitOutbox.ts';
@@ -77,6 +78,8 @@ const same = (a: unknown, b: unknown) => a === undefined || b === undefined
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const field = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+const changedField = (previous: Record<string, unknown>, next: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(next, key) && !same(field(previous, key), field(next, key));
 
 // Upstream config builders include optional undefined fields. Object omission
 // also preserves the editor's explicit transition-clear action as a removal.
@@ -245,7 +248,7 @@ export function createTimelineLocalSaveHandoff(options: {
       // Omission is a partial editor view, not an explicit clear. An unchanged
       // default/undefined never overwrites the raw own key (including null).
       for (const [key, value] of Object.entries(next)) {
-        if (same(field(previous, key), value)) continue;
+        if (!changedField(previous, next, key)) continue;
         if (value === undefined) {
           if ((!(element && ['elementRef', 'entrance'].includes(key)) && key !== 'transition') || path.length !== 3 || path[0] !== 'config' || path[1] !== 'clips') {
             refuse(`explicit clear is unavailable: ${[...path, key].join('/')}`, 'explicit-clear-unavailable');
@@ -262,6 +265,59 @@ export function createTimelineLocalSaveHandoff(options: {
       refuse(`changed display value has no exact authored binding: ${path.join('/')}`, 'display-value-unbound');
     }
     return authoredJson(next);
+  }
+  // Recompute only package-owned placement leaves from the verified physical parent.
+  // Applying them before the user delta preserves inherited fit across reloads.
+  function placementBaseline(raw: unknown, displayed: TimelineConfig): unknown {
+    if (!object(raw) || !Array.isArray(raw.clips) || !Array.isArray(raw.tracks))
+      refuse('placement migration has no authored clips and tracks');
+    const resolution = displayed.output?.resolution?.match(/^(\d+)x(\d+)$/i);
+    const fps = displayed.output?.fps;
+    const legacyCanvas = resolution && typeof fps === 'number' && Number.isFinite(fps) && fps > 0
+      ? { width: Number(resolution[1]), height: Number(resolution[2]), fps, source: 'app-resolved' as const } : undefined;
+    const result = normalizeClipPlacementWithFindings(structuredClone(raw) as Parameters<typeof normalizeClipPlacementWithFindings>[0],
+      legacyCanvas ? { legacyCanvas } : undefined);
+    if (result.findings.some(finding => finding.kind === 'scale-bake')
+      && result.findings.some(finding => finding.kind === 'canvas' && finding.source === 'app-resolved')) {
+      refuse('legacy scale migration needs an authored timeline canvas before this appearance edit');
+    }
+    const baseline = structuredClone(raw);
+    const clips = baseline.clips as Record<string, unknown>[];
+    const tracks = baseline.tracks as Record<string, unknown>[];
+    const normalized = result.config;
+    const unique = (rows: Record<string, unknown>[], id: string | undefined) => {
+      const matching = rows.filter(row => object(row) && row.id === id);
+      if (!id || matching.length !== 1) refuse('placement migration has no unique authored binding');
+      return matching[0];
+    };
+    for (const finding of result.findings) {
+      if (finding.kind === 'canvas' || finding.kind === 'canvas-not-required') continue;
+      if (finding.kind === 'markers') {
+        const row = unique(tracks, finding.trackId);
+        const expected = normalized.tracks?.find(track => track.id === finding.trackId);
+        const view = displayed.tracks?.find(track => track.id === finding.trackId);
+        if (!expected || !view || !object(expected.app) || !object(view.app)) refuse('placement migration track is unavailable');
+        const app = object(row.app) ? structuredClone(row.app) : {};
+        for (const key of ['scaleAppliesToPositionedClips', 'clipPlacementVersion'] as const) {
+          if (!same(expected.app[key], view.app[key])) refuse('placement migration differs from verified display');
+          app[key] = expected.app[key];
+        }
+        row.app = app;
+      } else if (finding.kind === 'scale-bake' || finding.kind === 'explicit-fit') {
+        const row = unique(clips, finding.clipId);
+        const expected = normalized.clips.find(clip => clip.id === finding.clipId && clip.track === finding.trackId);
+        const view = displayed.clips.find(clip => clip.id === finding.clipId && clip.track === finding.trackId);
+        if (!expected || !view || row.track !== finding.trackId) refuse('placement migration clip is unavailable');
+        const keys = finding.kind === 'scale-bake' ? ['x', 'y', 'width', 'height'] as const : ['fit'] as const;
+        for (const key of keys) {
+          if (!same(expected[key], view[key])) refuse('placement migration differs from verified display');
+          row[key] = expected[key];
+        }
+      } else {
+        refuse('unsupported placement migration finding');
+      }
+    }
+    return baseline;
   }
   const handoff: TimelineLocalSaveHandoff = {
     capture(input, gestureBasis) {
@@ -281,14 +337,23 @@ export function createTimelineLocalSaveHandoff(options: {
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
-        const topLevelClips = (parentGesture || gestureBasis?.kind === 'prepared-media' || gestureBasis?.kind === 'element') && object(parent.config)
+        const topLevelClips = (parentGesture || gestureBasis?.kind === 'prepared-media' || gestureBasis?.kind === 'element' || !gestureBasis) && object(parent.config)
           && !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips);
         const configBefore = topLevelClips ? { ...parent.config as Record<string, OutboxJson>, clips: parent.clips } : parent.config;
         const configSource = topLevelClips && !source.config.clips.length
           ? { ...source.config, clips: parent.clips } : source.config;
         if (gestureBasis?.kind === 'element' && topLevelClips && !source.config.clips.length
           && Array.isArray(parent.clips) && parent.clips.length) refuse('element parent clips are not present in the mounted source');
-        payload.config = changes(configBefore, configSource, next.config, ['config'], gestureBasis?.kind === 'element') as Record<string, OutboxJson>;
+        const appearanceChanged = !gestureBasis && (next.config.clips.some(clip => {
+          const previous = source.config.clips.find(item => item.id === clip.id);
+          return previous && ['x', 'y', 'width', 'height', 'fit', 'cropTop', 'cropRight', 'cropBottom', 'cropLeft'].some(
+            key => changedField(previous, clip, key));
+        }) || (next.config.tracks ?? []).some(track => {
+          const previous = source.config.tracks?.find(item => item.id === track.id);
+          return previous && ['scale', 'fit'].some(key => changedField(previous, track, key));
+        }));
+        const baseline = appearanceChanged ? placementBaseline(configBefore, configSource as TimelineConfig) : configBefore;
+        payload.config = changes(baseline, configSource, next.config, ['config'], gestureBasis?.kind === 'element') as Record<string, OutboxJson>;
         if (gestureBasis?.kind === 'prepared-media') {
           const asset = gestureBasis.command.payload.asset;
           if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
@@ -653,7 +718,7 @@ export function createTimelineLocalSaveHandoff(options: {
           ...(mediaReads && mediaSteps ? { reads: mediaReads, steps: mediaSteps,
             rationale: mediaSteps[0].intent, group_id: mediaSteps[0].id } : {}) }) : options.session.appendDocument({ before, after,
           roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
-          ...(reads === undefined ? {} : { reads, merge: gestureBasis?.kind === 'element' ? 'atomic' as const : 'fields' as const }),
+          ...(reads === undefined ? (appearanceChanged ? { merge: 'atomic' as const } : {}) : { reads, merge: gestureBasis?.kind === 'element' ? 'atomic' as const : 'fields' as const }),
           label: 'Edit timeline', step: { id: crypto.randomUUID(), label: 'Edit timeline', intent: gestureBasis ? (gestureBasis.kind === 'split'
             ? `Split ${gestureBasis.clipId} at ${gestureBasis.timeSeconds}`
             : gestureBasis.kind === 'move' ? `Move ${gestureBasis.clipId} on ${gestureBasis.trackId}`

@@ -19,7 +19,6 @@ import { useTimelinePersistence } from '@/tools/video-editor/hooks/useTimelinePe
 import { clearTimelineDraft, loadTimelineDraft } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { buildTimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { getStableConfigSignature } from '@/tools/video-editor/lib/config-utils.ts';
-import { withDefaultTimelineOutput } from '@/tools/video-editor/lib/defaults.ts';
 import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import { usePollSync, type UsePollSyncQueries } from '@/tools/video-editor/hooks/usePollSync.ts';
 import type { TimelineStoreApi } from '@/tools/video-editor/hooks/timelineStore.ts';
@@ -367,7 +366,7 @@ export function useTimelineSave(
             const head: TimelineHeadRevision = { projectId: document.project_id, timelineId: document.timeline_id,
               headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId };
             // The numeric UI counter is local; it is never used as a physical pin.
-            const next = await buildTimelineData({ ...config, ...withDefaultTimelineOutput(config) }, registry, resolveAssetUrl,
+            const next = await buildTimelineData(config, registry, resolveAssetUrl,
               configVersionRef.current, bundle?.itemsBySchemaRef, head, bundle?.transcriptReferences);
             const source: TimelineSaveSource = { config: next.config, registry: next.registry, head,
               ...(bundle === undefined ? {} : { bundle }) };

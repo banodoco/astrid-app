@@ -335,7 +335,19 @@ for (const width of [390, 1440]) {
       requestAnimationFrame(() => requestAnimationFrame(() => resolve(window.scrollY)));
     }));
     expect(outgoing).toBeGreaterThan(500);
-    await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+    // The sticky link shrinks while its wordmark folds. Locator.click() can
+    // retry with end/center scroll alignment and move the already-visible
+    // header before the click. Hit-test and click the visible icon instead;
+    // keep smooth scrolling and all application navigation behavior intact.
+    const homeLink = page.getByRole('link', { name: 'Astrid home', exact: true });
+    await expect(homeLink.locator('img')).toBeInViewport({ ratio: 1 });
+    const point = await homeLink.locator('img').evaluate(node => {
+      const box = node.getBoundingClientRect();
+      const x = box.x + box.width / 2, y = box.y + box.height / 2;
+      return { x, y, hit: document.elementFromPoint(x, y)?.closest('a') === node.closest('a') };
+    });
+    expect(point.hit).toBe(true);
+    await page.mouse.click(point.x, point.y);
     await expect(home).toBeVisible();
     await expect(home).toHaveAttribute('data-retained-proof', 'same');
     await expect.poll(() => page.evaluate(() => window.scrollY)).toBeCloseTo(expectedHomeY, 0);
@@ -348,17 +360,18 @@ for (const width of [390, 1440]) {
         __roomTransitions: { destination?: string; presentation?: string; outgoing: number;
           snapshot: { scroll: number; top: number }; frames: { scroll: number; top: number }[]; named: string[] }[];
       }).__roomTransitions.filter(r => r.destination === 'home').at(-1)!);
+      mkdirSync(folder, { recursive: true });
+      writeFileSync(`${folder}/room-transition-${info.project.name}-${width}.json`, JSON.stringify(record, null, 2));
       const sharedBrand = width > 640 && expectedHomeY <= 72;
       expect(record.presentation).toBe(sharedBrand ? 'brand' : 'crossfade');
       expect(record.outgoing).toBeGreaterThan(500);
+      expect(record.outgoing).toBeCloseTo(outgoing, 0);
       expect(record.snapshot.scroll).toBeCloseTo(expectedHomeY, 0);
       expect(record.named).toEqual(sharedBrand ? ['astrid-brand-mink', 'astrid-brand-name'] : []);
       for (const frame of record.frames) {
         expect(frame.scroll).toBeCloseTo(expectedHomeY, 0);
         expect(Math.abs(frame.top - record.snapshot.top)).toBeLessThan(1);
       }
-      mkdirSync(folder, { recursive: true });
-      writeFileSync(`${folder}/room-transition-${info.project.name}-${width}.json`, JSON.stringify(record, null, 2));
     }
     await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
     await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition-style');

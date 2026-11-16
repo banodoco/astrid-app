@@ -226,3 +226,103 @@ test.describe('desktop player projection', () => {
     });
   }
 });
+
+// Hosted WebKit has no collapsing browser toolbar: vh and dvh coincide.
+// Model that one missing input by resolving ONLY Home's legacy 100vh
+// minimum to the larger viewport. Do not change dynamic units, layout,
+// media/readiness, navigation, or any overflow/scroll implementation.
+test.describe('landscape tablet visible viewport', () => {
+  test.use({ isMobile: true, hasTouch: true, deviceScaleFactor: 2,
+    screen: { width: 1180, height: 820 }, viewport: { width: 1180, height: 700 } });
+  for (const audience of ['app', 'agent']) {
+    test(`Home has no toolbar-sized tail on ${audience} return`, async ({ page, request }, info) => {
+      test.setTimeout(180000);
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      const feedUrl = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
+      const response = await request.get(feedUrl); expect(response.ok()).toBe(true);
+      const feed = await response.json();
+      await page.route(feedUrl, route => route.fulfill({ json: feed }));
+      await page.goto('/home', { waitUntil: 'domcontentloaded' });
+      await expect(page.locator('.astrid-callouts > article')).toHaveCount(3, { timeout: 60000 });
+      const home = page.locator('.astrid-public-site');
+      if (audience === 'agent') await home.getByRole('button', { name: 'Agent', exact: true }).tap();
+      await expect(home).toHaveAttribute('data-audience', audience);
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(1800);
+      const model = await page.evaluate(() => {
+        const records: { before: string; after: string }[] = [];
+        const walk = (rules: CSSRuleList) => {
+          for (const rule of Array.from(rules)) {
+            if (rule instanceof CSSStyleRule && rule.selectorText === '.astrid-public-site' && rule.style.minHeight) {
+              const before = rule.style.minHeight;
+              if (before === '100vh') rule.style.minHeight = `${innerHeight + 120}px`;
+              records.push({ before, after: rule.style.minHeight });
+            }
+            if ('cssRules' in rule) walk((rule as CSSGroupingRule).cssRules);
+          }
+        };
+        for (const sheet of Array.from(document.styleSheets)) {
+          if (!sheet.href || new URL(sheet.href).origin === location.origin) walk(sheet.cssRules);
+        }
+        return { small: innerHeight, large: innerHeight + 120, records };
+      });
+      expect(model.records.length).toBeGreaterThan(0);
+      const samples: unknown[] = [];
+      const save = () => record(`landscape-viewport-${info.project.name}-${audience}`, { model, source: feed.source, samples });
+      for (const height of [700, 820, 640]) {
+        await page.setViewportSize({ width: 1180, height });
+        await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        await page.evaluate(() => scrollTo({ top: 10000, behavior: 'instant' }));
+        const geometry = await home.evaluate(node => ({
+          viewport: innerHeight, scroll: scrollY, document: document.documentElement.scrollHeight,
+          home: node.getBoundingClientRect().toJSON(), minimum: getComputedStyle(node).minHeight,
+          controls: ['.astrid-brand', 'h1', '.astrid-audience-switch', '.astrid-hero-actions', '.astrid-hero-note'].map(selector => ({
+            selector, rect: node.querySelector(selector)!.getBoundingClientRect().toJSON(),
+          })),
+        }));
+        samples.push({ height, geometry }); save();
+        expect.soft(geometry.document, 'no page below the visible scene').toBeLessThanOrEqual(height + 1);
+        expect.soft(geometry.scroll, 'no empty Home scroll offset to remember').toBe(0);
+        for (const box of geometry.controls) {
+          expect.soft(box.rect.top, box.selector).toBeGreaterThanOrEqual(-1);
+          expect.soft(box.rect.bottom, box.selector).toBeLessThanOrEqual(height + 1);
+        }
+        if (height === 700) await page.screenshot({ path: `${folder}/landscape-home-${info.project.name}-${audience}.png` });
+        await home.getByRole('link', { name: 'Vision', exact: true }).click();
+        await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4);
+        await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition');
+        await page.evaluate(() => scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' }));
+        expect(await page.evaluate(() => scrollY)).toBeGreaterThan(500);
+        await page.evaluate(() => {
+          const w = window as unknown as { landscapeReturn: { frames: { y: number; top: number; overflow: number }[]; done: boolean } };
+          const trace = w.landscapeReturn = { frames: [], done: false };
+          let finished = 0;
+          const started = performance.now();
+          const read = () => {
+            const active = document.querySelector('.astrid-public-site[data-astrid-lifecycle="active"]');
+            if (active) trace.frames.push({ y: scrollY, top: active.getBoundingClientRect().top,
+              overflow: document.documentElement.scrollHeight - innerHeight });
+          };
+          const observer = new MutationObserver(read);
+          observer.observe(document.documentElement, { subtree: true, attributes: true,
+            attributeFilter: ['data-astrid-lifecycle', 'data-astrid-page-transition'] });
+          const tick = () => {
+            read();
+            if (trace.frames.length && !document.documentElement.hasAttribute('data-astrid-page-transition')) finished++;
+            if (finished >= 8 || performance.now() - started > 12000) {
+              observer.disconnect(); trace.done = true; return;
+            }
+            requestAnimationFrame(tick);
+          };
+          requestAnimationFrame(tick);
+        });
+        await page.getByRole('link', { name: 'Astrid home', exact: true }).click();
+        await expect.poll(() => page.evaluate(() => (window as unknown as { landscapeReturn: { done: boolean } }).landscapeReturn.done), { timeout: 20000 }).toBe(true);
+        const trace = await page.evaluate(() => (window as unknown as { landscapeReturn: { frames: { y: number; top: number; overflow: number }[] } }).landscapeReturn);
+        samples.push({ height, trace }); save();
+        expect.soft(trace.frames.length).toBeGreaterThan(8);
+        expect.soft(trace.frames.every(frame => frame.y === 0 && Math.abs(frame.top) < 1 && frame.overflow <= 1), 'the return is fitted from its first committed frame').toBe(true);
+      }
+    });
+  }
+});

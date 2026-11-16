@@ -27,6 +27,9 @@
   --astrid-accent: #a94714;
   box-sizing: border-box;
   min-height: 100vh;
+  /* Match the visible viewport, not the larger screen behind browser chrome.
+     In landscape tablets this wide layout must not create a toolbar-sized tail. */
+  min-height: 100dvh;
   padding: 0 clamp(40px, calc(15vw - 152px), 64px);
   /* Clipped both ways: the tilted editor's 3D box reaches past the foot of the page, which otherwise lets
      the window scroll on past the page onto bare background. Nothing visible is cut. */

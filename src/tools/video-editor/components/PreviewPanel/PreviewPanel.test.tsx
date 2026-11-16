@@ -38,3 +38,12 @@ it('shows a transient authored canvas migration status', () => {
     delete (state.data.data as {migrationIssues?: unknown}).migrationIssues;
   }
 });
+
+it('shows transient child framing findings with occurrence context', () => {
+  const finding = {scope: 'child' as const, occurrenceId: 'shot-1', shotId: 'shot', revisionId: 'rev', kind: 'scale-bake' as const, trackId: 'video', clipId: 'clip', before: {x: 0}, after: {x: 480}};
+  render(<PreviewPanel surface={{hasConfig: true, slotRef: vi.fn(), portal: null, placementFindings: [finding]}} showOverlayEditor={false} />);
+  const status = screen.getByRole('status');
+  expect(status).toHaveTextContent('Updated legacy framing in 1 shot.');
+  expect(status).toHaveAttribute('title', expect.stringContaining('shot-1'));
+  expect(status).toHaveAttribute('title', expect.stringContaining('480'));
+});

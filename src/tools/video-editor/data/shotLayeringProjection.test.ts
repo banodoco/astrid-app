@@ -18,7 +18,9 @@ const canonicalSha256 = '4900be369f31bd03736b7eadaf2f8595a7ce48df5218296d405162c
 type LayeringCase = typeof layeringFixture.cases[number];
 
 function projectCase(testCase: LayeringCase, app?: ResolvedTimelineConfig['app']) {
-  const composition = createShotCompositionAdapter({ load: async () => testCase.input }).prepare(testCase.input);
+  const input = structuredClone(testCase.input);
+  for (const revision of input.shot_revisions) Object.assign(revision.internal_timeline_revision.timeline, {output: {resolution: '1920x1080', fps: 30, file: 'layers.mp4'}});
+  const composition = createShotCompositionAdapter({ load: async () => input }).prepare(input);
   const parent = testCase.input.parent_composition.config;
   const base: ResolvedTimelineConfig = {
     output: { resolution: '1920x1080', fps: 30, file: 'layers.mp4' },
@@ -122,7 +124,7 @@ describe('shared Runtime shot-layering projection cases', () => {
         .toEqual(testCase.expected.track_kinds);
     }
     expect(config.tracks.filter((track) => track.app?.group).map(({ id, app, role }) => ({ id, app, ...(role ? { role } : {}) })))
-      .toEqual(testCase.expected.group_tracks);
+      .toEqual(testCase.expected.group_tracks.map(track => ({...track, app: {...track.app, scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}})));
     expect(projection.warnings).toEqual(testCase.expected.warnings);
     expect(config.app?.canonicalComposition).toMatchObject({ warnings: testCase.expected.warnings });
     expect(Object.fromEntries(config.clips.map((clip) => [

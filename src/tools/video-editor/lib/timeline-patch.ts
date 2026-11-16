@@ -158,6 +158,11 @@ function validateClipUpdate(
   const diags: TimelinePatchDiagnostic[] = [];
   const p = op.payload;
 
+  if (p?.fit !== undefined && p.fit !== 'contain' && p.fit !== 'cover') {
+    diags.push(diag('error', 'timeline-patch/invalid-payload', 'clip.update: fit must be contain or cover', {
+      operationIndex: idx, op: op.op, target: op.target, detail: {key: 'fit', actual: p.fit},
+    }));
+  }
   // Validate mode if present
   if (p && p.mode !== undefined) {
     if (p.mode !== 'merge' && p.mode !== 'replace') {
@@ -943,7 +948,7 @@ function deepMergeObject(
 const CLIP_MUTABLE_FIELDS: ReadonlySet<string> = new Set([
   'clipType', 'asset', 'from', 'to', 'speed', 'hold',
   'volume', 'x', 'y', 'width', 'height',
-  'cropTop', 'cropBottom', 'cropLeft', 'cropRight',
+  'fit', 'cropTop', 'cropBottom', 'cropLeft', 'cropRight',
   'opacity', 'text', 'entrance', 'exit', 'continuous', 'transition',
   'effects', 'params', 'pool_id', 'clip_order', 'source_uuid',
   'generation', 'app',
@@ -1306,7 +1311,7 @@ export function compileTimelinePatch(
               || key === 'entrance' || key === 'exit' || key === 'continuous' || key === 'transition'
               || key === 'effects' || key === 'params' || key === 'pool_id' || key === 'clip_order'
               || key === 'source_uuid' || key === 'generation' || key === 'cropTop' || key === 'cropBottom'
-              || key === 'cropLeft' || key === 'cropRight' || key === 'asset' || key === 'app'
+              || key === 'cropLeft' || key === 'cropRight' || key === 'fit' || key === 'asset' || key === 'app'
               || key === 'label'
             ) {
                

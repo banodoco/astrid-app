@@ -156,6 +156,11 @@ function PreviewPanelComponent({
                 {canvas ? `Canvas ${data.output.resolution.replace('x', ' × ')} from timeline settings.` : ''}
               </div>;
             })()}
+            {surface.placementFindings?.some(finding => finding.scope === 'child' && (finding.kind === 'canvas' || finding.kind === 'explicit-fit' || finding.kind === 'scale-bake')) && (() => {
+              const findings = surface.placementFindings!.filter(finding => finding.scope === 'child' && (finding.kind === 'canvas' || finding.kind === 'explicit-fit' || finding.kind === 'scale-bake'));
+              const occurrences = new Set(findings.map(finding => finding.occurrenceId)).size;
+              return <div role="status" title={JSON.stringify(findings)}>{`Updated legacy framing in ${occurrences} ${occurrences === 1 ? 'shot' : 'shots'}.`}</div>;
+            })()}
             {overlay}
             <div
               ref={surface.slotRef}

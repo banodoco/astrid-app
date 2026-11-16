@@ -255,7 +255,7 @@ const VisualAsset: FC<VisualClipProps> = ({ clip, track, fps }) => {
     );
   }
   const size = Number.isFinite(declaredSize.width) && Number.isFinite(declaredSize.height) ? declaredSize : naturalSize;
-  if (!size && sizeFailed) return <div role="alert" data-testid="preview-media-error">{`Clip '${clip.id}' asset '${clip.asset ?? clip.assetEntry.id}' could not load intrinsic dimensions`}</div>;
+  if (!size && sizeFailed) return <div role="alert" data-testid="preview-media-error">{`Clip '${clip.id}' asset '${clip.asset ?? clip.assetEntry.file ?? mediaSrc}' could not load intrinsic dimensions`}</div>;
   if (!size) return null;
   const placement = resolveClipPlacement({clip, track, canvas: {width: compositionWidth, height: compositionHeight}, intrinsic: size});
   const renderBounds = placement.local.clip;

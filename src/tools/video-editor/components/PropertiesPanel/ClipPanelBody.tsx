@@ -417,14 +417,15 @@ export function ClipPanelBody({
               const intrinsic = intrinsicMediaSize(clip.assetEntry);
               const placement = Number.isFinite(intrinsic.width) && Number.isFinite(intrinsic.height)
                 ? resolveClipPlacement({clip, track, canvas: {width: compositionWidth, height: compositionHeight}, intrinsic}) : null;
+              const provenance = placement?.provenance as Record<string, string> | undefined;
               return <div className="space-y-2">
                 <label htmlFor="clip-fit">Fit</label>
                 <select id="clip-fit" value={clip.fit ?? ''} disabled={readOnly} onChange={event => { if (!readOnly) onChange({fit: (event.target.value || undefined) as ClipMeta['fit']}); }}>
                   <option value="">Inherit</option><option value="contain">Fit</option><option value="cover">Fill</option>
                 </select>
                 <span>{placement ? `${placement.fit === 'cover' ? 'Fill' : 'Fit'} (${placement.provenance.fit})` : 'Effective fit unavailable until media size is known'}</span>
-                {placement && <p>Track scale {placement.scale} ({placement.provenance.scale}); track opacity {placement.opacity.track} ({placement.provenance.trackOpacity}). Box {placement.local.full.x}, {placement.local.full.y}, {placement.local.full.width} × {placement.local.full.height} (x: {placement.provenance.x}, y: {placement.provenance.y}, width: {placement.provenance.width}, height: {placement.provenance.height}). Canvas {compositionWidth} × {compositionHeight}; media {intrinsic.width} × {intrinsic.height}.</p>}
-                {placement && <p>Crop sources: Top {placement.provenance.cropTop}, Right {placement.provenance.cropRight}, Bottom {placement.provenance.cropBottom}, Left {placement.provenance.cropLeft}.</p>}
+                {placement && <p>Track scale {placement.scale} ({placement.provenance.scale}); track opacity {placement.opacity.track} ({placement.provenance.trackOpacity}). Box {placement.local.full.x}, {placement.local.full.y}, {placement.local.full.width} × {placement.local.full.height} (x: {provenance?.x}, y: {provenance?.y}, width: {provenance?.width}, height: {provenance?.height}). Canvas {compositionWidth} × {compositionHeight}; media {intrinsic.width} × {intrinsic.height}.</p>}
+                {placement && <p>Crop sources: Top {provenance?.cropTop}, Right {provenance?.cropRight}, Bottom {provenance?.cropBottom}, Left {provenance?.cropLeft}.</p>}
                 {(['cropTop', 'cropRight', 'cropBottom', 'cropLeft'] as const).map(edge => <label key={edge}>{edge.slice(4)}
                   <NumberInput disabled={readOnly} value={clip[edge] ?? 0} min={0} max={1} step={0.01} onChange={value => { if (!readOnly && value !== null) onChange({[edge]: value}); }} />
                 </label>)}

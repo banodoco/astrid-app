@@ -1,3 +1,4 @@
+import { normalizeClipPlacementWithFindings, type PlacementMigrationFinding } from '@banodoco/timeline-composition';
 import { bridgeMediaUrl } from '@/shared/lib/media/bridgeMediaUrl.ts';
 import { cloneTimelineExtras } from '@/tools/video-editor/lib/timeline-domain.ts';
 import type {
@@ -62,9 +63,12 @@ export type CanonicalProjectionWarning = Readonly<{
 export type CanonicalCompositionProjection = Readonly<{
   config: ResolvedTimelineConfig;
   warnings: readonly CanonicalProjectionWarning[];
+  placementFindings: readonly ShotPlacementFinding[];
   clipIdentities: ReadonlyMap<string, CanonicalProjectedClipIdentity>;
   occurrenceIdentities: ReadonlyMap<string, CanonicalClipIdentity>;
 }>;
+
+export type ShotPlacementFinding = PlacementMigrationFinding & Readonly<{scope: 'parent' | 'child'; occurrenceId?: string; shotId?: string; revisionId?: string}>;
 
 export type CanonicalProjectedClipIdentity = CanonicalClipIdentity & Readonly<{
   /** Authored ID, never the display prefix or child-N fallback. */
@@ -542,6 +546,7 @@ function projectClip(
       ? { hold: durationMs / 1000 } : {}),
     ...(muted || hasAuthoredGain ? { volume: muted ? 0 : gain } : {}),
     ...preservedGeometry,
+    ...(typeof rawClip.fit === 'string' ? {fit: rawClip.fit as TimelineClip['fit']} : {}),
     ...(params ? { params } : {}),
     ...(record(rawClip.text) ? { text: rawClip.text as TimelineClip['text'] } : {}),
     ...(record(rawClip.effects) || Array.isArray(rawClip.effects) ? { effects: rawClip.effects as TimelineClip['effects'] } : {}),
@@ -598,6 +603,7 @@ export function projectCanonicalComposition(
   baseConfig?: ResolvedTimelineConfig | null,
   options: CanonicalCompositionProjectionOptions = {},
 ): CanonicalCompositionProjection {
+  const placementFindings: ShotPlacementFinding[] = [];
   let authoredBaseConfig = baseConfig;
   // Publication carries pinned parent bytes without a separate resolved config.
   // Read authored track roles before constructing the output-only projection.
@@ -608,9 +614,7 @@ export function projectCanonicalComposition(
       const registry = record(parent?.registry);
       authoredBaseConfig = {
         ...authored,
-        output: (record(authored.output) ?? {
-          resolution: '1920x1080', fps: 30, file: `timeline-${composition.parentDocumentId}.mp4`,
-        }) as ResolvedTimelineConfig['output'],
+        output: record(authored.output) as ResolvedTimelineConfig['output'],
         tracks: (Array.isArray(authored.tracks) ? authored.tracks : []) as TrackDefinition[],
         clips: (Array.isArray(parent?.clips) ? parent.clips
           : Array.isArray(authored.clips) ? authored.clips : []) as ResolvedTimelineConfig['clips'],
@@ -618,6 +622,32 @@ export function projectCanonicalComposition(
       } as ResolvedTimelineConfig;
     }
   }
+  if (authoredBaseConfig) {
+    const result = normalizeClipPlacementWithFindings(authoredBaseConfig as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0]);
+    authoredBaseConfig = result.config as unknown as ResolvedTimelineConfig;
+    placementFindings.push(...result.findings.map(finding => ({...finding, scope: 'parent' as const})));
+  }
+  // Normalize each immutable child before output projection loses its canvas and track context.
+  // Occurrences are copied independently so repeated revisions retain their identity in diagnostics.
+  composition = {...composition, occurrences: composition.occurrences.map(occurrence => {
+    const internal = record(occurrence.revision.internal_timeline_revision);
+    const timeline = record(internal?.timeline);
+    if (!timeline) return occurrence;
+    let result: ReturnType<typeof normalizeClipPlacementWithFindings>;
+    try {
+      const clips = (Array.isArray(timeline.clips) ? timeline.clips : []).map(raw => {
+        const clip = record(raw);
+        if (!clip) return raw;
+        return {...clip, ...(typeof clip.clipType !== 'string' && typeof clip.clip_type === 'string' ? {clipType: clip.clip_type} : {}),
+          ...(typeof clip.asset !== 'string' && typeof clip.asset_id === 'string' ? {asset: clip.asset_id} : {})};
+      });
+      result = normalizeClipPlacementWithFindings({...timeline, clips, tracks: Array.isArray(timeline.tracks) ? timeline.tracks : []} as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0]);
+    } catch (error) {
+      throw new CanonicalCompositionProjectionError('unsupported_placement', `Occurrence '${occurrence.occurrenceId}' child timeline: ${error instanceof Error ? error.message : String(error)}`, occurrence.occurrenceId);
+    }
+    placementFindings.push(...result.findings.map(finding => ({...finding, scope: 'child' as const, occurrenceId: occurrence.occurrenceId, shotId: occurrence.shotId, revisionId: occurrence.revisionId})));
+    return {...occurrence, revision: {...occurrence.revision, internal_timeline_revision: {...internal, timeline: result.config}}};
+  })};
   const parentTrackRoles = new Map(
     (authoredBaseConfig?.tracks ?? []).map((track) => [track.id, trackRole(track)]),
   );
@@ -739,6 +769,9 @@ export function projectCanonicalComposition(
       : clip.hold;
     return { ...clip, clipType, ...(hold !== undefined ? { hold } : {}), ...(asset ? { asset } : {}), assetEntry: asset ? registry[asset] : undefined };
   });
+  if (!outputBaseConfig?.output?.resolution && projectedClips.some(clip => clip.asset && outputTracks.find(track => track.id === clip.track)?.kind !== 'audio')) {
+    throw new CanonicalCompositionProjectionError('unsupported_placement', 'Parent timeline property output.resolution is required for visual media');
+  }
   const output = outputBaseConfig?.output ?? { resolution: '1920x1080', fps: 30, file: `timeline-${composition.parentDocumentId}.mp4` };
   const baseApp = record(outputBaseConfig?.app) ?? {};
   const configBase: ResolvedTimelineConfig = {
@@ -780,6 +813,7 @@ export function projectCanonicalComposition(
   return Object.freeze({
     config,
     warnings: Object.freeze(warnings),
+    placementFindings: Object.freeze(placementFindings),
     clipIdentities,
     occurrenceIdentities,
   });

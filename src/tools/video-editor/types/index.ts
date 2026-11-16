@@ -441,6 +441,7 @@ export type PinnedShotImageClipSnapshot = {
     y?: number;
     width?: number;
     height?: number;
+    fit?: 'contain' | 'cover';
     cropTop?: number;
     cropBottom?: number;
     cropLeft?: number;

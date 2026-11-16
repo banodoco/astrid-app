@@ -8,186 +8,58 @@ permissions:
 jobs:
   repair:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
         with:
           ref: fix/beta-brand-follow-20261116
-          fetch-depth: 2
+          fetch-depth: 3
       - uses: actions/setup-node@v4
         with:
           node-version: '20.19.0'
           cache: npm
       - run: npm ci --legacy-peer-deps
       - run: npx playwright install --with-deps chromium webkit
-      - name: Add the requested badge contract to the existing brand test
-        shell: bash
-        run: |
-          mkdir -p beta-follow-evidence
-          git rev-parse HEAD HEAD^{tree} > beta-follow-evidence/starting-source.txt
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
-          s = p.read_text()
-          def change(old, new, count=1):
-              global s
-              assert s.count(old) == count, (old[:100], s.count(old))
-              s = s.replace(old, new)
-          change('wordOpacity: number; scroll: number };', 'wordOpacity: number; scroll: number; wordWidth: number; wordHeight: number;\n  betaTransform: string; betaDuration: string; betaCurve: string; betaOpacity: number };')
-          change('incoming?: { names: string[]; word: BrandFollowBox; mink: BrandFollowBox } };', 'incoming?: { names: string[]; word: BrandFollowBox; mink: BrandFollowBox; beta: BrandFollowBox } };')
-          change('for (const fraction of [1, .5]) {', "for (const [audience, fraction] of [['App', 1], ['App', .5], ['Agent', 1], ['Agent', .5]] as const) {\n      await page.locator('.astrid-public-site').getByRole('button', { name: audience, exact: true }).click();\n      await expect(page.locator('.astrid-public-site')).toHaveAttribute('data-audience', audience.toLowerCase());")
-          change("word: home.querySelector('.astrid-brand-name')!.getBoundingClientRect().toJSON(),", "word: home.querySelector('.astrid-brand-name')!.getBoundingClientRect().toJSON(),\n              beta: home.querySelector('.astrid-beta')!.getBoundingClientRect().toJSON(),")
-          change("const image = getComputedStyle(root, '::view-transition-new(astrid-brand-name)');", "const image = getComputedStyle(root, '::view-transition-new(astrid-brand-name)');\n              const beta = getComputedStyle(root, '::view-transition-group(astrid-brand-beta)');\n              const betaImage = getComputedStyle(root, '::view-transition-new(astrid-brand-beta)');")
-          change('wordOpacity: Number(image.opacity), scroll: scrollY });', 'wordOpacity: Number(image.opacity), scroll: scrollY,\n                wordWidth: Number.parseFloat(word.width), wordHeight: Number.parseFloat(word.height),\n                betaTransform: beta.transform, betaDuration: beta.animationDuration,\n                betaCurve: beta.animationTimingFunction, betaOpacity: Number(betaImage.opacity) });')
-          change('wordmark-moving-${info.project.name}-${fraction}.png', 'wordmark-moving-${info.project.name}-${audience}-${fraction}.png')
-          change('records.push({ fraction, before, trace });', 'records.push({ audience, fraction, before, trace });')
-          change("expect(trace.incoming!.names).toEqual(['astrid-brand-mink', 'astrid-brand-name']);", "expect(trace.incoming!.names, 'Beta must travel separately from the settled page fade').toEqual(['astrid-brand-mink', 'astrid-brand-name', 'astrid-brand-beta']);")
-          change("expect(frames.some(f => f.wordOpacity > .99)).toBe(true);", """expect(frames.some(f => f.wordOpacity > .99)).toBe(true);
-                const badgeFrames = frames.filter(f => f.betaTransform !== 'none' && f.betaDuration === '0.9s');
-                expect(badgeFrames.length, 'the badge must have a real moving capture').toBeGreaterThan(5);
-                expect(new Set(badgeFrames.map(f => f.betaTransform)).size).toBeGreaterThan(4);
-                const destination = trace.incoming!;
-                for (const frame of badgeFrames) {
-                  const word = new DOMMatrix(frame.wordTransform);
-                  const beta = new DOMMatrix(frame.betaTransform);
-                  const sx = frame.wordWidth / destination.word.width;
-                  const sy = frame.wordHeight / destination.word.height;
-                  expect(frame.betaCurve).toBe(frame.wordCurve);
-                  expect(Math.abs(beta.e - (word.e + (destination.beta.x - destination.word.x) * sx)), 'Beta stays beside the moving name').toBeLessThan(1);
-                  expect(Math.abs(beta.f - (word.f + (destination.beta.y - destination.word.y) * sy)), 'Beta keeps its vertical relationship to the name').toBeLessThan(1);
-                  expect(Math.abs(beta.a - sx)).toBeLessThan(.02);
-                  expect(Math.abs(beta.d - sy)).toBeLessThan(.02);
-                }
-                expect(badgeFrames.some(f => f.betaOpacity > .99)).toBe(true);""")
-          # DOMMatrix is a browser API: decode the sampled CSS matrices in the page.
-          s = s.replace("const word = new DOMMatrix(frame.wordTransform);\n                  const beta = new DOMMatrix(frame.betaTransform);", "const [word, beta] = [frame.wordTransform, frame.betaTransform].map(value => {\n                    const values = value.slice(7, -1).split(',').map(Number);\n                    return { a: values[0], d: values[3], e: values[4], f: values[5] };\n                  });")
-          anchor = "      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition-style');\n    }\n  });\n});"
-          assert s.count(anchor) == 1
-          s = s.replace(anchor, "      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-page-transition-style');\n      await expect(page.locator('html')).not.toHaveAttribute('data-astrid-brand-beta-follow');\n      expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--astrid-brand-beta-from'))).toBe('');\n      expect(await page.evaluate(() => document.documentElement.style.getPropertyValue('--astrid-brand-beta-to'))).toBe('');\n      await expect(page.locator('.astrid-beta-tag')).toHaveText('BETA');\n    }\n  });\n});")
-          p.write_text(s)
-          PY
-      - name: Prove the badge is missing from the original moving brand
-        shell: bash
-        run: |
-          set +e
-          PLAYWRIGHT_JSON_OUTPUT_FILE=beta-follow-evidence/baseline-results.json npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts --project=chromium-desktop --grep 'wordmark accompanies' --output=beta-follow-evidence/baseline-traces --reporter=line,json > beta-follow-evidence/baseline.log 2>&1
-          result=$?
-          set -e
-          echo "$result" > beta-follow-evidence/baseline-exit.txt
-          test "$result" -eq 1
-          grep -q 'Beta must travel separately' beta-follow-evidence/baseline.log
-          cp -r test-results/vision-captures beta-follow-evidence/baseline-captures
-      - name: Apply the bounded badge animation and preserve existing guards
+      - name: Resume the same repair with browser-native matrix decoding
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          p = Path('src/pages/Home/publicAstridNavigation.ts')
-          s = p.read_text()
-          anchor = '/** Page and audience callbacks share this owner at Site; standalone Home has its own adapter. */'
-          assert s.count(anchor) == 1
-          helper = '''/** The badge has no counterpart in the scrolled header. Map its destination
-           * offset through the wordmark's captured box so both travel as one lockup,
-           * without inserting a duplicate badge or changing either page's layout. */
-          function prepareBrandBeta(origin: DOMRect) {
-            const home = document.querySelector('.astrid-public-site[data-astrid-lifecycle="active"]');
-            const word = home?.querySelector('.astrid-brand-name')?.getBoundingClientRect();
-            const beta = home?.querySelector('.astrid-beta')?.getBoundingClientRect();
-            if (!word || !beta || !origin.width || !origin.height || !word.width || !word.height || !beta.width || !beta.height) return;
-            const sx = origin.width / word.width;
-            const sy = origin.height / word.height;
-            const x = origin.x + (beta.x - word.x) * sx;
-            const y = origin.y + (beta.y - word.y) * sy;
-            const root = document.documentElement;
-            root.style.setProperty('--astrid-brand-beta-from', `translate(${x}px, ${y}px) scale(${sx}, ${sy})`);
-            root.style.setProperty('--astrid-brand-beta-to', `translate(${beta.x}px, ${beta.y}px) scale(1, 1)`);
-            root.dataset.astridBrandBetaFollow = '';
-          }
-
-          '''
-          s = s.replace(anchor, helper + anchor)
-          old = '    delete document.documentElement.dataset.astridPageTransitionStyle;'
-          assert s.count(old) == 1
-          s = s.replace(old, old + "\n    delete document.documentElement.dataset.astridBrandBetaFollow;\n    document.documentElement.style.removeProperty('--astrid-brand-beta-from');\n    document.documentElement.style.removeProperty('--astrid-brand-beta-to');")
-          old = '    const id = operationRef.current;'
-          assert s.count(old) == 1
-          s = s.replace(old, old + '\n    let wordmarkOrigin: DOMRect | null = null;')
-          old = '      flushSync(commit);'
-          assert s.count(old) == 1
-          s = s.replace(old, old + '\n      if (markerOwnerRef.current === id && wordmarkOrigin) prepareBrandBeta(wordmarkOrigin);')
-          old = '      document.documentElement.dataset.astridPageTransitionStyle = presentation;'
-          assert s.count(old) == 1
-          s = s.replace(old, old + '''
-                if (page === 'home' && presentation === 'brand') {
-                  // The marker gives the hidden wordmark its nonzero capture box.
-                  wordmarkOrigin = document.querySelector('.astrid-vision-brand-name')?.getBoundingClientRect() ?? null;
-                }''')
-          p.write_text(s)
-          p = Path('src/pages/Home/PublicAstridSite.css')
-          s = p.read_text()
-          s += '''
-          /* Beta and its Vision link share the wordmark's journey on scrolled
-             returns. The measured origin is relative to the same wordmark box;
-             no offscreen Vision label or extra live header element is needed. */
-          :root[data-astrid-page-transition-style="brand"][data-astrid-brand-beta-follow] .astrid-public-site[data-astrid-lifecycle="active"] .astrid-beta {
-            view-transition-name: astrid-brand-beta !important;
-          }
-          @keyframes astrid-brand-beta-follow {
-            from { transform: var(--astrid-brand-beta-from); }
-            to { transform: var(--astrid-brand-beta-to); }
-          }
-          :root[data-astrid-page-transition-style="brand"]::view-transition-group(astrid-brand-beta) {
-            transform-origin: 0 0;
-            animation: astrid-brand-beta-follow 900ms cubic-bezier(.65, 0, .35, 1) both;
-          }
-          :root[data-astrid-page-transition-style="brand"]::view-transition-new(astrid-brand-beta) {
-            animation: astrid-brand-name-emerge 160ms ease-out both;
-          }
-          '''
-          p.write_text(s)
-          p = Path('tests/e2e/public-astrid-vision-polish.spec.ts')
-          s = p.read_text()
-          old = "sharedBrand ? ['astrid-brand-mink', 'astrid-brand-name'] : []"
-          assert s.count(old) == 1
-          p.write_text(s.replace(old, "sharedBrand ? ['astrid-brand-mink', 'astrid-brand-name', 'astrid-brand-beta'] : []"))
-          p = Path('scripts/quality/check-public-vision-production.mjs')
-          s = p.read_text()
-          old = "wordmark: getComputedStyle(home.querySelector('.astrid-brand-name')).viewTransitionName,"
-          assert s.count(old) == 1
-          s = s.replace(old, old + "\n          beta: getComputedStyle(home.querySelector('.astrid-beta')).viewTransitionName,\n          betaTransform: getComputedStyle(document.documentElement, '::view-transition-group(astrid-brand-beta)').transform,")
-          old = "    expect(movingBrand.every(frame => frame.wordmark === 'astrid-brand-name')).toBe(true);"
-          assert s.count(old) == 1
-          s = s.replace(old, old + "\n    expect(movingBrand.every(frame => frame.beta === 'astrid-brand-beta')).toBe(true);\n    expect(new Set(movingBrand.map(frame => frame.betaTransform).filter(value => value !== 'none')).size).toBeGreaterThan(3);")
-          old = "    console.log('Production Astrid wordmark travels with the mink instead of appearing in the root crossfade.');"
-          assert s.count(old) == 1
-          s = s.replace(old, old + "\n    console.log('Production Beta/Vision badge travels with the brand instead of appearing at its destination early.');")
-          p.write_text(s)
+          import re, subprocess, textwrap, shutil
+          evidence = Path('beta-follow-evidence'); evidence.mkdir(exist_ok=True)
+          source = subprocess.check_output(['git', 'show', '6989483a47b77a266726e8a9a971126611233d3e:.github/workflows/beta-brand-follow-workbench.yml'], text=True)
+          def script(name):
+              block = source.split('      - name: ' + name + '\n', 1)[1].split('\n      - ', 1)[0]
+              return textwrap.dedent(block.split('        run: |\n', 1)[1])
+          def run(name):
+              print('Running:', name, flush=True)
+              subprocess.run(['bash', '--noprofile', '--norc', '-e', '-o', 'pipefail', '-c', script(name)], check=True)
+          try:
+              run('Add the requested badge contract to the existing brand test')
+              p = Path('tests/e2e/public-astrid-vision-entry.spec.ts')
+              s = p.read_text()
+              # DOMMatrix belongs to the browser, not Node's test process. This
+              # changes only decoding of the already recorded transforms.
+              replacement = '''const [word, beta] = await page.evaluate(transforms => transforms.map(transform => {
+                    const matrix = new DOMMatrix(transform);
+                    return { a: matrix.a, d: matrix.d, e: matrix.e, f: matrix.f };
+                  }), [frame.wordTransform, frame.betaTransform]);'''
+              s, count = re.subn(r'const word = new DOMMatrix\(frame\.wordTransform\);\s+const beta = new DOMMatrix\(frame\.betaTransform\);', replacement, s)
+              assert count == 1, count
+              p.write_text(s)
+              (evidence/'prior-failure.txt').write_text('Run43857461802 reproduced the original missing Beta capture, then 8/9 focused Chromium cases passed; the new geometry oracle stopped because DOMMatrix was called in Node. No product assertion failed and no candidate was committed. The original failure artifact14222730421 is retained. Correct only the decoder context; preserve every assertion, tolerance and source repair. Baseline missing-capture proof remains applicable because it fails before matrix decoding.\n')
+              run('Apply the bounded badge animation and preserve existing guards')
+              run('Verify movement, retained player and viewport behavior in Chromium')
+              run('Verify the native wordmark and badge journey in WebKit')
+              run('Commit only the proven feature and remove this temporary workbench')
+          finally:
+              (evidence/'diagnostic-diff.patch').write_text(subprocess.check_output(['git', 'diff'], text=True))
+              for name in ['src/pages/Home/publicAstridNavigation.ts', 'src/pages/Home/PublicAstridSite.css', 'tests/e2e/public-astrid-vision-entry.spec.ts', 'tests/e2e/public-astrid-vision-polish.spec.ts', 'scripts/quality/check-public-vision-production.mjs']:
+                  target = evidence/'source'/name; target.parent.mkdir(parents=True, exist_ok=True)
+                  shutil.copyfile(name, target)
+              captures = Path('test-results/vision-captures')
+              if captures.exists(): shutil.copytree(captures, evidence/'latest-captures', dirs_exist_ok=True)
           PY
-          npx eslint src/pages/Home/publicAstridNavigation.ts --max-warnings 0
-          node --check scripts/quality/check-public-vision-production.mjs
-          npx vitest run --config config/testing/vitest.config.ts src/pages/Home/PublicAstridSite.lifecycle.test.tsx
-      - name: Verify movement, retained player and viewport behavior in Chromium
-        shell: bash
-        run: |
-          PLAYWRIGHT_JSON_OUTPUT_FILE=beta-follow-evidence/chromium-results.json npx playwright test --config playwright.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts tests/e2e/public-astrid-home-chips.spec.ts --project=chromium-desktop --grep 'wordmark accompanies|scrolled Vision return|player projection stays|toolbar-sized tail' --output=beta-follow-evidence/chromium-traces --reporter=line,json | tee beta-follow-evidence/chromium.log
-          cp -r test-results/vision-captures beta-follow-evidence/chromium-captures
-      - name: Verify the native wordmark and badge journey in WebKit
-        shell: bash
-        run: |
-          PLAYWRIGHT_JSON_OUTPUT_FILE=beta-follow-evidence/webkit-results.json npx playwright test --config playwright.vision.config.ts tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts --grep 'wordmark accompanies|scrolled Vision returns' --output=beta-follow-evidence/webkit-traces --reporter=line,json | tee beta-follow-evidence/webkit.log
-          cp -r test-results/vision-captures beta-follow-evidence/webkit-captures
-      - name: Commit only the proven feature and remove this temporary workbench
-        shell: bash
-        run: |
-          git diff --check
-          git diff > beta-follow-evidence/repair.patch
-          git config user.name 'POM'
-          git config user.email 'peter@omalley.io'
-          git add src/pages/Home/publicAstridNavigation.ts src/pages/Home/PublicAstridSite.css tests/e2e/public-astrid-vision-entry.spec.ts tests/e2e/public-astrid-vision-polish.spec.ts scripts/quality/check-public-vision-production.mjs
-          git rm .github/workflows/beta-brand-follow-workbench.yml
-          git commit -m 'fix(vision): carry the Beta badge alongside the moving Astrid brand'
-          git rev-parse HEAD HEAD^{tree} > beta-follow-evidence/candidate-source.txt
-          git push origin HEAD:fix/beta-brand-follow-20261116
       - uses: actions/upload-artifact@v4
         if: always()
         with:

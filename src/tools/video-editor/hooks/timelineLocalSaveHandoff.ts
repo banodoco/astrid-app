@@ -78,6 +78,8 @@ const same = (a: unknown, b: unknown) => a === undefined || b === undefined
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
 const field = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+const changedField = (previous: Record<string, unknown>, next: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(next, key) && !same(field(previous, key), field(next, key));
 
 // Upstream config builders include optional undefined fields. Object omission
 // also preserves the editor's explicit transition-clear action as a removal.
@@ -246,7 +248,7 @@ export function createTimelineLocalSaveHandoff(options: {
       // Omission is a partial editor view, not an explicit clear. An unchanged
       // default/undefined never overwrites the raw own key (including null).
       for (const [key, value] of Object.entries(next)) {
-        if (same(field(previous, key), value)) continue;
+        if (!changedField(previous, next, key)) continue;
         if (value === undefined) {
           if ((!(element && ['elementRef', 'entrance'].includes(key)) && key !== 'transition') || path.length !== 3 || path[0] !== 'config' || path[1] !== 'clips') {
             refuse(`explicit clear is unavailable: ${[...path, key].join('/')}`, 'explicit-clear-unavailable');
@@ -345,10 +347,10 @@ export function createTimelineLocalSaveHandoff(options: {
         const appearanceChanged = !gestureBasis && (next.config.clips.some(clip => {
           const previous = source.config.clips.find(item => item.id === clip.id);
           return previous && ['x', 'y', 'width', 'height', 'fit', 'cropTop', 'cropRight', 'cropBottom', 'cropLeft'].some(
-            key => !same(field(previous, key), field(clip, key)));
+            key => changedField(previous, clip, key));
         }) || (next.config.tracks ?? []).some(track => {
           const previous = source.config.tracks?.find(item => item.id === track.id);
-          return previous && ['scale', 'fit'].some(key => !same(field(previous, key), field(track, key)));
+          return previous && ['scale', 'fit'].some(key => changedField(previous, track, key));
         }));
         const baseline = appearanceChanged ? placementBaseline(configBefore, configSource as TimelineConfig) : configBefore;
         payload.config = changes(baseline, configSource, next.config, ['config'], gestureBasis?.kind === 'element') as Record<string, OutboxJson>;

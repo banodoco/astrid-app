@@ -1202,3 +1202,27 @@ it('does not write placement migrations for a no-op', async () => {
   expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
   await env.session.dispose();
 });
+
+it.each(['fit', 'x', 'y', 'width', 'height', 'track.fit', 'track.scale'])
+  ('treats omitted %s as a partial view on no-op and unrelated edit', async omitted => {
+    const env = await environment(false, 'property', ['authored'], { cropRegressionFixture: true, positionedRegressionFixture: true }, {
+      key: 'media', registry: { assets: { media: { file: 'a.png', type: 'image/png', resolution: '1920x1080' } } },
+    });
+    const next = structuredClone(env.source);
+    if (omitted.startsWith('track.')) delete (next.config.tracks![0] as unknown as Record<string, unknown>)[omitted.slice(6)];
+    else delete (next.config.clips[0] as unknown as Record<string, unknown>)[omitted];
+    const original = structuredClone(env.initial.canonicalDocument);
+    await env.handoff.capture(next);
+    expect(env.session.getDocument()).toEqual(original);
+    next.config.tracks![0].label = 'Renamed';
+    await env.handoff.capture(next);
+    const actual = env.session.getDocument();
+    const expected = structuredClone(original);
+    (expected.parent_revision.payload.config as unknown as TimelineConfig).tracks![0].label = 'Renamed';
+    expect(actual).toEqual(expected);
+    const [stored] = await env.outboxes.list(env.scope);
+    expect(stored.intents).toHaveLength(1);
+    expect(stored.intents[0].payload.commands).toBeUndefined();
+    expect(stored.intents[0].payload.documentIntent).not.toHaveProperty('merge');
+    await env.session.dispose();
+  });

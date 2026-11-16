@@ -14,7 +14,7 @@ function declaredPictureTracks(config: ResolvedTimelineConfig): Set<string> {
   const value = record(record(config.app)?.visualSeamContract)?.pictureTracks;
   return new Set(Array.isArray(value) ? value.filter((track): track is string => typeof track === 'string') : []);
 }
-const MEDIA_CLIP_TYPES = new Set(['media', 'video', 'image']);
+const MEDIA_CLIP_TYPES = new Set(['media', 'video', 'image', 'hold']);
 
 /**
  * True only when the data says the clip covers the whole frame opaquely: a

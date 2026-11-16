@@ -60,6 +60,86 @@ function withOccurrenceRevision(
 }
 
 describe('canonical shot-composition downstream projection', () => {
+  it.each([
+    ['trimmed still', { from: 0, to: 1 }, 1, 1],
+    ['sped-up still', { from: 1, to: 5, speed: 2 }, 4, 2],
+    ['explicit hold takes precedence over trim', { from: 0, to: 5, hold: 2 }, 2, 2],
+    ['milliseconds take precedence over hold and trim', { from: 0, to: 1, hold: 2, duration_ms: 3000 }, 3, 3],
+    ['duration seconds take precedence over hold and trim', { from: 0, to: 1, hold: 2, duration: 3, speed: 2 }, 3, 1.5],
+  ])('keeps %s visible after conversion and occurrence bounding', (_label, timing, expectedHold, expectedDuration) => {
+    const source = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline,
+      clips: [{ id: 'still', clipType: 'image', asset: 'alpha-image', track: 'video', at: 0, ...timing }],
+    }));
+    const isolated = { ...source, occurrences: source.occurrences.slice(0, 1) };
+    const before = JSON.stringify(isolated);
+    const still = projectCanonicalComposition(isolated).config.clips.find((clip) => clip.id === 'occ-1:still');
+    expect(still).toMatchObject({ clipType: 'hold', hold: expectedHold });
+    expect(still && getClipTimelineDuration(still)).toBe(expectedDuration);
+    const bounded = still && boundCanonicalClipToOccurrence(still);
+    expect(bounded && getClipTimelineDuration(bounded)).toBe(expectedDuration);
+    expect(JSON.stringify(isolated)).toBe(before);
+  });
+
+  it('clamps the derived still hold to the next occurrence while preserving trim', () => {
+    const source = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline,
+      clips: [{ id: 'still', clipType: 'image', asset: 'alpha-image', track: 'video', at: 0, from: 0, to: 8, speed: 2 }],
+    }));
+    const occurrences = source.occurrences.slice(0, 2).map((occurrence, index) => ({
+      ...occurrence, atMs: index * 1500, trackId: 'picture',
+    }));
+    const still = projectCanonicalComposition({ ...source, occurrences }).config.clips.find((clip) => clip.id === 'occ-1:still');
+    expect(still).toMatchObject({ clipType: 'hold', from: 0, to: 8, hold: 3, speed: 2 });
+    const bounded = still && boundCanonicalClipToOccurrence(still);
+    expect(bounded && getClipTimelineDuration(bounded)).toBe(1.5);
+  });
+
+  it.each([
+    ['explicit hold', { from: 0, to: 5, hold: 2 }, 2],
+    ['trim only', { from: 1, to: 5 }, 4],
+  ])('keeps native hold with %s visible', (_label, timing, duration) => {
+    const source = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline,
+      clips: [{ id: 'still', clipType: 'hold', asset: 'alpha-image', track: 'video', at: 0, ...timing }],
+    }));
+    const isolated = { ...source, occurrences: source.occurrences.slice(0, 1) };
+    const before = JSON.stringify(isolated);
+    const clip = projectCanonicalComposition(isolated).config.clips.find((entry) => entry.id === 'occ-1:still');
+    expect(clip).toMatchObject({ clipType: 'hold', hold: duration });
+    const bounded = clip && boundCanonicalClipToOccurrence(clip);
+    expect(bounded && getClipTimelineDuration(bounded)).toBe(duration);
+    expect(JSON.stringify(isolated)).toBe(before);
+  });
+
+  it('clamps an explicit image hold with trim and speed to the next occurrence', () => {
+    const source = withOccurrenceRevision(prepared, 0, (timeline) => ({
+      ...timeline,
+      clips: [{ id: 'still', clipType: 'image', asset: 'alpha-image', track: 'video', at: 0, from: 1, to: 9, hold: 6, speed: 2 }],
+    }));
+    const occurrences = source.occurrences.slice(0, 2).map((occurrence, index) => ({
+      ...occurrence, atMs: index * 1500, trackId: 'picture',
+    }));
+    const still = projectCanonicalComposition({ ...source, occurrences }).config.clips.find((clip) => clip.id === 'occ-1:still');
+    expect(still).toMatchObject({ clipType: 'hold', from: 1, to: 9, hold: 3, speed: 2 });
+    const bounded = still && boundCanonicalClipToOccurrence(still);
+    expect(bounded && getClipTimelineDuration(bounded)).toBe(1.5);
+  });
+
+  it('normalizes a parent image with trim without mutating the parent config', () => {
+    const base = {
+      output: { resolution: '1280x720', fps: 30, file: 'out.mp4' },
+      tracks: [{ id: 'picture', kind: 'visual' as const, label: 'Picture' }],
+      clips: [{ id: 'parent-image', clipType: 'image', track: 'picture', at: 30, from: 0, to: 1 }],
+      registry: {},
+    };
+    const before = JSON.stringify(base);
+    const clip = projectCanonicalComposition(prepared, base).config.clips.find((entry) => entry.id === 'parent-image');
+    expect(clip).toMatchObject({ clipType: 'hold', hold: 1 });
+    expect(clip && getClipTimelineDuration(clip)).toBe(1);
+    expect(JSON.stringify(base)).toBe(before);
+  });
+
   it('projects Runtime images as native stills without changing the source or admitting unknown clip types', () => {
     const source = withOccurrenceRevision(prepared, 0, (timeline) => ({
       ...timeline,
@@ -800,7 +880,7 @@ describe('canonical shot-composition downstream projection', () => {
       width: 640,
       height: 360,
     });
-    expect(clip?.hold).toBeUndefined();
+    expect(clip?.hold).toBe(0.5);
   });
 
   it('skips null and malformed revision assets while projecting valid assets', () => {

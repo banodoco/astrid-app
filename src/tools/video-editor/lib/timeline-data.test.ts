@@ -733,7 +733,7 @@ describe('timeline data lanes duration neutrality', () => {
   });
 });
 
-it('materializes authored canvas before defaults and keeps migration findings transient through save', async () => {
+it('resolves authored canvas before defaults and keeps findings transient during serialization', async () => {
   const input = {
     theme_overrides: {visual: {canvas: {width: 1280, height: 720, fps: 24}}},
     tracks: [{id: 'V1', kind: 'visual', label: 'V1', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}}],
@@ -745,7 +745,7 @@ it('materializes authored canvas before defaults and keeps migration findings tr
   expect(data.output).toMatchObject({resolution: '1280x720', fps: 24});
   expect(data.config.clips[0]).toMatchObject({x: 10, width: 640, height: 360, fit: 'contain'});
   expect(data.config.tracks?.[0].app).toMatchObject({scaleAppliesToPositionedClips: true, clipPlacementVersion: 1});
-  expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({message: 'Materialized canvas from timeline settings.', details: expect.objectContaining({kind: 'canvas', source: 'theme_overrides.visual.canvas', before: undefined, after: expect.objectContaining({resolution: '1280x720', fps: 24})})})]));
+  expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({message: 'Using the timeline canvas setting in memory; it has not been written to output.', details: expect.objectContaining({kind: 'canvas', source: 'theme_overrides.visual.canvas', before: undefined, after: expect.objectContaining({resolution: '1280x720', fps: 24})})})]));
   const saved = rowsToConfig(data.rows, data.meta, data.output, data.clipOrder, data.tracks, data.config.pinnedShotGroups, data.config);
   expect(saved.output).toMatchObject({resolution: '1280x720', fps: 24});
   expect(saved.clips[0]).toMatchObject({x: 10, width: 640, height: 360, fit: 'contain'});
@@ -753,7 +753,7 @@ it('materializes authored canvas before defaults and keeps migration findings tr
 });
 
 
-it('opens legacy canvasless media at the editor default and saves that canvas with provenance', async () => {
+it('opens legacy canvasless media at the editor default and serializes an in-memory canvas with provenance', async () => {
   const input = {tracks: [{id: 'V1', kind: 'visual', label: 'V1', scale: 1, app: {scaleAppliesToPositionedClips: true}}], clips: [{id: 'opening', at: 0, track: 'V1', clipType: 'image', asset: 'a', hold: 1}]} as unknown as TimelineConfig;
   const original = structuredClone(input);
   const data = await buildTimelineData(input, {assets: {a: {file: 'a.png', type: 'image/png', resolution: '1920x1080'}}});

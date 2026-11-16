@@ -152,14 +152,16 @@ function PreviewPanelComponent({
               const clips = new Set(findings.map(issue => issue.clipId).filter(Boolean)).size;
               const canvas = findings.find(issue => issue.details?.kind === 'canvas');
               return <div role="status" title={JSON.stringify(findings)}>
-                {clips > 0 ? `Updated legacy framing for ${clips} ${clips === 1 ? 'clip' : 'clips'}. ` : ''}
-                {canvas ? `Canvas ${data.output.resolution.replace('x', ' × ')} ${canvas.details?.source === 'app-resolved' ? 'restored from the editor’s previous rendering' : 'from timeline settings'}.` : ''}
+                {clips > 0 ? `Preview uses legacy framing for ${clips} ${clips === 1 ? 'clip' : 'clips'}. ` : ''}
+                {canvas ? (canvas.details?.source === 'app-resolved'
+                  ? `Canvas is not stated on this timeline; using ${data.output.resolution.replace('x', ' × ')} from the ${data.config?.theme !== undefined || data.config?.theme_overrides !== undefined ? 'editor theme' : 'editor default'}. It has not been written.`
+                  : `Canvas is not stated in timeline output; using ${data.output.resolution.replace('x', ' × ')} from timeline settings. It has not been written to output.`) : ''}
               </div>;
             })()}
             {surface.placementFindings?.some(finding => finding.scope === 'child' && (finding.kind === 'canvas' || finding.kind === 'explicit-fit' || finding.kind === 'scale-bake')) && (() => {
               const findings = surface.placementFindings!.filter(finding => finding.scope === 'child' && (finding.kind === 'canvas' || finding.kind === 'explicit-fit' || finding.kind === 'scale-bake'));
               const occurrences = new Set(findings.map(finding => finding.occurrenceId)).size;
-              return <div role="status" title={JSON.stringify(findings)}>{`Updated legacy framing in ${occurrences} ${occurrences === 1 ? 'shot' : 'shots'}.`}</div>;
+              return <div role="status" title={JSON.stringify(findings)}>{`Preview uses legacy framing in ${occurrences} ${occurrences === 1 ? 'shot' : 'shots'}.`}</div>;
             })()}
             {overlay}
             <div

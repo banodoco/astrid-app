@@ -1164,7 +1164,7 @@ export const TRACK_SCALE_BAKE_MARKER = 'scaleAppliesToPositionedClips';
 
 export const placementFindingsToIssues = (findings: PlacementMigrationFinding[], level: TimelineDomainContractLevel): TimelineDomainIssue[] => findings.map(finding => createIssue(
   level, 'warning', finding.kind === 'scale-bake' ? 'track_scale_positions_baked' : 'clip_placement_migrated',
-  finding.kind === 'canvas' ? (finding.source === 'app-resolved' ? 'Materialized the editor’s previous canvas.' : 'Materialized canvas from timeline settings.') : finding.kind === 'canvas-not-required' ? 'No source canvas was needed for placement normalization.' : `Placement migration ${finding.kind} on track '${finding.trackId}'${finding.clipId ? ` clip '${finding.clipId}'` : ''}.`,
+  finding.kind === 'canvas' ? (finding.source === 'app-resolved' ? 'Using the editor-resolved canvas in memory; it has not been written to the timeline.' : 'Using the timeline canvas setting in memory; it has not been written to output.') : finding.kind === 'canvas-not-required' ? 'No source canvas was needed for placement normalization.' : `Placement migration ${finding.kind} on track '${finding.trackId}'${finding.clipId ? ` clip '${finding.clipId}'` : ''}.`,
   {trackId: finding.trackId, clipId: finding.clipId, repairApplied: finding.kind !== 'canvas-not-required', details: {...finding}},
 ));
 

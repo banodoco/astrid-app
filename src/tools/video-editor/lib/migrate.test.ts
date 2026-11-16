@@ -271,7 +271,7 @@ it('reports authored canvas materialization as a timeline finding before track r
   const before = structuredClone(input);
   const result = canonicalizeTimelineConfigSnapshot(input);
   const issue = result.issues.find(item => item.details?.kind === 'canvas');
-  expect(issue).toMatchObject({message: 'Materialized canvas from timeline settings.', details: {source: 'theme_overrides.visual.canvas', before: undefined, after: {resolution: '1280x720', fps: 24, file: 'output.mp4'}}});
+  expect(issue).toMatchObject({message: 'Using the timeline canvas setting in memory; it has not been written to output.', details: {source: 'theme_overrides.visual.canvas', before: undefined, after: {resolution: '1280x720', fps: 24, file: 'output.mp4'}}});
   expect(issue?.message).not.toContain('undefined');
   expect(result.config.clips[0]).toMatchObject({x: 40});
   expect(result.config.tracks?.[0].app).toMatchObject({scaleAppliesToPositionedClips: true, clipPlacementVersion: 1});

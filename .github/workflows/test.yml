@@ -3,21 +3,24 @@ name: Tests
 
 on:
   push:
-    branches: [main, release-1, "int/**"]
+    branches: [main, release-1, "int/**", "release/*/main"]
   pull_request:
-    branches: [main]
+    branches: [main, "release/*/main"]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
   # A later push to main must never cancel the release guard for an earlier one: every push to main is checked.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  # Release mains (release/<N>/main) are exempt too: each push to them runs in full.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !(startsWith(github.ref, 'refs/heads/release/') && endsWith(github.ref, '/main')) }}
 
 jobs:
   # Install tuple (manifest minus release/required, plus public/install*) and release move together:
   # a tuple change needs release +1 exactly; otherwise release is unchanged. Base is the PR base or the push's before SHA.
   release-guard:
-    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/main' }}
+    # Only against main: inside a release branch the tuple may change more than once before publication,
+    # and the guard's "+1 exactly" is checked when main is fast-forwarded to the release branch.
+    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,7 +85,7 @@ jobs:
   # declares these cases as skipped (config/testing/skipRegistry.mjs: macos-release-process-containment, macos-lockf-broker)
   # and this job runs exactly those files where the condition holds. Plain node: these files import only the repo.
       - name: Save npm cache on main or int branches (C-08)
-        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/')) && steps.c08-app-test-1.outputs.cache-hit != 'true' }}
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/') || (startsWith(github.ref, 'refs/heads/release/') && endsWith(github.ref, '/main'))) && steps.c08-app-test-1.outputs.cache-hit != 'true' }}
         uses: actions/cache/save@v4
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"

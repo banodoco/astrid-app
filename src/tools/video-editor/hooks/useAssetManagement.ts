@@ -167,6 +167,19 @@ export function resolveAssetDropTarget({
   };
 }
 
+/** The plain reason a dropped file was not placed. The headline says what happened; this says why. */
+const DECLINED_DETAIL: Record<string, string> = {
+  'command-schema': 'The drop was not understood.',
+  'provisioned-asset': 'The uploaded file could not be read.',
+  placement: 'It does not fit on that track at that time.',
+  'final-config': 'Adding it would leave the timeline invalid.',
+  missing_timeline: 'The timeline is not loaded yet.',
+  preserved_track_unavailable: 'That track is no longer available.',
+  missing_media_url: 'The file has no address to play from.',
+};
+export const fileNotAddedMessage = (reason: string): string =>
+  `The file was not added to the timeline. ${DECLINED_DETAIL[reason] ?? reason}`;
+
 export function useAssetManagement({
   store,
   dataRef,
@@ -276,14 +289,14 @@ export function useAssetManagement({
   ) => {
     // A drop that cannot be placed must say so: the upload already finished, so a silent `false` leaves
     // the user with neither a clip nor a reason.
-    const declined = (cause: string) => {
-      runtime.toast.error(`The image was not added to the timeline: ${cause}`);
+    const declined = (reason: string) => {
+      runtime.toast.error(fileNotAddedMessage(reason));
       return false;
     };
     const latestDataRef = getDataRef();
     const current = latestDataRef.current;
     if (!current) {
-      return declined('the timeline is not loaded');
+      return declined('missing_timeline');
     }
 
     const command = buildPlacePreparedMediaCommand({
@@ -309,7 +322,7 @@ export function useAssetManagement({
         || identities.some(identity => identity.projectId !== composition.projectId
           || identity.parentDocumentId !== composition.parentDocumentId || identity.occurrenceId !== composition.occurrenceIds![0])
         || (current.head && (current.head.projectId !== composition.projectId
-          || current.head.timelineId !== composition.parentDocumentId || current.head.headRevisionId !== composition.headRevisionId)))) return declined('this shot changed while the file uploaded');
+          || current.head.timelineId !== composition.parentDocumentId || current.head.headRevisionId !== composition.headRevisionId)))) return declined('The shot changed while the file was uploading.');
       const tracks = current.tracks.filter(track => track.id === trackId);
       if (forceNewTrack || insertAtTop || tracks.length !== 1 || tracks[0].kind !== 'visual'
         || tracks[0].role === 'source' || current.rows.filter(row => row.id === trackId).length !== 1
@@ -322,12 +335,12 @@ export function useAssetManagement({
         || !/^sha256:[0-9a-f]{64}$/.test(media.catalog_digest)
         || prepared.entry.media_id !== media.object_id || prepared.entry.generationId !== media.generation_id
         || prepared.entry.variantId !== media.variant_id
-        || (existing && canonicalJsonStringify(existing) !== canonicalJsonStringify(prepared.entry))) return declined('this timeline or track changed while the file uploaded');
+        || (existing && canonicalJsonStringify(existing) !== canonicalJsonStringify(prepared.entry))) return declined('The timeline or track changed while the file was uploading.');
       if (!removeClipId.startsWith('uploading-')
         || current.config.clips.some(clip => clip.id === removeClipId)
         || !current.meta[removeClipId]?.asset?.startsWith('uploading:')
         || current.meta[removeClipId]?.track !== trackId
-        || current.rows.flatMap(row => row.actions).filter(action => action.id === removeClipId).length !== 1) return declined('its upload placeholder is no longer on the timeline');
+        || current.rows.flatMap(row => row.actions).filter(action => action.id === removeClipId).length !== 1) return declined('The upload was removed from the timeline while it finished.');
       // Use the mounted editor's row preview. Whole-config prepared-media
       // validation cannot validate retained opaque or projected child fields.
       // A2 still owns the semantic command, original basis and durable save.
@@ -335,10 +348,10 @@ export function useAssetManagement({
         rows: current.rows.map(row => ({ ...row, actions: row.actions.filter(action => action.id !== removeClipId) })) };
       const target = planAssetDropTarget({ current: local, assetKind: 'visual', trackId,
         selectedTrackId: getSelectedTrackId(), time, duration: 5 });
-      if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) return declined('there is no room for it on that track');
+      if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) return declined('placement');
       const edit = buildAssetDropEdit({ current: local, assetKey: prepared.assetKey, assetEntry: prepared.entry,
         trackId: target.trackId, time: target.snappedTime ?? time });
-      if (!edit) return declined('there is no room for it on that track');
+      if (!edit) return declined('placement');
       getApplyEdit()({ type: 'rows', rows: edit.rows, metaUpdates: edit.metaUpdates,
         metaDeletes: [removeClipId],
         clipOrderOverride: edit.clipOrderOverride,
@@ -350,7 +363,7 @@ export function useAssetManagement({
     let diagnostic: PreparedMediaDiagnostic | undefined;
     const preview = previewPreparedMediaCommand(current, command, { onFailure: failure => { diagnostic = failure; } });
     if (!preview?.commandResult?.detail) {
-      return declined(diagnostic ? `${diagnostic.stage} check failed (${diagnostic.reason})` : 'it could not be placed');
+      return declined(diagnostic?.stage ?? 'placement');
     }
     const clipId = typeof preview.commandResult.detail.clipId === 'string'
       ? preview.commandResult.detail.clipId
@@ -359,7 +372,7 @@ export function useAssetManagement({
       ? preview.commandResult.detail.trackId
       : trackId ?? null;
     if (!clipId || !resolvedTrackId) {
-      return declined('no track accepted it');
+      return declined('placement');
     }
 
     getApplyEdit()({ type: 'prepared-media', command }, {
@@ -396,6 +409,7 @@ export function useAssetManagement({
       duration,
     });
     if (!targetPlan.ok) {
+      runtime.toast.error(fileNotAddedMessage(targetPlan.error));
       return false;
     }
     const resolvedTarget = {
@@ -410,6 +424,7 @@ export function useAssetManagement({
       time: resolvedTarget.snappedTime ?? time,
     });
     if (!nextEdit) {
+      runtime.toast.error(fileNotAddedMessage('placement'));
       return false;
     }
     latestDataRef.current = resolvedTarget.current;

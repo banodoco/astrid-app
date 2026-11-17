@@ -253,7 +253,7 @@ it.each([false, true])('retains an authored uploading-looking clip during drop c
   expect(env.mounted.result.current.assets.handleAssetDrop(media.asset, trackId, 10, false, false, prepared, id)).toBe(false);
   expect(env.mounted.result.current.commit.dataRef.current).toBe(next);
   // The refusal is visible: a dropped file that cannot be placed never leaves the user with no clip and no reason.
-  expect(env.toast).toHaveBeenCalledWith(expect.stringContaining('The image was not added to the timeline'));
+  expect(env.toast).toHaveBeenCalledWith(expect.stringContaining('The file was not added to the timeline.'));
   expect(env.captures).toEqual([]);
   expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
 });
@@ -295,12 +295,12 @@ it('commits the track and image from a real file drop onto a bootstrap empty hea
   ], steps: [{ command_ordinals: [0, 1] }] });
 });
 
-it.each([false, true])('says why a prepared drop that cannot be placed is refused (embedded: %s)', async child => {
+it.each([false, true])('says in plain words why a prepared drop that cannot be placed is refused (embedded: %s)', async child => {
   const env = await environment(child);
   const trackId = child ? 'V2' : 'V1';
   const unplaceable = { assetKey: media.asset, mediaType: 'image' as const, durationSeconds: null, source: 'registered' as const,
     entry: { type: 'image/png' } } as never;
   expect(env.mounted.result.current.assets.handleAssetDrop(media.asset, trackId, 10, false, false, unplaceable)).toBe(false);
-  expect(env.toast).toHaveBeenCalledWith(expect.stringMatching(/The image was not added to the timeline: .*invalid-placement/));
+  expect(env.toast).toHaveBeenCalledWith('The file was not added to the timeline. It does not fit on that track at that time.');
   expect(env.captures).toEqual([]);
 });

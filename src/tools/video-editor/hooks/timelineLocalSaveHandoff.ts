@@ -318,7 +318,8 @@ export function createTimelineLocalSaveHandoff(options: {
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
         // A document that stores its clips only at the top level is edited there, whichever gesture it is.
-        const topLevelClips = object(parent.config)
+        // An edit that names no gesture on such a document stays refused (its two clip lists may contradict).
+        const topLevelClips = gestureBasis !== undefined && object(parent.config)
           && !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips);
         const configBefore = topLevelClips ? { ...parent.config as Record<string, OutboxJson>, clips: parent.clips } : parent.config;
         const configSource = topLevelClips && !source.config.clips.length

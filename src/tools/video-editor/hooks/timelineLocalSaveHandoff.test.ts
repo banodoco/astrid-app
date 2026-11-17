@@ -258,7 +258,8 @@ describe('upstream local document handoff', () => {
         handoff = createTimelineLocalSaveHandoff({ initial: env.initial, source: env.source, session: env.session, adopted: env.receipt });
       }
       const reject = vi.spyOn(Promise, 'reject');
-      const error = await handoff.capture(next, gesture).catch((caught: unknown) => caught);
+      // A trim or split on a timeline with shots is proven by its expected diff; an edit that names no gesture is not.
+      const error = await handoff.capture(next, kind === 'children' ? undefined : gesture).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(kind === 'head' ? TimelineVersionConflictError : TimelineSaveError);
       expect(error).toHaveProperty('message', `Local document save retained: ${message}`);
       // This is the exact error passed to the existing Promise.reject boundary.

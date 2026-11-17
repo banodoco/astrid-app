@@ -76,7 +76,32 @@ const same = (a: unknown, b: unknown) => a === undefined || b === undefined
   ? a === b : canonicalJsonStringify(a) === canonicalJsonStringify(b);
 const object = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
+const rowId = (row: unknown) => object(row) ? String(row.id ?? '') : '';
+const byRowId = (rows: unknown[]) => [...rows].sort((a, b) => rowId(a) < rowId(b) ? -1 : rowId(a) > rowId(b) ? 1 : 0);
+const sameRowsById = (a: unknown[], b: unknown[]) => a.length === b.length && same(byRowId(a), byRowId(b));
 const field = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+
+// The editor writes clips grouped by track, so row order is serialisation, not meaning. A gesture
+// is checked by the rows it names (by id), never by where the editor happened to put them.
+const configById = (config: TimelineConfig): unknown => ({ ...config,
+  ...(Array.isArray(config.clips) ? { clips: byRowId(config.clips) } : {}),
+  ...(Array.isArray(config.tracks) ? { tracks: byRowId(config.tracks) } : {}) });
+const sameConfig = (a: TimelineConfig, b: TimelineConfig) => same(authoredJson(configById(a)), authoredJson(configById(b)));
+
+/** The editor's rows in the stored order: stored rows first, then each new row after its editor predecessor. */
+function inStoredOrder(stored: unknown[], edited: unknown[], appendNew = false): unknown[] {
+  const editedById = new Map(edited.map(row => [rowId(row), row]));
+  if (stored.some(row => !editedById.has(rowId(row)))) return edited;
+  const storedIds = new Set(stored.map(rowId));
+  const result = stored.map(row => editedById.get(rowId(row)));
+  if (appendNew) return [...result, ...edited.filter(row => !storedIds.has(rowId(row)))];
+  edited.forEach((row, index) => {
+    if (storedIds.has(rowId(row))) return;
+    const before = edited.slice(0, index).reverse().find(item => storedIds.has(rowId(item)));
+    result.splice(before ? result.findIndex(item => rowId(item) === rowId(before)) + 1 : 0, 0, row);
+  });
+  return result;
+}
 
 // Upstream config builders include optional undefined fields. Object omission
 // also preserves the editor's explicit transition-clear action as a removal.
@@ -89,8 +114,17 @@ function authoredJson(value: unknown): OutboxJson {
   return toOutboxJson(value);
 }
 
+// Refusals of one edit by this handoff's authoring guards, before that edit
+// entered the outbox. Owner, conflict and transport failures are not listed.
+const authoringRefusals = new WeakSet<object>();
+/** True when the handoff refused exactly one edit before it reached the outbox. */
+export function isTimelineAuthoringRefusal(error: unknown): boolean {
+  return Boolean(error && typeof error === 'object' && authoringRefusals.has(error));
+}
+
 function refuse(message: string, reason?: TimelineSaveRejectionCode): never {
   const error = new TimelineSaveError(`Local document save retained: ${message}`);
+  authoringRefusals.add(error);
   throw reason ? markTimelineSaveRejection(error, reason, 'TimelineSaveError') : error;
 }
 function checkHead(initial: TimelineCommandBasis, value: TimelineSaveSource,
@@ -275,13 +309,16 @@ export function createTimelineLocalSaveHandoff(options: {
           || (Array.isArray(parent.occurrences) && parent.occurrences.length);
         const parentGesture = gestureBasis?.kind === 'move' || gestureBasis?.kind === 'transition-clear';
         const trackLabelGesture = gestureBasis?.kind === 'track-label';
-        if (hasChildren && !parentGesture && !trackLabelGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+        // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
+        const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
+        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
-        const topLevelClips = (parentGesture || gestureBasis?.kind === 'prepared-media' || gestureBasis?.kind === 'element') && object(parent.config)
+        // A document that stores its clips only at the top level is edited there, whichever gesture it is.
+        const topLevelClips = object(parent.config)
           && !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips);
         const configBefore = topLevelClips ? { ...parent.config as Record<string, OutboxJson>, clips: parent.clips } : parent.config;
         const configSource = topLevelClips && !source.config.clips.length
@@ -289,6 +326,19 @@ export function createTimelineLocalSaveHandoff(options: {
         if (gestureBasis?.kind === 'element' && topLevelClips && !source.config.clips.length
           && Array.isArray(parent.clips) && parent.clips.length) refuse('element parent clips are not present in the mounted source');
         payload.config = changes(configBefore, configSource, next.config, ['config'], gestureBasis?.kind === 'element') as Record<string, OutboxJson>;
+        // A gesture never reorders rows: write them in the stored order. A dropped clip goes last (the
+        // Runtime appends it); a new track keeps the position the editor gave it.
+        const editorTracks = (payload.config as Record<string, OutboxJson>).tracks;
+        if (gestureBasis) {
+          const written = payload.config as Record<string, OutboxJson>;
+          const stored = configBefore as Record<string, OutboxJson>;
+          for (const key of ['clips', 'tracks'] as const) {
+            if (Array.isArray(written[key]) && Array.isArray(stored[key])) {
+              written[key] = inStoredOrder(stored[key] as unknown[], written[key] as unknown[],
+                gestureBasis.kind === 'prepared-media' && key === 'clips') as OutboxJson;
+            }
+          }
+        }
         if (gestureBasis?.kind === 'prepared-media') {
           const asset = gestureBasis.command.payload.asset;
           if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
@@ -319,7 +369,7 @@ export function createTimelineLocalSaveHandoff(options: {
           const gestureConfig = gestureBasis.kind === 'prepared-media'
             ? { ...gestureBasis.config, tracks: authoringSource.config.tracks } : gestureBasis.config;
           if (!['split', 'trim', 'move', 'transition-clear', 'prepared-media', 'element', 'track-label'].includes(gestureBasis.kind)
-            || !same(authoredJson(gestureConfig), authoredJson(authoringSource.config))
+            || !sameConfig(gestureConfig, authoringSource.config)
             || !same(authoredJson(gestureBasis.registry), authoredJson(authoringSource.registry))) {
             refuse('gesture read basis differs from the original local authoring input', 'gesture-basis-mismatch');
           }
@@ -346,7 +396,7 @@ export function createTimelineLocalSaveHandoff(options: {
               delete clip.transition;
             }
           }
-          if (!same(authoredJson(expected.config), authoredJson(next.config))
+          if (!sameConfig(expected.config, next.config)
             || !same(authoredJson(expected.registry), authoredJson(next.registry))
             || !same(expected.bundle, next.bundle)) refuse('parent gesture changes more than its selected fields');
           if (gestureBasis.kind === 'transition-clear') {
@@ -364,14 +414,48 @@ export function createTimelineLocalSaveHandoff(options: {
           if (matches.length !== 1 || typeof gestureBasis.label !== 'string') refuse('track label binds no unique authored track', 'track-label-ambiguous');
           const expected = structuredClone(authoringSource);
           expected.config.tracks.find(track => track.id === gestureBasis.trackId)!.label = gestureBasis.label;
-          if (!same(authoredJson(expected.config), authoredJson(next.config))
+          if (!sameConfig(expected.config, next.config)
             || !same(authoredJson(expected.registry), authoredJson(next.registry))
             || !same(expected.bundle, next.bundle)) refuse('track label change exceeds its selected field');
         }
+        if (clipGesture) {
+          // Expected = the original document plus the selected clip as the editor edited it (and, for a split,
+          // the one clip it created beside it). Nothing else may differ, whatever order the editor wrote rows in.
+          const id = gestureBasis.clipId;
+          const known = new Set(authoringSource.config.clips.map(clip => clip.id));
+          const origin = authoringSource.config.clips.filter(clip => clip.id === id);
+          const edited = next.config.clips.filter(clip => clip.id === id);
+          const created = next.config.clips.filter(clip => !known.has(clip.id));
+          if (origin.length !== 1 || edited.length !== 1) refuse('gesture selected clip has no unique authored binding', 'gesture-clip-ambiguous');
+          // A clip that belongs to a pinned shot group is owned by the shots it pins; which of them a trim or
+          // split reaches is not mapped, so that case is refused. Every other clip row is the parent's alone.
+          if (hasChildren && findEnclosingPinnedGroup(authoringSource.config, id)) {
+            refuse('child ownership/fork mapping is unavailable: the clip belongs to a pinned shot group', 'child-ownership-unavailable');
+          }
+          if (created.length !== (gestureBasis.kind === 'split' ? 1 : 0)
+            || edited[0].track !== origin[0].track || edited[0].asset !== origin[0].asset
+            || created.some(clip => clip.track !== origin[0].track || clip.asset !== origin[0].asset)) {
+            refuse(`${gestureBasis.kind} changes more than its selected clip`);
+          }
+          const expected = structuredClone(authoringSource);
+          // Overlap resolution after a trim may shorten or shift siblings on the same track: their timing only.
+          const timing = ['at', 'from', 'to', 'hold', 'speed'] as const;
+          const retimed = (clip: TimelineConfig['clips'][number]) => {
+            const edit = next.config.clips.find(item => item.id === clip.id);
+            if (!edit || clip.track !== origin[0].track) return clip;
+            const result: Record<string, unknown> = { ...clip };
+            for (const key of timing) { if (edit[key] === undefined) delete result[key]; else result[key] = edit[key]; }
+            return result as TimelineConfig['clips'][number];
+          };
+          expected.config.clips = [...expected.config.clips.map(clip => clip.id === id ? edited[0] : gestureBasis.kind === 'trim' ? retimed(clip) : clip), ...created];
+          if (!sameConfig(expected.config, next.config)
+            || !same(authoredJson(expected.registry), authoredJson(next.registry))
+            || !same(expected.bundle, next.bundle)) refuse(`${gestureBasis.kind} changes more than its selected clip`);
+        }
         if (gestureBasis?.kind === 'element') {
           if (!same(next.registry, authoringSource.registry) || !same(next.bundle, authoringSource.bundle)
-            || !same(authoredJson(next.config), authoredJson(applyTimelineOperation(gestureBasis.context,
-              gestureBasis.config, gestureBasis.operation)))) refuse('element operation differs from its original causal input');
+            || !sameConfig(next.config, applyTimelineOperation(gestureBasis.context,
+              gestureBasis.config, gestureBasis.operation))) refuse('element operation differs from its original causal input');
           const config = configBefore as Record<string, OutboxJson>;
           if (!Array.isArray(config.clips)) refuse('element parent clips are unavailable');
           const clips = config.clips as Record<string, OutboxJson>[];
@@ -445,7 +529,10 @@ export function createTimelineLocalSaveHandoff(options: {
           if (prepared.removeClipId !== undefined && clips.some(clip => object(clip) && clip.id === prepared.removeClipId)) {
             refuse('prepared media cannot remove an authored parent clip. Draft retained; reload the timeline, then choose Add media');
           }
-          const row = duplicateVideo ? nextClips.find(clip => object(clip) && clip.id === gestureBasis.clipId) : nextClips.at(-1);
+          // The editor serializes clips grouped by track, so the new clip is not necessarily last.
+          // Find it by its command id; the Runtime appends it, and the retained rows keep stored order.
+          const row = nextClips.find(clip => object(clip) && clip.id === gestureBasis.clipId);
+          const retainedRows = duplicateVideo ? nextClips : nextClips.filter(clip => clip !== row);
           const tracks = config.tracks;
           const nextTracks = nextConfig.tracks;
           const newTrack = object(row) && Array.isArray(tracks) && Array.isArray(nextTracks)
@@ -455,20 +542,25 @@ export function createTimelineLocalSaveHandoff(options: {
             && nextTracks.filter(track => object(track) && track.id === row.track);
           if (!object(row) || row.id !== gestureBasis.clipId || row.asset !== prepared.asset.assetKey
             || clips.some(clip => object(clip) && clip.id === row.id)
-            || (!duplicateVideo && !same(nextClips.slice(0, -1), clips))
+            || (!duplicateVideo && !sameRowsById(retainedRows, clips))
             || !Array.isArray(tracks) || !Array.isArray(nextTracks)
             || (!same(authoredJson(gestureBasis.config.tracks), authoredJson(authoringSource.config.tracks))
               && (!newTrack || !same(authoredJson(gestureBasis.config.tracks), authoredJson(next.config.tracks))))
             || !same({ ...nextConfig, clips, tracks }, config)
-            || (newTrack ? duplicateVideo || !same(nextTracks.filter(track => track !== newTrack), tracks)
-              : !same(nextTracks, tracks))
+            || (newTrack ? duplicateVideo || !sameRowsById(nextTracks.filter(track => track !== newTrack), tracks)
+              : !sameRowsById(nextTracks, tracks))
             || !visualTrack || visualTrack.length !== 1 || !object(visualTrack[0])
             || visualTrack[0].kind !== 'visual' || (visualTrack[0].role ?? 'output') !== 'output') {
             refuse('prepared media changes more than one ordinary parent clip. Draft retained; reload the timeline, then choose an existing visual track');
           }
           if (Array.isArray(parent.occurrences) && parent.occurrences.some(occurrence => object(occurrence)
             && (occurrence.track === row.track || (object(occurrence.placement) && occurrence.placement.track === row.track)))) {
-            refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+            refuse('child ownership/fork mapping is unavailable: the dropped track holds shots', 'child-ownership-unavailable');
+          }
+          if (newTrack && Array.isArray(editorTracks)) {
+            // The new track keeps the position the editor gave it; the old tracks were just proven unchanged.
+            nextConfig.tracks = editorTracks;
+            if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) payload.tracks = editorTracks;
           }
           if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
             || !same(payload.registry, { ...parent.registry, assets: { ...(parent.registry.assets ?? {}),
@@ -485,18 +577,20 @@ export function createTimelineLocalSaveHandoff(options: {
               || !object(anchor) || anchor.asset !== old.asset || row.asset !== media.asset) {
               refuse('video duplication needs both exact Runtime project media selections. Draft retained; reload the timeline, then import the media again');
             }
-            // Bound the consumer to the upstream parent duplicate preview. Timing
-            // and metadata normalization remain the provider's responsibility.
-            const retained = nextClips.filter(clip => object(clip) && clip.id !== row.id);
-            if (nextClips.length !== clips.length + 1 || !same(nextClips.map(clip => object(clip) ? clip.id : null),
-              [...clips.slice(0, anchorIndex + 1).map(clip => object(clip) ? clip.id : null), row.id,
-                ...clips.slice(anchorIndex + 1).map(clip => object(clip) ? clip.id : null)])
+            // Bound the consumer to the upstream parent duplicate preview, by id: the stored rows in stored
+            // order with the new row right after its anchor. Clips after the anchor on its track may ripple
+            // their `at`; every other row is unchanged. Timing and metadata normalization stay the provider's.
+            const editedById = new Map(nextClips.map(clip => [object(clip) ? clip.id : null, clip]));
+            const placed = [...clips.slice(0, anchorIndex + 1), row, ...clips.slice(anchorIndex + 1)];
+            if (nextClips.length !== clips.length + 1 || editedById.size !== nextClips.length
               || row.track !== anchor.track || clips.some((clip, index) => {
-                const nextClip = retained[index];
+                const nextClip = object(clip) ? editedById.get(clip.id) : undefined;
                 if (!object(clip) || !object(nextClip)) return true;
                 return index <= anchorIndex || clip.track !== anchor.track ? !same(clip, nextClip)
                   : !same({ ...nextClip, at: clip.at }, clip);
               })) refuse('video duplication exceeds one parent after-anchor preview; draft retained');
+            nextConfig.clips = placed.map(clip => object(clip) && clip.id !== row.id ? editedById.get(clip.id) as OutboxJson : clip as OutboxJson);
+            if (Object.prototype.hasOwnProperty.call(parent, 'clips')) payload.clips = nextConfig.clips;
             commands = [{ schema_version: 1, op: 'clip.duplicate-media', version: '1',
               select: `parent/clip:${prepared.afterClipId}`, args: { id: row.id, old_media: authoredJson(old), media: authoredJson(media) },
               intent: { ownership: 'parent' }, created: [
@@ -520,14 +614,14 @@ export function createTimelineLocalSaveHandoff(options: {
           }
           // track.create appends. Preserve a drop at the top in the same
           // atomic commit, using the normal document-patch encoder for order.
-          if (newTrack && nextTracks.at(-1) !== newTrack) {
+          if (newTrack && (editorTracks as unknown[]).at(-1) !== newTrack) {
             const appended = structuredClone(before);
             const appendedPayload = appended.parent_revision.payload;
             (appendedPayload.config as Record<string, OutboxJson>).tracks = [...tracks, newTrack];
             if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) appendedPayload.tracks = [...tracks, newTrack];
             const reordered = structuredClone(appended);
-            (reordered.parent_revision.payload.config as Record<string, OutboxJson>).tracks = nextTracks;
-            if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) reordered.parent_revision.payload.tracks = nextTracks;
+            (reordered.parent_revision.payload.config as Record<string, OutboxJson>).tracks = editorTracks;
+            if (Object.prototype.hasOwnProperty.call(parent, 'tracks')) reordered.parent_revision.payload.tracks = editorTracks;
             const patch = documentPatchIntent({ before: appended, after: reordered, basis: { head: initial.head },
               roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
               label: mediaLabel, step: { id: crypto.randomUUID(), label: 'Position new track', intent: 'Keep the dropped track position', tags: [] },
@@ -544,7 +638,7 @@ export function createTimelineLocalSaveHandoff(options: {
           }
         }
         // Verified parent recipes preserve the complete child closure cloned above.
-        if (hasChildren && !parentGesture && !trackLabelGesture && !commands && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && !commands && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
         if (topLevelClips) delete (payload.config as Record<string, OutboxJson>).clips;
         if (!commands) {
           const clips = (payload.config as Record<string, OutboxJson>).clips;
@@ -676,6 +770,9 @@ export function createTimelineLocalSaveHandoff(options: {
       } catch (error) {
         const rejection = error instanceof TimelineVersionConflictError || error instanceof TimelineSaveError ? error
           : new TimelineSaveError(`Local document save retained: ${error instanceof Error ? error.message : String(error)}`);
+        // Nothing was appended for this edit: an unexpected authoring failure
+        // is still a refusal of this one edit.
+        if (!(error instanceof TimelineVersionConflictError) && !(error instanceof TimelineSaveError)) authoringRefusals.add(rejection);
         return Promise.reject(rejection);
       }
     },

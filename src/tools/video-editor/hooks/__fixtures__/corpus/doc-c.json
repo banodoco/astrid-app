@@ -1,0 +1,720 @@
+{
+  "clips": [
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-36",
+          "on": "text-52",
+          "until": "text-53"
+        }
+      },
+      "asset": "asset-12",
+      "at": 89.4667,
+      "clipType": "am-sprite",
+      "hold": 3.3333,
+      "id": "v5-clip-01",
+      "params": {
+        "enter": "enum-01",
+        "outline": {
+          "color": "#ED6B23",
+          "pulse": 6,
+          "px": 1
+        },
+        "scale": 5,
+        "x": 226,
+        "y": 33
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-39",
+          "on": "text-54",
+          "until": "text-55"
+        }
+      },
+      "asset": "asset-07",
+      "at": 85.6667,
+      "clipType": "am-sprite",
+      "hold": 7.6333,
+      "id": "v5-clip-02",
+      "params": {
+        "enter": "enum-01",
+        "scale": 5,
+        "x": 228,
+        "y": 114
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-40",
+          "on": "text-56",
+          "until": "text-55"
+        }
+      },
+      "asset": "asset-05",
+      "at": 86.8,
+      "clipType": "am-sprite",
+      "hold": 6.5,
+      "id": "v5-clip-03",
+      "params": {
+        "enter": "enum-01",
+        "scale": 5,
+        "x": 228,
+        "y": 90
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-41",
+          "on": "text-57",
+          "until": "text-55"
+        }
+      },
+      "asset": "asset-06",
+      "at": 87.9667,
+      "clipType": "am-sprite",
+      "hold": 5.3333,
+      "id": "v5-clip-04",
+      "params": {
+        "enter": "enum-01",
+        "scale": 5,
+        "x": 228,
+        "y": 65
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-07",
+          "sequence": "text-58",
+          "sequence_index": 5
+        }
+      },
+      "asset": "asset-16",
+      "at": 57.9667,
+      "clipType": "am-footage",
+      "hold": 0.2,
+      "id": "v6-clip-05",
+      "params": {
+        "kind": "b-roll",
+        "label": "text-59",
+        "placeholder": true,
+        "slot": "slot-02",
+        "spec": "text-47"
+      },
+      "to": 0.2,
+      "track": "v6"
+    },
+    {
+      "app": {
+        "astrid": {
+          "gap_after_s": 0.2,
+          "segment": "text-60",
+          "text": "text-61",
+          "words": [
+            [
+              0.090916,
+              0.181832,
+              "text-62"
+            ],
+            [
+              0.181833,
+              0.215916,
+              "text-63"
+            ],
+            [
+              0.227291,
+              0.340916,
+              "text-64"
+            ],
+            [
+              0.340916,
+              0.511374,
+              "text-65"
+            ],
+            [
+              0.511375,
+              0.579541,
+              "text-66"
+            ],
+            [
+              0.590916,
+              0.909082,
+              "text-67"
+            ],
+            [
+              1.284083,
+              1.443166,
+              "text-68"
+            ],
+            [
+              1.443166,
+              1.738624,
+              "text-69"
+            ]
+          ]
+        }
+      },
+      "asset": "asset-75",
+      "at": 56.2,
+      "clipType": "media",
+      "from": 0,
+      "id": "a1-clip-06",
+      "to": 1.8,
+      "track": "a1",
+      "volume": 1.2589254117941673
+    },
+    {
+      "asset": "asset-25",
+      "at": 0,
+      "clipType": "media",
+      "from": 0,
+      "hold": 159.8333,
+      "id": "a2-clip-07",
+      "params": {
+        "fadeIn": 4,
+        "fadeOut": 3
+      },
+      "to": 162.966666,
+      "track": "a2",
+      "volume": 0.263
+    }
+  ],
+  "config": {
+    "app": {
+      "astrid": {
+        "cut_notes": {
+          "cut-01": {
+            "why": "text-17",
+            "why_layers": [
+              "text-18"
+            ]
+          },
+          "cut-02": {
+            "why": "text-19",
+            "why_layers": [
+              "text-20"
+            ]
+          },
+          "cut-03": {
+            "why": "text-21",
+            "why_layers": [
+              "text-20",
+              "text-22",
+              "text-18"
+            ]
+          },
+          "cut-04": {
+            "why": "text-23",
+            "why_layers": [
+              "text-24",
+              "text-18",
+              "text-25"
+            ]
+          },
+          "cut-05": {
+            "why": "text-26",
+            "why_layers": [
+              "text-27",
+              "text-28",
+              "text-29",
+              "text-20",
+              "text-30",
+              "text-31",
+              "text-32",
+              "text-33",
+              "text-25",
+              "text-34"
+            ]
+          },
+          "cut-06": {
+            "why": "text-35",
+            "why_layers": [
+              "text-28",
+              "text-29",
+              "text-36",
+              "text-20",
+              "text-30",
+              "text-31",
+              "text-32",
+              "text-33",
+              "text-25",
+              "text-34"
+            ]
+          },
+          "cut-07": {
+            "why": "text-37",
+            "why_layers": [
+              "text-38",
+              "text-36",
+              "text-39",
+              "text-40",
+              "text-41",
+              "text-20",
+              "text-42",
+              "text-43",
+              "text-44"
+            ]
+          }
+        },
+        "groups": [
+          {
+            "from": "text-01",
+            "name": "text-02"
+          },
+          {
+            "from": "text-03",
+            "name": "text-04"
+          },
+          {
+            "from": "text-05",
+            "name": "text-06"
+          },
+          {
+            "from": "text-07",
+            "name": "text-08"
+          },
+          {
+            "from": "text-09",
+            "name": "text-10"
+          },
+          {
+            "from": "text-11",
+            "name": "text-12"
+          },
+          {
+            "from": "text-13",
+            "name": "text-14"
+          },
+          {
+            "from": "text-15",
+            "name": "text-16"
+          }
+        ],
+        "slots": {
+          "slot-01": {
+            "face_zone": [
+              700,
+              110,
+              500,
+              610
+            ],
+            "kind": "a-roll",
+            "params": {
+              "label": "text-45",
+              "placeholder": true
+            },
+            "spec": "text-46"
+          },
+          "slot-02": {
+            "kind": "b-roll",
+            "spec": "text-47"
+          },
+          "slot-03": {
+            "hand_mark": {
+              "size": 450,
+              "x": 1310,
+              "y": 770
+            },
+            "kind": "hand",
+            "spec": "text-48"
+          },
+          "slot-04": {
+            "kind": "screen",
+            "spec": "text-49"
+          },
+          "slot-05": {
+            "kind": "window",
+            "spec": "text-50"
+          }
+        }
+      }
+    },
+    "clips": [
+      {
+        "app": {
+          "astrid": {
+            "cut": "text-51",
+            "layer": "text-36",
+            "on": "text-52",
+            "until": "text-53"
+          }
+        },
+        "asset": "asset-12",
+        "at": 89.4667,
+        "clipType": "am-sprite",
+        "hold": 3.3333,
+        "id": "v5-clip-01",
+        "params": {
+          "enter": "enum-01",
+          "outline": {
+            "color": "#ED6B23",
+            "pulse": 6,
+            "px": 1
+          },
+          "scale": 5,
+          "x": 226,
+          "y": 33
+        },
+        "track": "v5"
+      },
+      {
+        "app": {
+          "astrid": {
+            "cut": "text-51",
+            "layer": "text-39",
+            "on": "text-54",
+            "until": "text-55"
+          }
+        },
+        "asset": "asset-07",
+        "at": 85.6667,
+        "clipType": "am-sprite",
+        "hold": 7.6333,
+        "id": "v5-clip-02",
+        "params": {
+          "enter": "enum-01",
+          "scale": 5,
+          "x": 228,
+          "y": 114
+        },
+        "track": "v5"
+      },
+      {
+        "app": {
+          "astrid": {
+            "cut": "text-51",
+            "layer": "text-40",
+            "on": "text-56",
+            "until": "text-55"
+          }
+        },
+        "asset": "asset-05",
+        "at": 86.8,
+        "clipType": "am-sprite",
+        "hold": 6.5,
+        "id": "v5-clip-03",
+        "params": {
+          "enter": "enum-01",
+          "scale": 5,
+          "x": 228,
+          "y": 90
+        },
+        "track": "v5"
+      },
+      {
+        "app": {
+          "astrid": {
+            "cut": "text-51",
+            "layer": "text-41",
+            "on": "text-57",
+            "until": "text-55"
+          }
+        },
+        "asset": "asset-06",
+        "at": 87.9667,
+        "clipType": "am-sprite",
+        "hold": 5.3333,
+        "id": "v5-clip-04",
+        "params": {
+          "enter": "enum-01",
+          "scale": 5,
+          "x": 228,
+          "y": 65
+        },
+        "track": "v5"
+      },
+      {
+        "app": {
+          "astrid": {
+            "cut": "text-07",
+            "sequence": "text-58",
+            "sequence_index": 5
+          }
+        },
+        "asset": "asset-16",
+        "at": 57.9667,
+        "clipType": "am-footage",
+        "hold": 0.2,
+        "id": "v6-clip-05",
+        "params": {
+          "kind": "b-roll",
+          "label": "text-59",
+          "placeholder": true,
+          "slot": "slot-02",
+          "spec": "text-47"
+        },
+        "to": 0.2,
+        "track": "v6"
+      },
+      {
+        "app": {
+          "astrid": {
+            "gap_after_s": 0.2,
+            "segment": "text-60",
+            "text": "text-61",
+            "words": [
+              [
+                0.090916,
+                0.181832,
+                "text-62"
+              ],
+              [
+                0.181833,
+                0.215916,
+                "text-63"
+              ],
+              [
+                0.227291,
+                0.340916,
+                "text-64"
+              ],
+              [
+                0.340916,
+                0.511374,
+                "text-65"
+              ],
+              [
+                0.511375,
+                0.579541,
+                "text-66"
+              ],
+              [
+                0.590916,
+                0.909082,
+                "text-67"
+              ],
+              [
+                1.284083,
+                1.443166,
+                "text-68"
+              ],
+              [
+                1.443166,
+                1.738624,
+                "text-69"
+              ]
+            ]
+          }
+        },
+        "asset": "asset-75",
+        "at": 56.2,
+        "clipType": "media",
+        "from": 0,
+        "id": "a1-clip-06",
+        "to": 1.8,
+        "track": "a1",
+        "volume": 1.2589254117941673
+      },
+      {
+        "asset": "asset-25",
+        "at": 0,
+        "clipType": "media",
+        "from": 0,
+        "hold": 159.8333,
+        "id": "a2-clip-07",
+        "params": {
+          "fadeIn": 4,
+          "fadeOut": 3
+        },
+        "to": 162.966666,
+        "track": "a2",
+        "volume": 0.263
+      }
+    ],
+    "theme_overrides": {
+      "visual": {
+        "canvas": {
+          "fps": 30,
+          "height": 1080,
+          "width": 1920
+        }
+      }
+    },
+    "tracks": [
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v1",
+        "kind": "visual",
+        "label": "Track v1"
+      },
+      {
+        "id": "v2",
+        "kind": "visual",
+        "label": "Track v2"
+      },
+      {
+        "id": "v3",
+        "kind": "visual",
+        "label": "Track v3"
+      },
+      {
+        "id": "v4",
+        "kind": "visual",
+        "label": "Track v4"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v5",
+        "kind": "visual",
+        "label": "Track v5"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v6",
+        "kind": "visual",
+        "label": "Track v6"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "a1",
+        "kind": "audio",
+        "label": "Track a1"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "a2",
+        "kind": "audio",
+        "label": "Track a2"
+      },
+      {
+        "id": "a3",
+        "kind": "audio",
+        "label": "Track a3"
+      }
+    ]
+  },
+  "occurrences": [
+    {
+      "duration_ms": 7366,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-01",
+      "placement": {
+        "start_ms": 0
+      },
+      "provenance": {},
+      "shot_id": "shot-01",
+      "shot_revision_id": "shot-rev-01",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    },
+    {
+      "duration_ms": 35367,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-02",
+      "placement": {
+        "start_ms": 7366
+      },
+      "provenance": {},
+      "shot_id": "shot-02",
+      "shot_revision_id": "shot-rev-02",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    },
+    {
+      "duration_ms": 13633,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-03",
+      "placement": {
+        "start_ms": 42733
+      },
+      "provenance": {},
+      "shot_id": "shot-03",
+      "shot_revision_id": "shot-rev-03",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    }
+  ],
+  "registry": {
+    "assets": {
+      "asset-05": {
+        "content_sha256": "sha256:c016fccadba27b7e88a3e20c650cc0ec77157c1753fe36b5ffc0ad41ea42af9e",
+        "media_id": "sha256:c016fccadba27b7e88a3e20c650cc0ec77157c1753fe36b5ffc0ad41ea42af9e",
+        "resolution": "32x33",
+        "type": "image/png"
+      },
+      "asset-06": {
+        "content_sha256": "sha256:0910b80864893d3bfc1bbd5e5735b7876afdcce8bd2170c0ffa6d11c8e337232",
+        "media_id": "sha256:0910b80864893d3bfc1bbd5e5735b7876afdcce8bd2170c0ffa6d11c8e337232",
+        "resolution": "32x34",
+        "type": "image/png"
+      },
+      "asset-07": {
+        "content_sha256": "sha256:391f2d2c9b0027deec604ff20b9f5a3e3f682faa9716fd5046649c571194a956",
+        "media_id": "sha256:391f2d2c9b0027deec604ff20b9f5a3e3f682faa9716fd5046649c571194a956",
+        "resolution": "32x34",
+        "type": "image/png"
+      },
+      "asset-12": {
+        "content_sha256": "sha256:14ee7494eabcf9e3ca3e88967f12a8d11919d2a81ee4d3d7e4be80bd175f7e3b",
+        "media_id": "sha256:14ee7494eabcf9e3ca3e88967f12a8d11919d2a81ee4d3d7e4be80bd175f7e3b",
+        "resolution": "36x42",
+        "type": "image/png"
+      },
+      "asset-16": {
+        "content_sha256": "sha256:58f9123529b5e46cd07540926406a59fa62e28d28e2f515e03c6b88b7b2f4e0e",
+        "media_id": "sha256:58f9123529b5e46cd07540926406a59fa62e28d28e2f515e03c6b88b7b2f4e0e",
+        "resolution": "1536x1024",
+        "type": "image/png"
+      },
+      "asset-25": {
+        "content_sha256": "sha256:416ef714434c7d3ad333752b5ac5a0db6cbd046f2d8c17d1fc858339650bb37a",
+        "media_id": "sha256:416ef714434c7d3ad333752b5ac5a0db6cbd046f2d8c17d1fc858339650bb37a",
+        "type": "audio/mpeg"
+      },
+      "asset-75": {
+        "content_sha256": "sha256:abbf08a7e757059375ddfd72069a97e6364e68b1a3073dc04aed1c01c93832ff",
+        "media_id": "sha256:abbf08a7e757059375ddfd72069a97e6364e68b1a3073dc04aed1c01c93832ff",
+        "type": "audio/wav"
+      }
+    }
+  }
+}

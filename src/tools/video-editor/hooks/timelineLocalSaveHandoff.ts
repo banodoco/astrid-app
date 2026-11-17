@@ -317,7 +317,8 @@ export function createTimelineLocalSaveHandoff(options: {
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
-        const topLevelClips = (parentGesture || gestureBasis?.kind === 'prepared-media' || gestureBasis?.kind === 'element') && object(parent.config)
+        // A document that stores its clips only at the top level is edited there, whichever gesture it is.
+        const topLevelClips = object(parent.config)
           && !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips);
         const configBefore = topLevelClips ? { ...parent.config as Record<string, OutboxJson>, clips: parent.clips } : parent.config;
         const configSource = topLevelClips && !source.config.clips.length
@@ -425,7 +426,7 @@ export function createTimelineLocalSaveHandoff(options: {
           const origin = authoringSource.config.clips.filter(clip => clip.id === id);
           const edited = next.config.clips.filter(clip => clip.id === id);
           const created = next.config.clips.filter(clip => !known.has(clip.id));
-          if (origin.length !== 1 || edited.length !== 1) refuse('gesture selected clip has no unique authored parent binding', 'gesture-clip-ambiguous');
+          if (origin.length !== 1 || edited.length !== 1) refuse('gesture selected clip has no unique authored binding', 'gesture-clip-ambiguous');
           // A clip that belongs to a pinned shot group is owned by the shots it pins; which of them a trim or
           // split reaches is not mapped, so that case is refused. Every other clip row is the parent's alone.
           if (hasChildren && findEnclosingPinnedGroup(authoringSource.config, id)) {

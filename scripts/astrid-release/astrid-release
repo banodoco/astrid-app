@@ -1,0 +1,528 @@
+#!/usr/bin/env bash
+# astrid-release <branch>         build and start the whole Astrid stack on a release branch
+# astrid-release update <branch>  show what moved; refuses to move a built stack to new commits (see the README Limits)
+# astrid-release status <branch>  what resolves to what, and whether the stack runs
+# astrid-release stop <branch>    stop that stack
+#
+# A thin wrapper over the official paths: public/install, the App's dev-local-workspace.mjs,
+# and scripts/installer/pin.mjs for the manifest. Isolated root, HOME and ports, and a snapshot COPY of the
+# live realm. It never touches the live stack (:2222, :17340, :17336, :17391) or the live data root.
+set -Eeuo pipefail
+umask 077
+
+SCRIPT_DIR="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+fail() { trap - ERR; printf '[release] STOP: %s\n' "$*" >&2; exit 1; }
+say() { printf '[release] %s\n' "$*"; }
+trap 'fail "line $LINENO: $BASH_COMMAND failed (logs: ${LOGS:-none})"' ERR
+
+usage() {
+  cat >&2 <<'USAGE'
+Usage:
+  astrid-release <branch>           build and start the stack (example: release/14/plan-59)
+  astrid-release update <branch>    show what moved; refuses to switch a built stack to new commits
+  astrid-release status <branch>    show what resolves to what, and the running state
+  astrid-release stop <branch>      stop the stack
+USAGE
+  exit 2
+}
+[[ $# -ge 1 ]] || usage
+case "$1" in
+  status|stop|update) [[ $# -eq 2 ]] || usage; CMD="$1"; BRANCH="$2" ;;
+  *) [[ $# -eq 1 ]] || usage; CMD=up; BRANCH="$1" ;;
+esac
+[[ "$BRANCH" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ && "$BRANCH" != *..* ]] || usage
+SLUG="${BRANCH//\//-}"
+ROOT="$HOME/astrid-release/$SLUG"
+STATE="$ROOT/state"; LOGS="$ROOT/logs"; APP="$ROOT/editor"; PROGRAM="$ROOT/program"; DATA="$ROOT/data"
+PROTECTED="17340 2222 17336 17391"
+
+# ---------- resolve the two branch heads (App and Agent); everything else comes from the Agent's locks ----------
+CANDS="$BRANCH"
+if [[ "$BRANCH" =~ ^release/([0-9]+)/ ]]; then CANDS="$BRANCH release/${BASH_REMATCH[1]}/main"; fi
+CANDS="$CANDS main"
+head_of() { # repo [candidates] -> "ref<TAB>sha" of the first candidate branch that exists
+  local repo="$1" ref sha
+  for ref in ${2:-$CANDS}; do
+    sha="$(git ls-remote --heads "https://github.com/$repo.git" "refs/heads/$ref" | awk 'NR==1{print $1}')"
+    [[ -n "$sha" ]] && { printf '%s\t%s\n' "$ref" "$sha"; return 0; }
+  done
+  return 1
+}
+resolve_heads() {
+  local line
+  APP_REF_SHA="$(head_of banodoco/astrid-app)" || fail "banodoco/astrid-app has none of: $CANDS."
+  AGENT_REF_SHA="$(head_of banodoco/astrid-agent)" || fail "banodoco/astrid-agent has none of: $CANDS."
+  APP_REF="${APP_REF_SHA%%$'\t'*}"; APP_SHA="${APP_REF_SHA#*$'\t'}"
+  AGENT_REF="${AGENT_REF_SHA%%$'\t'*}"; AGENT_SHA="${AGENT_REF_SHA#*$'\t'}"
+  [[ "$APP_REF" == "$BRANCH" || "$AGENT_REF" == "$BRANCH" ]] || fail "Neither the App nor the Agent has a branch named $BRANCH (typo?). Nothing was done."
+}
+print_heads() {
+  printf '\n%-24s %-12s %-22s %-14s %s\n' REPO OWNER REF SHA ''
+  printf '%-24s %-12s %-22s %-14s %s\n' app 'branch' "$APP_REF" "${APP_SHA:0:12}" "$([[ "$APP_REF" == "$BRANCH" ]] || echo "<-- FELL BACK to $APP_REF (no $BRANCH on this repo)")"
+  printf '%-24s %-12s %-22s %-14s %s\n' agent 'branch' "$AGENT_REF" "${AGENT_SHA:0:12}" "$([[ "$AGENT_REF" == "$BRANCH" ]] || echo "<-- FELL BACK to $AGENT_REF (no $BRANCH on this repo)")"
+}
+# What the installed (or about to be installed) manifest pins, versus the branch tips: loud, never failing.
+print_derived() { # manifest-file
+  local manifest="$1" row name repo sha tip ref
+  [[ -f "$manifest" ]] || return 0
+  while read -r name repo sha; do
+    printf '%-24s %-12s %-22s %-14s %s\n' "$name" 'Agent lock' '-' "${sha:0:12}" ''
+    if row="$(head_of "$repo")"; then
+      ref="${row%%$'\t'*}"; tip="${row#*$'\t'}"
+      if [[ "$tip" != "$sha" ]]; then
+        say "NOT RUNNING: $name branch tip ${tip:0:12} ($ref) is not what this stack installs (${sha:0:12}); bump its lock on the Agent branch."
+      fi
+    fi
+  done < <(/usr/bin/python3 - "$manifest" <<'PY'
+import json, sys
+m = json.load(open(sys.argv[1]))
+print('runtime', 'banodoco/astrid-runtime', m['runtime']['sha'])
+print('vibecomfy', 'peteromallet/VibeComfy', m['vibecomfy']['sha'])
+print('runpod-lifecycle', 'banodoco/runpod-lifecycle', m['lifecycle']['sha'])
+PY
+)
+  if row="$(head_of banodoco/timeline-composition)"; then
+    say "NOT RUNNING: timeline-composition branch tip ${row#*$'\t'} (${row%%$'\t'*}) is never built in: the App and the Agent each bundle their own tarball."
+  fi
+  say 'launcher (astrid-pinokio) is out of scope; OMP is installed at the App manifest tools.omp pin (no release branch).'
+}
+
+listening() { lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1; }
+alive() { # pid lstart -> 0 when that exact process is still running
+  local started
+  started="$(ps -p "$1" -o lstart= 2>/dev/null | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)"
+  [[ -n "$started" && "$started" == "$2" ]]
+}
+is_running() { # every recorded process is alive; a leftover record after a reboot counts as stopped
+  [[ -s "$STATE/processes.tsv" ]] || return 1
+  local role pid started
+  while IFS=$'\t' read -r role pid started; do alive "$pid" "$started" || return 1; done < "$STATE/processes.tsv"
+}
+# Safety net: processes whose executable (or node script) lives under this stack's program or editor folder.
+stragglers() {
+  ps -axo pid=,command= | awk -v prog="$PROGRAM/versions/" -v app="$APP/" -v me="$$" \
+    '$1 != me && (index($2, prog) == 1 || index($3, app) == 1 || index($3, prog) == 1) {print $1}'
+}
+stop_stack() {
+  local pid role started cmd remaining
+  if [[ -s "$STATE/processes.tsv" ]]; then
+    while IFS=$'\t' read -r role pid started; do
+      alive "$pid" "$started" || continue
+      cmd="$(ps -p "$pid" -o command=)"
+      case "$role" in
+        editor) [[ "$cmd" == *"$APP/scripts/dev-local-workspace.mjs"* ]] || fail "pid $pid is not this stack's editor; nothing stopped." ;;
+        runtime) [[ "$cmd" == *"$PROGRAM/versions/"* ]] || fail "pid $pid is not this stack's Runtime; nothing stopped." ;;
+        *) fail "Unknown role $role" ;;
+      esac
+      kill -TERM "$pid" 2>/dev/null || true
+    done < "$STATE/processes.tsv"
+  fi
+  for pid in $(stragglers); do kill -TERM "$pid" 2>/dev/null || true; done
+  for _ in $(seq 20); do [[ -z "$(stragglers)" ]] && break; sleep 1; done
+  remaining="$(stragglers | tr '\n' ' ')"
+  [[ -z "$remaining" ]] || fail "These processes of this stack did not exit: $remaining"
+  rm -f "$STATE/processes.tsv"
+}
+# rm -rf can lose a race with Finder or a viewer re-creating .DS_Store: retry a few times.
+remove_dir() { local i; for i in 1 2 3 4 5; do rm -rf -- "$1" 2>/dev/null && return 0; sleep 2; done; rm -rf -- "$1"; }
+saved_ports() { [[ -f "$STATE/ports" ]] && IFS=, read -r APP_PORT PROXY_PORT DOOR_PORT < "$STATE/ports"; }
+
+# ---------- status ----------
+if [[ "$CMD" == status ]]; then
+  resolve_heads
+  say "Release $BRANCH, root $ROOT"
+  print_heads
+  print_derived "$STATE/install-manifest.json"
+  [[ ! -d "$APP/.git" ]] || say "App checkout (what the editor serves): $(git -C "$APP" rev-parse --short=12 HEAD) (the Agent and Runtime above are the installed pins)"
+  if saved_ports; then
+    if is_running; then running=yes; else running=no; fi
+    say "Running: $running. Editor http://127.0.0.1:$APP_PORT/tools/video-editor?connect=1 (ports editor $APP_PORT, proxy $PROXY_PORT, door $DOOR_PORT)"
+    if [[ -f "$STATE/heads.tsv" && "$(cat "$STATE/heads.tsv")" != "$APP_REF $APP_SHA $AGENT_REF $AGENT_SHA" ]]; then
+      say "WARNING: branch heads moved since this stack was built. Run: astrid-release update $BRANCH"
+    fi
+  else
+    say "No stack has been built for $BRANCH yet."
+  fi
+  exit 0
+fi
+
+# ---------- stop ----------
+if [[ "$CMD" == stop ]]; then
+  [[ -d "$STATE" ]] || { say "No stack for $BRANCH."; exit 0; }
+  stop_stack
+  say "Stopped. Files stay in $ROOT; run astrid-release $BRANCH to start again, or delete that folder to remove the stack."
+  exit 0
+fi
+
+# ---------- up / update ----------
+[[ "$(uname)" == Darwin ]] || fail 'macOS only.'
+[[ -f "$HOME/.local/share/astrid/install.json" ]] || fail "No live Astrid install found (~/.local/share/astrid/install.json); there is no realm to copy."
+for tool in sqlite3 python3; do command -v "$tool" >/dev/null || fail "$tool is required."; done
+for tool in git node npm curl lsof shasum awk; do command -v "$tool" >/dev/null || fail "$tool is required."; done
+NODE_BIN="$(dirname "$(command -v node)")"
+[[ ! -L "$ROOT" ]] || fail 'The root must not be a symlink.'
+mkdir -p "$STATE" "$LOGS" "$ROOT/home" "$ROOT/tmp"
+ROOT="$(cd -P -- "$ROOT" && pwd -P)"
+[[ "$ROOT" != / && "$ROOT" != "$(cd -P -- "$HOME" && pwd -P)" ]] || fail 'Unsafe root.'
+
+resolve_heads
+say "Release $BRANCH, root $ROOT"
+print_heads
+
+running=0; is_running && running=1
+if [[ "$running" != 1 ]]; then rm -f "$STATE/processes.tsv"; fi
+[[ "$CMD" != up || "$running" != 1 ]] || fail "Already running. Use: astrid-release update $BRANCH"
+if [[ "$CMD" == update ]]; then
+  [[ -f "$STATE/heads.tsv" && -f "$STATE/ports" ]] || fail "No stack built for $BRANCH yet. Run: astrid-release $BRANCH"
+  read -r old_app_ref old_app_sha old_agent_ref old_agent_sha < "$STATE/heads.tsv"
+  for pair in "app:$old_app_sha:$APP_SHA:$APP_REF" "agent:$old_agent_sha:$AGENT_SHA:$AGENT_REF"; do
+    IFS=: read -r n o w r <<< "$pair"
+    if [[ "$o" == "$w" ]]; then say "$n: unchanged (${w:0:12} on $r)"; else say "$n: ${o:0:12} -> ${w:0:12} (now on $r)"; fi
+  done
+  if [[ "$old_app_sha" == "$APP_SHA" && "$old_agent_sha" == "$AGENT_SHA" ]]; then
+    if [[ "$running" == 1 ]]; then say 'Nothing changed. The stack was left as it is.'; exit 0; fi
+    say 'Nothing changed, but the stack is not running; starting it.'
+  fi
+fi
+
+# Ports (editor, discovery proxy, door). A running stack keeps its own; a stopped one keeps them if still free.
+picked() { local p="$1" end="$2"; shift 2; for ((; p<=end; p++)); do
+    case " $PROTECTED $* " in *" $p "*) continue ;; esac
+    listening "$p" && continue
+    echo "$p"; return 0; done; fail 'No free port.'; }
+keep=0
+if saved_ports; then
+  keep=1
+  for q in $APP_PORT $PROXY_PORT $DOOR_PORT; do case " $PROTECTED " in *" $q "*) keep=0 ;; esac; done
+  if [[ "$running" != 1 ]]; then for q in $APP_PORT $PROXY_PORT $DOOR_PORT; do if listening "$q"; then keep=0; fi; done; fi
+fi
+if [[ -f "$PROGRAM/current" ]]; then  # the installed program owns the door port; never re-pick it
+  door="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"]["ASTRID_RUNTIME_DOOR_PORT"])' "$PROGRAM/versions/$(cat "$PROGRAM/current")/version.json" 2>/dev/null || true)"
+  if [[ -n "$door" && "$door" != "${DOOR_PORT:-}" ]]; then DOOR_PORT="$door"; printf '%s,%s,%s\n' "${APP_PORT:-}" "${PROXY_PORT:-}" "$DOOR_PORT" > "$STATE/ports"; fi
+fi
+if [[ "$keep" != 1 ]]; then
+  APP_PORT="$(picked 2400 2499)"; PROXY_PORT="$(picked 17500 17599 "$APP_PORT")"; DOOR_PORT="$(picked 17500 17599 "$APP_PORT" "$PROXY_PORT")"
+  printf '%s,%s,%s\n' "$APP_PORT" "$PROXY_PORT" "$DOOR_PORT" > "$STATE/ports"
+fi
+say "Ports editor/proxy/door: $APP_PORT,$PROXY_PORT,$DOOR_PORT"
+
+# Disk floor, computed from real sizes and checked where it applies: an install needs ~5 GB (program 3.6 GB plus the
+# editor clone) plus twice the live realm database; the realm step later needs only 1 GB plus its database (clones are free).
+live_data_root="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data_root"])' "$HOME/.local/share/astrid/install.json")"
+[[ -d "$live_data_root/runtime/realms" ]] || fail "No live realm under $live_data_root."
+need_disk() { # megabytes
+  local free_kb; free_kb="$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')"
+  [[ "$free_kb" -ge $(($1 * 1024)) ]] || fail "Not enough disk: $((free_kb / 1024)) MB free, $1 MB needed. Nothing was changed."
+}
+db_kb="$(du -sk "$live_data_root"/runtime/realms/*/realm.sqlite3 2>/dev/null | awk '{s+=$1} END {print s+0}')"
+
+# The editor source and the manifest are prepared WITHOUT touching a running stack: fetch, derive the manifest
+# with pin.mjs from the Agent's locks, check it. Only then is anything stopped or checked out.
+if [[ ! -d "$APP/.git" ]]; then
+  git clone --quiet --depth 1 --single-branch --branch "$APP_REF" https://github.com/banodoco/astrid-app.git "$APP"
+  APP_REV=HEAD
+else
+  [[ -z "$(git -C "$APP" status --porcelain --untracked-files=no)" ]] || fail "Editor source in $APP has changes; not overwriting."
+  git -C "$APP" fetch --quiet --depth 1 origin "$APP_REF"
+  APP_REV=FETCH_HEAD
+fi
+[[ "$(git -C "$APP" rev-parse "$APP_REV")" == "$APP_SHA" ]] || fail 'The App tip moved while fetching; rerun.'
+git -C "$APP" show "$APP_REV:public/install-manifest.json" > "$STATE/base-manifest.json"
+git -C "$APP" show "$APP_REV:runtime.lock.json" > "$STATE/app-runtime.lock.json"
+node "$SCRIPT_DIR/../installer/pin.mjs" "$AGENT_SHA" --in "$STATE/base-manifest.json" --out "$STATE/install-manifest.next.json" \
+  || fail 'pin.mjs could not derive a manifest from the Agent locks. The running stack, if any, was not touched.'
+node "$SCRIPT_DIR/../installer/pin.mjs" --check --in "$STATE/install-manifest.next.json" \
+  || fail 'The derived manifest is inconsistent. The running stack, if any, was not touched.'
+app_lock="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_commit"])' "$STATE/app-runtime.lock.json")"
+next_runtime="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime"]["sha"])' "$STATE/install-manifest.next.json")"
+say "Manifest derived from the Agent ${AGENT_SHA:0:12} locks: Runtime ${next_runtime:0:12}."
+if [[ "$app_lock" != "$next_runtime" ]]; then
+  say "MISMATCH (info): the App's runtime.lock.json names Runtime ${app_lock:0:12} but the Agent locks install Runtime ${next_runtime:0:12}. The App was built against another Runtime contract."
+fi
+print_derived "$STATE/install-manifest.next.json"
+
+if [[ "$running" == 1 ]]; then say 'Restarting this release stack only (the live stack is not touched).'; fi
+stop_stack
+[[ "$APP_REV" == HEAD ]] || git -C "$APP" checkout --quiet --detach FETCH_HEAD
+
+# Everything that installs or runs gets: the full environment minus every ASTRID_* (and the other variables that
+# can point at the live stack), plus an isolated HOME/XDG/TMPDIR and this stack's door port.
+clean_env() {
+  local name args=()
+  for name in $(compgen -e); do
+    case "$name" in
+      ASTRID_*|VITE_*|WORKSPACE_*|PORT|HOME|PATH|XDG_*|TMPDIR|PYTHON*|VIRTUAL_ENV|OLDPWD|PWD|_) continue ;;
+    esac
+    args+=("$name=${!name}")
+  done
+  env -i "${args[@]}" HOME="$ROOT/home" TMPDIR="$ROOT/tmp/" \
+    XDG_DATA_HOME="$ROOT/home/.local/share" XDG_STATE_HOME="$ROOT/home/.local/state" XDG_CACHE_HOME="$ROOT/home/.cache" XDG_CONFIG_HOME="$ROOT/home/.config" \
+    PATH="$NODE_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+    ASTRID_RUNTIME_DOOR_PORT="$DOOR_PORT" "$@"
+}
+bootstrap_work="$(mktemp -d "$ROOT/tmp/bootstrap.XXXXXXXX")"
+trap 'rm -rf -- "$bootstrap_work"' EXIT
+cp "$STATE/install-manifest.next.json" "$bootstrap_work/manifest.json"
+
+# Install, or the installer's own --update; skipped when the installed program already matches the manifest and door.
+need_install=1; AS_BUILT=0
+if [[ -f "$PROGRAM/current" ]]; then
+  installed_version="$(cat "$PROGRAM/current")"
+  [[ "$installed_version" != *[!A-Za-z0-9._-]* && -n "$installed_version" ]] || fail 'Invalid installed version pointer.'
+  if clean_env node --input-type=module - "$PROGRAM/versions/$installed_version" "$STATE/install-manifest.next.json" "$DOOR_PORT" <<'PINSCHECK'
+import { readFileSync } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
+const [installed, manifest, door] = process.argv.slice(2);
+try {
+  const read = (file) => JSON.parse(readFileSync(file, 'utf8'));
+  process.exit(isDeepStrictEqual(read(`${installed}/manifest.json`), read(manifest))
+    && read(`${installed}/version.json`).env.ASTRID_RUNTIME_DOOR_PORT === door ? 0 : 1);
+} catch { process.exit(1); }
+PINSCHECK
+  then
+    need_install=0; say 'The installed program already matches this manifest; skipping the installer.'
+  else
+    # The installer's own --update cannot run on this install (it probes the live launchd label haus.astrid.runtime and
+    # calls this stack's missing plist "malformed"), and reinstalling over kept data needs the retained Runtime
+    # source profile rewritten. That kept-data switch is not built yet, and this tool never deletes data/ (it holds
+    # the edits made on the realm copy), so it refuses.
+    if [[ "$CMD" == up ]]; then
+      # Starting a stack that is already built starts it AS BUILT; moving it to new commits is `update`.
+      need_install=0; AS_BUILT=1
+      say "NOTE: the branch moved since this stack was built (new manifest differs). Starting the stack as built; \`astrid-release update $BRANCH\` moves it (not supported without losing data yet)."
+    else
+    fail "The branch moved (the manifest changed). Moving a built stack is not supported without losing data (the installer's own --update is blocked, issue #825). To test the new commits: 1) astrid-release stop $BRANCH  2) keep the data: cp -c -R $DATA ~/astrid-release/$SLUG.data-\$(date +%Y%m%d-%H%M)  3) delete $ROOT and run astrid-release $BRANCH again (the realm is copied fresh from live). Edits on the old copy carry over only by attaching the kept clone (same workspace schema only). Nothing was changed."
+    fi
+  fi
+fi
+live_proof() { printf 'live runtime: %s | plist mtime: %s\n' "$(launchctl list 2>/dev/null | awk '/haus\.astrid\.runtime/ {print $1" "$3}')" "$(stat -f %m "$HOME/Library/LaunchAgents/haus.astrid.runtime.plist" 2>/dev/null || echo none)"; }
+live_proof > "$STATE/live-proof-before.txt"
+if [[ "$AS_BUILT" == 1 ]]; then rm -f "$STATE/install-manifest.next.json"; else mv "$STATE/install-manifest.next.json" "$STATE/install-manifest.json"; fi
+if [[ "$need_install" == 1 ]]; then
+  need_disk $((5 * 1024 + 2 * db_kb / 1024))
+  # Consent is given up front and kept minimal: no sign-in autostart, no shell command link, no skills outside this
+  # HOME. This matters: the installer's launchd label (haus.astrid.runtime) is the same global name the live
+  # service uses; it is only safe because autostart is off and HOME is the isolated one. Never --managed-by:
+  # that makes `astrid-runtime up`, which the editor launcher needs, refuse.
+  live_plist="$HOME/Library/LaunchAgents/haus.astrid.runtime.plist"
+  plist_before="$(stat -f %m "$live_plist" 2>/dev/null || echo none)"
+  last_run="$ROOT/home/Library/Logs/Astrid Runtime/last-run.json"
+  # The installer downloads its tools; retry up to 4 more times ONLY for a network-class failure, printing the reason.
+  [[ -f "$PROGRAM/current" ]] || remove_dir "$PROGRAM"   # absent, or the installer's own install.json: nothing else
+  for attempt in 1 2 3 4 5; do
+    rm -f "$last_run"; : > "$LOGS/install-attempt.log"
+    clean_env sh "$APP/public/install" --root "$PROGRAM" --data-root "$DATA" \
+      --yes --autostart off --command off --skills off --skill-copies off --no-browser \
+      --manifest "$bootstrap_work/manifest.json" 2>&1 | tee "$LOGS/install-attempt.log" || true
+    cat "$LOGS/install-attempt.log" >> "$LOGS/install.log"
+    install_report="$(node -e 'try{const r=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));console.log((r.exit_code??"?")+"\t"+(r.reason??"")+"\t"+(r.headline??"")+"\t"+(r.kind??""))}catch{console.log("?\tno last-run.json\t\t")}' "$last_run")"
+    install_code="${install_report%%$'\t'*}"
+    # last-run.json is the installer's own verdict; its shell exit code can be nonzero from a temp-dir cleanup race.
+    [[ "$install_code" != 0 ]] || break
+    net_reason="$(grep -Eo 'RemoteDisconnected|ConnectionResetError|Connection reset|timed out|TimeoutError|URLError|Temporary failure in name resolution|nodename nor servname|Unexpected [a-z]* source archive layout|IncompleteRead' "$LOGS/install-attempt.log" 2>/dev/null | head -1 || true)"
+    if [[ -n "$net_reason" && "$attempt" -lt 5 ]]; then
+      say "Installer attempt $attempt failed with a network error ($net_reason); retrying."
+      remove_dir "$PROGRAM"   # the whole folder: the installer refuses a program dir with files it does not own
+      sleep 5
+      continue
+    fi
+    fail "The installer failed (exit code $install_code; reason: $(cut -f2 <<< "$install_report"); $(cut -f3 <<< "$install_report"); ${net_reason:+network error $net_reason, no retries left; }see $LOGS/install.log). Nothing was started."
+  done
+  say "Installer outcome: $(cut -f4 <<< "$install_report") (current program: $(cat "$PROGRAM/current"))."
+  [[ ! -e "$ROOT/home/Library/LaunchAgents/haus.astrid.runtime.plist" ]] || fail 'A launchd plist was written under the isolated HOME.'
+  [[ "$(stat -f %m "$live_plist" 2>/dev/null || echo none)" == "$plist_before" ]] || fail 'The live launchd plist changed.'
+fi
+
+# Node for npm ci and the editor: the node the installed program ships (the manifest pins it), else the node on PATH
+# when it meets the App's engines requirement.
+shipped_node="$(find "$PROGRAM/versions/$(cat "$PROGRAM/current")/tools" -type f -name node -path '*bin*' 2>/dev/null | head -1)"
+if [[ -n "$shipped_node" ]]; then NODE_BIN="$(dirname "$shipped_node")"; fi
+node_ok() { "$NODE_BIN/node" -e '
+const need = (JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).engines || {}).node || "";
+const min = Number((need.match(/(\d+)/) || [])[1] || 0);
+const have = Number(process.versions.node.split(".")[0]);
+if (have < min) { console.error(`node ${process.versions.node} does not meet the App engines "${need}"`); process.exit(1); }' "$APP/package.json"; }
+node_ok || fail 'No node meets the App engines requirement (the installed program ships none and the node on PATH does not fit).'
+lock_hash="$(shasum -a 256 "$APP/package-lock.json" | awk '{print $1}')"
+if [[ ! -d "$APP/node_modules" || ! -f "$STATE/app-deps.sha256" || "$(cat "$STATE/app-deps.sha256")" != "$lock_hash" ]]; then
+  need_disk 2048
+  (cd "$APP" && clean_env npm ci --no-audit --no-fund) > "$LOGS/npm-ci.log" 2>&1 || { tail -n 20 "$LOGS/npm-ci.log" >&2; fail "npm ci failed; see $LOGS/npm-ci.log"; }
+  printf '%s\n' "$lock_hash" > "$STATE/app-deps.sha256"
+fi
+
+PYTHON="$PROGRAM/versions/$(cat "$PROGRAM/current")/py/bin/python"
+
+# Realm: ONE path, a point-in-time snapshot COPY of the live realm (one-way: edits on the copy never reach the live
+# realm; the live files are only read). Done once. The installer started its own Runtime on an empty realm, so
+# everything of this stack is stopped first. realm-snapshot.sh is the tested step (read-only SQLite backup, APFS
+# clones, skips owner.lock/staging/-wal/-shm, never copies the live runpod/ folder, verifies, repoints the catalog).
+stop_stack
+. "$SCRIPT_DIR/realm-snapshot.sh"
+export REALM_FREE_FLOOR_BYTES=$((1024 * 1024 * 1024))   # the program is already installed; clones cost almost nothing
+realm_attach_cmd() { clean_env "$PYTHON" -X utf8 -I -m astrid_runtime "$@" --source-manifest "$PROGRAM/versions/$(cat "$PROGRAM/current")/profile.json"; }
+if [[ ! -f "$STATE/realm-id" ]]; then
+  [[ -z "$(stragglers)" ]] || fail 'A process of this stack is still alive; not replacing its workspace selection.'
+  remove_dir "$ROOT/data.pre-realm"
+  cp -c -R "$DATA" "$ROOT/data.pre-realm" || fail 'Cannot clone-back-up data/ (APFS clone unsupported); nothing was changed.'
+  realm_live_fingerprint "$live_data_root" > "$STATE/live-before.txt"
+  realm_snapshot_copy "$live_data_root" "$DATA" || fail 'The realm copy failed; the live realm was not written.'
+  realm_live_fingerprint "$live_data_root" > "$STATE/live-after.txt"
+  # The live Runtime keeps writing its own database and logs; only the stable files are compared, and a difference
+  # is reported, never a reason to throw away a published copy.
+  if ! diff <(grep -vE 'realm\.sqlite3|\.lock|\.log|catalog\.json' "$STATE/live-before.txt") <(grep -vE 'realm\.sqlite3|\.lock|\.log|catalog\.json' "$STATE/live-after.txt") >/dev/null; then
+    say 'WARNING: stable live files changed during the copy (the live Runtime was active); see state/live-before.txt and live-after.txt.'
+  fi
+  realm_id="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selected_realm_id"])' "$DATA/runtime/catalog.json")"
+  # The installer's selection record named its empty realm; point it at the copy and drop the stale foreground pid.
+  # This is the one remaining hand edit: no supported writer exists while the installer cannot be re-run (issue #817).
+  /usr/bin/python3 - "$ROOT/home/.local/share/astrid-install.json" "$realm_id" "$DATA/runtime/realms/$realm_id" <<'PY'
+import json, sys
+path, rid, root = sys.argv[1:]
+record = json.load(open(path)); record['realm_id'] = rid; record['realm_root'] = root; record.pop('foreground', None)
+open(path, 'w').write(json.dumps(record, indent=2) + '\n')
+PY
+  printf '%s\n' "$realm_id" > "$STATE/realm-id"
+  say "Live realm listing compared before/after the copy ($(wc -l < "$STATE/live-before.txt" | tr -d ' ') entries)."
+fi
+# The stack's own Runtime must accept the repointed catalog: a read-only inspect of the copied realm.
+realm_id="$(cat "$STATE/realm-id" 2>/dev/null || true)"
+if [[ -n "$realm_id" ]]; then
+  clean_env "$PYTHON" -X utf8 -I -m astrid_runtime workspace inspect --data-root "$DATA" --realm-root "$DATA/runtime/realms/$realm_id" \
+    --expected-realm-id "$realm_id" --json > "$STATE/workspace-inspect.json" 2> "$LOGS/workspace-inspect.log" \
+    || { tail -n 20 "$LOGS/workspace-inspect.log" >&2; fail 'The Runtime refused the copied realm (workspace inspect).'; }
+  say "workspace inspect accepted the copied realm $realm_id."
+fi
+
+record() {
+  local started
+  started="$(ps -p "$2" -o lstart= | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+  [[ -n "$started" ]] || fail "$1 exited before its PID could be recorded."
+  printf '%s\t%s\t%s\n' "$1" "$2" "$started"
+}
+# The installer-started Runtime left its owner identity (old realm root) in discovery.json and instance.lock; the
+# stack is stopped here, so clear both and the Runtime records the copied realm instead.
+# The first start on a freshly copied realm can fail once with "accepted commit inputs changed during verification"
+# (a state only the first start consumes; a second start succeeds). Retry at most twice, keeping each log tail.
+started=0
+for attempt in 1 2 3; do
+[[ -z "$(stragglers)" ]] || fail 'A process of this stack is still alive; not clearing the Runtime owner records.'
+lock_pid="$(/usr/bin/python3 -c 'import json,re,sys
+t=open(sys.argv[1]).read()
+m=re.search(r"\"pid\"\s*:\s*(\d+)", t)
+print(m.group(1) if m else "")' "$DATA/runtime/instance.lock" 2>/dev/null || true)"
+if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then fail "The Runtime owner lock names pid $lock_pid, which is still alive; not removing it."; fi
+rm -f "$DATA/runtime/discovery.json" "$DATA/runtime/instance.lock"
+# Detach the editor from this terminal; stop uses its exact recorded PID.
+EDITOR_PID="$(clean_env PORT="$APP_PORT" VITE_ASTRID_DYNAMIC_PROXY_PORT="$PROXY_PORT" "$PYTHON" - "$LOGS/editor.log" "$APP" "$NODE_BIN/node" "$APP/scripts/dev-local-workspace.mjs" --data-root "$DATA" <<'PYLAUNCH'
+import subprocess, sys
+log, cwd, command, *args = sys.argv[1:]
+with open(log, 'wb') as stream:
+    child = subprocess.Popen([command, *args], cwd=cwd, stdin=subprocess.DEVNULL,
+                             stdout=stream, stderr=stream, start_new_session=True)
+print(child.pid)
+PYLAUNCH
+)"
+record editor "$EDITOR_PID" > "$STATE/processes.tsv"
+record_runtime() {
+  local pid
+  grep -q '^runtime' "$STATE/processes.tsv" 2>/dev/null && return 0
+  pid="$("$PYTHON" -c 'import json,sys; print(json.load(open(sys.argv[1]))["pid"])' "$DATA/runtime/discovery.json" 2>/dev/null)" || return 0
+  [[ "$(ps -p "$pid" -o command= 2>/dev/null)" == *"$PROGRAM/versions/"* ]] || return 0
+  record runtime "$pid" >> "$STATE/processes.tsv"
+}
+trap 'record_runtime || true; rm -rf -- "$bootstrap_work"' EXIT
+log_tail() { printf '[release] --- last lines of %s ---\n' "$LOGS/editor.log" >&2; tail -n 30 "$LOGS/editor.log" >&2; }
+
+# The ONE readiness gate: rendering.render ready in the Runtime's capability list (nothing is rendered), then the
+# editor page answers and Runtime health through the editor says ok. Fails at once if the editor process dies.
+"$PYTHON" - "$DATA" "$EDITOR_PID" "$APP_PORT" <<'PY' && started=1 || started=0
+import json, os, sys, time, urllib.request
+from pathlib import Path
+from urllib.parse import urlencode
+root, editor_pid, port = Path(sys.argv[1]), int(sys.argv[2]), sys.argv[3]
+deadline = time.monotonic() + 300
+error = 'not started yet'
+def get(url, headers=None):
+    with urllib.request.urlopen(urllib.request.Request(url, headers=headers or {}), timeout=10) as response:
+        return response.read()
+while time.monotonic() < deadline:
+    try:
+        os.kill(editor_pid, 0)
+    except OSError:
+        raise SystemExit('The editor process exited before the stack was ready.')
+    try:
+        discovery = json.loads((root / 'runtime/discovery.json').read_text())
+        token = json.loads(Path(discovery['credential_file']).read_text())['token']
+        endpoint = discovery['endpoint'].rstrip('/')
+        ready, cursor = False, None
+        while True:
+            query = urlencode({'limit': 100, **({'cursor': cursor} if cursor else {})})
+            page = json.loads(get(endpoint + '/v1/capabilities?' + query, {'Authorization': 'Bearer ' + token}))
+            for item in page['items']:
+                if item['capability_id'] == 'rendering.render':
+                    ready = item['status'] == 'ready'
+                    if not ready:
+                        error = 'rendering.render is ' + str(item.get('unavailable_reason') or item['status'])
+            cursor = page.get('next_cursor')
+            if not cursor:
+                break
+        if ready:
+            get(f'http://127.0.0.1:{port}/tools/video-editor')
+            health = json.loads(get(f'http://127.0.0.1:{port}/api/runtime/v1/health'))
+            if health.get('status') == 'ok':
+                print('Ready: rendering.render available, editor answers, Runtime health ok')
+                break
+            error = 'Runtime health is ' + str(health.get('status'))
+    except (OSError, ValueError, KeyError) as exc:
+        error = str(exc)
+    time.sleep(2)
+else:
+    raise SystemExit('Not ready: ' + error)
+PY
+
+  if [[ "$started" == 1 ]]; then break; fi
+  tail -n 40 "$LOGS/editor.log" > "$LOGS/start-attempt-$attempt.log" 2>/dev/null || true
+  tail -n 40 "$ROOT/home/Library/Logs/Astrid Runtime/runtime.log" >> "$LOGS/start-attempt-$attempt.log" 2>/dev/null || true
+  if [[ "$attempt" == 3 ]]; then log_tail; fail "The stack did not become ready after 3 starts (logs: $LOGS/start-attempt-*.log)."; fi
+  say "Start attempt $attempt failed (kept in $LOGS/start-attempt-$attempt.log); clearing the owner records and starting again."
+  stop_stack
+done
+record_runtime
+
+printf '%s %s %s %s\n' "$APP_REF" "$APP_SHA" "$AGENT_REF" "$AGENT_SHA" > "$STATE/heads.tsv"
+# Final self-check through the stack's own proxy: every project in the copied realm must be listed. Never a silent
+# fallback to an empty realm.
+/usr/bin/python3 - "$DATA/runtime/realms/$(cat "$STATE/realm-id" 2>/dev/null || echo none)/realm.sqlite3" "$APP_PORT" <<'PY' || { log_tail; fail 'The stack is up but does not list the copied realm projects (see above).'; }
+import json, sqlite3, sys, urllib.request
+db, port = sys.argv[1:]
+want = sorted(r[0] for r in sqlite3.connect(f'file:{db}?mode=ro&immutable=1', uri=True).execute('SELECT name FROM projects'))
+got = sorted(p.get('name') or '' for p in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/api/runtime/v1/projects?limit=200', timeout=20))['items'])
+if want != got:
+    raise SystemExit(f'projects differ: realm copy has {want}, the stack lists {got}')
+print('Projects listed through the stack:', ', '.join(got))
+try:
+    want_tl = sqlite3.connect(f'file:{db}?mode=ro&immutable=1', uri=True).execute('SELECT count(*) FROM timelines WHERE archived_at IS NULL').fetchone()[0]
+    ids = [p['project_id'] if 'project_id' in p else p['id'] for p in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/api/runtime/v1/projects?limit=200', timeout=20))['items']]
+    have_tl = sum(len(json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/api/runtime/v1/projects/{i}/timelines?limit=200', timeout=20))['items']) for i in ids)
+    print(f'Timelines: realm copy {want_tl}, listed through the stack {have_tl}')
+    if have_tl < want_tl:
+        raise SystemExit('the stack lists fewer timelines than the copied realm has')
+except (sqlite3.Error, KeyError, OSError):
+    print('Timeline count check skipped (could not read the counts).')
+PY
+live_proof > "$STATE/live-proof-after.txt"
+cmp -s "$STATE/live-proof-before.txt" "$STATE/live-proof-after.txt" || fail "The LIVE Runtime or its launchd plist changed during this run: before '$(cat "$STATE/live-proof-before.txt")', after '$(cat "$STATE/live-proof-after.txt")'."
+say "Live untouched: $(cat "$STATE/live-proof-after.txt") (same before and after this run)."
+[[ ! -d "$ROOT/data.pre-realm" ]] || { remove_dir "$ROOT/data.pre-realm"; say 'Pre-realm data clone dropped (READY and the project check passed).'; }
+say "READY: release $BRANCH"
+cat <<DONE
+To launch this, do:
+  open http://127.0.0.1:$APP_PORT/tools/video-editor?connect=1
+It is already running. After a stop or reboot, start it again with:
+  $SCRIPT_DIR/astrid-release $BRANCH
+See what moved:       $SCRIPT_DIR/astrid-release update $BRANCH
+CLI for this stack:   HOME=$ROOT/home $PROGRAM/run-astrid
+Ports:                editor $APP_PORT, proxy $PROXY_PORT, door $DOOR_PORT
+Status:               $SCRIPT_DIR/astrid-release status $BRANCH
+To stop it:           $SCRIPT_DIR/astrid-release stop $BRANCH
+DONE

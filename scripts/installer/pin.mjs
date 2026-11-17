@@ -5,7 +5,9 @@ import { pathToFileURL } from 'node:url';
 
 const agentRepo = 'banodoco/astrid-agent';
 const runtimeRepo = 'banodoco/astrid-runtime';
-const manifestPath = path.join(process.cwd(), 'public/install-manifest.json');
+let manifestPath = path.join(process.cwd(), 'public/install-manifest.json');
+const defaultPath = manifestPath;
+let outputPath = manifestPath;
 
 function rawUrl(repository, sha, file) {
   return `https://raw.githubusercontent.com/${repository}/${sha}/${file}`;
@@ -104,7 +106,7 @@ async function pin(agentSha, reason) {
   manifest.vibecomfy = sources.vibecomfy;
   manifest.lifecycle = sources.lifecycle;
   if (reason !== undefined) applyRequiredPin(manifest, reason);
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeFile(outputPath, `${JSON.stringify(manifest, null, 2)}\n`);
 }
 
 export async function checkManifest(manifest, reader = readRaw) {
@@ -139,6 +141,16 @@ async function check() {
 
 async function main() {
   const args = process.argv.slice(2);
+  // `--in <manifest>` reads another base manifest and `--out <file>` writes the result there (defaults: the repo manifest).
+  for (const flag of ['--in', '--out']) {
+    const at = args.indexOf(flag);
+    if (at === -1) continue;
+    if (!args[at + 1]) throw new Error(`${flag} needs a file`);
+    const file = path.resolve(args[at + 1]);
+    if (flag === '--in') { manifestPath = file; } else outputPath = file;
+    args.splice(at, 2);
+  }
+  if (args.includes('--check') ? false : (manifestPath !== defaultPath && outputPath === defaultPath)) throw new Error('--in needs --out so the input file is never overwritten');
   if (args.length === 1 && args[0] === '--check') return check();
   let reason;
   let agentSha;

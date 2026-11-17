@@ -198,7 +198,7 @@ describe.each(corpus)('$name through the local save handoff', ({ document }) => 
     const env = await mount(document);
     const { capture, clipId } = drop(env, trackId);
     if (shotTracks.has(trackId)) {
-      await expect(capture()).rejects.toThrow('child ownership/fork mapping is unavailable: the dropped track holds shots');
+      await expect(capture()).rejects.toThrow("Can't drop onto a track that holds shots yet");
     } else {
       await expect(capture()).resolves.toBeUndefined();
       const written = ids(writtenClips(env));
@@ -239,7 +239,19 @@ describe('what stays protected', () => {
     const other = clips.find(clip => clip.track !== selected.track)!;
     const { next, basis } = gestures(env, selected.id as string).trimEnd();
     next.clips.find(clip => clip.id === other.id)!.at += 3;
-    await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('trim changes more than its selected clip');
+    await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('This trim would change more than the clip you selected');
+    await env.session.dispose();
+  });
+
+  it('a trim that also shifts a sibling on the same track is refused (overlap resolution never moves siblings)', async () => {
+    const { document } = corpus[0];
+    const clips = storedClips(document);
+    const selected = clips.find(clip => clips.filter(item => item.track === clip.track).length > 1)!;
+    const sibling = clips.find(clip => clip.track === selected.track && clip.id !== selected.id)!;
+    const env = await mount(document);
+    const { next, basis } = gestures(env, selected.id as string).trimEnd();
+    next.clips.find(clip => clip.id === sibling.id)!.at += 3;
+    await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('This trim would change more than the clip you selected');
     await env.session.dispose();
   });
 
@@ -274,7 +286,7 @@ describe('what stays protected', () => {
     pinned.config.pinnedShotGroups = [{ trackId: (storedClips(document)[0].track as string), clipIds: [clipId] }];
     const env = await mount(pinned);
     const { next, basis } = gestures(env, clipId).trimEnd();
-    await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('child ownership/fork mapping is unavailable');
+    await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow("Can't trim or split a clip that belongs to a pinned shot group");
     await env.session.dispose();
   });
 

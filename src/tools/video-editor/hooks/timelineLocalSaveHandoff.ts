@@ -431,27 +431,20 @@ export function createTimelineLocalSaveHandoff(options: {
           // A clip that belongs to a pinned shot group is owned by the shots it pins; which of them a trim or
           // split reaches is not mapped, so that case is refused. Every other clip row is the parent's alone.
           if (hasChildren && findEnclosingPinnedGroup(authoringSource.config, id)) {
-            refuse('child ownership/fork mapping is unavailable: the clip belongs to a pinned shot group', 'child-ownership-unavailable');
+            refuse("Can't trim or split a clip that belongs to a pinned shot group yet.", 'child-ownership-unavailable');
           }
           if (created.length !== (gestureBasis.kind === 'split' ? 1 : 0)
             || edited[0].track !== origin[0].track || edited[0].asset !== origin[0].asset
             || created.some(clip => clip.track !== origin[0].track || clip.asset !== origin[0].asset)) {
-            refuse(`${gestureBasis.kind} changes more than its selected clip`);
+            refuse(`This ${gestureBasis.kind} would change more than the clip you selected, so it was not saved. Try it again.`);
           }
           const expected = structuredClone(authoringSource);
-          // Overlap resolution after a trim may shorten or shift siblings on the same track: their timing only.
-          const timing = ['at', 'from', 'to', 'hold', 'speed'] as const;
-          const retimed = (clip: TimelineConfig['clips'][number]) => {
-            const edit = next.config.clips.find(item => item.id === clip.id);
-            if (!edit || clip.track !== origin[0].track) return clip;
-            const result: Record<string, unknown> = { ...clip };
-            for (const key of timing) { if (edit[key] === undefined) delete result[key]; else result[key] = edit[key]; }
-            return result as TimelineConfig['clips'][number];
-          };
-          expected.config.clips = [...expected.config.clips.map(clip => clip.id === id ? edited[0] : gestureBasis.kind === 'trim' ? retimed(clip) : clip), ...created];
+          // A single-clip trim changes only its own clip: `resolveOverlaps` (lib/resolve-overlaps.ts), which the
+          // drag-trim path runs, treats siblings as fixed and shortens the trimmed clip itself.
+          expected.config.clips = [...expected.config.clips.map(clip => clip.id === id ? edited[0] : clip), ...created];
           if (!sameConfig(expected.config, next.config)
             || !same(authoredJson(expected.registry), authoredJson(next.registry))
-            || !same(expected.bundle, next.bundle)) refuse(`${gestureBasis.kind} changes more than its selected clip`);
+            || !same(expected.bundle, next.bundle)) refuse(`This ${gestureBasis.kind} would change more than the clip you selected, so it was not saved. Try it again.`);
         }
         if (gestureBasis?.kind === 'element') {
           if (!same(next.registry, authoringSource.registry) || !same(next.bundle, authoringSource.bundle)
@@ -556,7 +549,7 @@ export function createTimelineLocalSaveHandoff(options: {
           }
           if (Array.isArray(parent.occurrences) && parent.occurrences.some(occurrence => object(occurrence)
             && (occurrence.track === row.track || (object(occurrence.placement) && occurrence.placement.track === row.track)))) {
-            refuse('child ownership/fork mapping is unavailable: the dropped track holds shots', 'child-ownership-unavailable');
+            refuse("Can't drop onto a track that holds shots yet. Drop it on another visual track.", 'child-ownership-unavailable');
           }
           if (newTrack && Array.isArray(editorTracks)) {
             // The new track keeps the position the editor gave it; the old tracks were just proven unchanged.

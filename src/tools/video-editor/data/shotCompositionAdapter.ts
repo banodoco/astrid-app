@@ -213,6 +213,12 @@ function prepareContract(contract: ShotCompositionContract): PreparedShotComposi
           `occurrence ${String(occurrence.occurrence_id)} references a missing revision`,
         );
       }
+      // One rule everywhere (agent capture, Runtime service, this adapter): a source offset is >= 0, never clamped.
+      if (typeof occurrence.source_offset === 'number' && Number.isFinite(occurrence.source_offset) && occurrence.source_offset < 0) {
+        throw new ShotCompositionUnavailableError(
+          `occurrence ${String(occurrence.occurrence_id)} has a negative source offset (${occurrence.source_offset} ms)`,
+        );
+      }
       return Object.freeze({
         projectId,
         occurrenceId: requiredString(occurrence.occurrence_id, 'occurrence.occurrence_id'),

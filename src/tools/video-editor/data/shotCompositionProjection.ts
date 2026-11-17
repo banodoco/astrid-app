@@ -481,7 +481,8 @@ function projectClip(
   const rawFrom = optionalFiniteNumber(rawClip.from);
   const rawTo = optionalFiniteNumber(rawClip.to);
   const hasTrim = rawFrom !== undefined && rawTo !== undefined && rawTo > rawFrom;
-  const occurrenceSourceOffsetMs = Math.max(0, occurrence.sourceOffsetMs ?? 0);
+  // The adapter refuses a negative offset, so there is nothing to clamp here.
+  const occurrenceSourceOffsetMs = occurrence.sourceOffsetMs ?? 0;
   const isAudio = isAudioClip(rawClip, occurrence, parentTracks, registry);
   const sourceOffsetMs = isAudio ? 0 : occurrenceSourceOffsetMs;
   const sourceOffsetSeconds = sourceOffsetMs / 1000;

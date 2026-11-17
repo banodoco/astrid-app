@@ -24,6 +24,15 @@ describe('shot-composition product adapter', () => {
     expect(port.load).toHaveBeenCalledWith({ projectId: 'project-001', parentDocumentId: 'document-primary' });
   });
 
+  it('keeps a nonnegative source offset and refuses a negative one instead of clamping it', () => {
+    const adapter = createShotCompositionAdapter({ load: vi.fn() });
+    const withOffset = (offset: number) => ({ ...fixture,
+      occurrences: fixture.occurrences.map((occurrence, index) => index === 0 ? { ...occurrence, source_offset: offset } : occurrence) });
+    expect(adapter.prepare(withOffset(1500)).occurrences[0]?.sourceOffsetMs).toBe(1500);
+    expect(adapter.prepare(withOffset(0)).occurrences[0]?.sourceOffsetMs).toBe(0);
+    expect(() => adapter.prepare(withOffset(-250))).toThrow(ShotCompositionUnavailableError);
+  });
+
   it('allows the editor host and Travel Between Images to share one injected port', async () => {
     const port = { load: vi.fn().mockResolvedValue(fixture) };
     const editorAdapter = createShotCompositionAdapter(port);

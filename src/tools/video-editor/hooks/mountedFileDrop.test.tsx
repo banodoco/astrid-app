@@ -147,7 +147,7 @@ async function environment(child: boolean, delayed = false, empty = false) {
   }, { wrapper });
   mounted.result.current.coordinator.editAreaRef.current = editArea;
   cleanups.push(() => mounted.unmount());
-  return { mounted, outboxes, scope, captures, failures, send, prepareMediaImport, document, handoff, descriptor, releaseImport,
+  return { mounted, toast: runtime.toast.error as ReturnType<typeof vi.fn>, outboxes, scope, captures, failures, send, prepareMediaImport, document, handoff, descriptor, releaseImport,
     coordinator: mounted.result.current.coordinator, indicatorRef: mounted.result.current.indicatorRef };
 }
 
@@ -252,6 +252,8 @@ it.each([false, true])('retains an authored uploading-looking clip during drop c
     entry: env.descriptor.entry, mediaSelection: media };
   expect(env.mounted.result.current.assets.handleAssetDrop(media.asset, trackId, 10, false, false, prepared, id)).toBe(false);
   expect(env.mounted.result.current.commit.dataRef.current).toBe(next);
+  // The refusal is visible: a dropped file that cannot be placed never leaves the user with no clip and no reason.
+  expect(env.toast).toHaveBeenCalledWith(expect.stringContaining('The image was not added to the timeline'));
   expect(env.captures).toEqual([]);
   expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
 });
@@ -291,4 +293,14 @@ it('commits the track and image from a real file drop onto a bootstrap empty hea
     { op: 'track.create', args: { row: { id: 'V1', kind: 'visual' } } },
     { op: 'clip.add-media', args: { row: { track: 'V1', asset: media.asset }, media } },
   ], steps: [{ command_ordinals: [0, 1] }] });
+});
+
+it.each([false, true])('says why a prepared drop that cannot be placed is refused (embedded: %s)', async child => {
+  const env = await environment(child);
+  const trackId = child ? 'V2' : 'V1';
+  const unplaceable = { assetKey: media.asset, mediaType: 'image' as const, durationSeconds: null, source: 'registered' as const,
+    entry: { type: 'image/png' } } as never;
+  expect(env.mounted.result.current.assets.handleAssetDrop(media.asset, trackId, 10, false, false, unplaceable)).toBe(false);
+  expect(env.toast).toHaveBeenCalledWith(expect.stringMatching(/The image was not added to the timeline: .*invalid-placement/));
+  expect(env.captures).toEqual([]);
 });

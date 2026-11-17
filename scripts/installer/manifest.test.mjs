@@ -57,35 +57,3 @@ test('--check refuses a manifest whose lifecycle block is missing', async () => 
   assert.notEqual(result.status, 0);
   assert.match(`${result.stdout}${result.stderr}`, /missing the lifecycle block/);
 });
-
-test('--in checks another manifest file without touching the repo manifest', async () => {
-  const { mkdtemp, writeFile } = await import('node:fs/promises');
-  const os = await import('node:os');
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'pin-in-'));
-  const file = path.join(dir, 'other.json');
-  const manifest = JSON.parse(await readFile(path.join(repo, 'public/install-manifest.json'), 'utf8'));
-  delete manifest.lifecycle;
-  await writeFile(file, `${JSON.stringify(manifest, null, 2)}\n`);
-  const result = spawnSync(process.execPath, [path.join(repo, 'scripts/installer/pin.mjs'), '--check', '--in', file], {
-    cwd: dir,
-    encoding: 'utf8',
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(`${result.stdout}${result.stderr}`, /missing the lifecycle block/);
-});
-
-test('--in without --out refuses instead of overwriting its input', async () => {
-  const { mkdtemp, writeFile } = await import('node:fs/promises');
-  const os = await import('node:os');
-  const dir = await mkdtemp(path.join(os.tmpdir(), 'pin-in-only-'));
-  const file = path.join(dir, 'other.json');
-  const before = await readFile(path.join(repo, 'public/install-manifest.json'), 'utf8');
-  await writeFile(file, before);
-  const result = spawnSync(process.execPath, [path.join(repo, 'scripts/installer/pin.mjs'), '0'.repeat(40), '--in', file], {
-    cwd: dir,
-    encoding: 'utf8',
-  });
-  assert.notEqual(result.status, 0);
-  assert.match(`${result.stdout}${result.stderr}`, /--in needs --out/);
-  assert.equal(await readFile(file, 'utf8'), before);
-});

@@ -14,7 +14,7 @@ import { recalcActionEnd } from '../lib/clip-editing-utils.ts';
 import { withHeldClipSourceFields } from '../lib/serialize.ts';
 import { buildTimelineData, rowsToConfig, type ClipMeta } from '../lib/timeline-data.ts';
 import type { AssetRegistry, TimelineConfig } from '../types/index.ts';
-import { createTimelineLocalSaveHandoff, type TimelineGestureReadBasis, type TimelineSaveSource } from './timelineLocalSaveHandoff.ts';
+import { createTimelineLocalSaveHandoff, isTimelineAuthoringRefusal, type TimelineGestureReadBasis, type TimelineSaveSource } from './timelineLocalSaveHandoff.ts';
 
 interface StoredDocument { config: Record<string, unknown>; clips?: Array<Record<string, unknown>>; registry: AssetRegistry; occurrences: Array<Record<string, unknown>> }
 const corpus = Object.entries(import.meta.glob('./__fixtures__/corpus/*.json', { eager: true, import: 'default' }) as Record<string, StoredDocument>)
@@ -253,6 +253,64 @@ describe('what stays protected', () => {
     next.clips.find(clip => clip.id === sibling.id)!.at += 3;
     await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('This trim would change more than the clip you selected');
     await env.session.dispose();
+  });
+
+  it('a trim whose same-track sibling is pinned in a shot group and also moves is refused', async () => {
+    const { document } = corpus[0];
+    const clips = storedClips(document);
+    const selected = clips.find(clip => clips.filter(item => item.track === clip.track).length > 1)!;
+    const sibling = clips.find(clip => clip.track === selected.track && clip.id !== selected.id)!;
+    const pinned = structuredClone(document);
+    pinned.config.pinnedShotGroups = [{ shotId: 'shot-01', trackId: selected.track as string, clipIds: [sibling.id as string] }];
+    const env = await mount(pinned);
+    const { next, basis } = gestures(env, selected.id as string).trimEnd();
+    next.clips.find(clip => clip.id === sibling.id)!.at += 0.5;
+    const refused = env.handoff.capture({ ...env.source, config: next }, basis);
+    await expect(refused).rejects.toThrow('This trim would change more than the clip you selected');
+    expect(isTimelineAuthoringRefusal(await refused.catch(error => error))).toBe(true);
+    expect(writtenClips(env).find(clip => clip.id === sibling.id)!.at).toBe(sibling.at);
+    await env.session.dispose();
+  });
+
+  it.each(corpus)('a trim that also sets another field of the selected clip is refused ($name)', async ({ document }) => {
+    const env = await mount(document);
+    const clipId = storedClips(document)[0].id as string;
+    const { next, basis } = gestures(env, clipId).trimEnd();
+    Object.assign(next.clips.find(clip => clip.id === clipId)!, { volume: 0.123, text: 'injected' });
+    const refused = env.handoff.capture({ ...env.source, config: next }, basis);
+    await expect(refused).rejects.toThrow('This trim would change more than the clip you selected');
+    expect(isTimelineAuthoringRefusal(await refused.catch(error => error))).toBe(true);
+    await env.session.dispose();
+  });
+
+  it.each(corpus)('a split whose halves change a non-timing field is refused ($name)', async ({ document }) => {
+    for (const half of ['edited', 'created'] as const) {
+      const env = await mount(document);
+      const clipId = storedClips(document)[0].id as string;
+      const { next, basis, split } = gestures(env, clipId).split();
+      next.clips.find(clip => clip.id === (half === 'edited' ? clipId : split))!.volume = 0.123;
+      await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('This split would change more than the clip you selected');
+      await env.session.dispose();
+    }
+  });
+
+  it('a track rename on a top-level-clips document whose mounted source has no clips is refused and keeps the parent clips', async () => {
+    const { document } = corpus[1];
+    const full = await mount(document);
+    const config = { ...structuredClone(document.config), clips: [] };
+    const built = await buildTimelineData({ ...config, ...withDefaultTimelineOutput(config as never) } as TimelineConfig, structuredClone(document.registry));
+    const source: TimelineSaveSource = { config: built.config, registry: built.registry, head: full.source.head };
+    const handoff = createTimelineLocalSaveHandoff({ initial: { head: { revisionId: 'r0', publicationId: 'p0' },
+      canonicalDocument: full.session.getDocument() as never }, source, session: full.session, adopted: (() => {}) as never });
+    const next = structuredClone(source.config);
+    const trackId = next.tracks[0].id;
+    next.tracks[0].label = 'Renamed';
+    const refused = handoff.capture({ ...source, config: next }, { kind: 'track-label', trackId, label: 'Renamed', config: source.config, registry: source.registry });
+    await expect(refused).rejects.toThrow('parent clips are not present in the mounted source');
+    // A mounted-source problem is not a refusal of this one edit.
+    expect(isTimelineAuthoringRefusal(await refused.catch(error => error))).toBe(false);
+    expect((full.session.getDocument().parent_revision.payload as unknown as StoredDocument).clips).toEqual(document.clips);
+    await full.session.dispose();
   });
 
   it('a drop that also changes a registry entry is refused', async () => {

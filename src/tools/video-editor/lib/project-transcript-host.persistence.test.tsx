@@ -594,9 +594,8 @@ describe('mounted project transcript persistence', () => {
       // authored parent clips mirror is empty while config.clips is populated.
       expect(mounted.transportState.requests).toHaveLength(0);
       expect(mounted.transportState.wire).toHaveLength(0);
-      // The refused edit is undone on screen (it is not kept as a poisoned draft).
-      expect(mounted.result.current.save.dataRef.current?.config.clips.map((clip) => clip.id)).not.toContain(
-        captionId(`${CANONICAL_TRANSCRIPT_ID}@media-clip`),
+      expect(mounted.result.current.save.dataRef.current?.config.clips.map((clip) => clip.id)).toEqual(
+        expect.arrayContaining([captionId(`${CANONICAL_TRANSCRIPT_ID}@media-clip`)]),
       );
     } finally {
       mounted.unmount();

@@ -2,9 +2,9 @@
   "clips": [
     {
       "asset": "asset-295",
-      "at": 196.5667,
+      "at": 199.2597,
       "clipType": "hold",
-      "hold": 5,
+      "hold": 5.0685,
       "id": "v3-clip-01",
       "opacity": 1,
       "track": "v3"
@@ -12,125 +12,125 @@
     {
       "app": {
         "astrid": {
-          "gap_after_s": 0.527,
+          "gap_after_s": 0.5342,
           "segment": "text-520",
           "text": "text-521",
           "words": [
             [
-              0.08,
-              0.141,
+              0.0811,
+              0.1429,
               "text-522"
             ],
             [
-              0.181,
-              0.322,
+              0.1835,
+              0.3264,
               "text-523"
             ],
             [
-              0.402,
-              0.583,
+              0.4075,
+              0.591,
               "text-524"
             ],
             [
-              0.623,
-              1.005,
+              0.6315,
+              1.0188,
               "text-525"
             ],
             [
-              1.266,
-              1.327,
+              1.2833,
+              1.3452,
               "text-526"
             ],
             [
-              1.387,
-              1.91,
+              1.406,
+              1.9362,
               "text-527"
             ],
             [
-              1.99,
-              2.091,
+              2.0173,
+              2.1196,
               "text-528"
             ],
             [
-              2.131,
-              2.191,
+              2.1602,
+              2.221,
               "text-526"
             ],
             [
-              2.271,
-              2.613,
+              2.3021,
+              2.6488,
               "text-529"
             ]
           ]
         }
       },
       "asset": "asset-162",
-      "at": 85.3667,
+      "at": 86.5362,
       "clipType": "media",
       "from": 0,
       "id": "a1-clip-02",
       "label": "Label 01",
-      "to": 2.7666,
+      "to": 2.8045,
       "track": "a1",
       "volume": 1
     },
     {
       "asset": "asset-87",
-      "at": 27.9,
+      "at": 28.2822,
       "clipType": "media",
       "from": 0,
-      "hold": 0.7667,
+      "hold": 0.7772,
       "id": "a1-clip-03",
       "params": {
-        "fadeIn": 0.03,
-        "fadeOut": 0.03
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
       },
-      "to": 0.758,
+      "to": 0.7684,
       "track": "a1",
       "volume": 1
     },
     {
       "asset": "asset-87",
-      "at": 41.9,
+      "at": 42.474,
       "clipType": "media",
-      "from": 0.4,
-      "hold": 0.5333,
+      "from": 0.4055,
+      "hold": 0.5406,
       "id": "a1-clip-04",
       "params": {
-        "fadeIn": 0.03,
-        "fadeOut": 0.03
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
       },
-      "to": 0.94,
+      "to": 0.9529,
       "track": "a1",
       "volume": 1
     },
     {
       "asset": "asset-87",
-      "at": 81.3333,
+      "at": 82.4476,
       "clipType": "media",
-      "from": 0.4,
-      "hold": 0.4334,
+      "from": 0.4055,
+      "hold": 0.4393,
       "id": "a1-clip-05",
       "params": {
-        "fadeIn": 0.03,
-        "fadeOut": 0.03
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
       },
-      "to": 0.844,
+      "to": 0.8556,
       "track": "a1",
       "volume": 1
     },
     {
       "asset": "asset-87",
-      "at": 159.6667,
+      "at": 161.8541,
       "clipType": "media",
       "from": 0,
-      "hold": 0.3666,
+      "hold": 0.3716,
       "id": "a1-clip-06",
       "params": {
-        "fadeIn": 0.03,
-        "fadeOut": 0.03
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
       },
-      "to": 0.379,
+      "to": 0.3842,
       "track": "a1",
       "volume": 1
     },
@@ -139,11 +139,11 @@
       "at": 0,
       "clipType": "media",
       "from": 0,
-      "hold": 8.6667,
+      "hold": 8.7854,
       "id": "a2-clip-07",
       "params": {
         "fadeIn": 0.5,
-        "fadeOut": 0.25
+        "fadeOut": 0.2534
       },
       "track": "a2",
       "volume": 1
@@ -153,14 +153,14 @@
         "split_from": "a2-clip-07"
       },
       "asset": "asset-80",
-      "at": 8.4,
+      "at": 8.5151,
       "clipType": "media",
-      "from": 7.808333,
-      "hold": 188.1667,
+      "from": 7.9153,
+      "hold": 190.7446,
       "id": "a2-clip-08",
       "params": {
-        "fadeIn": 0.25,
-        "fadeOut": 1.5
+        "fadeIn": 0.2534,
+        "fadeOut": 1.5206
       },
       "track": "a2",
       "volume": 1
@@ -937,39 +937,39 @@
         },
         "slots": {
           "slot-01": {
-            "face_zone": [
-              700,
-              130,
-              500,
-              700
-            ],
-            "kind": "a-roll",
+            "kind": "kind-a",
             "media": "enum-01",
             "params": {
               "label": "text-514",
               "placeholder": false
             },
-            "spec": "text-515"
+            "spec": "text-515",
+            "zone_a": [
+              710,
+              132,
+              507,
+              710
+            ]
           },
           "slot-02": {
-            "kind": "b-roll",
+            "kind": "kind-b",
             "spec": "text-516"
           },
           "slot-03": {
-            "hand_mark": {
-              "size": 450,
-              "x": 1310,
-              "y": 770
+            "kind": "kind-c",
+            "mark_c": {
+              "size": 456,
+              "x": 1328,
+              "y": 781
             },
-            "kind": "hand",
             "spec": "text-517"
           },
           "slot-04": {
-            "kind": "screen",
+            "kind": "kind-d",
             "spec": "text-518"
           },
           "slot-05": {
-            "kind": "window",
+            "kind": "kind-e",
             "spec": "text-519"
           }
         }
@@ -977,8 +977,8 @@
       "structure": {
         "struct-01": {
           "pause_after_astrid": {
-            "cut_s": 80.666666,
-            "film_end_s": 169.1,
+            "cut_s": 81.7718,
+            "film_end_s": 171.4167,
             "held_clip_ids": [
               "clipref-01",
               "clipref-02",
@@ -986,30 +986,30 @@
               "clipref-04",
               "clipref-05"
             ],
-            "insert_s": 0.6,
-            "moved_clip_count": 104,
+            "insert_s": 0.6082,
+            "moved_clip_count": 105,
             "music_policy": "enum-02"
           }
         },
         "struct-02": {
           "at_cut": "cut-12",
           "by": "enum-03",
-          "insert_frames": 88,
-          "insert_s": 2.933333
+          "insert_frames": 89.2056,
+          "insert_s": 2.9735
         },
         "struct-03": {
           "at_cut": "cut-20",
-          "insert_frames": 176,
-          "insert_s": 5.866667
+          "insert_frames": 178,
+          "insert_s": 5.947
         }
       }
     },
     "clips": [
       {
         "asset": "asset-295",
-        "at": 196.5667,
+        "at": 199.2597,
         "clipType": "hold",
-        "hold": 5,
+        "hold": 5.0685,
         "id": "v3-clip-01",
         "opacity": 1,
         "track": "v3"
@@ -1017,125 +1017,125 @@
       {
         "app": {
           "astrid": {
-            "gap_after_s": 0.527,
+            "gap_after_s": 0.5342,
             "segment": "text-520",
             "text": "text-521",
             "words": [
               [
-                0.08,
-                0.141,
+                0.0811,
+                0.1429,
                 "text-522"
               ],
               [
-                0.181,
-                0.322,
+                0.1835,
+                0.3264,
                 "text-523"
               ],
               [
-                0.402,
-                0.583,
+                0.4075,
+                0.591,
                 "text-524"
               ],
               [
-                0.623,
-                1.005,
+                0.6315,
+                1.0188,
                 "text-525"
               ],
               [
-                1.266,
-                1.327,
+                1.2833,
+                1.3452,
                 "text-526"
               ],
               [
-                1.387,
-                1.91,
+                1.406,
+                1.9362,
                 "text-527"
               ],
               [
-                1.99,
-                2.091,
+                2.0173,
+                2.1196,
                 "text-528"
               ],
               [
-                2.131,
-                2.191,
+                2.1602,
+                2.221,
                 "text-526"
               ],
               [
-                2.271,
-                2.613,
+                2.3021,
+                2.6488,
                 "text-529"
               ]
             ]
           }
         },
         "asset": "asset-162",
-        "at": 85.3667,
+        "at": 86.5362,
         "clipType": "media",
         "from": 0,
         "id": "a1-clip-02",
         "label": "Label 01",
-        "to": 2.7666,
+        "to": 2.8045,
         "track": "a1",
         "volume": 1
       },
       {
         "asset": "asset-87",
-        "at": 27.9,
+        "at": 28.2822,
         "clipType": "media",
         "from": 0,
-        "hold": 0.7667,
+        "hold": 0.7772,
         "id": "a1-clip-03",
         "params": {
-          "fadeIn": 0.03,
-          "fadeOut": 0.03
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
         },
-        "to": 0.758,
+        "to": 0.7684,
         "track": "a1",
         "volume": 1
       },
       {
         "asset": "asset-87",
-        "at": 41.9,
+        "at": 42.474,
         "clipType": "media",
-        "from": 0.4,
-        "hold": 0.5333,
+        "from": 0.4055,
+        "hold": 0.5406,
         "id": "a1-clip-04",
         "params": {
-          "fadeIn": 0.03,
-          "fadeOut": 0.03
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
         },
-        "to": 0.94,
+        "to": 0.9529,
         "track": "a1",
         "volume": 1
       },
       {
         "asset": "asset-87",
-        "at": 81.3333,
+        "at": 82.4476,
         "clipType": "media",
-        "from": 0.4,
-        "hold": 0.4334,
+        "from": 0.4055,
+        "hold": 0.4393,
         "id": "a1-clip-05",
         "params": {
-          "fadeIn": 0.03,
-          "fadeOut": 0.03
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
         },
-        "to": 0.844,
+        "to": 0.8556,
         "track": "a1",
         "volume": 1
       },
       {
         "asset": "asset-87",
-        "at": 159.6667,
+        "at": 161.8541,
         "clipType": "media",
         "from": 0,
-        "hold": 0.3666,
+        "hold": 0.3716,
         "id": "a1-clip-06",
         "params": {
-          "fadeIn": 0.03,
-          "fadeOut": 0.03
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
         },
-        "to": 0.379,
+        "to": 0.3842,
         "track": "a1",
         "volume": 1
       },
@@ -1144,11 +1144,11 @@
         "at": 0,
         "clipType": "media",
         "from": 0,
-        "hold": 8.6667,
+        "hold": 8.7854,
         "id": "a2-clip-07",
         "params": {
           "fadeIn": 0.5,
-          "fadeOut": 0.25
+          "fadeOut": 0.2534
         },
         "track": "a2",
         "volume": 1
@@ -1158,14 +1158,14 @@
           "split_from": "a2-clip-07"
         },
         "asset": "asset-80",
-        "at": 8.4,
+        "at": 8.5151,
         "clipType": "media",
-        "from": 7.808333,
-        "hold": 188.1667,
+        "from": 7.9153,
+        "hold": 190.7446,
         "id": "a2-clip-08",
         "params": {
-          "fadeIn": 0.25,
-          "fadeOut": 1.5
+          "fadeIn": 0.2534,
+          "fadeOut": 1.5206
         },
         "track": "a2",
         "volume": 1
@@ -1258,7 +1258,7 @@
   },
   "occurrences": [
     {
-      "duration_ms": 9133,
+      "duration_ms": 9258,
       "gain": 1,
       "muted": false,
       "occurrence_id": "occ-01",
@@ -1280,12 +1280,12 @@
       "transform": {}
     },
     {
-      "duration_ms": 19534,
+      "duration_ms": 19802,
       "gain": 1,
       "muted": false,
       "occurrence_id": "occ-02",
       "placement": {
-        "start_ms": 9133
+        "start_ms": 9258
       },
       "provenance": {},
       "shot_id": "shot-02",
@@ -1302,12 +1302,12 @@
       "transform": {}
     },
     {
-      "duration_ms": 13666,
+      "duration_ms": 13853,
       "gain": 1,
       "muted": false,
       "occurrence_id": "occ-03",
       "placement": {
-        "start_ms": 28667
+        "start_ms": 29060
       },
       "provenance": {},
       "shot_id": "shot-03",

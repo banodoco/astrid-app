@@ -511,9 +511,10 @@ describe('upstream local document handoff', () => {
     const intent = stored.intents[0].payload.documentIntent as { reads: { kind: string; path: string[] }[] };
     expect(intent.reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media'],
       state: layout === 'absent' ? { state: 'absent' } : { state: 'present', value: media } });
-    expect(intent.reads.every((read) => read.kind === 'field')).toBe(true);
-    expect(intent.reads.some((read) => read.path.includes('id:OTHERCLIP') || read.path.includes('unused') || read.path.includes('tracks'))).toBe(false);
-    expect(intent.reads.some((read) => read.path.length <= 2 && read.path.at(-1) === 'clips')).toBe(false);
+    // A trim reads its same-track siblings like a move does, so a concurrent sibling move conflicts.
+    expect(intent.reads).toContainEqual(expect.objectContaining({ kind: 'collection', path: ['config', 'clips'] }));
+    expect(intent.reads).toContainEqual(expect.objectContaining({ kind: 'field', path: ['config', 'clips', 'id:OTHERCLIP', 'track'] }));
+    expect(intent.reads.some((read) => read.path.includes('unused') || read.path.includes('tracks'))).toBe(false);
     expect(env.session.getDocument()).toMatchObject({ parent_revision: { payload: {
       config: { output: { resolution: null, file: null, opaque: { keep: null } }, pinnedShotGroups: null }, registry,
     } } });

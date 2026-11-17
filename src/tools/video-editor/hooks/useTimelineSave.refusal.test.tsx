@@ -13,7 +13,7 @@ import { VideoEditorRuntimeProvider, type VideoEditorRuntimeContextValue } from 
 import { createInteractionState } from '../lib/interaction-state';
 import { buildTimelineData, type TimelineData } from '../lib/timeline-data';
 import { createDefaultTimelineConfig } from '../lib/defaults';
-import { loadTimelineDraft } from '../data/timelineDraftIndexedDb';
+import { loadTimelineDraft, saveTimelineDraft } from '../data/timelineDraftIndexedDb';
 import type { DataProvider } from '../data/DataProvider';
 import type { TimelineConfig } from '../types/index.ts';
 
@@ -249,5 +249,124 @@ describe('useTimelineSave refused authoring edits', () => {
       expect(await loadTimelineDraft(TIMELINE)).toBeNull();
       expect(again.hook.result.current.dataRef.current?.config.output.file).toBe(again.data.config.output.file);
     } finally { again.hook.unmount(); }
+  });
+
+  function refusedBasis(original: TimelineData) {
+    // The gesture's read basis differs from the original input, so the handoff refuses this edit alone.
+    return { kind: 'trim' as const, clipId: 'clip-a', patch: { hold: 7 },
+      config: { ...original.config, output: { ...original.config.output, file: 'someone-else.mp4' } }, registry: original.registry };
+  }
+  const sentPaths = (harness: Harness) => harness.requests.flatMap((request) => request.changes);
+
+  it('keeps a good edit A when a refused edit B follows in the same tick, and sends nothing of B', async () => {
+    const toastError = vi.spyOn(sonnerToast, 'error');
+    const harness = await mount();
+    try {
+      const original = harness.hook.result.current.dataRef.current!;
+      const a = await buildTimelineData({ ...original.config, output: { ...original.config.output, file: 'edit-a.mp4' } },
+        original.registry, undefined, 1, undefined, original.head);
+      const b = await buildTimelineData({ ...a.config, clips: a.config.clips.map((clip) => ({ ...clip, hold: 7 })) },
+        a.registry, undefined, 1, undefined, a.head);
+      await act(async () => {
+        harness.hook.result.current.commitData(a, { save: true });
+        harness.hook.result.current.commitData(b, { save: true, gestureBasis: refusedBasis(original) });
+      });
+      await vi.waitFor(() => expect(toastError).toHaveBeenCalledTimes(1));
+      expect(String(toastError.mock.calls[0][0])).toMatch(/^Not saved: .*That change was undone; your other edits are kept\.$/s);
+      expect(String(toastError.mock.calls[0][0])).not.toContain('Local document save retained');
+      await vi.waitFor(() => expect(harness.hook.result.current.dataRef.current?.config.clips[0].hold).toBe(1));
+      expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('edit-a.mp4');
+      await act(async () => { await expect(harness.hook.result.current.flushPendingSave()).rejects.toThrow('gesture read basis differs'); });
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      const changes = sentPaths(harness);
+      expect(changes).toEqual(expect.arrayContaining([expect.objectContaining({ path: ['config', 'output', 'file'], value: 'edit-a.mp4' })]));
+      // A was never published and then reverted: no request puts the original file back.
+      expect(changes.some((change) => change.value === original.config.output.file)).toBe(false);
+      expect(changes.some((change) => /hold/.test(change.path.join('/')))).toBe(false);
+      expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('edit-a.mp4');
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('takes the terminal path when a later edit C follows the refused edit B in the same tick', async () => {
+    const harness = await mount();
+    try {
+      const original = harness.hook.result.current.dataRef.current!;
+      const b = await buildTimelineData({ ...original.config, clips: original.config.clips.map((clip) => ({ ...clip, hold: 7 })) },
+        original.registry, undefined, 1, undefined, original.head);
+      const c = await buildTimelineData({ ...b.config, output: { ...b.config.output, fps: 24 } }, b.registry, undefined, 1, undefined, b.head);
+      await act(async () => {
+        harness.hook.result.current.commitData(b, { save: true, gestureBasis: refusedBasis(original) });
+        harness.hook.result.current.commitData(c, { save: true });
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await act(async () => { await expect(harness.hook.result.current.flushPendingSave()).rejects.toThrow('gesture read basis differs'); });
+      // Not reverted: C (authored on B) is not lost, and the draft keeps B and C for Save as copy.
+      const screen = harness.hook.result.current.dataRef.current!;
+      expect(screen.config.clips[0].hold).toBe(7);
+      expect(screen.config.output.fps).toBe(24);
+      const draft = await loadTimelineDraft(TIMELINE);
+      expect(JSON.stringify(draft?.draft)).toContain('"hold":7');
+      // The refused change is never published, not even inside C's unnamed capture.
+      expect(sentPaths(harness).some((change) => /hold/.test(change.path.join('/')))).toBe(false);
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('keeps an edit made after a 409 conflict in the draft instead of undoing it', async () => {
+    const toastError = vi.spyOn(sonnerToast, 'error');
+    const harness = await mount({ rejectFirstSend: true });
+    try {
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'conflicted.mp4' } }));
+      await act(async () => { await harness.hook.result.current.flushPendingSave().catch(() => {}); });
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('conflict'));
+      const original = harness.hook.result.current.dataRef.current!;
+      await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 24 } }), refusedBasis(original));
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(harness.hook.result.current.dataRef.current?.config.output.fps).toBe(24);
+      const draft = await loadTimelineDraft(TIMELINE);
+      expect((draft?.draft as { config: TimelineConfig }).config.output.fps).toBe(24);
+      expect(toastError.mock.calls.map((call) => String(call[0])).join('\n')).not.toContain('That change was undone');
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('keeps the recovered draft and banner when Save them is refused', async () => {
+    const seed = await mount();
+    const base = seed.hook.result.current.dataRef.current!;
+    seed.hook.unmount();
+    await saveTimelineDraft(TIMELINE, { config: { ...base.config, output: { ...base.config.output, file: 'recovered.mp4' } },
+      registry: base.registry, bundle: null }, 1, { ownerId: 'old-owner', draftIdentity: 'old-identity',
+      baseHeadRevisionId: 'r0', baseHeadProjectId: 'project-commit', baseHeadTimelineId: TIMELINE });
+    const harness = await mount();
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.recoveryDraft).not.toBeNull());
+      await act(async () => { await harness.hook.result.current.retryRecoveredDraft(); });
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await act(async () => { await harness.hook.result.current.flushPendingSave().catch(() => {}); });
+      const draft = await loadTimelineDraft(TIMELINE);
+      expect((draft?.draft as { config: TimelineConfig } | undefined)?.config.output.file).toBe('recovered.mp4');
+      expect(harness.hook.result.current.recoveryDraft).not.toBeNull();
+      expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('recovered.mp4');
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('does not report an undone edit to a flush whose target does not cover it', async () => {
+    const harness = await mount();
+    try {
+      const original = harness.hook.result.current.dataRef.current!;
+      const a = await buildTimelineData({ ...original.config, output: { ...original.config.output, file: 'edit-a.mp4' } },
+        original.registry, undefined, 1, undefined, original.head);
+      const b = await buildTimelineData({ ...a.config, clips: a.config.clips.map((clip) => ({ ...clip, hold: 7 })) },
+        a.registry, undefined, 1, undefined, a.head);
+      let earlier!: Promise<number>;
+      await act(async () => {
+        harness.hook.result.current.commitData(a, { save: true });
+        // This barrier targets A only; B is authored after it was requested.
+        earlier = harness.hook.result.current.flushPendingSave();
+        harness.hook.result.current.commitData(b, { save: true, gestureBasis: refusedBasis(original) });
+        await earlier;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      await act(async () => { await expect(harness.hook.result.current.flushPendingSave()).rejects.toThrow('gesture read basis differs'); });
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+    } finally { harness.hook.unmount(); }
   });
 });

@@ -570,6 +570,16 @@ export const assembleTimelineData = ({
   };
 };
 
+/**
+ * The single rule for when output defaults are materialized: only when the authored
+ * output has no resolution. A config that authors a resolution is displayed verbatim,
+ * including when optional fields (background, background_scale) are absent.
+ */
+export const materializeAuthoredOutput = (
+  config: TimelineConfig,
+  onMigration?: Parameters<typeof withDefaultTimelineOutput>[1],
+): TimelineConfig => config.output?.resolution == null ? withDefaultTimelineOutput(config, onMigration) : config;
+
 export const buildTimelineData = async (
   config: TimelineConfig,
   registry: AssetRegistry,
@@ -580,9 +590,7 @@ export const buildTimelineData = async (
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
   const priorIssues: TimelineDomainIssue[] = [];
-  const input = config.output?.resolution == null
-    ? withDefaultTimelineOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')))
-    : config;
+  const input = materializeAuthoredOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')));
   const canonical = canonicalizeTimelinePair(input, registry);
   const displayConfig = projectTimelineTracksForDisplay(canonical.config);
   const resolvedConfig = await resolveTimelineConfig(displayConfig, canonical.registry, urlResolver);
@@ -625,9 +633,7 @@ export const buildTimelineDataWithResolver = async (
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
   const priorIssues: TimelineDomainIssue[] = [];
-  const input = config.output?.resolution == null
-    ? withDefaultTimelineOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')))
-    : config;
+  const input = materializeAuthoredOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')));
   const canonical = canonicalizeTimelinePair(input, registry);
   const displayConfig = projectTimelineTracksForDisplay(canonical.config);
 

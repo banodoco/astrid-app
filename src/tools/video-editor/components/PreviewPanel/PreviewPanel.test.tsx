@@ -34,6 +34,7 @@ it('shows a transient authored canvas migration status', () => {
   try {
     render(<PreviewPanel surface={{hasConfig: true, slotRef: vi.fn(), portal: null}} showOverlayEditor={false} />);
     expect(screen.getByRole('status')).toHaveTextContent('Canvas is not stated in timeline output; using 1280 × 720 from timeline settings. It has not been written to output.');
+    expect(screen.getByRole('status').parentElement).toHaveClass('absolute');
   } finally {
     delete (state.data.data as {migrationIssues?: unknown}).migrationIssues;
   }
@@ -44,6 +45,7 @@ it('shows transient child framing findings with occurrence context', () => {
   render(<PreviewPanel surface={{hasConfig: true, slotRef: vi.fn(), portal: null, placementFindings: [finding]}} showOverlayEditor={false} />);
   const status = screen.getByRole('status');
   expect(status).toHaveTextContent('Preview uses legacy framing in 1 shot.');
+  expect(status.parentElement).toHaveClass('absolute');
   expect(status).toHaveAttribute('title', expect.stringContaining('shot-1'));
   expect(status).toHaveAttribute('title', expect.stringContaining('480'));
 });

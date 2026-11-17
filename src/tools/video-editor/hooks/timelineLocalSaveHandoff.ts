@@ -445,7 +445,12 @@ export function createTimelineLocalSaveHandoff(options: {
           if (prepared.removeClipId !== undefined && clips.some(clip => object(clip) && clip.id === prepared.removeClipId)) {
             refuse('prepared media cannot remove an authored parent clip. Draft retained; reload the timeline, then choose Add media');
           }
-          const row = duplicateVideo ? nextClips.find(clip => object(clip) && clip.id === gestureBasis.clipId) : nextClips.at(-1);
+          // The editor serializes clips grouped by track, so the new clip is not necessarily last.
+          // Find it by its command id; the Runtime appends it, and the retained rows keep stored order.
+          const row = nextClips.find(clip => object(clip) && clip.id === gestureBasis.clipId);
+          const retainedRows = duplicateVideo ? nextClips : nextClips.filter(clip => clip !== row);
+          const byId = (rows: unknown[]) => [...rows].sort((a, b) => String(object(a) ? a.id : '').localeCompare(String(object(b) ? b.id : '')));
+          const sameRowsById = (a: unknown[], b: unknown[]) => a.length === b.length && same(byId(a), byId(b));
           const tracks = config.tracks;
           const nextTracks = nextConfig.tracks;
           const newTrack = object(row) && Array.isArray(tracks) && Array.isArray(nextTracks)
@@ -455,7 +460,7 @@ export function createTimelineLocalSaveHandoff(options: {
             && nextTracks.filter(track => object(track) && track.id === row.track);
           if (!object(row) || row.id !== gestureBasis.clipId || row.asset !== prepared.asset.assetKey
             || clips.some(clip => object(clip) && clip.id === row.id)
-            || (!duplicateVideo && !same(nextClips.slice(0, -1), clips))
+            || (!duplicateVideo && !sameRowsById(retainedRows, clips))
             || !Array.isArray(tracks) || !Array.isArray(nextTracks)
             || (!same(authoredJson(gestureBasis.config.tracks), authoredJson(authoringSource.config.tracks))
               && (!newTrack || !same(authoredJson(gestureBasis.config.tracks), authoredJson(next.config.tracks))))

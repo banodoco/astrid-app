@@ -5,7 +5,7 @@ on:
   push:
     branches: [main, release-1, "int/**", "release/*/main", "release/14/plan-39"]
   pull_request:
-    branches: [main, "release/*/main"]
+    branches: [main, "release/*/main", "release/14/plan-39"]
   workflow_dispatch:
 
 concurrency:
@@ -63,10 +63,9 @@ jobs:
           echo "::error::A pull request into a release branch must name the plan or the astrid-dev issue it belongs to, for example 'Plan 55' or 'banodoco/astrid-dev#721'."
           exit 1
 
-  # Pull requests into main run only release-guard above. Pull requests into a release main also run vitest and
-  # boundary; release-tooling-macos stays push-only (macOS runner cost) and runs on the push to the release branch.
+  # Every accepted PR target runs Vitest and boundary checks, including the Plan 39 task PRs.
+  # release-tooling-macos stays push-only and runs on the push to the release branch.
   vitest:
-    if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/') && endsWith(github.base_ref, '/main')) }}
     # Pinned: Playwright does not support Chromium on ubuntu-latest (ubuntu 26.04) for this job.
     runs-on: ubuntu-24.04
     steps:
@@ -173,13 +172,20 @@ jobs:
 
   # Cross-repo copies: every vendored artifact must match its selected producer commit.
   boundary:
-    if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/') && endsWith(github.base_ref, '/main')) }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
+      - name: Check manifest pins against local locks
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+          import { checkLocalPins } from './scripts/installer/pin.mjs';
+          const manifest = JSON.parse(readFileSync('public/install-manifest.json', 'utf8'));
+          console.log(checkLocalPins(manifest));
+          NODE
       - id: pins
         run: |
           node <<'NODE' >> "$GITHUB_OUTPUT"

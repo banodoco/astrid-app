@@ -1674,6 +1674,11 @@ export function useTimelinePersistence({
         session.generation += 1;
         session.cancelledRanges = [];
         session.uncertainThroughSeq = -1;
+        // A refusal whose revert was declined (this reload) was never shown:
+        // the canonical state replaces the refused edit, so say why it is gone.
+        if (session.captureFailure instanceof TimelineSaveError && isTimelineAuthoringRefusal(session.captureFailure)) {
+          toast.error(session.captureFailure.message);
+        }
         session.captureFailure = undefined;
         session.editFailure = false;
         invalidateDraftReload();

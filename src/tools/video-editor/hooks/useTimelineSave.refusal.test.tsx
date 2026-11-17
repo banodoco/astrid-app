@@ -190,6 +190,40 @@ describe('useTimelineSave refused authoring edits', () => {
     } finally { reopened.hook.unmount(); }
   });
 
+  it('surfaces a refusal whose revert is declined (canonical reload in progress) as one refusal toast', async () => {
+    const toastError = vi.spyOn(sonnerToast, 'error');
+    const harness = await mount();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    vi.mocked(harness.provider.loadTimeline).mockImplementation(async () => { await gate; return { config: createDefaultTimelineConfig(), configVersion: 1 }; });
+    try {
+      const original = harness.hook.result.current.dataRef.current!;
+      const badBasis = { kind: 'trim' as const, clipId: 'clip-a', patch: { hold: 7 },
+        config: { ...original.config, output: { ...original.config.output, file: 'someone-else.mp4' } }, registry: original.registry };
+      const next = await buildTimelineData({ ...structuredClone(original.config), clips: original.config.clips.map((clip) => ({ ...clip, hold: 7 })) },
+        original.registry, undefined, 1, undefined, original.head);
+      let reload: Promise<unknown> = Promise.resolve();
+      await act(async () => {
+        harness.hook.result.current.commitData(next, { save: true, gestureBasis: badBasis });
+        // Synchronously after the edit is captured, before the refusal settles: the revert is declined.
+        reload = harness.hook.result.current.reloadFromServer({ preserveDraft: true });
+      });
+      // The reload is still running: the refusal has not been shown or lost yet.
+      expect(toastError).not.toHaveBeenCalled();
+      release();
+      await act(async () => { await reload; });
+      // The declined revert is never silent: one plain refusal toast, not the 'undone' text.
+      expect(toastError).toHaveBeenCalledTimes(1);
+      expect(String(toastError.mock.calls[0][0])).toMatch(/gesture read basis differs/);
+      expect(String(toastError.mock.calls[0][0])).not.toContain('That change was undone');
+      // The canonical reload replaced the refused edit, so the badge reflects canonical (saved), not a stuck error.
+      expect(harness.hook.result.current.dataRef.current?.config.clips[0]?.hold).not.toBe(7);
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      expect(toastError).toHaveBeenCalledTimes(1);
+      expect(harness.requests.flatMap((request) => request.changes).some((change) => /hold/.test(change.path.join('/')))).toBe(false);
+    } finally { harness.hook.unmount(); }
+  });
+
   it('Discard clears a retained non-refusal draft, and a reload offers neither it nor a refused edit', async () => {
     const harness = await mount({ rejectFirstSend: true });
     try {

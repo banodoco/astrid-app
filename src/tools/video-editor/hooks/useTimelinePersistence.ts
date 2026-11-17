@@ -142,6 +142,8 @@ interface PersistenceSession {
   cancelledRanges: Array<{ from: number; through: number }>;
   captures?: Set<Promise<void>>;
   captureFailure?: unknown;
+  /** A refused edit that was undone on screen; the next flush reports it once, so a caller never believes it saved. */
+  undoneRefusal?: TimelineSaveError;
   recoveryWrites?: number;
   storageFailure?: unknown;
   retiredPending?: boolean;
@@ -1288,6 +1290,7 @@ export function useTimelinePersistence({
     if (!restore || !isMountedRef.current || activeTargetRef.current !== refused.session
       || refused.generation !== session.generation || reloadInProgressRef.current) return false;
     refused.refusedAndReverted = true;
+    session.undoneRefusal = error;
     // Only the refused edit goes. Every earlier edit is in the local document
     // session (queued or acknowledged) and is part of `restore`; an edit made
     // after this one is authored on `restore` once it is on screen.
@@ -1409,7 +1412,13 @@ export function useTimelinePersistence({
 
   const flushPendingSave = useCallback((): Promise<number> => {
     // Capturing legacy callers here keeps the existing latest-document barrier.
-    return flushSaveTarget(Object.freeze({ session: session.identity, timelineId, targetSeq: editSeqRef.current, generation: session.generation }), false);
+    return flushSaveTarget(Object.freeze({ session: session.identity, timelineId, targetSeq: editSeqRef.current, generation: session.generation }), false)
+      .then((seq) => {
+        const refusal = session.undoneRefusal;
+        session.undoneRefusal = undefined;
+        if (refusal) throw refusal;
+        return seq;
+      });
   }, [editSeqRef, flushSaveTarget, session, timelineId]);
 
   const preserveTimelineDraftForReload = useCallback(async (): Promise<void> => {

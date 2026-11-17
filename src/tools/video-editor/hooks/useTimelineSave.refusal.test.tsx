@@ -156,6 +156,8 @@ describe('useTimelineSave refused authoring edits', () => {
       expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('edit-a.mp4');
       // B is authored after the revert, on a different field than A and the refused edit.
       await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 24 } }));
+      // The first flush reports the undone edit once, so a caller never believes it saved; the next one is clean.
+      await act(async () => { await expect(harness.hook.result.current.flushPendingSave()).rejects.toThrow('gesture read basis differs'); });
       await act(async () => { await harness.hook.result.current.flushPendingSave(); });
 
       const changes = harness.requests.flatMap((request) => request.changes);

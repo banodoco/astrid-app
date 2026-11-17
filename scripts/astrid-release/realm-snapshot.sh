@@ -326,6 +326,19 @@ PY
   fi
   realm_verify_copy "$rdir" "$stage" || { rm -rf "$stage"; _realm_err "verification failed; nothing was published"; return 1; }
   mv "$stage" "$final" || { rm -rf "$stage"; return 1; }
-  _realm_repoint_catalog "$dest" "$rid" "$final" "$name" || { _realm_err "catalog repoint failed; copy is at $final"; return 1; }
+  if declare -F realm_attach_cmd >/dev/null; then
+    # Select the copy with the Runtime's own command. The installer's empty-realm selection and owner records are
+    # removed first (the caller has confirmed the stack is stopped); the old catalog is kept.
+    local attach_out
+    cp -p "$dest/runtime/catalog.json" "$dest/runtime/catalog.json.pre-realm-snapshot" || return 1
+    rm -f "$dest/runtime/catalog.json" "$dest/runtime/instance.lock" "$dest/runtime/discovery.json"
+    attach_out="$(realm_attach_cmd workspace attach --data-root "$dest" --realm-root "$final" --realm-id "$rid" --json 2>&1)" || true
+    if ! printf '%s' "$attach_out" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"configured_attach"'; then
+      cp -p "$dest/runtime/catalog.json.pre-realm-snapshot" "$dest/runtime/catalog.json"
+      _realm_err "workspace attach did not report configured_attach: $(printf '%s' "$attach_out" | tail -c 400)"; return 1
+    fi
+  else
+    _realm_repoint_catalog "$dest" "$rid" "$final" "$name" || { _realm_err "catalog repoint failed; copy is at $final"; return 1; }
+  fi
   _realm_say "done: stack now selects the copied realm $rid (the installer's empty realm directory is left in place, unselected)"
 }

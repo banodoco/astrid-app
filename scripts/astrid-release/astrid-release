@@ -133,6 +133,7 @@ if [[ "$CMD" == status ]]; then
   say "Release $BRANCH, root $ROOT"
   print_heads
   print_derived "$STATE/install-manifest.json"
+  [[ ! -d "$APP/.git" ]] || say "App checkout (what the editor serves): $(git -C "$APP" rev-parse --short=12 HEAD) (the Agent and Runtime above are the installed pins)"
   if saved_ports; then
     if is_running; then running=yes; else running=no; fi
     say "Running: $running. Editor http://127.0.0.1:$APP_PORT/tools/video-editor?connect=1 (ports editor $APP_PORT, proxy $PROXY_PORT, door $DOOR_PORT)"
@@ -290,7 +291,7 @@ PINSCHECK
       need_install=0; AS_BUILT=1
       say "NOTE: the branch moved since this stack was built (new manifest differs). Starting the stack as built; \`astrid-release update $BRANCH\` moves it (not supported without losing data yet)."
     else
-    fail "The branch moved (the manifest changed), and switching programs without losing the data on this stack is not supported yet. Nothing was changed. To test the new commits now, delete $ROOT (this loses edits made on the realm copy) and run astrid-release $BRANCH again."
+    fail "The branch moved (the manifest changed). Moving a built stack is not supported without losing data (the installer's own --update is blocked, issue #825). To test the new commits: 1) astrid-release stop $BRANCH  2) keep the data: cp -c -R $DATA ~/astrid-release/$SLUG.data-\$(date +%Y%m%d-%H%M)  3) delete $ROOT and run astrid-release $BRANCH again (the realm is copied fresh from live). Edits on the old copy carry over only by attaching the kept clone (same workspace schema only). Nothing was changed."
     fi
   fi
 fi
@@ -358,7 +359,11 @@ PYTHON="$PROGRAM/versions/$(cat "$PROGRAM/current")/py/bin/python"
 stop_stack
 . "$SCRIPT_DIR/realm-snapshot.sh"
 export REALM_FREE_FLOOR_BYTES=$((1024 * 1024 * 1024))   # the program is already installed; clones cost almost nothing
+realm_attach_cmd() { clean_env "$PYTHON" -X utf8 -I -m astrid_runtime "$@" --source-manifest "$PROGRAM/versions/$(cat "$PROGRAM/current")/profile.json"; }
 if [[ ! -f "$STATE/realm-id" ]]; then
+  [[ -z "$(stragglers)" ]] || fail 'A process of this stack is still alive; not replacing its workspace selection.'
+  remove_dir "$ROOT/data.pre-realm"
+  cp -c -R "$DATA" "$ROOT/data.pre-realm" || fail 'Cannot clone-back-up data/ (APFS clone unsupported); nothing was changed.'
   realm_live_fingerprint "$live_data_root" > "$STATE/live-before.txt"
   realm_snapshot_copy "$live_data_root" "$DATA" || fail 'The realm copy failed; the live realm was not written.'
   realm_live_fingerprint "$live_data_root" > "$STATE/live-after.txt"
@@ -369,6 +374,7 @@ if [[ ! -f "$STATE/realm-id" ]]; then
   fi
   realm_id="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["selected_realm_id"])' "$DATA/runtime/catalog.json")"
   # The installer's selection record named its empty realm; point it at the copy and drop the stale foreground pid.
+  # This is the one remaining hand edit: no supported writer exists while the installer cannot be re-run (issue #817).
   /usr/bin/python3 - "$ROOT/home/.local/share/astrid-install.json" "$realm_id" "$DATA/runtime/realms/$realm_id" <<'PY'
 import json, sys
 path, rid, root = sys.argv[1:]
@@ -494,10 +500,20 @@ got = sorted(p.get('name') or '' for p in json.load(urllib.request.urlopen(f'htt
 if want != got:
     raise SystemExit(f'projects differ: realm copy has {want}, the stack lists {got}')
 print('Projects listed through the stack:', ', '.join(got))
+try:
+    want_tl = sqlite3.connect(f'file:{db}?mode=ro&immutable=1', uri=True).execute('SELECT count(*) FROM timelines WHERE archived_at IS NULL').fetchone()[0]
+    ids = [p['project_id'] if 'project_id' in p else p['id'] for p in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/api/runtime/v1/projects?limit=200', timeout=20))['items']]
+    have_tl = sum(len(json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/api/runtime/v1/projects/{i}/timelines?limit=200', timeout=20))['items']) for i in ids)
+    print(f'Timelines: realm copy {want_tl}, listed through the stack {have_tl}')
+    if have_tl < want_tl:
+        raise SystemExit('the stack lists fewer timelines than the copied realm has')
+except (sqlite3.Error, KeyError, OSError):
+    print('Timeline count check skipped (could not read the counts).')
 PY
 live_proof > "$STATE/live-proof-after.txt"
 cmp -s "$STATE/live-proof-before.txt" "$STATE/live-proof-after.txt" || fail "The LIVE Runtime or its launchd plist changed during this run: before '$(cat "$STATE/live-proof-before.txt")', after '$(cat "$STATE/live-proof-after.txt")'."
 say "Live untouched: $(cat "$STATE/live-proof-after.txt") (same before and after this run)."
+[[ ! -d "$ROOT/data.pre-realm" ]] || { remove_dir "$ROOT/data.pre-realm"; say 'Pre-realm data clone dropped (READY and the project check passed).'; }
 say "READY: release $BRANCH"
 cat <<DONE
 To launch this, do:

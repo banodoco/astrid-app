@@ -29,9 +29,16 @@ Open the stack at `http://127.0.0.1:<editor port>/tools/video-editor?entry=edito
 - `astrid` on PATH is still the live install. The stack's own entry is `HOME=<root>/home <root>/program/run-astrid`; never run it without that HOME.
 - Autostart stays off on purpose: the installer's launchd label (`haus.astrid.runtime`) is the same global name the live service uses.
 
-## Limits (not built)
+## What is proven, and what is not
 
-- **Moving a built stack to new commits** is not supported. The installer's own `--update` fails on this kind of install (it probes the live launchd label and calls the stack's missing plist "malformed"), and reinstalling over kept data needs the retained Runtime source profile rewritten. Starting an existing stack starts it as built and says so when the branch moved; `update` refuses so that edits on the copy are never wiped. To test newer commits today: stop, delete the stack folder (this loses edits made on the copy) and run again.
-- timeline-composition is never switched: the App and the Agent each bundle their own tarball. The launcher (astrid-pinokio) and the OMP pin are out of scope (OMP is installed at the App manifest's `tools.omp`).
-- The first live-realm copy is a snapshot taken while your live Runtime may be running; the copy can need one extra start (see step 4).
-- Not proven here: editing on the copy and keeping the edit across restarts.
+Proven on the real stack (the build before this commit): install through the real installer, the realm copy, `workspace inspect`, start, readiness, the project list through the stack's proxy, and a browser check that opened "Almost Ready" (5 timelines, clips and preview visible). The live Runtime pid and launchd plist were identical before and after. Fixtures: `test-realm-snapshot.sh` (35 checks, temp dir only), `scripts/installer/manifest.test.mjs` (6 tests, Node 20), and a scratch clone where `workspace attach` returned `configured_attach` and refused a wrong realm id.
+
+UNTESTED on the real stack (changed since, `bash -n` and fixtures only): the `workspace attach` selection of the copy (the tool no longer hand-edits the catalog; the installer record still gets two hand-set fields), the `data.pre-realm` clone backup, the new `update` refusal text, the `status` App-checkout line, and the timeline-count query. Not proven at all: an edit on the copy surviving a restart, and a fresh-clone end-to-end run.
+
+## Limits
+
+- **Moving a built stack to new commits is not supported.** The installer's own `--update` fails on this kind of install (it probes the live launchd label and calls the stack's missing plist "malformed"). Starting an existing stack starts it as built and says so when the branch moved; the editor checkout does follow the App branch tip on each start. `update` refuses so edits on the copy are never wiped. To test newer commits: `stop`, clone the data aside (`cp -c -R <root>/data ~/astrid-release/<slug>.data-<date>`), delete the root, run again (the realm is copied fresh; kept edits carry over only by attaching the kept clone, same workspace schema only).
+- The first start on a fresh realm copy can fail once ("accepted commit inputs changed during verification"); the tool retries up to twice and keeps the log tails. The cause is not found: a restart of an existing stack traced clean.
+- macOS only. About 10 GB of disk for a stack (program 3.6 GB, an isolated cache, clones). The install refuses below its computed floor and prints the number.
+- Run `run-astrid` only as `HOME=<root>/home <root>/program/run-astrid`.
+- timeline-composition is never switched (the App and the Agent each bundle their own tarball). The launcher (astrid-pinokio) and the OMP pin are out of scope.

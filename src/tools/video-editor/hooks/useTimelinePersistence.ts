@@ -217,6 +217,8 @@ export interface UseTimelinePersistenceResult {
   flushSaveTarget: (target: TimelineSaveTarget) => Promise<number>;
   discardUncommittedSaveTarget: (target: TimelineSaveTarget, error: unknown) => boolean;
   saveStatus: SaveStatus;
+  /** The reason behind a 'error' status, until the status changes. */
+  saveError: string | null;
   isConflictExhausted: boolean;
   /** Reopen resolution for a native refusal already retained in the recovered outbox. */
   restoreRetainedConflict: () => void;
@@ -367,6 +369,9 @@ export function useTimelinePersistence({
   }>>([]);
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  // Why the badge says 'error'. A toast is gone in seconds; this stays until the status leaves 'error'.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  useEffect(() => { if (saveStatus !== 'error') setSaveError(null); }, [saveStatus]);
   const [isConflictExhausted, setIsConflictExhausted] = useState(false);
   const [schemaIncompatible, setSchemaIncompatible] = useState<ReadonlyArray<TimelineSchemaIssue> | null>(null);
   const [watchdogTripped, setWatchdogTripped] = useState(false);
@@ -846,6 +851,7 @@ export function useTimelinePersistence({
         cancelErrorRetryTimer();
         disarmWatchdog();
         setSaveStatus('error');
+        setSaveError(persistenceError instanceof Error ? persistenceError.message : String(persistenceError));
         toast.error(persistenceError instanceof Error ? persistenceError.message : String(persistenceError));
         rejectFlushWaiters(persistenceError, attempt, true);
         return;
@@ -870,6 +876,7 @@ export function useTimelinePersistence({
         cancelErrorRetryTimer();
         disarmWatchdog();
         setSaveStatus('error');
+        setSaveError(persistenceError.message);
         toast.error(persistenceError.message);
         rejectFlushWaiters(persistenceError, attempt, true);
         return;
@@ -944,6 +951,7 @@ export function useTimelinePersistence({
         scheduleErrorRetry(attempt);
       } else {
         setSaveStatus('error');
+        setSaveError(error instanceof Error ? error.message : String(error));
       }
     } finally {
       attempt.session.activeAttempts.delete(attempt);
@@ -1787,6 +1795,7 @@ export function useTimelinePersistence({
     flushSaveTarget,
     discardUncommittedSaveTarget,
     saveStatus,
+    saveError,
     isConflictExhausted,
     restoreRetainedConflict,
     schemaIncompatible,

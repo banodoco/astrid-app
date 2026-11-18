@@ -5,7 +5,7 @@ on:
   push:
     branches: [main, release-1, "int/**", "release/*/main"]
   pull_request:
-    branches: [main, "release/*/main"]
+    branches: [main, "release/*/main", "release/14/plan-61"]
   workflow_dispatch:
 
 concurrency:
@@ -64,7 +64,7 @@ jobs:
           exit 1
 
   # Pull requests into main run only release-guard above. Pull requests into a release branch also run vitest and
-  # boundary; release-tooling-macos stays push-only (macOS runner cost) and runs on the push to the release branch.
+  # boundary. The macOS job also runs on Plan 61 PRs for native realm fixture proof.
   vitest:
     if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/') && endsWith(github.base_ref, '/main')) }}
     # Pinned: Playwright does not support Chromium on ubuntu-latest (ubuntu 26.04) for this job.
@@ -122,14 +122,49 @@ jobs:
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
 
   release-tooling-macos:
-    if: ${{ github.event_name != 'pull_request' }}
+    if: ${{ github.event_name != 'pull_request' || github.base_ref == 'release/14/plan-61' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
       - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs scripts/release/verify-extension-ship.test.mjs
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.base_ref == 'release/14/plan-61' }}
+        with:
+          python-version: "3.11"
+      - name: Plan 61 release, manifest and native realm fixtures
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.base_ref == 'release/14/plan-61' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git rev-parse HEAD
+          node --version
+          python3 --version
+          sqlite3 --version
+          node --test scripts/astrid-release/release.test.mjs scripts/astrid-release/workflow.test.mjs scripts/installer/manifest.test.mjs
+          P61_NATIVE_ROOT="$(mktemp -d "$RUNNER_TEMP/p61-native.XXXXXXXX")"
+          trap 'rm -rf "$P61_NATIVE_ROOT"' EXIT
+          P61_RUNTIME_SHA="$(node -e '
+            const sha = require("./public/install-manifest.json").runtime?.sha;
+            if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error("Runtime pin must be a full SHA");
+            process.stdout.write(sha);')"
+          git init --quiet "$P61_NATIVE_ROOT/runtime"
+          git -C "$P61_NATIVE_ROOT/runtime" remote add origin https://github.com/banodoco/astrid-runtime.git
+          git -C "$P61_NATIVE_ROOT/runtime" fetch --quiet --depth=1 origin "$P61_RUNTIME_SHA"
+          git -C "$P61_NATIVE_ROOT/runtime" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$P61_NATIVE_ROOT/runtime" rev-parse HEAD)" = "$P61_RUNTIME_SHA"
+          python3 -m venv "$P61_NATIVE_ROOT/venv"
+          PIP_CACHE_DIR="$P61_NATIVE_ROOT/pip-cache" "$P61_NATIVE_ROOT/venv/bin/python" -m pip install \
+            -e "$P61_NATIVE_ROOT/runtime" -e "$P61_NATIVE_ROOT/runtime/packages/python"
+          bash -n scripts/astrid-release/astrid-release
+          bash -n scripts/astrid-release/realm-snapshot.sh
+          bash -n scripts/astrid-release/test-realm-snapshot.sh
+          REALM_TEST_PYTHON="$P61_NATIVE_ROOT/venv/bin/python" \
+            bash scripts/astrid-release/test-realm-snapshot.sh
 
   # Cross-repo copies: every vendored artifact must match its selected producer commit.
   boundary:

@@ -129,5 +129,8 @@ echo "== verify catches corruption"
 echo x >> "$C/cas/sha256/cd/obj2"
 check "verify fails on a tampered media file" bash -c '. "$1"; ! realm_verify_copy "$2" "$3" >/dev/null 2>&1' _ "$HERE/realm-snapshot.sh" "$REALM" "$C"
 
+echo "== Runtime attach contract (installed manifest-pinned Runtime required)"
+check "real Runtime attach, inspect and wrong-id refusal" "${REALM_TEST_PYTHON:-python3}" -I "$HERE/test_realm_attach.py"
+
 echo; echo "passed=$PASS failed=$FAIL"
 [ "$FAIL" -eq 0 ]

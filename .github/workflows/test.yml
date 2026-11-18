@@ -100,9 +100,26 @@ jobs:
       - run: npm ci --legacy-peer-deps
         id: dependencies
       - name: Check quarantine policy against the merge base
+        shell: bash
         env:
           QUARANTINE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || inputs.quarantine_base }}
-        run: npm run check:quarantine-policy
+        run: |
+          if [[ -z "${QUARANTINE_BASE_REF:-}" || "$QUARANTINE_BASE_REF" == -* ]]; then
+            echo "An explicit quarantine base ref is required." >&2
+            exit 1
+          fi
+          base_commit=$(git rev-parse --verify "${QUARANTINE_BASE_REF}^{commit}")
+          merge_base=$(git merge-base HEAD "$base_commit")
+          # Keep the base module at this depth for its repository root and locked
+          # TypeScript import, but never execute the candidate's checker source.
+          policy_file=$(mktemp scripts/quality/.quarantine-policy-base-XXXXXX.mjs)
+          trap 'rm -f -- "$policy_file"' EXIT
+          echo "Quarantine checker source: ${merge_base}:scripts/quality/check-quarantine-policy.mjs"
+          if ! git show "${merge_base}:scripts/quality/check-quarantine-policy.mjs" > "$policy_file"; then
+            echo "The trusted quarantine checker is absent from merge base ${merge_base}; the Lead must bootstrap it into the target ancestry." >&2
+            exit 1
+          fi
+          node "$policy_file" "$merge_base"
       - name: Prove result-integrity rejection cases
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: python3 -m unittest discover -s scripts/quality -p test_vitest_results.py

@@ -2,6 +2,8 @@
 // A stalled task must not strand already-finished task updates in Vitest's throttle.
 // Pinned upstream cause: the elapsed-time boundary is strict, and the timer callback
 // retains its expired handle. An exact/early timer then cannot schedule another flush.
+// Empty each tables must fail during registration: they emit no task for a reporter
+// to inspect. Check the evaluated table after tagged-template expansion.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
@@ -31,13 +33,37 @@ const AFTER = BEFORE.replace('now - last > ms', 'now - last >= ms').replace(
 \t\t}, ms);`,
 );
 
-export function patchedSource(source) {
+const EACH_BEFORE = `function createTaskCollector(fn) {
+\tconst taskFn = fn;
+\ttaskFn.each = function(cases, ...args) {
+\t\tconst context = getChainableContext(this);
+\t\tconst test = context.withContext();
+\t\tcontext.setContext("each", true);
+\t\tif (Array.isArray(cases) && args.length) {
+\t\t\tcases = formatTemplateString(cases, args);
+\t\t}
+\t\treturn (name, optionsOrFn, fnOrOptions) => {`;
+const EACH_AFTER = EACH_BEFORE.replace(
+  '\t\treturn (name, optionsOrFn, fnOrOptions) => {',
+  `\t\tif (cases.length === 0) {
+\t\t\tcontext.setContext("each", undefined);
+\t\t\tthrow new Error("test.each() requires at least one row");
+\t\t}
+\t\treturn (name, optionsOrFn, fnOrOptions) => {`,
+);
+
+function patchBlock(source, before, after, label) {
   const occurrences = (block) => source.split(block).length - 1;
-  if (occurrences(AFTER) === 1 && occurrences(BEFORE) === 0) return source;
-  if (occurrences(BEFORE) !== 1 || occurrences(AFTER) !== 0) {
-    throw new Error('Vitest task-update throttle differs from the audited 4.1.5 source; inspect it before updating the patch');
+  if (occurrences(after) === 1 && occurrences(before) === 0) return source;
+  if (occurrences(before) !== 1 || occurrences(after) !== 0) {
+    throw new Error(`Vitest ${label} differs from the audited 4.1.5 source; inspect it before updating the patch`);
   }
-  return source.replace(BEFORE, AFTER);
+  return source.replace(before, after);
+}
+
+export function patchedSource(source) {
+  const streamed = patchBlock(source, BEFORE, AFTER, 'task-update throttle');
+  return patchBlock(streamed, EACH_BEFORE, EACH_AFTER, 'each-table collector');
 }
 
 export function patchInstalledRunner({ check = false } = {}) {
@@ -53,11 +79,11 @@ export function patchInstalledRunner({ check = false } = {}) {
     throw error;
   }
   const version = JSON.parse(readFileSync(manifest, 'utf8')).version;
-  if (version !== '4.1.5') throw new Error(`expected @vitest/runner 4.1.5, found ${version}; re-prove the streaming patch before upgrading`);
+  if (version !== '4.1.5') throw new Error(`expected @vitest/runner 4.1.5, found ${version}; re-prove the runner guards before upgrading`);
   const file = path.join(path.dirname(manifest), 'dist/chunk-artifact.js');
   const source = readFileSync(file, 'utf8');
   const patched = patchedSource(source);
-  if (check && patched !== source) throw new Error('Vitest streaming patch is absent; run npm install with postinstall enabled');
+  if (check && patched !== source) throw new Error('Vitest runner guards are absent; run npm install with postinstall enabled');
   if (!check && patched !== source) writeFileSync(file, patched);
   return file;
 }
@@ -68,7 +94,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
       throw new Error('usage: node scripts/patches/vitest-4.1.5-result-stream.mjs --apply|--check');
     }
     const file = patchInstalledRunner({ check: process.argv[2] === '--check' });
-    console.log(file ? 'Vitest 4.1.5 task-update streaming patch verified.'
+    console.log(file ? 'Vitest 4.1.5 task-update streaming and each-table guards verified.'
       : 'Production installation omits the Vitest development runner.');
   } catch (error) {
     console.error(error.message);

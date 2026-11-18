@@ -62,3 +62,31 @@ it('fails closed without the immutable Git base', () => {
   const f = fixture();
   assert.throws(() => checkQuarantinePolicy({ repoRoot: f.root, baseRef: 'nonexistent-base' }));
 });
+
+it('rejects a new far-future expiry using the merge-base age window', () => {
+  const f = fixture();
+  f.put('config/testing/direct-journey-expected-failures.json', JSON.stringify({ direct: [entry, {
+    ...entry, id: 'P39-NEW', title: 'new case', issue: 'https://github.com/banodoco/astrid-app/issues/253', expiry: '2027-12-01',
+  }] }));
+  const result = checkQuarantinePolicy({ repoRoot: f.root, baseRef: f.base, today: new Date('2026-11-18T23:59:59Z') });
+  assert.match(result.problems.join('\n'), /expiry exceeds merge-base 14-day window.*2026-12-02/);
+});
+
+it('keeps the previous expiry when both id and title are renamed under the same issue', () => {
+  const f = fixture();
+  f.put('config/testing/direct-journey-expected-failures.json', JSON.stringify({ direct: [{
+    ...entry, id: 'P39-RENAMED-AGAIN', title: 'renamed case', expiry: '2026-11-26',
+  }] }));
+  const result = checkQuarantinePolicy({ repoRoot: f.root, baseRef: f.base, today: new Date('2026-11-18T00:00:00Z') });
+  assert.match(result.problems.join('\n'), /expiry extended beyond merge base.*2026-11-25 -> 2026-11-26/);
+});
+
+it('accepts the last UTC day of the base window and rejects an invalid expiry date', () => {
+  const f = fixture();
+  const candidate = { ...entry, id: 'P39-NEW', title: 'new case', issue: 'https://github.com/banodoco/astrid-app/issues/253' };
+  f.put('config/testing/direct-journey-expected-failures.json', JSON.stringify({ direct: [{ ...candidate, expiry: '2026-12-02' }] }));
+  const check = () => checkQuarantinePolicy({ repoRoot: f.root, baseRef: f.base, today: new Date('2026-11-18T00:00:00Z') });
+  assert.deepEqual(check().problems, []);
+  f.put('config/testing/direct-journey-expected-failures.json', JSON.stringify({ direct: [{ ...candidate, expiry: '2026-11-99' }] }));
+  assert.match(check().problems.join('\n'), /invalid expiry date/);
+});

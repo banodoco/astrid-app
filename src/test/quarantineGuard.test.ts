@@ -61,6 +61,20 @@ it('preserves Vitest strict unexpected-pass failure', () => {
   expect(result.stdout + result.stderr).toContain('Expect test to fail');
 });
 
+for (const env of [{ P39_EACH_LITERAL: '1' }, { P39_EACH_LITERAL: '0' }]) {
+  it(`refuses an each table that creates zero cases (literal=${env.P39_EACH_LITERAL})`, () => {
+    const result = runFixture('empty-each.fixture.ts', env);
+    expect(result.status, result.stdout + result.stderr).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain('test.each() requires at least one row');
+  });
+}
+
+it('preserves every row of a nonempty evaluated each table', () => {
+  const result = runFixture('empty-each.fixture.ts', { P39_EACH_LITERAL: '0', P39_EACH_ROWS: 'nonempty' });
+  expect(result.status, result.stdout + result.stderr).toBe(0);
+  expect(result.stdout + result.stderr).toMatch(/3 passed/);
+});
+
 describe('runtime expected-failure equality', () => {
   const entry = { file: 'src/a.test.ts', title: 'suite > case' };
   const selected = new Set([entry.file]);

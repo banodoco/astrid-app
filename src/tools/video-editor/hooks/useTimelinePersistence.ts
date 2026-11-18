@@ -1169,6 +1169,8 @@ export function useTimelinePersistence({
     // ordering silently replaced the old recovery record and then returned,
     // leaving the UI looking saved even though no POST had happened.
     if (recoveryPendingRef?.current || recoveryActiveRef?.current) {
+      // A resumed deferred save carries several edits and has no valid restore point; never revert it.
+      beforeEditRef.current = null;
       deferredDuringRecoveryRef.current = {
         data: nextData,
         gestureBasis: options?.gestureBasis,
@@ -1308,7 +1310,10 @@ export function useTimelinePersistence({
       || recoveryPendingRef?.current || recoveryActiveRef?.current
       || saveStatusRef.current === 'error' || saveStatusRef.current === 'retrying') return false;
     const localStatus = session.localDocumentSave?.status?.();
-    if (localStatus !== undefined && localStatus !== 'saved' && localStatus !== 'dirty') return false;
+    // 'saving' is safe: the refused edit never entered the outbox and `restore`
+    // already holds the earlier edits that are in flight.
+    if (localStatus === 'blocked' || localStatus === 'conflict' || localStatus === 'recovery'
+      || localStatus === 'error' || localStatus === 'retry') return false;
     refused.refusedAndReverted = true;
     session.undoneRefusal = { error, seq: refused.seq };
     commitData(restore, { save: false, skipHistory: true });

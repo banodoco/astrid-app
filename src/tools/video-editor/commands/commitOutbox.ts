@@ -273,8 +273,25 @@ export function createCommitOutbox(options: {
     });
   }
 
+  // Nothing left to send: no queued intent, no request in flight, and no placement continuation (those record
+  // conflicts the person must see and accepted placements that guard against a duplicate, so they stay).
+  // A create ACK (`accepted.creation`) and the original init link are kept: bootstrap resumes from them.
+  // An accepted prefix alone is history, not work: it is only read to rebase intents that are still queued.
   const hasNothingToSend = (record: OutboxRecord) => !record.intents.length && !record.pending
-    && !record.placementContinuations?.length;
+    && !record.placementContinuations?.length && !record.initialization && !record.accepted?.creation
+    && (record.accepted?.value as { kind?: string } | undefined)?.kind !== 'timeline-initialized';
+
+  /** Delete an owner's row when its claim ends with nothing to send, so rows do not accumulate one per session. */
+  async function releaseEmpty(key: string, generation: number): Promise<void> {
+    await transaction<void>('readwrite', (store, finish) => {
+      const read = store.get(key);
+      read.addEventListener('success', () => {
+        const current = read.result as OutboxRecord | undefined;
+        if (current && current.generation === generation && hasNothingToSend(current)) store.delete(key);
+        finish(undefined);
+      });
+    });
+  }
 
   /**
    * On session start: delete this timeline's rows that can never be sent. That is every row written under another
@@ -284,12 +301,13 @@ export function createCommitOutbox(options: {
   async function prune(scope: OutboxScope): Promise<void> {
     const { realmId, projectId, timelineId } = scope;
     scopeKey({ ...scope }, '_');
+    // Only this timeline's rows are read: another timeline's record must never be able to stop the prune.
     const rows = await transaction<OutboxRecord[]>('readonly', (store, finish) => {
       const request = store.getAll();
-      request.addEventListener('success', () => finish((request.result as OutboxRecord[]).map(detached)));
+      request.addEventListener('success', () => finish((request.result as OutboxRecord[])
+        .filter((record) => record.scope.projectId === projectId && record.scope.timelineId === timelineId)));
     });
     for (const record of rows) {
-      if (record.scope.projectId !== projectId || record.scope.timelineId !== timelineId) continue;
       if (record.scope.realmId === realmId && !hasNothingToSend(record)) continue;
       const key = scopeKey(record.scope, record.ownerId);
       try {
@@ -618,6 +636,8 @@ export function createCommitOutbox(options: {
         return await work(outbox, ownerId);
       } finally {
         active = false;
+        // Still inside the claim's lock: a claim that ends with nothing to send leaves no row behind.
+        await releaseEmpty(key, generation).catch(() => {});
       }
     });
   }

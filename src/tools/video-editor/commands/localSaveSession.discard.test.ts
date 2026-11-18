@@ -180,23 +180,31 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
       [...await env.outboxes.list(oldScope), ...await env.outboxes.list(scope)];
 
     async function leaveRows(env: ReturnType<typeof world>['env']) {
-      // An edit retained under the old realm, plus two empty owners left by earlier editor sessions.
-      await env.outboxes.create(oldScope, async (box) => { await box.append({ kind: 'stale' }, { head: h0 }); });
-      await env.outboxes.create(oldScope, async () => undefined);
-      await env.outboxes.create(scope, async () => undefined);
-      await env.outboxes.create(scope, async () => undefined);
+      // What older builds left behind: an edit retained under the old realm, empty owners of the old realm, and
+      // thirty empty owners of this realm (some holding an accepted prefix).
+      await env.putRow({ scope: oldScope, ownerId: 'old-with-edit', intents: [{ id: 'i', basis: { head: h0 }, payload: {} }] });
+      await env.putRow({ scope: oldScope, ownerId: 'old-empty' });
+      for (let index = 0; index < 30; index += 1) {
+        await env.putRow({ scope, ownerId: `empty-${index}`, ...(index % 2 ? { accepted: { intentId: 'a', head: h0, value: {} } } : {}) });
+      }
     }
 
     it('are deleted when the session starts, so a stale row never becomes a recoverable owner', async () => {
       const { env, mount } = world();
       await leaveRows(env);
-      expect((await rows(env)).length).toBe(4);
+      expect((await rows(env)).length).toBe(32);
       const session = await mount();
       expect(session.getState().status).toBe('saved');
       expect(session.getState().recoverableOwners).toEqual([]);
       // Only the session's own fresh owner is left.
       expect(await rows(env)).toHaveLength(1);
       await session.dispose();
+    });
+
+    it('are not left by a session that ends with nothing to send: its own row goes when it releases the claim', async () => {
+      const { env, mount } = world();
+      for (let index = 0; index < 5; index += 1) await (await mount()).dispose();
+      expect(await rows(env)).toEqual([]);
     });
 
     it('are all deleted by Discard whatever realm wrote them', async () => {

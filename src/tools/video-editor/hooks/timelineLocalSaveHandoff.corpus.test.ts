@@ -352,7 +352,7 @@ describe('what stays protected', () => {
     const { document } = corpus[0];
     const env = await mount(document);
     const { next } = gestures(env, storedClips(document)[0].id as string).trimEnd();
-    await expect(env.handoff.capture({ ...env.source, config: next })).rejects.toThrow('This edit is not supported yet for a timeline that has shots');
+    await expect(env.handoff.capture({ ...env.source, config: next })).rejects.toThrow('This edit is not supported yet on a timeline that has shots');
     await env.session.dispose();
   });
 });

@@ -317,7 +317,7 @@ export function createTimelineLocalSaveHandoff(options: {
         const trackLabelGesture = gestureBasis?.kind === 'track-label';
         // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
         const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.', 'child-ownership-unavailable');
+        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet on a timeline that has shots. Moving, trimming, splitting or renaming a clip still works.', 'child-ownership-unavailable');
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
@@ -650,7 +650,7 @@ export function createTimelineLocalSaveHandoff(options: {
           }
         }
         // Verified parent recipes preserve the complete child closure cloned above.
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && !commands && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.', 'child-ownership-unavailable');
+        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && !commands && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet on a timeline that has shots. Moving, trimming, splitting or renaming a clip still works.', 'child-ownership-unavailable');
         if (topLevelClips) delete (payload.config as Record<string, OutboxJson>).clips;
         if (!commands) {
           const clips = (payload.config as Record<string, OutboxJson>).clips;

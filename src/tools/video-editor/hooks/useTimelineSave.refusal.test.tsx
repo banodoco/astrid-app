@@ -54,7 +54,7 @@ function applyChanges(payload: Json, changes: Array<{ op: string; path: string[]
   return next;
 }
 
-async function mount(options: { rejectFirstSend?: boolean } = {}) {
+async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> } = {}) {
   const config = createDefaultTimelineConfig();
   const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
     { timelineId: TIMELINE, projectId: 'project-commit' }).data.canonical_document;
@@ -67,6 +67,7 @@ async function mount(options: { rejectFirstSend?: boolean } = {}) {
   const requests: Array<{ changes: Array<{ op: string; path: string[]; value: unknown }> }> = [];
   let rejectNext = options.rejectFirstSend;
   const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(async (request) => {
+    if (options.gate) await options.gate;
     const changes = (request.commands as Array<{ args: { changes: never[] } }>).flatMap((command) => command.args.changes);
     requests.push({ changes });
     if (rejectNext) {
@@ -419,6 +420,33 @@ describe('useTimelineSave refused authoring edits', () => {
       expect(screen.config.clips[0].hold).toBe(1);
       expect(screen.rows.some((item) => item.actions.some((action) => action.id.startsWith('uploading-')))).toBe(false);
       expect(Object.keys(screen.meta).some((id) => id.startsWith('uploading-'))).toBe(false);
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('undoes a refused edit made while an earlier edit is being sent, and a later edit still reaches the Runtime', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    const harness = await mount({ gate });
+    try {
+      const original = harness.hook.result.current.dataRef.current!;
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'edit-a.mp4' } }));
+      let firstFlush: Promise<unknown> | undefined;
+      await act(async () => { firstFlush = harness.hook.result.current.flushPendingSave().catch((error: unknown) => error); });
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(1));
+      expect(harness.hook.result.current.localSaveState?.status).toBe('saving');
+      const badBasis = { kind: 'trim' as const, clipId: 'clip-a', patch: { hold: 7 },
+        config: { ...original.config, output: { ...original.config.output, file: 'someone-else.mp4' } }, registry: original.registry };
+      await author(harness, (config) => ({ ...config, clips: config.clips.map((clip) => ({ ...clip, hold: 7 })) }), badBasis);
+      await vi.waitFor(() => expect(harness.hook.result.current.dataRef.current!.config.clips[0].hold).toBe(1));
+      release();
+      await act(async () => { await firstFlush; });
+      await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 24 } }));
+      await act(async () => { await harness.hook.result.current.flushPendingSave().catch(() => {}); });
+      await act(async () => { await harness.hook.result.current.flushPendingSave().catch(() => {}); });
+      const sent = harness.requests.flatMap((request) => request.changes).map((change) => [change.path.join('/'), change.value]);
+      expect(sent).toEqual([['config/output/file', 'edit-a.mp4'], ['config/output/fps', 24]]);
+      expect(harness.hook.result.current.dataRef.current!.config.clips[0].hold).toBe(1);
+      expect(harness.hook.result.current.localSaveState?.status).toBe('saved');
     } finally { harness.hook.unmount(); }
   });
 });

@@ -226,7 +226,7 @@ describe('upstream local document handoff', () => {
   it.each([
     ['head', 'capture-input-head-unavailable', 'original verified authoring head is unavailable'],
     ['source', 'source-parent-mismatch', 'upstream source differs from the verified authored parent'],
-    ['children', 'child-ownership-unavailable', 'This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.'],
+    ['children', 'child-ownership-unavailable', 'This edit is not supported yet on a timeline that has shots. Moving, trimming, splitting or renaming a clip still works.'],
     ['gesture', 'gesture-basis-mismatch', 'The timeline changed while you were editing. Try the change again.'],
     ['selected clip', 'gesture-clip-ambiguous', 'gesture selected clip has no unique authored binding'],
     ['trim', 'trim-operands-unavailable', 'This trim is missing the clip or its neighbours. Try trimming again.'],
@@ -706,7 +706,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(true);
     const next = structuredClone(env.source);
     next.config.clips = [{ id: 'display-child-title', track: 'V1', at: 0, hold: 2 }];
-    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet for a timeline that has shots');
+    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet on a timeline that has shots');
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toHaveLength(0);
     await env.session.dispose();
@@ -794,7 +794,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
     const next = structuredClone(env.source);
     next.config.tracks![0].label = 'Renamed track';
-    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet for a timeline that has shots');
+    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet on a timeline that has shots');
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     await env.session.dispose();
   });

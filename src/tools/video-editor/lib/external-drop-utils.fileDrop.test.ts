@@ -61,3 +61,103 @@ describe('a dropped file whose upload finishes after a save landed', () => {
     expect(deletes[0]).toMatch(/^uploading-/);
   });
 });
+
+describe('a dropped file that is not added', () => {
+  function parkSetup(uploads: Array<() => Promise<unknown>>) {
+    const dataRef: MutableRefObject<TimelineData | null> = { current: timeline('r0') };
+    const pendingOpsRef = { current: 0 };
+    // A minimal applyEdit that keeps the rows/meta honest so we can see what stays on the timeline.
+    const meta: Record<string, { asset?: string }> = {};
+    const applyEdit = vi.fn((edit: { rows?: unknown; metaUpdates?: Record<string, { asset?: string }>; metaDeletes?: string[] }) => {
+      if (edit.rows) dataRef.current = { ...dataRef.current!, rows: edit.rows as never };
+      for (const [id, value] of Object.entries(edit.metaUpdates ?? {})) meta[id] = value;
+      for (const id of edit.metaDeletes ?? []) delete meta[id];
+      dataRef.current = { ...dataRef.current!, meta: { ...meta } } as never;
+    });
+    const dropAsset = vi.fn(() => true);
+    const onAssetDropError = vi.fn();
+    const parked: Array<import('./external-drop-utils.ts').ParkedDrop> = [];
+    const onDropParked = vi.fn((drop) => { parked.push(drop); });
+    const onDropSettled = vi.fn();
+    let next = 0;
+    const uploadImageGeneration = vi.fn(() => uploads[next++]());
+    const prepared = { assetKey: 'asset-2', mediaType: 'image', durationSeconds: null, entry: { file: 'x' }, source: 'registered' };
+    const run = () => handleFileDrop({
+      files: [new File(['x'], 'two.png', { type: 'image/png' })], dataRef, pendingOpsRef,
+      dropPosition: { time: 2, trackId: 'V1', isNewTrack: false } as never, insertAtTop: false, selectedTrackId: null,
+      applyEdit, invalidateAssetRegistry: vi.fn(async () => undefined), resolveAssetUrl: vi.fn(async (file: string) => file),
+      registerGenerationAsset: vi.fn(), prepareGenerationAsset: vi.fn(() => prepared) as never,
+      uploadImageGeneration: uploadImageGeneration as never, uploadVideoGeneration: vi.fn() as never,
+      dropAsset: dropAsset as never, onAssetDropError, onDropParked, onDropSettled,
+    });
+    const placeholderIds = () => (dataRef.current!.rows.flatMap((row) => row.actions as Array<{ id: string }>)).map((a) => a.id);
+    return { dataRef, meta, pendingOpsRef, dropAsset, onAssetDropError, parked, onDropParked, onDropSettled, run, placeholderIds, uploadImageGeneration };
+  }
+
+  it('keeps the placeholder visible and parked with the reason when the upload fails', async () => {
+    const s = parkSetup([() => Promise.reject(new Error('The server refused the file.'))]);
+    await s.run();
+    await settle();
+    expect(s.onAssetDropError).toHaveBeenCalledOnce();
+    expect(s.placeholderIds()).toHaveLength(1);
+    expect(s.onDropParked).toHaveBeenCalledOnce();
+    expect(s.parked[0].reason).toBe('The server refused the file.');
+    expect(s.parked[0].fileName).toBe('two.png');
+    expect(Object.values(s.meta)[0].asset).toBe('uploading:two.png (not added: The server refused the file.)');
+    expect(s.pendingOpsRef.current).toBe(0);
+  });
+
+  it('parks a drop the editor declined, with the decline reason', async () => {
+    const s = parkSetup([() => Promise.resolve({ id: 'g' })]);
+    s.dropAsset.mockImplementation(((_k: string, _t: unknown, _time: number, _a: boolean, _b: boolean, _p: unknown, _id: string, onDecline?: (m: string) => void) => {
+      onDecline?.('That track is no longer available.');
+      return false;
+    }) as never);
+    await s.run();
+    await settle();
+    expect(s.placeholderIds()).toHaveLength(1);
+    expect(s.parked[0].reason).toBe('That track is no longer available.');
+  });
+
+  it('Try again uploads the retained file again and ends the parked state on success', async () => {
+    const s = parkSetup([() => Promise.reject(new Error('Offline.')), () => Promise.resolve({ id: 'g' })]);
+    await s.run();
+    await settle();
+    expect(s.parked).toHaveLength(1);
+    await s.parked[0].tryAgain();
+    expect(s.uploadImageGeneration).toHaveBeenCalledTimes(2);
+    expect(s.dropAsset).toHaveBeenCalledOnce();
+    expect(s.onDropSettled).toHaveBeenCalledWith(s.parked[0].id);
+    expect(s.onDropParked).toHaveBeenCalledOnce();
+    expect(s.pendingOpsRef.current).toBe(0);
+  });
+
+  it('Try again that fails again stays parked with the new reason', async () => {
+    const s = parkSetup([() => Promise.reject(new Error('Offline.')), () => Promise.reject(new Error('Still offline.'))]);
+    await s.run();
+    await settle();
+    await s.parked[0].tryAgain();
+    expect(s.placeholderIds()).toHaveLength(1);
+    expect(s.parked[1].reason).toBe('Still offline.');
+    expect(s.onDropSettled).not.toHaveBeenCalled();
+  });
+
+  it('Discard removes the placeholder', async () => {
+    const s = parkSetup([() => Promise.reject(new Error('Offline.'))]);
+    await s.run();
+    await settle();
+    s.parked[0].discard();
+    expect(s.placeholderIds()).toHaveLength(0);
+    expect(Object.keys(s.meta)).toHaveLength(0);
+    expect(s.onDropSettled).toHaveBeenCalledWith(s.parked[0].id);
+  });
+
+  it('a successful drop parks nothing', async () => {
+    const s = parkSetup([() => Promise.resolve({ id: 'g' })]);
+    await s.run();
+    await settle();
+    expect(s.dropAsset).toHaveBeenCalledOnce();
+    expect(s.onDropParked).not.toHaveBeenCalled();
+    expect(s.onAssetDropError).not.toHaveBeenCalled();
+  });
+});

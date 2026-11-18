@@ -20,7 +20,7 @@ export const RUNTIME_TARGETED_EXECUTION_CAPABILITY = 'execution_binding.targeted
 export function supportsFullV2Commit(): boolean {
   return PROTOCOL === 'workspace.v1' && (CONTRACT_VERSION as string) === '0.2.14'
     && COMPONENT_MANIFEST_SHA256 === 'sha256:7b74a8df08c86bbd8168d11272f13abd3e76becc2bcb4cbed799f11dc2f85f34'
-    && SCHEMA_DIGEST === 'sha256:9c9e746eb5138f5e92baf5bcd87e8598c6aa92597c92083956b24517c4071923'
+    && SCHEMA_DIGEST === 'sha256:2f9ab5238e4f1dc43626db6780514c00846a708eb6d2a4ac31684ea3fcdd40bb'
     && (OPERATIONS as readonly string[]).includes('commitTimeline')
     && (OPERATIONS as readonly string[]).includes('listTimelineCommits');
 }

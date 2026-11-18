@@ -54,6 +54,7 @@ export type TimelineInitArgs = { name: string; slug: string; output: TimelineIni
 export type WordAnchor = { source: string; document: WordAnchorDocument; word_ids: [string, ...Array<string>]; edge?: "start" | "end"; offset_s?: number; offset_frames?: number };
 export type ClipAnchorArgs = { field: "on" | "until"; declaration: (string | null); choice: (null | WordAnchor) };
 export type OccurrenceCreateArgs = { occurrence_id: string; shot_id: string; name: string; track: string; on: number; duration: number };
+export type OccurrenceTrimArgs = { occurrence_id: string; edge: "start" | "end"; to_ms: number };
 export type TextBindingSetArgs = (unknown | unknown);
 export type DocPatchChange = (DocPatchChangeVariant1 | DocPatchChangeVariant2 | DocPatchChangeVariant3 | DocPatchChangeVariant4 | DocPatchChangeVariant5);
 export type DocPatchArgs = { changes: [DocPatchChange, ...Array<DocPatchChange>] };

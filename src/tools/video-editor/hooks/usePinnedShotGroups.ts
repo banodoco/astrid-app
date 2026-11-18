@@ -321,6 +321,7 @@ export function usePinnedGroupSync({
 
           const generationData = {
             generationId: desiredGenerationId,
+            ...(desiredImage.primary_variant_id ? { variantId: desiredImage.primary_variant_id } : {}),
             variantType: 'image',
             imageUrl,
             thumbUrl: getThumbnailUrl(desiredImage) ?? imageUrl,

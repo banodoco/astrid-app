@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   getGenerationAssetDisplayMetadata,
   planAssetDropTarget,
+  planDuplicateGenerationAssetRegistration,
+  planFinalVideoGenerationAssetRegistration,
   planGenerationAssetRegistration,
 } from './timeline-asset-plans.ts';
 import type { TimelineData } from './timeline-data.ts';
@@ -143,5 +145,107 @@ describe('planAssetDropTarget occurrence raw-track policy', () => {
     });
 
     expect(result).toEqual({ ok: false, error: 'preserved_track_unavailable' });
+  });
+});
+
+describe('registry catalog association is both ids or neither', () => {
+  const imageUrl = 'https://example.com/drop.png';
+
+  function plannedEntry(input: Parameters<typeof planGenerationAssetRegistration>[0]) {
+    const planned = planGenerationAssetRegistration(input);
+    if (!planned.ok) throw new Error(`expected a registration plan, got ${planned.error}`);
+    return planned.assetEntry;
+  }
+
+  it('gallery drop writes both ids when the dragged variant is known', () => {
+    // MediaGalleryItem.toGenerationDragData sends generationId and variantId together.
+    const entry = plannedEntry({
+      generationId: 'gen-gallery',
+      variantId: 'variant-gallery',
+      variantType: 'image',
+      imageUrl,
+      mediaId: 'media-gallery',
+    });
+    expect(entry).toMatchObject({ generationId: 'gen-gallery', variantId: 'variant-gallery', media_id: 'media-gallery' });
+  });
+
+  it('shot image drop writes both ids from primary_variant_id', () => {
+    const entry = plannedEntry({
+      generationId: 'gen-shot',
+      variantId: 'variant-shot',
+      variantType: 'image',
+      imageUrl,
+    });
+    expect(entry).toMatchObject({ generationId: 'gen-shot', variantId: 'variant-shot' });
+  });
+
+  it('shot image drop without a primary variant writes neither id', () => {
+    const entry = plannedEntry({ generationId: 'gen-shot', variantType: 'image', imageUrl });
+    expect(entry).not.toHaveProperty('generationId');
+    expect(entry).not.toHaveProperty('variantId');
+  });
+
+  it('pinned group image drop writes both ids when the variant is known and neither when it is not', () => {
+    // usePinnedGroupSync sends the same generation shape as the shot image drop.
+    expect(plannedEntry({
+      generationId: 'gen-pinned',
+      variantId: 'variant-pinned',
+      variantType: 'image',
+      imageUrl,
+    })).toMatchObject({ generationId: 'gen-pinned', variantId: 'variant-pinned' });
+    const unresolved = plannedEntry({ generationId: 'gen-pinned', variantType: 'image', imageUrl });
+    expect(unresolved).not.toHaveProperty('generationId');
+    expect(unresolved).not.toHaveProperty('variantId');
+  });
+
+  it('final video drop writes neither id, because its id is a Runtime media object id', () => {
+    const planned = planFinalVideoGenerationAssetRegistration({
+      imageUrl: 'https://example.com/final.mp4',
+      assetDurationSeconds: 12,
+    });
+    if (!planned.ok) throw new Error('expected a final video plan');
+    expect(planned.assetEntry).not.toHaveProperty('generationId');
+    expect(planned.assetEntry).not.toHaveProperty('variantId');
+    expect(planned.assetEntry).toMatchObject({ type: 'video/mp4', duration: 12 });
+  });
+
+  it('file drop from a Runtime import writes both ids; a plain upload without a variant writes neither', () => {
+    expect(plannedEntry({
+      generationId: 'gen-upload',
+      variantId: 'variant-upload',
+      variantType: 'image',
+      imageUrl,
+      mediaId: 'sha256:file',
+    })).toMatchObject({ generationId: 'gen-upload', variantId: 'variant-upload' });
+
+    const plainUpload = plannedEntry({ variantType: 'image', imageUrl, metadata: { original_filename: 'still.png' } });
+    expect(plainUpload).not.toHaveProperty('generationId');
+    expect(plainUpload).not.toHaveProperty('variantId');
+  });
+
+  it('duplicate of a generation variant follows the same rule', () => {
+    const sourceAssetEntry = { file: imageUrl, type: 'image/png' } as Parameters<typeof planDuplicateGenerationAssetRegistration>[0]['sourceAssetEntry'];
+    expect(planDuplicateGenerationAssetRegistration({
+      generationId: 'gen-dup',
+      variantId: 'variant-dup',
+      variantType: 'image',
+      imageUrl,
+      sourceAssetEntry,
+    })).toMatchObject({ ok: true, assetEntry: { generationId: 'gen-dup', variantId: 'variant-dup' } });
+
+    const unresolved = planDuplicateGenerationAssetRegistration({
+      generationId: 'gen-dup',
+      variantType: 'image',
+      imageUrl,
+      sourceAssetEntry,
+    });
+    expect(unresolved.ok && unresolved.assetEntry).not.toHaveProperty('generationId');
+  });
+
+  it('never writes a half association: generationId alone or variantId alone', () => {
+    const generationOnly = plannedEntry({ generationId: 'gen-half', variantType: 'image', imageUrl });
+    expect(generationOnly).not.toHaveProperty('generationId');
+    const variantOnly = plannedEntry({ variantId: 'variant-half', variantType: 'image', imageUrl });
+    expect(variantOnly).not.toHaveProperty('variantId');
   });
 });

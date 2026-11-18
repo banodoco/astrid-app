@@ -34,6 +34,8 @@ export type TimelineGestureReadBasis = {
 export interface TimelineLocalSaveHandoff {
   capture(source: TimelineSaveSource, gestureBasis?: TimelineGestureReadBasis): Promise<void>;
   flush(): Promise<TimelineSaveReceipt>;
+  /** The durable local save session's state, when the owner has one. */
+  status?(): string | undefined;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
   canUndo(): boolean;
@@ -43,7 +45,7 @@ export interface TimelineLocalSaveHandoff {
 }
 
 /** Scoped editors supply their own verified physical-image join and durable owner. */
-export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush'>;
+export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status'>;
 export interface TimelinePersistenceBinding {
   readonly provider: DataProvider;
   readonly timelineId: string;
@@ -262,7 +264,7 @@ export function createTimelineLocalSaveHandoff(options: {
       });
     }
     if (object(previous) && object(next)) {
-      if (!object(raw)) refuseEdit(`changed display container has no authored binding: ${path.join('/')}`, 'display-container-unbound');
+      if (!object(raw)) refuseEdit('This change touches a part of the timeline that cannot be saved from here. Make the change another way.', 'display-container-unbound');
       const result = structuredClone(raw);
       // The app extension is projected verbatim. Trim removes these authored
       // leaves from an explicitly supplied namespace; other omissions stay partial.
@@ -270,7 +272,7 @@ export function createTimelineLocalSaveHandoff(options: {
         && path[3] === 'app' && path[4] === 'astrid') {
         for (const key of ['for', 'until']) {
           if (!Object.prototype.hasOwnProperty.call(previous, key) || Object.prototype.hasOwnProperty.call(next, key)) continue;
-          if (!same(field(raw, key), field(previous, key))) refuseEdit(`trim intent has no exact authored binding: ${[...path, key].join('/')}`, 'trim-binding-mismatch');
+          if (!same(field(raw, key), field(previous, key))) refuseEdit('This trim does not match what is stored for the clip. Try trimming it again.', 'trim-binding-mismatch');
           delete result[key];
         }
       }
@@ -286,7 +288,7 @@ export function createTimelineLocalSaveHandoff(options: {
         if (same(field(previous, key), value)) continue;
         if (value === undefined) {
           if ((!(element && ['elementRef', 'entrance'].includes(key)) && key !== 'transition') || path.length !== 3 || path[0] !== 'config' || path[1] !== 'clips') {
-            refuseEdit(`explicit clear is unavailable: ${[...path, key].join('/')}`, 'explicit-clear-unavailable');
+            refuseEdit('Clearing this value cannot be saved yet. Set a new value instead.', 'explicit-clear-unavailable');
           }
           delete result[key];
         } else {
@@ -297,7 +299,7 @@ export function createTimelineLocalSaveHandoff(options: {
       return result;
     }
     if ((Array.isArray(next) || object(next)) && raw !== undefined && !same(raw, previous)) {
-      refuseEdit(`changed display value has no exact authored binding: ${path.join('/')}`, 'display-value-unbound');
+      refuseEdit('This value comes from a part of the timeline that cannot be saved from here. Edit it where it is defined.', 'display-value-unbound');
     }
     return authoredJson(next);
   }
@@ -315,7 +317,7 @@ export function createTimelineLocalSaveHandoff(options: {
         const trackLabelGesture = gestureBasis?.kind === 'track-label';
         // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
         const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuseEdit('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.', 'child-ownership-unavailable');
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
@@ -350,7 +352,7 @@ export function createTimelineLocalSaveHandoff(options: {
           if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
             || !same(authoredJson(next.registry), authoredJson({ ...source.registry,
               assets: { ...source.registry.assets, [asset.assetKey]: asset.entry } }))) {
-            refuseEdit('prepared media registry changes exceed the selected asset; draft retained');
+            refuseEdit('This media change would alter more than the asset you picked. Try adding it again.');
           }
           // Bootstrap registry is {}, while the editor displays { assets: {} }.
           payload.registry = { ...parent.registry, assets: { ...(parent.registry.assets ?? {}),
@@ -377,7 +379,7 @@ export function createTimelineLocalSaveHandoff(options: {
           if (!['split', 'trim', 'move', 'transition-clear', 'prepared-media', 'element', 'track-label'].includes(gestureBasis.kind)
             || !sameConfig(gestureConfig, authoringSource.config)
             || !same(authoredJson(gestureBasis.registry), authoredJson(authoringSource.registry))) {
-            refuseEdit('gesture read basis differs from the original local authoring input', 'gesture-basis-mismatch');
+            refuseEdit('The timeline changed while you were editing. Try the change again.', 'gesture-basis-mismatch');
           }
         }
         // Authority comes from the original parent selection and causal input,
@@ -395,16 +397,16 @@ export function createTimelineLocalSaveHandoff(options: {
             const selected = next.config.clips.filter(clip => clip.id === id);
             if (selected.length !== 1) refuse('gesture selected clip has no unique authored parent binding', 'gesture-clip-ambiguous');
             if (gestureBasis.kind === 'move') {
-              if (!Number.isFinite(selected[0].at) || selected[0].at < 0) refuseEdit('parent move time is unavailable');
+              if (!Number.isFinite(selected[0].at) || selected[0].at < 0) refuseEdit('The clip has no usable start time. Set its start time and try again.');
               clip.at = selected[0].at;
             } else {
-              if (selected[0].transition !== undefined) refuseEdit('parent transition clear is unavailable');
+              if (selected[0].transition !== undefined) refuseEdit('Clearing this transition cannot be saved yet. Set a new transition instead.');
               delete clip.transition;
             }
           }
           if (!sameConfig(expected.config, next.config)
             || !same(authoredJson(expected.registry), authoredJson(next.registry))
-            || !same(expected.bundle, next.bundle)) refuseEdit('parent gesture changes more than its selected fields');
+            || !same(expected.bundle, next.bundle)) refuseEdit('This edit would change more than the clip you selected. Try it again.');
           if (gestureBasis.kind === 'transition-clear') {
             // The rows builder omits undefined. The explicit causal clear still
             // removes the selected raw own key, including an authored null.
@@ -422,7 +424,7 @@ export function createTimelineLocalSaveHandoff(options: {
           expected.config.tracks.find(track => track.id === gestureBasis.trackId)!.label = gestureBasis.label;
           if (!sameConfig(expected.config, next.config)
             || !same(authoredJson(expected.registry), authoredJson(next.registry))
-            || !same(expected.bundle, next.bundle)) refuseEdit('track label change exceeds its selected field');
+            || !same(expected.bundle, next.bundle)) refuseEdit('Renaming this track would change more than its name. Try it again.');
         }
         if (clipGesture) {
           // Expected = the original document plus the selected clip as the editor edited it (and, for a split,
@@ -441,7 +443,7 @@ export function createTimelineLocalSaveHandoff(options: {
           if (created.length !== (gestureBasis.kind === 'split' ? 1 : 0)
             || edited[0].track !== origin[0].track || edited[0].asset !== origin[0].asset
             || created.some(clip => clip.track !== origin[0].track || clip.asset !== origin[0].asset)) {
-            refuseEdit(`This ${gestureBasis.kind} would change more than the clip you selected, so it was not saved. Try it again.`);
+            refuseEdit(`This ${gestureBasis.kind} would change more than the clip you selected. Try it again.`);
           }
           // The selected clip may change only timing: a trim its patch keys, `at` (start edge) and the end the editor
           // re-derives from the new length (`to`/`hold`, see rowsToConfig); a split the timing keys on both halves
@@ -452,7 +454,7 @@ export function createTimelineLocalSaveHandoff(options: {
             .filter(key => !same((clip as Record<string, unknown>)[key], (origin[0] as Record<string, unknown>)[key]));
           if (changedKeys(edited[0]).some(key => !allowed.has(key))
             || created.some(clip => changedKeys(clip).some(key => key !== 'id' && !allowed.has(key)))) {
-            refuseEdit(`This ${gestureBasis.kind} would change more than the clip you selected, so it was not saved. Try it again.`);
+            refuseEdit(`This ${gestureBasis.kind} would change more than the clip you selected. Try it again.`);
           }
           const expected = structuredClone(authoringSource);
           // A single-clip trim changes only its own clip: `resolveOverlaps` (lib/resolve-overlaps.ts), which the
@@ -460,12 +462,12 @@ export function createTimelineLocalSaveHandoff(options: {
           expected.config.clips = [...expected.config.clips.map(clip => clip.id === id ? edited[0] : clip), ...created];
           if (!sameConfig(expected.config, next.config)
             || !same(authoredJson(expected.registry), authoredJson(next.registry))
-            || !same(expected.bundle, next.bundle)) refuseEdit(`This ${gestureBasis.kind} would change more than the clip you selected, so it was not saved. Try it again.`);
+            || !same(expected.bundle, next.bundle)) refuseEdit(`This ${gestureBasis.kind} would change more than the clip you selected. Try it again.`);
         }
         if (gestureBasis?.kind === 'element') {
           if (!same(next.registry, authoringSource.registry) || !same(next.bundle, authoringSource.bundle)
             || !sameConfig(next.config, applyTimelineOperation(gestureBasis.context,
-              gestureBasis.config, gestureBasis.operation))) refuseEdit('element operation differs from its original causal input');
+              gestureBasis.config, gestureBasis.operation))) refuseEdit('The effect settings changed while you were editing. Try the change again.');
           const config = configBefore as Record<string, OutboxJson>;
           if (!Array.isArray(config.clips)) refuse('element parent clips are unavailable');
           const clips = config.clips as Record<string, OutboxJson>[];
@@ -512,13 +514,13 @@ export function createTimelineLocalSaveHandoff(options: {
         let mediaSteps: CommitRequest['steps'];
         let mediaLabel = 'Add media';
         if (gestureBasis?.kind === 'prepared-media') {
-          if (gestureBasis.command.type !== 'place-prepared-media') refuseEdit('prepared media command is unavailable');
+          if (gestureBasis.command.type !== 'place-prepared-media') refuseEdit('This media cannot be placed. Use Add media instead.');
           const prepared = gestureBasis.command.payload;
           const media = prepared.asset.mediaSelection;
           const keys = ['asset', 'generation_id', 'variant_id', 'object_id', 'catalog_digest'];
           if (!media || Object.keys(media).length !== keys.length
             || keys.some(key => typeof media[key as keyof typeof media] !== 'string' || !media[key as keyof typeof media])) {
-            refuseEdit('prepared media needs the Runtime project media selection. Draft retained; reload the timeline, then import the media again');
+            refuseEdit("This media was not picked from the project's media, so it cannot be placed. Import the media again.");
           }
           const duplicateVideo = Boolean(prepared.afterClipId && prepared.asset.mediaType === 'video');
           // File drops may remove only their transient uploading action. The
@@ -529,7 +531,7 @@ export function createTimelineLocalSaveHandoff(options: {
             || (!duplicateVideo && prepared.afterClipId) || prepared.replaceClipId || prepared.removeClipIds?.length
             || prepared.pinnedShotGroupsOverride
             || (!duplicateVideo && prepared.asset.mediaType !== 'image')) {
-            refuseEdit('prepared media currently supports an ordinary image add on a visual track. Draft retained; reload the timeline, then choose Add media');
+            refuseEdit('Only an image can be added to a visual track this way. Use Add media instead.');
           }
           const config = configBefore as Record<string, OutboxJson>;
           const nextConfig = payload.config as Record<string, OutboxJson>;
@@ -537,7 +539,7 @@ export function createTimelineLocalSaveHandoff(options: {
           const nextClips = nextConfig.clips;
           if (!Array.isArray(clips) || !Array.isArray(nextClips)) refuse('prepared media clip collection is unavailable');
           if (prepared.removeClipId !== undefined && clips.some(clip => object(clip) && clip.id === prepared.removeClipId)) {
-            refuseEdit('prepared media cannot remove an authored parent clip. Draft retained; reload the timeline, then choose Add media');
+            refuseEdit('Adding media cannot remove a clip you already placed. Use Add media instead.');
           }
           // The editor serializes clips grouped by track, so the new clip is not necessarily last.
           // Find it by its command id; the Runtime appends it, and the retained rows keep stored order.
@@ -561,7 +563,7 @@ export function createTimelineLocalSaveHandoff(options: {
               : !sameRowsById(nextTracks, tracks))
             || !visualTrack || visualTrack.length !== 1 || !object(visualTrack[0])
             || visualTrack[0].kind !== 'visual' || (visualTrack[0].role ?? 'output') !== 'output') {
-            refuseEdit('prepared media changes more than one ordinary parent clip. Draft retained; reload the timeline, then choose an existing visual track');
+            refuseEdit('Adding media would change more than one clip. Choose an existing visual track and try again.');
           }
           if (Array.isArray(parent.occurrences) && parent.occurrences.some(occurrence => object(occurrence)
             && (occurrence.track === row.track || (object(occurrence.placement) && occurrence.placement.track === row.track)))) {
@@ -575,7 +577,7 @@ export function createTimelineLocalSaveHandoff(options: {
           if (!object(parent.registry) || (parent.registry.assets !== undefined && !object(parent.registry.assets))
             || !same(payload.registry, { ...parent.registry, assets: { ...(parent.registry.assets ?? {}),
               [prepared.asset.assetKey]: authoredJson(prepared.asset.entry) } })) {
-            refuseEdit('prepared media registry changes exceed the selected asset; draft retained');
+            refuseEdit('This media change would alter more than the asset you picked. Try adding it again.');
           }
           if (duplicateVideo) {
             mediaLabel = 'Add video after clip';
@@ -585,7 +587,7 @@ export function createTimelineLocalSaveHandoff(options: {
             if (!old || Object.keys(old).length !== keys.length
               || keys.some(key => typeof old[key as keyof typeof old] !== 'string' || !old[key as keyof typeof old])
               || !object(anchor) || anchor.asset !== old.asset || row.asset !== media.asset) {
-              refuseEdit('video duplication needs both exact Runtime project media selections. Draft retained; reload the timeline, then import the media again');
+              refuseEdit('Duplicating this video needs both of its project media picks, and one is missing. Import the media again.');
             }
             // Bound the consumer to the upstream parent duplicate preview, by id: the stored rows in stored
             // order with the new row right after its anchor. Clips after the anchor on its track may ripple
@@ -598,7 +600,7 @@ export function createTimelineLocalSaveHandoff(options: {
                 if (!object(clip) || !object(nextClip)) return true;
                 return index <= anchorIndex || clip.track !== anchor.track ? !same(clip, nextClip)
                   : !same({ ...nextClip, at: clip.at }, clip);
-              })) refuseEdit('video duplication exceeds one parent after-anchor preview; draft retained');
+              })) refuseEdit('Duplicating this video would change more than the copy itself. Try duplicating it again.');
             nextConfig.clips = placed.map(clip => object(clip) && clip.id !== row.id ? editedById.get(clip.id) as OutboxJson : clip as OutboxJson);
             if (Object.prototype.hasOwnProperty.call(parent, 'clips')) payload.clips = nextConfig.clips;
             commands = [{ schema_version: 1, op: 'clip.duplicate-media', version: '1',
@@ -643,12 +645,12 @@ export function createTimelineLocalSaveHandoff(options: {
               ? { ...patch.step as NonNullable<CommitRequest['steps']>[number], command_ordinals: [index], patch: patch.changes as NonNullable<CommitRequest['steps']>[number]['patch'] }
               : { id: crypto.randomUUID(), label: mediaLabel, intent: mediaLabel, tags: [], command_ordinals: [index], patch: [] });
             const [firstStep, ...remainingSteps] = mappedSteps;
-            if (!firstStep) refuseEdit('prepared media command has no steps');
+            if (!firstStep) refuseEdit('There was nothing to place for this media. Use Add media instead.');
             mediaSteps = [firstStep, ...remainingSteps];
           }
         }
         // Verified parent recipes preserve the complete child closure cloned above.
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && !commands && gestureBasis?.kind !== 'element') refuseEdit('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && !commands && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.', 'child-ownership-unavailable');
         if (topLevelClips) delete (payload.config as Record<string, OutboxJson>).clips;
         if (!commands) {
           const clips = (payload.config as Record<string, OutboxJson>).clips;
@@ -659,7 +661,7 @@ export function createTimelineLocalSaveHandoff(options: {
             && !Object.prototype.hasOwnProperty.call(assets, clip.asset)
             && (Object.prototype.hasOwnProperty.call(nextAssets, clip.asset) || !Array.isArray(previous)
               || !previous.some(old => object(old) && old.id === clip.id && old.asset === clip.asset)))) {
-            refuseEdit('new media needs its original Runtime project media selection. Draft retained; reload the timeline, then import the media again');
+            refuseEdit("This media was not picked from the project's media, so it cannot be placed. Import the media again.");
           }
         }
         if (gestureBasis?.kind === 'transition-clear') {
@@ -720,14 +722,14 @@ export function createTimelineLocalSaveHandoff(options: {
           };
           assetRead(clip);
           if (gestureBasis.kind === 'split') {
-            if (!Number.isFinite(gestureBasis.timeSeconds)) refuseEdit('split time is unavailable', 'split-time-unavailable');
+            if (!Number.isFinite(gestureBasis.timeSeconds)) refuseEdit('The split point is missing. Move the playhead onto the clip and split again.', 'split-time-unavailable');
             // splitClipAtPlayhead uses order for insertion and every ID for allocation;
             // its pinned-group check reads this id-less list, not neighbor contents.
             const order = clips.map((item) => item.id as string);
             reads.push({ kind: 'collection', ref: 'parent', path: clipPath, members: [...order].sort(), order },
               read(config, 'pinnedShotGroups', ['config']));
           } else if (gestureBasis.kind === 'move') {
-            if (clip.track !== gestureBasis.trackId) refuseEdit('move is not on its original track', 'move-track-mismatch');
+            if (clip.track !== gestureBasis.trackId) refuseEdit('The clip is no longer on the track you dragged it from. Try the move again.', 'move-track-mismatch');
             const tracks = config.tracks;
             if (!Array.isArray(tracks)) refuse('move track read has no authored collection', 'move-tracks-unavailable');
             const track = tracks.filter((item) => object(item) && item.id === gestureBasis.trackId);
@@ -747,7 +749,7 @@ export function createTimelineLocalSaveHandoff(options: {
           } else {
             if (!Object.keys(gestureBasis.patch).length
               || Object.keys(gestureBasis.patch).some((key) => !['from', 'to', 'hold', 'speed'].includes(key))) {
-              refuseEdit('trim operands are unavailable', 'trim-operands-unavailable');
+              refuseEdit('This trim is missing the clip or its neighbours. Try trimming again.', 'trim-operands-unavailable');
             }
             // resolveOverlaps consults the same-track siblings, so a concurrent move of one must conflict.
             const order = clips.map((item) => item.id as string);
@@ -762,7 +764,7 @@ export function createTimelineLocalSaveHandoff(options: {
         }
         // The encoder supplies guards and created IDs; these bytes are never a wire DTO.
         const firstCommand = commands?.[0];
-        if (commands && !firstCommand) refuseEdit('prepared media command is empty');
+        if (commands && !firstCommand) refuseEdit('There was nothing to place for this media. Use Add media instead.');
         const pending = commands && firstCommand ? options.session.append({ before: toOutboxJson(before), after: toOutboxJson(after),
           label: mediaLabel, commands: [firstCommand, ...commands.slice(1)],
           ...(mediaReads && mediaSteps ? { reads: mediaReads, steps: mediaSteps,

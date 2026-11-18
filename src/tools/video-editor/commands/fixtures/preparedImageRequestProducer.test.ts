@@ -176,16 +176,17 @@ describe('prepared image request producer fixture', () => {
         kind === 'generic' ? undefined : gesture);
       if (kind !== 'valid' && !existingAsset && kind !== 'asset alias') {
         const message = kind === 'existing clip' ? 'authored parent entity binding is ambiguous'
-          : kind === 'generic' || kind === 'unknown gesture' || kind === 'occurrence lane' || kind === 'placement lane' ? 'child ownership/fork mapping'
+          : kind === 'occurrence lane' || kind === 'placement lane' ? "Can't drop onto a track that holds shots"
+          : kind === 'generic' || kind === 'unknown gesture' ? 'This edit is not supported yet for a timeline that has shots'
           : kind === 'source mismatch' ? 'upstream source differs'
             : kind === 'mirrors' ? 'contradictory parent tracks mirror'
           : kind === 'head' || kind === 'foreign timeline' ? 'original verified authoring head'
-            : kind === 'gesture basis' ? 'gesture read basis differs'
+            : kind === 'gesture basis' ? 'The timeline changed while you were editing'
               : kind === 'local child mutation' ? 'local authored document changed'
-                : kind === 'registry' ? 'registry changes exceed'
-                  : kind === 'missing selection' || kind === 'extra selection' ? 'Runtime project media selection'
-                    : kind === 'wrong recipe' ? 'ordinary image add'
-                      : kind === 'wrong command' ? 'prepared media command is unavailable' : 'more than one ordinary parent clip';
+                : kind === 'registry' ? 'would alter more than the asset you picked'
+                  : kind === 'missing selection' || kind === 'extra selection' ? "was not picked from the project's media"
+                    : kind === 'wrong recipe' ? 'Only an image can be added'
+                      : kind === 'wrong command' ? 'This media cannot be placed' : 'would change more than one clip';
         await expect(capture).rejects.toThrow(message);
         const [stored] = await outboxes.list(scope);
         expect(stored.intents).toEqual([]);

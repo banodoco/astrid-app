@@ -212,7 +212,7 @@ describe.each(corpus)('$name through the local save handoff', ({ document }) => 
     const env = await mount(document);
     const plain = visual.find(trackId => !shotTracks.has(trackId)) ?? visual[0];
     const before = structuredClone(env.session.getDocument());
-    await expect(drop(env, plain, false).capture()).rejects.toThrow('Runtime project media selection');
+    await expect(drop(env, plain, false).capture()).rejects.toThrow("was not picked from the project's media");
     expect(env.session.getDocument()).toEqual(before);
     const { next, basis } = gestures(env, clipIds[0]).move();
     await expect(env.handoff.capture({ ...env.source, config: next }, basis)).resolves.toBeUndefined();
@@ -227,7 +227,7 @@ describe('what stays protected', () => {
     const [first, second] = storedClips(document).map(clip => clip.id as string);
     const { next, basis } = gestures(env, first).move();
     next.clips.find(clip => clip.id === second)!.at += 3;
-    await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('parent gesture changes more than its selected fields');
+    await expect(env.handoff.capture({ ...env.source, config: next }, basis)).rejects.toThrow('This edit would change more than the clip you selected');
     await env.session.dispose();
   });
 
@@ -324,7 +324,7 @@ describe('what stays protected', () => {
     const command = dropCommand(plain.id);
     await expect(env.handoff.capture({ ...env.source, config: prepared.nextData.config, registry },
       { kind: 'prepared-media', config: env.source.config, registry: env.source.registry, clipId, command }))
-      .rejects.toThrow('prepared media registry changes exceed the selected asset');
+      .rejects.toThrow('would alter more than the asset you picked');
     await env.session.dispose();
   });
 
@@ -352,7 +352,7 @@ describe('what stays protected', () => {
     const { document } = corpus[0];
     const env = await mount(document);
     const { next } = gestures(env, storedClips(document)[0].id as string).trimEnd();
-    await expect(env.handoff.capture({ ...env.source, config: next })).rejects.toThrow('child ownership/fork mapping is unavailable');
+    await expect(env.handoff.capture({ ...env.source, config: next })).rejects.toThrow('This edit is not supported yet for a timeline that has shots');
     await env.session.dispose();
   });
 });

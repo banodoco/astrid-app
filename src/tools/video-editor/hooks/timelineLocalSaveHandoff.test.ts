@@ -110,9 +110,9 @@ describe('upstream local document handoff', () => {
     expect(row.hold).toBeUndefined();
     await expect(env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry },
       { kind: 'prepared-media', config: env.source.config, registry: env.source.registry, clipId: row.id, command }))
-      .rejects.toThrow('ordinary image add');
+      .rejects.toThrow('Only an image can be added');
     await expect(env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry }))
-      .rejects.toThrow('original Runtime project media selection');
+      .rejects.toThrow("was not picked from the project's media");
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
     expect(env.send).not.toHaveBeenCalled();
@@ -128,7 +128,7 @@ describe('upstream local document handoff', () => {
     refused.config.clips.push({ id: 'refused', track: 'V1', at: 0, hold: 2, clipType: 'hold', asset: 'import-image' });
     refused.registry.assets['import-image'] = command.payload.asset.entry;
     await expect(env.handoff.capture(refused, { kind: 'prepared-media', config: env.source.config,
-      registry: env.source.registry, clipId: 'refused', command })).rejects.toThrow('Runtime project media selection');
+      registry: env.source.registry, clipId: 'refused', command })).rejects.toThrow("was not picked from the project's media");
     // Discard the refused preview and author a fresh ordinary edit from the
     // unchanged canonical source, using the same mounted handoff.
     const valid = structuredClone(env.source);
@@ -216,7 +216,7 @@ describe('upstream local document handoff', () => {
     const next = structuredClone(env.source);
     next.config.clips = [{ id: 'restored', track: 'V1', at: 0, hold: 2, clipType: 'media', asset: 'new-media' }];
     next.registry.assets['new-media'] = { file: 'import.png', type: 'image/png' };
-    await expect(env.handoff.capture(next)).rejects.toThrow('original Runtime project media selection');
+    await expect(env.handoff.capture(next)).rejects.toThrow("was not picked from the project's media");
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
     expect(env.send).not.toHaveBeenCalled();
@@ -226,10 +226,10 @@ describe('upstream local document handoff', () => {
   it.each([
     ['head', 'capture-input-head-unavailable', 'original verified authoring head is unavailable'],
     ['source', 'source-parent-mismatch', 'upstream source differs from the verified authored parent'],
-    ['children', 'child-ownership-unavailable', 'child ownership/fork mapping is unavailable'],
-    ['gesture', 'gesture-basis-mismatch', 'gesture read basis differs from the original local authoring input'],
+    ['children', 'child-ownership-unavailable', 'This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.'],
+    ['gesture', 'gesture-basis-mismatch', 'The timeline changed while you were editing. Try the change again.'],
     ['selected clip', 'gesture-clip-ambiguous', 'gesture selected clip has no unique authored binding'],
-    ['trim', 'trim-operands-unavailable', 'trim operands are unavailable'],
+    ['trim', 'trim-operands-unavailable', 'This trim is missing the clip or its neighbours. Try trimming again.'],
     ['mirror', 'parent-mirror-mismatch', 'contradictory parent clips mirror'],
     ['nonfinite', 'operation-rejected', 'Outbox values must be finite JSON'],
   ])('observes the existing %s capture guard with identical enabled/disabled rejection behavior', async (kind, code, message) => {
@@ -460,7 +460,7 @@ describe('upstream local document handoff', () => {
     const stale = structuredClone(next);
     stale.config.clips[0].hold = 4;
     const document = env.session.getDocument();
-    await expect(env.handoff.capture(stale, original)).rejects.toThrow('gesture read basis differs');
+    await expect(env.handoff.capture(stale, original)).rejects.toThrow('The timeline changed while you were editing');
     expect(env.session.getDocument()).toEqual(document);
     expect((await env.outboxes.list(env.scope))[0].intents).toHaveLength(1);
     await env.session.dispose();
@@ -623,7 +623,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(false, true);
     const next = structuredClone(env.source);
     next.config.output.resolution = undefined as unknown as string;
-    await expect(env.handoff.capture(next)).rejects.toThrow('explicit clear is unavailable');
+    await expect(env.handoff.capture(next)).rejects.toThrow('Clearing this value cannot be saved yet');
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toHaveLength(0);
     const valid = structuredClone(env.source);
@@ -706,7 +706,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(true);
     const next = structuredClone(env.source);
     next.config.clips = [{ id: 'display-child-title', track: 'V1', at: 0, hold: 2 }];
-    await expect(env.handoff.capture(next)).rejects.toThrow('child ownership/fork mapping');
+    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet for a timeline that has shots');
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toHaveLength(0);
     await env.session.dispose();
@@ -772,7 +772,7 @@ describe('upstream local document handoff', () => {
     next.config.output.fps = 60;
     await expect(env.handoff.capture(next, structuredClone({ kind: 'track-label' as const,
       trackId: env.source.config.tracks![0].id, label: 'Renamed track', config: env.source.config, registry: env.source.registry })))
-      .rejects.toThrow('track label change exceeds its selected field');
+      .rejects.toThrow('Renaming this track would change more than its name');
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
     expect(env.send).not.toHaveBeenCalled();
@@ -794,7 +794,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
     const next = structuredClone(env.source);
     next.config.tracks![0].label = 'Renamed track';
-    await expect(env.handoff.capture(next)).rejects.toThrow('child ownership/fork mapping is unavailable');
+    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet for a timeline that has shots');
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     await env.session.dispose();
   });

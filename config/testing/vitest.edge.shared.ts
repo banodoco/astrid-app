@@ -1,4 +1,5 @@
 import type { InlineConfig } from 'vitest';
+import SkipGuardReporter from './skipGuardReporter';
 
 interface EdgeConfigOptions {
   include: readonly string[];
@@ -11,6 +12,9 @@ export function createEdgeVitestTestConfig(options: EdgeConfigOptions): NonNulla
     include: [...options.include],
     ...(options.exclude ? { exclude: [...options.exclude] } : {}),
     globals: true,
+    allowOnly: false,
+    includeTaskLocation: true,
+    reporters: ['default', new SkipGuardReporter()],
     sequence: {
       concurrent: false,
     },

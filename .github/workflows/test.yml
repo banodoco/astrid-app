@@ -7,6 +7,11 @@ on:
   pull_request:
     branches: [main, "release/*/main", "release/14/plan-39"]
   workflow_dispatch:
+    inputs:
+      quarantine_base:
+        description: 'Git ref for the quarantine policy merge base (for example origin/release/14/plan-39)'
+        required: true
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -93,9 +98,18 @@ jobs:
           node-version: "20.19.0"
       - run: node --test scripts/installer/release.test.mjs
       - run: npm ci --legacy-peer-deps
+        id: dependencies
+      - name: Check quarantine policy against the merge base
+        env:
+          QUARANTINE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || inputs.quarantine_base }}
+        run: npm run check:quarantine-policy
+      - name: Prove result-integrity rejection cases
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: python3 -m unittest discover -s scripts/quality -p test_vitest_results.py
       # The P1 corpus tests read git blobs from the Agent at the release-12 pin (public/install-manifest.json).
       # ASTRID_AGENT_CHECKOUT points them there; a missing checkout fails the test instead of skipping it.
       - name: Check out the pinned Agent for the P1 corpus
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
@@ -104,49 +118,39 @@ jobs:
           fetch-depth: 0
       # Browser-backed unit tests launch Playwright's Chromium from the default cache.
       - name: Install Playwright Chromium
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: npx playwright install chromium
       - name: Prepare Vitest result directory
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: mkdir -p "$RUNNER_TEMP/vitest-results"
         shell: bash
-      - run: npm test
+      - name: Run App Vitest suite
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: bash
+        run: npm run test:app 2>&1 | tee "$RUNNER_TEMP/vitest-results/vitest-app.log"
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
           VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-app.xml
+      - name: Run Node tests
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        run: npm run test:node
+        env:
+          ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
       - name: Run SDK boundary Vitest suite
-        run: npm run test:sdk-boundary
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: bash
+        run: npm run test:sdk-boundary 2>&1 | tee "$RUNNER_TEMP/vitest-results/vitest-sdk-boundary.log"
         env:
           VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-sdk-boundary.xml
-      - name: Summarize Vitest result XML
+      - name: Verify and summarize actual Vitest results
         if: always()
-        env:
-          TEST_RESULTS_DIR: ${{ runner.temp }}/vitest-results
-        run: |
-          python - <<'PY'
-          import os
-          from pathlib import Path
-          from xml.etree import ElementTree as ET
-          files = sorted(Path(os.environ['TEST_RESULTS_DIR']).glob('*.xml'))
-          if not files:
-              print('JUnit: no XML files; no test result available')
-              raise SystemExit(1)
-          totals = [0, 0, 0, 0]
-          for path in files:
-              root = ET.parse(path).getroot()
-              suites = [root] if root.tag == 'testsuite' else list(root.iter('testsuite'))
-              counts = [sum(int(suite.get(key, '0')) for suite in suites) for key in ('tests', 'failures', 'errors', 'skipped')]
-              print(f'{path.name}: tests={counts[0]} failures={counts[1]} errors={counts[2]} skipped={counts[3]}')
-              totals = [left + right for left, right in zip(totals, counts)]
-          line = f'JUnit total: tests={totals[0]} failures={totals[1]} errors={totals[2]} skipped={totals[3]}'
-          print(line)
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as summary:
-              summary.write(line + '\n')
-          PY
+        run: python3 scripts/quality/check-vitest-results.py "$RUNNER_TEMP/vitest-results"
       - name: Upload Vitest results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: test-results-vitest-all-${{ runner.os }}
-          path: ${{ runner.temp }}/vitest-results/*.xml
+          path: ${{ runner.temp }}/vitest-results/
           retention-days: 90
           if-no-files-found: warn
 

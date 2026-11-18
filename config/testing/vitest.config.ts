@@ -5,6 +5,7 @@ import { createElementAdmissionsPlugin } from '../vite/astridElementAdmissions';
 import { resolveAstridSource, validateAstridToolCatalog } from '../vite/astridSource';
 import { CHECKOUT_LANE, assertCheckoutLaneFilesExist } from './lanes';
 import SkipGuardReporter from './skipGuardReporter';
+import { DEFAULT_VITEST_INCLUDE } from './vitestIncludes.mjs';
 
 const projectRoot = fileURLToPath(new URL('../..', import.meta.url));
 const checkoutLane = process.env.VITEST_LANE === 'checkout';
@@ -65,8 +66,9 @@ export default defineConfig({
     globals: true,
     // No invisible skips: `.only` fails the run, and SkipGuardReporter fails it on any undeclared skip.
     allowOnly: false,
+    includeTaskLocation: true,
     reporters: process.env.VITEST_JUNIT_OUTPUT
-      ? ['default', new SkipGuardReporter(), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
+      ? ['default', new SkipGuardReporter({ resultsFile: `${process.env.VITEST_JUNIT_OUTPUT}.jsonl` }), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
       : ['default', new SkipGuardReporter()],
     // Hang guard only (testing plan R-10): durations never fail a run, so the
     // per-test and per-hook ceilings are generous; only a genuine hang trips them.
@@ -75,12 +77,7 @@ export default defineConfig({
     environment: 'jsdom',
     include: checkoutLane
       ? CHECKOUT_LANE
-      : [
-        'src/**/*.test.{ts,tsx}',
-        // Test files outside src/ that are vitest tests and that this repo owns.
-        'config/vite/*.test.ts',
-        'supabase/functions/**/*.test.ts',
-      ],
+      : DEFAULT_VITEST_INCLUDE,
     // Deliberately not collected (each is declared here so none is an invisible orphan):
     //  - vendor/*/tests, vendor/*/typescript/tests, vendor/*/dist/tests: vendored copies of upstream packages
     //    (timeline-ops, timeline-schema, timeline-composition, astrid-browser); their suites belong to, and run in,

@@ -428,7 +428,7 @@ PYTHON="$PROGRAM/versions/$(cat "$PROGRAM/current")/py/bin/python"
 stop_stack
 . "$SCRIPT_DIR/realm-snapshot.sh"
 export REALM_FREE_FLOOR_BYTES=$((1024 * 1024 * 1024))   # the program is already installed; clones cost almost nothing
-realm_attach_cmd() { clean_env "$PYTHON" -X utf8 -I -m astrid_runtime "$@" --source-manifest "$PROGRAM/versions/$(cat "$PROGRAM/current")/profile.json"; }
+realm_attach_cmd() { clean_env "$PYTHON" -X utf8 -I "$SCRIPT_DIR/workspace-attach.py" "$@" --source-manifest "$PROGRAM/versions/$(cat "$PROGRAM/current")/profile.json"; }
 if [[ ! -f "$STATE/realm-id" ]]; then
   [[ -z "$(stragglers)" ]] || fail 'A process of this stack is still alive; not replacing its workspace selection.'
   remove_dir "$ROOT/data.pre-realm"

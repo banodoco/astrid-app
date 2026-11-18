@@ -120,6 +120,23 @@ export async function createLocalSaveSession(options: Options) {
   let recoveryError: unknown;
   let writeError: unknown;
   let state: LocalSaveState = { status: 'saved', recoverableOwners: [] };
+  // An unavailable Runtime is retried on its own, doubling the wait up to 30 s; Try again retries at once.
+  const RETRY_FIRST_MS = 1000;
+  const RETRY_MAX_MS = 30_000;
+  let retryDelay = RETRY_FIRST_MS;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  function clearRetry() {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = undefined;
+  }
+  function scheduleRetry() {
+    clearRetry();
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      if (!closed && box && state.status === 'retry') void pump().catch(() => {});
+    }, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+  }
 
   function publish(status: LocalSaveState['status'], error?: OutboxJson) {
     if (closed) return;
@@ -284,13 +301,42 @@ export async function createLocalSaveSession(options: Options) {
           delete state.notice;
         }
         if (await rollback()) return;
-        if (record.pending) { publish('retry', record.pending.outcome?.kind === 'retry' ? record.pending.outcome.error : undefined); return; }
+        if (record.pending) {
+          publish('retry', record.pending.outcome?.kind === 'retry' ? record.pending.outcome.error : undefined);
+          scheduleRetry();
+          return;
+        }
+        retryDelay = RETRY_FIRST_MS;
       }
     })().catch((error) => {
       publish('error', { message: errorMessage(error) });
       throw error;
     }).finally(() => { sending = undefined; });
     return sending;
+  }
+
+  // Total Discard (see discharge). Nothing is kept: not the claimed owner, not the others in the outbox.
+  async function discardAll() {
+    clearRetry();
+    generation++;
+    if (sending) await sending.catch(() => {});
+    await writes.catch(() => {});
+    release?.();
+    await lifetime;
+    box = undefined; lifetime = undefined; release = undefined;
+    await storage.discardScope(options.scope);
+    record = undefined; writeError = undefined; recoveryError = undefined;
+    replaying = false; adoptedAcceptance = undefined; retryDelay = RETRY_FIRST_MS;
+    writes = Promise.resolve();
+    state = { status: 'saved', recoverableOwners: [] };
+    options.changed(clone(state));
+    await claim();
+    const at = generation;
+    try { await resetToCanonical(at); }
+    catch (error) {
+      publish('error', { message: `Discarded; reload failed: ${errorMessage(error)}` });
+      throw error;
+    }
   }
 
   async function claim(ownerId?: string) {
@@ -347,6 +393,8 @@ export async function createLocalSaveSession(options: Options) {
 
   function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
     assertOpen();
+    // Stopgap: the save bar declines the edit and shows its own headline; these throws are assertions only.
+    // Plan 18 CC-5 deletes them, so a new edit queues behind the retained ones.
     if (writeError || ['conflict', 'error'].includes(state.status)) throw new Error('Resolve retained local saves before editing again');
     // The visible closure is now canonical, while the retained suffix still
     // describes its original local chain. Do not author a new edit between them.
@@ -401,32 +449,24 @@ export async function createLocalSaveSession(options: Options) {
       return clone(basis);
     },
     /**
-     * Leave a refused save. `latest` drops the rejected change and everything built on it and adopts the
-     * accepted head; `keep` resends them on the latest head and resolves when that save settles. Does nothing
-     * when nothing is rejected.
+     * The two ways out of any unsaved state, whatever it is (unavailable, refused, head moved, recovered).
+     * `latest` is Discard: every retained owner of this timeline is deleted, then the accepted head is adopted
+     * and a fresh owner claimed. `keep` is Try again: the retained chain is resent now, on the latest head when
+     * it was refused. Does nothing when nothing is retained.
      */
     async discharge(mode: 'latest' | 'keep') {
+      if (closed) return;
+      if (mode === 'latest') { await discardAll(); return; }
       assertOpen();
       if (sending) await sending.catch(() => {});
       if (closed) return;
+      clearRetry();
       record = await box!.read();
-      if (record.pending?.outcome?.kind !== 'rejected') return;
-      const ids = record.intents.map((intent) => intent.id);
-      const at = generation;
-      if (mode === 'keep') {
-        await rebaseOntoLatest();
-        publish('dirty');
-        await pump();
-        return;
-      }
-      record = await box!.resolveRejected(ids, undefined, () => !closed);
-      delete state.notice;
-      publish('saved');
-      try { await resetToCanonical(at); }
-      catch (error) {
-        publish('error', { message: `Removed change; reload failed: ${errorMessage(error)}` });
-        throw error;
-      }
+      if (!record.intents.length && !record.pending) return;
+      if (record.pending?.outcome?.kind === 'rejected') await rebaseOntoLatest();
+      retryDelay = RETRY_FIRST_MS;
+      publish('dirty');
+      await pump();
     },
     async recover(ownerId: string) {
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');
@@ -445,6 +485,7 @@ export async function createLocalSaveSession(options: Options) {
     },
     async dispose() {
       closed = true;
+      clearRetry();
       try { await writes; if (writeError) throw writeError; }
       finally { release?.(); await lifetime; }
     },

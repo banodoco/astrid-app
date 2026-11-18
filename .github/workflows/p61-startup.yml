@@ -13,7 +13,7 @@ permissions:
 jobs:
   startup:
     if: ${{ github.event_name == 'pull_request' && github.head_ref == 'p61/rb-9' }}
-    runs-on: macos-14
+    runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
         with:

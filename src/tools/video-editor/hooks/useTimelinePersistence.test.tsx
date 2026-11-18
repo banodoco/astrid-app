@@ -431,7 +431,7 @@ describe('useTimelinePersistence — interaction gating', () => {
     const edited = buildDataFromCurrentRegistry({ ...original.config,
       clips: original.config.clips.map((clip) => ({ ...clip, hold: 2 })) }, original);
     harness.scheduleSave(edited);
-    await act(async () => { await expect(harness.result.current.flushPendingSave()).rejects.toThrow('This edit is not supported yet for a timeline that has shots'); });
+    await act(async () => { await expect(harness.result.current.flushPendingSave()).rejects.toThrow('upstream source differs from the verified authored parent'); });
     expect(harness.result.current.isConflictExhausted).toBe(false);
     expect(harness.result.current.saveStatus).toBe('error');
     expect(harness.dataRef.current?.config).toEqual(edited.config);

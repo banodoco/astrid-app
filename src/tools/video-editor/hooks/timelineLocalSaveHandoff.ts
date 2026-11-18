@@ -90,6 +90,75 @@ const configById = (config: TimelineConfig): unknown => ({ ...config,
   ...(Array.isArray(config.tracks) ? { tracks: byRowId(config.tracks) } : {}) });
 const sameConfig = (a: TimelineConfig, b: TimelineConfig) => same(authoredJson(configById(a)), authoredJson(configById(b)));
 
+/**
+ * Why an edit that names no gesture cannot be saved on a document with shots, or undefined when it can.
+ * The write only touches the parent's config and registry (the shot closure is cloned untouched), so the
+ * edit must stay on rows the parent alone owns: clips outside pinned shot groups on tracks no occurrence
+ * uses, additive registry changes, and no change to the rest of the config. Anything else stays refused.
+ */
+function unnamedEditRefusal(parent: Record<string, unknown>, before: TimelineSaveSource, next: TimelineSaveSource): string | undefined {
+  const config = parent.config;
+  if (!object(config) || !Array.isArray(config.clips) || !Array.isArray(config.tracks)
+    || !Array.isArray(before.config.clips) || !Array.isArray(next.config.clips)
+    || !Array.isArray(before.config.tracks) || !Array.isArray(next.config.tracks)) {
+    return "This edit can't be saved yet because this timeline's clips are stored in a form we can't match to the editor. Reload the timeline and try again.";
+  }
+  // Everything outside the clip and track lists (pinned groups, output, theme, bundle) is left as it was.
+  const rest = (value: TimelineConfig) => { const { clips: _clips, tracks: _tracks, ...others } = value; return authoredJson(others); };
+  if (!same(rest(before.config), rest(next.config)) || !same(authoredJson(before.bundle ?? null), authoredJson(next.bundle ?? null))) {
+    return "This change to the timeline's settings can't be saved yet because the timeline has shots. Your edit was undone.";
+  }
+  // Tracks that hold shots: their occurrences, and the tracks of their pinned groups.
+  const shotTracks = new Set<string>();
+  for (const occurrence of Array.isArray(parent.occurrences) ? parent.occurrences : []) {
+    if (!object(occurrence)) continue;
+    for (const track of [occurrence.track, object(occurrence.placement) ? occurrence.placement.track : undefined]) {
+      if (typeof track === 'string') shotTracks.add(track);
+    }
+  }
+  for (const group of before.config.pinnedShotGroups ?? []) shotTracks.add(group.trackId);
+  const occurrenceIds = Array.isArray(parent.occurrences) ? parent.occurrences.flatMap(item => object(item) && typeof item.occurrence_id === 'string' ? [item.occurrence_id] : []) : [];
+  const beforeClips = new Map(before.config.clips.map(clip => [clip.id, clip]));
+  const nextClips = new Map(next.config.clips.map(clip => [clip.id, clip]));
+  for (const id of new Set([...beforeClips.keys(), ...nextClips.keys()])) {
+    const was = beforeClips.get(id);
+    const now = nextClips.get(id);
+    if (was && now && same(authoredJson(was), authoredJson(now))) continue;
+    if (findEnclosingPinnedGroup(before.config, id)) {
+      return "Can't change a clip that belongs to a pinned shot group yet. Edit a clip outside the group.";
+    }
+    // A shot placeholder, or a copy of a shot's own clip, is not the parent's to edit.
+    if ([was, now].some(clip => clip?.clipType === 'shot') || (!was && occurrenceIds.some(occurrence => id.startsWith(`${occurrence}:`)))) {
+      return "Can't change a shot's own clips from here yet. Edit a clip you added to the timeline.";
+    }
+    if ([was, now].some(clip => clip && shotTracks.has(clip.track))) {
+      return "Can't change a clip on, or move one onto, a track that holds shots yet. Use another track.";
+    }
+  }
+  // Tracks: only a new track may appear and only a track without shots may go; the rest stay byte-identical.
+  const beforeTracks = new Map(before.config.tracks.map(track => [track.id, track]));
+  const nextTracks = new Map(next.config.tracks.map(track => [track.id, track]));
+  for (const [id, track] of beforeTracks) {
+    const kept = nextTracks.get(id);
+    if (kept ? !same(authoredJson(track), authoredJson(kept)) : shotTracks.has(id)) {
+      return "Can't change a track that holds shots yet. Your edit was undone.";
+    }
+  }
+  if (!same(before.config.tracks.filter(track => nextTracks.has(track.id)).map(track => track.id),
+    next.config.tracks.filter(track => beforeTracks.has(track.id)).map(track => track.id))) {
+    return "Can't reorder tracks on a timeline with shots yet. Your edit was undone.";
+  }
+  // Registry: new assets may appear; what is there stays as it was.
+  const assets = (registry: AssetRegistry) => (registry.assets ?? {}) as Record<string, unknown>;
+  const { assets: _a, ...otherBefore } = before.registry; const { assets: _b, ...otherNext } = next.registry;
+  if (!same(authoredJson(otherBefore), authoredJson(otherNext))
+    || Object.entries(assets(before.registry)).some(([key, entry]) => !Object.prototype.hasOwnProperty.call(assets(next.registry), key)
+      || !same(authoredJson(entry), authoredJson(assets(next.registry)[key])))) {
+    return "Can't remove or change project media on a timeline with shots yet. Your edit was undone.";
+  }
+  return undefined;
+}
+
 /** The editor's rows in the stored order: stored rows first, then each new row after its editor predecessor. */
 function inStoredOrder(stored: unknown[], edited: unknown[], appendNew = false): unknown[] {
   const editedById = new Map(edited.map(row => [rowId(row), row]));
@@ -317,10 +386,13 @@ export function createTimelineLocalSaveHandoff(options: {
         const trackLabelGesture = gestureBasis?.kind === 'track-label';
         // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
         const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.', 'child-ownership-unavailable');
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
+        // A gesture proves its own effect below; an edit that names none must stay on rows the parent alone owns.
+        const unnamedRefusal = hasChildren && gestureBasis === undefined
+          ? unnamedEditRefusal(parent, authoringSource, next) : undefined;
+        if (unnamedRefusal) refuseEdit(unnamedRefusal, 'child-ownership-unavailable');
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
         // A document that stores its clips only at the top level is edited there, whichever gesture it is.
@@ -649,8 +721,6 @@ export function createTimelineLocalSaveHandoff(options: {
             mediaSteps = [firstStep, ...remainingSteps];
           }
         }
-        // Verified parent recipes preserve the complete child closure cloned above.
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && !commands && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet for a timeline that has shots. Make the change on a track without shots.', 'child-ownership-unavailable');
         if (topLevelClips) delete (payload.config as Record<string, OutboxJson>).clips;
         if (!commands) {
           const clips = (payload.config as Record<string, OutboxJson>).clips;

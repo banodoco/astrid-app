@@ -15,8 +15,13 @@ execute this proof and must not be reported as real-run evidence.
 The frozen Release 13 manifest in this checkout supplies the control install:
 Agent `9814193a73f606719e81883a8be197d27dd361d4` and Runtime
 `6855dfa8df65cf8ae4c002b57134d6505493c17c`. The public installer runs with its
-real login service enabled. Public CLI operations create a media timeline and
-three further durable edits before the control is frozen for comparison.
+real login service enabled. Public CLI operations create a timeline with the
+original still-image clip and a ten-second moving H.264 clip, then three further
+durable edits before the control is frozen for comparison. The video is generated
+and validated with the live installation's recorded FFmpeg/FFprobe binaries;
+their exact paths, versions and hashes are retained. This exercises the real
+video-decoder readiness marker without removing the image fixture or weakening
+the browser's readiness/playback assertions.
 
 | Completion / negative case | Evidence |
 | --- | --- |

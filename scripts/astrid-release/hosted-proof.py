@@ -251,10 +251,41 @@ class Proof:
         def chunk(kind, value):
             return struct.pack(">I", len(value)) + kind + value + struct.pack(">I", zlib.crc32(kind + value) & 0xFFFFFFFF)
         image.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0)) + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
+        # Keep the original still-image clip and add real moving H.264 media.
+        # The preview's decoded-frame marker is emitted by ReadinessVideo; a
+        # still image alone cannot exercise that video-decoder acceptance gate.
+        selected = (program / "current").read_text().strip()
+        version = read_json(program / "versions" / selected / "version.json")
+        tools = version["env"]
+        ffmpeg = Path(tools["ASTRID_FFMPEG_EXECUTABLE"])
+        ffprobe = Path(tools["ASTRID_FFPROBE_EXECUTABLE"])
+        require(ffmpeg.is_file() and ffprobe.is_file(), "The live install has no recorded media-tool pair")
+        self.note("seed video tool identity", {
+            "ffmpeg": str(ffmpeg), "ffmpeg_sha256": digest(ffmpeg),
+            "ffprobe": str(ffprobe), "ffprobe_sha256": digest(ffprobe),
+            "source": tools["ASTRID_INSTALL_FFMPEG_SOURCE"],
+            "ffmpeg_version": tools["ASTRID_INSTALL_FFMPEG_VERSION"],
+            "ffprobe_version": tools["ASTRID_INSTALL_FFPROBE_VERSION"],
+        })
+        video = self.proof / "p61-motion-card.mp4"
+        self.run("generate real motion fixture", [ffmpeg, "-nostdin", "-hide_banner", "-y", "-f", "lavfi",
+                 "-i", "testsrc2=size=640x360:rate=30", "-frames:v", "300", "-an", "-c:v", "libx264",
+                 "-preset", "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", "-movflags", "+faststart", video])
+        probe = self.run("validate real motion fixture", [ffprobe, "-v", "error", "-select_streams", "v:0",
+                         "-show_entries", "stream=codec_name,width,height,nb_frames,avg_frame_rate,duration",
+                         "-of", "json", video])
+        stream = json.loads(probe.stdout)["streams"][0]
+        require(stream["codec_name"] == "h264" and stream["width"] == 640 and stream["height"] == 360,
+                "Motion fixture has the wrong codec or dimensions")
+        require(stream["nb_frames"] == "300" and stream["avg_frame_rate"] == "30/1"
+                and abs(float(stream["duration"]) - 10) < 0.01, "Motion fixture is not ten seconds at 30 fps")
+        self.context["seed_video"] = {"sha256": digest(video), "stream": stream}
+        self.save()
         commands = [
             ("seed-project", ["projects", "create", PROJECT, "--name", PROJECT_NAME, "--idempotency-key", "p61-project-create", "--json"]),
             ("seed-timeline", ["timelines", "create", TIMELINE, "--project", PROJECT, "--name", TIMELINE_NAME, "--canvas", "640x360", "--fps", "30", "--idempotency-key", "p61-timeline-create", "--json"]),
             ("seed-first-clip", ["timelines", "edit", TIMELINE, "--project", PROJECT, "--add-layer", "media", "--layer-asset", str(image), "--on", "0", "--for", "10", "--track", "V1", "--id", "p61-clip", "--idempotency-key", "p61-first-clip", "--json"]),
+            ("seed-video-clip", ["timelines", "edit", TIMELINE, "--project", PROJECT, "--add-layer", "media", "--layer-asset", str(video), "--on", "0", "--for", "10", "--track", "V2", "--id", "p61-video", "--idempotency-key", "p61-first-video", "--json"]),
         ]
         for label, args in commands:
             result = self.run(label, [launcher, *args])

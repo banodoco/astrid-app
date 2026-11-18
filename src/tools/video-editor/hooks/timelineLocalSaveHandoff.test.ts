@@ -226,7 +226,7 @@ describe('upstream local document handoff', () => {
   it.each([
     ['head', 'capture-input-head-unavailable', 'original verified authoring head is unavailable'],
     ['source', 'source-parent-mismatch', 'upstream source differs from the verified authored parent'],
-    ['children', 'child-ownership-unavailable', 'This edit is not supported yet on a timeline that has shots. Moving, trimming, splitting or renaming a clip still works.'],
+    ['children', 'child-ownership-unavailable', "Can't change a clip on, or move one onto, a track that holds shots yet. Use another track."],
     ['gesture', 'gesture-basis-mismatch', 'The timeline changed while you were editing. Try the change again.'],
     ['selected clip', 'gesture-clip-ambiguous', 'gesture selected clip has no unique authored binding'],
     ['trim', 'trim-operands-unavailable', 'This trim is missing the clip or its neighbours. Try trimming again.'],
@@ -251,6 +251,7 @@ describe('upstream local document handoff', () => {
       if (kind === 'selected clip') gesture.clipId = 'missing';
       if (kind === 'trim') gesture.patch = {} as typeof gesture.patch;
       if (kind === 'nonfinite') next.config.clips[0].hold = NaN;
+      if (kind === 'children') next.config.clips[0].hold = 3;
       if (kind === 'mirror') {
         env.initial.canonicalDocument.parent_revision.payload.clips = [];
         const document = toOutboxJson(env.initial.canonicalDocument);
@@ -258,7 +259,7 @@ describe('upstream local document handoff', () => {
         handoff = createTimelineLocalSaveHandoff({ initial: env.initial, source: env.source, session: env.session, adopted: env.receipt });
       }
       const reject = vi.spyOn(Promise, 'reject');
-      // A trim or split on a timeline with shots is proven by its expected diff; an edit that names no gesture is not.
+      // A trim or split on a timeline with shots is proven by its expected diff; an edit that names no gesture must stay off shot tracks.
       const error = await handoff.capture(next, kind === 'children' ? undefined : gesture).catch((caught: unknown) => caught);
       expect(error).toBeInstanceOf(kind === 'head' ? TimelineVersionConflictError : TimelineSaveError);
       expect(error).toHaveProperty('message', `Local document save retained: ${message}`);
@@ -706,7 +707,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(true);
     const next = structuredClone(env.source);
     next.config.clips = [{ id: 'display-child-title', track: 'V1', at: 0, hold: 2 }];
-    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet on a timeline that has shots');
+    await expect(env.handoff.capture(next)).rejects.toThrow("Can't change a clip on, or move one onto, a track that holds shots yet. Use another track.");
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     expect((await env.outboxes.list(env.scope))[0].intents).toHaveLength(0);
     await env.session.dispose();
@@ -794,7 +795,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
     const next = structuredClone(env.source);
     next.config.tracks![0].label = 'Renamed track';
-    await expect(env.handoff.capture(next)).rejects.toThrow('This edit is not supported yet on a timeline that has shots');
+    await expect(env.handoff.capture(next)).rejects.toThrow("Can't change a track that holds shots yet.");
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     await env.session.dispose();
   });

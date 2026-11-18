@@ -1,44 +1,83 @@
 # astrid-release
 
-One command builds an isolated Astrid stack on a release branch, with a point-in-time COPY of your live realm, so you can open your existing projects on release code.
+Build and start a separate Astrid stack for a release branch. Its program, editor, data, HOME and logs live in `~/astrid-release/<branch with / replaced by ->`. The first realm step takes a one-way, point-in-time copy of the live workspace. [Root layout](astrid-release#L28-L37) · [First-copy guard](astrid-release#L389-L420).
 
+## Commands and requirements
+
+```sh
+scripts/astrid-release/astrid-release release/14/plan-59
+scripts/astrid-release/astrid-release status release/14/plan-59
+scripts/astrid-release/astrid-release update release/14/plan-59
+scripts/astrid-release/astrid-release stop release/14/plan-59
 ```
-scripts/astrid-release/astrid-release release/14/plan-59           build and start (or start a stopped stack as built)
-scripts/astrid-release/astrid-release status release/14/plan-59    what resolves to what, and whether it runs
-scripts/astrid-release/astrid-release stop release/14/plan-59      stop it
-scripts/astrid-release/astrid-release update release/14/plan-59    see what moved; refuses to switch programs (see Limits)
+
+The first command builds or starts; `status` shows resolved heads, the editor checkout and recorded process state; `update` follows compatible changes or refuses; `stop` ends this stack's recorded/identified processes and keeps its files. Use the editor URL printed at READY or by `status`. These are explicit commands: there is no remote-branch watcher. [Dispatch](astrid-release#L18-L32) · [Status/stop](astrid-release#L130-L155) · [READY output](astrid-release#L551-L562).
+
+Build/start/update require macOS, a live install record at `~/.local/share/astrid/install.json`, and `git`, `sqlite3`, `python3`, `node`, `npm`, `curl`, `lsof`, `shasum` and `awk`. Realm copying requires APFS clone support between source and destination. The launcher prefers the installed program's Node; its engine check compares the major version with the first number in the App's `engines.node`. [Prerequisites](astrid-release#L157-L166) · [Clone probe](realm-snapshot.sh#L99-L119) · [Node check](astrid-release#L370-L379).
+
+Budget about **10 GB in practice** before database copies: roughly 3.6 GB for the program, 3.6 GB for the isolated home/cache and 0.7 GB for the editor, plus headroom. The install enforces **10 GiB plus twice the live realm database size**, rounded to MiB. Later checks require 2 GiB before `npm ci` and 1 GiB plus twice the database byte size before the snapshot. APFS media clones avoid an immediate full media copy; databases, caches and later edits still consume space. [Budget/calculation](astrid-release#L224-L232) · [Install floor](astrid-release#L327-L328) · [npm floor](astrid-release#L380-L384) · [Snapshot floor](astrid-release#L393-L395) · [Snapshot calculation](realm-snapshot.sh#L77-L97).
+
+## Which code runs
+
+| Layer | Selection and supporting code |
+| --- | --- |
+| App and Agent | Requested branch, then `release/NN/main`, then `main`. Each fallback prints `FELL BACK`. At least one repository must have the requested branch. [Resolution](astrid-release#L39-L63). |
+| Runtime | The selected Agent's `runtime.lock.json`. [Reader](../installer/pin.mjs#L50-L57). |
+| VibeComfy and runpod-lifecycle | The selected Agent's `astrid/packs/runpod/pins.json`. [Reader](../installer/pin.mjs#L59-L79). |
+| timeline-composition | This tool never switches it; the existing App/Agent bundles remain. Its branch-tip lookup is informational. [Diagnostic](astrid-release#L84-L87). |
+| Manifest | The tool's own `pin.mjs --in/--out` derives it; `pin.mjs --check` validates the Agent, Runtime, dependency pins and Runtime schema digest. There is no additional promised consistency checker. [Calls](astrid-release#L246-L258) · [Checks](../installer/pin.mjs#L112-L140). |
+
+The installed `version.json` owns the door port. Missing/stale saved ports or an occupied editor port cannot replace that door; an occupied installed door on a stopped stack causes refusal. The live ports 2222, 17340, 17336 and 17391 are excluded. [Protected ports](astrid-release#L37) · [Selection](astrid-release#L191-L222).
+
+## Updates and keeping edits
+
+When the installed manifest and door match, the tool logs **already matches** and runs no installer. A running, unchanged `update` returns without stopping processes or changing the root. App-only changes can be checked out and restarted while retaining the installed program. A normal start after other pins move keeps the program as built and says so. [Comparison/decisions](astrid-release#L274-L309) · [Accepted checkout](astrid-release#L311-L326).
+
+When the derived installed manifest changes, `update` refuses **before any stop, checkout or root write**. It prepares unknown App commits and manifests in a temporary directory outside the root, and checks tracked editor changes without refreshing its Git index. [Read-only preparation](astrid-release#L234-L258) · [Refusal before mutation](astrid-release#L292-L314).
+
+The refusal prints these rebuild steps with actual paths filled in:
+
+1. `astrid-release stop <branch>`.
+2. Keep the data: `cp -c -R <root>/data ~/astrid-release/<slug>.data-<date>`.
+3. Delete the root and run `astrid-release <branch>` again.
+
+A rebuild takes a fresh copy from live. Old edits remain in the kept clone; carrying them forward requires attaching its realm only when a read-only `SELECT version FROM runtime_schema WHERE id=1` equals `SCHEMA_VERSION` in the new Runtime's `runtime_protocol/store.py`. The tool does not perform that transfer automatically. The installer's `--update` and `astrid-runtime restart`/`down` are not this tool's lifecycle route: it uses its own stop/start because of the isolated-install limitation in [#825](https://github.com/banodoco/astrid-dev/issues/825). [Printed steps/rationale](astrid-release#L292-L304) · [Owned stop](astrid-release#L101-L125) · [Owned start](astrid-release#L449-L457).
+
+Before any realm copy exists, incomplete first installs and retryable installer failures discard **both `program/` and `data/`**. Once `state/realm-id` exists, cleanup refuses; a missing program pointer also refuses before installation. Installer attempts are capped at five, and only the listed network-error strings trigger retries. [Early protection](astrid-release#L187-L189) · [Paired cleanup/retries](astrid-release#L337-L364).
+
+## The realm and isolation
+
+The tool stops its stack, clones `data/` to `data.pre-realm`, then snapshots once. It takes a read-only SQLite backup including committed WAL data, clones allowed media, checks integrity/media and uses the installed Runtime's `workspace attach`. It keeps the old catalog, removes owner records only after stopped-owner checks, and requires both a successful attach exit and `configured_attach`. Failure restores the old catalog; it does not hand-migrate the database. [Caller/backup](astrid-release#L389-L403) · [SQLite backup](realm-snapshot.sh#L137-L152) · [Verification](realm-snapshot.sh#L180-L232) · [Owner guards/attach](realm-snapshot.sh#L294-L368).
+
+The copy omits old owner state, staging contents, SQLite sidecars, caches and `runpod/`, and creates a fresh empty `owner.lock`. The live data root's sibling `runpod/` lies outside the copied realm. There is no copy-back route; the saved realm ID prevents resnapshotting on later starts. [Excluded names](realm-snapshot.sh#L68-L75) · [Traversal](realm-snapshot.sh#L155-L178) · [Destination/marker](astrid-release#L397-L420).
+
+One hand edit remains: the isolated installer record's `realm_id` and `realm_root`, with its stale `foreground` entry removed. The tool then asks the Runtime to inspect the copy. [Record edit/inspect](astrid-release#L409-L427).
+
+Installation uses `--autostart off --command off --skills off --skill-copies off --no-browser`, never `--managed-by`. It asks the installer not to replace the `astrid` command on PATH, which stays the live installation's command. Use **`HOME=<root>/home <root>/program/run-astrid`** for this stack. The stack gets its own HOME/XDG/TMPDIR and data root. Incoming `ASTRID_*`, `VITE_*`, `WORKSPACE_*` and Python environment selectors are filtered; other exported variables are inherited, so this is not a universal secret scrubber. [Environment](astrid-release#L260-L273) · [Installer flags](astrid-release#L329-L350) · [Data-root launch](astrid-release#L450-L456) · [CLI output](astrid-release#L558).
+
+GPU work through that entry uses the stack's own configuration and claims; the snapshot does not import live RunPod claims. **Release any machine claimed by the stack before manually deleting its root.** This is an operator obligation: `stop` stops local processes and keeps files; the script does not release rented machines. [Isolation](astrid-release#L260-L273) · [RunPod exclusion](realm-snapshot.sh#L68-L75) · [Stop](astrid-release#L101-L125).
+
+## Readiness and known limits
+
+READY requires a ready `rendering.render` capability, an answering editor page, Runtime health `ok`, and agreement between the copy's project names and the projects listed through the proxy. It does not render an output. The timeline-count check is weaker: it reports a skip if its query fails. [Readiness](astrid-release#L470-L515) · [Project/timeline checks](astrid-release#L527-L546).
+
+Startup has at most two retries after the initial attempt and retains failed tails in `logs/start-attempt-N.log`. The known first-copy message is “accepted commit inputs changed during verification”. **The current loop retries any readiness failure; it does not yet restrict retries to that message.** That remaining guard/trace work belongs to Plan 61 RB-9, outside this fixture packet. [Loop](astrid-release#L436-L441) · [Failure handling](astrid-release#L517-L523).
+
+The built-in live check compares the launchctl PID/label and plist mtime, plus a warning-only stable-file listing around the copy. It is **not** RB-6's full live-file hash/database-fact proof. Fixture results do not establish a real editor run, an edit surviving restart or an untouched live install. [Recorded values](astrid-release#L324-L325) · [Listing comparison](astrid-release#L401-L407) · [Final comparison](astrid-release#L547-L549).
+
+## Fixture commands
+
+Run from the repository root with Node 20.19.4 (`.nvmrc`):
+
+```sh
+bash -n scripts/astrid-release/astrid-release
+bash -n scripts/astrid-release/realm-snapshot.sh
+node --test scripts/astrid-release/release.test.mjs
+node --test scripts/installer/manifest.test.mjs
+REALM_TEST_PYTHON=/absolute/path/to/scratch-runtime-venv/bin/python \
+  scripts/astrid-release/test-realm-snapshot.sh
 ```
 
-macOS only. Needs a live Astrid install (`~/.local/share/astrid/install.json`), `sqlite3`, `python3`, and a `node` that meets the App's `engines` (the installed program's own node is used when it ships one). State lives in `~/astrid-release/<branch with / as ->`. To remove a stack: stop it, then delete that folder.
+The shell fixture requires macOS/APFS and `sqlite3`. Install the Runtime and its `packages/python` client into a scratch Python environment from an exact checkout of `public/install-manifest.json`'s Runtime SHA. The added fixture verifies that identity and runs real `workspace create`, `attach` and `inspect`, including wrong-ID/schema refusals and unchanged source hashes. It starts no Runtime daemon. [Native fixture](test-realm-snapshot.sh#L1-L136) · [Runtime fixture](test_realm_attach.py#L1-L220).
 
-## What it does
-
-1. Resolves only the App and Agent branch heads: the branch, else `release/NN/main`, else `main`, with a loud `FELL BACK` line. Runtime, VibeComfy and runpod-lifecycle come from the Agent's locks. `scripts/installer/pin.mjs --in/--out` derives and checks the manifest. Where a branch tip is not what the locks install, it prints `NOT RUNNING: ... bump its lock on the Agent branch`. If the App's `runtime.lock.json` names another Runtime than the Agent locks install, it prints a `MISMATCH (info)` line.
-2. Installs with the real installer (`public/install`), flags `--autostart off --command off --skills off --skill-copies off --no-browser`, never `--managed-by`. It reads `last-run.json` as the verdict and retries up to 4 more times only on network-class errors.
-3. Copies the live realm (`realm-snapshot.sh`): read-only SQLite backup of the database first, then APFS clones of the media (no extra disk), skipping `owner.lock`, `staging/` and the sqlite `-wal`/`-shm`. It verifies the copy, repoints the stack's catalog and install record at it, and runs `workspace inspect`. The copy is one-way: edits on it never reach the live realm.
-4. Clears the stale Runtime owner records (`instance.lock`, `discovery.json`, only when no process of the stack is alive and the lock's pid is dead) and starts the editor. The first start on a fresh copy can fail once with "accepted commit inputs changed during verification"; the tool retries up to twice and keeps each log tail in `logs/start-attempt-N.log`.
-5. Readiness is real: rendering.render ready in the Runtime capability list (nothing is rendered), the editor page answers, Runtime health says ok, and the stack's own API (`/api/runtime/v1/projects`) lists every project of the copied realm. It never falls back to an empty realm silently.
-6. Records the live Runtime pid and the live launchd plist mtime before and after, and fails if either changed. It stops only the stack's own processes (recorded pids plus processes whose executable lies under the stack's root).
-
-Open the stack at `http://127.0.0.1:<editor port>/tools/video-editor?entry=editor` (the port is printed at READY and by `status`).
-
-## Safety
-
-- Never touches the live stack (ports 2222, 17340, 17336, 17391 are refused) or the live data root. The live files are only read.
-- No live credentials: nothing passes `ASTRID_ENV_FILE` or the other `ASTRID_*` variables into the stack. Jobs started in the stack have no live keys.
-- `astrid` on PATH is still the live install. The stack's own entry is `HOME=<root>/home <root>/program/run-astrid`; never run it without that HOME.
-- Autostart stays off on purpose: the installer's launchd label (`haus.astrid.runtime`) is the same global name the live service uses.
-
-## What is proven, and what is not
-
-Proven on the real stack (the build before this commit): install through the real installer, the realm copy, `workspace inspect`, start, readiness, the project list through the stack's proxy, and a browser check that opened "Almost Ready" (5 timelines, clips and preview visible). The live Runtime pid and launchd plist were identical before and after. Fixtures: `test-realm-snapshot.sh` (35 checks, temp dir only), `scripts/installer/manifest.test.mjs` (6 tests, Node 20), and a scratch clone where `workspace attach` returned `configured_attach` and refused a wrong realm id.
-
-UNTESTED on the real stack (changed since, `bash -n` and fixtures only): the `workspace attach` selection of the copy (the tool no longer hand-edits the catalog; the installer record still gets two hand-set fields), the `data.pre-realm` clone backup, the new `update` refusal text, the `status` App-checkout line, and the timeline-count query. Not proven at all: an edit on the copy surviving a restart, and a fresh-clone end-to-end run.
-
-## Limits
-
-- **Moving a built stack to new commits is not supported.** The installer's own `--update` fails on this kind of install (it probes the live launchd label and calls the stack's missing plist "malformed"). Starting an existing stack starts it as built and says so when the branch moved; the editor checkout does follow the App branch tip on each start. `update` refuses so edits on the copy are never wiped. To test newer commits: `stop`, clone the data aside (`cp -c -R <root>/data ~/astrid-release/<slug>.data-<date>`), delete the root, run again (the realm is copied fresh; kept edits carry over only by attaching the kept clone, same workspace schema only).
-- The first start on a fresh realm copy can fail once ("accepted commit inputs changed during verification"); the tool retries up to twice and keeps the log tails. The cause is not found: a restart of an existing stack traced clean.
-- macOS only. About 10 GB of disk for a stack (program 3.6 GB, an isolated cache, clones). The install refuses below its computed floor and prints the number.
-- Run `run-astrid` only as `HOME=<root>/home <root>/program/run-astrid`.
-- timeline-composition is never switched (the App and the Agent each bundle their own tarball). The launcher (astrid-pinokio) and the OMP pin are out of scope.
+For Linux logic proof only, use that Python environment with `-I scripts/astrid-release/test_realm_attach.py --portable`. This explicitly uses filesystem-copy and SQLite-CLI adapters; it is not APFS proof. The Node fixtures explicitly double macOS discovery, installer and Runtime handoff while using real Git and `pin.mjs`; stopped-start cases end at a deliberate Runtime-refusal sentinel. [Adapters/boundaries](test_realm_attach.py#L1-L137) · [Entry-point fixtures](release-fixture.mjs#L1-L177) · [Assertions](release.test.mjs#L1-L173).

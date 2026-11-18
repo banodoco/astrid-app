@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # astrid-release <branch>         build and start the whole Astrid stack on a release branch
-# astrid-release update <branch>  pull the latest tips; update this stack with the installer's own --update
+# astrid-release update <branch>  follow App changes; refuse changed installed pins with rebuild steps
 # astrid-release status <branch>  what resolves to what, and whether the stack runs
 # astrid-release stop <branch>    stop that stack
 #
-# A thin wrapper over the official paths: public/install (+ its --update), the App's dev-local-workspace.mjs,
+# A thin wrapper over the official paths: public/install, the App's dev-local-workspace.mjs,
 # and scripts/installer/pin.mjs for the manifest. Isolated root, HOME and ports, and a snapshot COPY of the
 # live realm. It never touches the live stack (:2222, :17340, :17336, :17391) or the live data root.
 set -Eeuo pipefail
@@ -19,7 +19,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage:
   astrid-release <branch>           build and start the stack (example: release/14/plan-59)
-  astrid-release update <branch>    move to the latest tips and restart if anything changed
+  astrid-release update <branch>    follow App changes; refuse changed installed pins
   astrid-release status <branch>    show what resolves to what, and the running state
   astrid-release stop <branch>      stop the stack
 USAGE
@@ -161,17 +161,17 @@ for tool in sqlite3 python3; do command -v "$tool" >/dev/null || fail "$tool is 
 for tool in git node npm curl lsof shasum awk; do command -v "$tool" >/dev/null || fail "$tool is required."; done
 NODE_BIN="$(dirname "$(command -v node)")"
 [[ ! -L "$ROOT" ]] || fail 'The root must not be a symlink.'
-mkdir -p "$STATE" "$LOGS" "$ROOT/home" "$ROOT/tmp"
-ROOT="$(cd -P -- "$ROOT" && pwd -P)"
+ROOT="$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ROOT")"
 [[ "$ROOT" != / && "$ROOT" != "$(cd -P -- "$HOME" && pwd -P)" ]] || fail 'Unsafe root.'
+STATE="$ROOT/state"; LOGS="$ROOT/logs"; APP="$ROOT/editor"; PROGRAM="$ROOT/program"; DATA="$ROOT/data"
 
 resolve_heads
 say "Release $BRANCH, root $ROOT"
 print_heads
 
 running=0; is_running && running=1
-if [[ "$running" != 1 ]]; then rm -f "$STATE/processes.tsv"; fi
 [[ "$CMD" != up || "$running" != 1 ]] || fail "Already running. Use: astrid-release update $BRANCH"
+heads_unchanged=0
 if [[ "$CMD" == update ]]; then
   [[ -f "$STATE/heads.tsv" && -f "$STATE/ports" ]] || fail "No stack built for $BRANCH yet. Run: astrid-release $BRANCH"
   read -r old_app_ref old_app_sha old_agent_ref old_agent_sha < "$STATE/heads.tsv"
@@ -180,10 +180,13 @@ if [[ "$CMD" == update ]]; then
     if [[ "$o" == "$w" ]]; then say "$n: unchanged (${w:0:12} on $r)"; else say "$n: ${o:0:12} -> ${w:0:12} (now on $r)"; fi
   done
   if [[ "$old_app_sha" == "$APP_SHA" && "$old_agent_sha" == "$AGENT_SHA" ]]; then
-    if [[ "$running" == 1 ]]; then say 'Nothing changed. The stack was left as it is.'; exit 0; fi
-    say 'Nothing changed, but the stack is not running; starting it.'
+    heads_unchanged=1
   fi
 fi
+
+# A copied realm is never disposable, even if a failed/manual cleanup removed current.
+[[ ! -e "$STATE/realm-id" || -f "$PROGRAM/current" ]] \
+  || fail 'A realm copy exists (state/realm-id), but the installed program is incomplete. Keeping program/ and data/; use the documented stop, data-clone and rebuild steps.'
 
 # Ports (editor, discovery proxy, door). A running stack keeps its own; a stopped one keeps them if still free.
 picked() { local p="$1" end="$2"; shift 2; for ((; p<=end; p++)); do
@@ -193,57 +196,66 @@ picked() { local p="$1" end="$2"; shift 2; for ((; p<=end; p++)); do
 keep=0
 if saved_ports; then
   keep=1
-  for q in $APP_PORT $PROXY_PORT $DOOR_PORT; do case " $PROTECTED " in *" $q "*) keep=0 ;; esac; done
+  for q in "$APP_PORT" "$PROXY_PORT" "$DOOR_PORT"; do
+    [[ "$q" =~ ^[1-9][0-9]*$ && "$q" -le 65535 ]] || keep=0
+    case " $PROTECTED " in *" $q "*) keep=0 ;; esac
+  done
   if [[ "$running" != 1 ]]; then for q in $APP_PORT $PROXY_PORT $DOOR_PORT; do if listening "$q"; then keep=0; fi; done; fi
 fi
+installed_door=""
 if [[ -f "$PROGRAM/current" ]]; then  # the installed program owns the door port; never re-pick it
-  door="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"]["ASTRID_RUNTIME_DOOR_PORT"])' "$PROGRAM/versions/$(cat "$PROGRAM/current")/version.json" 2>/dev/null || true)"
-  if [[ -n "$door" && "$door" != "${DOOR_PORT:-}" ]]; then DOOR_PORT="$door"; printf '%s,%s,%s\n' "${APP_PORT:-}" "${PROXY_PORT:-}" "$DOOR_PORT" > "$STATE/ports"; fi
+  installed_version="$(cat "$PROGRAM/current")"
+  [[ "$installed_version" != *[!A-Za-z0-9._-]* && -n "$installed_version" ]] || fail 'Invalid installed version pointer.'
+  installed_door="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["env"]["ASTRID_RUNTIME_DOOR_PORT"])' "$PROGRAM/versions/$installed_version/version.json" 2>/dev/null)" \
+    || fail 'Cannot read the installed door port; not replacing it.'
+  [[ "$installed_door" =~ ^[1-9][0-9]*$ && "$installed_door" -le 65535 ]] || fail 'Invalid installed door port.'
+  case " $PROTECTED " in *" $installed_door "*) fail 'The installed door uses a protected live port.' ;; esac
+  if [[ "$running" != 1 ]] && listening "$installed_door"; then fail "Installed door $installed_door is occupied; stop this stack or the conflicting process before starting it. The door was not changed."; fi
+  DOOR_PORT="$installed_door"
+  [[ "$DOOR_PORT" != "${APP_PORT:-}" && "$DOOR_PORT" != "${PROXY_PORT:-}" ]] || keep=0
 fi
 if [[ "$keep" != 1 ]]; then
-  APP_PORT="$(picked 2400 2499)"; PROXY_PORT="$(picked 17500 17599 "$APP_PORT")"; DOOR_PORT="$(picked 17500 17599 "$APP_PORT" "$PROXY_PORT")"
-  printf '%s,%s,%s\n' "$APP_PORT" "$PROXY_PORT" "$DOOR_PORT" > "$STATE/ports"
+  APP_PORT="$(picked 2400 2499 "$installed_door")"
+  PROXY_PORT="$(picked 17500 17599 "$APP_PORT" "$installed_door")"
+  DOOR_PORT="${installed_door:-$(picked 17500 17599 "$APP_PORT" "$PROXY_PORT")}"
 fi
 say "Ports editor/proxy/door: $APP_PORT,$PROXY_PORT,$DOOR_PORT"
 
-# Disk floor, computed from real sizes and checked where it applies: an install needs ~5 GB (program 3.6 GB plus the
-# editor clone) plus twice the live realm database; the realm step later needs only 1 GB plus its database (clones are free).
+# Budget 10 GiB for program (~3.6 GB), isolated home/cache (~3.6 GB), editor (~0.7 GB) and headroom,
+# plus twice the live realm database. Later checks cover the remaining npm/snapshot work separately.
 live_data_root="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data_root"])' "$HOME/.local/share/astrid/install.json")"
 [[ -d "$live_data_root/runtime/realms" ]] || fail "No live realm under $live_data_root."
 need_disk() { # megabytes
   local free_kb; free_kb="$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')"
-  [[ "$free_kb" -ge $(($1 * 1024)) ]] || fail "Not enough disk: $((free_kb / 1024)) MB free, $1 MB needed. Nothing was changed."
+  [[ "$free_kb" -ge $(($1 * 1024)) ]] || fail "Not enough disk: $((free_kb / 1024)) MB free, $1 MB needed for the next step."
 }
 db_kb="$(du -sk "$live_data_root"/runtime/realms/*/realm.sqlite3 2>/dev/null | awk '{s+=$1} END {print s+0}')"
 
-# The editor source and the manifest are prepared WITHOUT touching a running stack: fetch, derive the manifest
-# with pin.mjs from the Agent's locks, check it. Only then is anything stopped or checked out.
-if [[ ! -d "$APP/.git" ]]; then
-  git clone --quiet --depth 1 --single-branch --branch "$APP_REF" https://github.com/banodoco/astrid-app.git "$APP"
-  APP_REV=HEAD
-else
-  [[ -z "$(git -C "$APP" status --porcelain --untracked-files=no)" ]] || fail "Editor source in $APP has changes; not overwriting."
-  git -C "$APP" fetch --quiet --depth 1 origin "$APP_REF"
-  APP_REV=FETCH_HEAD
+# Prepare outside ROOT: a refused update must not even alter editor/.git or state/.
+bootstrap_work="$(mktemp -d "${TMPDIR:-/tmp}/astrid-release-preflight.XXXXXXXX")"
+trap 'rm -rf -- "$bootstrap_work"' EXIT
+APP_SOURCE="$APP"
+if [[ -d "$APP/.git" ]]; then
+  [[ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$APP" status --porcelain --untracked-files=no)" ]] || fail "Editor source in $APP has changes; not overwriting."
 fi
-[[ "$(git -C "$APP" rev-parse "$APP_REV")" == "$APP_SHA" ]] || fail 'The App tip moved while fetching; rerun.'
-git -C "$APP" show "$APP_REV:public/install-manifest.json" > "$STATE/base-manifest.json"
-git -C "$APP" show "$APP_REV:runtime.lock.json" > "$STATE/app-runtime.lock.json"
-node "$SCRIPT_DIR/../installer/pin.mjs" "$AGENT_SHA" --in "$STATE/base-manifest.json" --out "$STATE/install-manifest.next.json" \
+if [[ ! -d "$APP/.git" ]] || ! git -C "$APP" cat-file -e "$APP_SHA^{commit}" 2>/dev/null; then
+  APP_SOURCE="$bootstrap_work/editor"
+  git clone --quiet --depth 1 --single-branch --branch "$APP_REF" https://github.com/banodoco/astrid-app.git "$APP_SOURCE"
+  [[ "$(git -C "$APP_SOURCE" rev-parse HEAD)" == "$APP_SHA" ]] || fail 'The App tip moved while fetching; rerun.'
+fi
+git -C "$APP_SOURCE" show "$APP_SHA:public/install-manifest.json" > "$bootstrap_work/base-manifest.json"
+git -C "$APP_SOURCE" show "$APP_SHA:runtime.lock.json" > "$bootstrap_work/app-runtime.lock.json"
+node "$SCRIPT_DIR/../installer/pin.mjs" "$AGENT_SHA" --in "$bootstrap_work/base-manifest.json" --out "$bootstrap_work/manifest.json" \
   || fail 'pin.mjs could not derive a manifest from the Agent locks. The running stack, if any, was not touched.'
-node "$SCRIPT_DIR/../installer/pin.mjs" --check --in "$STATE/install-manifest.next.json" \
+node "$SCRIPT_DIR/../installer/pin.mjs" --check --in "$bootstrap_work/manifest.json" \
   || fail 'The derived manifest is inconsistent. The running stack, if any, was not touched.'
-app_lock="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_commit"])' "$STATE/app-runtime.lock.json")"
-next_runtime="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime"]["sha"])' "$STATE/install-manifest.next.json")"
+app_lock="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["source_commit"])' "$bootstrap_work/app-runtime.lock.json")"
+next_runtime="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["runtime"]["sha"])' "$bootstrap_work/manifest.json")"
 say "Manifest derived from the Agent ${AGENT_SHA:0:12} locks: Runtime ${next_runtime:0:12}."
 if [[ "$app_lock" != "$next_runtime" ]]; then
   say "MISMATCH (info): the App's runtime.lock.json names Runtime ${app_lock:0:12} but the Agent locks install Runtime ${next_runtime:0:12}. The App was built against another Runtime contract."
 fi
-print_derived "$STATE/install-manifest.next.json"
-
-if [[ "$running" == 1 ]]; then say 'Restarting this release stack only (the live stack is not touched).'; fi
-stop_stack
-[[ "$APP_REV" == HEAD ]] || git -C "$APP" checkout --quiet --detach FETCH_HEAD
+print_derived "$bootstrap_work/manifest.json"
 
 # Everything that installs or runs gets: the full environment minus every ASTRID_* (and the other variables that
 # can point at the live stack), plus an isolated HOME/XDG/TMPDIR and this stack's door port.
@@ -260,16 +272,12 @@ clean_env() {
     PATH="$NODE_BIN:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
     ASTRID_RUNTIME_DOOR_PORT="$DOOR_PORT" "$@"
 }
-bootstrap_work="$(mktemp -d "$ROOT/tmp/bootstrap.XXXXXXXX")"
-trap 'rm -rf -- "$bootstrap_work"' EXIT
-cp "$STATE/install-manifest.next.json" "$bootstrap_work/manifest.json"
-
-# Install, or the installer's own --update; skipped when the installed program already matches the manifest and door.
+# Decide before stopping anything. Never invoke the installer's --update on this stack.
 need_install=1; AS_BUILT=0
 if [[ -f "$PROGRAM/current" ]]; then
   installed_version="$(cat "$PROGRAM/current")"
   [[ "$installed_version" != *[!A-Za-z0-9._-]* && -n "$installed_version" ]] || fail 'Invalid installed version pointer.'
-  if clean_env node --input-type=module - "$PROGRAM/versions/$installed_version" "$STATE/install-manifest.next.json" "$DOOR_PORT" <<'PINSCHECK'
+  if clean_env node --input-type=module - "$PROGRAM/versions/$installed_version" "$bootstrap_work/manifest.json" "$DOOR_PORT" <<'PINSCHECK'
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 const [installed, manifest, door] = process.argv.slice(2);
@@ -284,22 +292,40 @@ PINSCHECK
   else
     # The installer's own --update cannot run on this install (it probes the live launchd label haus.astrid.runtime and
     # calls this stack's missing plist "malformed"), and reinstalling over kept data needs the retained Runtime
-    # source profile rewritten. That kept-data switch is not built yet, and this tool never deletes data/ (it holds
-    # the edits made on the realm copy), so it refuses.
+    # source profile rewritten. That kept-data switch is not built yet; a copied realm's data is never deleted.
+    # A first install before state/realm-id may discard a failed program/data pair below.
     if [[ "$CMD" == up ]]; then
       # Starting a stack that is already built starts it AS BUILT; moving it to new commits is `update`.
       need_install=0; AS_BUILT=1
-      say "NOTE: the branch moved since this stack was built (new manifest differs). Starting the stack as built; \`astrid-release update $BRANCH\` moves it (not supported without losing data yet)."
+      say "NOTE: the branch moved since this stack was built (new manifest differs). Starting the installed program as built; \`astrid-release update $BRANCH\` will print the rebuild steps."
     else
-    fail "The branch moved (the manifest changed). Moving a built stack is not supported without losing data (the installer's own --update is blocked, issue #825). To test the new commits: 1) astrid-release stop $BRANCH  2) keep the data: cp -c -R $DATA ~/astrid-release/$SLUG.data-\$(date +%Y%m%d-%H%M)  3) delete $ROOT and run astrid-release $BRANCH again (the realm is copied fresh from live). Edits on the old copy carry over only by attaching the kept clone (same workspace schema only). Nothing was changed."
+    fail "The branch moved (the manifest changed). Moving a built stack is not supported without losing data (the installer's own --update is blocked, issue #825). To test the new commits: 1) astrid-release stop $BRANCH  2) keep the data: cp -c -R $DATA ~/astrid-release/$SLUG.data-\$(date +%Y%m%d-%H%M)  3) delete $ROOT and run astrid-release $BRANCH again (the realm is copied fresh from live). Edits on the old copy carry over only by attaching the kept clone: its read-only SELECT version FROM runtime_schema WHERE id=1 must equal SCHEMA_VERSION in the new Runtime's runtime_protocol/store.py. Nothing was changed."
     fi
   fi
 fi
+if [[ "$CMD" == update && "$heads_unchanged" == 1 && "$need_install" == 0 && "$running" == 1 ]]; then
+  say 'Nothing changed. The stack was left as it is.'
+  exit 0
+fi
+
+# All refusals above were read-only on ROOT. Accepted changes start here.
+mkdir -p "$STATE" "$LOGS" "$ROOT/home" "$ROOT/tmp"
+if [[ "$running" == 1 ]]; then say 'Restarting this release stack only (the live stack is not touched).'; fi
+stop_stack
+if [[ ! -d "$APP/.git" ]]; then
+  mv "$APP_SOURCE" "$APP"
+elif [[ "$APP_SOURCE" != "$APP" ]]; then
+  git -C "$APP" fetch --quiet "$APP_SOURCE" "$APP_SHA"
+fi
+git -C "$APP" checkout --quiet --detach "$APP_SHA"
+printf '%s,%s,%s\n' "$APP_PORT" "$PROXY_PORT" "$DOOR_PORT" > "$STATE/ports"
+cp "$bootstrap_work/base-manifest.json" "$STATE/base-manifest.json"
+cp "$bootstrap_work/app-runtime.lock.json" "$STATE/app-runtime.lock.json"
 live_proof() { printf 'live runtime: %s | plist mtime: %s\n' "$(launchctl list 2>/dev/null | awk '/haus\.astrid\.runtime/ {print $1" "$3}')" "$(stat -f %m "$HOME/Library/LaunchAgents/haus.astrid.runtime.plist" 2>/dev/null || echo none)"; }
 live_proof > "$STATE/live-proof-before.txt"
-if [[ "$AS_BUILT" == 1 ]]; then rm -f "$STATE/install-manifest.next.json"; else mv "$STATE/install-manifest.next.json" "$STATE/install-manifest.json"; fi
+if [[ "$AS_BUILT" != 1 ]]; then cp "$bootstrap_work/manifest.json" "$STATE/install-manifest.json"; fi
 if [[ "$need_install" == 1 ]]; then
-  need_disk $((5 * 1024 + 2 * db_kb / 1024))
+  need_disk $((10 * 1024 + 2 * db_kb / 1024))
   # Consent is given up front and kept minimal: no sign-in autostart, no shell command link, no skills outside this
   # HOME. This matters: the installer's launchd label (haus.astrid.runtime) is the same global name the live
   # service uses; it is only safe because autostart is off and HOME is the isolated one. Never --managed-by:
@@ -308,7 +334,15 @@ if [[ "$need_install" == 1 ]]; then
   plist_before="$(stat -f %m "$live_plist" 2>/dev/null || echo none)"
   last_run="$ROOT/home/Library/Logs/Astrid Runtime/last-run.json"
   # The installer downloads its tools; retry up to 4 more times ONLY for a network-class failure, printing the reason.
-  [[ -f "$PROGRAM/current" ]] || remove_dir "$PROGRAM"   # absent, or the installer's own install.json: nothing else
+  discard_first_install() {
+    [[ ! -e "$STATE/realm-id" ]] || fail 'A realm copy exists (state/realm-id); refusing to delete program/ or data/.'
+    stop_stack
+    # A failed install can leave a managed source profile. Retaining it while removing
+    # only program/ makes the installer's next attempt refuse that stale profile.
+    remove_dir "$PROGRAM"
+    remove_dir "$DATA"
+  }
+  [[ -f "$PROGRAM/current" ]] || discard_first_install
   for attempt in 1 2 3 4 5; do
     rm -f "$last_run"; : > "$LOGS/install-attempt.log"
     clean_env sh "$APP/public/install" --root "$PROGRAM" --data-root "$DATA" \
@@ -322,7 +356,7 @@ if [[ "$need_install" == 1 ]]; then
     net_reason="$(grep -Eo 'RemoteDisconnected|ConnectionResetError|Connection reset|timed out|TimeoutError|URLError|Temporary failure in name resolution|nodename nor servname|Unexpected [a-z]* source archive layout|IncompleteRead' "$LOGS/install-attempt.log" 2>/dev/null | head -1 || true)"
     if [[ -n "$net_reason" && "$attempt" -lt 5 ]]; then
       say "Installer attempt $attempt failed with a network error ($net_reason); retrying."
-      remove_dir "$PROGRAM"   # the whole folder: the installer refuses a program dir with files it does not own
+      discard_first_install
       sleep 5
       continue
     fi

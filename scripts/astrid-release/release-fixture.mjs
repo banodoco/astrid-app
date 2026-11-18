@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-const shell = path.join(here, 'astrid-release');
+const shell = process.env.RELEASE_TOOL_UNDER_TEST || path.join(here, 'astrid-release');
 const realGit = spawnSync('which', ['git'], { encoding: 'utf8' }).stdout.trim();
 const realPython = spawnSync('which', ['python3'], { encoding: 'utf8' }).stdout.trim();
 export const branch = 'release/14/fixture';
@@ -55,7 +55,7 @@ export function fixture(t, { installed = true, realm = true, savedPorts = '2400,
     if (processChild && processChild.exitCode === null) processChild.kill('SIGKILL');
     rmSync(dir, { recursive: true, force: true });
   });
-  const config = { agent: sha('a'), runtime: sha('c'), installer, busy: [], remote, events, root };
+  const config = { agent: sha('a'), runtime: sha('c'), installer, busy: [], freeKb: 100000000, remote, events, root };
   const writeConfig = () => json(configPath, config);
   writeConfig();
   const contract = { openapi: 'openapi.json', schemas: [] };
@@ -80,6 +80,7 @@ fs.appendFileSync(c.events,JSON.stringify({attempt:old.length+1,program:fs.exist
 fs.mkdirSync(program,{recursive:true}); fs.mkdirSync(path.join(data,'runtime/source-profiles'),{recursive:true});
 fs.writeFileSync(path.join(program,'partial-program'),'keep until paired cleanup');
 fs.writeFileSync(path.join(data,'runtime/source-profiles/astrid.json'),'{}');
+if(c.protectOnFailure) fs.writeFileSync(path.join(c.root,'state/realm-id'),'fixture-realm\\n');
 const retry=c.installer==='retry'&&old.length===0;
 const report=path.join(process.env.HOME,'Library/Logs/Astrid Runtime/last-run.json');
 fs.mkdirSync(path.dirname(report),{recursive:true});
@@ -134,11 +135,23 @@ os.execv(${JSON.stringify(realGit)},[${JSON.stringify(realGit)}]+args)
 import json,sys
 c=json.load(open(${JSON.stringify(configPath)})); sys.exit(0 if any(x=='-iTCP:'+str(p) for x in sys.argv for p in c['busy']) else 1)
 `, 0o700);
-  for (const [name, body] of Object.entries({ uname: 'echo Darwin', sqlite3: 'echo "fixture: unexpected sqlite3" >&2; exit 91', npm: 'echo "fixture: unexpected npm" >&2; exit 91', launchctl: 'exit 0', sleep: 'exit 0', df: 'printf "Filesystem 1024-blocks Used Available Capacity Mounted on\\nfixture 100000000 0 100000000 0%% /\\n"' })) {
+  put(path.join(bin, 'df'), `#!${realPython}
+import json
+c=json.load(open(${JSON.stringify(configPath)}))
+print('Filesystem 1024-blocks Used Available Capacity Mounted on')
+print('fixture 100000000 0 %s 0%% /' % c['freeKb'])
+`, 0o700);
+  for (const [name, body] of Object.entries({ uname: 'echo Darwin', sqlite3: 'echo "fixture: unexpected sqlite3" >&2; exit 91', npm: 'echo "fixture: unexpected npm" >&2; exit 91', launchctl: 'exit 0', sleep: 'exit 0' })) {
     put(path.join(bin, name), `#!/bin/sh\n${body}\n`, 0o700);
   }
   return {
     root, dir, home, config, writeConfig, manifest,
+    moveApp: () => {
+      put(path.join(remote, 'changed.txt'), 'new App code\n');
+      runGit(['add', '.']);
+      runGit(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'move fixture App']);
+      return runGit(['rev-parse', 'HEAD']);
+    },
     events: () => existsSync(events) ? readFileSync(events, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [],
     run: (command = 'up') => {
       const r = spawnSync('bash', [shell, ...(command === 'up' ? [] : [command]), branch], { env, cwd: dir, encoding: 'utf8', timeout: 20_000 });

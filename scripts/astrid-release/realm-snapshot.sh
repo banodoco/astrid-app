@@ -291,6 +291,31 @@ realm_snapshot_copy() {  # <live_data_root> <dest_data_root>
   [ -f "$dest/runtime/catalog.json" ] || { _realm_err "destination has no runtime/catalog.json (installer step not done?)"; return 1; }
   final="$dest/runtime/realms/$rid"
   [ ! -e "$final" ] || { _realm_err "destination already has realm $rid; refusing to overwrite"; return 1; }
+  # workspace attach removes instance.lock below. A free realm lock alone is
+  # insufficient: an installer-started process can still own the instance record.
+  python3 -I - "$dest/runtime/instance.lock" <<'PY' || { _realm_err "destination instance owner is not proven stopped"; return 1; }
+import json, os, sys
+path = sys.argv[1]
+if os.path.exists(path):
+    try:
+        record = json.load(open(path))
+        pid = record["pid"]
+        if type(pid) is not int or pid <= 0:
+            raise ValueError("invalid pid")
+    except (OSError, ValueError, KeyError, TypeError):
+        sys.stderr.write("destination instance lock has no valid pid; refusing to remove it\n")
+        sys.exit(1)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        pass
+    except (OSError, OverflowError):
+        sys.stderr.write("cannot prove destination instance pid is dead\n")
+        sys.exit(1)
+    else:
+        sys.stderr.write("destination instance pid %s is still alive\n" % pid)
+        sys.exit(1)
+PY
   # The destination stack must be stopped: its current realm's owner lock must be free.
   python3 -I - "$dest" <<'PY' || { _realm_err "destination stack looks running (owner lock held); stop it first"; return 1; }
 import fcntl, glob, os, sys
@@ -329,13 +354,13 @@ PY
   if declare -F realm_attach_cmd >/dev/null; then
     # Select the copy with the Runtime's own command. The installer's empty-realm selection and owner records are
     # removed first (the caller has confirmed the stack is stopped); the old catalog is kept.
-    local attach_out
+    local attach_out attach_rc=0
     cp -p "$dest/runtime/catalog.json" "$dest/runtime/catalog.json.pre-realm-snapshot" || return 1
     rm -f "$dest/runtime/catalog.json" "$dest/runtime/instance.lock" "$dest/runtime/discovery.json"
-    attach_out="$(realm_attach_cmd workspace attach --data-root "$dest" --realm-root "$final" --realm-id "$rid" --json 2>&1)" || true
-    if ! printf '%s' "$attach_out" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"configured_attach"'; then
+    attach_out="$(realm_attach_cmd workspace attach --data-root "$dest" --realm-root "$final" --realm-id "$rid" --json 2>&1)" || attach_rc=$?
+    if [ "$attach_rc" -ne 0 ] || ! printf '%s' "$attach_out" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"configured_attach"'; then
       cp -p "$dest/runtime/catalog.json.pre-realm-snapshot" "$dest/runtime/catalog.json"
-      _realm_err "workspace attach did not report configured_attach: $(printf '%s' "$attach_out" | tail -c 400)"; return 1
+      _realm_err "workspace attach did not report configured_attach (exit $attach_rc): $(printf '%s' "$attach_out" | tail -c 400)"; return 1
     fi
   else
     _realm_repoint_catalog "$dest" "$rid" "$final" "$name" || { _realm_err "catalog repoint failed; copy is at $final"; return 1; }

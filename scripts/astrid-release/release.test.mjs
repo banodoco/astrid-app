@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { branch, fixture, inventory, put } from './release-fixture.mjs';
@@ -89,6 +89,85 @@ for (const command of ['up', 'update']) {
     assert.match(r.output, /realm copy|realm-id/);
     assert.deepEqual(f.events(), []);
     assert.equal(existsSync(path.join(f.root, 'program/partial')), true);
+    assert.deepEqual(inventory(f.root), before);
+  });
+}
+
+test('RB-2: App-only movement checks out new code without running installer', (t) => {
+  const f = fixture(t);
+  f.moveApp();
+  const r = f.run('update');
+  assert.match(r.output, /installed program already matches/);
+  assert.match(r.output, /fixture: Runtime handoff reached/);
+  assert.deepEqual(f.events(), []);
+  assert.equal(readFileSync(path.join(f.root, 'editor/changed.txt'), 'utf8'), 'new App code\n');
+});
+
+test('RB-8: moved App plus Agent uses scratch checkout before refusing', async (t) => {
+  const f = fixture(t);
+  const alive = await f.startProcess();
+  f.moveApp();
+  f.config.agent = 'b'.repeat(40); f.writeConfig();
+  const before = inventory(f.root);
+  const r = f.run('update');
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /manifest changed/);
+  assert.equal(alive(), true);
+  assert.deepEqual(inventory(f.root), before);
+  assert.deepEqual(f.events(), []);
+});
+
+test('RB-8: fresh editor checkout reaches only the fixture installer', (t) => {
+  const f = fixture(t, { installed: false, realm: false });
+  rmSync(path.join(f.root, 'editor'), { recursive: true });
+  const r = f.run();
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /fixture: installer decision recorded/);
+  assert.equal(f.events().length, 1);
+  assert.equal(f.events()[0].program, false);
+  assert.equal(f.events()[0].data, false);
+});
+
+test('RB-8: realm marker created by first attempt fences retry cleanup', (t) => {
+  const f = fixture(t, { installed: false, realm: false, installer: 'retry' });
+  f.config.protectOnFailure = true; f.writeConfig();
+  const r = f.run();
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /refusing to delete program\/ or data\//);
+  assert.equal(f.events().length, 1);
+  assert.equal(existsSync(path.join(f.root, 'program/partial-program')), true);
+  assert.equal(existsSync(path.join(f.root, 'data/runtime/source-profiles/astrid.json')), true);
+});
+
+test('RB-4: installation enforces the documented 10 GiB budget', (t) => {
+  const f = fixture(t, { installed: false, realm: false });
+  f.config.freeKb = 8 * 1024 * 1024; f.writeConfig();
+  const r = f.run();
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /10240 MB needed/);
+  assert.deepEqual(f.events(), []);
+});
+
+test('RB-2: occupied installed door refuses without choosing another', (t) => {
+  const f = fixture(t);
+  f.config.busy = [19501]; f.writeConfig();
+  const before = inventory(f.root);
+  const r = f.run();
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /Installed door 19501 is occupied/);
+  assert.deepEqual(f.events(), []);
+  assert.deepEqual(inventory(f.root), before);
+});
+
+for (const [door, message] of [['17340', /protected live port/], ['017340', /Invalid installed door/]]) {
+  test(`RB-2: unsafe installed door ${door} refuses without mutation`, (t) => {
+    const f = fixture(t);
+    put(path.join(f.root, 'program/versions/fixture-version/version.json'), JSON.stringify({ env: { ASTRID_RUNTIME_DOOR_PORT: door } }));
+    const before = inventory(f.root);
+    const r = f.run();
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, message);
+    assert.deepEqual(f.events(), []);
     assert.deepEqual(inventory(f.root), before);
   });
 }

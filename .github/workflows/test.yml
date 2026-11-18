@@ -7,6 +7,12 @@ on:
   pull_request:
     branches: [main, "release/*/main", "release/14/plan-61"]
   workflow_dispatch:
+    inputs:
+      p61_real_run:
+        description: Run the Plan 61 packet's real installed-stack proof on a hosted Mac
+        type: boolean
+        default: false
+        required: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
@@ -15,6 +21,59 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !(startsWith(github.ref, 'refs/heads/release/') && endsWith(github.ref, '/main')) }}
 
 jobs:
+  plan61-real-macos:
+    name: Plan 61 real hosted Mac
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/p61/rb-6' && inputs.p61_real_run }}
+    runs-on: macos-14
+    timeout-minutes: 150
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Record hosted Mac identity and disk
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Darwin
+          test "$GITHUB_REF" = refs/heads/p61/rb-6
+          P61_PROOF="$(mktemp -d "$RUNNER_TEMP/p61-proof.XXXXXXXX")"
+          printf 'P61_PROOF=%s\n' "$P61_PROOF" >> "$GITHUB_ENV"
+          {
+            git rev-parse HEAD
+            sw_vers
+            uname -m
+            node --version
+            python3 --version
+            sqlite3 --version
+            df -Pk "$HOME" "$RUNNER_TEMP"
+          } | tee "$P61_PROOF/runner.txt"
+      - name: Plan 61 existing focused test inventory
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --test --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=junit --test-reporter-destination="$P61_PROOF/focused.junit.xml" \
+            scripts/astrid-release/release.test.mjs scripts/astrid-release/workflow.test.mjs \
+            scripts/installer/manifest.test.mjs
+      - name: Retain Plan 61 evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p61-real-macos-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.P61_PROOF }}
+          if-no-files-found: error
+          retention-days: 14
+
   # Install tuple (manifest minus release/required, plus public/install*) and release move together:
   # a tuple change needs release +1 exactly; otherwise release is unchanged. Base is the PR base or the push's before SHA.
   release-guard:

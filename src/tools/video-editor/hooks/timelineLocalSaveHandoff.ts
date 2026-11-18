@@ -38,6 +38,11 @@ export interface TimelineLocalSaveHandoff {
   flush(): Promise<TimelineSaveReceipt>;
   /** The durable local save session's state, when the owner has one. */
   status?(): string | undefined;
+  /**
+   * Leave a refused save. `latest` drops the rejected change and its dependants; `keep` resends them on the
+   * latest head. Resolves once the owner is saved and the next edit can save; throws if it is not.
+   */
+  discharge?(mode: 'latest' | 'keep'): Promise<void>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
   canUndo(): boolean;
@@ -47,7 +52,7 @@ export interface TimelineLocalSaveHandoff {
 }
 
 /** Scoped editors supply their own verified physical-image join and durable owner. */
-export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status'>;
+export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status' | 'discharge'>;
 export interface TimelinePersistenceBinding {
   readonly provider: DataProvider;
   readonly timelineId: string;
@@ -1004,6 +1009,21 @@ export function createTimelineLocalSaveHandoff(options: {
         if (['blocked', 'error', 'recovery'].includes(state.status)) refuse(message);
         throw error;
       }
+    },
+    async discharge(mode) {
+      let failure: unknown;
+      try { await options.session.discharge(mode); } catch (error) { failure = error; }
+      const state = options.session.getState();
+      if (state.status !== 'saved') {
+        const message = object(state.error) && typeof state.error.message === 'string' ? state.error.message
+          : failure instanceof Error ? failure.message : 'The change is still not saved';
+        if (state.status === 'conflict') throw new TimelineVersionConflictError(message);
+        refuse(message);
+      }
+      // The session document is canonical again (or the saved result); the next capture authors from it.
+      document = structuredClone(options.session.getDocument()) as unknown as CanonicalDocument;
+      authoringSource = structuredClone(source);
+      sourceChecked = false;
     },
     remoteHistoryAvailable,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,

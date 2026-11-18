@@ -150,7 +150,6 @@ async function dispatchTimelineDrop({
       const assetDurationSeconds = await resolveFinalVideoDurationSecondsWithRetry(finalVideo, dataRef.current?.registry.assets);
       const durationContract = getFinalVideoDropDurationContract(assetDurationSeconds);
       const registrationPlan = planFinalVideoGenerationAssetRegistration({
-        generationId: finalVideo.id,
         imageUrl: finalVideo.location,
         thumbUrl: finalVideo.thumbnailUrl ?? finalVideo.location,
         assetDurationSeconds: durationContract.assetDurationSeconds,
@@ -304,6 +303,7 @@ async function dispatchTimelineDrop({
       if (!imageUrl) continue;
       const registrationPlan = planGenerationAssetRegistration({
         generationId: shotImage.generation_id,
+        ...(shotImage.primary_variant_id ? { variantId: shotImage.primary_variant_id } : {}),
         variantType: 'image',
         imageUrl,
         thumbUrl: getThumbnailUrl(shotImage) ?? imageUrl,
@@ -333,6 +333,7 @@ async function dispatchTimelineDrop({
       const generationData = {
         assetId: registrationPlan.assetId,
         generationId: shotImage.generation_id,
+        ...(shotImage.primary_variant_id ? { variantId: shotImage.primary_variant_id } : {}),
         variantType: 'image',
         imageUrl,
         thumbUrl: getThumbnailUrl(shotImage) ?? imageUrl,

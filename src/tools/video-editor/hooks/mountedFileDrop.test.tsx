@@ -332,23 +332,36 @@ async function intents(env: Env) {
   return (await env.outboxes.list(env.scope))[0].intents.map(intent => (intent.payload as { commands: Array<{ args: { media: MediaSelection; row: { at: number } } }> }).commands[0].args);
 }
 
-it('reuses the registry entry of the same media object even when it differs from the upload', async () => {
-  // The registry already holds this media object, as an earlier drop's commit left it.
-  const env = await environment(false, false, false, { [media.asset]: { file: 'served/earlier.png', type: 'image/png',
-    media_id: media.object_id, content_sha256: media.object_id, generationId: media.generation_id, variantId: media.variant_id,
-    extra: 'added by an earlier commit' } });
+it('reuses a registry entry that is exactly what the Agent writes for the object', async () => {
+  const exact = { media_id: media.object_id, type: 'image', generationId: media.generation_id, variantId: media.variant_id };
+  const env = await environment(false, false, false, { [media.asset]: exact });
   addPlaceholder(env, 'uploading-a');
   expect(drop(env, preparedFor(env), 'uploading-a')).toBe(true);
   expect(env.toast).not.toHaveBeenCalled();
   const current = env.mounted.result.current.commit.dataRef.current!;
-  expect(current.registry.assets[media.asset]).toMatchObject({ file: 'served/earlier.png', extra: 'added by an earlier commit' });
+  expect(current.registry.assets[media.asset]).toEqual(exact);
   expect(Object.keys(current.registry.assets).filter(key => key.startsWith(media.asset))).toEqual([media.asset]);
   expect(current.rows.flatMap(row => row.actions).some(action => action.id === 'uploading-a')).toBe(false);
   expect((await intents(env)).map(args => args.media)).toEqual([media]);
 });
 
-it('drops the same file twice, reusing one asset', async () => {
-  const env = await environment(false);
+it('gives the same object a new key when the stored entry differs from what the Agent would write', async () => {
+  const stored = { file: 'served/earlier.png', type: 'image/png', media_id: media.object_id, content_sha256: media.object_id,
+    generationId: media.generation_id, variantId: media.variant_id, extra: 'added by an earlier commit' };
+  const env = await environment(false, false, false, { [media.asset]: stored });
+  addPlaceholder(env, 'uploading-a');
+  expect(drop(env, preparedFor(env), 'uploading-a')).toBe(true);
+  expect(env.toast).not.toHaveBeenCalled();
+  const current = env.mounted.result.current.commit.dataRef.current!;
+  const added = Object.keys(current.registry.assets).filter(key => key.startsWith(`${media.asset}-`));
+  expect(added).toHaveLength(1);
+  expect(current.registry.assets[media.asset]).toEqual(stored);
+  expect((await intents(env)).map(args => args.media)).toEqual([{ ...media, asset: added[0] }]);
+});
+
+it('drops the same file twice, reusing one asset once the registry holds the Agent binding', async () => {
+  const env = await environment(false, false, false, { [media.asset]: { media_id: media.object_id, type: 'image',
+    generationId: media.generation_id, variantId: media.variant_id } });
   addPlaceholder(env, 'uploading-a', 10);
   expect(drop(env, preparedFor(env), 'uploading-a', 10)).toBe(true);
   addPlaceholder(env, 'uploading-b', 20);

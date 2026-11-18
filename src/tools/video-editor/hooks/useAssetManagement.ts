@@ -343,19 +343,29 @@ export function useAssetManagement({
       if (Boolean(media.generation_id) !== Boolean(media.variant_id)) return decline('generation-variant-incomplete', 'provisioned-asset');
       if (prepared.entry.media_id !== media.object_id || prepared.entry.generationId !== (media.generation_id || undefined)
         || prepared.entry.variantId !== (media.variant_id || undefined)) return decline('media-entry-mismatch', 'provisioned-asset');
-      // The registry key is a name, not an identity. The same media object under that key is reused as it
-      // stands (the registry may carry fields the upload does not); a different object gets a key of its own.
-      const sameObject = (entry: typeof existing) => entry?.media_id === media.object_id
-        || (entry as { content_sha256?: string } | undefined)?.content_sha256 === media.object_id;
-      if (existing && !sameObject(existing)) {
+      // The registry key is a name, not an identity. An existing key is reused only when its entry is exactly
+      // what the Agent's clip.add-media writes for this object (media_id, type, and both ids or neither, with
+      // no other fields); the Agent refuses any other binding as dependency_changed. Otherwise take a new key.
+      const exactBinding = (entry: typeof existing) => {
+        if (!entry) return false;
+        const expected: Record<string, unknown> = { media_id: media.object_id, type: 'image' };
+        if (media.generation_id) expected.generationId = media.generation_id;
+        if (media.variant_id) expected.variantId = media.variant_id;
+        // The upload's own entry already in the local registry is this session's earlier drop of the same
+        // file, still queued: its commit writes the exact binding, so the next drop chains onto it.
+        return canonicalJsonStringify(entry) === canonicalJsonStringify(expected)
+          || canonicalJsonStringify(entry) === canonicalJsonStringify(prepared.entry);
+      };
+      if (existing && !exactBinding(existing)) {
         const suffix = media.object_id.slice('sha256:'.length, 'sha256:'.length + 12);
         let key = `${prepared.assetKey}-${suffix}`;
-        for (let n = 2; current.registry.assets[key] && !sameObject(current.registry.assets[key]); n++) key = `${prepared.assetKey}-${suffix}-${n}`;
+        for (let n = 2; current.registry.assets[key] && !exactBinding(current.registry.assets[key]); n++) key = `${prepared.assetKey}-${suffix}-${n}`;
         prepared = { ...prepared, assetKey: key, mediaSelection: { ...media, asset: key } };
         media = prepared.mediaSelection!;
         existing = current.registry.assets[key];
       }
       // Reusing means placing with the entry the registry already holds, so the document write is the identity.
+      const playableEntry = prepared.entry;
       if (existing) prepared = { ...prepared, entry: existing };
       // A placeholder that is gone is not a reason to refuse while the track exists: place at the drop time.
       const row = current.rows.find(candidate => candidate.id === trackId);
@@ -378,7 +388,7 @@ export function useAssetManagement({
       const target = planAssetDropTarget({ current: local, assetKind: 'visual', trackId,
         selectedTrackId: getSelectedTrackId(), time, duration: 5 });
       if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) return declined('placement');
-      const edit = buildAssetDropEdit({ current: local, assetKey: prepared.assetKey, assetEntry: prepared.entry,
+      const edit = buildAssetDropEdit({ current: local, assetKey: prepared.assetKey, assetEntry: playableEntry,
         trackId: target.trackId, time: target.snappedTime ?? time });
       if (!edit) return declined('placement');
       getApplyEdit()({ type: 'rows', rows: edit.rows, metaUpdates: edit.metaUpdates,

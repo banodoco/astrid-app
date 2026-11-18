@@ -119,6 +119,10 @@ describe('Runtime timeline commit capability', () => {
     await expect(provider.commitTimeline(request(), 'key-p1')).rejects.toThrow('non-identity id_map');
     expect(classifyRuntimeCommitFailure(new ApiError(409, 'conflict', 'conflict', '', { status: 'conflict' }))).toBe('conflict');
     expect(classifyRuntimeCommitFailure(new ApiError(409, 'conflict', 'busy', '', { status: 'refused', reason: 'head_busy' }))).toBe('unknown');
+    // The Runtime's real head contention is typed `refused` with reason stale_head: a conflict to rebase, never a retry of the same base.
+    expect(classifyRuntimeCommitFailure(new ApiError(409, 'conflict', 'prose', '', { status: 'refused', reason: 'stale_head' }))).toBe('conflict');
+    expect(classifyRuntimeCommitFailure(new ApiError(409, 'conflict', 'prose', '', { reason: 'stale_head' }))).toBe('conflict');
+    expect(classifyRuntimeCommitFailure(new ApiError(409, 'conflict', 'stale_head in the prose', '', { status: 'refused' }))).toBe('refused');
     expect(classifyRuntimeCommitFailure(new ApiError(422, 'invalid', 'bad'))).toBe('validation');
     expect(classifyRuntimeCommitFailure(new ApiError(503, 'not_ready', 'unknown'))).toBe('unknown');
   });

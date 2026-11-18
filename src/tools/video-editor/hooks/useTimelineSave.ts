@@ -182,6 +182,12 @@ export function useTimelineSave(
       catch (error) { recordDraftReloadFailure(); throw error; }
     },
     status: () => localOwner.session?.getState().status,
+    async discharge(mode) {
+      // A failed bootstrap has no session and nothing queued to leave.
+      const handoff = await localOwner.ready?.catch(() => undefined);
+      if (localOwner.closed || !handoff) return;
+      await handoff.discharge?.(mode);
+    },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
     canUndo: () => localOwner.handoff?.canUndo() ?? false,
     canRedo: () => localOwner.handoff?.canRedo() ?? false,
@@ -392,11 +398,15 @@ export function useTimelineSave(
         emitTimelineSaveDiagnostic('session-created', () => ({ owner: localOwner, timelineId,
           sessionPresent: true, current: isCurrent(), generation, basis: verified, mounted: localDataRef.current }));
         const owners = session.getState().recoverableOwners;
-        if (owners.length === 1) { localOwner.recovered = true; await session.recover(owners[0]);
+        // Each owner is a separate editor session's retained work; recover them in turn. One that does
+        // not settle stops the rest, which stay retained until the next load.
+        for (const owner of owners) {
+          localOwner.recovered = true;
+          await session.recover(owner);
           emitTimelineSaveDiagnostic('session-recovered', () => ({ owner: localOwner, timelineId,
             current: isCurrent(), generation, sessionPresent: true }));
+          if (session.getState().status !== 'saved') break;
         }
-        else if (owners.length) throw markTimelineSaveRejection(new TimelineSaveError('Multiple local save owners require recovery; drafts retained'), 'owner-recovery-ambiguous', 'TimelineSaveError');
         let initial = verified.initial;
         if (owners.length && session.getState().status === 'saved') {
           initial = await session.flush();
@@ -758,7 +768,7 @@ export function useTimelineSave(
   }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef, localDocumentSave, localOwner]);
 
   const reloadCanonicalFromServer = persistence.reloadFromServer;
-  const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean }) => {
+  const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => {
     await reloadCanonicalFromServer(options);
     const shouldClearRecovery = options?.clearDraft ?? !options?.preserveDraft;
     if (shouldClearRecovery) {

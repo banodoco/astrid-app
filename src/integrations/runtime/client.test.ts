@@ -700,6 +700,8 @@ describe('isRuntimeConflict classification of the Runtime stale-head 409', () =>
 
   it('classifies the exact Runtime body as a conflict', () => {
     expect(isRuntimeConflict(fromBody(RUNTIME_STALE_HEAD_BODY))).toBe(true);
+    expect(isRuntimeConflict(fromBody({ ...RUNTIME_STALE_HEAD_BODY, details: { ...RUNTIME_STALE_HEAD_BODY.details, status: 'refused' } }))).toBe(true);
+    expect(isRuntimeConflict(fromBody({ ...RUNTIME_STALE_HEAD_BODY, details: { status: 'refused', reason: 'head_busy' } }))).toBe(false);
   });
 
   it('classifies by details.reason, not message wording', () => {

@@ -292,6 +292,8 @@ export function isRuntimeConflict(error: unknown): error is ApiError {
   if (!(error instanceof ApiError) || error.status !== 409) return false;
   if (error.code === 'realm_admission_failed' || error.code === 'runtime_unhealthy') return false;
   if (error.details?.status === 'conflict') return true;
+  // The stale-head 409 is typed `refused` too; its reason, not its status, says it is head contention.
+  if (error.code === 'conflict' && error.details?.reason === 'stale_head') return true;
   if (error.details?.status === 'refused') return false;
   if (error.code === 'timeline_version_conflict' || error.code === 'stale_write') return true;
   // Classify on structure, never on message wording. The Runtime's stale-head
@@ -322,6 +324,8 @@ export function classifyRuntimeCommitFailure(error: unknown): RuntimeCommitFailu
   // These typed refusals leave the exact request retryable, including 409
   // head contention. Keep them in the session's unknown-outcome retry lane.
   if (error.details?.reason === 'head_busy' || error.details?.reason === 'runtime_unavailable') return 'unknown';
+  // Head contention: the base moved, so the request is stale and a rebase onto the new head can resend it.
+  if (error.status === 409 && error.details?.reason === 'stale_head') return 'conflict';
   const status = error.details?.status;
   if (status === 'conflict') return 'conflict';
   if (status === 'refused') return 'refused';

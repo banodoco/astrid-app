@@ -902,7 +902,10 @@ export function createTimelineLocalSaveHandoff(options: {
             // resolve that path to the top-level raw registry when no mirror exists.
             if (Object.prototype.hasOwnProperty.call(config, 'registry')
               && (!object(config.registry) || !same(config.registry, parent.registry))) refuse('contradictory parent registry mirror', 'registry-mirror-mismatch');
-            reads!.push(readPath(parent.registry, ['assets', item.asset], ['config', 'registry']));
+            // The edit consults only the asset's source duration (getClipTimelineDuration -> registry duration), or
+            // that the entry exists. Reading the whole entry would conflict whenever the Runtime holds it in a
+            // different form than this optimistic copy (e.g. written by a queued predecessor and then normalised).
+            reads!.push(readPath(parent.registry, ['assets', item.asset, 'duration'], ['config', 'registry']));
           };
           assetRead(clip);
           if (gestureBasis.kind === 'split') {

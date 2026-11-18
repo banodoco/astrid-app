@@ -267,6 +267,7 @@ export interface UseTimelinePersistenceResult {
    */
   retryPendingSave: () => void;
   clearSaveFailure: () => void;
+  noteSaveProgress: () => void;
   /** Synchronous guard for recovery actions that must not race canonical reload. */
   canonicalReloadInProgressRef: MutableRefObject<boolean>;
   /**
@@ -579,6 +580,20 @@ export function useTimelinePersistence({
     if (watchdogTimer.current) {
       return;
     }
+    watchdogTimer.current = setTimeout(() => {
+      watchdogTimer.current = null;
+      setWatchdogTripped(true);
+    }, WATCHDOG_GRACE_MS);
+  }, []);
+
+  /**
+   * An intent was accepted: the save is making progress. The watchdog measures time without progress, so a long
+   * burst of edits that keep landing never shows "not confirmed"; only a save with no accept for the grace
+   * period does.
+   */
+  const noteSaveProgress = useCallback(() => {
+    if (!watchdogTimer.current) return;
+    clearTimeout(watchdogTimer.current);
     watchdogTimer.current = setTimeout(() => {
       watchdogTimer.current = null;
       setWatchdogTripped(true);
@@ -1931,6 +1946,7 @@ export function useTimelinePersistence({
     retryWatchdog,
     retryPendingSave,
     clearSaveFailure,
+    noteSaveProgress,
     canonicalReloadInProgressRef: reloadInProgressRef,
     /** Bundle from the last server reload; consumed downstream ([V2-B4]). */
     loadedBundleRef,

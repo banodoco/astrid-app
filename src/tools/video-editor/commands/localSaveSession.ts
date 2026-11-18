@@ -53,6 +53,8 @@ interface Options {
   /** Build with the upstream editor, then return a synchronous adoption callback. */
   prepareDisplay(basis: TimelineCommandBasis, draft?: OutboxJson): Promise<{ document: OutboxJson; adopt(): void }>;
   changed(state: LocalSaveState): void;
+  /** Called each time an intent is accepted: the save is making progress. */
+  progress?(): void;
 }
 
 const same = (a: OutboxJson, b: OutboxJson): boolean => {
@@ -244,14 +246,16 @@ export async function createLocalSaveSession(options: Options) {
         if (at !== generation) continue;
         if (await rollback()) return;
         if (closed || writeError || at !== generation) return;
-        if ((record.accepted && record.accepted.intentId !== adoptedAcceptance) || (!record.intents.length && !record.accepted)) {
-          // Runtime owns suffix revalidation. Install its complete landed closure
-          // before sending the next ORIGINAL intent, never execute/recapture it here.
+        // While edits are still queued, the screen keeps showing the person's own latest document: an accept only
+        // advances the base the next record is sent on (`basis`, above). The server's document is taken when the
+        // queue is empty. Runtime owns suffix revalidation, so the next ORIGINAL intent is sent as stored and never
+        // recaptured here; nothing about the send reads the screen. (Plan 63 CC-5b / Plan 18 TL-5 make this exact.)
+        if (!record.intents.length && (!record.accepted || record.accepted.intentId !== adoptedAcceptance)) {
           const prepared = await options.prepareDisplay(clone(basis));
           if (closed || writeError || at !== generation) return;
           displayBasis = clone(basis);
           document = toOutboxJson(prepared.document);
-          replaying = record.intents.length > 0;
+          replaying = false;
           prepared.adopt();
           adoptedAcceptance = record.accepted?.intentId;
         }
@@ -311,6 +315,7 @@ export async function createLocalSaveSession(options: Options) {
           const result = record.accepted.value as unknown as TimelineCommitResult;
           basis = { head: result.accepted, canonicalDocument: result.canonicalDocument, graph: result.graph };
           delete state.notice;
+          options.progress?.();
         }
         if (await rollback()) return;
         if (record.pending) {

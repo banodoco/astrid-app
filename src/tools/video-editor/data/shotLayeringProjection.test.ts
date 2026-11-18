@@ -87,25 +87,29 @@ describe('shared Runtime shot-layering projection cases', () => {
     const testCase = layeringFixture.cases.find((entry) => entry.id === caseId)!;
     const { config } = projectCase(testCase);
     const visual = caseId === 'child-visual-parent-audio';
-    // App derives the occurrence extent from child content (4s); the shared
-    // fixture's stored 2s placement remains provenance, not a playback cap.
+    // source_offset is the window origin: a child sits at start - offset + its own time, and the head of the shot
+    // (offset 350 ms) is cut away, so a child's media starts 0.35 s * speed later. The window ends at the authored 2 s.
     const expected = [
-      { id: 'trim-inherited', from: visual ? 0.475 : 0.125, to: visual ? 2.475 : 2.125, hold: undefined, speed: visual ? 1.5 : undefined, durationMs: 2000, timelineDuration: visual ? 2 / 1.5 : 2 },
-      { id: 'hold-inherited', from: visual ? 0.475 : 0.125, to: undefined, hold: 4, speed: visual ? 1.5 : undefined, durationMs: 4000, timelineDuration: visual ? 4 / 1.5 : 4 },
-      { id: 'trim-child-speed', from: visual ? 0.475 : 0.125, to: visual ? 4.475 : 4.125, hold: undefined, speed: 2, durationMs: 4000, timelineDuration: 2 },
-      { id: 'hold-child-speed', from: visual ? 0.475 : 0.125, to: undefined, hold: 4, speed: 2, durationMs: 4000, timelineDuration: 2 },
-      { id: 'compatible-audio', from: 0.125, to: 2.125, hold: undefined, speed: undefined, durationMs: 2000, timelineDuration: 2 },
+      { id: 'trim-inherited', from: visual ? 0.65 : 0.475, to: 2.125, hold: undefined, speed: visual ? 1.5 : undefined, durationMs: 2000, timelineDuration: visual ? 0.98333333 : 1.65 },
+      { id: 'hold-inherited', from: visual ? 0.65 : 0.475, to: undefined, hold: visual ? 3 : 2, speed: visual ? 1.5 : undefined, durationMs: 4000, timelineDuration: 2 },
+      { id: 'trim-child-speed', from: 0.825, to: 4.125, hold: undefined, speed: 2, durationMs: 4000, timelineDuration: 1.65 },
+      { id: 'hold-child-speed', from: 0.825, to: undefined, hold: 3.3, speed: 2, durationMs: 4000, timelineDuration: 1.65 },
+      { id: 'compatible-audio', from: 0.475, to: 2.125, hold: undefined, speed: undefined, durationMs: 2000, timelineDuration: 1.65 },
     ];
     for (const { id, durationMs, timelineDuration, ...timing } of expected) {
       const clip = config.clips.find((entry) => entry.id === `occ-collision:${id}`)!;
       expect(clip).toBeDefined();
       expect(clip.at).toBe(1);
-      expect({ from: clip.from, to: clip.to, hold: clip.hold, speed: clip.speed }).toStrictEqual(timing);
+      for (const key of ['from', 'to', 'hold'] as const) {
+        if (timing[key] === undefined) expect(clip[key]).toBeUndefined();
+        else expect(clip[key]).toBeCloseTo(timing[key]!, 6);
+      }
+      expect(clip.speed).toBe(timing.speed);
       expect(getClipTimelineDuration(clip)).toBeCloseTo(timelineDuration, 6);
       expect(clip.app?.canonicalTiming).toStrictEqual({
         sourceOffsetMs: 350, occurrenceSpeed: 1.5, speed: timing.speed ?? 1,
         gain: 1, muted: false, durationMs, occurrenceTrackId: 'picture',
-        occurrenceStartMs: 1000, occurrenceDurationMs: 4000, storedOccurrenceDurationMs: 2000,
+        occurrenceStartMs: 1000, occurrenceDurationMs: 2000, storedOccurrenceDurationMs: 2000,
       });
     }
     expect(config.clips.find((clip) => clip.id === 'parent-clip')).toMatchObject({ at: 0.5, hold: 1, track: 'shared' });

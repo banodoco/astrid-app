@@ -405,6 +405,8 @@ export async function createLocalSaveSession(options: Options) {
     }
   }
 
+  // Rows that can never be sent (another realm, or empty and unheld) are removed before anything is listed.
+  await storage.prune(options.scope).catch(() => {});
   const owners = (await storage.list(options.scope)).filter((owner) => owner.intents.length || owner.pending);
   state.recoverableOwners = owners.map((owner) => owner.ownerId);
   if (owners.length) publish('recovery');
@@ -433,8 +435,9 @@ export async function createLocalSaveSession(options: Options) {
       if (save.documentIntent) {
         save.documentIntent = toOutboxJson({ ...save.documentIntent as Record<string, OutboxJson>, basis: authoredBasis });
       }
+      // No read-back here: it re-transfers the whole record (every queued document) once per edit, and pump reads
+      // the record itself before anything is sent.
       await box!.append(toOutboxJson(save), authoredBasis);
-      record = await box!.read();
     });
     writes = write.catch((error) => {
       writeError = error;

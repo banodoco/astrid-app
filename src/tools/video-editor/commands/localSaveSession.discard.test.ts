@@ -173,4 +173,43 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
       vi.useRealTimers();
     }
   });
+
+  describe('rows a rebuilt stack leaves behind (another realm, or empty)', () => {
+    const oldScope = { ...scope, realmId: 'old-realm' };
+    const rows = async (env: ReturnType<typeof world>['env']) =>
+      [...await env.outboxes.list(oldScope), ...await env.outboxes.list(scope)];
+
+    async function leaveRows(env: ReturnType<typeof world>['env']) {
+      // An edit retained under the old realm, plus two empty owners left by earlier editor sessions.
+      await env.outboxes.create(oldScope, async (box) => { await box.append({ kind: 'stale' }, { head: h0 }); });
+      await env.outboxes.create(oldScope, async () => undefined);
+      await env.outboxes.create(scope, async () => undefined);
+      await env.outboxes.create(scope, async () => undefined);
+    }
+
+    it('are deleted when the session starts, so a stale row never becomes a recoverable owner', async () => {
+      const { env, mount } = world();
+      await leaveRows(env);
+      expect((await rows(env)).length).toBe(4);
+      const session = await mount();
+      expect(session.getState().status).toBe('saved');
+      expect(session.getState().recoverableOwners).toEqual([]);
+      // Only the session's own fresh owner is left.
+      expect(await rows(env)).toHaveLength(1);
+      await session.dispose();
+    });
+
+    it('are all deleted by Discard whatever realm wrote them', async () => {
+      const { env, mount } = world();
+      const session = await mount();
+      await leaveRows(env);
+      env.send.mockRejectedValue(failures.refused());
+      await env.append(session);
+      await expect(session.flush()).rejects.toThrow();
+      await session.discharge('latest');
+      const left = await rows(env);
+      expect(left.filter((row) => row.realmId === 'old-realm' || row.intents.length || row.pending)).toEqual([]);
+      expect(session.getState().status).toBe('saved');
+    });
+  });
 });

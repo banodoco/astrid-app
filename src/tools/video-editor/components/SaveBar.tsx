@@ -31,7 +31,8 @@ export function SaveBar({ bar, onTryAgain, onDiscard }: {
     <div role="alert" data-save-bar={bar.kind} aria-busy={running} className={`flex items-center justify-between gap-3 border-b px-3 py-2 text-sm ${tone}`}>
       <span>{bar.headline}{since ? ` Since ${since}.` : ''}</span>
       <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" disabled={running} onClick={() => run(onTryAgain)}>Try again</Button>
+        {bar.action === 'none' ? null
+          : <Button type="button" size="sm" variant="outline" disabled={running} onClick={() => run(onTryAgain)}>Try again</Button>}
         <Button type="button" size="sm" variant="outline" disabled={running} onClick={() => run(onDiscard)}>Discard</Button>
       </div>
     </div>

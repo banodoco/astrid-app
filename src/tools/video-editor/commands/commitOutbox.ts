@@ -256,20 +256,55 @@ export function createCommitOutbox(options: {
    * for: its next access finds no row (or a different generation) and throws "Stale outbox claim".
    */
   async function discardScope(scope: OutboxScope): Promise<void> {
-    const { realmId, actorId, projectId, timelineId } = scope;
-    scopeKey({ realmId, actorId, projectId, timelineId }, '_');
+    const { projectId, timelineId } = scope;
+    scopeKey({ ...scope }, '_');
+    // Every row of this project and timeline, whatever realm or actor wrote it: a row from a realm that no
+    // longer exists can never be sent, and is exactly what a stack rebuild leaves behind.
     await transaction<void>('readwrite', (store, finish) => {
       const request = store.getAll();
       request.addEventListener('success', () => {
         for (const record of request.result as OutboxRecord[]) {
-          if (record.scope.realmId === realmId && record.scope.actorId === actorId
-            && record.scope.projectId === projectId && record.scope.timelineId === timelineId) {
+          if (record.scope.projectId === projectId && record.scope.timelineId === timelineId) {
             store.delete(scopeKey(record.scope, record.ownerId));
           }
         }
         finish(undefined);
       });
     });
+  }
+
+  const hasNothingToSend = (record: OutboxRecord) => !record.intents.length && !record.pending
+    && !record.placementContinuations?.length;
+
+  /**
+   * On session start: delete this timeline's rows that can never be sent. That is every row written under another
+   * realm, and every empty row of this realm that no live editor holds (a live editor's own empty owner holds its
+   * lock, so it is skipped and never fenced).
+   */
+  async function prune(scope: OutboxScope): Promise<void> {
+    const { realmId, projectId, timelineId } = scope;
+    scopeKey({ ...scope }, '_');
+    const rows = await transaction<OutboxRecord[]>('readonly', (store, finish) => {
+      const request = store.getAll();
+      request.addEventListener('success', () => finish((request.result as OutboxRecord[]).map(detached)));
+    });
+    for (const record of rows) {
+      if (record.scope.projectId !== projectId || record.scope.timelineId !== timelineId) continue;
+      if (record.scope.realmId === realmId && !hasNothingToSend(record)) continue;
+      const key = scopeKey(record.scope, record.ownerId);
+      try {
+        await lock(`${DATABASE}:${key}`, () => transaction<void>('readwrite', (store, finish) => {
+          const read = store.get(key);
+          read.addEventListener('success', () => {
+            const current = read.result as OutboxRecord | undefined;
+            if (current && current.generation === record.generation) store.delete(key);
+            finish(undefined);
+          });
+        }));
+      } catch {
+        // Held by a live editor: not ours to remove.
+      }
+    }
   }
 
   async function own<T>(
@@ -590,6 +625,7 @@ export function createCommitOutbox(options: {
   return {
     list,
     discardScope,
+    prune,
     create: <T>(scope: OutboxScope, work: (outbox: ClaimedOutbox, ownerId: string) => Promise<T>) =>
       own(scope, crypto.randomUUID(), true, work),
     recover: <T>(scope: OutboxScope, ownerId: string, work: (outbox: ClaimedOutbox) => Promise<T>) =>

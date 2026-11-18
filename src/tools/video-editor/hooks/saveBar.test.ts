@@ -21,6 +21,11 @@ describe('saveBarInput: the headline and the action Try again runs come from one
     ['a conflict outside the queue', { conflictExhausted: true }, 'refused', 'This timeline changed somewhere else.', 'conflict'],
     ['an unconfirmed save', { watchdogTripped: true }, 'waiting', 'The save has not been confirmed. Your changes are kept.', 'watchdog'],
     ['a recovered draft', { recoveryDraft: { updatedAt: '2026-11-18T10:16:00Z' } }, 'recovered', 'You have unsaved changes.', 'draft'],
+    ['a draft whose base no longer exists offers only Discard', { recoveryDraft: { updatedAt: '2026-11-18T11:10:00Z', baseGone: true } },
+      'refused', 'These changes were made on a version that no longer exists.', 'none'],
+    ['a failed Try again on a recovered draft shows its reason, not the generic headline',
+      { recoveryDraft: { updatedAt: '2026-11-18T11:10:00Z' }, saveError: 'Local document save retained: original verified authoring head is unavailable' },
+      'refused', 'original verified authoring head is unavailable', 'draft'],
     ['a reload failure keeps its own reason', { local: local('saved'), saveError: 'The recovery draft changed during reload; it was kept for safety.' },
       'refused', 'The recovery draft changed during reload; it was kept for safety.', 'pending'],
   ] as const)('%s', (_name, patch, kind, headline, action) => {

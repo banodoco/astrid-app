@@ -1701,7 +1701,8 @@ describe('useTimelineSave — recovered draft durability', () => {
       expect(await createCommitOutbox().list({ ...scope, realmId: 'stale-realm', actorId: 'stale-actor' })).toEqual([]);
       expect(harness.hook.result.current.originalLocalSaveBasis).toMatchObject({ status: 'ready', value: { initial } });
       const owners = await createCommitOutbox().list(scope);
-      expect(owners).toHaveLength(boundary === 'claim' ? 2 : 1);
+      // The cancelled claim's empty owner is removed when the next session starts, so one owner remains.
+      expect(owners).toHaveLength(1);
       const currentOwner = owners.find(owner => owner.ownerId === harness.hook.result.current.localSaveState?.ownerId)!;
       expect(currentOwner).toBeDefined();
       expect(owners.every(owner => owner.intents.length === 0)).toBe(true);

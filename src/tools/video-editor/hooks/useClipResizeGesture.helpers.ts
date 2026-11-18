@@ -299,6 +299,7 @@ export const resolveClipEdgeResizeContext = (
         context: {
           kind: 'group',
           shotId: groupForAction.shotId,
+          ...(groupForAction.canonicalIdentity ? { occurrenceId: groupForAction.canonicalIdentity.occurrenceId } : {}),
           trackId: groupForAction.rowId,
           draggedClipId: action.id,
           draggedIndex,

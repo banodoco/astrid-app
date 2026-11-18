@@ -36,6 +36,8 @@ export interface FreeClipEdgeResizeContext {
 export interface GroupClipEdgeResizeContext {
   kind: 'group';
   shotId: string;
+  /** Set for a canonical shot occurrence: dragging its own block edge trims the shot (`occurrence.trim`). */
+  occurrenceId?: string;
   trackId: string;
   draggedClipId: string;
   draggedIndex: number;

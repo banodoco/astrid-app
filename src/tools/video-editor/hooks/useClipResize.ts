@@ -327,6 +327,10 @@ export function useClipResize({
         };
       }
 
+      // The shot's own block edge is an occurrence trim: the Runtime derives its start, source offset and length
+      // from the edge time. The rows edit above is only the preview. A child clip's edge stays a rows edit.
+      const trimmedOccurrenceId = session.context.occurrenceId === session.clipId ? session.context.occurrenceId : undefined;
+      const edgeSeconds = session.edge === 'left' ? primaryUpdate.start : primaryUpdate.end;
       applyEdit({
         type: 'rows',
         rows: nextRows,
@@ -337,7 +341,14 @@ export function useClipResize({
           overlapMetaPatches,
           perClipMetaUpdates,
         ),
-      }, { transactionId });
+      }, {
+        transactionId,
+        ...(trimmedOccurrenceId ? { gestureBasis: {
+          kind: 'occurrence-trim' as const, occurrenceId: trimmedOccurrenceId,
+          edge: session.edge === 'left' ? 'start' as const : 'end' as const,
+          toMs: Math.round(edgeSeconds * 1000), config: current.config, registry: current.registry,
+        } } : {}),
+      });
 
       clearResizeTracking(session.clipId);
       return;

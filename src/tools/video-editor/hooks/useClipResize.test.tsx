@@ -455,6 +455,37 @@ describe('useClipResize — unified clip-edge commit path', () => {
     expectRowBounds(mutation.rows, 'V2', 'effect-1', { start: 5, end: 20 });
   });
 
+  it.each([
+    ['right', 'c', 3.5, { edge: 'end', toMs: 3500 }],
+    ['left', 'a', 0.5, { edge: 'start', toMs: 500 }],
+  ] as const)('sends the shot\'s own %s edge (%s) as an occurrence trim, with the rows edit as its preview', (edge, clipId, time, expected) => {
+    const data = makeData({ groupClipIds: ['a', 'b', 'c'] });
+    const dataRef = { current: data };
+    const applyEdit = vi.fn<Parameters<TimelineApplyEdit>>();
+    const { result } = renderHook(() => useClipResize({ dataRef, applyEdit }));
+    const row = getRow(data.rows, 'V1');
+    const session = buildSession({ rowId: 'V1', clipId, edge,
+      context: { ...buildGroupContext(data.rows, 'V1', ['a', 'b', 'c'], clipId), occurrenceId: clipId } });
+    act(() => { result.current.onActionResizeStart({ action: getAction(data.rows, 'V1', clipId), row, dir: edge }); });
+    act(() => { result.current.onClipEdgeResizeEnd({ session, updates: applyClipEdgeMove(session.context, session.edge, time).updates, cancelled: false }); });
+    const [mutation, options] = applyEdit.mock.calls[0];
+    expect(mutation.type).toBe('rows');
+    expect(options?.gestureBasis).toMatchObject({ kind: 'occurrence-trim', occurrenceId: clipId, ...expected });
+  });
+
+  it('keeps a child clip edge inside a shot as a plain rows edit', () => {
+    const data = makeData({ groupClipIds: ['a', 'b', 'c'] });
+    const dataRef = { current: data };
+    const applyEdit = vi.fn<Parameters<TimelineApplyEdit>>();
+    const { result } = renderHook(() => useClipResize({ dataRef, applyEdit }));
+    const row = getRow(data.rows, 'V1');
+    const session = buildSession({ rowId: 'V1', clipId: 'b', edge: 'right',
+      context: { ...buildGroupContext(data.rows, 'V1', ['a', 'b', 'c'], 'b'), occurrenceId: 'a' } });
+    act(() => { result.current.onActionResizeStart({ action: getAction(data.rows, 'V1', 'b'), row, dir: 'right' }); });
+    act(() => { result.current.onClipEdgeResizeEnd({ session, updates: applyClipEdgeMove(session.context, session.edge, 0.5).updates, cancelled: false }); });
+    expect(applyEdit.mock.calls[0][1]?.gestureBasis).toBeUndefined();
+  });
+
   it('commits group left-edge resize on first clip, shifting nothing before it', () => {
     const data = makeData({ groupClipIds: ['a', 'b', 'c'] });
     const dataRef = { current: data };

@@ -27,7 +27,9 @@ export interface TimelineSaveSource {
 export type TimelineGestureReadBasis = {
   config: TimelineConfig;
   registry: AssetRegistry;
-} & ({ kind: 'track-label'; trackId: string; label: string } | ({ clipId: string } & ({ kind: 'split'; timeSeconds: number } | { kind: 'move'; trackId: string } | {
+} & ({ kind: 'track-label'; trackId: string; label: string }
+  /** A shot's own edge: intent only. The Runtime's `occurrence.trim` derives start, source offset and length from it. */
+  | { kind: 'occurrence-trim'; occurrenceId: string; edge: 'start' | 'end'; toMs: number } | ({ clipId: string } & ({ kind: 'split'; timeSeconds: number } | { kind: 'move'; trackId: string } | {
   kind: 'trim'; patch: Partial<Pick<TimelineConfig['clips'][number], 'from' | 'to' | 'hold' | 'speed'>>;
 } | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext })));
 
@@ -331,9 +333,21 @@ export function createTimelineLocalSaveHandoff(options: {
           || (Array.isArray(parent.occurrences) && parent.occurrences.length);
         const parentGesture = gestureBasis?.kind === 'move' || gestureBasis?.kind === 'transition-clear';
         const trackLabelGesture = gestureBasis?.kind === 'track-label';
-        if (hasChildren && !parentGesture && !trackLabelGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
+        if (hasChildren && !parentGesture && !trackLabelGesture && gestureBasis?.kind !== 'occurrence-trim' && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuse('child ownership/fork mapping is unavailable', 'child-ownership-unavailable');
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
+        if (gestureBasis?.kind === 'occurrence-trim') {
+          // Intent only: the Runtime owns what a trim means (anchor, bounds, neighbours). This handoff proves nothing about
+          // the editor's preview; it sends the command and the accepted head replaces the display on adoption.
+          const { occurrenceId, edge, toMs } = gestureBasis;
+          const rows = Array.isArray(parent.occurrences) ? parent.occurrences.filter(row => object(row) && row.occurrence_id === occurrenceId) : [];
+          if (rows.length !== 1) refuse('the shot being trimmed is not on this timeline');
+          if ((edge !== 'start' && edge !== 'end') || !Number.isInteger(toMs) || toMs < 0) refuse('the shot edge was dropped at an invalid time');
+          const command: EditCommand = { schema_version: 1, op: 'occurrence.trim', version: '1', select: `occurrence:${occurrenceId}`,
+            args: { occurrence_id: occurrenceId, edge, to_ms: toMs }, intent: { ownership: 'occurrence' } };
+          return options.session.append({ before: toOutboxJson(before), after: toOutboxJson(before),
+            label: 'Trim shot', commands: [command], reads: [] });
+        }
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;

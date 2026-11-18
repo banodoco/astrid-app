@@ -72,10 +72,10 @@ def stopped(dest):
             raise ValueError('destination ' + path.name + ' pid ' + str(pid) + ' is still alive')
         if record.get('realm_root'):
             roots.add(Path(record['realm_root']))
+    if any(not root.is_absolute() for root in roots):
+        raise ValueError('destination realm ownership path is not absolute')
     with ExitStack() as locks:
-        for root in sorted(roots):
-            if not root.is_absolute() or root.resolve() != root:
-                raise ValueError('destination realm ownership path is not canonical')
+        for root in sorted({path.resolve() for path in roots}):
             if not root.exists():
                 continue
             lock_fd(root, locks, 'destination realm admission lock held; stop it first')

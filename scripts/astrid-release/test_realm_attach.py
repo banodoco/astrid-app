@@ -306,6 +306,21 @@ while not ready.exists():
         self.assertFalse(self.copied.exists())
         self.assertFalse((self.root / "attach.json").exists())
 
+    def test_catalog_alias_resolves_to_the_same_realm_owner_lock(self):
+        alias = self.root / "dest-alias"
+        alias.symlink_to(self.dest, target_is_directory=True)
+        catalog = self.dest / "runtime/catalog.json"
+        value = json.loads(catalog.read_text())
+        value["realms"][0]["data_root"] = str(alias / "runtime/realms" / FRESH)
+        catalog.write_text(json.dumps(value))
+        original = catalog.read_bytes()
+        source = fingerprint(self.live)
+        result = self.snapshot()
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(json.loads((self.root / "attach.json").read_text())["status"], "configured_attach")
+        self.assertEqual((self.dest / "runtime/catalog.json.pre-realm-snapshot").read_bytes(), original)
+        self.assertEqual(fingerprint(self.live), source)
+
 
 if __name__ == "__main__":
     print("RB-3 mode: " + ("portable logic (APFS and CLI adapters)" if PORTABLE else "native macOS/APFS"), flush=True)

@@ -768,7 +768,7 @@ export function useTimelineSave(
   }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef, localDocumentSave, localOwner]);
 
   const reloadCanonicalFromServer = persistence.reloadFromServer;
-  const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean }) => {
+  const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => {
     await reloadCanonicalFromServer(options);
     const shouldClearRecovery = options?.clearDraft ?? !options?.preserveDraft;
     if (shouldClearRecovery) {

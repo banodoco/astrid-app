@@ -42,33 +42,35 @@ describe('a refused save can always be discharged', () => {
     it.each([
       ['typed refused', staleHead()],
       ['reason only', new ApiError(409, 'conflict', 'stale', '', { reason: 'stale_head' })],
-    ])('rebases onto the new head and resends (%s)', async (_name, failure) => {
+    ])('is a conflict that sends nothing more until the user chooses (%s)', async (_name, failure) => {
       const { env, latest, mount } = movedHead();
       const session = await mount();
       await env.append(session);
-      const requests: Array<{ request: CommitRequest; key: string }> = [];
-      env.send.mockImplementation(async (request, key) => {
-        requests.push({ request, key });
-        if (requests.length === 1) throw failure;
-        return env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' });
-      });
-      await expect(session.flush()).resolves.toMatchObject({ head: { revisionId: 'r2' } });
-      expect(requests.map((entry) => entry.request.base_revision_id)).toEqual([h0.revisionId, h1.revisionId]);
-      expect(requests[1].key).not.toBe(requests[0].key);
-      expect(requests[1].request.commands).toEqual(requests[0].request.commands);
+      env.send.mockRejectedValueOnce(failure);
+      await expect(session.flush()).rejects.toThrow();
+      expect(session.getState().status).toBe('conflict');
+      expect(env.send).toHaveBeenCalledTimes(1);
+      // "Keep my changes" resends the original chain on the latest head, with a fresh request identity.
+      env.send.mockImplementation(async () => env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' }));
+      await session.discharge('keep');
       expect(session.getState().status).toBe('saved');
+      const [first, second] = env.send.mock.calls;
+      expect([first[0].base_revision_id, second[0].base_revision_id]).toEqual([h0.revisionId, h1.revisionId]);
+      expect(second[1]).not.toBe(first[1]);
+      expect(second[0].commands).toEqual(first[0].commands);
     });
 
-    it('stops rebasing a head that never settles and leaves the refusal dischargeable', async () => {
-      const { env, mount } = movedHead();
+    it('"use latest" leaves the conflict and the next edit saves', async () => {
+      const { env, latest, mount } = movedHead();
       const session = await mount();
       await env.append(session);
-      env.send.mockRejectedValue(staleHead());
+      env.send.mockRejectedValueOnce(staleHead());
       await expect(session.flush()).rejects.toThrow();
-      expect(env.send).toHaveBeenCalledTimes(6);
-      expect(session.getState().status).toBe('conflict');
       await session.discharge('latest');
       expect(session.getState().status).toBe('saved');
+      env.send.mockImplementation(async () => env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' }));
+      await laterEdit(env, session, latest.canonicalDocument, 'Next');
+      await expect(session.flush()).resolves.toMatchObject({ head: { revisionId: 'r2' } });
     });
   });
 
@@ -168,7 +170,7 @@ describe('a refused save can always be discharged', () => {
   });
 
   describe('two editor sessions left work on the same head', () => {
-    it('recovers both in turn; the second is rebased onto what the first landed', async () => {
+    it('recovers both in turn, each sent on its original base for the Runtime to rebase', async () => {
       const { env, mount } = movedHead();
       const first = await mount();
       const other = await mount();
@@ -184,18 +186,17 @@ describe('a refused save can always be discharged', () => {
 
       const bases: string[] = [];
       env.send.mockReset();
+      // The Agent rebases a request on an older base itself, so the Runtime accepts both.
       env.send.mockImplementation(async (request) => {
         bases.push(request.base_revision_id);
-        // The head is r1 once any save landed; a request still on r0 after that is stale.
-        if (request.base_revision_id === h0.revisionId && bases.length > 1) throw staleHead();
-        return env.accepted(env.pair.document, request.base_revision_id === h0.revisionId ? h1 : { revisionId: 'r2', publicationId: 'p2' });
+        return env.accepted(env.pair.document, bases.length === 1 ? h1 : { revisionId: 'r2', publicationId: 'p2' });
       });
       const reopened = await mount();
       const owners = reopened.getState().recoverableOwners;
       expect(owners).toHaveLength(2);
       for (const owner of owners) await reopened.recover(owner);
       expect(reopened.getState().status).toBe('saved');
-      expect(bases).toEqual([h0.revisionId, h0.revisionId, h1.revisionId]);
+      expect(bases).toEqual([h0.revisionId, h0.revisionId]);
       expect((await env.outboxes.list(scope)).filter((entry) => entry.intents.length || entry.pending)).toEqual([]);
     });
   });

@@ -147,7 +147,7 @@ interface TestHarness {
   replaceSession: (provider: DataProvider, timelineId?: string) => void;
   commitData: ReturnType<typeof vi.fn>;
   scheduleSave: (data: TimelineData) => void;
-  reloadFromServer: () => Promise<void>;
+  reloadFromServer: (options?: { discardRefusedSave?: boolean }) => Promise<void>;
   unmount: () => void;
   eventBus: TimelineEventBus;
   result: { current: UseTimelinePersistenceResult };
@@ -259,7 +259,7 @@ function setup(options?: SetupOptions): TestHarness {
         hook.result.current.scheduleSave(data);
       });
     },
-    reloadFromServer: () => hook.result.current.reloadFromServer(),
+    reloadFromServer: (options) => hook.result.current.reloadFromServer(options),
     unmount: () => { hook.unmount(); },
     eventBus,
     result: hook.result,
@@ -2235,10 +2235,31 @@ describe('useTimelinePersistence — interaction gating', () => {
       await clearTimelineDraft('timeline-1');
       await act(async () => {
         if (mode === 'keep') await harness.result.current.retrySaveAfterConflict();
-        else await harness.reloadFromServer();
+        else await harness.reloadFromServer({ discardRefusedSave: true });
       });
       expect(handoff.discharge).toHaveBeenCalledExactlyOnceWith(mode);
       expect(harness.result.current.isConflictExhausted).toBe(false);
+    } finally {
+      harness.unmount();
+    }
+  });
+
+  it('a reload that is not the "use latest" choice keeps the refused native save and its card', async () => {
+    const handoff = {
+      capture: vi.fn(async () => {}),
+      flush: vi.fn(async () => { throw new TimelineVersionConflictError(); }),
+      discharge: vi.fn(async () => {}),
+      remoteHistoryAvailable: () => false, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(), redo: vi.fn(),
+    } satisfies TimelineLocalSaveHandoff;
+    const harness = setup({ persistenceEnabled: true, localDocumentSave: handoff });
+    try {
+      harness.scheduleSave(makeTimelineData('refused-native-save'));
+      await act(async () => {
+        await expect(harness.result.current.flushPendingSave()).rejects.toThrow(TimelineVersionConflictError);
+      });
+      await act(async () => { await harness.reloadFromServer(); });
+      expect(handoff.discharge).not.toHaveBeenCalled();
     } finally {
       harness.unmount();
     }

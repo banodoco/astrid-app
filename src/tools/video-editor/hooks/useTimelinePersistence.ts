@@ -244,7 +244,7 @@ export interface UseTimelinePersistenceResult {
   /** Reopen resolution for a native refusal already retained in the recovered outbox. */
   restoreRetainedConflict: () => void;
   schemaIncompatible: ReadonlyArray<TimelineSchemaIssue> | null;
-  reloadFromServer: (options?: { clearDraft?: boolean; preserveDraft?: boolean }) => Promise<void>;
+  reloadFromServer: (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => Promise<void>;
   retrySaveAfterConflict: () => Promise<void>;
   isSavingRef: MutableRefObject<boolean>;
   /** Mirrors isConflictExhausted for the poll gate. */
@@ -1598,7 +1598,7 @@ export function useTimelinePersistence({
     });
   }, [getInteractionStateRef, scheduleSaveWithCapture]);
 
-  const reloadFromServer = useCallback((options?: { clearDraft?: boolean; preserveDraft?: boolean }) => {
+  const reloadFromServer = useCallback((options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => {
     // Recovery Retry may still be in its asynchronous read/build phase, outside
     // the save queue. Invalidate it for every canonical reload entry point,
     // including the internal Save-as-copy path below.
@@ -1629,9 +1629,9 @@ export function useTimelinePersistence({
         if (reloadCancelledRef.current) {
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
-        // A refused save is queued durably and would refuse every later edit. Taking the latest version
-        // drops it, with whatever was built on it; a "keep" reload has already resent it.
-        if (!options?.preserveDraft) await session.localDocumentSave?.discharge?.('latest');
+        // A refused save is queued durably and would refuse every later edit. Only the explicit "Use latest
+        // version" choice drops it, with whatever was built on it; any other reload keeps it and its card.
+        if (options?.discardRefusedSave) await session.localDocumentSave?.discharge?.('latest');
 
         const loaded = provider.saveTimelineAtHead && provider.loadReferencedTimeline
           ? await provider.loadReferencedTimeline(timelineId)

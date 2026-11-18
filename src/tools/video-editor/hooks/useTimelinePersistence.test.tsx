@@ -546,9 +546,10 @@ describe('useTimelinePersistence — interaction gating', () => {
     });
 
     expect(capture).toHaveBeenCalledTimes(1);
-    expect(toast.error).toHaveBeenCalledExactlyOnceWith(refusal.message);
+    // The save bar shows the reason; a toast would be a second surface for the same refusal.
+    expect(toast.error).not.toHaveBeenCalled();
     expect(harness.result.current.saveStatus).toBe('error');
-    // The toast is gone in seconds; the reason behind the red badge is kept for the banner until the status changes.
+    // The reason behind the red badge is kept for the bar until the status changes.
     vi.mocked(toast.error).mockClear();
     expect(harness.result.current.saveError).toBe(refusal.message);
     expect(harness.result.current.isConflictExhausted).toBe(false);

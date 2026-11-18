@@ -1,3 +1,4 @@
+import { saveBarInput } from './saveBar.ts';
 import { withTimelineBasisDiagnostics } from '../lib/timeline-basis-diagnostics.ts';
 import { invalidateDraftReload, recordDraftReloadFailure, registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import { type AstridElementOperationAdapter, type ElementTimelineRoutes, type ElementTimelineDocument } from '../runtime/element-adapter.ts';
@@ -784,12 +785,42 @@ export function useTimelineSave(
       // Reload first. The persistence path clears the slot only after it has
       // built and committed fresh canonical data, so discarded content cannot
       // remain visible while the editor reports saved.
-      await reloadFromServer({ clearDraft: true });
+      await reloadFromServer({ clearDraft: true, discardRefusedSave: true });
     } catch {
       return;
     }
     setRecoveryDraft(null);
     setRecoveredAsDirty(false);
+  }, [reloadFromServer]);
+
+  // One bar for every unsaved state, and the two ways out of it. Discard removes everything retained for this
+  // timeline (every owner, the draft, the session copy) and adopts the accepted head; Try again resends it.
+  const saveBar = saveBarInput({
+    local: localSaveState,
+    recoveryDraft: persistence.isConflictExhausted ? null : recoveryDraft,
+    conflictExhausted: persistence.isConflictExhausted,
+    schemaIncompatible: persistence.schemaIncompatible != null,
+    watchdogTripped: persistence.watchdogTripped,
+    saveError: persistence.saveError,
+  });
+  const retrySaveAfterConflict = persistence.retrySaveAfterConflict;
+  const retryWatchdog = persistence.retryWatchdog;
+  const retryPendingSave = persistence.retryPendingSave;
+  const tryAgain = useCallback(async () => {
+    try {
+      if (persistence.isConflictExhaustedRef?.current) await retrySaveAfterConflict();
+      else if (persistence.watchdogTripped) retryWatchdog();
+      else if (localDocumentSave && localSaveState && localSaveState.status !== 'saved') await localDocumentSave.discharge?.('keep');
+      else if (recoveryDraft) await retryRecoveredDraft();
+      else retryPendingSave();
+    } catch {
+      // Still unsaved: the bar stays and names the reason.
+    }
+  }, [localDocumentSave, localSaveState, persistence.isConflictExhaustedRef, persistence.watchdogTripped, recoveryDraft,
+    retryPendingSave, retryRecoveredDraft, retrySaveAfterConflict, retryWatchdog]);
+  const discardUnsaved = useCallback(async () => {
+    try { await reloadFromServer({ clearDraft: true, discardRefusedSave: true }); }
+    catch { /* the bar stays; the reload failure is its own error */ }
   }, [reloadFromServer]);
 
   const registrationTargetsRef = useRef(new WeakMap<OwnedRegistryMutation, { session: object; generation: number }>());
@@ -969,5 +1000,8 @@ export function useTimelineSave(
     recoveryDraft: persistence.isConflictExhausted ? null : recoveryDraft,
     retryRecoveredDraft,
     discardRecoveredDraft,
+    saveBar,
+    tryAgain,
+    discardUnsaved,
   };
 }

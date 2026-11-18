@@ -438,8 +438,10 @@ export async function handleFileDrop({
       metaUpdates: { [skeletonId]: skeletonMeta },
     }, { save: false });
 
+    // The placeholder is this drop's own temporary row entry: it goes whenever the drop ends without placing
+    // the clip, including when the head moved meanwhile (a save landing during the upload).
     const removeSkeleton = () => {
-      const current = currentDropData();
+      const current = dataRef.current;
       if (!current) {
         return;
       }
@@ -457,6 +459,7 @@ export async function handleFileDrop({
           const generationData = await uploadImageGeneration(file);
           const current = currentDropData();
           if (!current) {
+            removeSkeleton();
             return;
           }
 
@@ -479,6 +482,7 @@ export async function handleFileDrop({
           const generationData = await uploadVideoGeneration(file);
           const current = currentDropData();
           if (!current) {
+            removeSkeleton();
             return;
           }
 
@@ -519,11 +523,6 @@ export async function handleFileDrop({
       } catch (error) {
         console.error('[drop] Upload failed:', error);
         onAssetDropError?.(error);
-        const current = dataRef.current;
-        if (!current) {
-          return;
-        }
-
         removeSkeleton();
       } finally {
         pendingOpsRef.current -= 1;

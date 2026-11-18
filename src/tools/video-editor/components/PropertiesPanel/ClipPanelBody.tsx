@@ -151,6 +151,8 @@ export function ClipPanelBody({
     from: clip?.from ?? 0,
     to: clip?.to ?? clip?.assetEntry?.duration ?? 5,
   };
+  // Position fields save once, when the edit ends (Enter, blur, a step), never once per keystroke.
+  const noLiveChange = () => {};
   const handleTimingValueChange = (field: TimingField, value: number | null) => {
     if (value === null) return;
     timingValuesRef.current[field] = value;
@@ -435,19 +437,19 @@ export function ClipPanelBody({
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-2">
                 <FieldLabel>X</FieldLabel>
-                <NumberInput value={clip.x ?? defaultBox.x} onChange={(value) => { if (value !== null) onChange({ x: value }); }} />
+                <NumberInput value={clip.x ?? defaultBox.x} onChange={noLiveChange} onValueCommitted={(value) => { if (value !== null) onChange({ x: value }); }} />
               </div>
               <div className="space-y-2">
                 <FieldLabel>Y</FieldLabel>
-                <NumberInput value={clip.y ?? defaultBox.y} onChange={(value) => { if (value !== null) onChange({ y: value }); }} />
+                <NumberInput value={clip.y ?? defaultBox.y} onChange={noLiveChange} onValueCommitted={(value) => { if (value !== null) onChange({ y: value }); }} />
               </div>
               <div className="space-y-2">
                 <FieldLabel>Width</FieldLabel>
-                <NumberInput value={clip.width ?? defaultBox.width} min={0} max={compositionWidth} onChange={(value) => { if (value !== null) onChange({ width: value }); }} />
+                <NumberInput value={clip.width ?? defaultBox.width} min={0} max={compositionWidth} onChange={noLiveChange} onValueCommitted={(value) => { if (value !== null) onChange({ width: value }); }} />
               </div>
               <div className="space-y-2">
                 <FieldLabel>Height</FieldLabel>
-                <NumberInput value={clip.height ?? defaultBox.height} min={0} max={compositionHeight} onChange={(value) => { if (value !== null) onChange({ height: value }); }} />
+                <NumberInput value={clip.height ?? defaultBox.height} min={0} max={compositionHeight} onChange={noLiveChange} onValueCommitted={(value) => { if (value !== null) onChange({ height: value }); }} />
               </div>
             </div>
             <div className="space-y-2">

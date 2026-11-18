@@ -10,6 +10,7 @@ import type { AssetRegistry, TimelineConfig } from '../types/index.ts';
 import { canonicalizeTimelinePair, projectTimelineTracksForDisplay } from '../lib/timeline-domain.ts';
 import { findEnclosingPinnedGroup } from '../lib/pinned-group-projection.ts';
 import { withDefaultTimelineOutput } from '../lib/defaults.ts';
+import { materializeAuthoredOutput } from '../lib/timeline-data.ts';
 import { markTimelineSaveRejection, type TimelineSaveRejectionCode } from '../lib/timeline-diagnostics.ts';
 import { applyTimelineOperation, type TimelineElementOperation } from '../runtime/element-adapter.ts';
 import type { AstridAgentElementContext } from '../runtime/element-contract.ts';
@@ -157,7 +158,9 @@ function checkSource(initial: TimelineCommandBasis, source: TimelineSaveSource) 
   const parent = initial.canonicalDocument.parent_revision.payload;
   if (!object(parent.config) || !object(parent.registry)) refuse('authored parent config/registry is unavailable', 'source-parent-unavailable');
   const { bundle: _bundle, ...config } = structuredClone(parent.config);
-  const loaded = { ...config, ...withDefaultTimelineOutput(config as unknown as TimelineConfig) } as unknown as TimelineConfig;
+  // Same output rule as buildTimelineData (the editor's source view); other defaults as before.
+  const loaded = { ...config, ...withDefaultTimelineOutput(config as unknown as TimelineConfig),
+    output: materializeAuthoredOutput(config as unknown as TimelineConfig).output } as unknown as TimelineConfig;
   const projected = canonicalizeTimelinePair(loaded, structuredClone(parent.registry) as unknown as AssetRegistry);
   // Runtime also loads an explicitly authored top-level parent clip list when
   // config has no clip list. This is a physical parent binding, never children.

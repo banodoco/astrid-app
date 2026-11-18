@@ -7,6 +7,7 @@ import {
   configToRows,
   loadTimelineJsonFromProvider,
   loadTranscript,
+  materializeAuthoredOutput,
   rowsToConfig,
 } from '@/tools/video-editor/lib/timeline-data';
 import { previewTimelineMutation } from '@/tools/video-editor/lib/timeline-mutation-engine';
@@ -790,4 +791,22 @@ it('keeps a canvas migration visible and synchronized during direct data assembl
   expect(data.migrationIssues).toEqual(expect.arrayContaining([expect.objectContaining({details: expect.objectContaining({kind: 'canvas', source: 'app-resolved'})})]));
   expect(data.config.clips[0]).toMatchObject({x: 320, y: 180, width: 640, height: 360, fit: 'cover'});
   expect(data.resolvedConfig.clips[0]).toMatchObject({x: 320, y: 180, width: 640, height: 360, fit: 'cover'});
+});
+
+describe('materializeAuthoredOutput', () => {
+  const base = { clips: [], tracks: [] } as unknown as TimelineConfig;
+  it('keeps an authored resolution verbatim, without inventing background fields', () => {
+    const config = { ...base, output: { resolution: '640x360', fps: 24, file: 'a.mp4' } } as TimelineConfig;
+    expect(materializeAuthoredOutput(config)).toBe(config);
+    expect(Object.hasOwn(materializeAuthoredOutput(config).output, 'background')).toBe(false);
+  });
+  it('fills output defaults when the resolution is absent', () => {
+    const output = materializeAuthoredOutput({ ...base, output: { fps: 24 } } as unknown as TimelineConfig).output;
+    expect(output).toMatchObject({ fps: 24, background: null, background_scale: null });
+    expect(typeof output.resolution).toBe('string');
+  });
+  it('keeps authored null background fields', () => {
+    const config = { ...base, output: { resolution: '640x360', fps: 24, file: 'a.mp4', background: null, background_scale: null } } as TimelineConfig;
+    expect(materializeAuthoredOutput(config).output).toEqual(config.output);
+  });
 });

@@ -24,14 +24,22 @@ jobs:
   plan61-real-macos:
     name: Plan 61 real hosted Mac
     if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/p61/rb-6' && inputs.p61_real_run }}
-    runs-on: macos-14
+    runs-on: macos-latest
     timeout-minutes: 150
+    env:
+      P61_TOOL_CHECKOUT: ${{ github.workspace }}/p61-startup-tool
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Check out the exact RB-9 tool candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 082b0a1ba2190ea9fd0b3645bd01f588cee87ac3
+          path: p61-startup-tool
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -65,6 +73,51 @@ jobs:
             --test-reporter=junit --test-reporter-destination="$P61_PROOF/focused.junit.xml" \
             scripts/astrid-release/release.test.mjs scripts/astrid-release/workflow.test.mjs \
             scripts/installer/manifest.test.mjs
+          node --test --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=junit --test-reporter-destination="$P61_PROOF/startup.junit.xml" \
+            "$P61_TOOL_CHECKOUT/scripts/astrid-release/startup.test.mjs"
+      - name: Native attach, wrong-id, schema and read-only refusal cases
+        shell: bash
+        run: |
+          set -euo pipefail
+          P61_NATIVE_ROOT="$(mktemp -d "$RUNNER_TEMP/p61-native.XXXXXXXX")"
+          trap 'rm -rf "$P61_NATIVE_ROOT"' EXIT
+          P61_RUNTIME_SHA="$(node -e 'process.stdout.write(require("./public/install-manifest.json").runtime.sha)')"
+          git init --quiet "$P61_NATIVE_ROOT/runtime"
+          git -C "$P61_NATIVE_ROOT/runtime" remote add origin https://github.com/banodoco/astrid-runtime.git
+          git -C "$P61_NATIVE_ROOT/runtime" fetch --quiet --depth=1 origin "$P61_RUNTIME_SHA"
+          git -C "$P61_NATIVE_ROOT/runtime" checkout --quiet --detach FETCH_HEAD
+          test "$(git -C "$P61_NATIVE_ROOT/runtime" rev-parse HEAD)" = "$P61_RUNTIME_SHA"
+          python3 -m venv "$P61_NATIVE_ROOT/venv"
+          "$P61_NATIVE_ROOT/venv/bin/python" -m pip install -e "$P61_NATIVE_ROOT/runtime" -e "$P61_NATIVE_ROOT/runtime/packages/python"
+          REALM_TEST_PYTHON="$P61_NATIVE_ROOT/venv/bin/python" \
+            bash scripts/astrid-release/test-realm-snapshot.sh 2>&1 | tee "$P61_PROOF/native-realm.log"
+          python3 scripts/astrid-release/hosted-negative.py 2>&1 | tee "$P61_PROOF/unreadable-source.log"
+      - name: Install the frozen Release 13 live control
+        run: python3 scripts/astrid-release/hosted-proof.py bootstrap
+      - name: Create durable live timeline history and record live-before facts
+        run: python3 scripts/astrid-release/hosted-proof.py seed
+      - name: Completion 1 - stop the real installer-started empty-realm Runtime
+        run: python3 scripts/astrid-release/hosted-proof.py half-built
+      - name: Completion 2 and 3 - fresh real attach and Playwright playback
+        run: python3 scripts/astrid-release/hosted-proof.py fresh
+      - name: Completion 4 - one editor edit survives restart
+        run: python3 scripts/astrid-release/hosted-proof.py restart-edit
+      - name: Completion 5 to 7 - unchanged and refused updates
+        run: python3 scripts/astrid-release/hosted-proof.py updates
+      - name: Negative cases and complete stack-process stop
+        run: python3 scripts/astrid-release/hosted-proof.py negatives
+      - name: Completion 8 and 11 - repeated fresh first starts and fresh checkout
+        run: python3 scripts/astrid-release/hosted-proof.py fresh-repeats
+      - name: Retain diagnostics and actual free disk on success or failure
+        if: ${{ always() && env.P61_PROOF != '' }}
+        run: python3 scripts/astrid-release/hosted-proof.py diagnostics
+      - name: Stop only this runner's owned release stack on success or failure
+        if: ${{ always() && env.P61_PROOF != '' }}
+        run: python3 scripts/astrid-release/hosted-proof.py cleanup
+      - name: Completion 10 - compare the live control after the run
+        if: ${{ always() && env.P61_PROOF != '' }}
+        run: python3 scripts/astrid-release/hosted-proof.py final
       - name: Retain Plan 61 evidence
         if: ${{ always() }}
         uses: actions/upload-artifact@v4

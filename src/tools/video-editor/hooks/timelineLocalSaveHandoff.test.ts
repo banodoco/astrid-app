@@ -106,6 +106,62 @@ function preparedImageCommand(removeClipId?: string) {
     } } };
 }
 
+function dropCommandFor(key: string, hex: string) {
+  return { type: 'place-prepared-media' as const, payload: { at: 0, trackId: 'V1', asset: {
+    assetKey: key, mediaType: 'image' as const, durationSeconds: null, source: 'registered' as const,
+    entry: { file: `${key}.png`, type: 'image/png' }, mediaSelection: { asset: key,
+      generation_id: `generation-${key}`, variant_id: `variant-${key}`, object_id: `sha256:${hex.repeat(64)}`, catalog_digest: `sha256:${'b'.repeat(64)}` },
+  } } };
+}
+
+describe('concurrent prepared-media drops', () => {
+  const keys = [['drop-a', 'a'], ['drop-b', 'c'], ['drop-c', 'd']] as const;
+  async function threeDrops(tweak?: (editorRegistry: AssetRegistry) => void, declaredFor?: (key: string, entry: unknown) => unknown) {
+    const env = await environment();
+    const commands = keys.map(([key, hex]) => dropCommandFor(key, hex));
+    // The editor already shows every in-flight drop's asset before any of their saves is captured.
+    const editorRegistry: AssetRegistry = { assets: Object.fromEntries(commands.map(command => [command.payload.asset.assetKey, command.payload.asset.entry])) };
+    tweak?.(editorRegistry);
+    let current = await buildTimelineData(env.source.config, editorRegistry);
+    const results: Array<Promise<void>> = [];
+    const remaining = new Map(commands.map(command => [command.payload.asset.assetKey, declaredFor?.(command.payload.asset.assetKey, command.payload.asset.entry) ?? command.payload.asset.entry]));
+    for (const command of commands) {
+      const preview = applyPreparedMediaCommand(current, command)!;
+      const row = preview.nextData.config.clips.find(clip => clip.asset === command.payload.asset.assetKey)!;
+      results.push(env.handoff.capture({ ...env.source, config: preview.nextData.config, registry: preview.nextData.registry },
+        { kind: 'prepared-media', config: current.config, registry: current.registry, clipId: row.id, command,
+          inFlight: Object.fromEntries(remaining) }));
+      await results[results.length - 1].catch(() => undefined);
+      remaining.delete(command.payload.asset.assetKey);
+      current = preview.nextData;
+    }
+    return { env, results };
+  }
+
+  it('captures three rapid drops without refusal and writes only each drop\'s own asset', async () => {
+    const { env, results } = await threeDrops();
+    await Promise.all(results);
+    const intents = (await env.outboxes.list(env.scope))[0].intents;
+    expect(intents).toHaveLength(3);
+    const registry = (env.session.getDocument() as unknown as { parent_revision: { payload: { registry: { assets: Record<string, unknown> } } } })
+      .parent_revision.payload.registry.assets;
+    expect(Object.keys(registry).sort()).toEqual(['drop-a', 'drop-b', 'drop-c']);
+    await env.session.dispose();
+  });
+
+  it('still refuses a registry entry that is not an in-flight drop\'s', async () => {
+    const { env, results } = await threeDrops(registry => { registry.assets['foreign'] = { file: 'foreign.png', type: 'image/png' }; });
+    await expect(results[0]).rejects.toThrow('would alter more than the asset you picked');
+    await env.session.dispose();
+  });
+
+  it('still refuses an in-flight drop\'s address whose entry is not the one it declared', async () => {
+    const { env, results } = await threeDrops(undefined, (key, entry) => key === 'drop-b' ? { file: 'something-else.png', type: 'image/png' } : entry);
+    await expect(results[0]).rejects.toThrow('would alter more than the asset you picked');
+    await env.session.dispose();
+  });
+});
+
 describe('upstream local document handoff', () => {
   it('retains the upstream video preview whose row lacks the hold required by Python media add', async () => {
     const env = await environment();

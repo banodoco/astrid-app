@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { GenerationDropData } from '@/shared/lib/dnd/dragDrop.ts';
 import { normalizeAndPresentError } from '@/shared/lib/errorHandling/runtimeError.ts';
@@ -200,6 +200,10 @@ export function useAssetManagement({
   const getSelectedTrackId = useCallback(() => {
     return store?.getState().data.selectedTrackId ?? selectedTrackId;
   }, [selectedTrackId, store]);
+  const inFlightAssetsRef = useRef(new Map<string, unknown>());
+  /** Every drop's asset that the editor shows before its own save is captured, by address. */
+  const inFlightNow = useCallback((): Record<string, unknown> | undefined =>
+    inFlightAssetsRef.current.size ? Object.fromEntries(inFlightAssetsRef.current) : undefined, []);
   const getPatchRegistry = useCallback(() => {
     return store?.getState().ops.patchRegistry ?? patchRegistry;
   }, [patchRegistry, store]);
@@ -276,6 +280,9 @@ export function useAssetManagement({
     // Registry-only generation enrichment is still an editor mutation. The
     // commit layer owns the queued CAS save; do not start a competing provider
     // registration that can race the following clip mutation.
+    // This drop's asset is shown in the editor before its own save is captured: remember it by address so the
+    // other drops' saves do not mistake it for a foreign registry change.
+    inFlightAssetsRef.current.set(assetKey, prepared.entry);
     getPatchRegistry()(assetKey, prepared.entry, prepared.entry.file);
 
     return assetKey;
@@ -400,7 +407,9 @@ export function useAssetManagement({
         clipOrderOverride: edit.clipOrderOverride,
         registryOverride: { ...current.registry, assets: { ...current.registry.assets, [prepared.assetKey]: prepared.entry } },
       }, { selectedClipId: edit.clipId, selectedTrackId: target.trackId, semantic: true,
-        gestureBasis: { kind: 'prepared-media', config: current.config, registry: current.registry, clipId: edit.clipId, command } });
+        gestureBasis: { kind: 'prepared-media', config: current.config, registry: current.registry, clipId: edit.clipId, command,
+          ...(inFlightNow() ? { inFlight: inFlightNow() } : {}) } });
+      inFlightAssetsRef.current.delete(prepared.assetKey);
       return true;
     }
     let diagnostic: PreparedMediaDiagnostic | undefined;
@@ -418,13 +427,14 @@ export function useAssetManagement({
       return declined('placement');
     }
 
-    getApplyEdit()({ type: 'prepared-media', command }, {
+    getApplyEdit()({ type: 'prepared-media', command, ...(inFlightNow() ? { inFlight: inFlightNow() } : {}) }, {
       selectedClipId: clipId,
       selectedTrackId: resolvedTrackId,
       semantic: true,
     });
+    inFlightAssetsRef.current.delete(prepared.assetKey);
     return true;
-  }, [getApplyEdit, getDataRef, getSelectedTrackId, runtime.toast, selectedProjectId]);
+  }, [getApplyEdit, getDataRef, getSelectedTrackId, inFlightNow, runtime.toast, selectedProjectId]);
 
   const handleAssetDrop = useCallback((assetKey: string, trackId: string | undefined, time: number, forceNewTrack = false, insertAtTop = false, preparedAsset?: TimelineProvisionedAsset, removeClipId?: string, onDecline?: (message: string) => void) => {
     if (preparedAsset) {

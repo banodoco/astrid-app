@@ -6,7 +6,9 @@ It does not connect to the owner's Mac or use an existing personal installation.
 
 Dispatch the registered **Tests** workflow on **p61/rb-6**, with
 `p61_real_run=true`. Record the exact dispatched commit and the run URL. The
-workflow checks out its pinned RB-9 candidate separately and records both SHAs;
+workflow reads the immutable RB-9 candidate from
+[`hosted-proof-inputs.json`](hosted-proof-inputs.json), checks it out separately,
+and records both SHAs;
 the editor branch under test is `release/14/plan-61`. A PR run alone does not
 execute this proof and must not be reported as real-run evidence.
 

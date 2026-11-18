@@ -35,15 +35,25 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
-      - name: Check out the exact RB-9 tool candidate
-        uses: actions/checkout@v4
-        with:
-          ref: 082b0a1ba2190ea9fd0b3645bd01f588cee87ac3
-          path: p61-startup-tool
-          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+      - name: Read the immutable packet proof input
+        id: p61_proof_inputs
+        run: |
+          node -e '
+            const fs = require("node:fs");
+            const proof = JSON.parse(fs.readFileSync("scripts/astrid-release/hosted-proof-inputs.json", "utf8"));
+            if (proof.packet !== "R14-P61-02" || proof.tool_repository !== "banodoco/astrid-app" || !/^[0-9a-f]{40}$/.test(proof.tool_sha)) {
+              throw new Error("Invalid immutable Plan 61 proof input");
+            }
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `tool_sha=${proof.tool_sha}\n`);'
+      - name: Check out the exact RB-9 tool candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.p61_proof_inputs.outputs.tool_sha }}
+          path: p61-startup-tool
+          persist-credentials: false
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"

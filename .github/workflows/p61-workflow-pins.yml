@@ -1,0 +1,48 @@
+name: Plan 61 workflow pin guard
+on:
+  pull_request:
+    branches: [release/14/plan-61]
+    paths:
+      - .github/workflows/**
+      - scripts/astrid-release/hosted-proof-inputs.json
+      - src/integrations/runtime/workflowPins.test.ts
+permissions:
+  contents: read
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+jobs:
+  workflow-pins:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Record the exact source and unchanged test
+        run: |
+          git rev-parse HEAD
+          shasum -a 256 src/integrations/runtime/workflowPins.test.ts
+          cat scripts/astrid-release/hosted-proof-inputs.json
+      - run: npm ci --legacy-peer-deps
+      - name: Existing workflow pin assertions on hosted macOS
+        run: |
+          set -euo pipefail
+          ./node_modules/.bin/vitest run --config config/testing/vitest.config.ts \
+            src/integrations/runtime/workflowPins.test.ts \
+            --reporter=verbose --reporter=./config/testing/skipGuardReporter.ts \
+            --reporter=junit --outputFile=workflow-pins.junit.xml \
+            2>&1 | tee workflow-pins.log
+      - name: Retain exact workflow pin outcomes
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p61-workflow-pins-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            workflow-pins.junit.xml
+            workflow-pins.log
+          if-no-files-found: error

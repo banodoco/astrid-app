@@ -141,6 +141,11 @@ export const LANES = {
 
 export const DECLARED_TAG = /\[declared:([a-z0-9-]+)\]/;
 
+// Vitest expected failures are identified by exact repository-relative file and
+// full suite/test title, and carry the same quarantine metadata as journey cases.
+// The runtime reporter checks the selected files against this registry.
+export const VITEST_EXPECTED_FAILURES = [];
+
 export function declaredTag(name) {
   if (!Object.hasOwn(SKIP_REGISTRY, name)) throw new Error(`skip "${name}" is not declared in config/testing/skipRegistry.mjs`);
   return `[declared:${name}] ${SKIP_REGISTRY[name].reason}`;

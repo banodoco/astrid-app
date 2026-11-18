@@ -146,6 +146,13 @@ export function AudioAnalysisProvider({
     : <><WarmAudioCache clips={clips} fps={fps} />{children}</>;
 }
 
+const warmedAudioUrls = new Set<string>();
+
+/** Test hook: forget warmed URLs so each test starts from a cold cache. */
+export function resetWarmedAudioUrls(): void {
+  warmedAudioUrls.clear();
+}
+
 function WarmAudioCache({ clips, fps }: { clips: ResolvedTimelineClip[]; fps: number }) {
   const environment = useRemotionEnvironment();
   const urlKey = useMemo(() => JSON.stringify([...new Set(
@@ -154,28 +161,32 @@ function WarmAudioCache({ clips, fps }: { clips: ResolvedTimelineClip[]; fps: nu
       .filter((src): src is string => src !== null),
   )].sort()), [clips, fps]);
 
+  // Stopgap: Plan 18 CC-9 moves this into the one object reader.
+  // Each URL is warmed once per session. Adding a source fetches only that source, and the
+  // in-flight warms are never aborted because the set grew.
   useEffect(() => {
     if (environment.isRendering || environment.isClientSideRendering) return;
-    const urls = JSON.parse(urlKey) as string[];
+    const urls = (JSON.parse(urlKey) as string[]).filter((url) => !warmedAudioUrls.has(url));
     if (urls.length === 0) return;
-    const controller = new AbortController();
+    urls.forEach((url) => warmedAudioUrls.add(url));
     let next = 0;
     const warm = async () => {
-      while (!controller.signal.aborted && next < urls.length) {
+      while (next < urls.length) {
         const url = urls[next++];
         try {
-          const response = await fetch(url, { signal: controller.signal, credentials: mediaFetchCredentials(url, 'include'), priority: 'low' });
+          const response = await fetch(url, { credentials: mediaFetchCredentials(url, 'include'), priority: 'low' });
+          if (!response.ok) throw new Error(`Audio warm failed with ${response.status}`);
           const reader = response.body?.getReader();
           if (reader) {
             while (!(await reader.read()).done) { /* Discard each chunk. */ }
           }
         } catch {
-          // Cache warming is best effort; playback handles media failures.
+          // Cache warming is best effort. A failed URL is forgotten so a later pass retries it.
+          warmedAudioUrls.delete(url);
         }
       }
     };
     for (let index = 0; index < Math.min(3, urls.length); index += 1) void warm();
-    return () => controller.abort();
   }, [urlKey, environment.isRendering, environment.isClientSideRendering]);
 
   return null;

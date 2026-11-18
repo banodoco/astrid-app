@@ -90,6 +90,115 @@ const configById = (config: TimelineConfig): unknown => ({ ...config,
   ...(Array.isArray(config.tracks) ? { tracks: byRowId(config.tracks) } : {}) });
 const sameConfig = (a: TimelineConfig, b: TimelineConfig) => same(authoredJson(configById(a)), authoredJson(configById(b)));
 
+/**
+ * Why an edit that names no gesture cannot be saved on a document with shots, or undefined when it can.
+ * The write only touches the parent's config and registry (the shot closure is cloned untouched), so the
+ * edit must stay on rows the parent alone owns: clips outside pinned shot groups on tracks that hold no shots,
+ * additive registry changes, and no change to the rest of the config. Anything else stays refused.
+ */
+function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSource, next: TimelineSaveSource): string | undefined {
+  const parent = document.parent_revision.payload;
+  const config = parent.config;
+  if (!object(config) || !Array.isArray(config.clips) || !Array.isArray(config.tracks)
+    || !Array.isArray(before.config.clips) || !Array.isArray(next.config.clips)
+    || !Array.isArray(before.config.tracks) || !Array.isArray(next.config.tracks)) {
+    return "This edit can't be saved yet because this timeline's clips are stored in a form we can't match to the editor. Reload the timeline and try again.";
+  }
+  // Everything outside the clip and track lists (pinned groups, output, theme, bundle) is left as it was.
+  const rest = (value: TimelineConfig) => { const { clips: _clips, tracks: _tracks, ...others } = value; return authoredJson(others); };
+  if (!same(rest(before.config), rest(next.config)) || !same(authoredJson(before.bundle ?? null), authoredJson(next.bundle ?? null))) {
+    return "This change to the timeline's settings can't be saved yet because the timeline has shots.";
+  }
+  // What the shots depend on in the parent, by membership in the document's own shot data. Occupied tracks hold
+  // the shots themselves (occurrences, pinned groups): clips may not change on or onto them. Shared lanes are
+  // parent tracks a shot's child content plays on: the lane itself (removal, a clashing new id) is what the
+  // shot relies on, but its settings and the parent clips layered over it are the user's to change.
+  const occurrences = Array.isArray(parent.occurrences) ? parent.occurrences.filter(object) : [];
+  const occupiedTracks = new Set<string>();
+  const sharedLanes = new Set<string>();
+  for (const occurrence of occurrences) {
+    for (const track of [occurrence.track, object(occurrence.placement) ? occurrence.placement.track : undefined]) {
+      if (typeof track === 'string') occupiedTracks.add(track);
+    }
+  }
+  for (const group of before.config.pinnedShotGroups ?? []) occupiedTracks.add(group.trackId);
+  const internals = new Map(document.internal_timeline_revisions.map(item => [item.revision_id, item.payload]));
+  const shotsByRevision = new Map(document.shot_revisions.map(item => [`${item.shot_id}/${item.revision_id}`, item.internal_timeline_revision_id]));
+  const shotAssets = new Set<string>();
+  const shotClipIds = new Set<string>();
+  const childTimelines = (items: unknown): Record<string, unknown>[] => (Array.isArray(items) ? items.filter(object) : []);
+  for (const payload of internals.values()) {
+    if (!object(payload)) continue;
+    for (const track of childTimelines(payload.tracks)) {
+      if (track.kind === 'audio' && typeof track.id === 'string') sharedLanes.add(track.id);
+    }
+    for (const clip of childTimelines(payload.clips)) {
+      if (typeof clip.track === 'string') sharedLanes.add(clip.track);
+      if (typeof clip.asset === 'string') shotAssets.add(clip.asset);
+    }
+  }
+  for (const occurrence of occurrences) {
+    const internal = internals.get(shotsByRevision.get(`${String(occurrence.shot_id)}/${String(occurrence.shot_revision_id)}`) as string);
+    for (const clip of object(internal) ? childTimelines(internal.clips) : []) {
+      if (typeof clip.id === 'string') shotClipIds.add(`${String(occurrence.occurrence_id)}:${clip.id}`);
+    }
+  }
+  const beforeTracks = new Map(before.config.tracks.map(track => [track.id, track]));
+  const nextTracks = new Map(next.config.tracks.map(track => [track.id, track]));
+  const beforeClips = new Map(before.config.clips.map(clip => [clip.id, clip]));
+  const nextClips = new Map(next.config.clips.map(clip => [clip.id, clip]));
+  for (const id of new Set([...beforeClips.keys(), ...nextClips.keys()])) {
+    const was = beforeClips.get(id);
+    const now = nextClips.get(id);
+    if (was && now && same(authoredJson(was), authoredJson(now))) continue;
+    if (findEnclosingPinnedGroup(before.config, id)) {
+      return "Can't change a clip that belongs to a pinned shot group yet. Edit a clip outside the group.";
+    }
+    // A shot placeholder, or a copy of one of a shot's own clips, is not the parent's to edit.
+    const canonical = !was && now?.app && typeof now.app === 'object' ? (now.app as Record<string, unknown>).canonical : undefined;
+    if ([was, now].some(clip => clip?.clipType === 'shot') || (!was && (shotClipIds.has(id) || canonical !== undefined))) {
+      return "Can't change a shot's own clips from here yet. Edit a clip you added to the timeline.";
+    }
+    if ([was, now].some(clip => clip && occupiedTracks.has(clip.track))) {
+      return "Can't change a clip on, or move one onto, a track that holds shots yet. Use another track.";
+    }
+    if (now && !nextTracks.has(now.track)) {
+      return "Can't place a clip on a track that doesn't exist. Put it on one of the timeline's tracks.";
+    }
+  }
+  // Tracks: a new track may appear and a track without shots or clips may go; kept tracks keep their kind and order.
+  for (const [id, track] of beforeTracks) {
+    const kept = nextTracks.get(id);
+    if (!kept) {
+      if (occupiedTracks.has(id)) return "Can't remove a track that holds shots yet.";
+      if (sharedLanes.has(id)) return "Can't remove a track that a shot plays on yet.";
+      if (next.config.clips.some(clip => clip.track === id)) return "Can't remove a track that still has clips on it. Move or delete its clips first.";
+    } else if (kept.kind !== track.kind) {
+      // Settings (label, mute, volume) are the user's to change on any track, a shot's included; what a track is stays.
+      return "Can't change what kind of track this is on a timeline with shots yet.";
+    }
+  }
+  for (const id of nextTracks.keys()) {
+    if (!beforeTracks.has(id) && (occupiedTracks.has(id) || sharedLanes.has(id))) return "Can't add that track because a shot already uses its name. Add a different track.";
+  }
+  if (!same(before.config.tracks.filter(track => nextTracks.has(track.id)).map(track => track.id),
+    next.config.tracks.filter(track => beforeTracks.has(track.id)).map(track => track.id))) {
+    return "Can't reorder tracks on a timeline with shots yet.";
+  }
+  // Registry: new assets may appear (unless a shot clip already uses that key); what is there stays as it was.
+  const assets = (registry: AssetRegistry) => (registry.assets ?? {}) as Record<string, unknown>;
+  const { assets: _a, ...otherBefore } = before.registry; const { assets: _b, ...otherNext } = next.registry;
+  if (!same(authoredJson(otherBefore), authoredJson(otherNext))
+    || Object.entries(assets(before.registry)).some(([key, entry]) => !Object.prototype.hasOwnProperty.call(assets(next.registry), key)
+      || !same(authoredJson(entry), authoredJson(assets(next.registry)[key])))) {
+    return "Can't remove or change project media on a timeline with shots yet.";
+  }
+  if (Object.keys(assets(next.registry)).some(key => !Object.prototype.hasOwnProperty.call(assets(before.registry), key) && shotAssets.has(key))) {
+    return "Can't add media under a name a shot already uses. Import the media again.";
+  }
+  return undefined;
+}
+
 /** The editor's rows in the stored order: stored rows first, then each new row after its editor predecessor. */
 function inStoredOrder(stored: unknown[], edited: unknown[], appendNew = false): unknown[] {
   const editedById = new Map(edited.map(row => [rowId(row), row]));
@@ -317,10 +426,13 @@ export function createTimelineLocalSaveHandoff(options: {
         const trackLabelGesture = gestureBasis?.kind === 'track-label';
         // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
         const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && gestureBasis?.kind !== 'prepared-media' && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet on a timeline that has shots. Moving, trimming, splitting or renaming a clip still works.', 'child-ownership-unavailable');
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
+        // A gesture proves its own effect below; an edit that names none must stay on rows the parent alone owns.
+        const unnamedRefusal = hasChildren && gestureBasis === undefined
+          ? unnamedEditRefusal(before, authoringSource, next) : undefined;
+        if (unnamedRefusal) refuseEdit(unnamedRefusal, 'child-ownership-unavailable');
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
         // A document that stores its clips only at the top level is edited there, whichever gesture it is.
@@ -649,8 +761,6 @@ export function createTimelineLocalSaveHandoff(options: {
             mediaSteps = [firstStep, ...remainingSteps];
           }
         }
-        // Verified parent recipes preserve the complete child closure cloned above.
-        if (hasChildren && !parentGesture && !trackLabelGesture && !clipGesture && !commands && gestureBasis?.kind !== 'element') refuseEdit('This edit is not supported yet on a timeline that has shots. Moving, trimming, splitting or renaming a clip still works.', 'child-ownership-unavailable');
         if (topLevelClips) delete (payload.config as Record<string, OutboxJson>).clips;
         if (!commands) {
           const clips = (payload.config as Record<string, OutboxJson>).clips;

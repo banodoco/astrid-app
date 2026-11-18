@@ -177,7 +177,8 @@ describe('prepared image request producer fixture', () => {
       if (kind !== 'valid' && !existingAsset && kind !== 'asset alias') {
         const message = kind === 'existing clip' ? 'authored parent entity binding is ambiguous'
           : kind === 'occurrence lane' || kind === 'placement lane' ? "Can't drop onto a track that holds shots"
-          : kind === 'generic' || kind === 'unknown gesture' ? 'This edit is not supported yet on a timeline that has shots'
+          : kind === 'generic' ? "clips are stored in a form we can't match"
+          : kind === 'unknown gesture' ? 'The timeline changed while you were editing'
           : kind === 'source mismatch' ? 'upstream source differs'
             : kind === 'mirrors' ? 'contradictory parent tracks mirror'
           : kind === 'head' || kind === 'foreign timeline' ? 'original verified authoring head'

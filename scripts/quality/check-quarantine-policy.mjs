@@ -31,7 +31,10 @@ function exportsFrom(sourceText, names) {
     if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
     for (const declaration of statement.declarationList.declarations) {
       if (ts.isIdentifier(declaration.name) && names.includes(declaration.name.text)) {
-        if (!(statement.declarationList.flags & ts.NodeFlags.Const)) throw new Error(`${declaration.name.text} must be a literal export const`);
+        if (statement.modifiers.length !== 1
+          || statement.declarationList.getFirstToken(source)?.kind !== ts.SyntaxKind.ConstKeyword) {
+          throw new Error(`${declaration.name.text} must be a literal export const`);
+        }
         if (!declaration.initializer || values.has(declaration.name.text)) throw new Error(`ambiguous policy ${declaration.name.text}`);
         values.set(declaration.name.text, literal(declaration.initializer));
       }

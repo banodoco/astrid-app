@@ -96,6 +96,8 @@ for (const [form, declaration] of [
   ['missing export', 'export const UNRELATED = [];'],
   ['mutable let export', 'export let VITEST_EXPECTED_FAILURES = [];'],
   ['mutable var export', 'export var VITEST_EXPECTED_FAILURES = [];'],
+  ['await using export', 'export await using VITEST_EXPECTED_FAILURES = [];'],
+  ['ambient declaration', 'export declare const VITEST_EXPECTED_FAILURES = [];'],
 ]) {
   it(`rejects a registry without a literal export const: ${form}`, () => {
     const f = fixture();

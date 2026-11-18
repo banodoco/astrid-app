@@ -348,11 +348,12 @@ describe('what stays protected', () => {
     await env.session.dispose();
   });
 
-  it('an edit that names no gesture on a document with shots is still refused', async () => {
+  it('an edit that names no gesture is still refused when it moves a clip onto a track that holds shots', async () => {
     const { document } = corpus[0];
     const env = await mount(document);
-    const { next } = gestures(env, storedClips(document)[0].id as string).trimEnd();
-    await expect(env.handoff.capture({ ...env.source, config: next })).rejects.toThrow('This edit is not supported yet on a timeline that has shots');
+    const next = structuredClone(env.source.config);
+    next.clips.find(clip => clip.id === storedClips(document)[0].id)!.track = document.occurrences[0].track as string;
+    await expect(env.handoff.capture({ ...env.source, config: next })).rejects.toThrow('track that holds shots');
     await env.session.dispose();
   });
 });

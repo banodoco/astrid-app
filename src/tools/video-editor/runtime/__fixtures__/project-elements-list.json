@@ -1,0 +1,51 @@
+{
+  "elements": [
+    {
+      "authoring": {
+        "componentPath": "/work/packs/reveal/component.tsx",
+        "descriptorPath": "/work/packs/reveal/descriptor.yaml",
+        "packRoot": "/work/packs/reveal",
+        "status": "admitted"
+      },
+      "descriptor": {
+        "componentPath": "elements/reveal/component.tsx",
+        "defaults": {},
+        "description": "",
+        "id": "reveal",
+        "kind": "effect",
+        "label": "Reveal",
+        "packId": "project_0123456789abcdef0123",
+        "parameters": [],
+        "renderability": {
+          "browserExport": "supported",
+          "preview": "supported",
+          "workerExport": "unknown"
+        },
+        "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "digest": "ff85a15cf48c1cf8710ca8042a145e1672cd207c4ecb88ac88a515876ba3604f",
+      "ref": {
+        "id": "reveal",
+        "kind": "effect",
+        "packId": "project_0123456789abcdef0123",
+        "revision": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+      },
+      "url": "/api/runtime/packs/project-elements/fixture-project/ff85a15cf48c1cf8710ca8042a145e1672cd207c4ecb88ac88a515876ba3604f.js"
+    }
+  ],
+  "projectId": "fixture-project",
+  "projects": [
+    {
+      "admitCommand": "python3 -m astrid.core.element.cli project-pack admit --realm fixture-realm --project fixture-project",
+      "initCommand": "python3 -m astrid.core.element.cli project-pack init --realm fixture-realm --project fixture-project",
+      "inspectCommand": "python3 -m astrid.core.element.cli project-pack inspect --realm fixture-realm --project fixture-project",
+      "packId": "project_0123456789abcdef0123",
+      "packRoot": "/work/packs/reveal",
+      "projectId": "fixture-project",
+      "status": "admitted"
+    }
+  ],
+  "realmId": "fixture-realm",
+  "selectionDigest": "b3abd243ae2d10593af7e952d98d3cafd30df84d8bad5e64fef50e6ecff41755",
+  "version": 1
+}

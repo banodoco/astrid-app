@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import fixture from './__fixtures__/project-elements-list.json';
 
 // The gateway origin is the only mutable input the loader reads from the connection module.
 let origin = '';
@@ -44,7 +45,7 @@ function entryFor(digest: string, revision = 'r1') {
 }
 
 function listBody(elements: unknown[], overrides: Record<string, unknown> = {}) {
-  return { version: 1, selectionDigest: 'a'.repeat(64), projects: [], realmId: 'realm', elements, ...overrides };
+  return { version: 1, projectId: 'project', selectionDigest: 'a'.repeat(64), projects: [], realmId: 'realm', elements, ...overrides };
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -72,6 +73,7 @@ describe('project element list parsing', () => {
 
   it.each([
     ['another version', (body: Record<string, unknown>) => ({ ...body, version: 2 })],
+    ['another project', (body: Record<string, unknown>) => ({ ...body, projectId: 'other' })],
     ['a missing realm', (body: Record<string, unknown>) => ({ ...body, realmId: '' })],
     ['a malformed selection digest', (body: Record<string, unknown>) => ({ ...body, selectionDigest: 'not-a-digest' })],
     ['a non-array projects field', (body: Record<string, unknown>) => ({ ...body, projects: 'none' })],
@@ -107,6 +109,15 @@ describe('project element list parsing', () => {
     const digest = 'b'.repeat(64);
     expect(() => parseProjectElementList(listBody([entryFor(digest), entryFor(digest)]), 'project'))
       .toThrow('listed the element blocks twice');
+  });
+});
+
+describe('Runtime project element list fixture', () => {
+  it('parses the committed Runtime response exactly, with every ref, digest, descriptor and authoring kept', async () => {
+    const { parseProjectElementList } = await loader();
+    const list = parseProjectElementList(fixture, fixture.projectId);
+    expect(list).toEqual({ version: 1, projectId: fixture.projectId, realmId: fixture.realmId,
+      selectionDigest: fixture.selectionDigest, projects: fixture.projects, elements: fixture.elements });
   });
 });
 

@@ -1,4 +1,4 @@
-import type { AstridElementDescriptor, AstridElementComponentProps } from './astrid-element-host';
+import type { AstridElementDescriptor } from './astrid-element-host';
 import { ASTRID_BRIDGE_REQUEST_TIMEOUT_MS } from '../data/astridBridgeWire';
 import { elementKey, importProjectElement, readProjectElementList, type ElementRef, type ProjectElementComponent, type ProjectElementEntry, type ProjectElementList } from './admittedElementLoader';
 
@@ -41,6 +41,7 @@ let currentSignature = '';
 // Verified bundles by digest. A digest names exact bytes, so a re-read of the same admitted build reuses its module.
 const importedByDigest = new Map<string, ProjectElementComponent>();
 let generation = 0;
+let lastLoggedFailure: string | null = null;
 let scope: {projectId:string;refs:Array<ElementRef>}|null=null;
 export function setAdmittedElementScope(projectId:string,refs:NonNullable<typeof scope>['refs']) {
   const next={projectId,refs:[...new Map(refs.map(ref=>[refKey(ref),ref])).values()].sort((a,b)=>refKey(a).localeCompare(refKey(b)))};
@@ -56,6 +57,8 @@ export const subscribeAdmittedElements = (listener: () => void) => { listeners.a
 /**
  * Native receiving-build refresh, independent of mounted editor/ACP authority.
  * `read` lists the project's admitted refs from the Runtime; `load` verifies and imports one listed bundle.
+ * Always resolves: a failed list or import is recorded as the readiness `error` with its reason and returns the
+ * selection as it was (elements not loaded stay unloaded).
  */
 export async function refreshAdmittedElements(
   read?: () => Promise<ProjectElementList | null>,
@@ -112,8 +115,15 @@ export async function refreshAdmittedElements(
     publishReadiness({...requestedReadiness, phase:'ready'});
     return current;
   } catch (error) {
-    if (request === generation) publishReadiness({...requestedReadiness, phase:'error', error:error instanceof Error ? error.message : String(error)});
-    throw error;
+    // A failed list never rejects into prompts, mount or element adapters: the readiness store carries the reason,
+    // elements stay unloaded, and clips that need them show the placeholder with that reason.
+    const reason = error instanceof Error ? error.message : String(error);
+    if (request === generation) publishReadiness({...requestedReadiness, phase:'error', error:reason});
+    if (reason !== lastLoggedFailure) {
+      lastLoggedFailure = reason;
+      console.error(`Project elements unavailable: ${reason}`);
+    }
+    return current;
   } finally {
     clearTimeout(timeout);
   }

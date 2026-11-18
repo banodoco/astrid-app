@@ -3,15 +3,6 @@ import { AstridAgentSessionStore } from './useAgentSession';
 import { readAstridTaskRefs } from '../runtime/agentTaskLinks';
 import type { AstridLocalClient } from '@/integrations/astrid/client';
 
-// The editor and agent prompt path list the project's admitted elements from the Runtime. These suites do not own pack
-// admission, so the list read answers an empty admitted set. A module-level mock survives vi.resetModules().
-vi.mock('../runtime/admittedElementLoader', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../runtime/admittedElementLoader')>(),
-  readProjectElementList: async (projectId: string) => ({
-    version: 1, projectId, realmId: 'realm', selectionDigest: 'a'.repeat(64), projects: [], elements: [],
-  }),
-}));
-
 const ref = { project_id: 'project', run_id: 'run', task_id: 'task', capability_id: 'media.clip_extract' };
 const notification = (update: unknown, sessionId = 'session') => ({ params: { sessionId, update } });
 function fixture() {

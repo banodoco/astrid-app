@@ -1,4 +1,4 @@
-import { getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
+import { getAdmittedElementReadiness, getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
 import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment } from 'remotion';
 import { Component, createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type FC, type ReactNode } from 'react';
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
@@ -459,6 +459,13 @@ const AstridAnimationPreviewSequence: FC<{
       </ThemeProvider>
     </Sequence>
   );
+};
+
+/** Names the failed project-element list when the editor could not read it, so the placeholder shows why. */
+const elementUnavailableDetail = (ref: NonNullable<ResolvedTimelineClip['elementRef']>) => {
+  const exact = `Element ${ref.id}@${ref.revision} requires its exact admitted pack revision. Embedded source is preserved for migration and is not executed.`;
+  const admission = getAdmittedElementReadiness();
+  return admission.phase === 'error' ? `Project elements did not load (${admission.error}). ${exact}` : exact;
 };
 
 const GeneratedModulePlaceholderSequence: FC<{
@@ -1400,7 +1407,7 @@ const VisualTrack: FC<VisualTrackProps> = ({
               fps={fps}
               artifactId={clip.elementRef.id}
               reason="element_source_missing"
-              detail={`Element ${clip.elementRef.id}@${clip.elementRef.revision} requires its exact admitted pack revision. Embedded source is preserved for migration and is not executed.`}
+              detail={elementUnavailableDetail(clip.elementRef)}
             />
           );
         }

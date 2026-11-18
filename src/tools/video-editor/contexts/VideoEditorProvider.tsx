@@ -275,7 +275,7 @@ function AgentChatBridgeRegistration({ operationsEnabled = true, elementTimeline
   useEffect(()=>{
     if(!project.projectId)return;
     setAdmittedElementScope(project.projectId,JSON.parse(packRefsKey));
-    void refreshAdmittedElements().catch(error=>{ console.error('Project pack activation failed; exact missing pins remain unavailable.',error); });
+    void refreshAdmittedElements();
   },[project.projectId,packRefsKey]);
 
   const elementContext = useMemo(() => buildAstridAgentElementContext({

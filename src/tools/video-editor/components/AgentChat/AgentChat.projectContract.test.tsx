@@ -10,15 +10,6 @@ import type { ProjectChatState } from '@/integrations/astrid/acpRoutes';
 // Waits here are hang ceilings, not timing assertions: on an oversubscribed
 // machine the default 1000 ms asyncUtilTimeout expires while real transport
 // work is still progressing. Scoped to this file and restored afterwards.
-// The editor and agent prompt path list the project's admitted elements from the Runtime. These suites do not own pack
-// admission, so the list read answers an empty admitted set. A module-level mock survives vi.resetModules().
-vi.mock('../../runtime/admittedElementLoader', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../runtime/admittedElementLoader')>(),
-  readProjectElementList: async (projectId: string) => ({
-    version: 1, projectId, realmId: 'realm', selectionDigest: 'a'.repeat(64), projects: [], elements: [],
-  }),
-}));
-
 const HANG_CEILING_MS = 10_000;
 const defaultAsyncUtilTimeout = getConfig().asyncUtilTimeout;
 beforeAll(() => { configure({ asyncUtilTimeout: HANG_CEILING_MS }); });

@@ -733,7 +733,7 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
         <div role="alert" className="absolute inset-x-4 bottom-20 z-10 rounded-md border border-destructive/40 bg-background/95 px-3 py-2 text-sm text-foreground">
           <p>Preview pack could not be loaded. {admissionError}</p>
           <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => {
-            void refreshAdmittedElements().catch(() => { /* The admission store exposes retry failures above. */ });
+            void refreshAdmittedElements();
           }}>Retry preview</Button>
         </div>
       )}

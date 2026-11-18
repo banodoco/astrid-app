@@ -2046,6 +2046,17 @@ describe('TimelineRenderer owner-qualified Astrid references', () => {
     expect(screen.getByTestId('admitted-after-refresh')).toHaveTextContent('Exact revision loaded');
   });
 
+  it('shows the reason a failed project-element list could not load on the clip that needs the element', async () => {
+    const admissions = await import('../runtime/admitted-elements');
+    const ref = { id: 'missing-element', kind: 'effect' as const, packId: 'project_reason', revision: 'reason-revision' };
+    admissions.setAdmittedElementScope('reason-project', [ref]);
+    await act(async () => { await admissions.refreshAdmittedElements(async () => { throw new Error('Runtime is not reachable'); }); });
+    render(<TimelineRenderer astridElementHost={fixtureAstridElementHost} config={{ ...buildConfig(), clips: [{
+      id: 'needs-missing-element', track: 'V1', at: 0, hold: 1, clipType: 'effect-layer', elementRef: ref,
+    }] }} />);
+    expect(screen.getByTestId('generated-module-placeholder')).toHaveTextContent('Project elements did not load (Runtime is not reachable)');
+  });
+
   it.each(['local', 'rendering'])('passes the %s owner to the component bridge', (packId) => {
     const Owned: FC<{ clip: { id: string } }> = ({ clip }) => <div data-testid="owner-preview">{clip.id}</div>;
     astridElementComponentMock.mockImplementation((id: string, kind: string, owner?: string) => (

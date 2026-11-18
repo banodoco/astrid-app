@@ -63,12 +63,6 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-// Every prompt refreshes the project's admitted elements from the Runtime. These tests exercise the chat, not pack
-// admission, so the list read answers an empty admitted set for the requested project.
-const stubEmptyElementList = async () => vi.spyOn(await import('../runtime/admittedElementLoader'), 'readProjectElementList')
-  .mockImplementation(async projectId => ({ version: 1, projectId, realmId: 'realm', selectionDigest: 'a'.repeat(64), projects: [], elements: [] }));
-beforeEach(stubEmptyElementList);
-
 describe('timeline agent ACP chat', () => {
   it('keeps a prompt running past five minutes on the same writer connection until it completes', async () => {
     vi.spyOn(await import('../runtime/admitted-elements'), 'refreshProjectElementContext').mockResolvedValue(undefined as never);
@@ -1214,7 +1208,6 @@ describe('explicit third-argument project routing', () => {
 
   it('keeps a failed request on its captured route/context and rejects a later project even if the session ID is unchanged', async () => {
     vi.resetModules();
-    await stubEmptyElementList();
     const { useSendMessage: scopedSend } = await import('./useAgentSession.ts');
     const prompts: Array<{ url: string; body: { session_id: string; prompt: Array<{ text: string }> } }> = [];
     let fail = true;
@@ -1269,7 +1262,6 @@ describe('explicit third-argument project routing', () => {
 
   it('rejects a mixed project route/context before any ACP dispatch', async () => {
     vi.resetModules();
-    await stubEmptyElementList();
     const { useSendMessage: scopedSend } = await import('./useAgentSession.ts');
     const fetchMock = vi.fn();
     vi.stubGlobal('fetch', fetchMock);

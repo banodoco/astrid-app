@@ -35,7 +35,7 @@ function installImportMap() {
 
 function listBody(url = `/api/runtime/packs/project-elements/project/${DIGEST}.js`) {
   return {
-    version: 1, selectionDigest: 'a'.repeat(64), projects: [], realmId: 'realm',
+    version: 1, projectId: 'project', selectionDigest: 'a'.repeat(64), projects: [], realmId: 'realm',
     elements: [{
       ref: REF, digest: DIGEST, url,
       descriptor: { id: 'blocks', kind: 'effect', packId: 'project_pack', revision: 'r1', label: 'Blocks', description: '',
@@ -111,15 +111,15 @@ describe('element admissions on the hosted build', () => {
     expect(host.admittedComponent(REF)).toBe(Blocks);
   });
 
-  it('refuses a gateway list whose bytes URL names another project, and publishes nothing from it', async () => {
+  it('refuses a gateway list whose bytes URL names another project, publishes nothing, and does not reject', async () => {
     origin = 'http://127.0.0.1:17340';
     fetchMock.mockImplementation(runtimeFetch(listBody(`/api/runtime/packs/project-elements/other/${DIGEST}.js`)));
     host.setAdmittedElementScope('project', [REF]);
 
-    await expect(host.refreshAdmittedElements()).rejects.toThrow('invalid project element entry');
+    await expect(host.refreshAdmittedElements()).resolves.toBe(host.getAdmittedElementSelection());
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(host.admittedComponent(REF)).toBeUndefined();
-    expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error' });
+    expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error', error: expect.stringContaining('invalid project element entry') });
   });
 });

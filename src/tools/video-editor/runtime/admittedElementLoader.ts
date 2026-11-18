@@ -33,11 +33,11 @@ const runtimeOriginPath = (projectId: string, digest: string) => (
 export const elementKey = (ref: ElementRef) => JSON.stringify([ref.packId, ref.kind, ref.id, ref.revision]);
 
 /**
- * Validates the Runtime's list shape for the project the editor asked about. The Runtime names the project by the
- * request, so the list carries no project id of its own; nothing here trusts a value the Runtime did not name exactly.
+ * Validates the Runtime's list shape for the project the editor asked about. The list must name that same project;
+ * nothing here trusts a value the Runtime did not name exactly.
  */
 export function parseProjectElementList(value: unknown, projectId: string): ProjectElementList {
-  if (!record(value) || value.version !== 1 || typeof value.realmId !== 'string' || !value.realmId
+  if (!record(value) || value.version !== 1 || value.projectId !== projectId || typeof value.realmId !== 'string' || !value.realmId
     || typeof value.selectionDigest !== 'string' || !SHA256.test(value.selectionDigest)
     || !Array.isArray(value.projects) || !Array.isArray(value.elements)) {
     throw new Error('Runtime returned an invalid project element list.');

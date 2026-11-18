@@ -83,14 +83,53 @@ describe('atomic admitted host refresh', () => {
     expect(host.getAdmittedElementSelection().selectionDigest).toBe(digestOf('b'));
   });
 
-  it('ends loading on a genuine failure and retains the diagnostic', async () => {
+  it('records a failed list as the error readiness with its reason, and a later good list clears it', async () => {
     host.setAdmittedElementScope('project', []);
     await expect(host.refreshAdmittedElements(async () => { throw new Error('Admission endpoint refused this pack'); }))
-      .rejects.toThrow('refused');
+      .resolves.toBe(host.getAdmittedElementSelection());
     expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error', error: 'Admission endpoint refused this pack' });
 
     await host.refreshAdmittedElements(async () => list('project', digestOf('5'), []));
     expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'ready', error: null });
+  });
+
+  it('never rejects into prompts or the editor: a network failure and a malformed list both settle, unloaded, and log once', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      host.setAdmittedElementScope('project', [ref('old')]);
+      const network = () => Promise.reject(new TypeError('Failed to fetch'));
+      const malformed = async () => {
+        const { parseProjectElementList } = await import('./admittedElementLoader');
+        return parseProjectElementList({ version: 2 }, 'project');
+      };
+
+      await expect(host.refreshAdmittedElements(network)).resolves.toBeDefined();
+      await expect(host.refreshAdmittedElements(network)).resolves.toBeDefined();
+      await expect(host.refreshAdmittedElements(malformed)).resolves.toBeDefined();
+
+      expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error', error: 'Runtime returned an invalid project element list.' });
+      expect(host.admittedComponent(ref('old'))).toBeUndefined();
+      expect(host.isAdmittedElementPreviewPreparing('project', [ref('old')])).toBe(false);
+      expect(consoleError.mock.calls.map(([message]) => message)).toEqual([
+        'Project elements unavailable: Failed to fetch',
+        'Project elements unavailable: Runtime returned an invalid project element list.',
+      ]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('keeps prompts working when the list read fails: the agent context refresh resolves and the project authoring still reads', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    try {
+      await expect(host.refreshProjectElementContext('project')).resolves.toBe(host.getAdmittedElementSelection());
+      expect(host.getAdmittedElementReadiness()).toMatchObject({ projectId: 'project', phase: 'error', error: 'Failed to fetch' });
+      expect(host.projectPackContext('project')).toMatchObject({ status: 'not-created', projectId: 'project' });
+    } finally {
+      vi.unstubAllGlobals();
+      vi.restoreAllMocks();
+    }
   });
 
   it('bounds a stalled load and ignores its late completion', async () => {
@@ -99,9 +138,9 @@ describe('atomic admitted host refresh', () => {
       host.setAdmittedElementScope('project', [ref('old')]);
       const pending = deferred<ProjectElementComponent>();
       const loading = host.refreshAdmittedElements(async () => list('project', digestOf('6'), [entry('old', digestOf('6'))]), () => pending.promise);
-      const rejected = expect(loading).rejects.toThrow('timed out');
       await vi.advanceTimersByTimeAsync(host.ADMITTED_ELEMENT_LOAD_TIMEOUT_MS);
-      await rejected;
+      await loading;
+      expect(host.getAdmittedElementReadiness().error).toContain('timed out');
       expect(host.getAdmittedElementReadiness().phase).toBe('error');
 
       pending.resolve(Blocks);
@@ -113,17 +152,17 @@ describe('atomic admitted host refresh', () => {
     }
   });
 
-  it('keeps the activated build and rejects a list for another project or a changed realm', async () => {
+  it('keeps the activated build and records an error for a list for another project or a changed realm', async () => {
     host.setAdmittedElementScope('project', [ref('old')]);
     await host.refreshAdmittedElements(async () => list('project', digestOf('a'), [entry('old', digestOf('1'))]), async () => Blocks);
     const activated = host.getAdmittedElementSelection();
 
-    await expect(host.refreshAdmittedElements(async () => list('other', digestOf('b'), [entry('old', digestOf('2'))]), async () => Blocks))
-      .rejects.toThrow('another project');
+    await host.refreshAdmittedElements(async () => list('other', digestOf('b'), [entry('old', digestOf('2'))]), async () => Blocks);
+    expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error', error: 'Element selection belongs to another project' });
     expect(host.getAdmittedElementSelection()).toBe(activated);
 
-    await expect(host.refreshAdmittedElements(async () => list('project', digestOf('c'), [entry('old', digestOf('3'))], 'other-realm'), async () => Blocks))
-      .rejects.toThrow('realm changed');
+    await host.refreshAdmittedElements(async () => list('project', digestOf('c'), [entry('old', digestOf('3'))], 'other-realm'), async () => Blocks);
+    expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error', error: 'Element selection realm changed; reload the editor.' });
     expect(host.getAdmittedElementSelection()).toBe(activated);
     expect(host.admittedComponent(ref('old'))).toBe(Blocks);
   });
@@ -135,10 +174,10 @@ describe('atomic admitted host refresh', () => {
 
     await expect(host.refreshAdmittedElements(async () => list('project', digestOf('b'), [entry('old', digestOf('2'))]),
       async () => { throw new Error('Project element blocks does not match the digest the Runtime admitted'); }))
-      .rejects.toThrow('does not match');
+      .resolves.toBe(activated);
 
     expect(host.getAdmittedElementSelection()).toBe(activated);
-    expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error' });
+    expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error', error: expect.stringContaining('does not match') });
   });
 
   it('fences a late project A completion after switching to project B and never leaks the old exact map', async () => {

@@ -361,6 +361,10 @@ export function useClipResize({
       session.edge,
     );
 
+    // A single-clip trim names its clip and the timing fields it changes, so the local save can prove that
+    // effect by id (also on a timeline with shots) instead of refusing an edit it cannot map.
+    const trimmed = Object.keys(primaryPatch).length > 0
+      && Object.keys(primaryPatch).every((key) => ['from', 'to', 'hold', 'speed'].includes(key));
     applyEdit({
       type: 'rows',
       rows: resolvedRows,
@@ -371,7 +375,11 @@ export function useClipResize({
         },
         overlapPatches,
       ),
-    }, { transactionId });
+    }, {
+      transactionId,
+      ...(trimmed ? { gestureBasis: structuredClone({ kind: 'trim' as const, clipId: session.clipId, patch: primaryPatch,
+        config: current.config, registry: current.registry }) } : {}),
+    });
 
     clearResizeTracking(session.clipId);
   }, [applyEdit, clearResizeTracking, dataRef, editability, selectionOwner]);

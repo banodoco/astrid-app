@@ -1,0 +1,1353 @@
+{
+  "clips": [
+    {
+      "asset": "asset-295",
+      "at": 199.2597,
+      "clipType": "hold",
+      "hold": 5.0685,
+      "id": "v3-clip-01",
+      "opacity": 1,
+      "track": "v3"
+    },
+    {
+      "app": {
+        "astrid": {
+          "gap_after_s": 0.5342,
+          "segment": "text-520",
+          "text": "text-521",
+          "words": [
+            [
+              0.0811,
+              0.1429,
+              "text-522"
+            ],
+            [
+              0.1835,
+              0.3264,
+              "text-523"
+            ],
+            [
+              0.4075,
+              0.591,
+              "text-524"
+            ],
+            [
+              0.6315,
+              1.0188,
+              "text-525"
+            ],
+            [
+              1.2833,
+              1.3452,
+              "text-526"
+            ],
+            [
+              1.406,
+              1.9362,
+              "text-527"
+            ],
+            [
+              2.0173,
+              2.1196,
+              "text-528"
+            ],
+            [
+              2.1602,
+              2.221,
+              "text-526"
+            ],
+            [
+              2.3021,
+              2.6488,
+              "text-529"
+            ]
+          ]
+        }
+      },
+      "asset": "asset-162",
+      "at": 86.5362,
+      "clipType": "media",
+      "from": 0,
+      "id": "a1-clip-02",
+      "label": "Label 01",
+      "to": 2.8045,
+      "track": "a1",
+      "volume": 1
+    },
+    {
+      "asset": "asset-87",
+      "at": 28.2822,
+      "clipType": "media",
+      "from": 0,
+      "hold": 0.7772,
+      "id": "a1-clip-03",
+      "params": {
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
+      },
+      "to": 0.7684,
+      "track": "a1",
+      "volume": 1
+    },
+    {
+      "asset": "asset-87",
+      "at": 42.474,
+      "clipType": "media",
+      "from": 0.4055,
+      "hold": 0.5406,
+      "id": "a1-clip-04",
+      "params": {
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
+      },
+      "to": 0.9529,
+      "track": "a1",
+      "volume": 1
+    },
+    {
+      "asset": "asset-87",
+      "at": 82.4476,
+      "clipType": "media",
+      "from": 0.4055,
+      "hold": 0.4393,
+      "id": "a1-clip-05",
+      "params": {
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
+      },
+      "to": 0.8556,
+      "track": "a1",
+      "volume": 1
+    },
+    {
+      "asset": "asset-87",
+      "at": 161.8541,
+      "clipType": "media",
+      "from": 0,
+      "hold": 0.3716,
+      "id": "a1-clip-06",
+      "params": {
+        "fadeIn": 0.0304,
+        "fadeOut": 0.0304
+      },
+      "to": 0.3842,
+      "track": "a1",
+      "volume": 1
+    },
+    {
+      "asset": "asset-80",
+      "at": 0,
+      "clipType": "media",
+      "from": 0,
+      "hold": 8.7854,
+      "id": "a2-clip-07",
+      "params": {
+        "fadeIn": 0.5,
+        "fadeOut": 0.2534
+      },
+      "track": "a2",
+      "volume": 1
+    },
+    {
+      "app": {
+        "split_from": "a2-clip-07"
+      },
+      "asset": "asset-80",
+      "at": 8.5151,
+      "clipType": "media",
+      "from": 7.9153,
+      "hold": 190.7446,
+      "id": "a2-clip-08",
+      "params": {
+        "fadeIn": 0.2534,
+        "fadeOut": 1.5206
+      },
+      "track": "a2",
+      "volume": 1
+    }
+  ],
+  "config": {
+    "app": {
+      "astrid": {
+        "cut_notes": {
+          "cut-01": {
+            "why": "text-01",
+            "why_layers": [
+              "text-02",
+              "text-03"
+            ]
+          },
+          "cut-02": {
+            "why": "text-04",
+            "why_layers": [
+              "text-05",
+              "text-06",
+              "text-07",
+              "text-08"
+            ]
+          },
+          "cut-03": {
+            "why": "text-09",
+            "why_layers": [
+              "text-03",
+              "text-10"
+            ]
+          },
+          "cut-04": {
+            "why": "text-11",
+            "why_layers": [
+              "text-05",
+              "text-02",
+              "text-12"
+            ]
+          },
+          "cut-05": {
+            "why": "text-13",
+            "why_layers": [
+              "text-03"
+            ]
+          },
+          "cut-06": {
+            "hold": "text-14",
+            "why": "text-15",
+            "why_layers": [
+              "text-03"
+            ]
+          },
+          "cut-07": {
+            "hold": "text-14",
+            "why": "text-16",
+            "why_layers": [
+              "text-17"
+            ]
+          },
+          "cut-08": {
+            "why": "text-18",
+            "why_layers": [
+              "text-19",
+              "text-03"
+            ]
+          },
+          "cut-09": {
+            "hold": "text-14",
+            "why": "text-20",
+            "why_layers": [
+              "text-21"
+            ]
+          },
+          "cut-10": {
+            "why": "text-22",
+            "why_layers": [
+              "text-03"
+            ]
+          },
+          "cut-11": {
+            "why": "text-23",
+            "why_layers": [
+              "text-06",
+              "text-24",
+              "text-03"
+            ]
+          },
+          "cut-12": {
+            "why": "text-25",
+            "why_layers": [
+              "text-26",
+              "text-27",
+              "text-28",
+              "text-29",
+              "text-30",
+              "text-31",
+              "text-32",
+              "text-33",
+              "text-34",
+              "text-35",
+              "text-36",
+              "text-37",
+              "text-38",
+              "text-39",
+              "text-40",
+              "text-41",
+              "text-42",
+              "text-43",
+              "text-44",
+              "text-45",
+              "text-46",
+              "text-47",
+              "text-48",
+              "text-49",
+              "text-50",
+              "text-51",
+              "text-52",
+              "text-53",
+              "text-54",
+              "text-55",
+              "text-56",
+              "text-57",
+              "text-58",
+              "text-59",
+              "text-60",
+              "text-61",
+              "text-62",
+              "text-63",
+              "text-64",
+              "text-65",
+              "text-66",
+              "text-67",
+              "text-68",
+              "text-69",
+              "text-70",
+              "text-71",
+              "text-72",
+              "text-73",
+              "text-74",
+              "text-75",
+              "text-76",
+              "text-77",
+              "text-78",
+              "text-79",
+              "text-80",
+              "text-81",
+              "text-82",
+              "text-83",
+              "text-84",
+              "text-85",
+              "text-86",
+              "text-87",
+              "text-88",
+              "text-89",
+              "text-90",
+              "text-91",
+              "text-92",
+              "text-93",
+              "text-94",
+              "text-95",
+              "text-96",
+              "text-97",
+              "text-98",
+              "text-99",
+              "text-100",
+              "text-101",
+              "text-102",
+              "text-103",
+              "text-104",
+              "text-105",
+              "text-106",
+              "text-107",
+              "text-108",
+              "text-109",
+              "text-110",
+              "text-111",
+              "text-112",
+              "text-113",
+              "text-114",
+              "text-115",
+              "text-116",
+              "text-117",
+              "text-118",
+              "text-119",
+              "text-120",
+              "text-121",
+              "text-122",
+              "text-123",
+              "text-124",
+              "text-125",
+              "text-126",
+              "text-127",
+              "text-128",
+              "text-129",
+              "text-130",
+              "text-131",
+              "text-132",
+              "text-133",
+              "text-134",
+              "text-135",
+              "text-136",
+              "text-137",
+              "text-138",
+              "text-139",
+              "text-140",
+              "text-141",
+              "text-142",
+              "text-143",
+              "text-144",
+              "text-145",
+              "text-146",
+              "text-147",
+              "text-148",
+              "text-149",
+              "text-150",
+              "text-151",
+              "text-152",
+              "text-153",
+              "text-154",
+              "text-155",
+              "text-156",
+              "text-157",
+              "text-158",
+              "text-159",
+              "text-160",
+              "text-161",
+              "text-162",
+              "text-163",
+              "text-164",
+              "text-165",
+              "text-166",
+              "text-167",
+              "text-168",
+              "text-169",
+              "text-170",
+              "text-171",
+              "text-172",
+              "text-173",
+              "text-174",
+              "text-175",
+              "text-176",
+              "text-177",
+              "text-178",
+              "text-179",
+              "text-180",
+              "text-181",
+              "text-182",
+              "text-183",
+              "text-184",
+              "text-185",
+              "text-186",
+              "text-187",
+              "text-188",
+              "text-189",
+              "text-190",
+              "text-191",
+              "text-192",
+              "text-193",
+              "text-194",
+              "text-195",
+              "text-196",
+              "text-197",
+              "text-198",
+              "text-199",
+              "text-200",
+              "text-201",
+              "text-202",
+              "text-203",
+              "text-204",
+              "text-205",
+              "text-206",
+              "text-207",
+              "text-208",
+              "text-209",
+              "text-210",
+              "text-211",
+              "text-212",
+              "text-213",
+              "text-214",
+              "text-215",
+              "text-216",
+              "text-217",
+              "text-218",
+              "text-219",
+              "text-220",
+              "text-221",
+              "text-222",
+              "text-223",
+              "text-224",
+              "text-225",
+              "text-226",
+              "text-227",
+              "text-228",
+              "text-229",
+              "text-230",
+              "text-231",
+              "text-232",
+              "text-233",
+              "text-234",
+              "text-235",
+              "text-236",
+              "text-237",
+              "text-238",
+              "text-239",
+              "text-240",
+              "text-241",
+              "text-242",
+              "text-243",
+              "text-244",
+              "text-245",
+              "text-246",
+              "text-247",
+              "text-248",
+              "text-249",
+              "text-250",
+              "text-251",
+              "text-252",
+              "text-253",
+              "text-254",
+              "text-255",
+              "text-256",
+              "text-257",
+              "text-258",
+              "text-259",
+              "text-260",
+              "text-261",
+              "text-262",
+              "text-263",
+              "text-264",
+              "text-265",
+              "text-266",
+              "text-267",
+              "text-268",
+              "text-269",
+              "text-270",
+              "text-271",
+              "text-272",
+              "text-273",
+              "text-274",
+              "text-275",
+              "text-276",
+              "text-277",
+              "text-278",
+              "text-279",
+              "text-280",
+              "text-281",
+              "text-282",
+              "text-283",
+              "text-284",
+              "text-285",
+              "text-286",
+              "text-287",
+              "text-288",
+              "text-289",
+              "text-290",
+              "text-291",
+              "text-292",
+              "text-293",
+              "text-294",
+              "text-295",
+              "text-296",
+              "text-297",
+              "text-298",
+              "text-299",
+              "text-300",
+              "text-301",
+              "text-302",
+              "text-303",
+              "text-304",
+              "text-305",
+              "text-306",
+              "text-307",
+              "text-308",
+              "text-309",
+              "text-310",
+              "text-311",
+              "text-312",
+              "text-313",
+              "text-314",
+              "text-315",
+              "text-316",
+              "text-317",
+              "text-318",
+              "text-319",
+              "text-320",
+              "text-321",
+              "text-322",
+              "text-323",
+              "text-324",
+              "text-325",
+              "text-326",
+              "text-327",
+              "text-328",
+              "text-329",
+              "text-330",
+              "text-331",
+              "text-332",
+              "text-333",
+              "text-334",
+              "text-335",
+              "text-336",
+              "text-337",
+              "text-338",
+              "text-339",
+              "text-340",
+              "text-341",
+              "text-342",
+              "text-343",
+              "text-344",
+              "text-345",
+              "text-346",
+              "text-347",
+              "text-348",
+              "text-349",
+              "text-350",
+              "text-351",
+              "text-352",
+              "text-353",
+              "text-354",
+              "text-355",
+              "text-356",
+              "text-357",
+              "text-358",
+              "text-359",
+              "text-360",
+              "text-361",
+              "text-362",
+              "text-363",
+              "text-364",
+              "text-365",
+              "text-366",
+              "text-02",
+              "text-367",
+              "text-368"
+            ]
+          },
+          "cut-13": {
+            "why": "text-369",
+            "why_layers": [
+              "text-370",
+              "text-371",
+              "text-06",
+              "text-372"
+            ]
+          },
+          "cut-14": {
+            "why": "text-373",
+            "why_layers": [
+              "text-374",
+              "text-375",
+              "text-376",
+              "text-06",
+              "text-377",
+              "text-378",
+              "text-379",
+              "text-380"
+            ]
+          },
+          "cut-15": {
+            "why": "text-381",
+            "why_layers": [
+              "text-06",
+              "text-382"
+            ]
+          },
+          "cut-16": {
+            "why": "text-383",
+            "why_layers": [
+              "text-375",
+              "text-384",
+              "text-385",
+              "text-386",
+              "text-387",
+              "text-388",
+              "text-389"
+            ]
+          },
+          "cut-17": {
+            "why": "text-390",
+            "why_layers": [
+              "text-374",
+              "text-391",
+              "text-392",
+              "text-393",
+              "text-388"
+            ]
+          },
+          "cut-18": {
+            "why": "text-394",
+            "why_layers": [
+              "text-395",
+              "text-03",
+              "text-380"
+            ]
+          },
+          "cut-19": {
+            "why": "text-396",
+            "why_layers": [
+              "text-06",
+              "text-397",
+              "text-398",
+              "text-399",
+              "text-400",
+              "text-401",
+              "text-402",
+              "text-403",
+              "text-404",
+              "text-405",
+              "text-406",
+              "text-407",
+              "text-408",
+              "text-409",
+              "text-389",
+              "text-410",
+              "text-411",
+              "text-412",
+              "text-413",
+              "text-414",
+              "text-415",
+              "text-416",
+              "text-417"
+            ]
+          },
+          "cut-20": {
+            "why": "text-418",
+            "why_layers": [
+              "text-419",
+              "text-374",
+              "text-375",
+              "text-06",
+              "text-420",
+              "text-377",
+              "text-421",
+              "text-378",
+              "text-380",
+              "text-422"
+            ]
+          },
+          "cut-21": {
+            "why": "text-423",
+            "why_layers": [
+              "text-374",
+              "text-375",
+              "text-376",
+              "text-06",
+              "text-420",
+              "text-377",
+              "text-421",
+              "text-378",
+              "text-380",
+              "text-422"
+            ]
+          },
+          "cut-22": {
+            "why": "text-424",
+            "why_layers": [
+              "text-02",
+              "text-425",
+              "text-426",
+              "text-427",
+              "text-427",
+              "text-427",
+              "text-427",
+              "text-427",
+              "text-427"
+            ]
+          },
+          "cut-23": {
+            "why": "text-428",
+            "why_layers": [
+              "text-429",
+              "text-376",
+              "text-430",
+              "text-431",
+              "text-432",
+              "text-06",
+              "text-433"
+            ]
+          },
+          "cut-24": {
+            "why": "text-434",
+            "why_layers": [
+              "text-435",
+              "text-435",
+              "text-06",
+              "text-436",
+              "text-437"
+            ]
+          },
+          "cut-25": {
+            "why": "text-438",
+            "why_layers": [
+              "text-439",
+              "text-06",
+              "text-436",
+              "text-08",
+              "text-437"
+            ]
+          },
+          "cut-26": {
+            "why": "text-440",
+            "why_layers": [
+              "text-441",
+              "text-442",
+              "text-443",
+              "text-444",
+              "text-445",
+              "text-446",
+              "text-447",
+              "text-448",
+              "text-449",
+              "text-450",
+              "text-451",
+              "text-452",
+              "text-453",
+              "text-454",
+              "text-06",
+              "text-455",
+              "text-456",
+              "text-457",
+              "text-458",
+              "text-459",
+              "text-460",
+              "text-461",
+              "text-462",
+              "text-463",
+              "text-464",
+              "text-465",
+              "text-466",
+              "text-467",
+              "text-468"
+            ]
+          },
+          "cut-27": {
+            "why": "text-469",
+            "why_layers": [
+              "text-470",
+              "text-471",
+              "text-06",
+              "text-472"
+            ]
+          },
+          "cut-28": {
+            "hold": "text-14",
+            "why": "text-473",
+            "why_layers": [
+              "text-06",
+              "text-474"
+            ]
+          },
+          "cut-29": {
+            "hold": "text-14",
+            "why": "text-475",
+            "why_layers": [
+              "text-06",
+              "text-476"
+            ]
+          },
+          "cut-30": {
+            "hold": "text-14",
+            "why": "text-477",
+            "why_layers": [
+              "text-06",
+              "text-478",
+              "text-479"
+            ]
+          },
+          "cut-31": {
+            "hold": "text-14",
+            "why": "text-480",
+            "why_layers": [
+              "text-06",
+              "text-481",
+              "text-482",
+              "text-483"
+            ]
+          },
+          "cut-32": {
+            "hold": "text-14",
+            "why": "text-484",
+            "why_layers": [
+              "text-485",
+              "text-06"
+            ]
+          },
+          "cut-33": {
+            "hold": "text-14",
+            "why": "text-486",
+            "why_layers": [
+              "text-485",
+              "text-06"
+            ]
+          },
+          "cut-34": {
+            "hold": "text-14",
+            "why": "text-487",
+            "why_layers": [
+              "text-488",
+              "text-03"
+            ]
+          },
+          "cut-35": {
+            "why": "text-489",
+            "why_layers": [
+              "text-490",
+              "text-06",
+              "text-491",
+              "text-492"
+            ]
+          },
+          "cut-36": {
+            "why": "text-493",
+            "why_layers": [
+              "text-494",
+              "text-495",
+              "text-496",
+              "text-497",
+              "text-498",
+              "text-06",
+              "text-499",
+              "text-500",
+              "text-501"
+            ]
+          },
+          "cut-37": {
+            "why": "text-502",
+            "why_layers": [
+              "text-503",
+              "text-06",
+              "text-504"
+            ]
+          },
+          "cut-38": {
+            "hold": "text-14",
+            "why": "text-505",
+            "why_layers": [
+              "text-506",
+              "text-03"
+            ]
+          },
+          "cut-39": {
+            "why": "text-507",
+            "why_layers": [
+              "text-06",
+              "text-506",
+              "text-508"
+            ]
+          },
+          "cut-40": {
+            "hold": "text-14",
+            "why": "text-509",
+            "why_layers": [
+              "text-510",
+              "text-03"
+            ]
+          },
+          "cut-41": {
+            "hold": "text-14",
+            "why": "text-511",
+            "why_layers": [
+              "text-03"
+            ]
+          },
+          "cut-42": {
+            "why": "text-512",
+            "why_layers": [
+              "text-439",
+              "text-06",
+              "text-436",
+              "text-513"
+            ]
+          }
+        },
+        "slots": {
+          "slot-01": {
+            "kind": "kind-a",
+            "media": "enum-01",
+            "params": {
+              "label": "text-514",
+              "placeholder": false
+            },
+            "spec": "text-515",
+            "zone_a": [
+              710,
+              132,
+              507,
+              710
+            ]
+          },
+          "slot-02": {
+            "kind": "kind-b",
+            "spec": "text-516"
+          },
+          "slot-03": {
+            "kind": "kind-c",
+            "mark_c": {
+              "size": 456,
+              "x": 1328,
+              "y": 781
+            },
+            "spec": "text-517"
+          },
+          "slot-04": {
+            "kind": "kind-d",
+            "spec": "text-518"
+          },
+          "slot-05": {
+            "kind": "kind-e",
+            "spec": "text-519"
+          }
+        }
+      },
+      "structure": {
+        "struct-01": {
+          "pause_after_astrid": {
+            "cut_s": 81.7718,
+            "film_end_s": 171.4167,
+            "held_clip_ids": [
+              "clipref-01",
+              "clipref-02",
+              "clipref-03",
+              "clipref-04",
+              "clipref-05"
+            ],
+            "insert_s": 0.6082,
+            "moved_clip_count": 105,
+            "music_policy": "enum-02"
+          }
+        },
+        "struct-02": {
+          "at_cut": "cut-12",
+          "by": "enum-03",
+          "insert_frames": 89.2056,
+          "insert_s": 2.9735
+        },
+        "struct-03": {
+          "at_cut": "cut-20",
+          "insert_frames": 178,
+          "insert_s": 5.947
+        }
+      }
+    },
+    "clips": [
+      {
+        "asset": "asset-295",
+        "at": 199.2597,
+        "clipType": "hold",
+        "hold": 5.0685,
+        "id": "v3-clip-01",
+        "opacity": 1,
+        "track": "v3"
+      },
+      {
+        "app": {
+          "astrid": {
+            "gap_after_s": 0.5342,
+            "segment": "text-520",
+            "text": "text-521",
+            "words": [
+              [
+                0.0811,
+                0.1429,
+                "text-522"
+              ],
+              [
+                0.1835,
+                0.3264,
+                "text-523"
+              ],
+              [
+                0.4075,
+                0.591,
+                "text-524"
+              ],
+              [
+                0.6315,
+                1.0188,
+                "text-525"
+              ],
+              [
+                1.2833,
+                1.3452,
+                "text-526"
+              ],
+              [
+                1.406,
+                1.9362,
+                "text-527"
+              ],
+              [
+                2.0173,
+                2.1196,
+                "text-528"
+              ],
+              [
+                2.1602,
+                2.221,
+                "text-526"
+              ],
+              [
+                2.3021,
+                2.6488,
+                "text-529"
+              ]
+            ]
+          }
+        },
+        "asset": "asset-162",
+        "at": 86.5362,
+        "clipType": "media",
+        "from": 0,
+        "id": "a1-clip-02",
+        "label": "Label 01",
+        "to": 2.8045,
+        "track": "a1",
+        "volume": 1
+      },
+      {
+        "asset": "asset-87",
+        "at": 28.2822,
+        "clipType": "media",
+        "from": 0,
+        "hold": 0.7772,
+        "id": "a1-clip-03",
+        "params": {
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
+        },
+        "to": 0.7684,
+        "track": "a1",
+        "volume": 1
+      },
+      {
+        "asset": "asset-87",
+        "at": 42.474,
+        "clipType": "media",
+        "from": 0.4055,
+        "hold": 0.5406,
+        "id": "a1-clip-04",
+        "params": {
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
+        },
+        "to": 0.9529,
+        "track": "a1",
+        "volume": 1
+      },
+      {
+        "asset": "asset-87",
+        "at": 82.4476,
+        "clipType": "media",
+        "from": 0.4055,
+        "hold": 0.4393,
+        "id": "a1-clip-05",
+        "params": {
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
+        },
+        "to": 0.8556,
+        "track": "a1",
+        "volume": 1
+      },
+      {
+        "asset": "asset-87",
+        "at": 161.8541,
+        "clipType": "media",
+        "from": 0,
+        "hold": 0.3716,
+        "id": "a1-clip-06",
+        "params": {
+          "fadeIn": 0.0304,
+          "fadeOut": 0.0304
+        },
+        "to": 0.3842,
+        "track": "a1",
+        "volume": 1
+      },
+      {
+        "asset": "asset-80",
+        "at": 0,
+        "clipType": "media",
+        "from": 0,
+        "hold": 8.7854,
+        "id": "a2-clip-07",
+        "params": {
+          "fadeIn": 0.5,
+          "fadeOut": 0.2534
+        },
+        "track": "a2",
+        "volume": 1
+      },
+      {
+        "app": {
+          "split_from": "a2-clip-07"
+        },
+        "asset": "asset-80",
+        "at": 8.5151,
+        "clipType": "media",
+        "from": 7.9153,
+        "hold": 190.7446,
+        "id": "a2-clip-08",
+        "params": {
+          "fadeIn": 0.2534,
+          "fadeOut": 1.5206
+        },
+        "track": "a2",
+        "volume": 1
+      }
+    ],
+    "theme_overrides": {
+      "visual": {
+        "canvas": {
+          "fps": 30,
+          "height": 1080,
+          "width": 1920
+        }
+      }
+    },
+    "tracks": [
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v1",
+        "kind": "visual",
+        "label": "Track v1"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v2",
+        "kind": "visual",
+        "label": "Track v2"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v3",
+        "kind": "visual",
+        "label": "Track v3"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v4",
+        "kind": "visual",
+        "label": "Track v4"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v5",
+        "kind": "visual",
+        "label": "Track v5"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v6",
+        "kind": "visual",
+        "label": "Track v6"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "a1",
+        "kind": "audio",
+        "label": "Track a1"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "a2",
+        "kind": "audio",
+        "label": "Track a2",
+        "muted": false
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "a3",
+        "kind": "audio",
+        "label": "Track a3"
+      }
+    ]
+  },
+  "occurrences": [
+    {
+      "duration_ms": 9258,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-01",
+      "placement": {
+        "start_ms": 0
+      },
+      "provenance": {},
+      "shot_id": "shot-01",
+      "shot_revision_id": "shot-rev-01",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    },
+    {
+      "duration_ms": 19802,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-02",
+      "placement": {
+        "start_ms": 9258
+      },
+      "provenance": {},
+      "shot_id": "shot-02",
+      "shot_revision_id": "shot-rev-02",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    },
+    {
+      "duration_ms": 13853,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-03",
+      "placement": {
+        "start_ms": 29060
+      },
+      "provenance": {},
+      "shot_id": "shot-03",
+      "shot_revision_id": "shot-rev-03",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    }
+  ],
+  "registry": {
+    "assets": {
+      "asset-162": {
+        "content_sha256": "sha256:1f40c66f80f41eaf9168bff4e1f02ca37882e50d89ee168346f6786ead85fc4f",
+        "media_id": "sha256:1f40c66f80f41eaf9168bff4e1f02ca37882e50d89ee168346f6786ead85fc4f",
+        "type": "audio/x-wav"
+      },
+      "asset-295": {
+        "file": "file-102",
+        "generationId": "gen-01",
+        "media_id": "sha256:4af06bb9592f187adc48291ffb102141f8f087f1c6e64855777ae0a5b4dfad6e",
+        "thumbnailUrl": "file-103",
+        "type": "image/png"
+      },
+      "asset-80": {
+        "content_sha256": "sha256:0e4e4717bf455228122daf9c20a66123cfe24870a86cdc8c0c284cbaed9c2128",
+        "media_id": "sha256:0e4e4717bf455228122daf9c20a66123cfe24870a86cdc8c0c284cbaed9c2128",
+        "type": "audio/x-wav"
+      },
+      "asset-87": {
+        "content_sha256": "sha256:de5df4928afcff177a7354ec6d34c1e8fcb31d0c4152316a83247a52d67abdf7",
+        "media_id": "sha256:de5df4928afcff177a7354ec6d34c1e8fcb31d0c4152316a83247a52d67abdf7",
+        "type": "audio/x-wav"
+      }
+    }
+  }
+}

@@ -1,3 +1,4 @@
+import type { SaveBarInput } from './saveBar.ts';
 import type { TranscriptPanelHost } from '@/tools/video-editor/lib/transcript-panel-host.ts';
 import type { useAssetManagement } from '@/tools/video-editor/hooks/useAssetManagement.ts';
 import type { useClipEditing } from '@/tools/video-editor/hooks/useClipEditing.ts';
@@ -260,6 +261,10 @@ export interface TimelineChromeContextValue {
   recoveryDraft: { updatedAt: string; baseVersion: number; retryAllowed?: boolean } | null;
   retryRecoveredDraft: () => void;
   discardRecoveredDraft: () => void;
+  /** The one description of unsaved work (null when nothing is waiting) and its two actions. */
+  saveBar: SaveBarInput | null;
+  tryAgain: () => void;
+  discardUnsaved: () => void;
   startRender: TimelineStartRender;
 }
 

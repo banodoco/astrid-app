@@ -147,3 +147,33 @@ describe('ClipPanelBody touch Inspector', () => {
     expect(screen.queryByRole('group', { name: 'Clip actions' })).toBeNull();
   });
 });
+
+describe('clip media placement controls', () => {
+  it('shows inherited fit and changes fit and crop independently', () => {
+    const onChange = vi.fn();
+    const clip = {id: 'clip-fit', clipType: 'media', at: 0, track: 'V1', asset: 'a', cropLeft: 0.2,
+      assetEntry: {id: 'a', file: 'a', src: '/a', type: 'image/png', resolution: '1920x800'}};
+    render(<ClipPanelBody {...bodyProps()} activeTab="position" clip={clip} track={{id: 'V1', kind: 'visual', label: 'V1', fit: 'cover'}} onChange={onChange} />);
+    expect(screen.getByText('Fill (track)')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Fit'), {target: {value: 'contain'}});
+    expect(onChange).toHaveBeenLastCalledWith({fit: 'contain'});
+    const crop = screen.getByText('Left').querySelector('input');
+    expect(crop).not.toBeNull();
+    fireEvent.change(crop!, {target: {value: '0.3'}});
+    expect(onChange).toHaveBeenLastCalledWith({cropLeft: 0.3});
+    fireEvent.change(screen.getByLabelText('Fit'), {target: {value: ''}});
+    expect(onChange).toHaveBeenLastCalledWith({fit: undefined});
+  });
+});
+
+
+it('disables fit and crop controls in read-only mode', () => {
+  const onChange = vi.fn();
+  const clip = {id: 'clip-fit', clipType: 'media', at: 0, track: 'V1', asset: 'a', assetEntry: {id: 'a', file: 'a', src: '/a', type: 'image/png', resolution: '1920x800'}};
+  render(<ClipPanelBody {...bodyProps()} readOnly activeTab="position" clip={clip} track={{id: 'V1', kind: 'visual', label: 'V1', fit: 'cover'}} onChange={onChange} />);
+  expect(screen.getByLabelText('Fit')).toBeDisabled();
+  const crop = screen.getByText('Left').querySelector('input');
+  expect(crop).toBeDisabled();
+  fireEvent.change(crop!, {target: {value: '0.3'}});
+  expect(onChange).not.toHaveBeenCalled();
+});

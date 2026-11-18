@@ -251,6 +251,27 @@ export function createCommitOutbox(options: {
     });
   }
 
+  /**
+   * Total Discard: remove every owner row for this timeline. A claim another tab holds is fenced, not waited
+   * for: its next access finds no row (or a different generation) and throws "Stale outbox claim".
+   */
+  async function discardScope(scope: OutboxScope): Promise<void> {
+    const { realmId, actorId, projectId, timelineId } = scope;
+    scopeKey({ realmId, actorId, projectId, timelineId }, '_');
+    await transaction<void>('readwrite', (store, finish) => {
+      const request = store.getAll();
+      request.addEventListener('success', () => {
+        for (const record of request.result as OutboxRecord[]) {
+          if (record.scope.realmId === realmId && record.scope.actorId === actorId
+            && record.scope.projectId === projectId && record.scope.timelineId === timelineId) {
+            store.delete(scopeKey(record.scope, record.ownerId));
+          }
+        }
+        finish(undefined);
+      });
+    });
+  }
+
   async function own<T>(
     scopeInput: OutboxScope,
     ownerId: string,
@@ -568,6 +589,7 @@ export function createCommitOutbox(options: {
 
   return {
     list,
+    discardScope,
     create: <T>(scope: OutboxScope, work: (outbox: ClaimedOutbox, ownerId: string) => Promise<T>) =>
       own(scope, crypto.randomUUID(), true, work),
     recover: <T>(scope: OutboxScope, ownerId: string, work: (outbox: ClaimedOutbox) => Promise<T>) =>

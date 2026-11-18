@@ -4,7 +4,31 @@
  * Do not edit by hand — regenerate with `npm run gen:types`.
  */
 
+/**
+ * A finite JSON descendant of an opaque metadata namespace.
+ *
+ * This interface was referenced by `TimelineConfig`'s JSON-Schema
+ * via the `definition` "MetaValue".
+ */
+export type MetaValue =
+  | {
+      [k: string]: MetaValue;
+    }
+  | MetaValue[]
+  | string
+  | number
+  | boolean
+  | null;
+/**
+ * ASCII namespace key for opaque extension metadata.
+ *
+ * This interface was referenced by `TimelineConfig`'s JSON-Schema
+ * via the `definition` "MetaNamespaceKey".
+ */
+export type MetaNamespaceKey = string;
+
 export interface TimelineConfig {
+  meta?: Meta;
   theme?: string;
   clips: TimelineClip[];
   tracks: {
@@ -19,8 +43,11 @@ export interface TimelineConfig {
     muted?: boolean;
     blendMode?: "normal" | "multiply" | "screen" | "overlay" | "darken" | "lighten" | "soft-light" | "hard-light";
     app?: {
+      clipPlacementVersion?: 1;
+      scaleAppliesToPositionedClips?: boolean;
       [k: string]: unknown;
     };
+    meta?: Meta1;
   }[];
   pinnedShotGroups?: {
     shotId?: string;
@@ -40,6 +67,21 @@ export interface TimelineConfig {
     [k: string]: unknown;
   };
   output?: TimelineOutput;
+}
+/**
+ * Runtime-owned opaque extension metadata; ignored by TimelineConfig consumers.
+ */
+export interface Meta {
+  [k: string]: MetaNamespaceValue;
+}
+/**
+ * Opaque namespace payload; the namespace root is always an object.
+ *
+ * This interface was referenced by `TimelineConfig`'s JSON-Schema
+ * via the `definition` "MetaNamespaceValue".
+ */
+export interface MetaNamespaceValue {
+  [k: string]: MetaValue;
 }
 /**
  * This interface was referenced by `TimelineConfig`'s JSON-Schema
@@ -66,6 +108,7 @@ export interface TimelineClip {
   cropLeft?: number;
   cropRight?: number;
   opacity?: number;
+  fit?: "contain" | "cover";
   text?: {
     content?: string;
     fontFamily?: string;
@@ -76,16 +119,22 @@ export interface TimelineClip {
     italic?: boolean;
   };
   entrance?: {
+    id?: string;
     type?: string;
     duration?: number;
+    durationFrames?: number;
+    easing?: string;
     intensity?: number;
     params?: {
       [k: string]: unknown;
     };
   };
   exit?: {
+    id?: string;
     type?: string;
     duration?: number;
+    durationFrames?: number;
+    easing?: string;
     intensity?: number;
     params?: {
       [k: string]: unknown;
@@ -139,6 +188,16 @@ export interface TimelineClip {
   derived_output?: {
     [k: string]: unknown;
   };
+  meta?: Meta1;
+}
+/**
+ * Optional bounded namespace map. Canonical byte and depth limits are provider-enforced.
+ *
+ * This interface was referenced by `TimelineConfig`'s JSON-Schema
+ * via the `definition` "Meta".
+ */
+export interface Meta1 {
+  [k: string]: MetaNamespaceValue;
 }
 /**
  * This interface was referenced by `TimelineConfig`'s JSON-Schema
@@ -212,6 +271,7 @@ export interface AssetEntry {
   generationId?: string;
   variantId?: string;
   thumbnailUrl?: string;
+  meta?: Meta1;
 }
 
 export type TimelineClipT = TimelineClip;

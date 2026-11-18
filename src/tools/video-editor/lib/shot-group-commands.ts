@@ -272,6 +272,7 @@ function snapshotClipMeta(meta: ClipMeta): PinnedShotImageClipSnapshot['meta'] {
     y: meta.y,
     width: meta.width,
     height: meta.height,
+    fit: meta.fit,
     cropTop: meta.cropTop,
     cropBottom: meta.cropBottom,
     cropLeft: meta.cropLeft,

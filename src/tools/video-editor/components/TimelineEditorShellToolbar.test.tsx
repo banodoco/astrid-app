@@ -69,9 +69,9 @@ describe('TimelineEditorShellToolbar', () => {
   });
 
   describe('the save badge', () => {
-    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', isConflictExhausted = false) => {
+    const renderToolbar = (saveStatus: 'saved' | 'saving' | 'dirty' | 'retrying' | 'error', unsaved = false) => {
       const store = createTimelineStore();
-      store.setState((state) => ({ chrome: { ...state.chrome, saveStatus, isConflictExhausted } }));
+      store.setState((state) => ({ chrome: { ...state.chrome, saveStatus, saveBar: unsaved ? { kind: 'refused' as const, headline: 'x' } : null } }));
       return render(
         <TimelineStoreProvider store={store}>
           <TimelineEditorShellToolbar
@@ -108,7 +108,7 @@ describe('TimelineEditorShellToolbar', () => {
       }
     });
 
-    it('reads Not saved, neutral and muted, while a save conflict is open: a choice, not an error', () => {
+    it('reads Not saved, neutral and muted, while the save bar is showing: it reads the same input', () => {
       renderToolbar('error', true);
       expect(screen.queryByText('error')).toBeNull();
       const badge = screen.getByText('Not saved');

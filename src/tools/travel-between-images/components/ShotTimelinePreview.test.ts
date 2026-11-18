@@ -85,6 +85,9 @@ const popupChrome = vi.hoisted(() => ({
   retrySaveAfterConflict: vi.fn(),
   retryRecoveredDraft: vi.fn(),
   discardRecoveredDraft: vi.fn(),
+  saveBar: null as { kind: 'refused' | 'waiting' | 'recovered'; headline: string; since?: string } | null,
+  tryAgain: vi.fn(),
+  discardUnsaved: vi.fn(),
   timelineLoadGate: null as Promise<void> | null,
   onTimelineLoadStarted: vi.fn(),
 }));
@@ -250,6 +253,7 @@ describe('shot timeline popup persistence', () => {
     popupChrome.isConflictExhausted = false;
     popupChrome.saveStatus = 'saved';
     popupChrome.recoveryDraft = null;
+    popupChrome.saveBar = null;
     popupChrome.timelineLoadGate = null;
     vi.clearAllMocks();
     previewProps.currentTime = undefined;
@@ -329,22 +333,17 @@ describe('shot timeline popup persistence', () => {
     });
   });
 
-  it('renders recovery controls in the mounted popup surface', async () => {
-    popupChrome.recoveryDraft = { updatedAt: '2026-09-23T00:00:00.000Z', baseVersion: 4 };
+  it('renders the one save bar in the mounted popup surface', async () => {
+    popupChrome.saveBar = { kind: 'recovered', headline: 'You have unsaved changes.', since: '2026-09-23T00:00:00.000Z' };
     const composition = createShotCompositionAdapter({ load: vi.fn(), publish: vi.fn() }).prepare(fixture);
 
     render(React.createElement(ShotTimelinePreview, { composition, occurrenceId: 'occ-1' }));
 
-    await waitFor(() => expect(document.querySelector('[data-shot-timeline-recovery="true"]')).toBeTruthy());
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Discard' })).toBeTruthy();
-    expect(screen.getByRole('button', { name: 'Reload' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(document.querySelector('[data-save-bar="recovered"]')).toBeTruthy());
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
-    expect(popupChrome.retryRecoveredDraft).toHaveBeenCalled();
-    expect(popupChrome.discardRecoveredDraft).toHaveBeenCalled();
-    expect(popupChrome.reloadFromServer).toHaveBeenCalled();
+    expect(popupChrome.tryAgain).toHaveBeenCalled();
+    expect(popupChrome.discardUnsaved).toHaveBeenCalled();
   });
 
   it('resolves canonical managed popup media to its browser content URL', async () => {

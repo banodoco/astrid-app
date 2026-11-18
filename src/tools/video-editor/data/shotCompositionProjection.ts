@@ -481,11 +481,11 @@ function projectClip(
   const rawFrom = optionalFiniteNumber(rawClip.from);
   const rawTo = optionalFiniteNumber(rawClip.to);
   const hasTrim = rawFrom !== undefined && rawTo !== undefined && rawTo > rawFrom;
-  // The adapter refuses a negative offset, so there is nothing to clamp here.
+  // source_offset is the window origin into the shot's timeline (see occurrenceWindow.ts): a child at
+  // internal time tau sits at start - offset + tau and shows only inside [start, start + duration]. The
+  // adapter refuses an invalid (negative / non-finite) offset, so there is nothing to clamp here.
   const occurrenceSourceOffsetMs = occurrence.sourceOffsetMs ?? 0;
   const isAudio = isAudioClip(rawClip, occurrence, parentTracks, registry);
-  const sourceOffsetMs = isAudio ? 0 : occurrenceSourceOffsetMs;
-  const sourceOffsetSeconds = sourceOffsetMs / 1000;
   const occurrenceSpeed = positiveNumber(occurrence.speed, 1);
   const speed = positiveNumber(rawClip.speed, isAudio ? 1 : occurrenceSpeed);
   // Persisted duration/hold/trim values are source-media units. Keep that
@@ -500,6 +500,14 @@ function projectClip(
         : hasTrim
           ? Math.max(1, (rawTo - rawFrom) * 1000)
           : Math.max(1, occurrence.durationMs * speed);
+  const windowStartSeconds = occurrence.atMs / 1000;
+  const absoluteAtSeconds = windowStartSeconds - occurrenceSourceOffsetMs / 1000 + atMs / 1000;
+  const absoluteEndSeconds = absoluteAtSeconds + durationMs / 1000 / speed;
+  // Entirely before the window: not visible (same as the Agent projection).
+  if (absoluteEndSeconds <= windowStartSeconds && occurrenceSourceOffsetMs > 0) return null;
+  const cutSeconds = Math.max(0, windowStartSeconds - absoluteAtSeconds);
+  const visibleStartSeconds = absoluteAtSeconds + cutSeconds;
+  const holdSeconds = durationMs / 1000 - cutSeconds * speed;
   const childGain = finiteNumber(rawClip.gain ?? rawClip.volume, 1);
   const occurrenceGain = finiteNumber(occurrence.gain, 1);
   const gain = childGain * occurrenceGain;
@@ -530,21 +538,22 @@ function projectClip(
     ...(typeof rawClip.disabled === 'boolean' ? { disabled: rawClip.disabled } : {}),
     ...(typeof rawClip.hidden === 'boolean' ? { hidden: rawClip.hidden } : {}),
     ...(typeof rawClip.deleted === 'boolean' ? { deleted: rawClip.deleted } : {}),
-    at: Math.max(0, occurrence.atMs + atMs) / 1000,
+    at: visibleStartSeconds,
     track,
     clipType,
     ...(text(rawClip.label) ? { label: text(rawClip.label) } : {}),
     ...(asset ? { asset } : {}),
-    ...(rawFrom !== undefined || sourceOffsetMs > 0
-      ? { from: Math.max(0, (rawFrom ?? 0) + sourceOffsetSeconds) }
+    // Shot time hidden before the window advances the media start (at the clip's speed).
+    ...(rawFrom !== undefined || (cutSeconds > 0 && clipType !== 'image')
+      ? { from: Math.max(0, (rawFrom ?? 0) + cutSeconds * speed) }
       : {}),
-    ...(hasTrim ? { to: Math.max(0, rawTo + sourceOffsetSeconds) } : {}),
+    ...(hasTrim ? { to: rawTo } : {}),
     ...(speed !== 1 ? { speed } : {}),
     // Stills use a hold for rendering. Preserve the same duration precedence
     // as shot extent (duration_ms, duration, hold, then trim), in source units.
     // Other trimmed media retain their source window.
     ...(!hasTrim || clipType === 'image' || clipType === 'hold'
-      ? { hold: durationMs / 1000 } : {}),
+      ? { hold: holdSeconds } : {}),
     ...(muted || hasAuthoredGain ? { volume: muted ? 0 : gain } : {}),
     ...preservedGeometry,
     ...(typeof rawClip.fit === 'string' ? {fit: rawClip.fit as TimelineClip['fit']} : {}),
@@ -697,7 +706,12 @@ export function projectCanonicalComposition(
     const identity = identityForOccurrence(occurrence);
     occurrenceIdentities.set(occurrence.occurrenceId, identity);
     const timeline = childTimeline(occurrence);
-    const contentDurationMs = timelineContentExtentMs(timeline);
+    // A start-trimmed occurrence (source_offset > 0) shows an explicit window [offset, offset + duration]
+    // of its shot: the window end is authored, not derived from the content extent. Offset 0 keeps the
+    // content-derived (soft wall) duration.
+    const contentDurationMs = (occurrence.sourceOffsetMs ?? 0) > 0
+      ? occurrence.durationMs
+      : timelineContentExtentMs(timeline);
     const effectiveDurationMs = timelineOccurrenceEffectiveDurationMs(
       occurrence,
       outputOccurrences,

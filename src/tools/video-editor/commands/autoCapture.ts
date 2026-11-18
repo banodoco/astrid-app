@@ -1,6 +1,7 @@
 import type { EditCommand, JSON, MediaSelection, VerifiedMedia } from '@/integrations/runtime/timeline-commit-types.ts';
 import { AuthoredState, ClipMoveError, MoveRecording, assertFiniteJson, copy, equal, freezeJson, has, object, type AuthoredBundle } from './clipMovePrimitives.ts';
-import { fractionNumber, number, occurrenceStart, rate } from './clipMoveCapture.ts';
+import { fractionNumber, number, occurrenceOrigin, occurrenceStart, rate } from './clipMoveCapture.ts';
+import { occurrenceOffsetIsValid, readOccurrenceSourceOffsetSeconds } from '../data/occurrenceWindow.ts';
 
 type Row = Record<string, JSON>;
 type Approval = {
@@ -55,23 +56,25 @@ function endFrame(clip: Row, origin: number, fps: number): number {
   return Math.floor((origin + at) * fps + 0.5) + Math.max(1, Math.floor(length / speed * fps + 0.5));
 }
 
-function ownerInputs(ctx: MoveRecording, owner: string): number {
+function ownerInputs(ctx: MoveRecording, owner: string): { floor: number; limit: number } {
   ctx.select('collection.occurrences', 'parent');
   ctx.read(owner, ['occurrence_id']);
   ctx.read(owner + '/shot', ['shot_id']);
   for (const path of MAP_FIELDS) ctx.read(owner, path);
   const row = ctx.state.occurrence(owner);
   occurrenceStart(row);
-  if (!active(row) || ![undefined, null, 0].includes(row.source_offset as number | null | undefined) ||
+  if (!active(row) || !occurrenceOffsetIsValid(row.source_offset) ||
     ![undefined, null, 1].includes(row.speed as number | null | undefined) || row.time_map != null || row.timeMap != null) {
     throw new ClipMoveError('active translation-only occurrence is required', 'unsupported_map');
   }
-  const limit = number(row.duration_ms, 'occurrence.duration_ms', true) / 1000;
+  // Child-local time: the occurrence shows [source_offset, source_offset + duration] of the shot's timeline.
+  const floor = readOccurrenceSourceOffsetSeconds(row.source_offset);
+  const limit = floor + number(row.duration_ms, 'occurrence.duration_ms', true) / 1000;
   const fps = rate(ctx.read('parent', ['config', 'output', 'fps']));
   if (!equal(rate(ctx.read(owner + '/source', ['output', 'fps'])), fps)) throw new ClipMoveError('parent and child fps differ', 'unsupported_timing');
   if (ctx.read(owner + '/source', ['source_window']) != null) throw new ClipMoveError('internal source_window is unsupported', 'unsupported_map');
   ctx.bind('media.owner', owner);
-  return limit;
+  return { floor, limit };
 }
 
 function exclusive(ctx: MoveRecording, owner: string): void {
@@ -79,7 +82,7 @@ function exclusive(ctx: MoveRecording, owner: string): void {
 }
 
 function addMedia(ctx: MoveRecording, owner: string, row: Row, pin: MediaSelection, verified: VerifiedMedia, consumed: JSON): void {
-  const limit = ownerInputs(ctx, owner);
+  const { floor, limit } = ownerInputs(ctx, owner);
   exclusive(ctx, owner);
   ctx.read(owner + '/source', ['app', 'astrid', 'pool']);
   ctx.read('parent', ['config', 'pinnedShotGroups']);
@@ -95,7 +98,7 @@ function addMedia(ctx: MoveRecording, owner: string, row: Row, pin: MediaSelecti
   const keys = ['asset', 'at', 'clipType', 'hold', 'id', 'track', ...(kind === 'video' ? ['from', 'speed', 'to'] : [])].sort();
   if (!equal(Object.keys(row).sort(), keys) || row.clipType !== kind || row.asset !== pin.asset || !rawId(row.id)) throw new ClipMoveError('unsupported automatic birth row');
   const at = number(row.at, 'clip.at'), hold = number(row.hold, 'clip.hold', true);
-  if (at < 0 || at + hold > limit) throw new ClipMoveError('child interval exceeds occurrence', 'occurrence_boundary');
+  if (at < floor || at + hold > limit) throw new ClipMoveError('child interval exceeds occurrence', 'occurrence_boundary');
   if (kind === 'video' && (row.from !== 0 || row.to !== hold || row.speed !== 1 || hold > verified.duration_seconds!)) {
     throw new ClipMoveError('source window exceeds verified media', 'unsupported_timing');
   }
@@ -152,7 +155,7 @@ export function executeAutoBirth(bundle: AuthoredBundle, supplied: EditCommand, 
     const [n, d] = rate(ctx.read('parent', ['config', 'output', 'fps']));
     const frame = Math.floor(number(args.on, 'on') * fractionNumber(n, d) + 0.5);
     const on = Math.sign(frame) * fractionNumber(BigInt(Math.abs(frame)) * d, n);
-    row = { id: args.id, clipType: 'image', asset: pin.asset, track: home, at: on - occurrenceStart(occurrence), hold: args.hold };
+    row = { id: args.id, clipType: 'image', asset: pin.asset, track: home, at: on - occurrenceOrigin(occurrence), hold: args.hold };
   } else {
     if (!object(args.row)) throw new ClipMoveError('birth row is required');
     row = args.row;
@@ -190,7 +193,8 @@ export function finishAutoCapture(basis: AutoCaptureBasis, media: MediaSelection
   const kind = verifiedInput(media, verified);
   const state = new AuthoredState(bundle), occurrence = state.occurrence(a.owner);
   if (bundle.placements.filter((row) => row.shot_id === occurrence.shot_id).length !== 1) throw new ClipMoveError('shared authored placement is unsupported', 'unsupported_ownership');
-  const origin = occurrenceStart(occurrence);
+  const windowStart = occurrenceStart(occurrence);
+  const origin = occurrenceOrigin(occurrence);
   const home = object(occurrence.placement) && has(occurrence.placement, 'track') ? occurrence.placement.track : occurrence.track;
   const [n, d] = rate((state.config('parent').output as Row | undefined)?.fps), fps = fractionNumber(n, d);
   const rows = clips(state, a.owner), found = rows.find((row) => a.anchor !== null && row.id === a.anchor);
@@ -204,7 +208,7 @@ export function finishAutoCapture(basis: AutoCaptureBasis, media: MediaSelection
     else if (a.fallbackAt !== null) { frame = Math.floor(a.fallbackAt * fps + 0.5); resolution = 'fallback-at'; }
     else {
       const ends = rows.filter((row) => row.track === lane).map((row) => endFrame(row, origin, fps));
-      frame = ends.length ? Math.max(...ends) : Math.floor(origin * fps + 0.5); resolution = 'lane-end';
+      frame = ends.length ? Math.max(...ends) : Math.floor(windowStart * fps + 0.5); resolution = 'lane-end';
     }
   } else {
     const legacy = state.config('parent').pinnedShotGroups;
@@ -213,7 +217,7 @@ export function finishAutoCapture(basis: AutoCaptureBasis, media: MediaSelection
     if (pool.state === 'present' && Array.isArray(pool.value) && pool.value.includes(media.asset)) throw new ClipMoveError('pool promotion requires the separate shot.pool port', 'dependency_unavailable');
     lane = found ? found.track : home;
     if (a.frame === null) {
-      frame = rows.length ? Math.max(...rows.map((row) => endFrame(row, origin, fps))) : Math.floor(origin * fps + 0.5);
+      frame = rows.length ? Math.max(...rows.map((row) => endFrame(row, origin, fps))) : Math.floor(windowStart * fps + 0.5);
       resolution = 'append'; detail.extent_frame = frame;
     } else {
       const taken = new Set(rows.map((row) => Math.floor((origin + number(row.at, 'clip.at')) * fps + 0.5)));

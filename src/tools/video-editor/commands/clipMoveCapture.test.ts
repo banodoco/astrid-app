@@ -202,13 +202,33 @@ describe('Agent built-in clip.move capture parity', () => {
   });
 
   it.each([
-    ['source_offset', 1], ['source_offset', { start: 0 }], ['speed', true],
+    // A valid window origin is accepted (see the next test); an invalid one is refused.
+    ['source_offset', -1], ['source_offset', { start: 'soon' }], ['source_offset', true], ['speed', true],
     ['speed', 2], ['speed', { numerator: 1, denominator: 1 }], ['time_map', {}],
   ])('refuses unsupported occurrence mapping %s=%j', (key, value) => {
     const golden = named('repeated_shared_A');
     const input = detached(golden.bundle);
     input.placements[0][key] = value;
     expect(() => captureClipMove(input, golden.select)).toThrow('translation-only');
+  });
+
+  it.each([2, { start: 2000, end: 0 }])('accepts a window-origin source_offset=%j and measures local time from start - offset', (offset) => {
+    const golden = named('repeated_shared_A');
+    // Earliest absolute start the move accepts (local start >= 0), found on a quarter-second grid.
+    const earliest = (value: unknown) => {
+      const input = detached(golden.bundle);
+      input.placements[0].source_offset = value as never;
+      input.parent.config = { ...(input.parent.config as Record<string, never>), output: { fps: 30 } };
+      const basis = captureClipMove(input, golden.select);
+      for (let on = 0; on < 30; on += 0.25) {
+        try { finishClipMove(basis, on); return on; } catch (error) {
+          if (!String((error as Error).message).includes('precedes')) throw error;
+        }
+      }
+      throw new Error('no accepted start');
+    };
+    const unshifted = earliest(0);
+    expect(earliest(typeof offset === 'number' ? offset * 1000 : offset)).toBe(unshifted - 2);
   });
 
   it('refuses intervals before the occurrence or crossing its next blocker, with a half-open end', () => {

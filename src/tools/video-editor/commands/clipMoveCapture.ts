@@ -1,6 +1,7 @@
 import type { EditCommand, JSON } from '@/integrations/runtime/timeline-commit-types.ts';
 import { AuthoredState, ClipMoveError, MoveRecording, assertFiniteJson, copy, equal, freezeJson, has, object } from './clipMovePrimitives.ts';
 import type { AuthoredBundle } from './clipMovePrimitives.ts';
+import { occurrenceOffsetIsValid, readOccurrenceSourceOffsetSeconds } from '../data/occurrenceWindow.ts';
 
 export { ClipMoveError } from './clipMovePrimitives.ts';
 export type { AuthoredBundle } from './clipMovePrimitives.ts';
@@ -97,6 +98,14 @@ export function occurrenceStart(row: Record<string, JSON>): number {
   return number(start ?? fallback ?? 0, 'occurrence start') / 1000;
 }
 
+/** Absolute time of the shot's internal time zero: start - source_offset (the window origin rule). */
+export function occurrenceOrigin(row: Record<string, JSON>): number {
+  if (!occurrenceOffsetIsValid(row.source_offset)) {
+    throw new ClipMoveError('clip.move v1 requires a translation-only occurrence map (invalid source_offset)', 'unsupported_map');
+  }
+  return occurrenceStart(row) - readOccurrenceSourceOffsetSeconds(row.source_offset);
+}
+
 function move(bundle: AuthoredBundle, command: EditCommand) {
   if (command.schema_version !== 1 || command.op !== 'clip.move' || command.version !== '1' ||
     !equal(Object.keys(command.args), ['on'])) {
@@ -166,10 +175,10 @@ function move(bundle: AuthoredBundle, command: EditCommand) {
     const row = ctx.state.occurrence(owner);
     for (const path of MAP_FIELDS) ctx.read(owner, path);
     if (row.time_map != null || row.timeMap != null ||
-      (row.source_offset != null && row.source_offset !== 0) || (row.speed != null && row.speed !== 1)) {
+      !occurrenceOffsetIsValid(row.source_offset) || (row.speed != null && row.speed !== 1)) {
       throw new ClipMoveError('clip.move v1 requires a translation-only occurrence map', 'unsupported_map');
     }
-    origin = occurrenceStart(row);
+    origin = occurrenceOrigin(row);
     const lane = object(row.placement) && has(row.placement, 'track') ? row.placement.track : row.track;
     if (typeof lane === 'string') {
       for (const key of ['id', 'kind', 'role', 'enabled', 'active', 'disabled', 'hidden', 'deleted']) {
@@ -181,7 +190,7 @@ function move(bundle: AuthoredBundle, command: EditCommand) {
       for (const path of [['placement', 'start_ms'], ['at_ms'], ['track'], ['placement', 'track'],
         ['enabled'], ['active'], ['disabled'], ['hidden'], ['deleted']]) ctx.read(other, path);
       const start = occurrenceStart(ctx.state.occurrence(other));
-      if (other !== owner && start > origin) nextStart = Math.min(nextStart, start);
+      if (other !== owner && start > occurrenceStart(row)) nextStart = Math.min(nextStart, start);
     }
     if (quantized + length > nextStart + 1e-9) throw new ClipMoveError('moved interval crosses the next occurrence', 'occurrence_boundary');
   }
@@ -244,7 +253,7 @@ export function captureClipMove(bundle: AuthoredBundle, select: string): ClipMov
   const target = state.entity(select)!;
   const owner = select.slice(0, select.lastIndexOf('/'));
   const current = has(target, 'at') ? number(target.at, 'clip.at') : number(target.at_ms, 'clip.at_ms') / 1000;
-  const origin = owner === 'parent' ? 0 : occurrenceStart(state.occurrence(owner));
+  const origin = owner === 'parent' ? 0 : occurrenceOrigin(state.occurrence(owner));
   const { command } = move(snapshot, { schema_version: 1, op: 'clip.move', version: '1', select,
     args: { on: current + origin }, intent: moveIntent(select) });
   return freezeJson({ bundle: snapshot, command });

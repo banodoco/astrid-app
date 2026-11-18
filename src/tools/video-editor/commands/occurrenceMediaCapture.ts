@@ -5,6 +5,7 @@ import {
   assertFiniteJson, ClipMoveError, copy, equal, freezeJson, has, MoveRecording, object,
 } from './clipMovePrimitives.ts';
 import type { AuthoredBundle } from './clipMovePrimitives.ts';
+import { occurrenceOffsetIsValid, readOccurrenceSourceOffsetSeconds } from '../data/occurrenceWindow.ts';
 
 type ObjectValue = { [key: string]: JSON };
 type Row = ObjectValue;
@@ -184,7 +185,7 @@ function verified(pin: MediaSelection, inputs: readonly VerifiedMedia[]): { valu
   return { value, kind };
 }
 
-function owner(ctx: MoveRecording, ref: string): { owner: string; limit: number } {
+function owner(ctx: MoveRecording, ref: string): { owner: string; floor: number; limit: number } {
   if (typeof ref !== 'string' || !/^occurrence:(?!.*::)[^/]+$/.test(ref)) {
     throw new ClipMoveError('media edit requires explicit occurrence/raw child ownership');
   }
@@ -194,12 +195,13 @@ function owner(ctx: MoveRecording, ref: string): { owner: string; limit: number 
   for (const path of MAP_FIELDS) ctx.read(ref, path);
   const row = ctx.state.occurrence(ref);
   occurrenceStart(row);
-  if (!active(row) || typeof row.source_offset === 'boolean' || typeof row.speed === 'boolean'
-    || (row.source_offset != null && row.source_offset !== 0)
+  if (!active(row) || !occurrenceOffsetIsValid(row.source_offset) || typeof row.speed === 'boolean'
     || (row.speed != null && row.speed !== 1) || row.time_map != null || row.timeMap != null) {
     throw new ClipMoveError('media edit requires an active translation-only occurrence', 'unsupported_map');
   }
-  const limit = number(row.duration_ms, 'occurrence.duration_ms', true) / 1000;
+  // Child-local time: the occurrence shows [source_offset, source_offset + duration] of the shot's timeline.
+  const floor = readOccurrenceSourceOffsetSeconds(row.source_offset);
+  const limit = floor + number(row.duration_ms, 'occurrence.duration_ms', true) / 1000;
   const fps = rate(ctx.read('parent', ['config', 'output', 'fps']));
   if (!equal(rate(ctx.read(`${ref}/source`, ['output', 'fps'])), fps)) {
     throw new ClipMoveError('parent and child fps differ', 'unsupported_timing');
@@ -208,10 +210,10 @@ function owner(ctx: MoveRecording, ref: string): { owner: string; limit: number 
     throw new ClipMoveError('internal source_window is unsupported', 'unsupported_map');
   }
   ctx.bind('media.owner', ref);
-  return { owner: ref, limit };
+  return { owner: ref, floor, limit };
 }
 
-function validateClip(ctx: MoveRecording, ownerRef: string, row: Row, limit: number, kind: 'image' | 'video', input: VerifiedMedia): void {
+function validateClip(ctx: MoveRecording, ownerRef: string, row: Row, floor: number, limit: number, kind: 'image' | 'video', input: VerifiedMedia): void {
   if ((row.clipType !== 'media' && row.clipType !== kind) || !rawIdentity(row.asset)) {
     throw new ClipMoveError('media edit requires one matching media clip');
   }
@@ -232,7 +234,7 @@ function validateClip(ctx: MoveRecording, ownerRef: string, row: Row, limit: num
   const at = number(row.at, 'clip.at');
   const hold = number(row.hold, 'clip.hold', true);
   const speed = number(row.speed == null ? 1 : row.speed, 'clip.speed', true);
-  if (at < 0 || at + hold / speed > limit) throw new ClipMoveError('child interval exceeds occurrence', 'occurrence_boundary');
+  if (at < floor || at + hold / speed > limit) throw new ClipMoveError('child interval exceeds occurrence', 'occurrence_boundary');
   if (kind === 'image') {
     if (speed !== 1 || row.from != null || row.to != null) {
       throw new ClipMoveError('image requires hold without a source window', 'unsupported_timing');
@@ -320,7 +322,7 @@ export function executeOccurrenceAddMedia(
   const pin = supplied.args.media;
   selectionPin(pin);
   const ctx = new MoveRecording(bundle, copy(supplied));
-  const { owner: ownerRef, limit } = owner(ctx, supplied.select!);
+  const { owner: ownerRef, floor, limit } = owner(ctx, supplied.select!);
   const placementOwners = selectPlacementOwners(ctx, ownerRef);
   if (placementOwners.length !== 1 || placementOwners[0] !== ownerRef) {
     throw new ClipMoveError('shared authored placement is unsupported', 'unsupported_ownership');
@@ -334,7 +336,7 @@ export function executeOccurrenceAddMedia(
   }
   const { value, kind } = verified(pin, inputs);
   if (row.asset !== pin.asset) throw new ClipMoveError('child asset must equal the reserved selection alias');
-  validateClip(ctx, ownerRef, row, limit, kind, value);
+  validateClip(ctx, ownerRef, row, floor, limit, kind, value);
   registry(ctx, ownerRef, pin, kind);
   createChild(ctx, ownerRef, row);
   for (const key of CLAIMS) {

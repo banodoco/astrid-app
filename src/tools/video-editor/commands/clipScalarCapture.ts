@@ -11,6 +11,7 @@ import {
   object,
 } from './clipMovePrimitives.ts';
 import type { AuthoredBundle } from './clipMovePrimitives.ts';
+import { occurrenceOffsetIsValid, readOccurrenceSourceOffsetSeconds } from '../data/occurrenceWindow.ts';
 
 export { ClipMoveError } from './clipMovePrimitives.ts';
 export type { AuthoredBundle } from './clipMovePrimitives.ts';
@@ -393,19 +394,20 @@ function holdExtent(ctx: MoveRecording, ref: string, values: ScalarValue, clear:
   const occurrence = ctx.state.occurrence(owner);
   if (occurrence.time_map != null || occurrence.timeMap != null ||
     (typeof occurrence.speed === 'boolean') || (occurrence.speed != null && occurrence.speed !== 1) ||
-    (typeof occurrence.source_offset === 'boolean') ||
-    (occurrence.source_offset != null && occurrence.source_offset !== 0)) {
+    !occurrenceOffsetIsValid(occurrence.source_offset)) {
     throw new ClipMoveError('clip.set requires a translation-only occurrence', 'unsupported_map');
   }
-  const origin = occurrenceStart(occurrence);
+  const windowStart = occurrenceStart(occurrence);
+  // Child-local time zero sits at start - source_offset (window-origin rule).
+  const origin = windowStart - readOccurrenceSourceOffsetSeconds(occurrence.source_offset);
   const extent = occurrence.duration_ms;
   if (extent == null) throw new ClipMoveError('clip.set requires an explicit occurrence extent', 'unsupported_timing');
-  let limit = origin + number(extent, 'occurrence.duration_ms', true) / 1000;
+  let limit = windowStart + number(extent, 'occurrence.duration_ms', true) / 1000;
   for (const other of ctx.select('move.blockers', owner)) {
     for (const path of [['placement', 'start_ms'], ['at_ms'], ['track'], ['placement', 'track'],
       ['enabled'], ['active'], ['disabled'], ['hidden'], ['deleted']]) ctx.read(other, path);
     const start = occurrenceStart(ctx.state.occurrence(other));
-    if (other !== owner && start > origin) limit = Math.min(limit, start);
+    if (other !== owner && start > windowStart) limit = Math.min(limit, start);
   }
   const boundary = clipStartFrame({ at: limit - origin, hold: 1 }, fpsNumber);
   if (number(row.at, 'clip.at') < 0 || number(row.at, 'clip.at') + duration > limit - origin + 1e-9 || end > boundary) {

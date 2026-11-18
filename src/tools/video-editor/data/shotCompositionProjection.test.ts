@@ -208,28 +208,44 @@ describe('canonical shot-composition downstream projection', () => {
       .toEqual([0, 0]);
   });
 
+  // source_offset is the window origin: with offset 0.35 s the first 0.35 s of shot time are hidden, so a
+  // child at at=0 starts 0.35 s * its speed later in its media. This holds for visual and audio alike, and
+  // a start-trimmed occurrence's window end is its authored duration (2 s), not the content extent.
   const collisionTimingCases = [
     {
       name: 'inherited trim', raw: { from: 0.125, to: 2.125 }, durationMs: 2000, extentMs: 2000,
-      visual: { from: 0.475, to: 2.475, hold: undefined, speed: 1.5 },
-      audio: { from: 0.125, to: 2.125, hold: undefined, speed: undefined },
+      visual: { from: 0.65, to: 2.125, hold: undefined, speed: 1.5 },
+      audio: { from: 0.475, to: 2.125, hold: undefined, speed: undefined },
     },
     {
-      name: 'inherited hold', raw: { from: 0.125, hold: 4 }, durationMs: 4000, extentMs: 4000,
-      visual: { from: 0.475, to: undefined, hold: 4, speed: 1.5 },
-      audio: { from: 0.125, to: undefined, hold: 4, speed: undefined },
+      name: 'inherited hold', raw: { from: 0.125, hold: 4 }, durationMs: 4000, extentMs: 2000,
+      visual: { from: 0.65, to: undefined, hold: 3, speed: 1.5 },
+      audio: { from: 0.475, to: undefined, hold: 2, speed: undefined },
     },
     {
       name: 'explicit trim speed', raw: { from: 0.125, to: 4.125, speed: 2 }, durationMs: 4000, extentMs: 2000,
-      visual: { from: 0.475, to: 4.475, hold: undefined, speed: 2 },
-      audio: { from: 0.125, to: 4.125, hold: undefined, speed: 2 },
+      visual: { from: 0.825, to: 4.125, hold: undefined, speed: 2 },
+      audio: { from: 0.825, to: 4.125, hold: undefined, speed: 2 },
     },
     {
       name: 'explicit hold speed', raw: { from: 0.125, hold: 4, speed: 2 }, durationMs: 4000, extentMs: 2000,
-      visual: { from: 0.475, to: undefined, hold: 4, speed: 2 },
-      audio: { from: 0.125, to: undefined, hold: 4, speed: 2 },
+      visual: { from: 0.825, to: undefined, hold: 3.3, speed: 2 },
+      audio: { from: 0.825, to: undefined, hold: 3.3, speed: 2 },
     },
   ];
+  // from/to/hold derive from float seconds, so compare numbers approximately and undefined exactly.
+  const expectTiming = (
+    clip: { from?: number; to?: number; hold?: number; speed?: number },
+    want: { from: number; to?: number; hold?: number; speed?: number },
+  ) => {
+    for (const key of ['from', 'to', 'hold', 'speed'] as const) {
+      if (want[key] === undefined) expect(clip[key], key).toBeUndefined();
+      else expect(clip[key], key).toBeCloseTo(want[key] as number, 9);
+    }
+  };
+  const timelineSeconds = (c: { from: number; to?: number; hold?: number; speed?: number }) => (
+    (c.hold !== undefined ? c.hold : (c.to as number) - c.from) / (c.speed ?? 1)
+  );
 
   it.each(collisionTimingCases)('uses a child visual declaration over parent audio for $name', ({ raw, visual, durationMs, extentMs }) => {
     const child = withOccurrenceRevision(prepared, 0, (timeline) => ({
@@ -252,8 +268,8 @@ describe('canonical shot-composition downstream projection', () => {
         occurrenceStartMs: 0, occurrenceDurationMs: extentMs, storedOccurrenceDurationMs: 2000,
       } },
     });
-    expect({ from: clip.from, to: clip.to, hold: clip.hold, speed: clip.speed }).toStrictEqual(visual);
-    expect(getClipTimelineDuration(clip)).toBeCloseTo(durationMs / 1000 / visual.speed, 6);
+    expectTiming(clip, visual);
+    expect(getClipTimelineDuration(clip)).toBeCloseTo(timelineSeconds(visual), 6);
   });
 
   it.each(collisionTimingCases)('uses a child audio declaration over parent visual for $name', ({ raw, audio, durationMs, extentMs }) => {
@@ -281,8 +297,8 @@ describe('canonical shot-composition downstream projection', () => {
         occurrenceStartMs: 0, occurrenceDurationMs: extentMs, storedOccurrenceDurationMs: 2000,
       } },
     });
-    expect({ from: clip.from, to: clip.to, hold: clip.hold, speed: clip.speed }).toStrictEqual(audio);
-    expect(getClipTimelineDuration(clip)).toBeCloseTo(durationMs / 1000 / (audio.speed ?? 1), 6);
+    expectTiming(clip, audio);
+    expect(getClipTimelineDuration(clip)).toBeCloseTo(timelineSeconds(audio), 6);
   });
 
   it.each([false, true])('keeps undeclared visual tracks local when another occurrence declares audio (reverse %s)', (reverse) => {
@@ -304,11 +320,12 @@ describe('canonical shot-composition downstream projection', () => {
     expect(projection.config.tracks.map(({ id, kind }) => ({ id, kind }))).toEqual([
       { id: 'occ-1~shared', kind: 'visual' }, { id: 'picture', kind: 'visual' }, { id: 'shared', kind: 'audio' },
     ]);
-    expect(projection.config.clips.find((clip) => clip.id === 'occ-1:visual')).toMatchObject({
-      track: 'occ-1~shared', from: 0.35, to: 2.35, speed: 1.5,
-    });
+    const visual = projection.config.clips.find((clip) => clip.id === 'occ-1:visual');
+    expect(visual).toMatchObject({ track: 'occ-1~shared', to: 2, speed: 1.5 });
+    expect(visual?.from).toBeCloseTo(0.525, 9);  // 0.35 s of shot time hidden x speed 1.5
     const audio = projection.config.clips.find((clip) => clip.id === 'occ-2:audio');
-    expect(audio).toMatchObject({ track: 'shared', from: 0, to: 2 });
+    expect(audio).toMatchObject({ track: 'shared', to: 2 });
+    expect(audio?.from).toBeCloseTo(0.35, 9);  // audio shifts by the same window origin (speed 1)
     expect(audio?.speed).toBeUndefined();
   });
 
@@ -388,8 +405,8 @@ describe('canonical shot-composition downstream projection', () => {
     expect(projected.get('audio-asset-inferred')?.speed).toBeUndefined();
     expect(projected.get('audio-clip-type-inferred')?.speed).toBeUndefined();
     expect(projected.get('audio-track-inherited')?.app?.canonicalTiming)
-      .toMatchObject({ sourceOffsetMs: 350, occurrenceSpeed: 1.5, speed: 1 });
-    expect(projected.get('visual-trim-inherited')?.app?.canonicalTiming).toMatchObject({ sourceOffsetMs: 350, speed: 1.5 });
+      .toMatchObject({ sourceOffsetMs: 0, occurrenceSpeed: 1.5, speed: 1 });
+    expect(projected.get('visual-trim-inherited')?.app?.canonicalTiming).toMatchObject({ sourceOffsetMs: 0, speed: 1.5 });
     expect(projection.config.registry['occ-1:lane-audio-source'] ?? projection.config.registry['lane-audio-source'])
       .toMatchObject({ media_id: 'object-lane-audio-source', type: 'audio/wav' });
     expect(projection.config.clips.find((clip) => clip.id === 'parent-standalone')).toMatchObject(parentClip);
@@ -569,14 +586,16 @@ describe('canonical shot-composition downstream projection', () => {
       },
     );
     const first = projection.config.clips.find((clip) => clip.id === 'occ-1:alpha-video');
+    // Offset 350 ms is the window origin: 0.35 s of shot time is hidden, which at child speed 1.5 skips
+    // 0.525 s of media and leaves 2 - 0.525 s of the 2 s source hold.
     expect(first).toMatchObject({
       at: 0,
       speed: 1.5,
-      from: 0.35,
       volume: 0,
-      hold: 2,
       app: { canonicalTiming: { sourceOffsetMs: 350, speed: 1.5, gain: 0.65, muted: true } },
     });
+    expect(first?.from).toBeCloseTo(0.525, 9);
+    expect(first?.hold).toBeCloseTo(1.475, 9);
     expect(first?.app).toMatchObject({
       canonical: {
         projectId: 'project-001',

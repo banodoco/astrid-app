@@ -417,7 +417,7 @@ describe('Agent built-in clip.set capture parity', () => {
     windowedRow.to = 5;
     expect(captureClipClear(windowed, ref, 'hold')).toMatchObject({ op: 'clip.set', args: { clear: ['hold'] } });
 
-    for (const [key, value] of [['speed', 0], ['speed', 2], ['source_offset', 1], ['duration_ms', 0]] as const) {
+    for (const [key, value] of [['speed', 0], ['speed', 2], ['source_offset', -1], ['duration_ms', 0]] as const) {
       const malformed = detached(golden.bundle);
       if (key === 'duration_ms') clip(malformed, ref)[key] = value;
       else if (key === 'speed' || key === 'source_offset') {

@@ -8,6 +8,7 @@ import {
   timelineClipDurationMs,
   timelineClipStartMs,
 } from './shotCompositionTiming.ts';
+import { readOccurrenceSourceOffsetMs } from './occurrenceWindow.ts';
 import { assertVisualSeamAdmission } from './visualSeamContract.ts';
 import { projectCanonicalComposition } from './shotCompositionProjection.ts';
 
@@ -214,9 +215,12 @@ function prepareContract(contract: ShotCompositionContract): PreparedShotComposi
         );
       }
       // One rule everywhere (agent capture, Runtime service, this adapter): a source offset is >= 0, never clamped.
-      if (typeof occurrence.source_offset === 'number' && Number.isFinite(occurrence.source_offset) && occurrence.source_offset < 0) {
+      let sourceOffsetMs: number;
+      try {
+        sourceOffsetMs = readOccurrenceSourceOffsetMs(occurrence.source_offset);
+      } catch (error) {
         throw new ShotCompositionUnavailableError(
-          `occurrence ${String(occurrence.occurrence_id)} has a negative source offset (${occurrence.source_offset} ms)`,
+          `occurrence ${String(occurrence.occurrence_id)} has an invalid source offset: ${(error as Error).message}`,
         );
       }
       return Object.freeze({
@@ -233,9 +237,7 @@ function prepareContract(contract: ShotCompositionContract): PreparedShotComposi
         ...(typeof occurrence.track === 'string' && occurrence.track.length > 0
           ? { trackId: occurrence.track }
           : {}),
-        ...(typeof occurrence.source_offset === 'number' && Number.isFinite(occurrence.source_offset)
-          ? { sourceOffsetMs: occurrence.source_offset }
-          : {}),
+        ...(occurrence.source_offset != null ? { sourceOffsetMs } : {}),
         ...(typeof occurrence.speed === 'number' && Number.isFinite(occurrence.speed) && occurrence.speed > 0
           ? { speed: occurrence.speed }
           : {}),

@@ -231,6 +231,23 @@ describe('Agent built-in clip.move capture parity', () => {
     expect(earliest(typeof offset === 'number' ? offset * 1000 : offset)).toBe(unshifted - 2);
   });
 
+  it.each([2000, { start: 2000, end: 0 }])('stores a moved child at absolute time start - offset + at under source_offset=%j', (offset) => {
+    const golden = named('repeated_shared_A');
+    const run = (value: unknown, on: number) => {
+      const input = detached(golden.bundle);
+      input.placements[0].source_offset = value as never;
+      input.parent.config = { ...(input.parent.config as Record<string, never>), output: { fps: 30 } };
+      return { input, result: finishClipMove(captureClipMove(input, golden.select), on) };
+    };
+    const start = (named('repeated_shared_A').bundle.placements[0].placement as Record<string, number>).start_ms / 1000;
+    const on = 12;
+    const shifted = run(offset, on), plain = run(0, on);
+    // The child's stored time is internal; its absolute time is start - offset + at, which must be the requested `on`.
+    expect(start - 2 + (clip(shifted.result.bundle, golden.select).at as number)).toBeCloseTo(on, 6);
+    expect(start + (clip(plain.result.bundle, golden.select).at as number)).toBeCloseTo(on, 6);
+    expect(clip(shifted.result.bundle, golden.select).at as number).toBeCloseTo((clip(plain.result.bundle, golden.select).at as number) + 2, 6);
+  });
+
   it('refuses intervals before the occurrence or crossing its next blocker, with a half-open end', () => {
     const golden = named('repeated_shared_A');
     const input = detached(golden.bundle);

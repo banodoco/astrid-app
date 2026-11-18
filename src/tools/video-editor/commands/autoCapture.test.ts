@@ -275,3 +275,46 @@ it('keeps the image completion default even with an explicit duration', () => {
     preferredTrack: null, fallbackAt: null, fallbackTrack: null, duration: 3 }), media, verified);
   expect(child(result.bundle, 'placed').hold).toBe(5);
 });
+
+describe.each([['scalar', 2000], ['mapping', { start: 2000, end: 0 }]] as Array<[string, JSON]>)(
+  'automatic placement on a nonzero window-origin source_offset (%s form)', (_form, offset) => {
+    // Occurrence starts at 8 s; child time tau sits at 8 - 2 + tau. NTSC rate: frames round half up.
+    const fps = 30000 / 1001;
+    const absoluteFrame = (seconds: number) => Math.floor(seconds * fps + 0.5);
+    const place = (name: string, image: boolean) => {
+      const golden = goldens.find((entry) => entry.name === name)!;
+      const bundle = copy(originals[image ? 0 : 1]);
+      bundle.placements[0].source_offset = offset as never;
+      bundle.placements[0].duration_ms = 20000;
+      const basis = captureAutoBasis(bundle, JSON.parse(JSON.stringify(golden.approval)));
+      return { bundle, result: finishAutoCapture(basis, golden.media, golden.verified) };
+    };
+
+    it('places after the anchor at start - offset + anchor end, in absolute time', () => {
+      // clip-a is internal 1..3: absolute 8 - 2 + 3 = 9 (unshifted it would be 11).
+      const { result } = place('completion-image-anchor', true);
+      expect(result.capture.start_frame).toBe(absoluteFrame(9));
+      expect(result.capture.on).toBeCloseTo(9, 1);
+      expect(result.commands[0].args.on).toBe(result.capture.on);
+      // The stored child time is internal: absolute = start - offset + at.
+      const at = child(result.bundle, 'placed').at as number;
+      expect(8 - 2 + at).toBeCloseTo(result.capture.on as number, 9);
+      expect(at).toBeCloseTo(3, 1);
+    });
+
+    it('appends at the lane end of start - offset + latest internal end, in absolute time', () => {
+      // clip-a ends at internal 3, clip-b at 7: absolute 8 - 2 + 7 = 13 (unshifted it would be 15).
+      const { result } = place('completion-video-absent', false);
+      expect(result.capture.resolution).toBe('lane-end');
+      expect(result.capture.start_frame).toBe(absoluteFrame(13));
+      const placed = child(result.bundle, 'placed');
+      expect(8 - 2 + (placed.at as number)).toBeCloseTo(result.capture.on as number, 9);
+      expect(placed.at as number).toBeCloseTo(7, 1);
+      expect((result.commands[0].args.row as Record<string, JSON>).at).toBe(placed.at);
+    });
+
+    it('measures a shared-mode append from the same window origin', () => {
+      const { result } = place('shared-image-append', true);
+      expect(result.capture.start_frame).toBe(absoluteFrame(8 - 2 + 7));
+    });
+  });

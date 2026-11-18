@@ -458,3 +458,36 @@ describe('Agent built-in clip.set capture parity', () => {
     expect(() => executeClipSet(changed, command)).toThrow('original capture');
   });
 });
+
+describe.each([['scalar', 2000], ['mapping', { start: 2000, end: 0 }]] as Array<[string, JsonValue]>)(
+  'clip.set on a child of an occurrence with a nonzero window-origin source_offset (%s form)', (_form, offset) => {
+    // Occurrence at 5 s, 12 s long, showing [2 s, 14 s] of its shot: child time tau sits at 5 - 2 + tau,
+    // so the child at tau = 3 starts at absolute 6 and may end at absolute 17 (tau = 14).
+    const ref = 'occurrence:f2-occurrence/clip:f2-agent-clip';
+    const windowed = (siblingStartMs = 20000) => {
+      const input = detached(golden.bundle);
+      Object.assign(input.placements[0], { source_offset: offset, placement: { start_ms: 5000 } });
+      (input.placements[1].placement as Record<string, JsonValue>).start_ms = siblingStartMs;
+      return input;
+    };
+    const absoluteEnd = (input: AuthoredBundle, hold: number) => 5 - 2 + (clip(input, ref).at as number) + hold;
+
+    it('lands the new hold so that start - offset + at + hold is the absolute end, up to the window end', () => {
+      const input = windowed();
+      const command = captureClipSet(input, ref, { values: { hold: 11 } });
+      const result = executeClipSet(input, command);
+      expect(command.args).toEqual({ values: { hold: 11 }, clear: [] });
+      expect(clip(result.bundle, ref).hold).toBe(11);
+      expect(clip(result.bundle, ref).at).toBe(3);
+      expect(absoluteEnd(result.bundle, 11)).toBe(17); // start + duration
+      expect(() => captureClipSet(input, ref, { values: { hold: 11.5 } })).toThrow('occurrence boundary');
+    });
+
+    it('stops at the next occurrence start, converted through start - offset', () => {
+      // Sibling at 10 s: the child may end at absolute 10, i.e. child time 7, i.e. hold 4.
+      const input = windowed(10000);
+      const result = executeClipSet(input, captureClipSet(input, ref, { values: { hold: 4 } }));
+      expect(absoluteEnd(result.bundle, 4)).toBe(10);
+      expect(() => captureClipSet(input, ref, { values: { hold: 4.5 } })).toThrow('occurrence boundary');
+    });
+  });

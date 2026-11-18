@@ -9,7 +9,8 @@ import {
 } from './ordinaryScalarMember.ts';
 import { AuthoredState, copy } from './clipMovePrimitives.ts';
 import type { AuthoredBundle } from './clipMovePrimitives.ts';
-import type { EditCommand } from '@/integrations/runtime/timeline-commit-types.ts';
+import type { EditCommand, JSON as JsonValue } from '@/integrations/runtime/timeline-commit-types.ts';
+import fixture from './fixtures/recipe_m2_app_clip_scalar_fields.json';
 
 const ref = 'parent/clip:x';
 
@@ -112,3 +113,32 @@ describe('ordinary clip scalar member', () => {
     expect(() => executeOrdinaryScalarMember(input, command)).toThrow('unsupported field');
   });
 });
+
+describe.each([['scalar', 2000], ['mapping', { start: 2000, end: 0 }]] as Array<[string, JsonValue]>)(
+  'ordinary clip scalar member on a shot child under a nonzero window-origin source_offset (%s form)', (_form, offset) => {
+    // Occurrence at 5 s, 12 s long, showing [2 s, 14 s]: child time tau sits at 5 - 2 + tau; the child at tau = 3
+    // starts at absolute 6 and may end at absolute 17 (a sibling occurrence at 10 s cuts it to 10).
+    const ref = 'occurrence:f2-occurrence/clip:f2-agent-clip';
+    const windowed = (siblingStartMs = 20000): AuthoredBundle => {
+      const input = structuredClone(fixture.bundle) as unknown as AuthoredBundle;
+      Object.assign(input.placements[0], { source_offset: offset, placement: { start_ms: 5000 } });
+      (input.placements[1].placement as Record<string, JsonValue>).start_ms = siblingStartMs;
+      return input;
+    };
+    const absoluteEnd = (input: AuthoredBundle, target: string) =>
+      5 - 2 + (clip(input, target).at as number) + (clip(input, target).hold as number);
+
+    it('accepts a hold whose absolute end is the window end and refuses one past it', () => {
+      const input = windowed();
+      const result = executeOrdinaryScalarMember(input, captureOrdinaryScalarMember(input, { select: ref, values: { hold: 11 } }));
+      expect(absoluteEnd(result.bundle, ref)).toBe(17);
+      expect(() => captureOrdinaryScalarMember(input, { select: ref, values: { hold: 11.5 } })).toThrow('occurrence boundary');
+    });
+
+    it('stops at the next occurrence start, converted through start - offset', () => {
+      const input = windowed(10000);
+      const result = executeOrdinaryScalarMember(input, captureOrdinaryScalarMember(input, { select: ref, values: { hold: 4 } }));
+      expect(absoluteEnd(result.bundle, ref)).toBe(10);
+      expect(() => captureOrdinaryScalarMember(input, { select: ref, values: { hold: 4.5 } })).toThrow('occurrence boundary');
+    });
+  });

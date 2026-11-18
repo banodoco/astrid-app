@@ -231,4 +231,37 @@ describe('dormant native occurrence.add-media capture', () => {
       expect.objectContaining({ kind: 'identity_conflict' }),
     );
   });
+  describe.each([['scalar', 2000], ['mapping', { start: 2000, end: 0 }]] as Array<[string, JSON]>)(
+    'nonzero window-origin source_offset (%s form)', (_form, offset) => {
+      // Occurrence starts at 8 s, shows [2 s, 12 s] of the shot: child time tau sits at 8 - 2 + tau.
+      const windowed = () => { const input = bundle(); input.placements[0].source_offset = offset as never; return input; };
+      const place = (at: number, hold = 4) => ({ ...row, at, hold, from: 2, to: 2 + hold, speed: 1 });
+      const absolute = (at: number) => 8 - 2 + at;
+
+      it('writes the child at its internal time, which is the absolute time start - offset + at', () => {
+        const input = windowed();
+        const child = place(2.5);
+        const result = finishOccurrenceAddMedia(captureOccurrenceAddMedia(input, owner, child, media, [verified]));
+        const written = (result.bundle.shots[sourceShot].internal_timeline.clips as Array<Record<string, JSON>>).at(-1)!;
+        expect(written.at).toBe(2.5);
+        expect(absolute(written.at as number)).toBe(8.5);
+        expect(result.record.writes.at(-1)!.after).toEqual({ state: 'present', value: child });
+        expect(result.command.reads).toContainEqual(
+          { ref: owner, path: ['source_offset'], state: { state: 'present', value: offset } });
+      });
+
+      it('accepts exactly the window [offset, offset + duration] in child time', () => {
+        const accepts = (at: number, hold: number) => {
+          captureOccurrenceAddMedia(windowed(), owner, place(at, hold), media, [verified]);
+        };
+        // Child time 2 is absolute 8 (the occurrence start); child time 12 is absolute 18 (its end).
+        expect(() => accepts(2, 4)).not.toThrow();
+        expect(() => accepts(8, 4)).not.toThrow();
+        expect(absolute(8 + 4)).toBe(18);
+        expect(() => accepts(8.5, 4)).toThrowError(expect.objectContaining({ kind: 'occurrence_boundary' }));
+        // Before the occurrence start: absolute 7.875, though child time 0.125 is valid for offset 0.
+        expect(() => accepts(0.125, 4)).toThrowError(expect.objectContaining({ kind: 'occurrence_boundary' }));
+        expect(() => accepts(1.9, 1)).toThrowError(expect.objectContaining({ kind: 'occurrence_boundary' }));
+      });
+    });
 });

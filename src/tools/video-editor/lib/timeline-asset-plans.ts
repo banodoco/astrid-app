@@ -166,9 +166,9 @@ export function planGenerationAssetRegistration({
       ...sourceNames,
       type: mimeType,
       ...(normalizedDuration !== null ? { duration: normalizedDuration } : {}),
-      generationId,
       ...(mediaId ? { media_id: mediaId } : {}),
-      ...(variantId ? { variantId } : {}),
+      // A catalog association names both ids or neither; the Agent refuses a half entry.
+      ...(variantId ? { generationId, variantId } : {}),
       ...(resolvedThumbUrl !== imageUrl ? { thumbnailUrl: resolvedThumbUrl } : {}),
     },
   };

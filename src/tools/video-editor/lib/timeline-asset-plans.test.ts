@@ -22,6 +22,24 @@ function plannerData(overrides: Partial<Pick<TimelineData, 'tracks' | 'rows'>> =
   } as TimelineData;
 }
 
+describe('planGenerationAssetRegistration catalog association', () => {
+  const imageUrl = '/api/runtime/v1/objects/sha256%3Aabc';
+
+  it('writes generationId and variantId together', () => {
+    const planned = planGenerationAssetRegistration({ generationId: 'g', variantId: 'v', imageUrl });
+    expect(planned).toMatchObject({ ok: true, assetEntry: { generationId: 'g', variantId: 'v' } });
+  });
+
+  it('writes neither id when the variant is unknown', () => {
+    const planned = planGenerationAssetRegistration({ generationId: 'g', imageUrl });
+    expect(planned.ok).toBe(true);
+    if (planned.ok) {
+      expect(planned.assetEntry).not.toHaveProperty('generationId');
+      expect(planned.assetEntry).not.toHaveProperty('variantId');
+    }
+  });
+});
+
 describe('planGenerationAssetRegistration content type', () => {
   it('reads the MIME type from metadata so a Runtime video is not registered as a still image', () => {
     // Runtime generation rows carry their MIME type (e.g. video/mp4) in metadata.content_type.

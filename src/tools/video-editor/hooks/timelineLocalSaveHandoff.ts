@@ -93,7 +93,7 @@ const sameConfig = (a: TimelineConfig, b: TimelineConfig) => same(authoredJson(c
 /**
  * Why an edit that names no gesture cannot be saved on a document with shots, or undefined when it can.
  * The write only touches the parent's config and registry (the shot closure is cloned untouched), so the
- * edit must stay on rows the parent alone owns: clips outside pinned shot groups on tracks no shot uses,
+ * edit must stay on rows the parent alone owns: clips outside pinned shot groups on tracks that hold no shots,
  * additive registry changes, and no change to the rest of the config. Anything else stays refused.
  */
 function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSource, next: TimelineSaveSource): string | undefined {
@@ -109,16 +109,19 @@ function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSou
   if (!same(rest(before.config), rest(next.config)) || !same(authoredJson(before.bundle ?? null), authoredJson(next.bundle ?? null))) {
     return "This change to the timeline's settings can't be saved yet because the timeline has shots.";
   }
-  // What the shots depend on in the parent, by membership in the document's own shot data: the tracks they
-  // sit or play on, the clips they own, and the registry keys their clips use.
+  // What the shots depend on in the parent, by membership in the document's own shot data. Occupied tracks hold
+  // the shots themselves (occurrences, pinned groups): clips may not change on or onto them. Shared lanes are
+  // parent tracks a shot's child content plays on: the lane itself (removal, mute, volume, a clashing new id) is
+  // what the shot relies on, but parent clips layered over it are the user's to place.
   const occurrences = Array.isArray(parent.occurrences) ? parent.occurrences.filter(object) : [];
-  const shotTracks = new Set<string>();
+  const occupiedTracks = new Set<string>();
+  const sharedLanes = new Set<string>();
   for (const occurrence of occurrences) {
     for (const track of [occurrence.track, object(occurrence.placement) ? occurrence.placement.track : undefined]) {
-      if (typeof track === 'string') shotTracks.add(track);
+      if (typeof track === 'string') occupiedTracks.add(track);
     }
   }
-  for (const group of before.config.pinnedShotGroups ?? []) shotTracks.add(group.trackId);
+  for (const group of before.config.pinnedShotGroups ?? []) occupiedTracks.add(group.trackId);
   const internals = new Map(document.internal_timeline_revisions.map(item => [item.revision_id, item.payload]));
   const shotsByRevision = new Map(document.shot_revisions.map(item => [`${item.shot_id}/${item.revision_id}`, item.internal_timeline_revision_id]));
   const shotAssets = new Set<string>();
@@ -127,10 +130,10 @@ function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSou
   for (const payload of internals.values()) {
     if (!object(payload)) continue;
     for (const track of childTimelines(payload.tracks)) {
-      if (track.kind === 'audio' && typeof track.id === 'string') shotTracks.add(track.id);
+      if (track.kind === 'audio' && typeof track.id === 'string') sharedLanes.add(track.id);
     }
     for (const clip of childTimelines(payload.clips)) {
-      if (typeof clip.track === 'string') shotTracks.add(clip.track);
+      if (typeof clip.track === 'string') sharedLanes.add(clip.track);
       if (typeof clip.asset === 'string') shotAssets.add(clip.asset);
     }
   }
@@ -156,7 +159,7 @@ function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSou
     if ([was, now].some(clip => clip?.clipType === 'shot') || (!was && (shotClipIds.has(id) || canonical !== undefined))) {
       return "Can't change a shot's own clips from here yet. Edit a clip you added to the timeline.";
     }
-    if ([was, now].some(clip => clip && shotTracks.has(clip.track))) {
+    if ([was, now].some(clip => clip && occupiedTracks.has(clip.track))) {
       return "Can't change a clip on, or move one onto, a track that holds shots yet. Use another track.";
     }
     if (now && !nextTracks.has(now.track)) {
@@ -167,14 +170,16 @@ function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSou
   for (const [id, track] of beforeTracks) {
     const kept = nextTracks.get(id);
     if (!kept) {
-      if (shotTracks.has(id)) return "Can't remove a track that holds shots yet.";
+      if (occupiedTracks.has(id)) return "Can't remove a track that holds shots yet.";
+      if (sharedLanes.has(id)) return "Can't remove a track that a shot plays on yet.";
       if (next.config.clips.some(clip => clip.track === id)) return "Can't remove a track that still has clips on it. Move or delete its clips first.";
     } else if (!same(authoredJson(track), authoredJson(kept))) {
-      return shotTracks.has(id) ? "Can't change a track that holds shots yet." : "Can't change a track's settings on a timeline with shots yet.";
+      return occupiedTracks.has(id) ? "Can't change a track that holds shots yet."
+        : sharedLanes.has(id) ? "Can't change a track that a shot plays on yet." : "Can't change a track's settings on a timeline with shots yet.";
     }
   }
   for (const id of nextTracks.keys()) {
-    if (!beforeTracks.has(id) && shotTracks.has(id)) return "Can't add that track because a shot already uses its name. Add a different track.";
+    if (!beforeTracks.has(id) && (occupiedTracks.has(id) || sharedLanes.has(id))) return "Can't add that track because a shot already uses its name. Add a different track.";
   }
   if (!same(before.config.tracks.filter(track => nextTracks.has(track.id)).map(track => track.id),
     next.config.tracks.filter(track => beforeTracks.has(track.id)).map(track => track.id))) {

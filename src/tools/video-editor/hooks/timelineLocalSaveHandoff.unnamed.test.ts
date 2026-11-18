@@ -287,19 +287,46 @@ describe.each(shotCorpus)('$name: gesture-less edits on a document with shots', 
       await env.session.dispose();
     });
 
-    it('refuses a changed clip on a lane a shot child plays on', async () => {
+    it('admits parent clip edits on a lane a shot child plays on: move on, move off, delete and inspector edit', async () => {
+      let env = await mount(document, CHILD);
+      let next = structuredClone(env.source.config);
+      const moved = next.clips[0];
+      moved.track = 'a3';
+      await admit(env, next);
+      expect(writtenClips(env).find(clip => clip.id === moved.id)!.track).toBe('a3');
+      await env.session.dispose();
+      // A parent clip already layered on the lane: move it off, edit it, delete it.
+      const layered = structuredClone(document);
+      const row = dropRow('layered', 'a3', Object.keys(document.registry.assets)[0]);
+      (layered.config.clips as Array<Record<string, unknown>>).push(row);
+      if (layered.clips) layered.clips.push(row);
+      for (const edit of [
+        (config: TimelineConfig) => { config.clips.find(clip => clip.id === 'layered')!.track = freeTrack; },
+        (config: TimelineConfig) => { config.clips.find(clip => clip.id === 'layered')!.volume = 0.5; },
+        (config: TimelineConfig) => { config.clips = config.clips.filter(clip => clip.id !== 'layered'); },
+      ]) {
+        env = await mount(layered, CHILD);
+        next = structuredClone(env.source.config);
+        edit(next);
+        await admit(env, next);
+        await env.session.dispose();
+      }
+    });
+
+    it('still refuses a changed clip on a track that holds a shot, even with a shot lane present', async () => {
       const env = await mount(document, CHILD);
       const next = structuredClone(env.source.config);
-      next.clips[0].track = 'a3';
+      next.clips[0].track = occurrenceTrack;
       await refuse(env, next);
       await env.session.dispose();
     });
 
-    it('admits the same edits on a lane no shot uses', async () => {
-      const env = await mount(document, CHILD);
+    it('refuses removing a parent track that a shot child clip names, whatever its kind', async () => {
+      const env = await mount(document, { tracks: [{ id: 'v1', kind: 'visual', label: 'Track' }],
+        clips: [{ id: 'child-v', track: 'v4', at: 0, hold: 1, clipType: 'media', asset: 'asset-shot-x' }] });
       const next = structuredClone(env.source.config);
-      next.clips[0].volume = 0.5;
-      await admit(env, next);
+      next.tracks = next.tracks.filter(track => track.id !== 'v4');
+      await refuse(env, next);
       await env.session.dispose();
     });
 

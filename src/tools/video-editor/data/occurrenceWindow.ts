@@ -44,3 +44,15 @@ export function occurrenceOffsetIsValid(value: unknown): boolean {
 export function readOccurrenceSourceOffsetSeconds(value: unknown): number {
   return readOccurrenceSourceOffsetMs(value) / 1000;
 }
+
+const EPS = 1e-6;
+
+/**
+ * The one crop rule: a child span [start, end] cut to the window [offset, offset + length], all in one
+ * unit (shot-local time). Null when none of it shows. Mirrors the Agent's `visible_span_ms`.
+ */
+export function visibleSpan(start: number, end: number, offset: number, length: number): [number, number] | null {
+  const low = Math.max(start, offset);
+  const high = Math.min(end, offset + length);
+  return high > low + EPS ? [low, high] : null;
+}

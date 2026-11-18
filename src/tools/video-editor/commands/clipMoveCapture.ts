@@ -185,17 +185,14 @@ function move(bundle: AuthoredBundle, command: EditCommand) {
         ctx.read(`parent/track:${lane}`, [key]);
       }
     }
-    let nextStart = Infinity;
+    // The neighbours stay a read dependency of the capture; no guard follows from them (cropped, not refused).
     for (const other of ctx.select('move.blockers', owner)) {
       for (const path of [['placement', 'start_ms'], ['at_ms'], ['track'], ['placement', 'track'],
         ['enabled'], ['active'], ['disabled'], ['hidden'], ['deleted']]) ctx.read(other, path);
-      const start = occurrenceStart(ctx.state.occurrence(other));
-      if (other !== owner && start > occurrenceStart(row)) nextStart = Math.min(nextStart, start);
     }
-    if (quantized + length > nextStart + 1e-9) throw new ClipMoveError('moved interval crosses the next occurrence', 'occurrence_boundary');
   }
   const local = number(quantized - origin, 'local start');
-  if (local < 0) throw new ClipMoveError('moved interval precedes its occurrence', 'occurrence_boundary');
+  if (local < 0) throw new ClipMoveError('moved interval precedes its shot', 'occurrence_boundary');
   const pin: Record<string, JSON> = { parent: copy(bundle.base_parent ?? {}) };
   if (owner !== 'parent') {
     const mapping = bundle.source_mapping;

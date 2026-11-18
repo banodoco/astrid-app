@@ -11,7 +11,7 @@ import {
   object,
 } from './clipMovePrimitives.ts';
 import type { AuthoredBundle } from './clipMovePrimitives.ts';
-import { occurrenceOffsetIsValid, readOccurrenceSourceOffsetSeconds } from '../data/occurrenceWindow.ts';
+import { occurrenceOffsetIsValid } from '../data/occurrenceWindow.ts';
 
 /** The fields accepted by Agent's existing clip.set command. */
 export type OrdinaryScalarClear = 'hold' | 'asset' | 'transition';
@@ -91,22 +91,6 @@ function rate(value: JSON | undefined): [bigint, bigint] {
   return [numerator / a, denominator / a];
 }
 
-function fractionNumber(numerator: bigint, denominator: bigint): number {
-  if (numerator === 0n) return 0;
-  let exponent = numerator.toString(2).length - denominator.toString(2).length;
-  if (exponent >= 0
-    ? numerator < (denominator << BigInt(exponent))
-    : (numerator << BigInt(-exponent)) < denominator) exponent--;
-  const shift = exponent < -1022 ? 1074 : 52 - exponent;
-  const scaledNumerator = shift >= 0 ? numerator << BigInt(shift) : numerator;
-  const scaledDenominator = shift >= 0 ? denominator : denominator << BigInt(-shift);
-  let quotient = scaledNumerator / scaledDenominator;
-  const remainder = scaledNumerator % scaledDenominator;
-  if (remainder * 2n > scaledDenominator ||
-    (remainder * 2n === scaledDenominator && quotient % 2n !== 0n)) quotient++;
-  return Number(quotient) * 2 ** -shift;
-}
-
 function timelineDuration(clip: Record<string, JSON>): number {
   const speed = clip.speed == null ? 1 : number(clip.speed, 'clip.speed', true);
   const at = has(clip, 'at')
@@ -134,30 +118,6 @@ function timelineDuration(clip: Record<string, JSON>): number {
     throw new ClipMoveError('move needs an unambiguous positive authored duration/window', 'unsupported_timing');
   }
   return lengths[0];
-}
-
-function clipStartFrame(clip: Record<string, JSON>, fps: number): number {
-  return Math.floor(number(clip.at, 'clip.at') * number(fps, 'fps', true) + 0.5);
-}
-
-function clipEndFrame(clip: Record<string, JSON>, fps: number): number {
-  const start = clipStartFrame(clip, fps);
-  const frames = Math.max(1, Math.floor(timelineDuration(clip) * fps + 0.5));
-  return start + frames;
-}
-
-function occurrenceStart(row: Record<string, JSON>): number {
-  if (row.placement != null && !object(row.placement)) {
-    throw new ClipMoveError('occurrence placement must be an object', 'unsupported_map');
-  }
-  const placement = row.placement as Record<string, JSON> | undefined;
-  const start = placement?.start_ms;
-  const fallback = row.at_ms;
-  if (start != null && fallback != null &&
-    !close(number(start, 'placement.start_ms'), number(fallback, 'at_ms'))) {
-    throw new ClipMoveError('contradictory occurrence start codecs', 'unsupported_timing');
-  }
-  return number(start ?? fallback ?? 0, 'occurrence start') / 1000;
 }
 
 function holdExtent(ctx: MoveRecording, ref: string, values: Record<string, JSON>, clear: readonly OrdinaryScalarClear[]): [string[][], number] {
@@ -192,8 +152,6 @@ function holdExtent(ctx: MoveRecording, ref: string, values: Record<string, JSON
   const duration = timelineDuration(row);
   row.at = has(row, 'at') ? row.at : number(row.at_ms ?? 0, 'at_ms') / 1000;
   const fps = rate(ctx.read('parent', ['config', 'output', 'fps']));
-  const fpsNumber = fractionNumber(fps[0], fps[1]);
-  const end = clipEndFrame(row, fpsNumber);
   ctx.dependency('clip.set.quantization', 'time-map', {
     numerator: Number(fps[0]),
     denominator: Number(fps[1]),
@@ -211,21 +169,14 @@ function holdExtent(ctx: MoveRecording, ref: string, values: Record<string, JSON
     !occurrenceOffsetIsValid(occurrence.source_offset)) {
     throw new ClipMoveError('clip.set requires a translation-only occurrence', 'unsupported_map');
   }
-  const windowStart = occurrenceStart(occurrence);
-  // Child-local time zero sits at start - source_offset (window-origin rule).
-  const origin = windowStart - readOccurrenceSourceOffsetSeconds(occurrence.source_offset);
-  const extent = occurrence.duration_ms;
-  if (extent == null) throw new ClipMoveError('clip.set requires an explicit occurrence extent', 'unsupported_timing');
-  let limit = windowStart + number(extent, 'occurrence.duration_ms', true) / 1000;
+  // The neighbours stay a read dependency of the capture; no guard follows from them.
   for (const other of ctx.select('move.blockers', owner)) {
     for (const path of [['placement', 'start_ms'], ['at_ms'], ['track'], ['placement', 'track'],
       ['enabled'], ['active'], ['disabled'], ['hidden'], ['deleted']]) ctx.read(other, path);
-    const start = occurrenceStart(ctx.state.occurrence(other));
-    if (other !== owner && start > windowStart) limit = Math.min(limit, start);
   }
-  const boundary = clipStartFrame({ at: limit - origin, hold: 1 }, fpsNumber);
-  if (number(row.at, 'clip.at') < 0 || number(row.at, 'clip.at') + duration > limit - origin + 1e-9 || end > boundary) {
-    throw new ClipMoveError('clip.set interval crosses occurrence boundary', 'occurrence_boundary');
+  // A child past the occurrence's window is cropped there, not refused; only a start before the shot's zero is a fault.
+  if (number(row.at, 'clip.at') < 0) {
+    throw new ClipMoveError('clip.set interval starts before its shot', 'occurrence_boundary');
   }
   return [durationPaths, duration];
 }

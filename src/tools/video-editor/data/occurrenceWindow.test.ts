@@ -5,6 +5,7 @@ import {
   occurrenceOffsetIsValid,
   readOccurrenceSourceOffsetMs,
   readOccurrenceSourceOffsetSeconds,
+  visibleSpan,
 } from './occurrenceWindow.ts';
 
 describe('occurrence source_offset rule', () => {
@@ -37,5 +38,13 @@ describe('occurrence source_offset rule', () => {
 
   it('reads seconds', () => {
     expect(readOccurrenceSourceOffsetSeconds({ start: 1500, end: 0 })).toBe(1.5);
+  });
+});
+
+describe('occurrence crop rule (the same vectors as the Agent and Runtime helpers)', () => {
+  it('cuts a child span to the window', () => {
+    expect(visibleSpan(1000, 5000, 2000, 4000)).toEqual([2000, 5000]);
+    expect(visibleSpan(0, 2000, 2000, 4000)).toBeNull();
+    expect(visibleSpan(1000, 10000, 2000, 4000)).toEqual([2000, 6000]);
   });
 });

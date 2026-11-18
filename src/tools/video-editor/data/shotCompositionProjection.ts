@@ -16,6 +16,7 @@ import {
   timelineContentExtentMs,
   timelineOccurrenceEffectiveDurationMs,
 } from './shotCompositionTiming.ts';
+import { visibleSpan } from './occurrenceWindow.ts';
 import { analyzeVisualSeams } from './visualSeamContract.ts';
 import {
   outputTimeline,
@@ -501,12 +502,15 @@ function projectClip(
           ? Math.max(1, (rawTo - rawFrom) * 1000)
           : Math.max(1, occurrence.durationMs * speed);
   const windowStartSeconds = occurrence.atMs / 1000;
-  const absoluteAtSeconds = windowStartSeconds - occurrenceSourceOffsetMs / 1000 + atMs / 1000;
-  const absoluteEndSeconds = absoluteAtSeconds + durationMs / 1000 / speed;
-  // Entirely before the window: not visible (same as the Agent projection).
-  if (absoluteEndSeconds <= windowStartSeconds && occurrenceSourceOffsetMs > 0) return null;
-  const cutSeconds = Math.max(0, windowStartSeconds - absoluteAtSeconds);
-  const visibleStartSeconds = absoluteAtSeconds + cutSeconds;
+  const offsetSeconds = occurrenceSourceOffsetMs / 1000;
+  const localAtSeconds = atMs / 1000;
+  const absoluteAtSeconds = windowStartSeconds - offsetSeconds + localAtSeconds;
+  // The one crop rule (occurrenceWindow.visibleSpan): the part of the child before the window is hidden here;
+  // the end is cut by the occurrence duration below. Entirely before the window: not visible.
+  const shown = visibleSpan(localAtSeconds, localAtSeconds + durationMs / 1000 / speed, offsetSeconds, Infinity);
+  if (!shown && occurrenceSourceOffsetMs > 0) return null;
+  const cutSeconds = shown ? shown[0] - localAtSeconds : 0;
+  const visibleStartSeconds = shown ? windowStartSeconds + (shown[0] - offsetSeconds) : absoluteAtSeconds;
   const holdSeconds = durationMs / 1000 - cutSeconds * speed;
   const childGain = finiteNumber(rawClip.gain ?? rawClip.volume, 1);
   const occurrenceGain = finiteNumber(occurrence.gain, 1);
@@ -586,8 +590,9 @@ function projectClip(
   // Inactive clips remain editable/re-enableable at their authored geometry;
   // their state excludes them from occurrence extent and render output.
   if (clampToOccurrenceDuration && isActiveTimelineClip(rawClip)) {
-    const remainingSeconds = occurrence.durationMs / 1000 - projected.at + occurrence.atMs / 1000;
-    if (remainingSeconds <= 0) return null;
+    const tail = visibleSpan(projected.at - windowStartSeconds + offsetSeconds, Infinity, offsetSeconds, occurrence.durationMs / 1000);
+    if (!tail) return null;
+    const remainingSeconds = tail[1] - tail[0];
     if ((clipType === 'image' || clipType === 'hold') && projected.hold !== undefined) {
       projected.hold = Math.min(projected.hold, remainingSeconds * speed);
     } else if (hasTrim && projected.from !== undefined && projected.to !== undefined) {

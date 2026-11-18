@@ -1,7 +1,7 @@
 import type { EditCommand, JSON, MediaSelection, VerifiedMedia } from '@/integrations/runtime/timeline-commit-types.ts';
 import { AuthoredState, ClipMoveError, MoveRecording, assertFiniteJson, copy, equal, freezeJson, has, object, type AuthoredBundle } from './clipMovePrimitives.ts';
 import { fractionNumber, number, occurrenceOrigin, occurrenceStart, rate } from './clipMoveCapture.ts';
-import { occurrenceOffsetIsValid, readOccurrenceSourceOffsetSeconds } from '../data/occurrenceWindow.ts';
+import { occurrenceOffsetIsValid } from '../data/occurrenceWindow.ts';
 
 type Row = Record<string, JSON>;
 type Approval = {
@@ -56,7 +56,7 @@ function endFrame(clip: Row, origin: number, fps: number): number {
   return Math.floor((origin + at) * fps + 0.5) + Math.max(1, Math.floor(length / speed * fps + 0.5));
 }
 
-function ownerInputs(ctx: MoveRecording, owner: string): { floor: number; limit: number } {
+function ownerInputs(ctx: MoveRecording, owner: string): void {
   ctx.select('collection.occurrences', 'parent');
   ctx.read(owner, ['occurrence_id']);
   ctx.read(owner + '/shot', ['shot_id']);
@@ -67,14 +67,10 @@ function ownerInputs(ctx: MoveRecording, owner: string): { floor: number; limit:
     ![undefined, null, 1].includes(row.speed as number | null | undefined) || row.time_map != null || row.timeMap != null) {
     throw new ClipMoveError('active translation-only occurrence is required', 'unsupported_map');
   }
-  // Child-local time: the occurrence shows [source_offset, source_offset + duration] of the shot's timeline.
-  const floor = readOccurrenceSourceOffsetSeconds(row.source_offset);
-  const limit = floor + number(row.duration_ms, 'occurrence.duration_ms', true) / 1000;
   const fps = rate(ctx.read('parent', ['config', 'output', 'fps']));
   if (!equal(rate(ctx.read(owner + '/source', ['output', 'fps'])), fps)) throw new ClipMoveError('parent and child fps differ', 'unsupported_timing');
   if (ctx.read(owner + '/source', ['source_window']) != null) throw new ClipMoveError('internal source_window is unsupported', 'unsupported_map');
   ctx.bind('media.owner', owner);
-  return { floor, limit };
 }
 
 function exclusive(ctx: MoveRecording, owner: string): void {
@@ -82,7 +78,7 @@ function exclusive(ctx: MoveRecording, owner: string): void {
 }
 
 function addMedia(ctx: MoveRecording, owner: string, row: Row, pin: MediaSelection, verified: VerifiedMedia, consumed: JSON): void {
-  const { floor, limit } = ownerInputs(ctx, owner);
+  ownerInputs(ctx, owner);
   exclusive(ctx, owner);
   ctx.read(owner + '/source', ['app', 'astrid', 'pool']);
   ctx.read('parent', ['config', 'pinnedShotGroups']);
@@ -98,7 +94,8 @@ function addMedia(ctx: MoveRecording, owner: string, row: Row, pin: MediaSelecti
   const keys = ['asset', 'at', 'clipType', 'hold', 'id', 'track', ...(kind === 'video' ? ['from', 'speed', 'to'] : [])].sort();
   if (!equal(Object.keys(row).sort(), keys) || row.clipType !== kind || row.asset !== pin.asset || !rawId(row.id)) throw new ClipMoveError('unsupported automatic birth row');
   const at = number(row.at, 'clip.at'), hold = number(row.hold, 'clip.hold', true);
-  if (at < floor || at + hold > limit) throw new ClipMoveError('child interval exceeds occurrence', 'occurrence_boundary');
+  // A child past the window is cropped there; only a start before the shot's zero is a fault.
+  if (at < 0) throw new ClipMoveError('child starts before its shot', 'occurrence_boundary');
   if (kind === 'video' && (row.from !== 0 || row.to !== hold || row.speed !== 1 || hold > verified.duration_seconds!)) {
     throw new ClipMoveError('source window exceeds verified media', 'unsupported_timing');
   }

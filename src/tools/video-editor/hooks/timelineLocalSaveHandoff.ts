@@ -111,8 +111,8 @@ function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSou
   }
   // What the shots depend on in the parent, by membership in the document's own shot data. Occupied tracks hold
   // the shots themselves (occurrences, pinned groups): clips may not change on or onto them. Shared lanes are
-  // parent tracks a shot's child content plays on: the lane itself (removal, mute, volume, a clashing new id) is
-  // what the shot relies on, but parent clips layered over it are the user's to place.
+  // parent tracks a shot's child content plays on: the lane itself (removal, a clashing new id) is what the
+  // shot relies on, but its settings and the parent clips layered over it are the user's to change.
   const occurrences = Array.isArray(parent.occurrences) ? parent.occurrences.filter(object) : [];
   const occupiedTracks = new Set<string>();
   const sharedLanes = new Set<string>();
@@ -166,16 +166,16 @@ function unnamedEditRefusal(document: CanonicalDocument, before: TimelineSaveSou
       return "Can't place a clip on a track that doesn't exist. Put it on one of the timeline's tracks.";
     }
   }
-  // Tracks: a new track may appear and a track without shots or clips may go; the rest stay byte-identical.
+  // Tracks: a new track may appear and a track without shots or clips may go; kept tracks keep their kind and order.
   for (const [id, track] of beforeTracks) {
     const kept = nextTracks.get(id);
     if (!kept) {
       if (occupiedTracks.has(id)) return "Can't remove a track that holds shots yet.";
       if (sharedLanes.has(id)) return "Can't remove a track that a shot plays on yet.";
       if (next.config.clips.some(clip => clip.track === id)) return "Can't remove a track that still has clips on it. Move or delete its clips first.";
-    } else if (!same(authoredJson(track), authoredJson(kept))) {
-      return occupiedTracks.has(id) ? "Can't change a track that holds shots yet."
-        : sharedLanes.has(id) ? "Can't change a track that a shot plays on yet." : "Can't change a track's settings on a timeline with shots yet.";
+    } else if (kept.kind !== track.kind) {
+      // Settings (label, mute, volume) are the user's to change on any track, a shot's included; what a track is stays.
+      return "Can't change what kind of track this is on a timeline with shots yet.";
     }
   }
   for (const id of nextTracks.keys()) {

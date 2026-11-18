@@ -791,12 +791,15 @@ describe('upstream local document handoff', () => {
     await env.session.dispose();
   });
 
-  it('keeps a track-label change without its own gesture refused beside child shots', async () => {
+  it('saves a track-label change without its own gesture beside child shots, leaving the shot closure as it was', async () => {
     const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
     const next = structuredClone(env.source);
     next.config.tracks![0].label = 'Renamed track';
-    await expect(env.handoff.capture(next)).rejects.toThrow("Can't change a track that holds shots yet.");
-    expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
+    await env.handoff.capture(next);
+    const document = env.session.getDocument() as unknown as typeof env.initial.canonicalDocument;
+    expect(document.parent_revision.payload.config.tracks[0].label).toBe('Renamed track');
+    expect(document.shot_revisions).toEqual(env.initial.canonicalDocument.shot_revisions);
+    expect(document.internal_timeline_revisions).toEqual(env.initial.canonicalDocument.internal_timeline_revisions);
     await env.session.dispose();
   });
 });

@@ -271,11 +271,12 @@ describe.each(shotCorpus)('$name: gesture-less edits on a document with shots', 
       await env.session.dispose();
     });
 
-    it('refuses changing a parent audio lane a shot child plays on', async () => {
+    it('admits changing the settings of a parent audio lane a shot child plays on', async () => {
       const env = await mount(document, CHILD);
       const next = structuredClone(env.source.config);
       (next.tracks.find(track => track.id === 'a3') as Record<string, unknown>).muted = true;
-      await refuse(env, next);
+      await admit(env, next);
+      expect((writtenTracks(env).find(track => track.id === 'a3') as Record<string, unknown>).muted).toBe(true);
       await env.session.dispose();
     });
 
@@ -386,10 +387,21 @@ describe.each(shotCorpus)('$name: gesture-less edits on a document with shots', 
       await env.session.dispose();
     });
 
-    it('refuses a changed setting on a track no shot uses', async () => {
+    it('admits changing track settings on any track: one no shot uses, and the track the shots sit on', async () => {
+      for (const id of [freeTrack, occurrenceTrack]) {
+        const env = await mount(document);
+        const next = structuredClone(env.source.config);
+        Object.assign(next.tracks.find(track => track.id === id) as Record<string, unknown>, { muted: true, volume: 0.5 });
+        await admit(env, next);
+        expect(writtenTracks(env).find(track => track.id === id)).toMatchObject({ muted: true, volume: 0.5 });
+        await env.session.dispose();
+      }
+    });
+
+    it('refuses changing what kind a track is', async () => {
       const env = await mount(document);
       const next = structuredClone(env.source.config);
-      (next.tracks.find(track => track.id === freeTrack) as Record<string, unknown>).muted = true;
+      (next.tracks.find(track => track.id === freeTrack) as Record<string, unknown>).kind = 'audio';
       await refuse(env, next);
       await env.session.dispose();
     });

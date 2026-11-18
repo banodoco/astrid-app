@@ -603,4 +603,27 @@ describe('useTimelineSave refused authoring edits', () => {
       } finally { harness.hook.unmount(); }
     });
   });
+
+  it('says plainly that a recovered draft whose base no longer exists cannot be re-applied, offers only Discard, and Discard clears it', async () => {
+    const seed = await mount();
+    const base = seed.hook.result.current.dataRef.current!;
+    seed.hook.unmount();
+    await saveTimelineDraft(TIMELINE, { config: { ...base.config, output: { ...base.config.output, file: 'recovered.mp4' } },
+      registry: base.registry, bundle: null }, 1, { ownerId: 'old-owner', draftIdentity: 'old-identity',
+      baseHeadRevisionId: 'gone-revision', baseHeadProjectId: 'project-commit', baseHeadTimelineId: TIMELINE });
+    const harness = await mount({ canonicalReload: true });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.saveBar).not.toBeNull());
+      expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'refused', action: 'none',
+        headline: 'These changes were made on a version that no longer exists.' });
+      // Nothing is sent, and nothing re-applies the draft behind the person's back.
+      await act(async () => { await harness.hook.result.current.tryAgain(); });
+      expect(harness.send).not.toHaveBeenCalled();
+      expect(harness.hook.result.current.saveStatus).not.toBe('error');
+      await act(async () => { await harness.hook.result.current.discardUnsaved(); });
+      await vi.waitFor(() => expect(harness.hook.result.current.saveBar).toBeNull());
+      expect(await loadTimelineDraft(TIMELINE)).toBeNull();
+    } finally { harness.hook.unmount(); }
+  });
+
 });

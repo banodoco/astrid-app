@@ -10,7 +10,9 @@ export type SaveBarAction =
   /** The save session did not start: start it again (it recovers what is retained). */
   | 'restart'
   | 'draft'
-  | 'pending';
+  | 'pending'
+  /** Nothing can be retried (a draft whose base no longer exists): only Discard is offered. */
+  | 'none';
 
 /**
  * The one description of "this timeline has unsaved work and nothing is sending it": what the save bar and the
@@ -28,7 +30,7 @@ export interface SaveBarSources {
   local: LocalSaveState | null;
   /** The save session failed to start (its owner could not be claimed or recovered). */
   bootstrapFailed: boolean;
-  recoveryDraft: { updatedAt: string } | null;
+  recoveryDraft: { updatedAt: string; baseGone?: boolean } | null;
   conflictExhausted: boolean;
   schemaIncompatible: boolean;
   watchdogTripped: boolean;
@@ -63,10 +65,14 @@ export function saveBarInput(source: SaveBarSources): SaveBarInput | null {
   // Retained work found on load, before it has been replayed.
   if (local?.status === 'recovery') return { kind: 'recovered', headline: 'You have unsaved changes.', action: 'restart' };
   if (source.watchdogTripped) return { kind: 'waiting', headline: 'The save has not been confirmed. Your changes are kept.', action: 'watchdog' };
+  if (source.recoveryDraft?.baseGone) {
+    return { kind: 'refused', headline: 'These changes were made on a version that no longer exists.',
+      since: source.recoveryDraft.updatedAt, action: 'none' };
+  }
+  // A refusal reason comes before the generic "unsaved changes": a Try again that fails must say why.
+  if (source.saveError) return { kind: 'refused', headline: withoutPrefix(source.saveError), action: source.recoveryDraft ? 'draft' : 'pending' };
   if (source.recoveryDraft) {
     return { kind: 'recovered', headline: 'You have unsaved changes.', since: source.recoveryDraft.updatedAt, action: 'draft' };
   }
-  // Any other failure keeps its own reason (a reload failure, a declined edit that could not be undone).
-  if (source.saveError) return { kind: 'refused', headline: withoutPrefix(source.saveError), action: 'pending' };
   return null;
 }

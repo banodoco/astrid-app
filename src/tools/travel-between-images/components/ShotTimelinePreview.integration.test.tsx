@@ -444,7 +444,8 @@ describe('shot timeline popup real recovery integration', () => {
       await waitFor(() => expect(loadCanonical).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument());
       expect(await loadTimelineDraft(recoveryKey)).toMatchObject({ draftIdentity: 'durable-popup-recovery' });
-      expect(screen.getByRole('alert')).toHaveTextContent('You have unsaved changes');
+      // The failed Discard says why, instead of repeating the generic recovery headline.
+      expect(screen.getByRole('alert')).toHaveTextContent('canonical reload unavailable');
       expect(screen.getByRole('region', { name: 'Shot timeline' })).toHaveAttribute('data-shot-timeline-status', 'ready');
     } else {
       await waitFor(() => expect(screen.queryByText('You have unsaved changes')).toBeNull());

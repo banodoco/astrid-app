@@ -590,6 +590,8 @@ export function useTimelineSave(
     updatedAt: string;
     baseVersion: number;
     retryAllowed: boolean;
+    /** The draft was made on a head that is not the one the editor now has; it cannot be re-applied. */
+    baseGone: boolean;
   } | null>(null);
   const [recoveredAsDirty, setRecoveredAsDirty] = useState(false);
   const recoveryCheckedScopeRef = useRef<string | null>(null);
@@ -622,9 +624,15 @@ export function useTimelineSave(
   const offerRecovery = useCallback((record: TimelineDraftRecord) => {
     recoveryPendingRef.current = true;
     recoveryActiveRef.current = true;
-    setRecoveryDraft({ updatedAt: record.updatedAt, baseVersion: record.baseVersion,
-      retryAllowed: !provider.saveTimelineAtHead || Boolean(trustedRecoveryHead(record)) });
-  }, [provider, trustedRecoveryHead]);
+    // A whole-document draft can only be sent on the head it was authored on. When that head is gone (a rebuilt
+    // Runtime, or the timeline moved on), nothing can re-apply it: say so, and do not offer Try again.
+    const current = headRevisionRef.current ?? commit.dataRef.current?.head;
+    // (The local document save path refuses any other base at its head check; head-addressed providers send it as is.)
+    const baseGone = Boolean(usesLocalDocumentSave && typeof record.baseHeadRevisionId === 'string'
+      && current && record.baseHeadRevisionId !== current.headRevisionId);
+    setRecoveryDraft({ updatedAt: record.updatedAt, baseVersion: record.baseVersion, baseGone,
+      retryAllowed: !baseGone && (!provider.saveTimelineAtHead || Boolean(trustedRecoveryHead(record))) });
+  }, [commit.dataRef, headRevisionRef, provider, trustedRecoveryHead, usesLocalDocumentSave]);
   useEffect(() => {
     // No durable persistence (a read-only example, the editor tour) means no draft was ever written to offer.
     if (!isDataProviderPersistenceEnabled(provider)) return;

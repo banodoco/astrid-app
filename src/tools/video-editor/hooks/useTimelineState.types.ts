@@ -263,8 +263,8 @@ export interface TimelineChromeContextValue {
   discardRecoveredDraft: () => void;
   /** The one description of unsaved work (null when nothing is waiting) and its two actions. */
   saveBar: SaveBarInput | null;
-  tryAgain: () => void;
-  discardUnsaved: () => void;
+  tryAgain: () => void | Promise<void>;
+  discardUnsaved: () => void | Promise<void>;
   startRender: TimelineStartRender;
 }
 

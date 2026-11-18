@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { CanonicalDocument } from '@/integrations/runtime/generated.ts';
 import { toOutboxJson } from './commitOutbox.ts';
-import { createLocalSaveSession, type LocalSaveSession } from './localSaveSession.ts';
+import { createLocalSaveSession, LocalSaveDeclined, type LocalSaveSession } from './localSaveSession.ts';
 import { environment, h0, scope } from './__tests__/localSaveSessionEnvironment.ts';
 import { saveBarInput } from '../hooks/saveBar.ts';
 
@@ -68,7 +68,7 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
         }
         expect((await retained()).length).toBeGreaterThanOrEqual(1);
         expect(saveBarInput({ local: session.getState(), recoveryDraft: null, conflictExhausted: false,
-          schemaIncompatible: false, watchdogTripped: false, saveError: null })).not.toBeNull();
+          schemaIncompatible: false, watchdogTripped: false, saveError: null, bootstrapFailed: false })).not.toBeNull();
         const before = (await env.outboxes.list(scope)).map((owner) => owner.ownerId);
 
         await session.discharge('latest');
@@ -79,7 +79,7 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
         // Every owner that existed is gone, not just emptied.
         expect((await env.outboxes.list(scope)).map((owner) => owner.ownerId).filter((id) => before.includes(id))).toEqual([]);
         expect(saveBarInput({ local: session.getState(), recoveryDraft: null, conflictExhausted: false,
-          schemaIncompatible: false, watchdogTripped: false, saveError: null })).toBeNull();
+          schemaIncompatible: false, watchdogTripped: false, saveError: null, bootstrapFailed: false })).toBeNull();
 
         env.send.mockReset();
         env.send.mockImplementation(async () => env.accepted(latest.canonicalDocument, h2));
@@ -95,6 +95,38 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
         await reopened.dispose();
       });
     });
+  });
+
+  it('declines an edit while earlier saves are unresolved with a typed refusal the editor can undo', async () => {
+    const { env, mount, latest } = world();
+    env.send.mockRejectedValue(failures.refused());
+    const session = await mount();
+    await env.append(session);
+    await expect(session.flush()).rejects.toThrow();
+    const document = toOutboxJson(session.getDocument());
+    expect(() => session.append({ before: document, after: document, label: 'x', commands: [] })).toThrow(LocalSaveDeclined);
+    expect(latest).toBeTruthy();
+  });
+
+  it('Discard stops a send loop that is already running and a retry timer that is already armed', async () => {
+    const { env, mount, retained } = world();
+    let release!: () => void;
+    const hold = new Promise<void>((resolve) => { release = resolve; });
+    const session = await mount();
+    await env.append(session);
+    await session.appendDocument({ before: env.pair.after, after: laterDocument(env.pair.after, 'Second'), label: 'Second',
+      roots: [{ ref: 'parent', revisionId: h0.revisionId, contentDigest: env.pair.after.parent_revision.content_digest }],
+      step: { id: 'second-step', label: 'Second', intent: 'Second', tags: [] } } as Parameters<typeof session.appendDocument>[0]);
+    env.send.mockImplementation(async () => { await hold; return env.accepted(env.pair.after, h1); });
+    const flushing = session.flush().catch(() => {});
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const discarding = session.discharge('latest');
+    release();
+    await Promise.all([flushing, discarding]);
+    // Only the request already in flight was sent: the second intent was not dispatched after Discard.
+    expect(env.send).toHaveBeenCalledTimes(1);
+    expect(await retained()).toEqual([]);
+    expect(session.getState().status).toBe('saved');
   });
 
   it('fences a second tab that still holds a discarded owner: its next write fails and resurrects nothing', async () => {

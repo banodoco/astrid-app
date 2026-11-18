@@ -29,6 +29,7 @@ import type { TimelineDraftRecord } from '@/tools/video-editor/data/timelineDraf
 import { canonicalJsonStringify, parseTimelineBundle, type TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { createTimelineLocalSaveHandoff, readTimelineOriginalSaveBasis, type TimelineLocalSaveHandoff, type TimelineOriginalSaveBasis, type TimelineSaveSource, type TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
+import { createCommitOutbox } from '../commands/commitOutbox.ts';
 import { createLocalSaveSession, type LocalSaveSession, type LocalSaveState } from '../commands/localSaveSession.ts';
 import { toOutboxJson } from '../commands/commitOutbox.ts';
 import { emitTimelineSaveDiagnostic, markTimelineSaveRejection } from '../lib/timeline-diagnostics.ts';
@@ -148,6 +149,22 @@ export function useTimelineSave(
     handoff: undefined as TimelineLocalSaveHandoff | undefined,
     session: undefined as LocalSaveSession | undefined }), [provider, timelineId]);
   const usesLocalDocumentSave = Boolean(provider.loadTimelineCommandBasis && provider.commitTimeline && provider.getRecoverableIdentity);
+  // Bumped to run the save-session bootstrap again after it failed.
+  const [bootstrapEpoch, setBootstrapEpoch] = useState(0);
+  const restartLocalSession = useCallback(() => {
+    const old = localOwner.session;
+    if (old) {
+      // A session that started but could not settle its owners is retired; the next bootstrap recovers them again.
+      localOwner.generation++;
+      localOwner.session = undefined;
+      localOwner.handoff = undefined;
+      localOwner.ready = undefined;
+      localOwner.started = false;
+      localOwner.retirement = old.dispose().catch(() => {});
+    }
+    setLocalSaveState(null);
+    setBootstrapEpoch((epoch) => epoch + 1);
+  }, [localOwner]);
   const localOperationBoundaryRef = useRef(invalidateDraftReload);
   // Stable from the first render: a gesture during assembly cannot fall through
   // to the old snapshot writer while the verified original is being loaded.
@@ -185,7 +202,17 @@ export function useTimelineSave(
     async discharge(mode) {
       // A failed bootstrap has no session and nothing queued to leave.
       const handoff = await localOwner.ready?.catch(() => undefined);
-      if (localOwner.closed || !handoff) return;
+      if (localOwner.closed) return;
+      if (!handoff) {
+        // The session never started: its owner rows may still be in the outbox. Discard removes them and starts again.
+        if (mode === 'latest' && localOwner.initialization === 'error') {
+          const identity = await provider.getRecoverableIdentity?.();
+          const projectId = localDataRef.current?.head?.projectId;
+          if (identity && projectId) await createCommitOutbox().discardScope({ ...identity, projectId, timelineId });
+          restartLocalSession();
+        }
+        return;
+      }
       await handoff.discharge?.(mode);
     },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
@@ -213,7 +240,7 @@ export function useTimelineSave(
       } catch (error) { localOwner.operationError = true; recordDraftReloadFailure(); throw error; }
       finally { localOwner.operations--; if (!localOwner.closed) setLocalSaveState((current) => current ? { ...current } : current); }
     },
-  } : undefined, [localOwner, usesLocalDocumentSave]);
+  } : undefined, [localOwner, usesLocalDocumentSave, restartLocalSession, provider, timelineId]);
   useEffect(() => {
     localOwner.closed = false;
     emitTimelineSaveDiagnostic('owner-init', () => ({ owner: localOwner, timelineId: localOwner.timelineId, closed: localOwner.closed,
@@ -402,7 +429,9 @@ export function useTimelineSave(
         // not settle stops the rest, which stay retained until the next load.
         for (const owner of owners) {
           localOwner.recovered = true;
-          await session.recover(owner);
+          // A recover that throws (an owner held by another tab, a row that cannot be verified) must not fail the
+          // whole bootstrap: the handoff is still built, and Discard (or Try again) reaches the session.
+          try { await session.recover(owner); } catch { break; }
           emitTimelineSaveDiagnostic('session-recovered', () => ({ owner: localOwner, timelineId,
             current: isCurrent(), generation, sessionPresent: true }));
           if (session.getState().status !== 'saved') break;
@@ -453,7 +482,7 @@ export function useTimelineSave(
       emitTimelineSaveDiagnostic('lifecycle-cancel', () => ({ owner: localOwner, timelineId,
         closed: localOwner.closed, generation: readGeneration, basisReadOrdinal: readOrdinal, sessionPresent: Boolean(localOwner.session) }));
     };
-  }, [provider, timelineId, originalHeadKey, localDataRef, localEditSeqRef, adoptCanonicalData, localOwner, resolveAssetUrl, usesLocalDocumentSave]);
+  }, [provider, timelineId, originalHeadKey, localDataRef, localEditSeqRef, adoptCanonicalData, localOwner, resolveAssetUrl, usesLocalDocumentSave, bootstrapEpoch]);
   const persistence = useTimelinePersistence({
     store,
     provider,
@@ -797,6 +826,7 @@ export function useTimelineSave(
   // timeline (every owner, the draft, the session copy) and adopts the accepted head; Try again resends it.
   const saveBar = saveBarInput({
     local: localSaveState,
+    bootstrapFailed: localOwner.initialization === 'error',
     recoveryDraft: persistence.isConflictExhausted ? null : recoveryDraft,
     conflictExhausted: persistence.isConflictExhausted,
     schemaIncompatible: persistence.schemaIncompatible != null,
@@ -806,22 +836,32 @@ export function useTimelineSave(
   const retrySaveAfterConflict = persistence.retrySaveAfterConflict;
   const retryWatchdog = persistence.retryWatchdog;
   const retryPendingSave = persistence.retryPendingSave;
+  const clearSaveFailure = persistence.clearSaveFailure;
+  const saveBarAction = saveBar?.action;
   const tryAgain = useCallback(async () => {
+    // A declined edit leaves a failure that would refuse every later save; resending starts from a clean slate.
+    clearSaveFailure();
     try {
-      if (persistence.isConflictExhaustedRef?.current) await retrySaveAfterConflict();
-      else if (persistence.watchdogTripped) retryWatchdog();
-      else if (localDocumentSave && localSaveState && localSaveState.status !== 'saved') await localDocumentSave.discharge?.('keep');
-      else if (recoveryDraft) await retryRecoveredDraft();
-      else retryPendingSave();
+      switch (saveBarAction) {
+        case 'conflict': await retrySaveAfterConflict(); break;
+        case 'watchdog': retryWatchdog(); break;
+        case 'local': await localDocumentSave?.discharge?.('keep'); break;
+        case 'restart': restartLocalSession(); break;
+        case 'draft': await retryRecoveredDraft(); break;
+        case 'pending': retryPendingSave(); break;
+        default: break;
+      }
     } catch {
       // Still unsaved: the bar stays and names the reason.
     }
-  }, [localDocumentSave, localSaveState, persistence.isConflictExhaustedRef, persistence.watchdogTripped, recoveryDraft,
-    retryPendingSave, retryRecoveredDraft, retrySaveAfterConflict, retryWatchdog]);
+  }, [clearSaveFailure, localDocumentSave, restartLocalSession, retryPendingSave, retryRecoveredDraft,
+    retrySaveAfterConflict, retryWatchdog, saveBarAction]);
   const discardUnsaved = useCallback(async () => {
+    // A waiting automatic retry must not race the Discard.
+    localOwner.session?.cancelRetry();
     try { await reloadFromServer({ clearDraft: true, discardRefusedSave: true }); }
     catch { /* the bar stays; the reload failure is its own error */ }
-  }, [reloadFromServer]);
+  }, [localOwner, reloadFromServer]);
 
   const registrationTargetsRef = useRef(new WeakMap<OwnedRegistryMutation, { session: object; generation: number }>());
   // commit and persistence are fresh object literals on every render; their
@@ -970,7 +1010,8 @@ export function useTimelineSave(
     selectedClipId: commit.selectedClipId,
     selectedTrackId: commit.selectedTrackId,
     saveStatus: localSaveState && (['blocked', 'conflict', 'error', 'recovery', 'retry'].includes(localSaveState.status) || localSaveState.notice)
-      ? 'error' : localSaveState?.status === 'saving' ? 'saving' : localSaveState?.status === 'dirty' ? 'dirty' : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty' : persistence.saveStatus,
+      ? 'error' : localSaveState?.status === 'saving' ? 'saving' : localSaveState?.status === 'dirty' ? 'dirty' : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty'
+      : localSaveState?.status === 'saved' && persistence.saveStatus === 'retrying' ? 'saved' : persistence.saveStatus,
     schemaIncompatible: persistence.schemaIncompatible,
     flushPendingSave: persistence.flushPendingSave,
     preserveTimelineDraftForReload: persistence.preserveTimelineDraftForReload,

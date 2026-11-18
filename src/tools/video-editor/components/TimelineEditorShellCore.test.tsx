@@ -2025,7 +2025,7 @@ describe('TimelineEditorShellCore — the save bar', () => {
     ['refused', 'The Runtime did not accept this change.'],
     ['waiting', 'The Runtime is not answering. Your changes are kept.'],
     ['recovered', 'You have unsaved changes.'],
-  ] as const)('shows a %s save with Try again and Discard, wired to the one pair of actions', (kind, headline) => {
+  ] as const)('shows a %s save with Try again and Discard, wired to the one pair of actions', async (kind, headline) => {
     const tryAgain = vi.fn();
     const discardUnsaved = vi.fn();
     __chromeOverrides = { saveBar: { kind, headline }, tryAgain, discardUnsaved };
@@ -2038,6 +2038,8 @@ describe('TimelineEditorShellCore — the save bar', () => {
     fireEvent.click(within(bar).getByRole('button', { name: 'Try again' }));
     expect(tryAgain).toHaveBeenCalledOnce();
     expect(discardUnsaved).not.toHaveBeenCalled();
+    // Both buttons wait while an action runs, then are usable again.
+    await waitFor(() => expect(within(bar).getByRole('button', { name: 'Discard' })).not.toBeDisabled());
     fireEvent.click(within(bar).getByRole('button', { name: 'Discard' }));
     expect(discardUnsaved).toHaveBeenCalledOnce();
   });

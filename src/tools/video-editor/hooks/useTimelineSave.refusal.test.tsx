@@ -50,7 +50,7 @@ function applyChanges(payload: Json, changes: Array<{ op: string; path: string[]
   return next;
 }
 
-async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> } = {}) {
+async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void>; failSends?: boolean; gates?: Array<Promise<void>>; waitForOwner?: boolean; canonicalReload?: boolean } = {}) {
   const config = createDefaultTimelineConfig();
   const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
     { timelineId: TIMELINE, projectId: 'project-commit' }).data.canonical_document;
@@ -64,6 +64,9 @@ async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> 
   let rejectNext = options.rejectFirstSend;
   const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(async (request) => {
     if (options.gate) await options.gate;
+    if (options.failSends) throw new TypeError('Failed to fetch');
+    const gateForThisSend = options.gates?.[requests.length];
+    if (gateForThisSend) await gateForThisSend;
     const changes = (request.commands as Array<{ args: { changes: never[] } }>).flatMap((command) => command.args.changes);
     requests.push({ changes });
     if (rejectNext) {
@@ -83,7 +86,8 @@ async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> 
   });
   const provider = {
     persistenceEnabled: true,
-    loadTimeline: vi.fn(async () => ({ config: createDefaultTimelineConfig(), configVersion: 1 })),
+    loadTimeline: vi.fn(async () => options.canonicalReload
+      ? ({ config: data.config, configVersion: 1, head }) : ({ config: createDefaultTimelineConfig(), configVersion: 1 })),
     loadAssetRegistry: vi.fn(async () => ({ assets: {} })),
     saveTimeline: vi.fn(async () => { throw new Error('Legacy save must not be called'); }),
     resolveAssetUrl: vi.fn(async (file: string) => file),
@@ -103,7 +107,7 @@ async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> 
   );
   const hook = renderHook(() => useTimelineSave({ timelineQuery: { data: undefined, isLoading: false }, assetRegistryQuery: { data: undefined } },
     provider, { current: createInteractionState() }, store, data), { wrapper });
-  await vi.waitFor(() => expect(hook.result.current.localSaveState?.ownerId).toBeTruthy());
+  if (options.waitForOwner !== false) await vi.waitFor(() => expect(hook.result.current.localSaveState?.ownerId).toBeTruthy());
   return { hook, send, requests, data, provider };
 }
 
@@ -443,6 +447,50 @@ describe('useTimelineSave refused authoring edits', () => {
       expect(sent).toEqual([['config/output/file', 'edit-a.mp4'], ['config/output/fps', 24]]);
       expect(harness.hook.result.current.dataRef.current!.config.clips[0].hold).toBe(1);
       expect(harness.hook.result.current.localSaveState?.status).toBe('saved');
+    } finally { harness.hook.unmount(); }
+  });
+  it('a save session that cannot recover an owner held by another tab still offers Discard, and the next edit saves', async () => {
+    // Tab A holds an unsaved, retried save; its owner stays claimed.
+    const tabA = await mount({ failSends: true });
+    try {
+      await author(tabA, (config) => ({ ...config, output: { ...config.output, file: 'held.mp4' } }));
+      await vi.waitFor(() => expect(tabA.hook.result.current.localSaveState?.status).toBe('retry'));
+      // Tab B lists A's owner, cannot claim it, and used to end with a dead bar and a rejected `ready`.
+      const tabB = await mount({ waitForOwner: false, canonicalReload: true });
+      try {
+        await vi.waitFor(() => expect(tabB.hook.result.current.saveBar?.headline)
+          .toBe('This timeline has unsaved changes open in another tab.'));
+        await act(async () => { await tabB.hook.result.current.discardUnsaved(); });
+        await vi.waitFor(() => expect(tabB.hook.result.current.saveBar).toBeNull());
+        expect(tabB.hook.result.current.localSaveState?.status).toBe('saved');
+        await author(tabB, (config) => ({ ...config, output: { ...config.output, file: 'after-discard.mp4' } }));
+        await act(async () => { await tabB.hook.result.current.flushPendingSave(); });
+        expect(tabB.requests.flatMap((request) => request.changes)).toEqual(expect.arrayContaining([
+          expect.objectContaining({ path: ['config', 'output', 'file'], value: 'after-discard.mp4' })]));
+        expect(tabB.hook.result.current.saveBar).toBeNull();
+      } finally { tabB.hook.unmount(); }
+    } finally { tabA.hook.unmount(); }
+  });
+
+  it('two drops, the second made while the first saves, are both saved, and the bar is clear afterwards', async () => {
+    let release1!: () => void;
+    const gate1 = new Promise<void>((resolve) => { release1 = resolve; });
+    const harness = await mount({ gates: [gate1] });
+    try {
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'drop-1.mp4' } }));
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(1));
+      await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 24 } }));
+      act(() => release1());
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'drop-3.mp4' } }));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      expect(harness.requests.flatMap((request) => request.changes)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: ['config', 'output', 'file'], value: 'drop-1.mp4' }),
+        expect.objectContaining({ path: ['config', 'output', 'fps'], value: 24 }),
+        expect.objectContaining({ path: ['config', 'output', 'file'], value: 'drop-3.mp4' }),
+      ]));
+      expect(harness.hook.result.current.saveBar).toBeNull();
     } finally { harness.hook.unmount(); }
   });
 });

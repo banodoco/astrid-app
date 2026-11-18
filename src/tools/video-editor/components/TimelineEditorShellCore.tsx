@@ -799,6 +799,10 @@ function TimelineEditorShellCoreComponent({
    *  payload and a blank editor whose badge claims `saved`. */
   const timelineRegion = (
     <>
+      {chrome.parkedDrops?.map((drop) => (
+        <SaveBar key={drop.id} bar={{ kind: 'refused', headline: `${drop.fileName} was not added: ${drop.reason}`, action: 'pending' }}
+          onTryAgain={drop.tryAgain} onDiscard={drop.discard} />
+      ))}
       {chrome.saveBar ? <SaveBar bar={chrome.saveBar} onTryAgain={chrome.tryAgain} onDiscard={chrome.discardUnsaved} /> : null}
       {chrome.loadError && !(recoveryCardShowing && hasLoadedTimeline) ? (
         // The hosted build's "Astrid stopped" / "restarted" card already says what to do about the same failure.

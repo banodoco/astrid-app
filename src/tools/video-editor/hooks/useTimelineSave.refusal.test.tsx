@@ -493,4 +493,71 @@ describe('useTimelineSave refused authoring edits', () => {
       expect(harness.hook.result.current.saveBar).toBeNull();
     } finally { harness.hook.unmount(); }
   });
+
+  const outputOf = (harness: Harness) => harness.hook.result.current.dataRef.current!.config.output as Record<string, unknown>;
+
+  it('an edit made while a later save is sending is kept and saved, and the screen never loses an edit', async () => {
+    let release1!: () => void;
+    let release2!: () => void;
+    const gate1 = new Promise<void>((resolve) => { release1 = resolve; });
+    const gate2 = new Promise<void>((resolve) => { release2 = resolve; });
+    const harness = await mount({ gates: [gate1, gate2] });
+    const toastError = vi.spyOn(sonnerToast, 'error');
+    try {
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'drop-1.mp4' } }));
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(1));
+      await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 24 } }));
+      act(() => release1());
+      // Save 1 is accepted while save 2 is queued, then sends: the screen still shows both edits.
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(2));
+      expect(outputOf(harness)).toMatchObject({ file: 'drop-1.mp4', fps: 24 });
+      await author(harness, (config) => ({ ...config, output: { ...config.output, width: 640 } }));
+      expect(outputOf(harness)).toMatchObject({ file: 'drop-1.mp4', fps: 24, width: 640 });
+      expect(harness.hook.result.current.saveBar).toBeNull();
+      act(() => release2());
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      const changes = harness.requests.flatMap((request) => request.changes);
+      expect(changes.map((change) => `${change.path.join('/')}=${String(change.value)}`)).toEqual(expect.arrayContaining([
+        'config/output/file=drop-1.mp4', 'config/output/fps=24', 'config/output/width=640']));
+      expect(harness.hook.result.current.saveBar).toBeNull();
+      expect(toastError).not.toHaveBeenCalled();
+      // After the drain the screen is the server's head, with all three edits in it.
+      expect(outputOf(harness)).toMatchObject({ file: 'drop-1.mp4', fps: 24, width: 640 });
+      expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r3');
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('a burst of ten quick edits across two accepts is saved in order, with nothing undone', async () => {
+    let release1!: () => void;
+    let release2!: () => void;
+    const gate1 = new Promise<void>((resolve) => { release1 = resolve; });
+    const gate2 = new Promise<void>((resolve) => { release2 = resolve; });
+    const harness = await mount({ gates: [gate1, gate2] });
+    const toastError = vi.spyOn(sonnerToast, 'error');
+    const edit = (value: number) => author(harness, (config) => ({ ...config, output: { ...config.output, fps: value } }));
+    try {
+      await edit(21);
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(1));
+      for (const value of [22, 23, 24, 25]) await edit(value);
+      act(() => release1());
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(2));
+      expect(outputOf(harness).fps).toBe(25);
+      for (const value of [26, 27, 28]) await edit(value);
+      act(() => release2());
+      await vi.waitFor(() => expect(harness.send.mock.calls.length).toBeGreaterThanOrEqual(3));
+      for (const value of [29, 30]) await edit(value);
+      expect(outputOf(harness).fps).toBe(30);
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      const fps = harness.requests.flatMap((request) => request.changes)
+        .filter((change) => change.path.join('/') === 'config/output/fps').map((change) => change.value);
+      expect(fps).toEqual([21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
+      expect(harness.hook.result.current.saveBar).toBeNull();
+      expect(toastError).not.toHaveBeenCalled();
+      expect(outputOf(harness).fps).toBe(30);
+      expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r10');
+    } finally { harness.hook.unmount(); }
+  });
 });

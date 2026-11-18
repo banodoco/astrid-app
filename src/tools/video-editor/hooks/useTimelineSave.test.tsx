@@ -995,8 +995,9 @@ describe('useTimelineSave — recovered draft durability', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(500); });
       await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
       expect(send).toHaveBeenCalledTimes(2);
-      expect(adopted!.head?.headRevisionId).toBe('r1');
-      expect(adopted!.config.clips).toEqual(splitConfig.clips);
+      // The queue was not empty when split was accepted: the screen kept the person's own split-and-trim.
+      expect(adopted!.head?.headRevisionId).toBe('r0');
+      expect(adopted!.config.clips).toEqual(trimmedConfig.clips);
       const request = send.mock.calls[1][0];
       expect(request).toMatchObject({ api_version: 1, project_id: head.projectId, timeline_id: head.timelineId,
         base_revision_id: 'r1', base_publication_id: 'p1', merge: 'fields', dry_run: false,
@@ -1534,9 +1535,10 @@ describe('useTimelineSave — recovered draft durability', () => {
           next.canonicalDocument.parent_revision.revision_id = 'r2';
           next.canonicalDocument.parent_revision.payload.config = JSON.parse(JSON.stringify(second.config));
           send.mockImplementationOnce(async (request) => {
-            // Observe the mounted assembly at transmission, before B can ACK.
-            expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r1');
-            expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('authored.mp4');
+            // Observe the mounted assembly at transmission, before B can ACK: while B is queued the screen still shows
+            // the person's own latest document; the accepted one is taken when the queue drains.
+            expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r0');
+            expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('dependent.mp4');
             expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1',
               commands: [{ args: { changes: [{ before: { state: 'present', value: 'authored.mp4' }, value: 'dependent.mp4' }] } }] });
             return next;

@@ -1,7 +1,7 @@
 import { createContext } from 'react';
 import { normalizeClipPlacementWithFindings } from '@banodoco/timeline-composition';
 import type { CanonicalDocument, CommitRequest, EditCommand, HistoryPage } from '@/integrations/runtime/timeline-commit-types.ts';
-import type { LocalSaveSession } from '../commands/localSaveSession.ts';
+import { LocalSaveDeclined, type LocalSaveSession } from '../commands/localSaveSession.ts';
 import { toOutboxJson, type OutboxJson } from '../commands/commitOutbox.ts';
 import { canonicalJsonStringify, type TimelineBundleEnvelope } from '../data/typed/timelineBundle.ts';
 import { authoringBundleFromDocument, type AuthoringBundle } from '../commands/authoringBundle.ts';
@@ -978,6 +978,9 @@ export function createTimelineLocalSaveHandoff(options: {
         // Only refuseEdit registers; unexpected errors and session or conflict errors stay unregistered.
         const rejection = error instanceof TimelineVersionConflictError || error instanceof TimelineSaveError ? error
           : new TimelineSaveError(`Local document save retained: ${error instanceof Error ? error.message : String(error)}`);
+        // A declined edit (earlier saves unresolved or replaying) never entered the queue: undo it on screen
+        // and say why, rather than leaving a failure that blocks every later save.
+        if (error instanceof LocalSaveDeclined) authoringRefusals.add(rejection);
         return Promise.reject(rejection);
       }
     },

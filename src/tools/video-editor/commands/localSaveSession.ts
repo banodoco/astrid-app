@@ -13,6 +13,14 @@ import {
   type OutboxScope,
 } from './commitOutbox.ts';
 
+/**
+ * A new edit was declined because earlier retained saves are still unresolved or replaying. It never entered
+ * the queue, so the caller undoes it on screen and says why. Plan 18 CC-5 deletes the declines: a new edit then
+ * queues behind the retained ones. (Awaiting the replay here is not enough: the edit was authored on the
+ * handoff's chain, which only a flush re-bases, so it would fail the same-document check once the replay ends.)
+ */
+export class LocalSaveDeclined extends Error {}
+
 /** Authored bytes supplied by the local editor, never produced by an executor here. */
 export interface LocalSave {
   before: OutboxJson;
@@ -124,6 +132,8 @@ export async function createLocalSaveSession(options: Options) {
   const RETRY_FIRST_MS = 1000;
   const RETRY_MAX_MS = 30_000;
   let retryDelay = RETRY_FIRST_MS;
+  // Bumped first thing by Discard: a send loop that started before it must not dispatch another request.
+  let discardEpoch = 0;
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   function clearRetry() {
     if (retryTimer) clearTimeout(retryTimer);
@@ -225,7 +235,8 @@ export async function createLocalSaveSession(options: Options) {
   async function pump() {
     if (sending) return sending;
     sending = (async () => {
-      while (!closed) {
+      const epoch = discardEpoch;
+      while (!closed && epoch === discardEpoch) {
         const at = generation;
         await writes;
         if (closed || !box || writeError) return;
@@ -255,6 +266,7 @@ export async function createLocalSaveSession(options: Options) {
         const fullV2 = supportsFullV2Commit();
         if ((!save.commands && !(fullV2 && save.documentIntent))
           || (!fullV2 && save.commands?.some((command) => command.op === 'doc.patch'))) { publish('blocked', dtoGap); return; }
+        if (epoch !== discardEpoch) return;
         publish('saving');
         const acceptedId = record.accepted?.intentId;
         record = await box.dispatch((intent, head) => {
@@ -317,9 +329,11 @@ export async function createLocalSaveSession(options: Options) {
 
   // Total Discard (see discharge). Nothing is kept: not the claimed owner, not the others in the outbox.
   async function discardAll() {
+    discardEpoch++;
     clearRetry();
     generation++;
     if (sending) await sending.catch(() => {});
+    clearRetry();
     await writes.catch(() => {});
     release?.();
     await lifetime;
@@ -395,10 +409,10 @@ export async function createLocalSaveSession(options: Options) {
     assertOpen();
     // Stopgap: the save bar declines the edit and shows its own headline; these throws are assertions only.
     // Plan 18 CC-5 deletes them, so a new edit queues behind the retained ones.
-    if (writeError || ['conflict', 'error'].includes(state.status)) throw new Error('Resolve retained local saves before editing again');
+    if (writeError || ['conflict', 'error'].includes(state.status)) throw new LocalSaveDeclined('Resolve retained local saves before editing again');
     // The visible closure is now canonical, while the retained suffix still
     // describes its original local chain. Do not author a new edit between them.
-    if (replaying) throw new Error('Wait for retained dependent saves to finish revalidation before editing again');
+    if (replaying) throw new LocalSaveDeclined('Wait for retained dependent saves to finish revalidation before editing again');
     const save = toOutboxJson({ ...input, kind: 'local-save', displayBasis,
       ...(documentIntent ? { documentIntent } : {}) }) as unknown as StoredSave;
     if (!save.label.trim() || (save.commands && !save.commands.length)) throw new Error('Local save requires a label and nonempty commands');
@@ -462,7 +476,11 @@ export async function createLocalSaveSession(options: Options) {
       if (closed) return;
       clearRetry();
       record = await box!.read();
-      if (!record.intents.length && !record.pending) return;
+      if (!record.intents.length && !record.pending) {
+        // Nothing to resend: Try again acknowledges a notice about a change that was already removed.
+        if (state.notice) { delete state.notice; publish(state.status); }
+        return;
+      }
       if (record.pending?.outcome?.kind === 'rejected') await rebaseOntoLatest();
       retryDelay = RETRY_FIRST_MS;
       publish('dirty');
@@ -483,6 +501,8 @@ export async function createLocalSaveSession(options: Options) {
       await claim(ownerId);
       await pump();
     },
+    /** Stops a waiting automatic retry now (Discard must not race it). */
+    cancelRetry: clearRetry,
     async dispose() {
       closed = true;
       clearRetry();

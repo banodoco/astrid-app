@@ -25,7 +25,6 @@ import {
 import { getAssetResolutionToken } from '@/tools/video-editor/lib/asset-registry.ts';
 import type { UseAssetManagementResult } from '@/tools/video-editor/hooks/useAssetManagement.ts';
 import type { TimelineProvisionedAsset } from '@/tools/video-editor/commands/provisioning.ts';
-import { canonicalJsonStringify } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { DragCoordinator } from '@/tools/video-editor/hooks/useDragCoordinator.ts';
 import type {
   TimelineApplyEdit,
@@ -403,12 +402,15 @@ export async function handleFileDrop({
 
     const clipTime = dropPosition.time + timeOffset;
     timeOffset += defaultClipDuration;
-    const dropScope = canonicalJsonStringify({ head: dataRef.current.head,
-      composition: dataRef.current.config.app?.canonicalComposition });
+    // A save landing during the upload moves the head, and that must not cancel the drop: the clip is placed on the
+    // document as it is now. The drop is abandoned only when it no longer has a place: another timeline, or its
+    // target track is gone.
+    const dropTimeline = { projectId: dataRef.current.head?.projectId, timelineId: dataRef.current.head?.timelineId };
+    const dropTrackId: string = compatibleTrackId;
     const currentDropData = () => {
       const current = dataRef.current;
-      return current && canonicalJsonStringify({ head: current.head,
-        composition: current.config.app?.canonicalComposition }) === dropScope ? current : null;
+      return current && current.head?.projectId === dropTimeline.projectId && current.head?.timelineId === dropTimeline.timelineId
+        && current.rows.some((row) => row.id === dropTrackId) ? current : null;
     };
 
     const skeletonId = `uploading-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -452,6 +454,12 @@ export async function handleFileDrop({
       }, { save: false });
     };
 
+    // The upload finished but the drop has no place any more: say so, and take the placeholder away.
+    const abandonDrop = () => {
+      removeSkeleton();
+      onAssetDropError?.(new Error('The timeline changed while this file uploaded; drop it again.'));
+    };
+
     pendingOpsRef.current += 1;
     void (async () => {
       try {
@@ -459,7 +467,7 @@ export async function handleFileDrop({
           const generationData = await uploadImageGeneration(file);
           const current = currentDropData();
           if (!current) {
-            removeSkeleton();
+            abandonDrop();
             return;
           }
 
@@ -482,7 +490,7 @@ export async function handleFileDrop({
           const generationData = await uploadVideoGeneration(file);
           const current = currentDropData();
           if (!current) {
-            removeSkeleton();
+            abandonDrop();
             return;
           }
 

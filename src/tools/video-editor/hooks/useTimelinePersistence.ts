@@ -266,6 +266,7 @@ export interface UseTimelinePersistenceResult {
    * edit or a click. Does nothing when no save is waiting or a conflict, reload or recovery choice owns the timeline.
    */
   retryPendingSave: () => void;
+  clearSaveFailure: () => void;
   /** Synchronous guard for recovery actions that must not race canonical reload. */
   canonicalReloadInProgressRef: MutableRefObject<boolean>;
   /**
@@ -914,7 +915,6 @@ export function useTimelinePersistence({
         cancelErrorRetryTimer();
         disarmWatchdog();
         failSave(persistenceError.message);
-        toast.error(persistenceError.message);
         rejectFlushWaiters(persistenceError, attempt, true);
         return;
       }
@@ -984,8 +984,11 @@ export function useTimelinePersistence({
         // error — the user sees a neutral `retrying` badge while the backend
         // recovers. `error` is reserved for 404/409/lost-edit/unrecoverable.
         setSaveStatus('retrying');
-        retryScheduled = true;
-        scheduleErrorRetry(attempt);
+        // The local save session owns the retry of its own unavailable save; a second scheduler would only race it.
+        if (session.localDocumentSave?.status?.() !== 'retry') {
+          retryScheduled = true;
+          scheduleErrorRetry(attempt);
+        }
       } else {
         failSave(error instanceof Error ? error.message : String(error));
       }
@@ -1568,6 +1571,13 @@ export function useTimelinePersistence({
     }
   }, [clearWatchdog, dataRef, getDataRef, scheduleSave, watchdogReason]);
 
+  /** Forget the failure a declined edit or an earlier refusal left, so the next save is attempted. */
+  const clearSaveFailure = useCallback(() => {
+    session.captureFailure = undefined;
+    session.editFailure = false;
+    setSaveState((current) => current.status === 'error' ? { status: 'saved' } : current);
+  }, [session]);
+
   const retryPendingSave = useCallback(() => {
     if (!isMountedRef.current || reloadInProgressRef.current || isSavingRef.current) return;
     if (isConflictExhaustedRef.current || isSchemaIncompatibleRef.current) return;
@@ -1920,6 +1930,7 @@ export function useTimelinePersistence({
     watchdogReason,
     retryWatchdog,
     retryPendingSave,
+    clearSaveFailure,
     canonicalReloadInProgressRef: reloadInProgressRef,
     /** Bundle from the last server reload; consumed downstream ([V2-B4]). */
     loadedBundleRef,

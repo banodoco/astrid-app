@@ -33,7 +33,7 @@ beforeEach(() => {
 });
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; vi.unstubAllGlobals(); });
 
-async function environment(child: boolean, delayed = false, empty = false) {
+async function environment(child: boolean, delayed = false, empty = false, stored: Record<string, Record<string, unknown>> = {}) {
   const parentConfig = createDefaultTimelineConfig();
   parentConfig.tracks = [{ id: 'V1', kind: 'visual', label: 'V1' }, { id: 'S1', kind: 'visual', label: 'S1' }];
   parentConfig.clips = [
@@ -42,7 +42,7 @@ async function environment(child: boolean, delayed = false, empty = false) {
   ];
   Object.assign(parentConfig.clips[0], { opaqueClip: { nullable: null, ordered: [false, 0, '', [], { z: 2, a: 1 }] } });
   const registry = { assets: { 'existing-image': { file: 'existing.png', type: 'image/png', media_id: `sha256:${'c'.repeat(64)}`, content_sha256: `sha256:${'c'.repeat(64)}` },
-    'existing-video': { file: 'existing.mp4', type: 'video/mp4', duration: 12, media_id: `sha256:${'d'.repeat(64)}`, content_sha256: `sha256:${'d'.repeat(64)}` } } };
+    'existing-video': { file: 'existing.mp4', type: 'video/mp4', duration: 12, media_id: `sha256:${'d'.repeat(64)}`, content_sha256: `sha256:${'d'.repeat(64)}` }, ...stored } };
   const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' },
     { revision_id: 'r0', publication_id: 'p0' }, { children: true }).data.canonical_document;
   document.parent_revision.payload = { config: { ...parentConfig, registry }, clips: parentConfig.clips, registry,
@@ -121,7 +121,8 @@ async function environment(child: boolean, delayed = false, empty = false) {
     captures.push(handoff.capture({ config: next.config, registry: next.registry, head: next.head }, options?.gestureBasis)
       .catch(error => { failures.push(error.message); }));
   });
-  const runtime = { provider: mountedProvider, toast: { error: vi.fn() } } as unknown as VideoEditorRuntimeContextValue;
+  const telemetry = { warn: vi.fn(), log: vi.fn(), error: vi.fn() };
+  const runtime = { provider: mountedProvider, toast: { error: vi.fn() }, telemetry } as unknown as VideoEditorRuntimeContextValue;
   const wrapper = ({ children }: { children: React.ReactNode }) => <VideoEditorRuntimeProvider value={runtime}>{children}</VideoEditorRuntimeProvider>;
   const trackId = child ? 'V2' : 'V1';
   const timelineWrapper = globalThis.document.createElement('div');
@@ -147,7 +148,7 @@ async function environment(child: boolean, delayed = false, empty = false) {
   }, { wrapper });
   mounted.result.current.coordinator.editAreaRef.current = editArea;
   cleanups.push(() => mounted.unmount());
-  return { mounted, toast: runtime.toast.error as ReturnType<typeof vi.fn>, outboxes, scope, captures, failures, send, prepareMediaImport, document, handoff, descriptor, releaseImport,
+  return { mounted, telemetry, toast: runtime.toast.error as ReturnType<typeof vi.fn>, outboxes, scope, captures, failures, send, prepareMediaImport, document, handoff, descriptor, releaseImport,
     coordinator: mounted.result.current.coordinator, indicatorRef: mounted.result.current.indicatorRef };
 }
 
@@ -302,5 +303,121 @@ it.each([false, true])('says in plain words why a prepared drop that cannot be p
     entry: { type: 'image/png' } } as never;
   expect(env.mounted.result.current.assets.handleAssetDrop(media.asset, trackId, 10, false, false, unplaceable)).toBe(false);
   expect(env.toast).toHaveBeenCalledWith('The file was not added to the timeline. It does not fit on that track at that time.');
+  expect(env.captures).toEqual([]);
+});
+
+// A drop that replaces an upload placeholder judges only what the edit needs: a usable track, a valid time, a
+// well-formed media selection. The registry, head and placeholder are the document's business, not grounds to refuse.
+type Env = Awaited<ReturnType<typeof environment>>;
+const trackOf = 'V1';
+function commitWith(env: Env, change: (next: ReturnType<typeof structuredClone<any>>) => void) {
+  const next = structuredClone(env.mounted.result.current.commit.dataRef.current!);
+  change(next);
+  act(() => env.mounted.result.current.commit.commitData(next, { save: false }));
+}
+function addPlaceholder(env: Env, id: string, at = 10) {
+  commitWith(env, next => {
+    next.meta[id] = { asset: 'uploading:drop.png', track: trackOf, clipType: 'hold', hold: 1 };
+    next.rows.find((row: { id: string }) => row.id === trackOf).actions.push({ id, start: at, end: at + 1, effectId: `effect-${id}` });
+  });
+}
+const preparedFor = (env: Env, selection: MediaSelection = media, entry: Record<string, unknown> = env.descriptor.entry) => ({
+  assetKey: selection.asset, mediaType: 'image' as const, durationSeconds: null, source: 'registered' as const,
+  entry, mediaSelection: structuredClone(selection) }) as never;
+const drop = (env: Env, prepared: never, id: string | undefined, at = 10, track: string = trackOf) =>
+  env.mounted.result.current.assets.handleAssetDrop(media.asset, track, at, false, false, prepared, id);
+async function intents(env: Env) {
+  await Promise.all(env.captures);
+  expect(env.failures).toEqual([]);
+  return (await env.outboxes.list(env.scope))[0].intents.map(intent => (intent.payload as { commands: Array<{ args: { media: MediaSelection; row: { at: number } } }> }).commands[0].args);
+}
+
+it('reuses the registry entry of the same media object even when it differs from the upload', async () => {
+  // The registry already holds this media object, as an earlier drop's commit left it.
+  const env = await environment(false, false, false, { [media.asset]: { file: 'served/earlier.png', type: 'image/png',
+    media_id: media.object_id, content_sha256: media.object_id, generationId: media.generation_id, variantId: media.variant_id,
+    extra: 'added by an earlier commit' } });
+  addPlaceholder(env, 'uploading-a');
+  expect(drop(env, preparedFor(env), 'uploading-a')).toBe(true);
+  expect(env.toast).not.toHaveBeenCalled();
+  const current = env.mounted.result.current.commit.dataRef.current!;
+  expect(current.registry.assets[media.asset]).toMatchObject({ file: 'served/earlier.png', extra: 'added by an earlier commit' });
+  expect(Object.keys(current.registry.assets).filter(key => key.startsWith(media.asset))).toEqual([media.asset]);
+  expect(current.rows.flatMap(row => row.actions).some(action => action.id === 'uploading-a')).toBe(false);
+  expect((await intents(env)).map(args => args.media)).toEqual([media]);
+});
+
+it('drops the same file twice, reusing one asset', async () => {
+  const env = await environment(false);
+  addPlaceholder(env, 'uploading-a', 10);
+  expect(drop(env, preparedFor(env), 'uploading-a', 10)).toBe(true);
+  addPlaceholder(env, 'uploading-b', 20);
+  expect(drop(env, preparedFor(env), 'uploading-b', 20)).toBe(true);
+  expect(env.toast).not.toHaveBeenCalled();
+  const current = env.mounted.result.current.commit.dataRef.current!;
+  expect(Object.keys(current.registry.assets).filter(key => key.startsWith(media.asset))).toEqual([media.asset]);
+  expect((await intents(env)).map(args => [args.media.asset, args.row.at])).toEqual([[media.asset, 10], [media.asset, 20]]);
+});
+
+it('does not judge the head: a head that moved while the file uploaded is the save layer\'s business', async () => {
+  const env = await environment(false);
+  addPlaceholder(env, 'uploading-a');
+  commitWith(env, next => { next.head = { ...next.head, headRevisionId: 'r1', headPublicationId: 'p1' }; });
+  expect(drop(env, preparedFor(env), 'uploading-a')).toBe(true);
+  expect(env.toast).not.toHaveBeenCalled();
+  expect(env.telemetry.warn).not.toHaveBeenCalled();
+  await Promise.all(env.captures);
+});
+
+it('gives a different media object under the same key a key of its own', async () => {
+  const env = await environment(false, false, false, { [media.asset]: { file: 'other.png', type: 'image/png',
+    media_id: `sha256:${'e'.repeat(64)}`, content_sha256: `sha256:${'e'.repeat(64)}` } });
+  addPlaceholder(env, 'uploading-a');
+  expect(drop(env, preparedFor(env), 'uploading-a')).toBe(true);
+  expect(env.toast).not.toHaveBeenCalled();
+  const current = env.mounted.result.current.commit.dataRef.current!;
+  const added = Object.keys(current.registry.assets).filter(key => key.startsWith(`${media.asset}-`));
+  expect(added).toHaveLength(1);
+  expect(current.registry.assets[added[0]].media_id).toBe(media.object_id);
+  expect(current.registry.assets[media.asset].media_id).toBe(`sha256:${'e'.repeat(64)}`);
+  expect((await intents(env)).map(args => args.media)).toEqual([{ ...media, asset: added[0] }]);
+});
+
+it('places at the drop time when the placeholder is gone but the track exists', async () => {
+  const env = await environment(false);
+  expect(drop(env, preparedFor(env), 'uploading-gone', 20)).toBe(true);
+  expect(env.toast).not.toHaveBeenCalled();
+  expect((await intents(env)).map(args => args.row.at)).toEqual([20]);
+});
+
+it.each([
+  ['track-missing', (next: any) => { next.tracks = next.tracks.filter((t: { id: string }) => t.id !== trackOf); }],
+  ['track-missing', (next: any) => { next.rows = next.rows.filter((r: { id: string }) => r.id !== trackOf); }],
+  ['track-unsuitable', (next: any) => { next.tracks.find((t: { id: string }) => t.id === trackOf).kind = 'audio'; }],
+  ['track-unsuitable', (next: any) => { next.tracks.find((t: { id: string }) => t.id === trackOf).role = 'source'; }],
+  ['track-hidden-or-disabled', (next: any) => { next.tracks.find((t: { id: string }) => t.id === trackOf).hidden = true; }],
+  ['track-hidden-or-disabled', (next: any) => { next.tracks.find((t: { id: string }) => t.id === trackOf).enabled = false; }],
+] as const)('refuses a placeholder drop when the target is really gone: %s', async (reason, change) => {
+  const env = await environment(false);
+  addPlaceholder(env, 'uploading-a');
+  commitWith(env, change);
+  expect(drop(env, preparedFor(env), 'uploading-a')).toBe(false);
+  expect(env.telemetry.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ reason }));
+  expect(env.toast).toHaveBeenCalledWith(expect.stringContaining('The file was not added to the timeline.'));
+  expect(env.captures).toEqual([]);
+});
+
+it.each([
+  ['time-invalid', (env: Env) => drop(env, preparedFor(env), 'uploading-a', Number.NaN)],
+  ['time-invalid', (env: Env) => drop(env, preparedFor(env), 'uploading-a', -1)],
+  ['media-selection-invalid', (env: Env) => drop(env, preparedFor(env, { ...media, object_id: 'sha256:short' }), 'uploading-a')],
+  ['generation-variant-incomplete', (env: Env) => drop(env, preparedFor(env, { ...media, variant_id: '' }), 'uploading-a')],
+  ['media-entry-mismatch', (env: Env) => drop(env, preparedFor(env, media, { ...env.descriptor.entry, variantId: 'other' }), 'uploading-a')],
+  ['placeholder-inconsistent', (env: Env) => { commitWith(env, next => { next.meta['uploading-a'].track = 'S1'; }); return drop(env, preparedFor(env), 'uploading-a'); }],
+] as const)('refuses a placeholder drop with an unusable time or selection: %s', async (reason, run) => {
+  const env = await environment(false);
+  addPlaceholder(env, 'uploading-a');
+  expect(run(env)).toBe(false);
+  expect(env.telemetry.warn).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ reason }));
   expect(env.captures).toEqual([]);
 });

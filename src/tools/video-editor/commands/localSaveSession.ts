@@ -53,6 +53,8 @@ interface Options {
   /** Build with the upstream editor, then return a synchronous adoption callback. */
   prepareDisplay(basis: TimelineCommandBasis, draft?: OutboxJson): Promise<{ document: OutboxJson; adopt(): void }>;
   changed(state: LocalSaveState): void;
+  /** Called each time an intent is accepted: the save is making progress. */
+  progress?(): void;
 }
 
 const same = (a: OutboxJson, b: OutboxJson): boolean => {
@@ -313,6 +315,7 @@ export async function createLocalSaveSession(options: Options) {
           const result = record.accepted.value as unknown as TimelineCommitResult;
           basis = { head: result.accepted, canonicalDocument: result.canonicalDocument, graph: result.graph };
           delete state.notice;
+          options.progress?.();
         }
         if (await rollback()) return;
         if (record.pending) {

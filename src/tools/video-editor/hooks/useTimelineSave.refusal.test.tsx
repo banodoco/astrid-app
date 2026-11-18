@@ -560,4 +560,47 @@ describe('useTimelineSave refused authoring edits', () => {
       expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r10');
     } finally { harness.hook.unmount(); }
   });
+
+  describe('the save watchdog measures time without progress', () => {
+    afterEach(() => { vi.useRealTimers(); });
+    const deferredGate = () => { let open!: () => void; const gate = new Promise<void>((resolve) => { open = resolve; }); return { gate, open }; };
+    const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+    it('does not show "not confirmed" for twelve edits accepted three seconds apart (36 s in all)', async () => {
+      const gates = Array.from({ length: 12 }, deferredGate);
+      const harness = await mount({ gates: gates.map((entry) => entry.gate) });
+      vi.useFakeTimers();
+      try {
+        for (let value = 21; value <= 32; value += 1) {
+          await author(harness, (config) => ({ ...config, output: { ...config.output, fps: value } }));
+        }
+        await tick(500);
+        for (const entry of gates) {
+          await tick(3000);
+          expect(harness.hook.result.current.watchdogTripped).toBe(false);
+          await act(async () => { entry.open(); await vi.advanceTimersByTimeAsync(0); });
+        }
+        await tick(100);
+        expect(harness.send.mock.calls.length).toBe(12);
+        expect(harness.hook.result.current.watchdogTripped).toBe(false);
+        expect(harness.hook.result.current.saveBar).toBeNull();
+      } finally { harness.hook.unmount(); }
+    });
+
+    it('still shows it when a save is not accepted for longer than the grace period', async () => {
+      const stuck = deferredGate();
+      const harness = await mount({ gates: [stuck.gate] });
+      vi.useFakeTimers();
+      try {
+        await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 21 } }));
+        await tick(500);
+        await tick(30_000);
+        expect(harness.hook.result.current.watchdogTripped).toBe(false);
+        await tick(2000);
+        expect(harness.hook.result.current.watchdogTripped).toBe(true);
+        expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'waiting', action: 'watchdog' });
+        stuck.open();
+      } finally { harness.hook.unmount(); }
+    });
+  });
 });

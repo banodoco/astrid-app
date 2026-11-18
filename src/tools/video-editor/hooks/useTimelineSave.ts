@@ -141,6 +141,8 @@ export function useTimelineSave(
     { status: 'ready'; value: TimelineOriginalSaveBasis } | { status: 'unavailable'; reason: string } | { status: 'loading' } | null
   >(null);
   const [localSaveState, setLocalSaveState] = useState<LocalSaveState | null>(null);
+  // Set once the persistence layer exists; the save session reports each accepted intent through it.
+  const saveProgressRef = useRef<() => void>(() => {});
   const localOwner = useMemo(() => ({ provider, timelineId, closed: false, started: false, generation: 0,
     initialization: 'pending' as 'pending' | 'ready' | 'error', operations: 0, operationError: false, failedOutbox: false,
     headKey: '', recovered: false,
@@ -385,6 +387,7 @@ export function useTimelineSave(
           initial: verified.initial, document: toOutboxJson(verified.initial.canonicalDocument),
           send: (request, key) => provider.commitTimeline!(request, key),
           loadLatest: () => provider.loadTimelineCommandBasis!(timelineId),
+          progress: () => { if (isCurrent()) saveProgressRef.current(); },
           changed: (state) => {
             if (isCurrent() && ['retry', 'blocked', 'conflict', 'error'].includes(state.status)) recordDraftReloadFailure();
             emitTimelineSaveDiagnostic('session-changed', () => ({ owner: localOwner, timelineId,
@@ -833,6 +836,7 @@ export function useTimelineSave(
     watchdogTripped: persistence.watchdogTripped,
     saveError: persistence.saveError,
   });
+  saveProgressRef.current = persistence.noteSaveProgress;
   const retrySaveAfterConflict = persistence.retrySaveAfterConflict;
   const retryWatchdog = persistence.retryWatchdog;
   const retryPendingSave = persistence.retryPendingSave;

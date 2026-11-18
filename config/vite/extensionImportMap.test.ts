@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
-import { build, loadConfigFromFile } from 'vite';
+import { build, createServer as createViteServer, loadConfigFromFile, type ViteDevServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ExtensionSharedModuleLock } from './extensionImportMap';
 import { manualVendorChunk } from './policy';
@@ -59,8 +59,100 @@ async function serveDirectory(root: string): Promise<string> {
   return `http://127.0.0.1:${address.port}`;
 }
 
+function fixtureAlias() {
+  return [
+    { find: /^@\//, replacement: `${path.join(APP_ROOT, 'src')}/` },
+    { find: /^react$/, replacement: path.join(APP_ROOT, 'node_modules/react/index.js') },
+    { find: /^react\/jsx-runtime$/, replacement: path.join(APP_ROOT, 'node_modules/react/jsx-runtime.js') },
+    { find: /^react\/jsx-dev-runtime$/, replacement: path.join(APP_ROOT, 'node_modules/react/jsx-dev-runtime.js') },
+    { find: /^react-dom\/client$/, replacement: path.join(APP_ROOT, 'node_modules/react-dom/client.js') },
+    { find: /^remotion$/, replacement: path.join(APP_ROOT, 'node_modules/remotion/dist/esm/index.mjs') },
+    { find: /^@astrid\/editor-sdk$/, replacement: path.join(APP_ROOT, 'src/sdk/index.ts') },
+  ];
+}
+
+describe('extension shared module import map dev server', () => {
+  it('serves the same six wrappers in dev, with the import map injected before the module scripts', async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'astrid-extension-import-map-dev-')));
+    tempRoots.push(root);
+    await Promise.all([
+      writeFixture(root, 'index.html', '<!doctype html><html><head><meta charset="UTF-8"></head><body><div id="root"></div><script type="module" src="/src/main.js"></script></body></html>'),
+      writeFixture(root, 'package-lock.json', JSON.stringify({ packages: {
+        'node_modules/react': { version: '18.3.1' },
+        'node_modules/react-dom': { version: '18.3.1' },
+        'node_modules/remotion': { version: '4.0.509' },
+      } })),
+      // Import every shared specifier so the dev optimizer discovers each dependency at startup, not mid-request.
+      writeFixture(root, 'src/main.js', [
+        "import React from 'react';",
+        "import { createRoot } from 'react-dom/client';",
+        "import { jsx } from 'react/jsx-runtime';",
+        "import { jsxDEV } from 'react/jsx-dev-runtime';",
+        "import { AbsoluteFill } from 'remotion';",
+        "import { defineExtension } from '@astrid/editor-sdk';",
+        'window.host = [React, createRoot, jsx, jsxDEV, AbsoluteFill, defineExtension];',
+        '',
+      ].join('\n')),
+    ]);
+    const { createExtensionImportMapPlugin, EXTENSION_IMPORT_MAP_ID } = await import('./extensionImportMap');
+    const server: ViteDevServer = await createViteServer({
+      configFile: false, root, logLevel: 'silent', appType: 'custom', server: { middlewareMode: true, hmr: false },
+      // Module URLs are compared, never executed, so the optimizer's pre-bundling is not part of this check.
+      optimizeDeps: { noDiscovery: true, include: [] },
+      plugins: [createExtensionImportMapPlugin()], resolve: { alias: fixtureAlias() },
+    });
+    const { createServer: createHttpServer } = await import('node:http');
+    const http = createHttpServer(server.middlewares);
+    servers.push(http);
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+    const address = http.address();
+    if (!address || typeof address === 'string') throw new Error('Dev fixture server did not bind a TCP port.');
+    const base = `http://127.0.0.1:${address.port}`;
+    try {
+      const names = ['react', 'react-jsx-runtime', 'react-jsx-dev-runtime', 'react-dom-client', 'remotion', 'astrid-editor-sdk'];
+      const reactWrapper = await fetch(`${base}/astrid-extension-shared/react.js`);
+      expect(reactWrapper.status).toBe(200);
+      expect(reactWrapper.headers.get('content-type')).toContain('text/javascript');
+      const wrapperBody = await reactWrapper.text();
+      expect(wrapperBody).toContain('export default __astridSharedModule;');
+      expect(wrapperBody).not.toMatch(/from "react"/);
+
+      for (const name of names) {
+        const response = await fetch(`${base}/astrid-extension-shared/${name}.js`);
+        expect(response.status, name).toBe(200);
+      }
+
+      // The host app's own `react` import and the wrapper's must resolve to the same module URL, or React identity splits.
+      // Dev pre-bundles CommonJS React; both sides must name the same module file.
+      const reactUrl = /from "([^"]*\/react[^"]*)"/;
+      const hostModule = await server.transformRequest('/src/main.js');
+      const hostReact = reactUrl.exec(hostModule?.code ?? '')?.[1];
+      const wrapperReact = reactUrl.exec(wrapperBody)?.[1];
+      expect(hostReact).toBeDefined();
+      expect(wrapperReact).toBe(hostReact);
+
+      // appType 'custom' leaves the page to the host; the same transform Vite runs on index.html in dev.
+      const html = await server.transformIndexHtml('/', await readFile(path.join(root, 'index.html'), 'utf8'));
+      const importMap = html.indexOf(`<script type="importmap" id="${EXTENSION_IMPORT_MAP_ID}">`);
+      expect(importMap).toBeGreaterThan(html.indexOf('<head'));
+      expect(importMap).toBeLessThan(html.indexOf('<script type="module"'));
+      const imports = JSON.parse(/id="astrid-extension-importmap">(.*?)<\/script>/.exec(html)![1]).imports as Record<string, string>;
+      expect(imports).toEqual({
+        react: '/astrid-extension-shared/react.js',
+        'react/jsx-runtime': '/astrid-extension-shared/react-jsx-runtime.js',
+        'react/jsx-dev-runtime': '/astrid-extension-shared/react-jsx-dev-runtime.js',
+        'react-dom/client': '/astrid-extension-shared/react-dom-client.js',
+        remotion: '/astrid-extension-shared/remotion.js',
+        '@astrid/editor-sdk': '/astrid-extension-shared/astrid-editor-sdk.js',
+      });
+    } finally {
+      await server.close();
+    }
+  }, 60_000);
+});
+
 describe('extension shared module import map build', () => {
-  it('wires the import map plugin into the actual App build config', async () => {
+  it('wires the import map plugin into the actual App config for build and dev', async () => {
     const envNames = [
       'ASTRID_CHECKOUT', 'ASTRID_PUBLIC_CHECKOUT', 'ASTRID_ELEMENT_ARTIFACT_ROOT',
       'ASTRID_PROJECT_PACKS_ROOT', 'VITE_WORKSPACE_RUNTIME_URL', 'WORKSPACE_RUNTIME_TOKEN_FILE',
@@ -78,10 +170,11 @@ describe('extension shared module import map build', () => {
         Array.isArray(plugin) ? flatten(plugin) : [plugin]
       ));
       const plugins = flatten((loaded!.config.plugins ?? []) as unknown[]);
+      // Applies in dev and build alike: one loader and one import map contract in both.
       expect(plugins.some((plugin) => (
         typeof plugin === 'object' && plugin !== null
         && (plugin as { name?: unknown }).name === 'astrid-extension-import-map'
-        && (plugin as { apply?: unknown }).apply === 'build'
+        && (plugin as { apply?: unknown }).apply === undefined
       ))).toBe(true);
     } finally {
       for (const [name, value] of previousEnv) {

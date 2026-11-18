@@ -51,9 +51,24 @@ const COMMONJS_EXPORTS: Partial<Record<SharedModuleSpecifier, readonly string[]>
   'react-dom/client': Object.freeze(['createRoot', 'hydrateRoot']),
 });
 const PREFIX = '\0astrid-extension-shared:';
+/** Dev-server URL directory for the same wrappers; each file is `<sanitized specifier>.js`. */
+const DEV_DIRECTORY = '/astrid-extension-shared/';
 
 function virtualId(specifier: SharedModuleSpecifier): string {
   return `${PREFIX}${specifier}`;
+}
+
+function sanitizedName(specifier: SharedModuleSpecifier): string {
+  return specifier.replace(/[^a-zA-Z0-9]+/g, '-');
+}
+
+function devUrl(specifier: SharedModuleSpecifier): string {
+  return `${DEV_DIRECTORY}${sanitizedName(specifier).replace(/^-+|-+$/g, '')}.js`;
+}
+
+function devSpecifierFor(requestUrl: string): SharedModuleSpecifier | undefined {
+  const pathname = requestUrl.split('?')[0];
+  return (Object.keys(MODULE_VERSIONS) as SharedModuleSpecifier[]).find((specifier) => devUrl(specifier) === pathname);
 }
 
 function wrapperSource(specifier: SharedModuleSpecifier): string {
@@ -112,16 +127,17 @@ function injectIntoHead(html: string, scripts: string): string {
 }
 
 /**
- * Emit six public singleton entry points in the host Rollup graph. The wrappers
- * re-export the same resolved modules as the host, so imports through the
- * generated browser import map retain React/SDK identity.
+ * The same six singleton wrappers serve both modes, so one loader and one import map contract work everywhere.
+ * Build emits them as entry chunks of the host Rollup graph and records their digests in the lock. Dev serves each
+ * wrapper through Vite's own transform pipeline at a stable URL, so bare imports inside the wrapper resolve to the
+ * same optimized dependency URLs as the host app: React/SDK identity holds in both modes.
  */
 export function createExtensionImportMapPlugin(): Plugin {
   const references = new Map<SharedModuleSpecifier, string>();
+  let isBuild = false;
 
   return {
     name: 'astrid-extension-import-map',
-    apply: 'build',
     configResolved(resolved) {
       if (resolved.base !== '/') {
         throw new Error('The extension import map requires a root-relative Vite base.');
@@ -130,17 +146,33 @@ export function createExtensionImportMapPlugin(): Plugin {
         throw new Error('The extension import map requires build.assetsDir to be "assets".');
       }
       verifyPackageLock(resolved.root);
+      isBuild = resolved.command === 'build';
     },
-    buildStart() {
-      references.clear();
-      for (const specifier of Object.keys(MODULE_VERSIONS) as SharedModuleSpecifier[]) {
-        references.set(specifier, this.emitFile({
-          type: 'chunk',
-          id: virtualId(specifier),
-          name: `astrid-extension-shared-${specifier.replace(/[^a-zA-Z0-9]+/g, '-')}`,
-          preserveSignature: 'strict',
-        }));
-      }
+    configureServer(server) {
+      // Registered before Vite's internal middlewares so a wrapper URL is never answered by the file-system fallback.
+      server.middlewares.use(async (request, response, next) => {
+        const specifier = devSpecifierFor(request.url ?? '');
+        if (!specifier) {
+          next();
+          return;
+        }
+        try {
+          const result = await server.transformRequest(virtualId(specifier));
+          if (!result) throw new Error(`Shared module ${specifier} produced no dev module.`);
+          response.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+          response.setHeader('Cache-Control', 'no-cache');
+          response.end(result.code);
+        } catch (error) {
+          next(error);
+        }
+      });
+    },
+    transformIndexHtml(html) {
+      if (isBuild) return html;
+      const imports = Object.fromEntries(
+        (Object.keys(MODULE_VERSIONS) as SharedModuleSpecifier[]).map((specifier) => [specifier, devUrl(specifier)]),
+      );
+      return injectIntoHead(html, `<script type="importmap" id="${EXTENSION_IMPORT_MAP_ID}">${JSON.stringify({ imports })}</script>`);
     },
     resolveId(source) {
       return source.startsWith(PREFIX) ? source : null;
@@ -150,6 +182,18 @@ export function createExtensionImportMapPlugin(): Plugin {
       const specifier = id.slice(PREFIX.length) as SharedModuleSpecifier;
       if (!(specifier in MODULE_VERSIONS)) return null;
       return wrapperSource(specifier);
+    },
+    buildStart() {
+      if (!isBuild) return;
+      references.clear();
+      for (const specifier of Object.keys(MODULE_VERSIONS) as SharedModuleSpecifier[]) {
+        references.set(specifier, this.emitFile({
+          type: 'chunk',
+          id: virtualId(specifier),
+          name: `astrid-extension-shared-${specifier.replace(/[^a-zA-Z0-9]+/g, '-')}`,
+          preserveSignature: 'strict',
+        }));
+      }
     },
     generateBundle: {
       order: 'post',

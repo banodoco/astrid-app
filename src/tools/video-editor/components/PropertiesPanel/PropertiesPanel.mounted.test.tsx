@@ -30,7 +30,11 @@ vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async original 
 
 const scope = { projectId: 'project-commit', timelineId: 'timeline-commit', actorId: 'actor', realmId: 'realm' };
 const locksDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
-beforeEach(() => {
+beforeEach(async () => {
+  // The editor refreshes the project's admitted elements on mount; this file owns the timeline commit, not pack admission.
+  vi.spyOn(await import('../../runtime/admittedElementLoader'), 'readProjectElementList').mockImplementation(async projectId => ({
+    version: 1, projectId, realmId: 'realm', selectionDigest: 'a'.repeat(64), projects: [], elements: [],
+  }));
   vi.stubGlobal('indexedDB', createFakeIndexedDB());
   localStorage.clear();
   systemResetSelectionForProjectChange();

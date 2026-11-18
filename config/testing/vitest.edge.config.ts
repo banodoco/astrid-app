@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { createEdgeVitestTestConfig } from './vitest.edge.shared';
 import { buildEdgeAliasMap } from './vitest.edge.aliases';
 import { resolveAstridSource } from '../vite/astridSource';
-import { createElementAdmissionsPlugin } from '../vite/astridElementAdmissions';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const astridSource = resolveAstridSource();
@@ -63,7 +62,6 @@ const STRIPE_ESM_SPECIFIER = 'https:' + '//esm.sh/stripe@14.21.0';
 const GROQ_NPM_SPECIFIER = 'npm' + ':groq-sdk@0.26.0';
 
 export default defineConfig({
-  plugins: [createElementAdmissionsPlugin()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, '../../src'),

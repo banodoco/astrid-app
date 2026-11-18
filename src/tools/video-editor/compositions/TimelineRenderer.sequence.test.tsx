@@ -2025,21 +2025,22 @@ describe('TimelineRenderer — track.scale scales the whole track subtree', () =
 describe('TimelineRenderer owner-qualified Astrid references', () => {
   it('replaces the initial unavailable preview after exact admission with the same config and host',async()=>{
     const admissions=await import('../runtime/admitted-elements');
-    admissions.setAdmittedElementScope('preview-project',[]);
     const host:AstridElementHost={...fixtureAstridElementHost,
       get descriptors(){return admissions.getAdmittedElementSelection().elements.map(entry=>entry.descriptor);},
       resolveComponent(id,kind,packId,revision){return revision?admissions.admittedComponent({id,kind,packId,revision}):undefined;},
     };
     const ref={id:'text-card',kind:'effect' as const,packId:'project_preview',revision:'exact-preview-revision'};
+    // The provider scopes the clip's exact pin before the refresh, as it does in production.
+    admissions.setAdmittedElementScope('preview-project',[ref]);
     const config={...buildConfig(),clips:[{id:'activated-exact',track:'V1',at:0,hold:1,clipType:'effect-layer',elementRef:ref}]};
     render(<TimelineRenderer astridElementHost={host} config={config}/>);
     expect(screen.getByTestId('generated-module-placeholder')).toBeInTheDocument();
-    const digest='f'.repeat(64);const key=JSON.stringify([ref.packId,ref.kind,ref.id,ref.revision]);
+    const digest='f'.repeat(64);
     const Owned:FC=()=> <div data-testid="admitted-after-refresh">Exact revision loaded</div>;
     await act(async()=>{await admissions.refreshAdmittedElements(
-      async()=>({digest,moduleUrl:'/@id/__x00__virtual:astrid-element-admissions?v='+digest}),
-      async()=>({configured:true,projectId:'preview-project',selectionDigest:digest,realmId:null,projects:[],
-        elements:[{projectId:'preview-project',descriptor:{...ref,componentPath:'external/fixture.tsx'} as never,authoring:{packRoot:'/pack',descriptorPath:'/pack/element.yaml',componentPath:'/pack/component.tsx',status:'ready'}}],components:{[key]:Owned}}),
+      async()=>({version:1,projectId:'preview-project',realmId:'realm',selectionDigest:digest,projects:[],
+        elements:[{ref,digest,url:`/api/runtime/packs/project-elements/preview-project/${digest}.js`,descriptor:{...ref,componentPath:'external/fixture.tsx'} as never,authoring:{packRoot:'/pack',descriptorPath:'/pack/element.yaml',componentPath:'/pack/component.tsx',status:'ready'}}]}),
+      async()=>Owned as never,
     );});
     expect(screen.queryByTestId('generated-module-placeholder')).not.toBeInTheDocument();
     expect(screen.getByTestId('admitted-after-refresh')).toHaveTextContent('Exact revision loaded');

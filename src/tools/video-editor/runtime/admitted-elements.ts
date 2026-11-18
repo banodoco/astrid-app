@@ -1,11 +1,8 @@
-import * as initial from 'virtual:astrid-element-admissions';
-import type { ComponentType } from 'react';
-import type { AstridElementDescriptor } from './astrid-element-host';
+import type { AstridElementDescriptor, AstridElementComponentProps } from './astrid-element-host';
 import { ASTRID_BRIDGE_REQUEST_TIMEOUT_MS } from '../data/astridBridgeWire';
-type AdmittedDescriptor = AstridElementDescriptor & {label:string; description:string; parameters:import('../types/index').ParameterSchema; defaults:Record<string,unknown>; renderability:{preview:'supported'|'blocked'|'unknown';browserExport:'supported'|'blocked'|'unknown';workerExport:'supported'|'blocked'|'unknown'}};
-import type { AstridElementComponentProps } from './astrid-element-host';
-import { runtimeOrigin } from '@/integrations/runtime/connection.ts';
+import { elementKey, importProjectElement, readProjectElementList, type ElementRef, type ProjectElementComponent, type ProjectElementEntry, type ProjectElementList } from './admittedElementLoader';
 
+export type AdmittedDescriptor = AstridElementDescriptor & {label:string; description:string; parameters:import('../types/index').ParameterSchema; defaults:Record<string,unknown>; renderability:{preview:'supported'|'blocked'|'unknown';browserExport:'supported'|'blocked'|'unknown';workerExport:'supported'|'blocked'|'unknown'}};
 export type ProjectElementAuthoring = {
   projectId: string; packId: string; packRoot: string; status: string;
   initCommand: string; admitCommand: string; inspectCommand: string;
@@ -15,14 +12,14 @@ export type AdmittedElement = {
   authoring: {packRoot: string; descriptorPath: string; componentPath: string; status: string};
 };
 export type AdmittedElementSelection = {
-  projectId: string | null; configured: boolean; selectionDigest: string; realmId: string | null;
+  projectId: string | null; selectionDigest: string; realmId: string | null;
   projects: readonly ProjectElementAuthoring[]; elements: readonly AdmittedElement[];
-  components: Readonly<Record<string, ComponentType<AstridElementComponentProps>>>;
+  components: Readonly<Record<string, ProjectElementComponent>>;
 };
-const refKey = (ref: {packId?: string; kind: string; id: string; revision: string}) => JSON.stringify([ref.packId, ref.kind, ref.id, ref.revision]);
+const refKey = elementKey;
 const listeners = new Set<() => void>();
 // Pack selection talks to the same local Runtime as editor data requests.
-// Reuse its request budget for verification plus browser module admission.
+// Reuse its request budget for the list read plus browser module admission.
 export const ADMITTED_ELEMENT_LOAD_TIMEOUT_MS = ASTRID_BRIDGE_REQUEST_TIMEOUT_MS;
 type AdmissionReadiness = {projectId: string | null; refKeys: readonly string[]; phase: 'idle' | 'loading' | 'ready' | 'error'; error: string | null};
 const readinessListeners = new Set<() => void>();
@@ -36,37 +33,39 @@ export const subscribeAdmittedElementReadiness = (listener: () => void) => {
   readinessListeners.add(listener);
   return () => { readinessListeners.delete(listener); };
 };
-// Project packs are compiled by the local Vite server; the hosted build (a gateway origin is configured) has no
-// compiler, so it keeps the compiled set and never waits for an admission (Plan A, decision 5).
-export const usesScopedElementAdmissions = () => import.meta.env.DEV && initial.configured && runtimeOrigin() === '';
-let current: AdmittedElementSelection = initial;
+const EMPTY_SELECTION: AdmittedElementSelection = Object.freeze({projectId: null, selectionDigest: 'empty', realmId: null,
+  projects: Object.freeze([]), elements: Object.freeze([]), components: Object.freeze({})});
+let current: AdmittedElementSelection = EMPTY_SELECTION;
+// What the last published selection was built from; a refresh that resolves to the same inputs keeps the same object.
+let currentSignature = '';
+// Verified bundles by digest. A digest names exact bytes, so a re-read of the same admitted build reuses its module.
+const importedByDigest = new Map<string, ProjectElementComponent>();
 let generation = 0;
-let scope: {projectId:string;refs:Array<{packId:string;kind:'effect'|'animation'|'transition';id:string;revision:string}>}|null=null;
+let scope: {projectId:string;refs:Array<ElementRef>}|null=null;
 export function setAdmittedElementScope(projectId:string,refs:NonNullable<typeof scope>['refs']) {
   const next={projectId,refs:[...new Map(refs.map(ref=>[refKey(ref),ref])).values()].sort((a,b)=>refKey(a).localeCompare(refKey(b)))};
   if(JSON.stringify(scope)===JSON.stringify(next))return;
   const changed=scope?.projectId!==projectId;scope=next;++generation;
   publishReadiness({projectId, refKeys: next.refs.map(refKey), phase: 'loading', error: null});
-  if(changed){current={...initial,projectId,elements:[],components:{},projects:[],selectionDigest:'empty'};listeners.forEach(listener=>listener());}
+  if(changed){current={...EMPTY_SELECTION,projectId};currentSignature='';listeners.forEach(listener=>listener());}
 }
 
 export const getAdmittedElementSelection = () => current;
 export const subscribeAdmittedElements = (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; };
 
-/** Native receiving-build refresh, independent of mounted editor/ACP authority. */
+/**
+ * Native receiving-build refresh, independent of mounted editor/ACP authority.
+ * `read` lists the project's admitted refs from the Runtime; `load` verifies and imports one listed bundle.
+ */
 export async function refreshAdmittedElements(
-  read?: () => Promise<{digest: string; moduleUrl: string; projectId?: string} | null>,
-  load = (url: string): Promise<AdmittedElementSelection> => import(/* @vite-ignore */ url),
+  read?: () => Promise<ProjectElementList | null>,
+  load?: (entry: ProjectElementEntry) => Promise<ProjectElementComponent>,
 ): Promise<AdmittedElementSelection> {
   const controller = new AbortController();
-  const readSelection = read ?? (async () => {
-    if (!usesScopedElementAdmissions() || !scope) return null;
-    const response = await fetch('/api/astrid-element-admissions', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(scope),cache:'no-store',signal:controller.signal});
-    if (!response.ok) throw new Error('Pack admission is unavailable or invalid; inspect/admit the project pack before applying a ref.');
-    return response.json() as Promise<{digest: string; moduleUrl: string;projectId?:string}>;
-  });
+  const loadEntry = load ?? ((entry: ProjectElementEntry) => importProjectElement(entry, controller.signal));
+  const requestedScope = scope;
+  const readList = read ?? (async () => (requestedScope ? readProjectElementList(requestedScope.projectId, controller.signal) : null));
   const request = ++generation;
-  const requestedProject=scope?.projectId;
   const requestedReadiness = {...readiness, phase: 'loading' as const, error: null};
   publishReadiness(requestedReadiness);
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -77,24 +76,38 @@ export async function refreshAdmittedElements(
     }, ADMITTED_ELEMENT_LOAD_TIMEOUT_MS);
   });
   try {
-    const info = await Promise.race([readSelection(), deadline]);
+    const list = await Promise.race([readList(), deadline]);
     if (request !== generation) return current;
-    if (!info || info.digest === current.selectionDigest) {
+    if (!list) {
       publishReadiness({...requestedReadiness, phase:'ready'});
       return current;
     }
-    if (!/^[a-f0-9]{64}$/.test(info.digest) || info.moduleUrl !== '/@id/__x00__virtual:astrid-element-admissions?v=' + info.digest) throw new Error('Invalid host-selected element build URL');
-    const next = await Promise.race([load(info.moduleUrl), deadline]);
-    if (request !== generation) return current;
-    if (requestedProject && next.projectId!==requestedProject) throw new Error('Element selection belongs to another project');
-    if (next.selectionDigest !== info.digest || !Array.isArray(next.elements) || !Array.isArray(next.projects) || !next.components
-      || (current.realmId !== null && next.realmId !== current.realmId)) throw new Error('Element build selection does not match its verified host receipt');
-    for (const entry of next.elements) if (typeof next.components[refKey(entry.descriptor)] !== 'function') throw new Error('Element build is incomplete');
+    if (requestedScope && list.projectId !== requestedScope.projectId) throw new Error('Element selection belongs to another project');
+    if (current.realmId !== null && list.realmId !== current.realmId) throw new Error('Element selection realm changed; reload the editor.');
     // Only the active exact requested pins are loaded. Missing pins stay unavailable; never substitute newest code.
-    // import() returns an exotic module namespace: freezing it throws even when
-    // each export is valid. Own a plain snapshot rather than mutating that namespace.
-    current = Object.freeze({projectId:next.projectId,configured:next.configured,selectionDigest:next.selectionDigest,
-      realmId:next.realmId,projects:next.projects,elements:next.elements,components:next.components});
+    const wanted = list.elements.filter(entry => !requestedScope || requestedScope.refs.some(ref => refKey(ref) === refKey(entry.ref)));
+    const components = await Promise.race([Promise.all(wanted.map(async entry => {
+      const imported = importedByDigest.get(entry.digest);
+      if (imported) return imported;
+      const component = await loadEntry(entry);
+      if (typeof component !== 'function') throw new Error(`Project element ${entry.ref.id} is not a component.`);
+      importedByDigest.set(entry.digest, component);
+      while (importedByDigest.size > 128) importedByDigest.delete(importedByDigest.keys().next().value!);
+      return component;
+    })), deadline]);
+    if (request !== generation) return current;
+    const signature = JSON.stringify([list.projectId, list.realmId, list.selectionDigest, wanted.map(entry => [refKey(entry.ref), entry.digest])]);
+    if (signature === currentSignature) {
+      publishReadiness({...requestedReadiness, phase:'ready'});
+      return current;
+    }
+    // import() returns an exotic module namespace: freezing it throws even when each export is valid.
+    // The published selection is a plain frozen snapshot of the components already verified above.
+    current = Object.freeze({projectId: list.projectId, selectionDigest: list.selectionDigest, realmId: list.realmId,
+      projects: Object.freeze([...list.projects]),
+      elements: Object.freeze(wanted.map(entry => Object.freeze({projectId: list.projectId, descriptor: entry.descriptor, authoring: entry.authoring}))),
+      components: Object.freeze(Object.fromEntries(wanted.map((entry, index) => [refKey(entry.ref), components[index]])))});
+    currentSignature = signature;
     listeners.forEach(listener => listener());
     publishReadiness({...requestedReadiness, phase:'ready'});
     return current;
@@ -106,7 +119,7 @@ export async function refreshAdmittedElements(
   }
 }
 export function admittedComponent(ref: {packId?: string; kind: string; id: string; revision: string}) {
-  return current.components[refKey(ref)];
+  return current.components[refKey(ref as ElementRef)];
 }
 export function isAdmittedElementPreviewPreparing(
   projectId: string,
@@ -117,13 +130,12 @@ export function isAdmittedElementPreviewPreparing(
   const missing = refs.filter(ref => !admittedComponent(ref));
   // A new config may render once before the provider's scope effect runs.
   // A completed request only settles the exact pins that it checked.
-  if (missing.some(ref => !readiness.refKeys.includes(refKey(ref)))) return true;
+  if (missing.some(ref => !readiness.refKeys.includes(refKey(ref as ElementRef)))) return true;
   return missing.length > 0 && readiness.phase === 'loading';
 }
 export function projectElementAuthoring(projectId: string) {
   return current.projects.find(project => project.projectId === projectId) ?? null;
 }
-if (import.meta.hot) import.meta.hot.on('astrid:elements-admitted', () => { void refreshAdmittedElements().catch(error => { console.error('Project pack activation failed; the previous verified build is retained.',error); }); });
 
 export function admittedCatalogEntries(projectId?: string): import('./element-contract').AstridElementCatalogEntry[] {
   return current.elements.filter(entry => !projectId || entry.projectId === projectId).map(({descriptor: d, authoring}) => ({

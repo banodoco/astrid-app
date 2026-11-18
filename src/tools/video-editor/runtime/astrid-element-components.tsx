@@ -1,4 +1,4 @@
-import { admittedComponent, getAdmittedElementSelection, isAdmittedElementPreviewPreparing, usesScopedElementAdmissions } from './admitted-elements';
+import { admittedComponent, getAdmittedElementSelection, isAdmittedElementPreviewPreparing } from './admitted-elements';
 import type { ComponentType } from 'react';
 import { ASTRID_RENDERING_ELEMENTS } from '@astrid/packs/rendering/elements/catalog.ts';
 import {
@@ -99,7 +99,6 @@ export function resolveAstridElementComponent(
 /** Explicit installed host: preserves the current full catalog and sequence values. */
 const installedAstridElementHost: AstridElementHost = {
   isPreviewPreparing(projectId, clips) {
-    if (!usesScopedElementAdmissions()) return false;
     const refs = clips.flatMap(clip => clip.elementRef?.packId ? [clip.elementRef] : [])
       .filter(ref => !ASTRID_RENDERING_ELEMENTS.some(entry => entry.id === ref.id && entry.kind === ref.kind
         && entry.packId === ref.packId && entry.revision === ref.revision));

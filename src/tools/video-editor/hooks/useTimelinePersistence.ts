@@ -39,7 +39,7 @@ import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/i
 import type { CommitDataOptions, ScheduleSaveFn } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
 import { generateUUID } from '@/shared/lib/taskCreation/ids.ts';
 import { emitTimelineSaveDiagnostic, isTimelineDiagnosticsEnabled } from '@/tools/video-editor/lib/timeline-diagnostics.ts';
-import { TimelinePersistenceHandoffContext, resolveTimelinePersistenceHandoff, type TimelineGestureReadBasis, type TimelinePersistenceHandoff } from './timelineLocalSaveHandoff.ts';
+import { TimelinePersistenceHandoffContext, isTimelineAuthoringRefusal, resolveTimelinePersistenceHandoff, type TimelineGestureReadBasis, type TimelinePersistenceHandoff } from './timelineLocalSaveHandoff.ts';
 
 export type SaveStatus = 'saved' | 'saving' | 'dirty' | 'retrying' | 'error';
 
@@ -142,6 +142,8 @@ interface PersistenceSession {
   cancelledRanges: Array<{ from: number; through: number }>;
   captures?: Set<Promise<void>>;
   captureFailure?: unknown;
+  /** A refused edit that was undone on screen; the next flush reports it once, so a caller never believes it saved. */
+  undoneRefusal?: { error: TimelineSaveError; seq: number };
   recoveryWrites?: number;
   storageFailure?: unknown;
   retiredPending?: boolean;
@@ -149,6 +151,8 @@ interface PersistenceSession {
 }
 
 interface ScheduledSave {
+  /** Set when this edit's capture was refused and the editor reverted past it. */
+  refusedAndReverted?: boolean;
   session: PersistenceSession;
   generation: number;
   data: TimelineData;
@@ -193,6 +197,25 @@ function sameHead(a: TimelineHeadRevision | undefined, b: TimelineHeadRevision |
   return a?.projectId === b?.projectId
     && a?.timelineId === b?.timelineId
     && a?.headRevisionId === b?.headRevisionId;
+}
+
+/** A restore point never carries an in-flight `uploading-` skeleton: its drop flow has already returned. */
+function stripTransientRows(data: TimelineData | null): TimelineData | null {
+  if (!data || !data.rows.some((row) => row.actions.some((action) => action.id.startsWith('uploading-')))) return data;
+  return { ...data,
+    rows: data.rows.map((row) => ({ ...row, actions: row.actions.filter((action) => !action.id.startsWith('uploading-')) })),
+    meta: Object.fromEntries(Object.entries(data.meta).filter(([id]) => !id.startsWith('uploading-'))) };
+}
+
+/** The plain headline for a refused edit: what was not saved, why, and what to do. */
+export function timelineSaveRefusalHeadline(reason: string): string {
+  const plain = reason.replace(/^Local document save retained:\s*/, '');
+  return `Not saved: ${/[.!?]$/.test(plain) ? plain : `${plain}.`}`;
+}
+
+/** The user-facing refusal for an edit that was undone on screen. */
+export function timelineSaveRefusalMessage(reason: string): string {
+  return `${timelineSaveRefusalHeadline(reason)} That change was undone; your other edits are kept.`;
 }
 
 export interface UseTimelinePersistenceResult {
@@ -251,6 +274,8 @@ export interface UseTimelinePersistenceResult {
    * admitted source plane. Current source items always own the save payload.
    */
   loadedBundleRef: MutableRefObject<TimelineBundleEnvelope | null>;
+  /** While true, a refused edit scheduled now is never undone on screen (recovery 'Save them'). */
+  keepRefusedEditRef: MutableRefObject<boolean>;
 }
 
 export function useTimelinePersistence({
@@ -289,6 +314,12 @@ export function useTimelinePersistence({
   const deferredSaveRef = useRef<{ save: ScheduledSave; preserveStatus?: boolean } | null>(null);
   const deferredDuringRecoveryRef = useRef<DeferredRecoverySave | null>(null);
   const latestScheduledSaveRef = useRef<ScheduledSave | null>(null);
+  // The editor state on screen just before the latest local edit (the
+  // `localCommit` event fires immediately before that edit is scheduled). It
+  // already includes every earlier edit, accepted or still being captured.
+  const beforeEditRef = useRef<TimelineData | null>(null);
+  const saveStatusRef = useRef<SaveStatus>('saved');
+  const revertRefusedCaptureRef = useRef<(refused: ScheduledSave, restore: TimelineData, error: TimelineSaveError) => boolean>(() => false);
   const isSavingRef = useRef(false);
   const reloadInProgressRef = useRef(false);
   // Invalidates delayed queue continuations when a canonical reload begins.
@@ -303,6 +334,7 @@ export function useTimelinePersistence({
    * admitted source plane. Current source items always own the save payload.
    */
   const loadedBundleRef = useRef<TimelineBundleEnvelope | null>(null);
+  const keepRefusedEditRef = useRef(false);
   // Transport-failure retry: attempt counter + its own timer, so a failing
   // backend is retried on a backoff instead of as fast as it can answer.
   const errorRetryRef = useRef(0);
@@ -375,6 +407,7 @@ export function useTimelinePersistence({
   const saveError = saveState.status === 'error' ? saveState.reason : null;
   const setSaveStatus = useCallback((status: Exclude<SaveStatus, 'error'>) => setSaveState({ status }), []);
   const failSave = useCallback((reason: string) => setSaveState({ status: 'error', reason }), []);
+  saveStatusRef.current = saveStatus;
   const [isConflictExhausted, setIsConflictExhausted] = useState(false);
   const [schemaIncompatible, setSchemaIncompatible] = useState<ReadonlyArray<TimelineSchemaIssue> | null>(null);
   const [watchdogTripped, setWatchdogTripped] = useState(false);
@@ -707,6 +740,7 @@ export function useTimelinePersistence({
           stableSignature: scheduledOrAttempt.data.stableSignature,
         };
     let retryScheduled = false;
+    if ((scheduledOrAttempt as Partial<ScheduledSave>).refusedAndReverted) return;
 
     if (!options?.bypassQueue) {
       isSavingRef.current = true;
@@ -715,8 +749,10 @@ export function useTimelinePersistence({
 
     attempt.session.activeAttempts.add(attempt);
     try {
-      await Promise.all([...(attempt.session.captures ?? [])]);
+      // A refused-and-reverted capture is not this attempt's failure.
+      await Promise.allSettled([...(attempt.session.captures ?? [])]);
       if (attempt.session.captureFailure) throw attempt.session.captureFailure;
+      if ((scheduledOrAttempt as Partial<ScheduledSave>).refusedAndReverted) return;
       await attempt.localCapture;
       await saveMutation.mutateAsync(
         {
@@ -1098,7 +1134,19 @@ export function useTimelinePersistence({
           ...snapshot.draft, bundle: snapshot.wireBundle, head: snapshot.baseHead,
         }, gestureBasis);
       } catch (error) { localCapture = Promise.reject(error); }
+      // An edit can be reverted only to the screen state it was authored on;
+      // consume that state so a later unrelated schedule cannot reuse it. The
+      // recovery retry replaces the whole document and is never reverted.
+      const restoreTo = keepRefusedEditRef.current ? null : stripTransientRows(beforeEditRef.current);
+      beforeEditRef.current = null;
       localCapture = localCapture.catch((error: unknown) => {
+        // An authoring guard refused only THIS edit before it entered the
+        // outbox. Undo it on screen only when that is provably safe (see
+        // revertRefusedCaptureRef); every other failure, and every refusal
+        // that is not safe to undo, keeps the terminal behaviour: the draft
+        // is retained and the banner stays.
+        if (restoreTo && error instanceof TimelineSaveError && isTimelineAuthoringRefusal(error)
+          && revertRefusedCaptureRef.current(scheduledSave, restoreTo, error)) throw error;
         session.captureFailure = error;
         recordDraftReloadFailure();
         throw error;
@@ -1129,6 +1177,8 @@ export function useTimelinePersistence({
     // ordering silently replaced the old recovery record and then returned,
     // leaving the UI looking saved even though no POST had happened.
     if (recoveryPendingRef?.current || recoveryActiveRef?.current) {
+      // A resumed deferred save carries several edits and has no valid restore point; never revert it.
+      beforeEditRef.current = null;
       deferredDuringRecoveryRef.current = {
         data: nextData,
         gestureBasis: options?.gestureBasis,
@@ -1243,6 +1293,47 @@ export function useTimelinePersistence({
     scheduleSaveWithCapture(nextData, options);
   }, [scheduleSaveWithCapture]);
 
+  useEffect(() => {
+    beforeEditRef.current = null;
+    const offLocal = eventBus.on('localCommit', (before) => { beforeEditRef.current = before ?? null; });
+    const offRemote = eventBus.on('remoteCommit', () => { beforeEditRef.current = null; });
+    return () => { offLocal(); offRemote(); };
+  }, [eventBus, session]);
+
+  /**
+   * Undo a refused edit on screen, but only when that is provably safe:
+   * still the latest
+   * edit on screen, nothing scheduled after it, and a healthy save state.
+   * `restore` is the screen state the edit was authored on, so it already holds
+   * every earlier edit even if its capture has not resolved yet. Anything else
+   * returns false and the caller keeps the terminal path (draft retained).
+   */
+  revertRefusedCaptureRef.current = (refused, restore, error) => {
+    if (!isMountedRef.current || activeTargetRef.current !== refused.session
+      || refused.generation !== session.generation || reloadInProgressRef.current
+      || latestScheduledSaveRef.current !== refused
+      || editSeqRef.current !== refused.seq
+      || getDataRef().current?.stableSignature !== refused.data.stableSignature
+      || session.captureFailure || session.editFailure || isConflictExhaustedRef.current
+      || recoveryPendingRef?.current || recoveryActiveRef?.current
+      || saveStatusRef.current === 'error' || saveStatusRef.current === 'retrying') return false;
+    const localStatus = session.localDocumentSave?.status?.();
+    // 'saving' is safe: the refused edit never entered the outbox and `restore`
+    // already holds the earlier edits that are in flight.
+    if (localStatus === 'blocked' || localStatus === 'conflict' || localStatus === 'recovery'
+      || localStatus === 'error' || localStatus === 'retry') return false;
+    refused.refusedAndReverted = true;
+    session.undoneRefusal = { error, seq: refused.seq };
+    commitData(restore, { save: false, skipHistory: true });
+    // Rewrite the browser recovery slot without the refused edit and send the
+    // restored state, so a queued earlier edit is flushed and acknowledged.
+    const flush = createRecoverySave(restore, editSeqRef.current);
+    scheduleSaveWithCapture(restore, { preserveStatus: true },
+      { ...flush, localCapture: Promise.resolve() });
+    toast.error(timelineSaveRefusalMessage(error.message));
+    return true;
+  };
+
   const resumeDeferredRecoverySave = useCallback(() => {
     if (recoveryPendingRef?.current || recoveryActiveRef?.current) return;
     const deferred = deferredDuringRecoveryRef.current;
@@ -1351,7 +1442,17 @@ export function useTimelinePersistence({
 
   const flushPendingSave = useCallback((): Promise<number> => {
     // Capturing legacy callers here keeps the existing latest-document barrier.
-    return flushSaveTarget(Object.freeze({ session: session.identity, timelineId, targetSeq: editSeqRef.current, generation: session.generation }), false);
+    const targetSeq = editSeqRef.current;
+    return flushSaveTarget(Object.freeze({ session: session.identity, timelineId, targetSeq, generation: session.generation }), false)
+      .then((seq) => {
+        // Report an undone edit once, and only to a flush that covers it.
+        const refusal = session.undoneRefusal;
+        if (refusal && refusal.seq <= targetSeq) {
+          session.undoneRefusal = undefined;
+          throw refusal.error;
+        }
+        return seq;
+      });
   }, [editSeqRef, flushSaveTarget, session, timelineId]);
 
   const preserveTimelineDraftForReload = useCallback(async (): Promise<void> => {
@@ -1417,7 +1518,7 @@ export function useTimelinePersistence({
   ), [editSeqRef, getDataRef, recoveryActiveRef, recoveryPendingRef, savedSeqRef, session]);
 
   const flushTimelineSaveForUpdate = useCallback(async () => {
-    await Promise.all([...(session.captures ?? [])]);
+    await Promise.allSettled([...(session.captures ?? [])]);
     if (session.captureFailure) throw session.captureFailure;
     await flushPendingSave();
     await waitForSaveDrain();
@@ -1607,6 +1708,11 @@ export function useTimelinePersistence({
         session.generation += 1;
         session.cancelledRanges = [];
         session.uncertainThroughSeq = -1;
+        // A refusal whose revert was declined (this reload) was never shown:
+        // the canonical state replaces the refused edit, so say why it is gone.
+        if (session.captureFailure instanceof TimelineSaveError && isTimelineAuthoringRefusal(session.captureFailure)) {
+          toast.error(timelineSaveRefusalHeadline(session.captureFailure.message));
+        }
         session.captureFailure = undefined;
         session.editFailure = false;
         invalidateDraftReload();
@@ -1810,5 +1916,6 @@ export function useTimelinePersistence({
     canonicalReloadInProgressRef: reloadInProgressRef,
     /** Bundle from the last server reload; consumed downstream ([V2-B4]). */
     loadedBundleRef,
+    keepRefusedEditRef,
   };
 }

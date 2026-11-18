@@ -180,6 +180,7 @@ export function useTimelineSave(
       try { return await handoff.flush(); }
       catch (error) { recordDraftReloadFailure(); throw error; }
     },
+    status: () => localOwner.session?.getState().status,
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
     canUndo: () => localOwner.handoff?.canUndo() ?? false,
     canRedo: () => localOwner.handoff?.canRedo() ?? false,
@@ -751,7 +752,8 @@ export function useTimelineSave(
     // Keep the slot and visible recovery controls until a durable ACK. A 409
     // or transport failure must leave the recovered work retryable.
     setRecoveredAsDirty(true);
-    commit.commitData(recovered, { save: true });
+    persistence.keepRefusedEditRef.current = true;
+    try { commit.commitData(recovered, { save: true }); } finally { persistence.keepRefusedEditRef.current = false; }
   }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef, localDocumentSave, localOwner]);
 
   const reloadCanonicalFromServer = persistence.reloadFromServer;

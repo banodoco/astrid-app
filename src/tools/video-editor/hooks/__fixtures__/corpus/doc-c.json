@@ -10,20 +10,20 @@
         }
       },
       "asset": "asset-12",
-      "at": 89.4667,
-      "clipType": "am-sprite",
-      "hold": 3.3333,
+      "at": 92.0881,
+      "clipType": "effect-a",
+      "hold": 3.431,
       "id": "v5-clip-01",
       "params": {
         "enter": "enum-01",
         "outline": {
           "color": "#ED6B23",
-          "pulse": 6,
+          "pulse": 6.1758,
           "px": 1
         },
-        "scale": 5,
-        "x": 226,
-        "y": 33
+        "scale": 5.1465,
+        "x": 233,
+        "y": 33.9669
       },
       "track": "v5"
     },
@@ -37,15 +37,15 @@
         }
       },
       "asset": "asset-07",
-      "at": 85.6667,
-      "clipType": "am-sprite",
-      "hold": 7.6333,
+      "at": 88.1767,
+      "clipType": "effect-a",
+      "hold": 7.857,
       "id": "v5-clip-02",
       "params": {
         "enter": "enum-01",
-        "scale": 5,
-        "x": 228,
-        "y": 114
+        "scale": 5.1465,
+        "x": 235,
+        "y": 117
       },
       "track": "v5"
     },
@@ -59,15 +59,15 @@
         }
       },
       "asset": "asset-05",
-      "at": 86.8,
-      "clipType": "am-sprite",
-      "hold": 6.5,
+      "at": 89.3432,
+      "clipType": "effect-a",
+      "hold": 6.6905,
       "id": "v5-clip-03",
       "params": {
         "enter": "enum-01",
-        "scale": 5,
-        "x": 228,
-        "y": 90
+        "scale": 5.1465,
+        "x": 235,
+        "y": 92.637
       },
       "track": "v5"
     },
@@ -81,15 +81,15 @@
         }
       },
       "asset": "asset-06",
-      "at": 87.9667,
-      "clipType": "am-sprite",
-      "hold": 5.3333,
+      "at": 90.5441,
+      "clipType": "effect-a",
+      "hold": 5.4896,
       "id": "v5-clip-04",
       "params": {
         "enter": "enum-01",
-        "scale": 5,
-        "x": 228,
-        "y": 65
+        "scale": 5.1465,
+        "x": 235,
+        "y": 66.9045
       },
       "track": "v5"
     },
@@ -98,97 +98,97 @@
         "astrid": {
           "cut": "text-07",
           "sequence": "text-58",
-          "sequence_index": 5
+          "sequence_index": 46
         }
       },
       "asset": "asset-16",
-      "at": 57.9667,
-      "clipType": "am-footage",
-      "hold": 0.2,
+      "at": 59.6651,
+      "clipType": "effect-b",
+      "hold": 0.2059,
       "id": "v6-clip-05",
       "params": {
-        "kind": "b-roll",
+        "kind": "kind-b",
         "label": "text-59",
         "placeholder": true,
         "slot": "slot-02",
         "spec": "text-47"
       },
-      "to": 0.2,
+      "to": 0.2059,
       "track": "v6"
     },
     {
       "app": {
         "astrid": {
-          "gap_after_s": 0.2,
+          "gap_after_s": 0.2059,
           "segment": "text-60",
           "text": "text-61",
           "words": [
             [
-              0.090916,
-              0.181832,
+              0.0936,
+              0.1872,
               "text-62"
             ],
             [
-              0.181833,
-              0.215916,
+              0.1872,
+              0.2222,
               "text-63"
             ],
             [
-              0.227291,
-              0.340916,
+              0.234,
+              0.3509,
               "text-64"
             ],
             [
-              0.340916,
-              0.511374,
+              0.3509,
+              0.5264,
               "text-65"
             ],
             [
-              0.511375,
-              0.579541,
+              0.5264,
+              0.5965,
               "text-66"
             ],
             [
-              0.590916,
-              0.909082,
+              0.6082,
+              0.9357,
               "text-67"
             ],
             [
-              1.284083,
-              1.443166,
+              1.3217,
+              1.4855,
               "text-68"
             ],
             [
-              1.443166,
-              1.738624,
+              1.4855,
+              1.7896,
               "text-69"
             ]
           ]
         }
       },
       "asset": "asset-75",
-      "at": 56.2,
+      "at": 57.8467,
       "clipType": "media",
       "from": 0,
       "id": "a1-clip-06",
-      "to": 1.8,
+      "to": 1.8527,
       "track": "a1",
-      "volume": 1.2589254117941673
+      "volume": 1.2958
     },
     {
       "asset": "asset-25",
       "at": 0,
       "clipType": "media",
       "from": 0,
-      "hold": 159.8333,
+      "hold": 164.5164,
       "id": "a2-clip-07",
       "params": {
-        "fadeIn": 4,
+        "fadeIn": 4.1172,
         "fadeOut": 3
       },
-      "to": 162.966666,
+      "to": 167.7416,
       "track": "a2",
-      "volume": 0.263
+      "volume": 0.2707
     }
   ],
   "config": {
@@ -304,38 +304,38 @@
         ],
         "slots": {
           "slot-01": {
-            "face_zone": [
-              700,
-              110,
-              500,
-              610
-            ],
-            "kind": "a-roll",
+            "kind": "kind-a",
             "params": {
               "label": "text-45",
               "placeholder": true
             },
-            "spec": "text-46"
+            "spec": "text-46",
+            "zone_a": [
+              721,
+              113,
+              515,
+              628
+            ]
           },
           "slot-02": {
-            "kind": "b-roll",
+            "kind": "kind-b",
             "spec": "text-47"
           },
           "slot-03": {
-            "hand_mark": {
-              "size": 450,
-              "x": 1310,
-              "y": 770
+            "kind": "kind-c",
+            "mark_c": {
+              "size": 463,
+              "x": 1348,
+              "y": 793
             },
-            "kind": "hand",
             "spec": "text-48"
           },
           "slot-04": {
-            "kind": "screen",
+            "kind": "kind-d",
             "spec": "text-49"
           },
           "slot-05": {
-            "kind": "window",
+            "kind": "kind-e",
             "spec": "text-50"
           }
         }
@@ -352,20 +352,20 @@
           }
         },
         "asset": "asset-12",
-        "at": 89.4667,
-        "clipType": "am-sprite",
-        "hold": 3.3333,
+        "at": 92.0881,
+        "clipType": "effect-a",
+        "hold": 3.431,
         "id": "v5-clip-01",
         "params": {
           "enter": "enum-01",
           "outline": {
             "color": "#ED6B23",
-            "pulse": 6,
+            "pulse": 6.1758,
             "px": 1
           },
-          "scale": 5,
-          "x": 226,
-          "y": 33
+          "scale": 5.1465,
+          "x": 233,
+          "y": 33.9669
         },
         "track": "v5"
       },
@@ -379,15 +379,15 @@
           }
         },
         "asset": "asset-07",
-        "at": 85.6667,
-        "clipType": "am-sprite",
-        "hold": 7.6333,
+        "at": 88.1767,
+        "clipType": "effect-a",
+        "hold": 7.857,
         "id": "v5-clip-02",
         "params": {
           "enter": "enum-01",
-          "scale": 5,
-          "x": 228,
-          "y": 114
+          "scale": 5.1465,
+          "x": 235,
+          "y": 117
         },
         "track": "v5"
       },
@@ -401,15 +401,15 @@
           }
         },
         "asset": "asset-05",
-        "at": 86.8,
-        "clipType": "am-sprite",
-        "hold": 6.5,
+        "at": 89.3432,
+        "clipType": "effect-a",
+        "hold": 6.6905,
         "id": "v5-clip-03",
         "params": {
           "enter": "enum-01",
-          "scale": 5,
-          "x": 228,
-          "y": 90
+          "scale": 5.1465,
+          "x": 235,
+          "y": 92.637
         },
         "track": "v5"
       },
@@ -423,15 +423,15 @@
           }
         },
         "asset": "asset-06",
-        "at": 87.9667,
-        "clipType": "am-sprite",
-        "hold": 5.3333,
+        "at": 90.5441,
+        "clipType": "effect-a",
+        "hold": 5.4896,
         "id": "v5-clip-04",
         "params": {
           "enter": "enum-01",
-          "scale": 5,
-          "x": 228,
-          "y": 65
+          "scale": 5.1465,
+          "x": 235,
+          "y": 66.9045
         },
         "track": "v5"
       },
@@ -440,97 +440,97 @@
           "astrid": {
             "cut": "text-07",
             "sequence": "text-58",
-            "sequence_index": 5
+            "sequence_index": 46
           }
         },
         "asset": "asset-16",
-        "at": 57.9667,
-        "clipType": "am-footage",
-        "hold": 0.2,
+        "at": 59.6651,
+        "clipType": "effect-b",
+        "hold": 0.2059,
         "id": "v6-clip-05",
         "params": {
-          "kind": "b-roll",
+          "kind": "kind-b",
           "label": "text-59",
           "placeholder": true,
           "slot": "slot-02",
           "spec": "text-47"
         },
-        "to": 0.2,
+        "to": 0.2059,
         "track": "v6"
       },
       {
         "app": {
           "astrid": {
-            "gap_after_s": 0.2,
+            "gap_after_s": 0.2059,
             "segment": "text-60",
             "text": "text-61",
             "words": [
               [
-                0.090916,
-                0.181832,
+                0.0936,
+                0.1872,
                 "text-62"
               ],
               [
-                0.181833,
-                0.215916,
+                0.1872,
+                0.2222,
                 "text-63"
               ],
               [
-                0.227291,
-                0.340916,
+                0.234,
+                0.3509,
                 "text-64"
               ],
               [
-                0.340916,
-                0.511374,
+                0.3509,
+                0.5264,
                 "text-65"
               ],
               [
-                0.511375,
-                0.579541,
+                0.5264,
+                0.5965,
                 "text-66"
               ],
               [
-                0.590916,
-                0.909082,
+                0.6082,
+                0.9357,
                 "text-67"
               ],
               [
-                1.284083,
-                1.443166,
+                1.3217,
+                1.4855,
                 "text-68"
               ],
               [
-                1.443166,
-                1.738624,
+                1.4855,
+                1.7896,
                 "text-69"
               ]
             ]
           }
         },
         "asset": "asset-75",
-        "at": 56.2,
+        "at": 57.8467,
         "clipType": "media",
         "from": 0,
         "id": "a1-clip-06",
-        "to": 1.8,
+        "to": 1.8527,
         "track": "a1",
-        "volume": 1.2589254117941673
+        "volume": 1.2958
       },
       {
         "asset": "asset-25",
         "at": 0,
         "clipType": "media",
         "from": 0,
-        "hold": 159.8333,
+        "hold": 164.5164,
         "id": "a2-clip-07",
         "params": {
-          "fadeIn": 4,
+          "fadeIn": 4.1172,
           "fadeOut": 3
         },
-        "to": 162.966666,
+        "to": 167.7416,
         "track": "a2",
-        "volume": 0.263
+        "volume": 0.2707
       }
     ],
     "theme_overrides": {
@@ -607,7 +607,7 @@
   },
   "occurrences": [
     {
-      "duration_ms": 7366,
+      "duration_ms": 7582,
       "gain": 1,
       "muted": false,
       "occurrence_id": "occ-01",
@@ -629,12 +629,12 @@
       "transform": {}
     },
     {
-      "duration_ms": 35367,
+      "duration_ms": 36403,
       "gain": 1,
       "muted": false,
       "occurrence_id": "occ-02",
       "placement": {
-        "start_ms": 7366
+        "start_ms": 7582
       },
       "provenance": {},
       "shot_id": "shot-02",
@@ -651,12 +651,12 @@
       "transform": {}
     },
     {
-      "duration_ms": 13633,
+      "duration_ms": 14032,
       "gain": 1,
       "muted": false,
       "occurrence_id": "occ-03",
       "placement": {
-        "start_ms": 42733
+        "start_ms": 43985
       },
       "provenance": {},
       "shot_id": "shot-03",

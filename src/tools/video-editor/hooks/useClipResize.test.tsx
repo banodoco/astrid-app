@@ -615,3 +615,63 @@ describe('useClipResize — unified clip-edge commit path', () => {
     expectRowBounds(mutation.rows, 'V1', 'c', { start: 2, end: 3 });
   });
 });
+
+describe('useClipResize — naming a single-clip trim for the local save', () => {
+  function resizeFree(data: TimelineData, clipId: string, edge: ResizeDir, boundary: number) {
+    const dataRef = { current: data };
+    const applyEdit = vi.fn<Parameters<TimelineApplyEdit>>();
+    const { result } = renderHook(() => useClipResize({ dataRef, applyEdit }));
+    const row = getRow(data.rows, 'V2');
+    const action = getAction(data.rows, 'V2', clipId);
+    const session = buildResolvedFreeSession(data, 'V2', clipId, edge);
+    act(() => { result.current.onActionResizeStart({ action, row, dir: edge }); });
+    act(() => {
+      result.current.onClipEdgeResizeEnd({
+        session,
+        updates: applyClipEdgeMove(session.context, session.edge, boundary).updates,
+        cancelled: false,
+      });
+    });
+    return applyEdit;
+  }
+
+  it('names a hold clip resize as a trim of that clip with only its timing patch', () => {
+    const data = makeData({ groupClipIds: [], freeClips: [{ id: 'free-1', at: 5, hold: 2 }] });
+    const applyEdit = resizeFree(data, 'free-1', 'right', 7.5);
+    expect(applyEdit).toHaveBeenCalledOnce();
+    const options = applyEdit.mock.calls[0][1];
+    expect(options?.gestureBasis).toEqual({
+      kind: 'trim', clipId: 'free-1', patch: { hold: expect.closeTo(2.5, 5) },
+      config: data.config, registry: data.registry,
+    });
+  });
+
+  it('names a media clip edge resize as a trim whose patch holds only from, to and speed', () => {
+    const data = makeData({
+      groupClipIds: [],
+      freeClips: [{ id: 'video-1', at: 5, clipType: 'media', asset: 'asset-video', from: 0, to: 4, speed: 1 }],
+      registryAssets: { 'asset-video': { file: 'video.mp4', type: 'video/mp4' } },
+    });
+    const applyEdit = resizeFree(data, 'video-1', 'left', 6);
+    const basis = applyEdit.mock.calls[0][1]?.gestureBasis;
+    expect(basis).toMatchObject({ kind: 'trim', clipId: 'video-1' });
+    const patch = (basis as { patch: Record<string, unknown> }).patch;
+    expect(Object.keys(patch).sort()).toEqual(['from', 'speed', 'to']);
+  });
+
+  it('does not name a trim for a group (shot) resize', () => {
+    const data = makeData({ groupClipIds: ['a', 'b', 'c'] });
+    const dataRef = { current: data };
+    const applyEdit = vi.fn<Parameters<TimelineApplyEdit>>();
+    const { result } = renderHook(() => useClipResize({ dataRef, applyEdit }));
+    const session = buildSession({ rowId: 'V1', clipId: 'c', edge: 'right', context: buildGroupContext(data.rows, 'V1', ['a', 'b', 'c'], 'c') });
+    act(() => { result.current.onActionResizeStart({ action: getAction(data.rows, 'V1', 'c'), row: getRow(data.rows, 'V1'), dir: 'right' }); });
+    act(() => {
+      result.current.onClipEdgeResizeEnd({
+        session, updates: applyClipEdgeMove(session.context, session.edge, 3.5).updates, cancelled: false,
+      });
+    });
+    expect(applyEdit).toHaveBeenCalledOnce();
+    expect(applyEdit.mock.calls[0][1]?.gestureBasis).toBeUndefined();
+  });
+});

@@ -2,7 +2,7 @@
 // uname/installer/Runtime are doubles; git, pin.mjs and the release shell are real.
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -36,7 +36,7 @@ export function inventory(root) {
 }
 
 export function fixture(t, { installed = true, realm = true, savedPorts = '2400,17500,19501', installer = 'fail' } = {}) {
-  const dir = mkdtempSync(path.join(tmpdir(), 'astrid-release-fixture-'));
+  const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'astrid-release-fixture-')));
   const home = path.join(dir, 'home');
   const root = path.join(home, 'astrid-release', branch.replaceAll('/', '-'));
   const bin = path.join(dir, 'bin');

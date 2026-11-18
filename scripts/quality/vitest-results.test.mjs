@@ -83,3 +83,30 @@ it('checks a real failed run and its declared skip against XML, summary and stre
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+it('reconciles actual JUnit control-character encoding while retaining raw streamed names', () => {
+  const root = mkdtempSync(path.join(os.tmpdir(), 'p39-vitest-xml-names-'));
+  const xml = path.join(root, 'names.xml');
+  const config = path.join(root, 'vitest.config.mts');
+  const names = ['tab\tpath', 'line\nbreak', 'cr\rpath', 'crlf\r\npath', 'nul\0path', 'del\x7fpath', 'literal & < > "', 'nel\u0085path', 'astral\u{1f600}'];
+  try {
+    symlinkSync(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'), 'junction');
+    writeFileSync(config, `import SkipGuardReporter from ${JSON.stringify(path.join(ROOT, 'config/testing/skipGuardReporter.ts'))};
+      export default { root: ${JSON.stringify(root)}, test: { include: ['*.fixture.ts'], includeTaskLocation: true,
+        reporters: ['default', new SkipGuardReporter({ resultsFile: ${JSON.stringify(xml + '.jsonl')} }), ['junit', { outputFile: ${JSON.stringify(xml)} }]] } };`);
+    writeFileSync(path.join(root, 'names.fixture.ts'), `import { it } from 'vitest';
+      for (const name of ${JSON.stringify(names)}) it(name, () => {});`);
+    const result = spawnSync(process.execPath, [path.join(ROOT, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config], {
+      cwd: root, env: { ...process.env, CI: '' }, encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+    writeFileSync(path.join(root, 'names.log'), result.stdout + result.stderr);
+    const finished = readFileSync(xml + '.jsonl', 'utf8').trim().split('\n').map(JSON.parse).filter((record) => record.event === 'result');
+    assert.deepEqual(finished.map((record) => record.name), names);
+    const check = spawnSync('python3', [path.join(ROOT, 'scripts/quality/check-vitest-results.py'), root, '--expected', 'names.xml'], { encoding: 'utf8' });
+    assert.equal(check.status, 0, check.stdout + check.stderr);
+    assert.match(check.stdout, /actual tests=9 finished=9 failures=0 skipped=0/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

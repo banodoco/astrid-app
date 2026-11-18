@@ -14,6 +14,24 @@ from xml.etree import ElementTree as ET
 ANSI = re.compile(r"\x1b\[[0-?]*[ -/]*[@-~]")
 
 
+def junit_attribute(value: str | None) -> str | None:
+    """Compare with Vitest's XML representation; JSONL keeps the raw identity.
+
+    Vitest 4's JUnit writer removes XML control/noncharacters, then XML parsing
+    normalizes literal attribute whitespace. Ordinary spaces are not collapsed.
+    """
+    if value is None:
+        return None
+    def retained(character: str) -> bool:
+        code = ord(character)
+        return not (code <= 8 or code in (11, 12, 0xFFFD) or 14 <= code <= 31
+                    or 0x7F <= code <= 0x84 or 0x86 <= code <= 0x9F
+                    or 0xD800 <= code <= 0xDFFF or 0xFDD0 <= code <= 0xFDEF
+                    or (code & 0xFFFF) in (0xFFFE, 0xFFFF))
+    value = "".join(character for character in value if retained(character))
+    return value.replace("\r\n", "\n").replace("\r", " ").replace("\n", " ").replace("\t", " ")
+
+
 def xml_outcome(case: ET.Element) -> str:
     if case.find("failure") is not None or case.find("error") is not None:
         return "failed"
@@ -62,7 +80,12 @@ def check_result(xml_file: Path, log_file: Path | None = None, stream_file: Path
 
     records: list[dict] = []
     try:
-        for line_number, line in enumerate(stream_file.read_text(encoding="utf-8").splitlines(), 1):
+        # JSONL uses LF separators. splitlines() also splits valid JSON strings
+        # containing NEL/Unicode line separators, destroying their raw identity.
+        lines = stream_file.read_text(encoding="utf-8").split("\n")
+        if lines[-1] == "":
+            lines.pop()
+        for line_number, line in enumerate(lines, 1):
             try:
                 record = json.loads(line)
                 if not isinstance(record, dict):
@@ -91,9 +114,12 @@ def check_result(xml_file: Path, log_file: Path | None = None, stream_file: Path
             problems.append(f"{label} stream contains missing or duplicate test IDs")
     if Counter(item.get("id") for item in collected) != Counter(item.get("id") for item in finished):
         problems.append(f"collected/finished ID mismatch: {len(collected)} collected, {len(finished)} finished")
+    raw_identity = lambda item: (item.get("id"), item.get("file"), item.get("name"))
+    if Counter(map(raw_identity, collected)) != Counter(map(raw_identity, finished)):
+        problems.append("collected/finished raw identity mismatch")
     if any(item.get("state") not in ("passed", "failed", "skipped") for item in finished):
         problems.append("stream contains unfinished or unknown outcomes")
-    recorded = Counter((r.get("file"), r.get("name"), r.get("state")) for r in finished)
+    recorded = Counter((junit_attribute(r.get("file")), junit_attribute(r.get("name")), r.get("state")) for r in finished)
     reported = Counter((c.get("classname"), c.get("name"), xml_outcome(c)) for c in cases)
     if recorded != reported:
         problems.append("incremental results and XML differ by test identity/outcome")

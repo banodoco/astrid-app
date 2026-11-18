@@ -96,6 +96,28 @@ class VitestResultsTest(unittest.TestCase):
         self.write_stream()
         self.assertEqual(self.problems(), "")
 
+    def test_accepts_junit_control_character_encoding_without_changing_raw_identity(self):
+        raw = 'suite > a\tb\nc\rd\r\ne\x00f\x7fg&"<>'
+        self.test["name"] = raw
+        self.records[2]["name"] = raw
+        self.xml.write_text('<testsuite tests="1"><testcase classname="src/a.test.ts" name="suite &gt; a\tb\nc\rd\r\nefg&amp;&quot;&lt;&gt;"/></testsuite>')
+        self.write_stream()
+        self.assertEqual(self.problems(), "")
+        self.assertEqual(json.loads(self.stream.read_text().splitlines()[2])["name"], raw)
+
+    def test_rejects_raw_identity_change_even_if_junit_encoding_would_hide_it(self):
+        self.test["name"] = "suite > ca\x00se"
+        self.write_stream()
+        self.assertIn("collected/finished raw identity mismatch", self.problems())
+
+    def test_reads_jsonl_with_unicode_line_separators_inside_names(self):
+        raw = "suite > case\u0085nel\u2028line\u2029paragraph"
+        self.test["name"] = raw
+        self.records[2]["name"] = raw
+        self.xml.write_text(self.xml.read_text().replace('name="suite &gt; case"', 'name="suite &gt; case\u0085nel\u2028line\u2029paragraph"'))
+        self.stream.write_text("".join(json.dumps(record, ensure_ascii=False) + "\n" for record in self.records))
+        self.assertEqual(self.problems(), "")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,6 +1,6 @@
 // Gesture-less edits (no gestureBasis) on a document with shots. The by-id diff is admitted only when it is confined to
-// parent clips that no shot pins and no occurrence track holds, plus additive registry changes and track changes that
-// only append an empty track or remove a track holding no occurrence. Anything else is refused as child ownership.
+// parent clips that no shot pins and no shot sits or plays on, plus additive registry changes and track changes that only
+// add a track or remove one that holds no shots and no clips. Anything else is refused as child ownership.
 // Helpers are copied from timelineLocalSaveHandoff.corpus.test.ts.
 import { describe, expect, it, vi } from 'vitest';
 import { createFakeIndexedDB } from 'fake-indexeddb';
@@ -20,7 +20,7 @@ const corpus = Object.entries(import.meta.glob('./__fixtures__/corpus/*.json', {
 // (its two clip lists may contradict), so this rule is exercised on the documents that carry config.clips.
 const shotCorpus = corpus.filter(item => item.name !== 'doc-b.json');
 
-async function mount(stored: StoredDocument) {
+async function mount(stored: StoredDocument, internalPayload: unknown = { tracks: [{ id: 'v1', kind: 'visual', label: 'Track' }], clips: [] }) {
   const head = { projectId: 'project-commit', timelineId: 'timeline-commit', headRevisionId: 'r0', headPublicationId: 'p0' };
   const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' }, { children: false }).data.canonical_document;
   document.parent_revision.payload = structuredClone(stored) as never;
@@ -28,11 +28,10 @@ async function mount(stored: StoredDocument) {
   // Every occurrence is backed by the exact shot and internal timeline images the Runtime closure requires.
   for (const [index, occurrence] of stored.occurrences.entries()) {
     const internalId = `internal-${index}`;
-    const internalPayload = { tracks: [{ id: 'v1', kind: 'visual', label: 'Track' }], clips: [] };
     const shotPayload = { name: 'Shot', internal_timeline_revision_id: internalId, timing: { duration_ms: 1000 }, assets: [] };
     const shot = { shot_id: occurrence.shot_id as string, revision_id: occurrence.shot_revision_id as string, internal_timeline_revision_id: internalId,
       content_digest: fixtureDigest(shotPayload), payload: shotPayload };
-    const internal = { timeline_id: `internal-timeline-${index}`, revision_id: internalId, content_digest: fixtureDigest(internalPayload), payload: internalPayload };
+    const internal = { timeline_id: `internal-timeline-${index}`, revision_id: internalId, content_digest: fixtureDigest(internalPayload), payload: structuredClone(internalPayload) };
     document.shot_revisions.push(shot as never);
     document.internal_timeline_revisions.push(internal as never);
     document.dependency_manifest.shots.push({ shot_id: shot.shot_id, revision_id: shot.revision_id, internal_timeline_revision_id: internalId, content_digest: shot.content_digest });
@@ -254,6 +253,155 @@ describe.each(shotCorpus)('$name: gesture-less edits on a document with shots', 
       const occurrenceTrack = document.occurrences[0].track as string;
       next.tracks = next.tracks.filter(track => track.id !== occurrenceTrack);
       await refuse(env, next);
+      await env.session.dispose();
+    });
+  });
+  // A shot with real child content: an audio child plays on the parent's own audio lane a3 and a second audio lane a9.
+  const CHILD = { tracks: [{ id: 'v1', kind: 'visual', label: 'Track' }, { id: 'a3', kind: 'audio', label: 'Audio' }, { id: 'a9', kind: 'audio', label: 'Audio' }],
+    clips: [{ id: 'child-a', track: 'a3', at: 0, hold: 1, clipType: 'media', asset: 'asset-shot-x' }] };
+  const occurrenceId = document.occurrences[0].occurrence_id as string;
+  const occurrenceTrack = document.occurrences[0].track as string;
+
+  describe('a shot with child content', () => {
+    it('refuses removing a parent audio lane a shot child plays on', async () => {
+      const env = await mount(document, CHILD);
+      const next = structuredClone(env.source.config);
+      next.tracks = next.tracks.filter(track => track.id !== 'a3');
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses changing a parent audio lane a shot child plays on', async () => {
+      const env = await mount(document, CHILD);
+      const next = structuredClone(env.source.config);
+      (next.tracks.find(track => track.id === 'a3') as Record<string, unknown>).muted = true;
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses adding a track whose id a shot child already plays on', async () => {
+      const env = await mount(document, CHILD);
+      const next = structuredClone(env.source.config);
+      next.tracks.push({ id: 'a9', kind: 'visual', label: 'Clash' } as never);
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses a changed clip on a lane a shot child plays on', async () => {
+      const env = await mount(document, CHILD);
+      const next = structuredClone(env.source.config);
+      next.clips[0].track = 'a3';
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('admits the same edits on a lane no shot uses', async () => {
+      const env = await mount(document, CHILD);
+      const next = structuredClone(env.source.config);
+      next.clips[0].volume = 0.5;
+      await admit(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses a new registry key that a shot child already uses', async () => {
+      const env = await mount(document, CHILD);
+      const next = structuredClone(env.source.config);
+      const registry = structuredClone(env.source.registry);
+      registry.assets['asset-shot-x'] = { file: 'override.png', type: 'image/png' } as never;
+      await refuse(env, next, registry);
+      await env.session.dispose();
+    });
+
+    it('refuses a new clip copied from a shot child, by its identity and by its projected id', async () => {
+      for (const row of [
+        { ...dropRow('copy-by-identity', freeTrack, Object.keys(document.registry.assets)[0]),
+          app: { canonical: { occurrenceId, rawClipId: 'child-a', clipRef: `occurrence:${occurrenceId}/clip:child-a` } } },
+        dropRow(`${occurrenceId}:child-a`, freeTrack, Object.keys(document.registry.assets)[0]),
+      ]) {
+        const env = await mount(document, CHILD);
+        const next = structuredClone(env.source.config);
+        next.clips.push(row as never);
+        await refuse(env, next);
+        await env.session.dispose();
+      }
+    });
+  });
+
+  describe('the remaining predicate clauses', () => {
+    it('refuses a pinned-group clip that sits on a free track (membership, not track)', async () => {
+      const pinned = structuredClone(document);
+      pinned.config.pinnedShotGroups = [{ shotId: 'shot-01', trackId: occurrenceTrack, clipIds: [firstStored.id] }];
+      const env = await mount(pinned);
+      expect(firstStored.track).not.toBe(occurrenceTrack);
+      const next = structuredClone(env.source.config);
+      next.clips.find(clip => clip.id === firstStored.id)!.volume = 0.5;
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses editing a shot placeholder row on a free track', async () => {
+      const placeholder = structuredClone(document);
+      const row = { id: 'shot-ph', track: freeTrack, at: 0, hold: 1, clipType: 'shot' };
+      (placeholder.config.clips as Array<Record<string, unknown>>).push(row);
+      if (placeholder.clips) placeholder.clips.push(row);
+      const env = await mount(placeholder);
+      const next = structuredClone(env.source.config);
+      next.clips.find(clip => clip.id === 'shot-ph')!.at = 1;
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses reordering the existing tracks', async () => {
+      const env = await mount(document);
+      const next = structuredClone(env.source.config);
+      next.tracks = [next.tracks[1], next.tracks[0], ...next.tracks.slice(2)];
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses a changed setting on a track no shot uses', async () => {
+      const env = await mount(document);
+      const next = structuredClone(env.source.config);
+      (next.tracks.find(track => track.id === freeTrack) as Record<string, unknown>).muted = true;
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('admits moving a clip onto a track added in the same edit', async () => {
+      const env = await mount(document);
+      const next = structuredClone(env.source.config);
+      next.tracks.push({ id: 'v7', kind: 'visual', label: 'New' } as never);
+      next.clips[0].track = 'v7';
+      await admit(env, next);
+      expect(writtenClips(env).find(clip => clip.id === next.clips[0].id)!.track).toBe('v7');
+      await env.session.dispose();
+    });
+
+    it('refuses a clip placed on a track that does not exist, including a shot projected lane', async () => {
+      for (const lane of ['v-missing', `${occurrenceId}~v1`]) {
+        const env = await mount(document);
+        const next = structuredClone(env.source.config);
+        next.clips[0].track = lane;
+        await refuse(env, next);
+        await env.session.dispose();
+      }
+    });
+
+    it('refuses removing a track that still has clips on it', async () => {
+      const env = await mount(document);
+      const next = structuredClone(env.source.config);
+      const track = next.clips[0].track;
+      next.tracks = next.tracks.filter(item => item.id !== track);
+      await refuse(env, next);
+      await env.session.dispose();
+    });
+
+    it('refuses changing an existing registry entry', async () => {
+      const env = await mount(document);
+      const next = structuredClone(env.source.config);
+      const registry = structuredClone(env.source.registry);
+      (registry.assets[Object.keys(registry.assets)[0]] as Record<string, unknown>).file = 'swapped.png';
+      await refuse(env, next, registry);
       await env.session.dispose();
     });
   });

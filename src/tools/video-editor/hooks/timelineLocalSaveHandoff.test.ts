@@ -795,7 +795,7 @@ describe('upstream local document handoff', () => {
     const env = await environment(true, true, ['authored', 'sibling'], undefined, undefined, false, true);
     const next = structuredClone(env.source);
     next.config.tracks![0].label = 'Renamed track';
-    await expect(env.handoff.capture(next)).rejects.toThrow("Can't change a track that holds shots yet. Your edit was undone.");
+    await expect(env.handoff.capture(next)).rejects.toThrow("Can't change a track that holds shots yet.");
     expect(env.session.getDocument()).toEqual(env.initial.canonicalDocument);
     await env.session.dispose();
   });

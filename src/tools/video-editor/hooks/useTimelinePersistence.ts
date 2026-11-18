@@ -1629,6 +1629,9 @@ export function useTimelinePersistence({
         if (reloadCancelledRef.current) {
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
+        // A refused save is queued durably and would refuse every later edit. Taking the latest version
+        // drops it, with whatever was built on it; a "keep" reload has already resent it.
+        if (!options?.preserveDraft) await session.localDocumentSave?.discharge?.('latest');
 
         const loaded = provider.saveTimelineAtHead && provider.loadReferencedTimeline
           ? await provider.loadReferencedTimeline(timelineId)
@@ -1785,7 +1788,11 @@ export function useTimelinePersistence({
     }
 
     try {
-      if (session.localDocumentSave && persistenceEnabled) {
+      if (session.localDocumentSave?.discharge && persistenceEnabled) {
+        // The durable outbox holds the refused save: resend it on the latest head. If it is refused
+        // again the card stays, and "Use latest version" can still discharge it.
+        await session.localDocumentSave.discharge('keep');
+      } else if (session.localDocumentSave && persistenceEnabled) {
         // Native rejection can already have rolled the display back to the
         // latest canonical document. The scheduled edit owns the durable
         // draft and its original CAS base; copying the display would erase it.

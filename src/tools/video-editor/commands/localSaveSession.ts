@@ -60,6 +60,13 @@ const clone = <T>(value: T): T => structuredClone(value);
 const errorMessage = (error: unknown) => error instanceof Error ? error.message : String(error);
 const rejectionKind = (error: OutboxJson | undefined): string | undefined => error && typeof error === 'object' && !Array.isArray(error) && typeof error.kind === 'string'
   ? error.kind : undefined;
+/** The Runtime's typed reason for a refusal (details.reason), never its prose. */
+const rejectionReason = (error: OutboxJson | undefined): string | undefined => {
+  const details = error && typeof error === 'object' && !Array.isArray(error) ? error.details : undefined;
+  return details && typeof details === 'object' && !Array.isArray(details) && typeof details.reason === 'string' ? details.reason : undefined;
+};
+/** A head that keeps moving under one change stops being contention; hand it to the user after this many rebases. */
+const MAX_STALE_HEAD_REBASES = 5;
 const rejectionMessage = (error: OutboxJson | undefined): string => error && typeof error === 'object' && !Array.isArray(error) && typeof error.message === 'string'
   ? error.message : 'This change could not be saved.';
 
@@ -118,6 +125,7 @@ export async function createLocalSaveSession(options: Options) {
   let adoptedAcceptance: string | undefined;
   let replaying = false;
   let recoveryError: unknown;
+  let staleHeadRebases = 0;
   let writeError: unknown;
   let state: LocalSaveState = { status: 'saved', recoverableOwners: [] };
 
@@ -169,10 +177,24 @@ export async function createLocalSaveSession(options: Options) {
     return false;
   }
 
+  // Resend the rejected chain unchanged, on the head the Runtime has now. The Runtime revalidates the
+  // original commands there; a real clash comes back as a new refusal the user can discharge.
+  async function rebaseOntoLatest() {
+    const latest = await options.loadLatest();
+    checkBasis(latest);
+    if (closed) throw new Error('Local save session is closed');
+    record = await box!.rebaseRejected(record!.intents.map((intent) => intent.id), latest.head, () => !closed);
+  }
+
   async function rollback() {
     const failure = record?.pending?.outcome;
     if (failure?.kind !== 'rejected') return false;
     if (rejectionKind(failure.error) === 'too_large') return discardOversized(failure.error);
+    if (rejectionReason(failure.error) === 'stale_head' && staleHeadRebases < MAX_STALE_HEAD_REBASES) {
+      staleHeadRebases++;
+      try { await rebaseOntoLatest(); return false; }
+      catch { /* The latest head could not be read: fall through and let the user decide. */ }
+    }
     const inverse = record?.intents.some((intent) => {
       const commands = saveOf(intent.payload).commands;
       return commands?.some((command) => command.op === 'timeline.inverse') ?? false;
@@ -272,6 +294,7 @@ export async function createLocalSaveSession(options: Options) {
         if (record.accepted && record.accepted.intentId !== acceptedId) {
           const result = record.accepted.value as unknown as TimelineCommitResult;
           basis = { head: result.accepted, canonicalDocument: result.canonicalDocument, graph: result.graph };
+          staleHeadRebases = 0;
           delete state.notice;
         }
         if (await rollback()) return;
@@ -302,7 +325,7 @@ export async function createLocalSaveSession(options: Options) {
         checkBasis(basis);
       }
       box = claimed;
-      state = { status: 'saved', recoverableOwners: [], ownerId: id };
+      state = { status: 'saved', recoverableOwners: state.recoverableOwners.filter((owner) => owner !== id), ownerId: id };
       // A recovered accepted prefix must win over its old optimistic suffix,
       // including when the next request already has uncertain durable bytes.
       replaying = !!record.accepted && record.intents.length > 0;
@@ -391,8 +414,47 @@ export async function createLocalSaveSession(options: Options) {
       if (state.status !== 'saved') throw new Error('Local saves remain unacknowledged; draft retained');
       return clone(basis);
     },
+    /**
+     * Leave a refused save. `latest` drops the rejected change and everything built on it and adopts the
+     * accepted head; `keep` resends them on the latest head and resolves when that save settles. Does nothing
+     * when nothing is rejected.
+     */
+    async discharge(mode: 'latest' | 'keep') {
+      assertOpen();
+      if (sending) await sending.catch(() => {});
+      if (closed) return;
+      record = await box!.read();
+      if (record.pending?.outcome?.kind !== 'rejected') return;
+      const ids = record.intents.map((intent) => intent.id);
+      const at = generation;
+      staleHeadRebases = 0;
+      if (mode === 'keep') {
+        await rebaseOntoLatest();
+        publish('dirty');
+        await pump();
+        return;
+      }
+      record = await box!.resolveRejected(ids, undefined, () => !closed);
+      delete state.notice;
+      publish('saved');
+      try { await resetToCanonical(at); }
+      catch (error) {
+        publish('error', { message: `Removed change; reload failed: ${errorMessage(error)}` });
+        throw error;
+      }
+    },
     async recover(ownerId: string) {
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');
+      if (box) {
+        // Several editor sessions can each leave work behind. Recover them one at a time, each only
+        // after the previous owner has fully settled, so a later one is rebased onto what landed.
+        if (state.status !== 'saved') throw new Error('Finish the current owner before recovering another');
+        const remaining = state.recoverableOwners;
+        release?.();
+        await lifetime;
+        box = undefined; lifetime = undefined; release = undefined;
+        state = { ...state, status: 'recovery', recoverableOwners: remaining };
+      }
       await claim(ownerId);
       await pump();
     },

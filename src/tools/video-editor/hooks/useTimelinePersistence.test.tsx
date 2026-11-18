@@ -2216,6 +2216,34 @@ describe('useTimelinePersistence — interaction gating', () => {
     }
   });
 
+  it.each(['keep', 'latest'] as const)('%s discharges a refused native save and leaves the conflict card', async (mode) => {
+    const handoff = {
+      capture: vi.fn(async () => {}),
+      flush: vi.fn(async () => { throw new TimelineVersionConflictError(); }),
+      discharge: vi.fn(async () => {}),
+      remoteHistoryAvailable: () => false, canUndo: () => false, canRedo: () => false,
+      undo: vi.fn(), redo: vi.fn(),
+    } satisfies TimelineLocalSaveHandoff;
+    const harness = setup({ persistenceEnabled: true, localDocumentSave: handoff });
+    try {
+      harness.scheduleSave(makeTimelineData('refused-native-save'));
+      await act(async () => {
+        await expect(harness.result.current.flushPendingSave()).rejects.toThrow(TimelineVersionConflictError);
+      });
+      expect(harness.result.current.isConflictExhausted).toBe(true);
+      // No one-slot draft is needed: the durable outbox owns the refused save.
+      await clearTimelineDraft('timeline-1');
+      await act(async () => {
+        if (mode === 'keep') await harness.result.current.retrySaveAfterConflict();
+        else await harness.reloadFromServer();
+      });
+      expect(handoff.discharge).toHaveBeenCalledExactlyOnceWith(mode);
+      expect(harness.result.current.isConflictExhausted).toBe(false);
+    } finally {
+      harness.unmount();
+    }
+  });
+
   it('direct reload adopts server state and clears a diverged recovery draft', async () => {
     const harness = setup({ persistenceEnabled: true });
     harness.scheduleSave(makeTimelineData('local-before-reload'));

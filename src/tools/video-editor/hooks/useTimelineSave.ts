@@ -924,7 +924,8 @@ export function useTimelineSave(
     data: commit.data,
     dataRef: commit.dataRef,
     isConflictExhausted: persistence.isConflictExhausted,
-    saveNotice: localSaveNotice(localSaveState),
+    saveNotice: localSaveNotice(localSaveState)
+      ?? (persistence.saveError ? `This change was not saved. ${persistence.saveError}` : null),
     selectedClipId: commit.selectedClipId,
     selectedTrackId: commit.selectedTrackId,
     saveStatus: localSaveState && (['blocked', 'conflict', 'error', 'recovery', 'retry'].includes(localSaveState.status) || localSaveState.notice)

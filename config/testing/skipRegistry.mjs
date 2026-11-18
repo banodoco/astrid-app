@@ -141,6 +141,29 @@ export const LANES = {
 
 export const DECLARED_TAG = /\[declared:([a-z0-9-]+)\]/;
 
+// Vitest expected failures are identified by exact repository-relative file and
+// full suite/test title, and carry the same quarantine metadata as journey cases.
+// The runtime reporter checks the selected files against this registry.
+export const VITEST_EXPECTED_FAILURES = [];
+
+/** Equality for the files selected by this run; unrelated focused files need not run. */
+export function expectedFailureProblems(observed, selectedFiles, registry = VITEST_EXPECTED_FAILURES) {
+  const key = (entry) => JSON.stringify([entry.file, entry.title]);
+  const registered = new Set(registry.map(key));
+  const seen = new Set();
+  const problems = [];
+  for (const entry of observed) {
+    const id = key(entry);
+    if (!registered.has(id)) problems.push(`UNDECLARED EXPECTED FAILURE ${entry.file} > ${entry.title}`);
+    if (seen.has(id)) problems.push(`DUPLICATE EXPECTED FAILURE ${entry.file} > ${entry.title}`);
+    seen.add(id);
+  }
+  for (const entry of registry) {
+    if (selectedFiles.has(entry.file) && !seen.has(key(entry))) problems.push(`MISSING EXPECTED FAILURE ${entry.file} > ${entry.title}`);
+  }
+  return problems;
+}
+
 export function declaredTag(name) {
   if (!Object.hasOwn(SKIP_REGISTRY, name)) throw new Error(`skip "${name}" is not declared in config/testing/skipRegistry.mjs`);
   return `[declared:${name}] ${SKIP_REGISTRY[name].reason}`;
@@ -169,11 +192,14 @@ export function laneIsRequired(name) {
   return Boolean(lane) && (process.env.ASTRID_REQUIRE_LANES ?? '').split(',').map((part) => part.trim()).includes(lane);
 }
 
-/** Splits `{ name, reason }` skip entries into declared and undeclared, and formats the report. */
-export function classifySkips(entries) {
+/** Classifies labels; runners supply an item-binding check before trusting a label. */
+export function classifySkips(entries, isBound) {
   const declared = [];
   const undeclared = [];
-  for (const entry of entries) (declaredName(entry.reason) ? declared : undeclared).push(entry);
+  for (const entry of entries) {
+    const name = declaredName(entry.reason);
+    (name && (!isBound || isBound(entry, name)) ? declared : undeclared).push(entry);
+  }
   return { declared, undeclared };
 }
 

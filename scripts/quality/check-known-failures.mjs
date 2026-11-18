@@ -4,10 +4,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { globSync } from 'tinyglobby';
+import { ALL_VITEST_INCLUDE } from '../../config/testing/vitestIncludes.mjs';
+import { VITEST_EXPECTED_FAILURES } from '../../config/testing/skipRegistry.mjs';
+import { inspectTestSource } from './lib/test-source.mjs';
 
 const DEFAULT_REPO_ROOT = path.resolve(import.meta.dirname, '../..');
 export const MAX_SRC_ENTRIES = 0;
-const MARKER_RE = /\b(?:it|test)\.fails?\b/;
 const EXCEPTIONS_FILE = path.join(DEFAULT_REPO_ROOT, 'config/testing/direct-journey-expected-failures.json');
 // Plan 39 quarantine rule. Each entry: { id (the Plan 39 item), file, title, issue, owner, expiry }. A marker is allowed
 // only inside the test with exactly that title, in that file, directly under a comment line naming the entry id; no other
@@ -17,62 +20,26 @@ export const MAX_QUARANTINE_ENTRIES = 10;
 export const MAX_EXPIRY_DAYS = 14;
 export const REQUIRED_FIELDS = ['id', 'file', 'title', 'issue', 'owner', 'expiry'];
 export const DIRECT_JOURNEY_EXCEPTIONS = Object.values(JSON.parse(fs.readFileSync(EXCEPTIONS_FILE, 'utf8'))).flat();
-function listFiles(dir, namePattern) {
-  if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) return listFiles(full, namePattern);
-    return namePattern.test(entry.name) ? [full] : [];
-  });
-}
-
 function scanFile(file, repoRoot, exceptions) {
-  const lines = fs.readFileSync(file, 'utf8').split('\n');
   const rel = path.relative(repoRoot, file).split(path.sep).join('/');
-  const markers = lines.flatMap((line, index) => {
-    if (!MARKER_RE.test(line)) return [];
-    return [...line.matchAll(/\b(?:it|test)\.fails?\b/g)].map((match) => {
-      const where = `${rel}:${index + 1}`;
-      const call = line.slice(match.index + match[0].length)
-        .match(/^\s*\(\s*(['"])(.*?)\1/);
-      let enclosingTitle;
-      for (let i = index; i >= 0; i--) {
-        const header = lines[i].match(/^\s*test(?:\.\w+)?\(\s*(['"])(.*?)\1\s*,/);
-        if (header) { enclosingTitle = header[2].replace(/\\(['"])/g, '$1'); break; }
-      }
-      return {
-        where,
-        enclosingTitle,
-        previousLine: lines[index - 1] ?? '',
-        name: call?.[2],
-      };
-    });
-  });
-
-  const perException = new Map();
+  const markers = inspectTestSource(file).expectedFailures;
   const exceptionOf = (marker) => exceptions.find((item) => item.file === rel
-    && item.title === marker.enclosingTitle && marker.previousLine.includes(item.id));
+    && item.title === (marker.kind === 'vitest' ? marker.fullTitle : marker.title)
+    && (marker.kind === 'vitest' || marker.previousLine.includes(item.id)));
+  const counts = new Map();
   for (const marker of markers) {
     const item = exceptionOf(marker);
-    if (item) perException.set(item, (perException.get(item) ?? 0) + 1);
+    if (item) counts.set(item, (counts.get(item) ?? 0) + 1);
   }
-
   return markers.map((marker) => {
     const item = exceptionOf(marker);
-    if (item && perException.get(item) === 1) {
-      return {
-        where: marker.where,
-        status: 'ALLOWED',
-        detail: `named exception ${item.id}`,
-        name: item.title,
-        exceptionId: item.id,
-      };
-    }
+    const allowed = item && counts.get(item) === 1;
     return {
-      where: marker.where,
-      status: 'FORBIDDEN',
-      detail: 'expected-failure marker',
-      name: marker.name,
+      where: `${rel}:${marker.line}`,
+      status: allowed ? 'ALLOWED' : 'FORBIDDEN',
+      detail: allowed ? `named exception ${item.id}` : 'expected-failure marker',
+      name: marker.fullTitle ?? marker.title,
+      ...(allowed ? { exceptionId: item.id } : {}),
     };
   });
 }
@@ -104,17 +71,16 @@ export function validateExceptions(exceptions, today = new Date()) {
   return problems;
 }
 
-export function checkKnownFailures({ repoRoot = DEFAULT_REPO_ROOT, requireAllExceptions = false, exceptions = DIRECT_JOURNEY_EXCEPTIONS, today = new Date() } = {}) {
+export function checkKnownFailures({ repoRoot = DEFAULT_REPO_ROOT, requireAllExceptions = false, exceptions = [...DIRECT_JOURNEY_EXCEPTIONS, ...VITEST_EXPECTED_FAILURES], today = new Date(), include = ALL_VITEST_INCLUDE } = {}) {
   const entries = [];
 
-  const srcEntries = listFiles(path.join(repoRoot, 'src'), /\.test\.tsx?$/)
-    .flatMap((file) => scanFile(file, repoRoot, exceptions));
-  entries.push(...srcEntries);
-
-  for (const file of listFiles(path.join(repoRoot, 'tests'), /\.spec\.ts$/)) {
-    const found = scanFile(file, repoRoot, exceptions);
-    entries.push(...found);
-  }
+  // Use the same include globs as Vitest, including JS and edge functions. Scan
+  // all declared lanes, even when this invocation selects only the default lane.
+  const files = globSync([...include, 'tests/**/*.spec.ts'], {
+    cwd: repoRoot, absolute: true, onlyFiles: true,
+    ignore: ['**/node_modules/**', '**/.git/**'],
+  }).sort();
+  for (const file of files) entries.push(...scanFile(file, repoRoot, exceptions));
 
   const allowedEntries = entries.filter((entry) => entry.status === 'ALLOWED');
   const forbiddenEntries = entries.filter((entry) => entry.status === 'FORBIDDEN');

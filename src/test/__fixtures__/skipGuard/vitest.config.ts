@@ -6,5 +6,5 @@ import SkipGuardReporter from '../../../../config/testing/skipGuardReporter';
 export default defineConfig({
   root: __dirname,
   resolve: { alias: { '@': path.resolve(__dirname, '../../..') } },
-  test: { include: ['*.fixture.ts'], allowOnly: false, reporters: ['default', new SkipGuardReporter()] },
+  test: { include: ['*.fixture.ts'], allowOnly: false, includeTaskLocation: true, reporters: ['default', new SkipGuardReporter()] },
 });

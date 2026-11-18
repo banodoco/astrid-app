@@ -139,30 +139,6 @@ schema:
           type: number
         border:
           type: string
-    feather:
-      description: 'Soften the inset rect''s edges to transparent so the background field shows through (a CSS mask). One size for every edge, or {left, top, right, bottom}; a size <= 1 is a fraction of the frame width, larger is px. A key in insetKeys can carry its own feather.'
-      oneOf:
-        - type: number
-        - type: object
-          properties:
-            left: {type: number}
-            top: {type: number}
-            right: {type: number}
-            bottom: {type: number}
-    insetKeys:
-      type: array
-      description: 'Animate the inset rect: keyframes {at (clip frame), x, y, w, h (canvas px), ease (easeOut default, or linear)}. Each segment eases with the ease of the key it arrives at; the rect holds outside the keys. radius, shadow and border come from inset.'
-      items:
-        type: object
-        required: [at, x, y, w, h]
-        properties:
-          at: {type: integer, minimum: 0}
-          x: {type: number}
-          y: {type: number}
-          w: {type: number}
-          h: {type: number}
-          feather: {}
-          ease: {type: string, enum: [linear, easeOut]}
     tint:
       type: object
       properties:

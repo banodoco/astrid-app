@@ -253,8 +253,7 @@ const parseCamera = (items: unknown[] | undefined): CameraStep[] =>
     const focus = obj(c.focus);
     return {
       at: frameOf(c.at),
-      zoom: Math.min(8, Math.max(1, finiteNumber(c.zoom, 1))),
-      ease: c.ease === 'linear' ? 'linear' : undefined,
+      zoom: integerIn(c.zoom, 1, 3, 1),
       fx: finiteNumber(focus.x, Number.NaN),
       fy: finiteNumber(focus.y, Number.NaN),
     };

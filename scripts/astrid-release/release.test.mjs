@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, truncateSync, utimesSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { test } from 'node:test';
 import { branch, fixture, inventory, put } from './release-fixture.mjs';
@@ -171,3 +172,144 @@ for (const [door, message] of [['17340', /protected live port/], ['017340', /Inv
     assert.deepEqual(inventory(f.root), before);
   });
 }
+
+test('R1: canonical live-data overlap refuses before cleanup or stop', async (t) => {
+  const f = fixture(t, { installed: false, realm: false });
+  const live = path.join(f.root, 'data/shared-live');
+  const database = path.join(live, 'runtime/realms/live/realm.sqlite3');
+  put(database, 'PRIVATE LIVE FIXTURE MUST SURVIVE\n');
+  const alias = path.join(f.dir, 'live-alias');
+  symlinkSync(live, alias, 'dir');
+  put(path.join(f.home, '.local/share/astrid/install.json'), JSON.stringify({ data_root: alias }));
+  const alive = await f.startProcess();
+  const before = inventory(f.root);
+  const r = f.run('update');
+  assert.notEqual(r.status, 0);
+  assert.equal(existsSync(database), true, 'the database named by the configured live record must survive');
+  assert.equal(alive(), true);
+  assert.deepEqual(f.events(), []);
+  assert.deepEqual(inventory(f.root), before);
+  assert.equal(readFileSync(database, 'utf8'), 'PRIVATE LIVE FIXTURE MUST SURVIVE\n');
+  assert.match(r.output, /live.*overlap|overlap.*live/i);
+});
+
+test('R1: unexplained existing data is not an interrupted first install', async (t) => {
+  const f = fixture(t, { installed: false, realm: false });
+  rmSync(path.join(f.root, 'state/first-install.json'));
+  put(path.join(f.root, 'program/partial'), 'not disposable without ownership evidence');
+  const alive = await f.startProcess();
+  const before = inventory(f.root);
+  const r = f.run('update');
+  assert.notEqual(r.status, 0);
+  assert.equal(alive(), true);
+  assert.deepEqual(f.events(), []);
+  assert.deepEqual(inventory(f.root), before);
+  assert.match(r.output, /unexplained|identified interrupted first install/i);
+});
+
+test('R1: a genuinely new root records first-install ownership before installation', (t) => {
+  const f = fixture(t, { installed: false, realm: false });
+  rmSync(path.join(f.root, 'state/first-install.json'));
+  rmSync(path.join(f.root, 'data'), { recursive: true });
+  const r = f.run();
+  assert.match(r.output, /fixture: installer decision recorded/);
+  assert.equal(f.events().length, 1);
+  const marker = JSON.parse(readFileSync(path.join(f.root, 'state/first-install.json'), 'utf8'));
+  assert.deepEqual(marker, { version: 1, branch, program_root: path.join(f.root, 'program'), data_root: path.join(f.root, 'data') });
+});
+
+test('R2: depth-one file transport preserves connectivity across two new App commits', (t) => {
+  const f = fixture(t, { shallow: true });
+  const editor = path.join(f.root, 'editor');
+  assert.equal(spawnSync('git', ['-C', editor, 'rev-parse', '--is-shallow-repository'], { encoding: 'utf8' }).stdout.trim(), 'true');
+  f.moveApp('first movement\n');
+  const target = f.moveApp('second movement\n');
+  const r = f.run('update');
+  assert.match(r.output, /fixture: Runtime handoff reached/);
+  assert.deepEqual(f.events(), []);
+  assert.equal(spawnSync('git', ['-C', editor, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim(), target);
+  const fsck = spawnSync('git', ['-C', editor, 'fsck', '--connectivity-only'], { encoding: 'utf8' });
+  assert.equal(fsck.status, 0, fsck.stdout + fsck.stderr);
+});
+
+test('R3: occupied non-checkout editor refuses before stopping its child', async (t) => {
+  const f = fixture(t);
+  const alive = await f.startProcess();
+  renameSync(path.join(f.root, 'editor/.git'), path.join(f.dir, 'saved-editor-git'));
+  f.moveApp();
+  const before = inventory(f.root);
+  const r = f.run('update');
+  assert.notEqual(r.status, 0);
+  assert.equal(alive(), true);
+  assert.deepEqual(inventory(f.root), before);
+  assert.deepEqual(f.events(), []);
+  assert.match(r.output, /editor.*(occupied|checkout|unusable)/i);
+});
+
+test('R3: genuinely empty editor destination accepts the prepared checkout without nesting', (t) => {
+  const f = fixture(t, { installed: false, realm: false });
+  rmSync(path.join(f.root, 'editor'), { recursive: true });
+  mkdirSync(path.join(f.root, 'editor'));
+  const r = f.run();
+  assert.match(r.output, /fixture: installer decision recorded/);
+  assert.equal(f.events().length, 1);
+  assert.equal(existsSync(path.join(f.root, 'editor/.git')), true);
+  assert.equal(existsSync(path.join(f.root, 'editor/editor')), false);
+});
+
+for (const alias of [false, true]) {
+  test(`R5: preflight leaves internal TMPDIR metadata unchanged (alias=${alias})`, async (t) => {
+    const f = fixture(t);
+    const alive = await f.startProcess();
+    f.config.agent = 'b'.repeat(40); f.writeConfig();
+    const internal = path.join(f.root, 'tmp');
+    const temp = alias ? path.join(f.dir, 'temp-alias') : internal;
+    if (alias) symlinkSync(internal, temp, 'dir');
+    utimesSync(internal, new Date('2020-01-01T00:00:00Z'), new Date('2020-01-01T00:00:00Z'));
+    const before = inventory(f.root);
+    const mtime = statSync(internal, { bigint: true }).mtimeNs;
+    const r = f.run('update', { TMPDIR: temp });
+    assert.notEqual(r.status, 0);
+    assert.match(r.output, /manifest changed/);
+    assert.equal(alive(), true);
+    assert.deepEqual(inventory(f.root), before);
+    assert.equal(statSync(internal, { bigint: true }).mtimeNs, mtime, 'transient preflight writes inside ROOT are forbidden');
+  });
+}
+
+test('R6: changed pins print all rebuild steps even when the installed door is occupied', (t) => {
+  const f = fixture(t);
+  f.config.agent = 'b'.repeat(40); f.config.busy = [19501]; f.writeConfig();
+  const before = inventory(f.root);
+  const r = f.run('update');
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /manifest changed/);
+  assert.ok(r.output.includes(`1) astrid-release stop ${branch}`), r.output);
+  assert.ok(r.output.includes(`2) keep the data: cp -c -R ${path.join(f.root, 'data')}`), r.output);
+  assert.ok(r.output.includes(`3) delete ${f.root} and run astrid-release ${branch} again`), r.output);
+  assert.deepEqual(inventory(f.root), before);
+  assert.deepEqual(f.events(), []);
+});
+
+test('R6: Runtime-only installed-manifest drift refuses even when both branch heads are unchanged', async (t) => {
+  const f = fixture(t);
+  const alive = await f.startProcess();
+  const installed = { ...f.manifest, runtime: { ...f.manifest.runtime, sha: 'f'.repeat(40) } };
+  put(path.join(f.root, 'program/versions/fixture-version/manifest.json'), JSON.stringify(installed));
+  const before = inventory(f.root);
+  const r = f.run('update');
+  assert.notEqual(r.status, 0);
+  assert.match(r.output, /manifest changed/);
+  assert.equal(alive(), true);
+  assert.deepEqual(inventory(f.root), before);
+});
+
+test('R7: install budget uses selected logical database size and rounds up', (t) => {
+  const f = fixture(t, { installed: false, realm: false });
+  truncateSync(path.join(f.home, 'live/runtime/realms/live/realm.sqlite3'), 100 * 1024 * 1024 + 1);
+  f.config.freeKb = 10241 * 1024; f.writeConfig();
+  const r = f.run();
+  assert.notEqual(r.status, 0);
+  assert.deepEqual(f.events(), []);
+  assert.match(r.output, /10441 MB needed/);
+});

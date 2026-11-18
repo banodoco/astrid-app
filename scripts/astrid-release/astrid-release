@@ -146,6 +146,14 @@ if [[ "$CMD" == status ]]; then
   exit 0
 fi
 
+# Every mutating command first proves that its canonical destinations are isolated.
+[[ ! -L "$ROOT" ]] || fail 'The root must not be a symlink.'
+ROOT="$(/usr/bin/python3 -I -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ROOT")"
+STATE="$ROOT/state"; LOGS="$ROOT/logs"; APP="$ROOT/editor"; PROGRAM="$ROOT/program"; DATA="$ROOT/data"
+LIVE_RECORD="$HOME/.local/share/astrid/install.json"
+release_state() { /usr/bin/python3 -I "$SCRIPT_DIR/release-state.py" "$1" "$ROOT" "$LIVE_RECORD" "${@:2}"; }
+live_data_root="$(release_state layout)" || fail 'Release/live path isolation could not be established; nothing stopped or written.'
+
 # ---------- stop ----------
 if [[ "$CMD" == stop ]]; then
   [[ -d "$STATE" ]] || { say "No stack for $BRANCH."; exit 0; }
@@ -160,15 +168,15 @@ fi
 for tool in sqlite3 python3; do command -v "$tool" >/dev/null || fail "$tool is required."; done
 for tool in git node npm curl lsof shasum awk; do command -v "$tool" >/dev/null || fail "$tool is required."; done
 NODE_BIN="$(dirname "$(command -v node)")"
-[[ ! -L "$ROOT" ]] || fail 'The root must not be a symlink.'
-ROOT="$(/usr/bin/python3 -c 'import os,sys; print(os.path.realpath(sys.argv[1]))' "$ROOT")"
-[[ "$ROOT" != / && "$ROOT" != "$(cd -P -- "$HOME" && pwd -P)" ]] || fail 'Unsafe root.'
-STATE="$ROOT/state"; LOGS="$ROOT/logs"; APP="$ROOT/editor"; PROGRAM="$ROOT/program"; DATA="$ROOT/data"
 
 resolve_heads
 say "Release $BRANCH, root $ROOT"
 print_heads
 
+# Missing current/realm markers alone are not evidence that existing data is disposable.
+if [[ ! -f "$PROGRAM/current" && ! -e "$STATE/realm-id" ]]; then
+  release_state disposable "$BRANCH" || fail 'First-install cleanup is not authorized by this root state.'
+fi
 running=0; is_running && running=1
 [[ "$CMD" != up || "$running" != 1 ]] || fail "Already running. Use: astrid-release update $BRANCH"
 heads_unchanged=0
@@ -188,21 +196,8 @@ fi
 [[ ! -e "$STATE/realm-id" || -f "$PROGRAM/current" ]] \
   || fail 'A realm copy exists (state/realm-id), but the installed program is incomplete. Keeping program/ and data/; use the documented stop, data-clone and rebuild steps.'
 
-# Ports (editor, discovery proxy, door). A running stack keeps its own; a stopped one keeps them if still free.
-picked() { local p="$1" end="$2"; shift 2; for ((; p<=end; p++)); do
-    case " $PROTECTED $* " in *" $p "*) continue ;; esac
-    listening "$p" && continue
-    echo "$p"; return 0; done; fail 'No free port.'; }
-keep=0
-if saved_ports; then
-  keep=1
-  for q in "$APP_PORT" "$PROXY_PORT" "$DOOR_PORT"; do
-    [[ "$q" =~ ^[1-9][0-9]*$ && "$q" -le 65535 ]] || keep=0
-    case " $PROTECTED " in *" $q "*) keep=0 ;; esac
-  done
-  if [[ "$running" != 1 ]]; then for q in $APP_PORT $PROXY_PORT $DOOR_PORT; do if listening "$q"; then keep=0; fi; done; fi
-fi
-installed_door=""
+# Validate the installed pointer/door once. Availability is a start decision, after pin refusal.
+installed_version=""; installed_door=""; DOOR_PORT=""
 if [[ -f "$PROGRAM/current" ]]; then  # the installed program owns the door port; never re-pick it
   installed_version="$(cat "$PROGRAM/current")"
   [[ "$installed_version" != *[!A-Za-z0-9._-]* && -n "$installed_version" ]] || fail 'Invalid installed version pointer.'
@@ -210,35 +205,43 @@ if [[ -f "$PROGRAM/current" ]]; then  # the installed program owns the door port
     || fail 'Cannot read the installed door port; not replacing it.'
   [[ "$installed_door" =~ ^[1-9][0-9]*$ && "$installed_door" -le 65535 ]] || fail 'Invalid installed door port.'
   case " $PROTECTED " in *" $installed_door "*) fail 'The installed door uses a protected live port.' ;; esac
-  if [[ "$running" != 1 ]] && listening "$installed_door"; then fail "Installed door $installed_door is occupied; stop this stack or the conflicting process before starting it. The door was not changed."; fi
   DOOR_PORT="$installed_door"
-  [[ "$DOOR_PORT" != "${APP_PORT:-}" && "$DOOR_PORT" != "${PROXY_PORT:-}" ]] || keep=0
 fi
-if [[ "$keep" != 1 ]]; then
-  APP_PORT="$(picked 2400 2499 "$installed_door")"
-  PROXY_PORT="$(picked 17500 17599 "$APP_PORT" "$installed_door")"
-  DOOR_PORT="${installed_door:-$(picked 17500 17599 "$APP_PORT" "$PROXY_PORT")}"
-fi
-say "Ports editor/proxy/door: $APP_PORT,$PROXY_PORT,$DOOR_PORT"
 
 # Budget 10 GiB for program (~3.6 GB), isolated home/cache (~3.6 GB), editor (~0.7 GB) and headroom,
 # plus twice the live realm database. Later checks cover the remaining npm/snapshot work separately.
-live_data_root="$(/usr/bin/python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["data_root"])' "$HOME/.local/share/astrid/install.json")"
 [[ -d "$live_data_root/runtime/realms" ]] || fail "No live realm under $live_data_root."
 need_disk() { # megabytes
-  local free_kb; free_kb="$(df -Pk "$ROOT" | awk 'NR==2 {print $4}')"
+  local free_kb parent="$ROOT"
+  while [[ ! -d "$parent" ]]; do parent="$(dirname "$parent")"; done
+  free_kb="$(df -Pk "$parent" | awk 'NR==2 {print $4}')"
   [[ "$free_kb" -ge $(($1 * 1024)) ]] || fail "Not enough disk: $((free_kb / 1024)) MB free, $1 MB needed for the next step."
 }
-db_kb="$(du -sk "$live_data_root"/runtime/realms/*/realm.sqlite3 2>/dev/null | awk '{s+=$1} END {print s+0}')"
+. "$SCRIPT_DIR/realm-snapshot.sh"
+install_need_bytes=$((10 * 1024 * 1024 * 1024))
+if [[ -f "$live_data_root/runtime/catalog.json" ]]; then
+  install_need_bytes="$(REALM_FREE_FLOOR_BYTES="$install_need_bytes" realm_required_bytes "$live_data_root")" \
+    || fail 'Cannot measure the selected live realm database; nothing stopped or written.'
+fi
+install_need_mb=$(((install_need_bytes + 1024 * 1024 - 1) / (1024 * 1024)))
 
 # Prepare outside ROOT: a refused update must not even alter editor/.git or state/.
-bootstrap_work="$(mktemp -d "${TMPDIR:-/tmp}/astrid-release-preflight.XXXXXXXX")"
+bootstrap_work="$(release_state scratch)" || fail 'Cannot prepare in an external scratch directory.'
 trap 'rm -rf -- "$bootstrap_work"' EXIT
 APP_SOURCE="$APP"
-if [[ -d "$APP/.git" ]]; then
+editor_checkout=0
+if [[ -e "$APP" || -L "$APP" ]]; then
+  if [[ -d "$APP/.git" || -f "$APP/.git" ]] \
+      && [[ "$(git -C "$APP" rev-parse --show-toplevel 2>/dev/null)" == "$APP" ]]; then
+    editor_checkout=1
+  elif [[ ! -d "$APP" || -n "$(find "$APP" -mindepth 1 -maxdepth 1 -print -quit)" ]]; then
+    fail "Editor destination $APP is occupied but is not a usable checkout; nothing stopped or changed."
+  fi
+fi
+if [[ "$editor_checkout" == 1 ]]; then
   [[ -z "$(GIT_OPTIONAL_LOCKS=0 git -C "$APP" status --porcelain --untracked-files=no)" ]] || fail "Editor source in $APP has changes; not overwriting."
 fi
-if [[ ! -d "$APP/.git" ]] || ! git -C "$APP" cat-file -e "$APP_SHA^{commit}" 2>/dev/null; then
+if [[ "$editor_checkout" != 1 ]] || ! git -C "$APP" cat-file -e "$APP_SHA^{commit}" 2>/dev/null; then
   APP_SOURCE="$bootstrap_work/editor"
   git clone --quiet --depth 1 --single-branch --branch "$APP_REF" https://github.com/banodoco/astrid-app.git "$APP_SOURCE"
   [[ "$(git -C "$APP_SOURCE" rev-parse HEAD)" == "$APP_SHA" ]] || fail 'The App tip moved while fetching; rerun.'
@@ -274,9 +277,7 @@ clean_env() {
 }
 # Decide before stopping anything. Never invoke the installer's --update on this stack.
 need_install=1; AS_BUILT=0
-if [[ -f "$PROGRAM/current" ]]; then
-  installed_version="$(cat "$PROGRAM/current")"
-  [[ "$installed_version" != *[!A-Za-z0-9._-]* && -n "$installed_version" ]] || fail 'Invalid installed version pointer.'
+if [[ -n "$installed_version" ]]; then
   if clean_env node --input-type=module - "$PROGRAM/versions/$installed_version" "$bootstrap_work/manifest.json" "$DOOR_PORT" <<'PINSCHECK'
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
@@ -308,14 +309,46 @@ if [[ "$CMD" == update && "$heads_unchanged" == 1 && "$need_install" == 0 && "$r
   exit 0
 fi
 
+# Ports are chosen only after a changed-pin update has printed its rebuild instructions.
+picked() { local p="$1" end="$2"; shift 2; for ((; p<=end; p++)); do
+    case " $PROTECTED $* " in *" $p "*) continue ;; esac
+    listening "$p" && continue
+    echo "$p"; return 0; done; fail 'No free port.'; }
+keep=0
+if saved_ports; then
+  keep=1
+  for q in "$APP_PORT" "$PROXY_PORT" "$DOOR_PORT"; do
+    [[ "$q" =~ ^[1-9][0-9]*$ && "$q" -le 65535 ]] || keep=0
+    case " $PROTECTED " in *" $q "*) keep=0 ;; esac
+  done
+  if [[ "$running" != 1 ]]; then for q in $APP_PORT $PROXY_PORT $DOOR_PORT; do if listening "$q"; then keep=0; fi; done; fi
+fi
+if [[ -n "$installed_door" ]]; then
+  if [[ "$running" != 1 ]] && listening "$installed_door"; then fail "Installed door $installed_door is occupied; stop this stack or the conflicting process before starting it. The door was not changed."; fi
+  DOOR_PORT="$installed_door"
+  [[ "$DOOR_PORT" != "${APP_PORT:-}" && "$DOOR_PORT" != "${PROXY_PORT:-}" ]] || keep=0
+fi
+if [[ "$keep" != 1 ]]; then
+  APP_PORT="$(picked 2400 2499 "$installed_door")"
+  PROXY_PORT="$(picked 17500 17599 "$APP_PORT" "$installed_door")"
+  DOOR_PORT="${installed_door:-$(picked 17500 17599 "$APP_PORT" "$PROXY_PORT")}"
+fi
+say "Ports editor/proxy/door: $APP_PORT,$PROXY_PORT,$DOOR_PORT"
+if [[ "$need_install" == 1 ]]; then
+  release_state disposable "$BRANCH" || fail 'First-install cleanup is not authorized by this root state.'
+  say "Install floor: 10240 MB needed for program/cache and headroom; the selected realm backup adds $((install_need_mb - 10240)) MB (rounded up)."
+  need_disk "$install_need_mb"
+fi
+
 # All refusals above were read-only on ROOT. Accepted changes start here.
 mkdir -p "$STATE" "$LOGS" "$ROOT/home" "$ROOT/tmp"
 if [[ "$running" == 1 ]]; then say 'Restarting this release stack only (the live stack is not touched).'; fi
 stop_stack
-if [[ ! -d "$APP/.git" ]]; then
+if [[ "$editor_checkout" != 1 ]]; then
+  [[ ! -d "$APP" ]] || rmdir "$APP"
   mv "$APP_SOURCE" "$APP"
 elif [[ "$APP_SOURCE" != "$APP" ]]; then
-  git -C "$APP" fetch --quiet "$APP_SOURCE" "$APP_SHA"
+  git -C "$APP" fetch --quiet --update-shallow "$APP_SOURCE" "$APP_SHA"
 fi
 git -C "$APP" checkout --quiet --detach "$APP_SHA"
 printf '%s,%s,%s\n' "$APP_PORT" "$PROXY_PORT" "$DOOR_PORT" > "$STATE/ports"
@@ -325,7 +358,6 @@ live_proof() { printf 'live runtime: %s | plist mtime: %s\n' "$(launchctl list 2
 live_proof > "$STATE/live-proof-before.txt"
 if [[ "$AS_BUILT" != 1 ]]; then cp "$bootstrap_work/manifest.json" "$STATE/install-manifest.json"; fi
 if [[ "$need_install" == 1 ]]; then
-  need_disk $((10 * 1024 + 2 * db_kb / 1024))
   # Consent is given up front and kept minimal: no sign-in autostart, no shell command link, no skills outside this
   # HOME. This matters: the installer's launchd label (haus.astrid.runtime) is the same global name the live
   # service uses; it is only safe because autostart is off and HOME is the isolated one. Never --managed-by:
@@ -336,6 +368,7 @@ if [[ "$need_install" == 1 ]]; then
   # The installer downloads its tools; retry up to 4 more times ONLY for a network-class failure, printing the reason.
   discard_first_install() {
     [[ ! -e "$STATE/realm-id" ]] || fail 'A realm copy exists (state/realm-id); refusing to delete program/ or data/.'
+    release_state disposable "$BRANCH" || fail 'Keeping program/ and data/: first-install ownership or live-path isolation changed.'
     stop_stack
     # A failed install can leave a managed source profile. Retaining it while removing
     # only program/ makes the installer's next attempt refuse that stale profile.
@@ -343,6 +376,7 @@ if [[ "$need_install" == 1 ]]; then
     remove_dir "$DATA"
   }
   [[ -f "$PROGRAM/current" ]] || discard_first_install
+  release_state begin "$BRANCH" || fail 'Cannot record ownership of the first installer attempt.'
   for attempt in 1 2 3 4 5; do
     rm -f "$last_run"; : > "$LOGS/install-attempt.log"
     clean_env sh "$APP/public/install" --root "$PROGRAM" --data-root "$DATA" \
@@ -362,6 +396,7 @@ if [[ "$need_install" == 1 ]]; then
     fi
     fail "The installer failed (exit code $install_code; reason: $(cut -f2 <<< "$install_report"); $(cut -f3 <<< "$install_report"); ${net_reason:+network error $net_reason, no retries left; }see $LOGS/install.log). Nothing was started."
   done
+  rm -f "$STATE/first-install.json"
   say "Installer outcome: $(cut -f4 <<< "$install_report") (current program: $(cat "$PROGRAM/current"))."
   [[ ! -e "$ROOT/home/Library/LaunchAgents/haus.astrid.runtime.plist" ]] || fail 'A launchd plist was written under the isolated HOME.'
   [[ "$(stat -f %m "$live_plist" 2>/dev/null || echo none)" == "$plist_before" ]] || fail 'The live launchd plist changed.'

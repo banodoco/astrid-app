@@ -231,50 +231,20 @@ print("realm-snapshot: verified %d media files (%d byte-compared), %d bytes" % (
 PY
 }
 
-# Repoint <dest>/runtime/catalog.json at the copied realm. See the notes in
-# README-style comment below for why this is a direct edit.
-_realm_repoint_catalog() {  # <dest_data_root> <realm_id> <realm_dir> <display_name>
-  python3 -I - "$@" <<'PY'
-import json, os, shutil, sys, tempfile
-dest, rid, rdir, name = sys.argv[1:5]
-cat = os.path.join(dest, "runtime", "catalog.json")
-c = json.load(open(cat))
-if c.get("version") != 1 or len(c.get("realms", [])) != 1:
-    sys.stderr.write("unexpected destination catalog shape; refusing to edit\n"); sys.exit(1)
-old = c["realms"][0]
-shutil.copy2(cat, cat + ".pre-realm-snapshot")
-c["selected_realm_id"] = rid
-c["realms"] = [{
-    "realm_id": rid,
-    "display_name": old.get("display_name") or name,
-    "data_root": rdir,
-    "selection_source": "attach",
-    "source_profile": old.get("source_profile", "astrid"),
-}]
-fd, tmp = tempfile.mkstemp(prefix=".catalog-", dir=os.path.dirname(cat))
-with os.fdopen(fd, "w") as f:
-    json.dump(c, f, indent=2, sort_keys=True); f.write("\n"); f.flush(); os.fsync(f.fileno())
-os.chmod(tmp, 0o600)
-os.replace(tmp, cat)
-PY
+# This helper uses the Runtime's existing bootstrap.lock and realm admission/owner
+# locks. It leaves them before the external attach command, which locks itself.
+_realm_handoff() {
+  local directory
+  directory="$(cd -P -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)" || return 1
+  python3 -I "$directory/realm-handoff.py" "$@"
 }
-# Catalog approach: the Runtime's `workspace attach` / `workspace adopt` both
-# refuse ("workspace selection conflicts" / "destination already has a workspace
-# selection") when the data root already selects the installer's empty realm, and
-# no supported command deselects one. So we make the one minimal edit that
-# `configure_workspace(mode="attach")` would itself write: selected_realm_id, one
-# realms[] entry {realm_id, display_name, data_root, selection_source:"attach",
-# source_profile}; version and source_profiles are left untouched. The old file is
-# kept as catalog.json.pre-realm-snapshot. admission-state.json is deliberately
-# not copied: its stat fingerprints cannot match a copy, so the Runtime runs its
-# deep admission tier on first start (the safe path). A fresh empty owner.lock is
-# created (0600) because the Runtime opens it without creating the realm.
-# After this, `astrid-runtime workspace inspect --realm-root <dir>
-# --expected-realm-id <id>` (read-only) is the supported confirmation; it is not
-# run here because that starts Runtime code.
+# The release caller always supplies realm_attach_cmd. Standalone SQLite fixtures
+# retain their minimal-catalog path inside the same locked publication helper.
+# admission-state.json is not copied: stat fingerprints cannot match a copy, so
+# Runtime performs deep admission. owner.lock is freshly created and empty (0600).
 
 realm_snapshot_copy() {  # <live_data_root> <dest_data_root>
-  local live="${1:-}" dest="${2:-}" info rc rid rdir name stage final need
+  local live="${1:-}" dest="${2:-}" info rc rid rdir name stage final catalog_before mode
   [ -n "$dest" ] || { _realm_err "usage: realm_snapshot_copy <live_data_root> <dest_data_root>"; return 2; }
   if [ -z "$live" ] || [ ! -d "$live" ]; then
     _realm_say "no live Astrid install found; the stack starts on the installer's empty workspace (nothing copied)"
@@ -288,46 +258,18 @@ realm_snapshot_copy() {  # <live_data_root> <dest_data_root>
   [ "$rc" = 0 ] || { _realm_err "live realm could not be resolved"; return 1; }
   rid="$(printf '%s' "$info" | cut -f1)"; rdir="$(printf '%s' "$info" | cut -f2)"; name="$(printf '%s' "$info" | cut -f3)"
   dest="$(cd "$dest" 2>/dev/null && pwd -P)" || { _realm_err "destination data root does not exist"; return 1; }
+  python3 -I - "$live" "$dest" <<'PY' || { _realm_err "live/destination isolation could not be established"; return 1; }
+import os, sys
+live, dest = map(os.path.realpath, sys.argv[1:])
+if os.path.commonpath((live, dest)) in (live, dest):
+    sys.exit("live data and destination overlap; nothing copied or removed")
+PY
   [ -f "$dest/runtime/catalog.json" ] || { _realm_err "destination has no runtime/catalog.json (installer step not done?)"; return 1; }
   final="$dest/runtime/realms/$rid"
   [ ! -e "$final" ] || { _realm_err "destination already has realm $rid; refusing to overwrite"; return 1; }
-  # workspace attach removes instance.lock below. A free realm lock alone is
-  # insufficient: an installer-started process can still own the instance record.
-  python3 -I - "$dest/runtime/instance.lock" <<'PY' || { _realm_err "destination instance owner is not proven stopped"; return 1; }
-import json, os, sys
-path = sys.argv[1]
-if os.path.exists(path):
-    try:
-        record = json.load(open(path))
-        pid = record["pid"]
-        if type(pid) is not int or pid <= 0:
-            raise ValueError("invalid pid")
-    except (OSError, ValueError, KeyError, TypeError):
-        sys.stderr.write("destination instance lock has no valid pid; refusing to remove it\n")
-        sys.exit(1)
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        pass
-    except (OSError, OverflowError):
-        sys.stderr.write("cannot prove destination instance pid is dead\n")
-        sys.exit(1)
-    else:
-        sys.stderr.write("destination instance pid %s is still alive\n" % pid)
-        sys.exit(1)
-PY
-  # The destination stack must be stopped: its current realm's owner lock must be free.
-  python3 -I - "$dest" <<'PY' || { _realm_err "destination stack looks running (owner lock held); stop it first"; return 1; }
-import fcntl, glob, os, sys
-for p in glob.glob(os.path.join(sys.argv[1], "runtime", "realms", "*", "owner.lock")):
-    fd = os.open(p, os.O_RDONLY)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
-        sys.exit(1)
-    finally:
-        os.close(fd)
-PY
+  # Check both PID records and realm ownership early, then repeat at publication.
+  catalog_before="$(_realm_handoff check "$dest")" \
+    || { _realm_err "destination owner is not proven stopped"; return 1; }
   realm_disk_check "$live" "$dest" || return 1
   mkdir -p "$dest/runtime/realms" && realm_clone_supported "$rdir" "$dest/runtime/realms" \
     || { _realm_err "APFS cloning is not available between the live realm and the destination; refusing to byte-copy the media"; return 1; }
@@ -350,20 +292,27 @@ PY
     rm -rf "$stage"; _realm_err "copied database realm id does not match the live catalog"; return 1
   fi
   realm_verify_copy "$rdir" "$stage" || { rm -rf "$stage"; _realm_err "verification failed; nothing was published"; return 1; }
-  mv "$stage" "$final" || { rm -rf "$stage"; return 1; }
-  if declare -F realm_attach_cmd >/dev/null; then
-    # Select the copy with the Runtime's own command. The installer's empty-realm selection and owner records are
-    # removed first (the caller has confirmed the stack is stopped); the old catalog is kept.
+  mode=legacy
+  if declare -F realm_attach_cmd >/dev/null; then mode=attach; fi
+  # Publish, back up/unselect the empty catalog, and remove only proven-stale
+  # advertisements while holding the launcher's mutex and realm ownership locks.
+  if ! _realm_handoff publish "$dest" "$stage" "$final" "$catalog_before" "$mode" "$rid" "$name"; then
+    rm -rf "$stage"; _realm_err "publication refused; any existing copy and owner records were retained"; return 1
+  fi
+  if [ "$mode" = attach ]; then
+    # No selected catalog is left for ordinary `up` to launch. Release the mutex
+    # before workspace attach, which performs its own serialized selection.
     local attach_out attach_rc=0
-    cp -p "$dest/runtime/catalog.json" "$dest/runtime/catalog.json.pre-realm-snapshot" || return 1
-    rm -f "$dest/runtime/catalog.json" "$dest/runtime/instance.lock" "$dest/runtime/discovery.json"
     attach_out="$(realm_attach_cmd workspace attach --data-root "$dest" --realm-root "$final" --realm-id "$rid" --json 2>&1)" || attach_rc=$?
     if [ "$attach_rc" -ne 0 ] || ! printf '%s' "$attach_out" | grep -Eq '"status"[[:space:]]*:[[:space:]]*"configured_attach"'; then
-      cp -p "$dest/runtime/catalog.json.pre-realm-snapshot" "$dest/runtime/catalog.json"
-      _realm_err "workspace attach did not report configured_attach (exit $attach_rc): $(printf '%s' "$attach_out" | tail -c 400)"; return 1
+      if _realm_handoff rollback "$dest" "$rid" "$final"; then
+        _realm_err 'the previous catalog was restored; the published copy was retained'
+      else
+        _realm_err 'catalog restoration refused because destination ownership/selection changed; inspect the retained backup'
+      fi
+      _realm_err "workspace attach did not report configured_attach (exit $attach_rc): $(printf '%s' "$attach_out" | tail -c 400)"
+      _realm_err "copy retained at $final; a normal retry refuses to overwrite it (see README recovery)"; return 1
     fi
-  else
-    _realm_repoint_catalog "$dest" "$rid" "$final" "$name" || { _realm_err "catalog repoint failed; copy is at $final"; return 1; }
   fi
   _realm_say "done: stack now selects the copied realm $rid (the installer's empty realm directory is left in place, unselected)"
 }

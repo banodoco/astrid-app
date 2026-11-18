@@ -5,7 +5,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const shell = process.env.RELEASE_TOOL_UNDER_TEST || path.join(here, 'astrid-release');
@@ -35,7 +35,7 @@ export function inventory(root) {
   return entries;
 }
 
-export function fixture(t, { installed = true, realm = true, savedPorts = '2400,17500,19501', installer = 'fail' } = {}) {
+export function fixture(t, { installed = true, realm = true, savedPorts = '2400,17500,19501', installer = 'fail', shallow = false } = {}) {
   const dir = realpathSync(mkdtempSync(path.join(tmpdir(), 'astrid-release-fixture-')));
   const home = path.join(dir, 'home');
   const root = path.join(home, 'astrid-release', branch.replaceAll('/', '-'));
@@ -55,7 +55,7 @@ export function fixture(t, { installed = true, realm = true, savedPorts = '2400,
     if (processChild && processChild.exitCode === null) processChild.kill('SIGKILL');
     rmSync(dir, { recursive: true, force: true });
   });
-  const config = { agent: sha('a'), runtime: sha('c'), installer, busy: [], freeKb: 100000000, remote, events, root };
+  const config = { agent: sha('a'), runtime: sha('c'), installer, busy: [], freeKb: 100000000, remote: shallow ? pathToFileURL(remote).href : remote, events, root };
   const writeConfig = () => json(configPath, config);
   writeConfig();
   const contract = { openapi: 'openapi.json', schemas: [] };
@@ -90,16 +90,23 @@ console.log(retry?'ConnectionResetError: injected first-run network failure':'fi
   runGit(['init', '--quiet', '-b', branch]);
   runGit(['add', '.']);
   runGit(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'fixture App']);
+  if (shallow) {
+    put(path.join(remote, 'ancestor.txt'), 'shallow fixture has an omitted parent\n');
+    runGit(['add', '.']);
+    runGit(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'initial shallow tip']);
+  }
   const appSha = runGit(['rev-parse', 'HEAD']);
-  runGit(['clone', '--quiet', remote, path.join(root, 'editor')], dir);
+  runGit(['clone', '--quiet', ...(shallow ? ['--depth', '1'] : []), config.remote, path.join(root, 'editor')], dir);
   mkdirSync(path.join(root, 'editor/node_modules'));
   put(path.join(root, 'state/app-deps.sha256'), `${digest(Buffer.from('{}\n'))}\n`);
   put(path.join(root, 'state/heads.tsv'), `${branch} ${appSha} ${branch} ${config.agent}\n`);
   if (savedPorts !== null) put(path.join(root, 'state/ports'), `${savedPorts}\n`);
   if (realm) put(path.join(root, 'state/realm-id'), 'fixture-realm\n');
   put(path.join(root, 'data/edits.txt'), 'edits must survive\n');
+  if (!installed) json(path.join(root, 'state/first-install.json'), { version: 1, branch, program_root: path.join(root, 'program'), data_root: path.join(root, 'data') });
   mkdirSync(path.join(home, 'live/runtime/realms/live'), { recursive: true });
   put(path.join(home, 'live/runtime/realms/live/realm.sqlite3'), 'fixture only\n');
+  json(path.join(home, 'live/runtime/catalog.json'), { version: 1, selected_realm_id: 'live', realms: [{ realm_id: 'live', data_root: path.join(home, 'live/runtime/realms/live'), display_name: 'Fixture live' }] });
   json(path.join(home, '.local/share/astrid/install.json'), { data_root: path.join(home, 'live') });
   if (installed) {
     put(path.join(root, 'program/current'), 'fixture-version\n');
@@ -146,15 +153,15 @@ print('fixture 100000000 0 %s 0%% /' % c['freeKb'])
   }
   return {
     root, dir, home, config, writeConfig, manifest,
-    moveApp: () => {
-      put(path.join(remote, 'changed.txt'), 'new App code\n');
+    moveApp: (content = 'new App code\n') => {
+      put(path.join(remote, 'changed.txt'), content);
       runGit(['add', '.']);
       runGit(['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '--quiet', '-m', 'move fixture App']);
       return runGit(['rev-parse', 'HEAD']);
     },
     events: () => existsSync(events) ? readFileSync(events, 'utf8').trim().split('\n').filter(Boolean).map(JSON.parse) : [],
-    run: (command = 'up') => {
-      const r = spawnSync('bash', [shell, ...(command === 'up' ? [] : [command]), branch], { env, cwd: dir, encoding: 'utf8', timeout: 20_000 });
+    run: (command = 'up', overrides = {}) => {
+      const r = spawnSync('bash', [shell, ...(command === 'up' ? [] : [command]), branch], { env: { ...env, ...overrides }, cwd: dir, encoding: 'utf8', timeout: 20_000 });
       if (r.error) throw r.error;
       return { ...r, output: r.stdout + r.stderr };
     },

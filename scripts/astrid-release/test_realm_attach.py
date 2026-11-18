@@ -26,7 +26,7 @@ from astrid_runtime.bootstrap import SourceProfile
 PORTABLE = "--portable" in sys.argv
 if PORTABLE:
     sys.argv.remove("--portable")
-SCRIPT = Path(__file__).with_name("realm-snapshot.sh").resolve()
+SCRIPT = Path(os.environ.get("REALM_SNAPSHOT_UNDER_TEST", Path(__file__).with_name("realm-snapshot.sh"))).resolve()
 RID = "aaaaaaaa-1111-4222-8333-444444444444"
 FRESH = "bbbbbbbb-1111-4222-8333-555555555555"
 
@@ -88,7 +88,7 @@ class RealmAttachFixture(unittest.TestCase):
         (self.live / "runpod" / "claim.json").write_text("FAKE-NOT-A-SECRET")
         (self.realm / "admission-state.json").write_text("{}")
         (self.dest / "runtime" / "instance.lock").write_text('{"pid":999999999}')
-        (self.dest / "runtime" / "discovery.json").write_text('{"stale":true}')
+        (self.dest / "runtime" / "discovery.json").write_text('{"pid":999999999,"stale":true}')
         self.writer = sqlite3.connect(self.realm / "realm.sqlite3", isolation_level=None)
         self.addCleanup(self.writer.close)
         self.writer.execute("PRAGMA journal_mode=WAL")
@@ -131,20 +131,30 @@ with sqlite3.connect(db, uri=db.startswith('file:')) as source:
             self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         return result
 
-    def snapshot(self, *, force_nonzero_attach=False):
+    def snapshot(self, *, force_nonzero_attach=False, after_copy="", attach_probe=False):
         script = '. "$1"\n'
         if PORTABLE:
             script += '''
 realm_clone_supported() { return 0; }
 cp() { if [[ "${1:-}" == -c ]]; then shift; fi; command cp "$@"; }
 '''
+        attach = (shlex.quote(sys.executable) + ' -I -m astrid_runtime "$@" --source-manifest '
+                  + shlex.quote(str(self.profile)) + ' | tee ' + shlex.quote(str(self.root / "attach.json")))
+        if attach_probe:
+            attach = "printf '%s\\n' '{\"status\":\"configured_attach\"}' | tee " + shlex.quote(str(self.root / "attach.json"))
         script += f'''
 _realm_repoint_catalog() {{ echo 'fixture: hand-edited catalog forbidden' >&2; return 97; }}
 realm_attach_cmd() {{
-  {shlex.quote(sys.executable)} -I -m astrid_runtime "$@" --source-manifest {shlex.quote(str(self.profile))} | tee {shlex.quote(str(self.root / "attach.json"))}
+  {attach}
   {"return 7" if force_nonzero_attach else "return ${PIPESTATUS[0]}"}
 }}
 '''
+        if after_copy:
+            script += '''
+eval "$(declare -f _realm_clone_tree | sed '1s/_realm_clone_tree/_fixture_clone_tree/')"
+_realm_clone_tree() {
+  _fixture_clone_tree "$@" || return
+''' + after_copy + '\n}\n'
         script += 'realm_snapshot_copy "$2" "$3"\n'
         return subprocess.run(["bash", "-uo", "pipefail", "-c", script, "fixture", str(SCRIPT), str(self.live), str(self.dest)],
                               env=self.env, cwd=self.root, text=True, capture_output=True, timeout=30)
@@ -201,6 +211,13 @@ realm_attach_cmd() {{
         self.assertEqual(json.loads((self.root / "attach.json").read_text())["status"], "configured_attach")
         self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual((self.dest / "runtime/catalog.json").read_bytes(), old_catalog)
+        self.assertTrue((self.copied / "realm.sqlite3").is_file())
+        self.assertEqual((self.dest / "runtime/catalog.json.pre-realm-snapshot").read_bytes(), old_catalog)
+        retained = fingerprint(self.dest)
+        retry = self.snapshot()
+        self.assertNotEqual(retry.returncode, 0, retry.stdout + retry.stderr)
+        self.assertIn("destination already has realm", retry.stdout + retry.stderr)
+        self.assertEqual(fingerprint(self.dest), retained, "a retry must not discard the published copy")
 
     def test_runtime_schema_refusal_restores_catalog_without_migrating(self):
         self.writer.execute("UPDATE runtime_schema SET version=999999 WHERE id=1")
@@ -213,6 +230,81 @@ realm_attach_cmd() {{
         self.assertEqual(fingerprint(self.live), before)
         with sqlite3.connect(self.copied / "realm.sqlite3") as db:
             self.assertEqual(db.execute("SELECT version FROM runtime_schema WHERE id=1").fetchone()[0], 999999)
+
+    def test_live_discovery_pid_refuses_even_with_stale_instance_pid(self):
+        (self.dest / "runtime/discovery.json").write_text(json.dumps({"pid": os.getpid()}))
+        before = fingerprint(self.dest)
+        result = self.snapshot()
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("still alive", result.stdout + result.stderr)
+        self.assertEqual(fingerprint(self.dest), before)
+        self.assertFalse(self.copied.exists())
+
+    def test_owner_appearing_during_copy_is_preserved_at_publication(self):
+        advertisement = self.dest / "runtime/instance.lock"
+        record = json.dumps({"pid": os.getpid()})
+        hook = 'printf %s ' + shlex.quote(record) + ' > ' + shlex.quote(str(advertisement))
+        old_catalog = (self.dest / "runtime/catalog.json").read_bytes()
+        source = fingerprint(self.live)
+        result = self.snapshot(after_copy=hook)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("still alive", result.stdout + result.stderr)
+        self.assertEqual(advertisement.read_text(), record)
+        self.assertEqual((self.dest / "runtime/catalog.json").read_bytes(), old_catalog)
+        self.assertFalse(self.copied.exists())
+        self.assertEqual(fingerprint(self.live), source)
+
+    def test_publication_obeys_the_existing_bootstrap_mutex(self):
+        with (self.dest / "runtime/bootstrap.lock").open("a+") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            before = fingerprint(self.dest)
+            result = self.snapshot(attach_probe=True)
+            self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("bootstrap lock held", result.stdout + result.stderr)
+            self.assertEqual(fingerprint(self.dest), before)
+            self.assertFalse(self.copied.exists())
+            self.assertFalse((self.root / "attach.json").exists(), "attach must not run through another launcher's mutex")
+
+    def test_realm_owner_lock_appearing_during_copy_refuses_publication(self):
+        start, ready = self.root / "lock-start", self.root / "lock-ready"
+        owner = self.dest / "runtime/realms" / FRESH / "owner.lock"
+        holder = subprocess.Popen([sys.executable, "-I", "-c", '''
+import fcntl, pathlib, sys, time
+start, ready, owner = map(pathlib.Path, sys.argv[1:])
+deadline = time.monotonic() + 20
+while not start.exists():
+    if time.monotonic() > deadline:
+        sys.exit("fixture owner never received its start signal")
+    time.sleep(0.01)
+with owner.open("rb") as handle:
+    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    ready.touch()
+    sys.stdin.read()
+''', str(start), str(ready), str(owner)], env=self.env, cwd=self.root, stdin=subprocess.PIPE)
+        def stop_holder():
+            holder.stdin.close()
+            holder.wait(timeout=25)
+        self.addCleanup(stop_holder)
+        signal = '''
+import pathlib, sys, time
+start, ready = map(pathlib.Path, sys.argv[1:])
+start.touch()
+deadline = time.monotonic() + 10
+while not ready.exists():
+    if time.monotonic() > deadline:
+        sys.exit("fixture owner did not acquire the lock")
+    time.sleep(0.01)
+'''
+        hook = ' '.join(map(shlex.quote, [sys.executable, '-I', '-c', signal, str(start), str(ready)]))
+        before = fingerprint(self.dest)
+        source = fingerprint(self.live)
+        result = self.snapshot(after_copy=hook)
+        self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("owner lock held", result.stdout + result.stderr)
+        self.assertEqual(fingerprint(self.dest), before)
+        self.assertEqual(fingerprint(self.live), source)
+        self.assertFalse(self.copied.exists())
+        self.assertFalse((self.root / "attach.json").exists())
 
 
 if __name__ == "__main__":

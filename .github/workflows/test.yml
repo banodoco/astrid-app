@@ -131,15 +131,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
+      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs scripts/release/verify-extension-ship.test.mjs
       - uses: actions/setup-python@v5
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.base_ref == 'release/14/plan-61' }}
         with:
           python-version: "3.11"
-      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs scripts/release/verify-extension-ship.test.mjs
-      - name: Release tool and manifest fixtures
-        if: ${{ !cancelled() }}
-        run: node --test scripts/astrid-release/release.test.mjs scripts/installer/manifest.test.mjs
-      - name: Native realm snapshot and attach fixtures
-        if: ${{ !cancelled() }}
+      - name: Plan 61 release, manifest and native realm fixtures
+        if: ${{ !cancelled() && github.event_name == 'pull_request' && github.base_ref == 'release/14/plan-61' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -147,6 +145,7 @@ jobs:
           node --version
           python3 --version
           sqlite3 --version
+          node --test scripts/astrid-release/release.test.mjs scripts/astrid-release/workflow.test.mjs scripts/installer/manifest.test.mjs
           P61_NATIVE_ROOT="$(mktemp -d "$RUNNER_TEMP/p61-native.XXXXXXXX")"
           trap 'rm -rf "$P61_NATIVE_ROOT"' EXIT
           P61_RUNTIME_SHA="$(node -e '

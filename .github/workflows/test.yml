@@ -102,6 +102,9 @@ jobs:
           "$P61_NATIVE_ROOT/venv/bin/python" -m pip install -e "$P61_NATIVE_ROOT/runtime" -e "$P61_NATIVE_ROOT/runtime/packages/python"
           REALM_TEST_PYTHON="$P61_NATIVE_ROOT/venv/bin/python" \
             bash scripts/astrid-release/test-realm-snapshot.sh 2>&1 | tee "$P61_PROOF/native-realm.log"
+          "$P61_NATIVE_ROOT/venv/bin/python" -I \
+            "$P61_TOOL_CHECKOUT/scripts/astrid-release/test_realm_attach.py" \
+            2>&1 | tee "$P61_PROOF/tool-realm-caller.log"
           python3 scripts/astrid-release/hosted-negative.py 2>&1 | tee "$P61_PROOF/unreadable-source.log"
       - name: Install the frozen Release 13 live control
         run: python3 scripts/astrid-release/hosted-proof.py bootstrap

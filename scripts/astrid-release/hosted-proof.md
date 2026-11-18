@@ -40,7 +40,7 @@ the browser's readiness/playback assertions.
 | Non-Mac | Only `uname` is injected on the hosted Mac; this demonstrates platform refusal, not a Linux stack run |
 | Unreadable source DB | Actual mode=ro backup failure on chmod-000 source with a valid stopped destination; no publication/catalog mutation |
 | Wrong realm ID | Installed Runtime rejects a real copied realm under a wrong requested ID; facts unchanged |
-| Schema mismatch | Installed Runtime rejects a disposable APFS realm clone with schema 999999; no migration, selection, or normal-copy mutation |
+| Schema mismatch | The App release caller invokes the installed Runtime on a disposable APFS realm clone with schema 999999; exit 1, its bounded read-only doctor report names the exact realm and actual/expected versions, and rejected DB bytes/facts, selection and the normal copy remain unchanged |
 
 Completion 11 records the exact current plan-branch SHA. RB-7 landing belongs to
 the Lead; a pre-landing fresh clone does not claim that an unperformed landing

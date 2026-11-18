@@ -495,15 +495,33 @@ class Proof:
             connection.execute("UPDATE runtime_schema SET version=999999 WHERE id=1")
         schema_before = db_facts(schema_realm)
         schema_hash = digest(schema_realm / "realm.sqlite3")
-        refused = self.run("negative-real-schema-refusal", [python, "-I", "-m", "astrid_runtime", "workspace", "attach",
+        # Exercise the same installed-Python caller used by astrid-release. It
+        # retains Runtime's refusal and appends the real read-only doctor report.
+        refused = self.run("negative-real-schema-refusal", [python, "-X", "utf8", "-I",
+                           self.tool.with_name("workspace-attach.py"), "workspace", "attach",
                            "--data-root", schema_root / "selection", "--realm-root", schema_realm,
                            "--realm-id", realm_id, "--source-manifest", version / "profile.json", "--json"],
-                           env=self.isolated_env(), expected="nonzero")
-        require("schema" in refused.stdout.lower(), "Schema refusal did not identify its cause")
+                           env=self.isolated_env(), expected=1)
+        self.note("negative-real-schema-before-and-after", {
+            "rejected_before": schema_before, "rejected_after": db_facts(schema_realm),
+            "database_sha256_before": schema_hash, "database_sha256_after": digest(schema_realm / "realm.sqlite3"),
+            "catalog_published": (schema_root / "selection/runtime/catalog.json").exists(),
+            "normal_copy_before": before, "normal_copy_after": db_facts(realm),
+        })
         require(db_facts(schema_realm) == schema_before, "Schema attach migrated the rejected copy")
         require(digest(schema_realm / "realm.sqlite3") == schema_hash, "Schema attach changed rejected database bytes")
         require(not (schema_root / "selection/runtime/catalog.json").exists(), "Schema refusal published a catalog")
         require(db_facts(realm) == before, "Schema probe changed the normal copied realm")
+        require("schema" in refused.stdout.lower(), "Schema refusal did not identify its cause")
+        diagnostic = next(json.loads(line.removeprefix("astrid-release: Runtime doctor: "))
+                          for line in refused.stdout.splitlines()
+                          if line.startswith("astrid-release: Runtime doctor: "))
+        require(diagnostic["realm_root"] == str(schema_realm), "Doctor did not inspect the rejected realm")
+        schema_report = diagnostic["report"]["checks"]["schema"]
+        require("schema" in diagnostic["report"]["issues"] and schema_report["ok"] is False,
+                "Doctor did not report the schema refusal")
+        require(schema_report["actual_version"] == 999999 and schema_report["expected_version"] == before["schema"]["version"],
+                "Doctor did not report the actual and expected schema versions")
         self.note("negative-real-schema-no-migration", {"schema": schema_before["schema"], "database_sha256_before_and_after": schema_hash})
         self.note("negative unreadable source", "The separate named native fixture reaches the actual mode=ro failure with a valid, stopped destination and retains its unchanged catalog.")
 

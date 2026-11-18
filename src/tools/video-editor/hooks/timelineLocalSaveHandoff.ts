@@ -1,4 +1,5 @@
 import { createContext } from 'react';
+import { normalizeClipPlacementWithFindings } from '@banodoco/timeline-composition';
 import type { CanonicalDocument, CommitRequest, EditCommand, HistoryPage } from '@/integrations/runtime/timeline-commit-types.ts';
 import type { LocalSaveSession } from '../commands/localSaveSession.ts';
 import { toOutboxJson, type OutboxJson } from '../commands/commitOutbox.ts';
@@ -9,6 +10,7 @@ import type { AssetRegistry, TimelineConfig } from '../types/index.ts';
 import { canonicalizeTimelinePair, projectTimelineTracksForDisplay } from '../lib/timeline-domain.ts';
 import { findEnclosingPinnedGroup } from '../lib/pinned-group-projection.ts';
 import { withDefaultTimelineOutput } from '../lib/defaults.ts';
+import { materializeAuthoredOutput } from '../lib/timeline-data.ts';
 import { markTimelineSaveRejection, type TimelineSaveRejectionCode } from '../lib/timeline-diagnostics.ts';
 import { applyTimelineOperation, type TimelineElementOperation } from '../runtime/element-adapter.ts';
 import type { AstridAgentElementContext } from '../runtime/element-contract.ts';
@@ -87,6 +89,8 @@ const rowId = (row: unknown) => object(row) ? String(row.id ?? '') : '';
 const byRowId = (rows: unknown[]) => [...rows].sort((a, b) => rowId(a) < rowId(b) ? -1 : rowId(a) > rowId(b) ? 1 : 0);
 const sameRowsById = (a: unknown[], b: unknown[]) => a.length === b.length && same(byRowId(a), byRowId(b));
 const field = (value: Record<string, unknown>, key: string) => Object.prototype.hasOwnProperty.call(value, key) ? value[key] : undefined;
+const changedField = (previous: Record<string, unknown>, next: Record<string, unknown>, key: string) =>
+  Object.prototype.hasOwnProperty.call(next, key) && !same(field(previous, key), field(next, key));
 
 // The editor writes clips grouped by track, so row order is serialisation, not meaning. A gesture
 // is checked by the rows it names (by id), never by where the editor happened to put them.
@@ -268,7 +272,9 @@ function checkSource(initial: TimelineCommandBasis, source: TimelineSaveSource) 
   const parent = initial.canonicalDocument.parent_revision.payload;
   if (!object(parent.config) || !object(parent.registry)) refuse('authored parent config/registry is unavailable', 'source-parent-unavailable');
   const { bundle: _bundle, ...config } = structuredClone(parent.config);
-  const loaded = { ...config, ...withDefaultTimelineOutput(config as unknown as TimelineConfig) } as unknown as TimelineConfig;
+  // Same output rule as buildTimelineData (the editor's source view); other defaults as before.
+  const loaded = { ...config, ...withDefaultTimelineOutput(config as unknown as TimelineConfig),
+    output: materializeAuthoredOutput(config as unknown as TimelineConfig).output } as unknown as TimelineConfig;
   const projected = canonicalizeTimelinePair(loaded, structuredClone(parent.registry) as unknown as AssetRegistry);
   // Runtime also loads an explicitly authored top-level parent clip list when
   // config has no clip list. This is a physical parent binding, never children.
@@ -399,7 +405,7 @@ export function createTimelineLocalSaveHandoff(options: {
       // Omission is a partial editor view, not an explicit clear. An unchanged
       // default/undefined never overwrites the raw own key (including null).
       for (const [key, value] of Object.entries(next)) {
-        if (same(field(previous, key), value)) continue;
+        if (!changedField(previous, next, key)) continue;
         if (value === undefined) {
           if ((!(element && ['elementRef', 'entrance'].includes(key)) && key !== 'transition') || path.length !== 3 || path[0] !== 'config' || path[1] !== 'clips') {
             refuseEdit('Clearing this value cannot be saved yet. Set a new value instead.', 'explicit-clear-unavailable');
@@ -416,6 +422,59 @@ export function createTimelineLocalSaveHandoff(options: {
       refuseEdit('This value comes from a part of the timeline that cannot be saved from here. Edit it where it is defined.', 'display-value-unbound');
     }
     return authoredJson(next);
+  }
+  // Recompute only package-owned placement leaves from the verified physical parent.
+  // Applying them before the user delta preserves inherited fit across reloads.
+  function placementBaseline(raw: unknown, displayed: TimelineConfig): unknown {
+    if (!object(raw) || !Array.isArray(raw.clips) || !Array.isArray(raw.tracks))
+      refuse('placement migration has no authored clips and tracks');
+    const resolution = displayed.output?.resolution?.match(/^(\d+)x(\d+)$/i);
+    const fps = displayed.output?.fps;
+    const legacyCanvas = resolution && typeof fps === 'number' && Number.isFinite(fps) && fps > 0
+      ? { width: Number(resolution[1]), height: Number(resolution[2]), fps, source: 'app-resolved' as const } : undefined;
+    const result = normalizeClipPlacementWithFindings(structuredClone(raw) as Parameters<typeof normalizeClipPlacementWithFindings>[0],
+      legacyCanvas ? { legacyCanvas } : undefined);
+    if (result.findings.some(finding => finding.kind === 'scale-bake')
+      && result.findings.some(finding => finding.kind === 'canvas' && finding.source === 'app-resolved')) {
+      refuse('legacy scale migration needs an authored timeline canvas before this appearance edit');
+    }
+    const baseline = structuredClone(raw);
+    const clips = baseline.clips as Record<string, unknown>[];
+    const tracks = baseline.tracks as Record<string, unknown>[];
+    const normalized = result.config;
+    const unique = (rows: Record<string, unknown>[], id: string | undefined) => {
+      const matching = rows.filter(row => object(row) && row.id === id);
+      if (!id || matching.length !== 1) refuse('placement migration has no unique authored binding');
+      return matching[0];
+    };
+    for (const finding of result.findings) {
+      if (finding.kind === 'canvas' || finding.kind === 'canvas-not-required') continue;
+      if (finding.kind === 'markers') {
+        const row = unique(tracks, finding.trackId);
+        const expected = normalized.tracks?.find(track => track.id === finding.trackId);
+        const view = displayed.tracks?.find(track => track.id === finding.trackId);
+        if (!expected || !view || !object(expected.app) || !object(view.app)) refuse('placement migration track is unavailable');
+        const app = object(row.app) ? structuredClone(row.app) : {};
+        for (const key of ['scaleAppliesToPositionedClips', 'clipPlacementVersion'] as const) {
+          if (!same(expected.app[key], view.app[key])) refuse('placement migration differs from verified display');
+          app[key] = expected.app[key];
+        }
+        row.app = app;
+      } else if (finding.kind === 'scale-bake' || finding.kind === 'explicit-fit') {
+        const row = unique(clips, finding.clipId);
+        const expected = normalized.clips.find(clip => clip.id === finding.clipId && clip.track === finding.trackId);
+        const view = displayed.clips.find(clip => clip.id === finding.clipId && clip.track === finding.trackId);
+        if (!expected || !view || row.track !== finding.trackId) refuse('placement migration clip is unavailable');
+        const keys = finding.kind === 'scale-bake' ? ['x', 'y', 'width', 'height'] as const : ['fit'] as const;
+        for (const key of keys) {
+          if (!same(expected[key], view[key])) refuse('placement migration differs from verified display');
+          row[key] = expected[key];
+        }
+      } else {
+        refuse('unsupported placement migration finding');
+      }
+    }
+    return baseline;
   }
   const handoff: TimelineLocalSaveHandoff = {
     capture(input, gestureBasis) {
@@ -441,8 +500,17 @@ export function createTimelineLocalSaveHandoff(options: {
         const after = structuredClone(before);
         const payload = after.parent_revision.payload;
         // A document that stores its clips only at the top level is edited there, whichever gesture it is.
-        // An edit that names no gesture on such a document stays refused (its two clip lists may contradict).
-        const topLevelClips = gestureBasis !== undefined && object(parent.config)
+        // An edit that names no gesture on such a document stays refused (its two clip lists may contradict),
+        // except a placement-appearance edit, which is verified against the recomputed baseline below.
+        const appearanceChanged = !gestureBasis && (next.config.clips.some(clip => {
+          const previous = source.config.clips.find(item => item.id === clip.id);
+          return previous && ['x', 'y', 'width', 'height', 'fit', 'cropTop', 'cropRight', 'cropBottom', 'cropLeft'].some(
+            key => changedField(previous, clip, key));
+        }) || (next.config.tracks ?? []).some(track => {
+          const previous = source.config.tracks?.find(item => item.id === track.id);
+          return previous && ['scale', 'fit'].some(key => changedField(previous, track, key));
+        }));
+        const topLevelClips = (gestureBasis !== undefined || appearanceChanged) && object(parent.config)
           && !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips);
         const configBefore = topLevelClips ? { ...parent.config as Record<string, OutboxJson>, clips: parent.clips } : parent.config;
         const configSource = topLevelClips && !source.config.clips.length
@@ -450,7 +518,8 @@ export function createTimelineLocalSaveHandoff(options: {
         // Whatever the gesture, a mounted source without the parent's clips would write them away.
         if (topLevelClips && !source.config.clips.length
           && Array.isArray(parent.clips) && parent.clips.length) refuse('parent clips are not present in the mounted source');
-        payload.config = changes(configBefore, configSource, next.config, ['config'], gestureBasis?.kind === 'element') as Record<string, OutboxJson>;
+        const baseline = appearanceChanged ? placementBaseline(configBefore, configSource as TimelineConfig) : configBefore;
+        payload.config = changes(baseline, configSource, next.config, ['config'], gestureBasis?.kind === 'element') as Record<string, OutboxJson>;
         // A gesture never reorders rows: write them in the stored order. A dropped clip goes last (the
         // Runtime appends it); a new track keeps the position the editor gave it.
         const editorTracks = (payload.config as Record<string, OutboxJson>).tracks;
@@ -885,7 +954,7 @@ export function createTimelineLocalSaveHandoff(options: {
           ...(mediaReads && mediaSteps ? { reads: mediaReads, steps: mediaSteps,
             rationale: mediaSteps[0].intent, group_id: mediaSteps[0].id } : {}) }) : options.session.appendDocument({ before, after,
           roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
-          ...(reads === undefined ? {} : { reads, merge: gestureBasis?.kind === 'element' ? 'atomic' as const : 'fields' as const }),
+          ...(reads === undefined ? (appearanceChanged ? { merge: 'atomic' as const } : {}) : { reads, merge: gestureBasis?.kind === 'element' ? 'atomic' as const : 'fields' as const }),
           label: 'Edit timeline', step: { id: crypto.randomUUID(), label: 'Edit timeline', intent: gestureBasis ? (gestureBasis.kind === 'split'
             ? `Split ${gestureBasis.clipId} at ${gestureBasis.timeSeconds}`
             : gestureBasis.kind === 'move' ? `Move ${gestureBasis.clipId} on ${gestureBasis.trackId}`

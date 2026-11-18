@@ -7,10 +7,6 @@ import type { TimelineCommandBasis, TimelineCommitResult } from '../data/DataPro
 import { createCommitOutbox, toOutboxJson } from './commitOutbox.ts';
 import { createLocalSaveSession } from './localSaveSession.ts';
 
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
 
 describe('official full-v2 local document transport', () => {
   it('restarts the exact request with reads and step metadata, then sends the original new-ID dependent at the accepted pair', async () => {

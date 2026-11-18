@@ -27,6 +27,7 @@ vi.mock('remotion', () => ({
 import {
   AudioAnalysisProvider,
   createFrameSource,
+  resetWarmedAudioUrls,
   SILENT_AUDIO_DATA,
   useAudioAnalysisContext,
 } from '@/tools/video-editor/compositions/AudioAnalysisProvider';
@@ -322,6 +323,7 @@ describe('AudioAnalysisProvider', () => {
       return created;
     });
     resetAudioAnalysisCaches();
+    resetWarmedAudioUrls();
     MockOfflineAudioContext.renderedBuffers = [];
     MockOfflineAudioContext.renderIndex = 0;
     stubAudioEnvironment();
@@ -401,28 +403,56 @@ describe('AudioAnalysisProvider', () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
-  it('aborts in-flight warms when URLs change or the provider unmounts', async () => {
+  it('warms a newly added source once without re-fetching or aborting the sources already warmed', async () => {
     const fetchMock = vi.fn(async (_url: string, _init: RequestInit) => new Response(new ReadableStream<Uint8Array>({ start() {} })));
     vi.stubGlobal('fetch', fetchMock);
+    const source = (src: string) => createAudioClip({ assetEntry: { ...createAudioClip().assetEntry!, src } });
+    const [a, b, c] = ['https://example.com/a.wav', 'https://example.com/b.wav', 'https://example.com/c.wav'];
     const view = render(
-      <AudioAnalysisProvider clips={[createAudioClip()]} fps={FPS} totalDurationInFrames={3} enabled={false}>
-        <AnalysisSummary />
-      </AudioAnalysisProvider>,
-    );
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
-    const signal = fetchMock.mock.calls[0][1].signal;
-    expect(signal?.aborted).toBe(false);
-    view.rerender(
-      <AudioAnalysisProvider clips={[createAudioClip({ assetEntry: { ...createAudioClip().assetEntry!, src: 'https://example.com/new.wav' } })]} fps={FPS} totalDurationInFrames={3} enabled={false}>
+      <AudioAnalysisProvider clips={[source(a), source(b)]} fps={FPS} totalDurationInFrames={3} enabled={false}>
         <AnalysisSummary />
       </AudioAnalysisProvider>,
     );
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(signal?.aborted).toBe(true);
-    const replacementSignal = fetchMock.mock.calls[1][1].signal;
-    expect(replacementSignal?.aborted).toBe(false);
-    view.unmount();
-    expect(replacementSignal?.aborted).toBe(true);
+
+    view.rerender(
+      <AudioAnalysisProvider clips={[source(a), source(b), source(c)]} fps={FPS} totalDurationInFrames={3} enabled={false}>
+        <AnalysisSummary />
+      </AudioAnalysisProvider>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([a, b, c]);
+
+    view.rerender(
+      <AudioAnalysisProvider clips={[source(c), source(b), source(a)]} fps={FPS} totalDurationInFrames={3} enabled={false}>
+        <AnalysisSummary />
+      </AudioAnalysisProvider>,
+    );
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+  });
+
+  it('forgets a failed warm so the next pass retries it', async () => {
+    const flaky = 'https://example.com/flaky.wav';
+    const other = 'https://example.com/other.wav';
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValue(new Response(new Uint8Array(8)));
+    vi.stubGlobal('fetch', fetchMock);
+    const source = (src: string) => createAudioClip({ assetEntry: { ...createAudioClip().assetEntry!, src } });
+    const view = render(
+      <AudioAnalysisProvider clips={[source(flaky)]} fps={FPS} totalDurationInFrames={3} enabled={false}>
+        <AnalysisSummary />
+      </AudioAnalysisProvider>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    await flushAsync();
+    view.rerender(
+      <AudioAnalysisProvider clips={[source(flaky), source(other)]} fps={FPS} totalDurationInFrames={3} enabled={false}>
+        <AnalysisSummary />
+      </AudioAnalysisProvider>,
+    );
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([flaky, flaky, other]);
   });
 
   it('provides silent data and continues render immediately when there are no clips', async () => {

@@ -25,15 +25,20 @@ function literal(node) {
 
 function exportsFrom(sourceText, names) {
   const source = ts.createSourceFile('policy.mjs', sourceText, ts.ScriptTarget.Latest, true);
+  if (source.parseDiagnostics.length) throw new Error('policy source must parse without errors');
   const values = new Map();
   for (const statement of source.statements) {
     if (!ts.isVariableStatement(statement) || !statement.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) continue;
     for (const declaration of statement.declarationList.declarations) {
       if (ts.isIdentifier(declaration.name) && names.includes(declaration.name.text)) {
+        if (!(statement.declarationList.flags & ts.NodeFlags.Const)) throw new Error(`${declaration.name.text} must be a literal export const`);
         if (!declaration.initializer || values.has(declaration.name.text)) throw new Error(`ambiguous policy ${declaration.name.text}`);
         values.set(declaration.name.text, literal(declaration.initializer));
       }
     }
+  }
+  for (const name of names) {
+    if (!values.has(name)) throw new Error(`${name} must be a literal export const`);
   }
   return values;
 }
@@ -43,7 +48,7 @@ export function readPolicy(read) {
   for (const name of LIMITS) {
     if (!Number.isInteger(limits.get(name)) || limits.get(name) < 0) throw new Error(`missing or invalid ${name}`);
   }
-  const expected = exportsFrom(read(SKIPS), ['VITEST_EXPECTED_FAILURES']).get('VITEST_EXPECTED_FAILURES') ?? [];
+  const expected = exportsFrom(read(SKIPS), ['VITEST_EXPECTED_FAILURES']).get('VITEST_EXPECTED_FAILURES');
   const journeys = Object.values(JSON.parse(read(JOURNEY)));
   if (!Array.isArray(expected) || journeys.some((entries) => !Array.isArray(entries))) throw new Error('expected-failure registries must contain arrays');
   return { limits: Object.fromEntries(limits), entries: [...expected, ...journeys.flat()] };
@@ -100,7 +105,10 @@ export function checkQuarantinePolicy({ repoRoot = ROOT, baseRef = process.env.Q
 
 if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) {
   try {
-    const result = checkQuarantinePolicy({ ...(process.argv[2] ? { baseRef: process.argv[2] } : {}) });
+    const result = checkQuarantinePolicy({
+      ...(process.argv[2] ? { baseRef: process.argv[2] } : {}),
+      ...(process.argv[3] ? { repoRoot: path.resolve(process.argv[3]) } : {}),
+    });
     console.log(`Quarantine policy merge base: ${result.mergeBase}`);
     for (const problem of result.problems) console.error(`FAIL ${problem}`);
     if (result.problems.length) process.exitCode = 1;

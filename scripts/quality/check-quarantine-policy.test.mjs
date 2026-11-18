@@ -90,3 +90,16 @@ it('accepts the last UTC day of the base window and rejects an invalid expiry da
   f.put('config/testing/direct-journey-expected-failures.json', JSON.stringify({ direct: [{ ...candidate, expiry: '2026-11-99' }] }));
   assert.match(check().problems.join('\n'), /invalid expiry date/);
 });
+
+for (const [form, declaration] of [
+  ['aliased export', `const QF = ${JSON.stringify([{ ...entry, expiry: '2027-12-01' }])}; export { QF as VITEST_EXPECTED_FAILURES };`],
+  ['missing export', 'export const UNRELATED = [];'],
+  ['mutable let export', 'export let VITEST_EXPECTED_FAILURES = [];'],
+  ['mutable var export', 'export var VITEST_EXPECTED_FAILURES = [];'],
+]) {
+  it(`rejects a registry without a literal export const: ${form}`, () => {
+    const f = fixture();
+    f.put('config/testing/skipRegistry.mjs', declaration);
+    assert.throws(f.check, /VITEST_EXPECTED_FAILURES.*literal export const/);
+  });
+}

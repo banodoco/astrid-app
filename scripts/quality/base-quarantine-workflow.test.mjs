@@ -4,7 +4,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = fileURLToPath(new URL('../..', import.meta.url));
 const CHECKER = 'scripts/quality/check-quarantine-policy.mjs';
@@ -34,12 +34,14 @@ function fixture({ trustedChecker = true } = {}) {
   put('config/testing/skipRegistry.mjs', 'export const VITEST_EXPECTED_FAILURES = [];\n');
   put('config/testing/direct-journey-expected-failures.json', '{"direct":[]}');
   put('package.json', JSON.stringify({ scripts: { 'check:quarantine-policy': `node ${CHECKER}` } }));
+  const typescript = JSON.parse(readFileSync(path.join(ROOT, 'package-lock.json'), 'utf8')).packages['node_modules/typescript'];
+  put('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/typescript': typescript } }));
   if (trustedChecker) put(CHECKER, checker);
   git('init', '-q'); git('add', '.'); git('-c', 'user.name=Probe', '-c', 'user.email=probe@example.invalid', 'commit', '-qm', 'trusted policy base');
   const base = git('rev-parse', 'HEAD');
   symlinkSync(path.join(ROOT, 'node_modules'), path.join(root, 'node_modules'), 'junction');
   if (!trustedChecker) put(CHECKER, checker);
-  return { root, base, put, checker, run: () => spawnSync('bash', ['-euo', 'pipefail', '-c', workflowCommand()], {
+  return { root, base, put, git, checker, run: () => spawnSync('bash', ['-euo', 'pipefail', '-c', workflowCommand()], {
     cwd: root, env: { ...process.env, QUARANTINE_BASE_REF: base }, encoding: 'utf8',
   }) };
 }
@@ -64,4 +66,26 @@ it('the actual workflow fails closed when the merge base has no trusted checker'
   const result = f.run();
   assert.notEqual(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout + result.stderr, /trusted quarantine checker is absent from merge base/);
+});
+
+it('the actual workflow ignores a committed nested TypeScript stub and candidate parser lock', () => {
+  const f = fixture();
+  f.put(GATE, readFileSync(path.join(f.root, GATE), 'utf8').replace('MAX_QUARANTINE_ENTRIES = 10', 'MAX_QUARANTINE_ENTRIES = 11'));
+  const nested = 'scripts/quality/node_modules/typescript';
+  f.put(`${nested}/package.json`, JSON.stringify({ name: 'typescript', type: 'module', exports: './index.mjs' }));
+  f.put(`${nested}/index.mjs`, `import ts from ${JSON.stringify(pathToFileURL(path.join(ROOT, 'node_modules/typescript/lib/typescript.js')).href)};
+    export default { ...ts, createSourceFile(file, text, ...args) {
+      console.log('COMMITTED_TYPESCRIPT_STUB_RAN');
+      return ts.createSourceFile(file, text.replace('MAX_QUARANTINE_ENTRIES = 11', 'MAX_QUARANTINE_ENTRIES = 10'), ...args);
+    } };`);
+  f.put('package-lock.json', JSON.stringify({ lockfileVersion: 3, packages: { 'node_modules/typescript': {
+    version: '0.0.0', resolved: `file:${nested}`, integrity: 'candidate-controlled',
+  } } }));
+  f.git('add', '-f', GATE, nested, 'package-lock.json');
+  f.git('-c', 'user.name=Probe', '-c', 'user.email=probe@example.invalid', 'commit', '-qm', 'commit parser shadow and raised ceiling');
+  assert.equal(f.git('ls-files', `${nested}/index.mjs`), `${nested}/index.mjs`);
+  const result = f.run();
+  assert.notEqual(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout + result.stderr, /MAX_QUARANTINE_ENTRIES raised above merge base/);
+  assert.doesNotMatch(result.stdout + result.stderr, /COMMITTED_TYPESCRIPT_STUB_RAN/);
 });

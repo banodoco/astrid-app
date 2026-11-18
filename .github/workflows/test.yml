@@ -110,16 +110,44 @@ jobs:
           fi
           base_commit=$(git rev-parse --verify "${QUARANTINE_BASE_REF}^{commit}")
           merge_base=$(git merge-base HEAD "$base_commit")
-          # Keep the base module at this depth for its repository root and locked
-          # TypeScript import, but never execute the candidate's checker source.
-          policy_file=$(mktemp scripts/quality/.quarantine-policy-base-XXXXXX.mjs)
-          trap 'rm -f -- "$policy_file"' EXIT
+          repo_root=$(git rev-parse --show-toplevel)
+          policy_dir=$(mktemp -d /tmp/astrid-quarantine-policy.XXXXXX)
+          trap 'rm -rf -- "$policy_dir"' EXIT
+          case "$policy_dir/" in
+            "$repo_root/"*) echo "The trusted checker must run outside the checkout." >&2; exit 1 ;;
+          esac
           echo "Quarantine checker source: ${merge_base}:scripts/quality/check-quarantine-policy.mjs"
-          if ! git show "${merge_base}:scripts/quality/check-quarantine-policy.mjs" > "$policy_file"; then
-            echo "The trusted quarantine checker is absent from merge base ${merge_base}; the Lead must bootstrap it into the target ancestry." >&2
+          if ! git show "${merge_base}:scripts/quality/check-quarantine-policy.mjs" > "$policy_dir/check-quarantine-policy.mjs"; then
+            echo "The trusted quarantine checker is absent from merge base ${merge_base}; no candidate checker will be used." >&2
             exit 1
           fi
-          node "$policy_file" "$merge_base"
+          git show "${merge_base}:package-lock.json" > "$policy_dir/base-lock.json"
+          # Resolve the parser from the base lock, outside candidate module and npm
+          # configuration paths. Earlier postinstall code execution is a known limit.
+          node --input-type=module - "$policy_dir" <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const directory = process.argv[2];
+          const baseLock = JSON.parse(fs.readFileSync(path.join(directory, 'base-lock.json'), 'utf8'));
+          const typescript = baseLock.packages?.['node_modules/typescript'];
+          if (!typescript?.version || !typescript.resolved || !typescript.integrity
+            || ['dependencies', 'optionalDependencies', 'peerDependencies'].some(key => Object.keys(typescript[key] ?? {}).length)) {
+            throw new Error('the base must pin a dependency-free TypeScript package with its resolved URL and integrity');
+          }
+          const manifest = { name: 'astrid-quarantine-policy-checker', version: '0.0.0', private: true,
+            devDependencies: { typescript: typescript.version } };
+          const lock = { name: manifest.name, version: manifest.version, lockfileVersion: 3, requires: true,
+            packages: { '': { name: manifest.name, version: manifest.version, devDependencies: manifest.devDependencies },
+              'node_modules/typescript': typescript } };
+          fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
+          fs.writeFileSync(path.join(directory, 'package-lock.json'), JSON.stringify(lock));
+          console.log(`Trusted TypeScript from base lock: ${typescript.version}`);
+          NODE
+          (
+            cd "$policy_dir"
+            npm ci --ignore-scripts --include=dev --no-audit --no-fund --prefer-offline
+            node ./check-quarantine-policy.mjs "$merge_base" "$repo_root"
+          )
       - name: Prove result-integrity rejection cases
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: python3 -m unittest discover -s scripts/quality -p test_vitest_results.py

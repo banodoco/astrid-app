@@ -2,7 +2,7 @@
 // A stalled task must not strand already-finished task updates in Vitest's throttle.
 // Pinned upstream cause: the elapsed-time boundary is strict, and the timer callback
 // retains its expired handle. An exact/early timer then cannot schedule another flush.
-// Empty each tables must fail during registration: they emit no task for a reporter
+// Empty each/for tables must fail during registration: they emit no task for a reporter
 // to inspect. Check the evaluated table after tagged-template expansion.
 import { readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -52,6 +52,37 @@ const EACH_AFTER = EACH_BEFORE.replace(
 \t\treturn (name, optionsOrFn, fnOrOptions) => {`,
 );
 
+const TABLE_COLLECTORS = [
+  ['describe.each', true, `\tsuiteFn.each = function(cases, ...args) {
+\t\tconst context = getChainableContext(this);
+\t\tconst suite = context.withContext();
+\t\tcontext.setContext("each", true);
+\t\tif (Array.isArray(cases) && args.length) {
+\t\t\tcases = formatTemplateString(cases, args);
+\t\t}
+\t\treturn (name, optionsOrFn, fnOrOptions) => {`],
+  ['describe.for', false, `\tsuiteFn.for = function(cases, ...args) {
+\t\tif (Array.isArray(cases) && args.length) {
+\t\t\tcases = formatTemplateString(cases, args);
+\t\t}
+\t\treturn (name, optionsOrFn, fnOrOptions) => {`],
+  ['test.for', false, `\ttaskFn.for = function(cases, ...args) {
+\t\tconst context = getChainableContext(this);
+\t\tconst test = context.withContext();
+\t\tif (Array.isArray(cases) && args.length) {
+\t\t\tcases = formatTemplateString(cases, args);
+\t\t}
+\t\treturn (name, optionsOrFn, fnOrOptions) => {`],
+];
+
+function withEmptyTableGuard(before, api, resetEach) {
+  return before.replace('\t\treturn (name, optionsOrFn, fnOrOptions) => {',
+    `\t\tif (cases.length === 0) {
+${resetEach ? '\t\t\tcontext.setContext("each", undefined);\n' : ''}\t\t\tthrow new Error("${api}() requires at least one row");
+\t\t}
+\t\treturn (name, optionsOrFn, fnOrOptions) => {`);
+}
+
 function patchBlock(source, before, after, label) {
   const occurrences = (block) => source.split(block).length - 1;
   if (occurrences(after) === 1 && occurrences(before) === 0) return source;
@@ -63,7 +94,11 @@ function patchBlock(source, before, after, label) {
 
 export function patchedSource(source) {
   const streamed = patchBlock(source, BEFORE, AFTER, 'task-update throttle');
-  return patchBlock(streamed, EACH_BEFORE, EACH_AFTER, 'each-table collector');
+  let patched = patchBlock(streamed, EACH_BEFORE, EACH_AFTER, 'each-table collector');
+  for (const [api, resetEach, before] of TABLE_COLLECTORS) {
+    patched = patchBlock(patched, before, withEmptyTableGuard(before, api, resetEach), `${api} collector`);
+  }
+  return patched;
 }
 
 export function patchInstalledRunner({ check = false } = {}) {
@@ -94,7 +129,7 @@ if (process.argv[1] && pathToFileURL(process.argv[1]).href === import.meta.url) 
       throw new Error('usage: node scripts/patches/vitest-4.1.5-result-stream.mjs --apply|--check');
     }
     const file = patchInstalledRunner({ check: process.argv[2] === '--check' });
-    console.log(file ? 'Vitest 4.1.5 task-update streaming and each-table guards verified.'
+    console.log(file ? 'Vitest 4.1.5 task-update streaming and parameter-table guards verified.'
       : 'Production installation omits the Vitest development runner.');
   } catch (error) {
     console.error(error.message);

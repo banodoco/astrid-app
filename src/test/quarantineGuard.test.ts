@@ -75,6 +75,29 @@ it('preserves every row of a nonempty evaluated each table', () => {
   expect(result.stdout + result.stderr).toMatch(/3 passed/);
 });
 
+for (const [api, message] of [
+  ['describe.each', 'describe.each() requires at least one row'],
+  ['it.for', 'test.for() requires at least one row'],
+  ['describe.for', 'describe.for() requires at least one row'],
+]) {
+  it(`refuses an empty evaluated ${api} table beside an ordinary passing test`, () => {
+    const result = runFixture('empty-table-variants.fixture.ts', { P39_TABLE_API: api });
+    expect(result.status, result.stdout + result.stderr).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain(message);
+  });
+  it(`preserves every row of a nonempty evaluated ${api} table`, () => {
+    const result = runFixture('empty-table-variants.fixture.ts', { P39_TABLE_API: api, P39_TABLE_ROWS: 'nonempty' });
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout + result.stderr).toMatch(/3 passed/);
+  });
+}
+
+it('preserves nonempty tagged tables in suite each and both for collectors', () => {
+  const result = runFixture('empty-table-variants.fixture.ts', { P39_TABLE_FORMAT: 'tagged' });
+  expect(result.status, result.stdout + result.stderr).toBe(0);
+  expect(result.stdout + result.stderr).toMatch(/7 passed/);
+});
+
 describe('runtime expected-failure equality', () => {
   const entry = { file: 'src/a.test.ts', title: 'suite > case' };
   const selected = new Set([entry.file]);

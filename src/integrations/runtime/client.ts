@@ -334,11 +334,14 @@ export function classifyRuntimeCommitFailure(error: unknown): RuntimeCommitFailu
   if (/storage|disk|space/i.test(error.code) || /storage|disk|space/i.test(String(error.details?.reason ?? ''))) return 'storage';
   if (error.status >= 500) return 'unknown';
   // Permanent client errors: the same bytes will be refused again, so they must
-  // not stay at the outbox head as "retry". 408 (timeout), 409 (untyped head
-  // contention, see isRuntimeConflict) and 429 (rate limit) stay retryable.
+  // not stay at the outbox head as "retry". 408 (timeout) and 429 (rate limit) stay retryable.
   if (error.status === 413) return 'too_large';
   if (error.status === 404 || error.status === 405) return 'unsupported_route';
-  if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 409 && error.status !== 429) {
+  // Any other 409 (for example a media-selection digest conflict) is a refusal
+  // of the exact request: resending identical bytes can never succeed, so it is
+  // a dischargeable conflict. Only head_busy/runtime_unavailable (above) retry.
+  if (error.status === 409) return 'conflict';
+  if (error.status >= 400 && error.status < 500 && error.status !== 408 && error.status !== 429) {
     return 'rejected_request';
   }
   return 'unknown';

@@ -5,7 +5,7 @@ on:
     paths:
       - .github/workflows/p61-startup.yml
       - scripts/astrid-release/startup.test.mjs
-      - scripts/astrid-release/startup-retry.sh
+      - scripts/astrid-release/startup-log.py
       - scripts/astrid-release/astrid-release
   workflow_dispatch:
 permissions:

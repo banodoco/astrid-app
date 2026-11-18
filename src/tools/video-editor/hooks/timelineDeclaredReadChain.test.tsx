@@ -118,8 +118,19 @@ describe('mounted split and inspector trim authoring reads', () => {
           state: { state: 'present', value: registry.assets.media } });
         expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'output', 'fps'],
           state: { state: 'present', value: 30 } });
-        expect(reads.some((read) => (read as { kind: string }).kind === 'collection')).toBe(false);
-        expect(reads).not.toContainEqual(expect.objectContaining({ path: ['config', 'clips'] }));
+        // A named trim reads what resolveOverlaps consults: the collection order and every sibling's track,
+        // plus timing and asset for same-track siblings (same shape as move).
+        expect(reads.filter((read) => (read as { kind: string }).kind === 'collection')).toEqual([
+          { kind: 'collection', ref: 'parent', path: ['config', 'clips'],
+            members: ['OTHERCLIP', 'original', rightId].sort(), order: ['original', rightId, 'OTHERCLIP'] }]);
+        for (const sibling of ['original', 'OTHERCLIP']) {
+          expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'clips', `id:${sibling}`, 'track'],
+            state: { state: 'present', value: 'V1' } });
+        }
+        expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'clips', 'id:OTHERCLIP', 'at'],
+          state: { state: 'present', value: 10 } });
+        expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'clips', 'id:OTHERCLIP', 'to'],
+          state: { state: 'present', value: 2 } });
         expect(splitIntent.reads).toContainEqual({ kind: 'collection', ref: 'parent', path: ['config', 'clips'],
           members: ['OTHERCLIP', 'original'], order: ['original', 'OTHERCLIP'] });
         expect(splitIntent.reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'pinnedShotGroups'], state: { state: 'absent' } });

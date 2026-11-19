@@ -463,7 +463,7 @@ export function VideoEditorRuntimeContent({
   operationsEnabled?: boolean;
 }) {
   const runtime = useVideoEditorRuntime();
-  const { store, editor, chrome, transcriptHost } = sync;
+  const { store, editor, chrome, transcriptHost, timelineEditingReady } = sync;
   const timelineEditability = sync.timelineEditability ?? runtime.timelineEditability;
   const commands = useMemo(() => createTimelineCommands(store, {
     timelineEditability,
@@ -550,7 +550,8 @@ export function VideoEditorRuntimeContent({
   editorRef.current = editor;
 
   useEffect(() => {
-    if (editor.isLoading) return;
+    // Keep staged intent queued until its first placement can reach the save owner.
+    if (editor.isLoading || timelineEditingReady === false) return;
     const targetProject = searchParams.get(ADD_GENERATION_PROJECT_PARAM);
     const targetTimeline = searchParams.get(ADD_GENERATION_TIMELINE_PARAM);
     const hasScopedIntent = Boolean(targetProject && targetTimeline);
@@ -687,7 +688,7 @@ export function VideoEditorRuntimeContent({
         drainInFlightRef.current = false;
       }
     })();
-  }, [commands, editor.isLoading, isActiveInstance, pendingAddGenerationId, runtime.mediaLightbox, runtime.provider, runtime.toast, runtime.timelineId, runtime.project.projectId, searchParams, setSearchParams, store]);
+  }, [commands, editor.isLoading, isActiveInstance, pendingAddGenerationId, runtime.mediaLightbox, runtime.provider, runtime.toast, runtime.timelineId, runtime.project.projectId, searchParams, setSearchParams, store, timelineEditingReady]);
 
   const [lightboxAssetKey, setLightboxAssetKey] = useState<string | null>(null);
   const [lightboxClipId, setLightboxClipId] = useState<string | null>(null);

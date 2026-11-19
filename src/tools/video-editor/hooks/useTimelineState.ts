@@ -1286,6 +1286,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
   return {
     store,
     timelineEditability,
+    timelineEditingReady: save.timelineEditingReady,
     editor: { ...editor, elementTimelineRoutes: save.elementTimelineRoutes },
     editorData,
     editorOps,

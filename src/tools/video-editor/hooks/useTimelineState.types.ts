@@ -275,6 +275,7 @@ export interface TimelinePlaybackContextValue {
 export interface UseTimelineStateResult {
   store: TimelineStoreApi;
   timelineEditability?: TimelineEditability;
+  timelineEditingReady?: boolean;
   editor: TimelineEditorContextValue & { elementTimelineRoutes?: import('../runtime/element-adapter.ts').ElementTimelineRoutes };
   editorData: TimelineEditorDataContextValue;
   editorOps: TimelineEditorOpsContextValue;

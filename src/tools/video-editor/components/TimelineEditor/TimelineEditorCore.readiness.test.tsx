@@ -269,3 +269,70 @@ describe('C4 production Core-to-V1 save readiness (#966)', () => {
     } finally { mounted.dispose(); }
   });
 });
+
+describe('C4 production track-name presentation during save readiness (#966)', () => {
+  it.each(['original', 'identity'] as const)(
+    'keeps the named field visible and nonwritable while %s is held, then enables the same field', async hold => {
+      const source = await makeSource(hold);
+      const mounted = mountCore(source);
+      try {
+        await waitFor(() => expect(hold === 'original' ? source.loadBasis : source.identity).toHaveBeenCalled());
+        const field = screen.getByRole<HTMLInputElement>('textbox', { name: 'Track name' });
+        expect(field).toBeVisible();
+        expect(field).toHaveValue('V1');
+        expect(field).toHaveAttribute('readonly');
+        expect(screen.queryByRole('button', { name: 'Reorder track' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Track settings' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Remove track' })).toBeNull();
+        // Even a synthetic change cannot call the track operation during the hold.
+        fireEvent.change(field, { target: { value: 'Denied during handoff' } });
+        expect(mounted.getEditor().dataRef.current?.config.tracks?.[0].label).toBe('V1');
+        expect(source.commit).toHaveBeenCalledTimes(0);
+        expect(mounted.getRuntime().timelineEditability?.checkTimeline?.().allowed).toBe(false);
+        await act(async () => { source.gate.resolve(); });
+        await renameOnce(mounted, source);
+        expect(screen.getByRole('textbox', { name: 'Track name' })).toBe(field);
+        expect(field).not.toHaveAttribute('readonly');
+      } finally { mounted.dispose(); }
+    },
+  );
+
+  it('returns the named field to nonwritable presentation for a replacement save owner', async () => {
+    const previous = await makeSource('none');
+    const current = await makeSource('original');
+    const mounted = mountCore(previous);
+    try {
+      await waitFor(() => expect(mounted.getRuntime().timelineEditability?.checkTimeline?.().allowed).toBe(true));
+      expect(screen.getByRole('textbox', { name: 'Track name' })).not.toHaveAttribute('readonly');
+      mounted.replaceSource(current);
+      await waitFor(() => expect(current.loadBasis).toHaveBeenCalled());
+      const field = screen.getByRole('textbox', { name: 'Track name' });
+      expect(field).toBeVisible();
+      expect(field).toHaveAttribute('readonly');
+      fireEvent.change(field, { target: { value: 'Denied on replacement' } });
+      expect(mounted.getEditor().dataRef.current?.config.tracks?.[0].label).toBe('V1');
+      expect(previous.commit).toHaveBeenCalledTimes(0);
+      expect(current.commit).toHaveBeenCalledTimes(0);
+      await act(async () => { current.gate.resolve(); });
+      await renameOnce(mounted, current);
+      expect(previous.commit).toHaveBeenCalledTimes(0);
+    } finally { current.gate.resolve(); mounted.dispose(); }
+  });
+
+  it('keeps permanent host read-only presentation during and after the save hold', async () => {
+    const denied = () => ({ allowed: false, reason: 'timeline_read_only' as const });
+    const source = await makeSource('original');
+    const mounted = mountCore(source, { checkTimeline: denied, check: denied, checkMove: denied });
+    try {
+      await waitFor(() => expect(source.loadBasis).toHaveBeenCalled());
+      expect(screen.queryByRole('textbox', { name: 'Track name' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Reorder track' })).toBeNull();
+      await act(async () => { source.gate.resolve(); });
+      await waitFor(() => expect(mounted.getChrome().saveStatus).toBe('saved'));
+      expect(screen.queryByRole('textbox', { name: 'Track name' })).toBeNull();
+      expect(mounted.getRuntime().timelineEditability?.checkTimeline?.()).toEqual(denied());
+      expect(source.commit).toHaveBeenCalledTimes(0);
+      expect(source.provider.saveTimeline).not.toHaveBeenCalled();
+    } finally { mounted.dispose(); }
+  });
+});

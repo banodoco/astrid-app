@@ -942,6 +942,7 @@ function TimelineEditorCoreComponent({
           rows={renderRows}
           tracks={data.tracks}
           readOnly={readOnly}
+          showReadOnlyTrackName={runtime?.timelineSaveReadinessHeld === true}
           nestedAudioTrackIds={nestedAudioTrackIds}
           deviceClass={deviceClass}
           inputModality={inputModality}

@@ -310,7 +310,8 @@ PY
       else
         _realm_err 'catalog restoration refused because destination ownership/selection changed; inspect the retained backup'
       fi
-      _realm_err "workspace attach did not report configured_attach (exit $attach_rc): $(printf '%s' "$attach_out" | tail -c 400)"
+      _realm_err "workspace attach did not report configured_attach (exit $attach_rc):"
+      printf '%s\n' "$attach_out" >&2
       _realm_err "copy retained at $final; a normal retry refuses to overwrite it (see README recovery)"; return 1
     fi
   fi

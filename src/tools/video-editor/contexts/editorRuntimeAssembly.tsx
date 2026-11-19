@@ -1320,10 +1320,13 @@ export function EditorRuntimeScaffold({
   children: ReactNode;
 }) {
   const runtime = useVideoEditorRuntime();
+  const timelineSaveReadinessHeld = sync.timelineEditingReady === false
+    && runtime.timelineEditability?.checkTimeline?.().allowed !== false;
   const editingRuntime = useMemo(() => ({
     ...runtime,
     timelineEditability: sync.timelineEditability ?? runtime.timelineEditability,
-  }), [runtime, sync.timelineEditability]);
+    timelineSaveReadinessHeld,
+  }), [runtime, sync.timelineEditability, timelineSaveReadinessHeld]);
   const inner = (
     <EffectCatalogProvider value={sync.effectResources}>
       <RuntimeEffectRegistryLifecycle

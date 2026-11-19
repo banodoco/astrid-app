@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import sqlite3
@@ -158,6 +159,66 @@ _realm_clone_tree() {
         script += 'realm_snapshot_copy "$2" "$3"\n'
         return subprocess.run(["bash", "-uo", "pipefail", "-c", script, "fixture", str(SCRIPT), str(self.live), str(self.dest)],
                               env=self.env, cwd=self.root, text=True, capture_output=True, timeout=30)
+
+    def release_attach(self, data):
+        # Execute the actual release caller with this fixture's installed Runtime.
+        # Only clean_env is replaced: self.env already supplies the isolated home.
+        source = SCRIPT.with_name("astrid-release").read_text()
+        caller = re.search(r"^realm_attach_cmd\(\) \{[^\n]*\}$", source, re.MULTILINE)
+        self.assertIsNotNone(caller, "fixture must execute the actual release attach caller")
+        program = self.root / "caller-program"
+        version = program / "versions/fixture"
+        version.mkdir(parents=True, exist_ok=True)
+        (program / "current").write_text("fixture\n")
+        shutil.copyfile(self.profile, version / "profile.json")
+        script = 'SCRIPT_DIR="$1"; PYTHON="$2"; PROGRAM="$3"; shift 3\n'
+        script += 'clean_env() { "$@"; }\n' + caller.group(0) + '\nrealm_attach_cmd "$@"\n'
+        result = subprocess.run([
+            "bash", "-uo", "pipefail", "-c", script, "release-caller-fixture",
+            str(SCRIPT.parent), sys.executable, str(program), "workspace", "attach",
+            "--data-root", str(data), "--realm-root", str(self.copied), "--realm-id", RID, "--json",
+        ], env=self.env, cwd=self.root, text=True, capture_output=True, timeout=150)
+        print("release caller stdout:\n" + result.stdout + "release caller stderr:\n" + result.stderr, flush=True)
+        return result
+
+    def test_release_caller_reports_schema_cause_without_mutating_rejected_realm(self):
+        copied = self.snapshot()
+        self.assertEqual(copied.returncode, 0, copied.stdout + copied.stderr)
+        with sqlite3.connect(self.copied / "realm.sqlite3") as connection:
+            connection.execute("UPDATE runtime_schema SET version=999999 WHERE id=1")
+        rejected_before = fingerprint(self.copied)
+        live_before = fingerprint(self.live)
+        catalog_before = (self.dest / "runtime/catalog.json").read_bytes()
+        selection = self.root / "rejected-selection"
+        result = self.release_attach(selection)
+        output = result.stdout + result.stderr
+        self.assertEqual(result.returncode, 1, output)
+        self.assertEqual(fingerprint(self.copied), rejected_before)
+        self.assertEqual(fingerprint(self.live), live_before)
+        self.assertEqual((self.dest / "runtime/catalog.json").read_bytes(), catalog_before)
+        self.assertFalse((selection / "runtime/catalog.json").exists())
+        self.assertIn("schema", output.lower(), output)
+        self.assertIn(str(self.copied), output)
+        diagnostic = next(line.removeprefix("astrid-release: Runtime doctor: ")
+                          for line in result.stderr.splitlines()
+                          if line.startswith("astrid-release: Runtime doctor: "))
+        report = json.loads(diagnostic)["report"]
+        self.assertIn("schema", report["issues"])
+        self.assertFalse(report["checks"]["schema"]["ok"])
+        self.assertEqual(report["checks"]["schema"]["actual_version"], 999999)
+        self.assertEqual(report["checks"]["schema"]["expected_version"], report["schema_version"])
+
+    def test_release_caller_preserves_success_json(self):
+        copied = self.snapshot()
+        self.assertEqual(copied.returncode, 0, copied.stdout + copied.stderr)
+        before = fingerprint(self.copied)
+        result = self.release_attach(self.root / "successful-selection")
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        report = json.loads(result.stdout)
+        self.assertEqual(report["status"], "configured_attach")
+        self.assertEqual(report["realm_id"], RID)
+        self.assertNotIn("Runtime doctor", result.stderr)
+        self.assertEqual(fingerprint(self.copied), before)
 
     def test_snapshot_attaches_with_real_runtime_and_refuses_wrong_id(self):
         before = fingerprint(self.live)

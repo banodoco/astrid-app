@@ -1,5 +1,5 @@
 import { getEffectiveClipVolume } from '@/tools/video-editor/lib/clip-volume.ts';
-import { useOptionalVideoEditorRuntime as useMarqueeEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
+import { useOptionalVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import type { DataLaneView } from '@/tools/video-editor/data/typed/envelope.ts';
 // Layer map & invariants: docs/structure_detail/tool_video_editor.md
 import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
@@ -432,7 +432,9 @@ function TimelineEditorCoreComponent({
 
   const { dragSessionRef, isDragging, dragPreview } = useClipDrag();
 
-  const marqueeOwner = useMarqueeEditorRuntime()?.agentSelectionOwner;
+  const runtime = useOptionalVideoEditorRuntime();
+  const marqueeOwner = runtime?.agentSelectionOwner;
+  const readOnly = runtime?.timelineEditability?.checkTimeline?.().allowed === false;
   const { marqueeRect, onPointerDown: onMarqueePointerDown } = useMarqueeSelect({
     selectionOwner: marqueeOwner,
     editAreaRef,
@@ -939,6 +941,8 @@ function TimelineEditorCoreComponent({
           ref={timelineRef as React.RefObject<import('@/tools/video-editor/types/timeline-canvas').TimelineCanvasHandle>}
           rows={renderRows}
           tracks={data.tracks}
+          readOnly={readOnly}
+          showReadOnlyTrackName={runtime?.timelineSaveReadinessHeld === true}
           nestedAudioTrackIds={nestedAudioTrackIds}
           deviceClass={deviceClass}
           inputModality={inputModality}

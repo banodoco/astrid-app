@@ -428,7 +428,7 @@ PYTHON="$PROGRAM/versions/$(cat "$PROGRAM/current")/py/bin/python"
 stop_stack
 . "$SCRIPT_DIR/realm-snapshot.sh"
 export REALM_FREE_FLOOR_BYTES=$((1024 * 1024 * 1024))   # the program is already installed; clones cost almost nothing
-realm_attach_cmd() { clean_env "$PYTHON" -X utf8 -I -m astrid_runtime "$@" --source-manifest "$PROGRAM/versions/$(cat "$PROGRAM/current")/profile.json"; }
+realm_attach_cmd() { clean_env "$PYTHON" -X utf8 -I "$SCRIPT_DIR/workspace-attach.py" "$@" --source-manifest "$PROGRAM/versions/$(cat "$PROGRAM/current")/profile.json"; }
 if [[ ! -f "$STATE/realm-id" ]]; then
   [[ -z "$(stragglers)" ]] || fail 'A process of this stack is still alive; not replacing its workspace selection.'
   remove_dir "$ROOT/data.pre-realm"
@@ -470,9 +470,11 @@ record() {
 }
 # The installer-started Runtime left its owner identity (old realm root) in discovery.json and instance.lock; the
 # stack is stopped here, so clear both and the Runtime records the copied realm instead.
-# The first start on a freshly copied realm can fail once with "accepted commit inputs changed during verification"
-# (a state only the first start consumes; a second start succeeds). Retry at most twice, keeping each log tail.
+# A fresh copied realm has failed with "accepted commit inputs changed during verification".
+# Its cause is not established. Retry only that exact, current-attempt failure, at most twice,
+# with a counted warning and retained tails. An unrelated failure is never retried.
 started=0
+runtime_log="$ROOT/home/Library/Logs/Astrid Runtime/runtime.log"
 for attempt in 1 2 3; do
 [[ -z "$(stragglers)" ]] || fail 'A process of this stack is still alive; not clearing the Runtime owner records.'
 lock_pid="$(/usr/bin/python3 -c 'import json,re,sys
@@ -481,6 +483,11 @@ m=re.search(r"\"pid\"\s*:\s*(\d+)", t)
 print(m.group(1) if m else "")' "$DATA/runtime/instance.lock" 2>/dev/null || true)"
 if [[ -n "$lock_pid" ]] && kill -0 "$lock_pid" 2>/dev/null; then fail "The Runtime owner lock names pid $lock_pid, which is still alive; not removing it."; fi
 rm -f "$DATA/runtime/discovery.json" "$DATA/runtime/instance.lock"
+# Fence old Runtime messages before this launch. A historical verification error
+# must not authorize a retry after a new, unrelated startup failure.
+runtime_cursor="$LOGS/start-attempt-$attempt.cursor.json"
+/usr/bin/python3 "$SCRIPT_DIR/startup-log.py" mark "$runtime_log" "$runtime_cursor" \
+  || fail 'Could not record the Runtime log boundary; not starting.'
 # Detach the editor from this terminal; stop uses its exact recorded PID.
 EDITOR_PID="$(clean_env PORT="$APP_PORT" VITE_ASTRID_DYNAMIC_PROXY_PORT="$PROXY_PORT" "$PYTHON" - "$LOGS/editor.log" "$APP" "$NODE_BIN/node" "$APP/scripts/dev-local-workspace.mjs" --data-root "$DATA" <<'PYLAUNCH'
 import subprocess, sys
@@ -550,10 +557,15 @@ else:
 PY
 
   if [[ "$started" == 1 ]]; then break; fi
-  tail -n 40 "$LOGS/editor.log" > "$LOGS/start-attempt-$attempt.log" 2>/dev/null || true
-  tail -n 40 "$ROOT/home/Library/Logs/Astrid Runtime/runtime.log" >> "$LOGS/start-attempt-$attempt.log" 2>/dev/null || true
+  attempt_log="$LOGS/start-attempt-$attempt.log"
+  retry_reason="$(/usr/bin/python3 "$SCRIPT_DIR/startup-log.py" retain "$LOGS/editor.log" "$runtime_log" "$runtime_cursor" "$attempt_log")" \
+    || fail "Could not retain the current startup logs; no retry (logs: $LOGS)."
+  if [[ "$retry_reason" != known-verification-failure ]]; then
+    log_tail
+    fail "Startup failed without the known verification error; no retry (current-attempt tails: $attempt_log)."
+  fi
   if [[ "$attempt" == 3 ]]; then log_tail; fail "The stack did not become ready after 3 starts (logs: $LOGS/start-attempt-*.log)."; fi
-  say "Start attempt $attempt failed (kept in $LOGS/start-attempt-$attempt.log); clearing the owner records and starting again."
+  say "WARNING: accepted commit inputs changed during verification; retry $attempt/2 (failed attempt $attempt retained in $attempt_log)."
   stop_stack
 done
 record_runtime

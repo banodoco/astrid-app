@@ -513,15 +513,15 @@ describe('pinned-group background sync and history', () => {
     vi.useFakeTimers();
     const registry: AssetRegistry = {
       assets: {
-        'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1' },
+        'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1', variantId: 'variant-1' },
       },
     };
     const shots: Shot[] = [{
       id: 'shot-1',
       name: 'Shot 1',
       images: [
-        { generation_id: 'gen-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
-        { generation_id: 'gen-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
+        { generation_id: 'gen-1', primary_variant_id: 'variant-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
+        { generation_id: 'gen-2', primary_variant_id: 'variant-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
       ],
     } as Shot];
     const harness = setupHarness({
@@ -533,6 +533,7 @@ describe('pinned-group background sync and history', () => {
             file: 'https://example.com/two.png',
             type: 'image/png',
             generationId: 'gen-2',
+            variantId: 'variant-2',
           };
         }
         return 'asset-2';

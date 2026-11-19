@@ -42,6 +42,21 @@ export interface TimelineEditability {
   }): TimelineEditabilityResult;
 }
 
+/** Keep every editing surface read-only until its save owner has a handoff.
+ * The live predicate also protects callbacks retained across owner retirement. */
+export function withTimelineSaveReadiness(
+  editability: TimelineEditability | undefined,
+  isReady: () => boolean,
+): TimelineEditability {
+  const blocked = (): TimelineEditabilityResult => ({ allowed: false, reason: 'timeline_read_only' });
+  return {
+    hardDurationSeconds: editability?.hardDurationSeconds,
+    checkTimeline: () => isReady() ? editability?.checkTimeline?.() ?? { allowed: true } : blocked(),
+    check: input => isReady() ? editability?.check(input) ?? { allowed: true } : blocked(),
+    checkMove: input => isReady() ? editability?.checkMove?.(input) ?? { allowed: true } : blocked(),
+  };
+}
+
 /**
  * Nested canonical shot publication and parent document saves use different
  * CAS heads. Freeze parent edits while a nested shot has an unacknowledged

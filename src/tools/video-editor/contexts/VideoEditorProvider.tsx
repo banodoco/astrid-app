@@ -464,10 +464,11 @@ export function VideoEditorRuntimeContent({
 }) {
   const runtime = useVideoEditorRuntime();
   const { store, editor, chrome, transcriptHost } = sync;
+  const timelineEditability = sync.timelineEditability ?? runtime.timelineEditability;
   const commands = useMemo(() => createTimelineCommands(store, {
-    timelineEditability: runtime.timelineEditability,
+    timelineEditability,
     preparedMediaRequiresSelection: Boolean(runtime.provider.commitTimeline),
-  }), [store, runtime.timelineEditability, runtime.provider.commitTimeline]);
+  }), [store, timelineEditability, runtime.provider.commitTimeline]);
   useEffect(() => {
     const pending = store.getState().pendingWorkRegistry;
     if (!pending || !onPendingWorkChange) return;

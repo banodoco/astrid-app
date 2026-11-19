@@ -116,7 +116,7 @@ export function planGenerationAssetRegistration({
   assetDurationSeconds,
 }: {
   assetId?: string;
-  generationId: string;
+  generationId?: string;
   variantId?: string;
   variantType?: string;
   mediaId?: string | null;
@@ -166,9 +166,10 @@ export function planGenerationAssetRegistration({
       ...sourceNames,
       type: mimeType,
       ...(normalizedDuration !== null ? { duration: normalizedDuration } : {}),
-      generationId,
       ...(mediaId ? { media_id: mediaId } : {}),
-      ...(variantId ? { variantId } : {}),
+      // A catalog association names both ids or neither (the Agent refuses a half entry).
+      // Callers resolve the variant the drop shows; without one the entry stays unassociated.
+      ...(generationId && variantId ? { generationId, variantId } : {}),
       ...(resolvedThumbUrl !== imageUrl ? { thumbnailUrl: resolvedThumbUrl } : {}),
     },
   };
@@ -206,22 +207,21 @@ export function planDuplicateGenerationAssetRegistration({
   });
 }
 
+// A final video's id is a Runtime media object id, not a generation or variant, so the
+// entry carries neither catalog id.
 export function planFinalVideoGenerationAssetRegistration({
   assetId,
-  generationId,
   imageUrl,
   thumbUrl,
   assetDurationSeconds,
 }: {
   assetId?: string;
-  generationId: string;
   imageUrl: string;
   thumbUrl?: string | null;
   assetDurationSeconds: number | null;
 }): PlannedGenerationAssetRegistration {
   return planGenerationAssetRegistration({
     assetId,
-    generationId,
     variantType: 'video',
     imageUrl,
     thumbUrl,

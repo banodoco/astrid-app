@@ -1,0 +1,528 @@
+{
+  "clips": [
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-36",
+          "on": "text-52",
+          "until": "text-53"
+        }
+      },
+      "asset": "asset-12",
+      "at": 88.3126,
+      "clipType": "effect-a",
+      "hold": 3.2903,
+      "id": "v5-clip-01",
+      "params": {
+        "enter": "enum-01",
+        "outline": {
+          "color": "#ED6B23",
+          "pulse": 5.9226,
+          "px": 1
+        },
+        "scale": 4.9355,
+        "x": 223,
+        "y": 32.5743
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-39",
+          "on": "text-54",
+          "until": "text-55"
+        }
+      },
+      "asset": "asset-07",
+      "at": 84.5616,
+      "clipType": "effect-a",
+      "hold": 7.5348,
+      "id": "v5-clip-02",
+      "params": {
+        "enter": "enum-01",
+        "scale": 4.9355,
+        "x": 225,
+        "y": 113
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-40",
+          "on": "text-56",
+          "until": "text-55"
+        }
+      },
+      "asset": "asset-05",
+      "at": 85.6803,
+      "clipType": "effect-a",
+      "hold": 6.4162,
+      "id": "v5-clip-03",
+      "params": {
+        "enter": "enum-01",
+        "scale": 4.9355,
+        "x": 225,
+        "y": 88.839
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-51",
+          "layer": "text-41",
+          "on": "text-57",
+          "until": "text-55"
+        }
+      },
+      "asset": "asset-06",
+      "at": 86.8319,
+      "clipType": "effect-a",
+      "hold": 5.2645,
+      "id": "v5-clip-04",
+      "params": {
+        "enter": "enum-01",
+        "scale": 4.9355,
+        "x": 225,
+        "y": 64.1615
+      },
+      "track": "v5"
+    },
+    {
+      "app": {
+        "astrid": {
+          "gap_after_s": 0.1974,
+          "segment": "text-58",
+          "text": "text-59",
+          "words": [
+            [
+              0.0897,
+              0.1795,
+              "text-60"
+            ],
+            [
+              0.1795,
+              0.2131,
+              "text-61"
+            ],
+            [
+              0.2244,
+              0.3365,
+              "text-62"
+            ],
+            [
+              0.3365,
+              0.5048,
+              "text-63"
+            ],
+            [
+              0.5048,
+              0.5721,
+              "text-64"
+            ],
+            [
+              0.5833,
+              0.8974,
+              "text-65"
+            ],
+            [
+              1.2675,
+              1.4245,
+              "text-66"
+            ],
+            [
+              1.4245,
+              1.7162,
+              "text-67"
+            ]
+          ]
+        }
+      },
+      "asset": "asset-75",
+      "at": 55.475,
+      "clipType": "media",
+      "from": 0,
+      "id": "a1-clip-05",
+      "to": 1.7768,
+      "track": "a1",
+      "volume": 1.2427
+    },
+    {
+      "asset": "asset-25",
+      "at": 0,
+      "clipType": "media",
+      "from": 0,
+      "hold": 160.8647,
+      "id": "a2-clip-06",
+      "params": {
+        "fadeIn": 3.9484,
+        "fadeOut": 3
+      },
+      "to": 160.8647,
+      "track": "a2",
+      "volume": 0.2596
+    },
+    {
+      "app": {
+        "astrid": {
+          "cut": "text-07",
+          "sequence": "text-68",
+          "sequence_index": 79
+        }
+      },
+      "asset": "asset-16",
+      "at": 60.0486,
+      "clipType": "effect-b",
+      "hold": 0.0658,
+      "id": "v6-clip-07",
+      "params": {
+        "kind": "kind-b",
+        "label": "text-69",
+        "placeholder": true,
+        "slot": "slot-02",
+        "spec": "text-47"
+      },
+      "to": 0.0658,
+      "track": "v6"
+    }
+  ],
+  "config": {
+    "app": {
+      "astrid": {
+        "cut_notes": {
+          "cut-01": {
+            "why": "text-17",
+            "why_layers": [
+              "text-18"
+            ]
+          },
+          "cut-02": {
+            "why": "text-19",
+            "why_layers": [
+              "text-20"
+            ]
+          },
+          "cut-03": {
+            "why": "text-21",
+            "why_layers": [
+              "text-20",
+              "text-22",
+              "text-18"
+            ]
+          },
+          "cut-04": {
+            "why": "text-23",
+            "why_layers": [
+              "text-24",
+              "text-18",
+              "text-25"
+            ]
+          },
+          "cut-05": {
+            "why": "text-26",
+            "why_layers": [
+              "text-27",
+              "text-28",
+              "text-29",
+              "text-20",
+              "text-30",
+              "text-31",
+              "text-32",
+              "text-33",
+              "text-25",
+              "text-34"
+            ]
+          },
+          "cut-06": {
+            "why": "text-35",
+            "why_layers": [
+              "text-28",
+              "text-29",
+              "text-36",
+              "text-20",
+              "text-30",
+              "text-31",
+              "text-32",
+              "text-33",
+              "text-25",
+              "text-34"
+            ]
+          },
+          "cut-07": {
+            "why": "text-37",
+            "why_layers": [
+              "text-38",
+              "text-36",
+              "text-39",
+              "text-40",
+              "text-41",
+              "text-20",
+              "text-42",
+              "text-43",
+              "text-44"
+            ]
+          }
+        },
+        "groups": [
+          {
+            "from": "text-01",
+            "name": "text-02"
+          },
+          {
+            "from": "text-03",
+            "name": "text-04"
+          },
+          {
+            "from": "text-05",
+            "name": "text-06"
+          },
+          {
+            "from": "text-07",
+            "name": "text-08"
+          },
+          {
+            "from": "text-09",
+            "name": "text-10"
+          },
+          {
+            "from": "text-11",
+            "name": "text-12"
+          },
+          {
+            "from": "text-13",
+            "name": "text-14"
+          },
+          {
+            "from": "text-15",
+            "name": "text-16"
+          }
+        ],
+        "slots": {
+          "slot-01": {
+            "kind": "kind-a",
+            "params": {
+              "label": "text-45",
+              "placeholder": true
+            },
+            "spec": "text-46",
+            "zone_a": [
+              691,
+              109,
+              494,
+              602
+            ]
+          },
+          "slot-02": {
+            "kind": "kind-b",
+            "spec": "text-47"
+          },
+          "slot-03": {
+            "kind": "kind-c",
+            "mark_c": {
+              "size": 444,
+              "x": 1293,
+              "y": 760
+            },
+            "spec": "text-48"
+          },
+          "slot-04": {
+            "kind": "kind-d",
+            "spec": "text-49"
+          },
+          "slot-05": {
+            "kind": "kind-e",
+            "spec": "text-50"
+          }
+        }
+      }
+    },
+    "theme_overrides": {
+      "visual": {
+        "canvas": {
+          "fps": 30,
+          "height": 1080,
+          "width": 1920
+        }
+      }
+    },
+    "tracks": [
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v1",
+        "kind": "visual",
+        "label": "Track v1"
+      },
+      {
+        "id": "v2",
+        "kind": "visual",
+        "label": "Track v2"
+      },
+      {
+        "id": "v3",
+        "kind": "visual",
+        "label": "Track v3"
+      },
+      {
+        "id": "v4",
+        "kind": "visual",
+        "label": "Track v4"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v5",
+        "kind": "visual",
+        "label": "Track v5"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "v6",
+        "kind": "visual",
+        "label": "Track v6"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "a1",
+        "kind": "audio",
+        "label": "Track a1"
+      },
+      {
+        "app": {
+          "scaleAppliesToPositionedClips": true
+        },
+        "id": "a2",
+        "kind": "audio",
+        "label": "Track a2"
+      },
+      {
+        "id": "a3",
+        "kind": "audio",
+        "label": "Track a3"
+      }
+    ]
+  },
+  "occurrences": [
+    {
+      "duration_ms": 7271,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-01",
+      "placement": {
+        "start_ms": 0
+      },
+      "provenance": {},
+      "shot_id": "shot-01",
+      "shot_revision_id": "shot-rev-01",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    },
+    {
+      "duration_ms": 34911,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-02",
+      "placement": {
+        "start_ms": 7271
+      },
+      "provenance": {},
+      "shot_id": "shot-02",
+      "shot_revision_id": "shot-rev-02",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    },
+    {
+      "duration_ms": 13457,
+      "gain": 1,
+      "muted": false,
+      "occurrence_id": "occ-03",
+      "placement": {
+        "start_ms": 42182
+      },
+      "provenance": {},
+      "shot_id": "shot-03",
+      "shot_revision_id": "shot-rev-03",
+      "source_offset": {
+        "end": 0,
+        "start": 0
+      },
+      "speed": {
+        "denominator": 1,
+        "numerator": 1
+      },
+      "track": "v1",
+      "transform": {}
+    }
+  ],
+  "registry": {
+    "assets": {
+      "asset-05": {
+        "content_sha256": "sha256:11b0922cc39e4e16fd3151c43746556cd3c3514b45ff8c4eb13c3ed51278830c",
+        "media_id": "sha256:11b0922cc39e4e16fd3151c43746556cd3c3514b45ff8c4eb13c3ed51278830c",
+        "resolution": "32x33",
+        "type": "image/png"
+      },
+      "asset-06": {
+        "content_sha256": "sha256:9df0f8513b26969a21a313a81ecd33e1ed849fb21744d32d87e45192461e717e",
+        "media_id": "sha256:9df0f8513b26969a21a313a81ecd33e1ed849fb21744d32d87e45192461e717e",
+        "resolution": "32x34",
+        "type": "image/png"
+      },
+      "asset-07": {
+        "content_sha256": "sha256:dbb9687d22f83b4da5f9334cd63a0143a728056c2ce14f243be8bd7fd3add938",
+        "media_id": "sha256:dbb9687d22f83b4da5f9334cd63a0143a728056c2ce14f243be8bd7fd3add938",
+        "resolution": "32x34",
+        "type": "image/png"
+      },
+      "asset-12": {
+        "content_sha256": "sha256:50d32ce500b98d991a5b52851da84810c21ed84a5ecc539a4fa0c2d3a4353171",
+        "media_id": "sha256:50d32ce500b98d991a5b52851da84810c21ed84a5ecc539a4fa0c2d3a4353171",
+        "resolution": "36x42",
+        "type": "image/png"
+      },
+      "asset-16": {
+        "content_sha256": "sha256:d788d5a2e654504f5023c16c60cb824b11806814b840d4a91d9adaba2c0bf3ac",
+        "media_id": "sha256:d788d5a2e654504f5023c16c60cb824b11806814b840d4a91d9adaba2c0bf3ac",
+        "resolution": "1536x1024",
+        "type": "image/png"
+      },
+      "asset-25": {
+        "content_sha256": "sha256:5d21302556111e2492f9b4948f7d05b76e974237d29f14a51623206f1c568d07",
+        "media_id": "sha256:5d21302556111e2492f9b4948f7d05b76e974237d29f14a51623206f1c568d07",
+        "type": "audio/mpeg"
+      },
+      "asset-75": {
+        "content_sha256": "sha256:64e864758aa3135352ab684b915ed21ad30e8ff590aaa94b3f454f329d14387d",
+        "media_id": "sha256:64e864758aa3135352ab684b915ed21ad30e8ff590aaa94b3f454f329d14387d",
+        "type": "audio/wav"
+      }
+    }
+  }
+}

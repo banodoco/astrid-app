@@ -99,6 +99,8 @@ export interface ClaimedOutbox {
   append(payload: OutboxJson, basis: OutboxBasis): Promise<string>;
   cancel(intentId: string): Promise<void>;
   resolveRejected(intentIds: string[], replacement?: { payload: OutboxJson; head: OutboxHead }, isCurrent?: () => boolean): Promise<OutboxRecord>;
+  /** Re-queue a rejected prefix and its dependants unchanged, to be resent on `head` with a fresh request identity. */
+  rebaseRejected(intentIds: string[], head: OutboxHead, isCurrent?: () => boolean): Promise<OutboxRecord>;
   reservePlacementAdmission(id: string, input: OutboxPlacementInput, assertCurrent?: () => void): Promise<OutboxPlacementContinuation>;
   recordPlacementTask(id: string, request: OutboxRequest, taskLocator: NonNullable<OutboxPlacementContinuation['taskLocator']>, assertCurrent?: () => void): Promise<OutboxPlacementContinuation>;
   recordPlacementConflict(id: string, error: OutboxJson, assertCurrent?: () => void): Promise<OutboxPlacementContinuation>;
@@ -366,6 +368,29 @@ export function createCommitOutbox(options: {
             if (intent && ids.length !== 1) throw new Error('Cannot replace a predecessor of retained work');
             cancelPlacements(record, ids);
             record.intents = intent ? [intent] : [];
+            delete record.pending;
+            return detached(record);
+          });
+        },
+        rebaseRejected(intentIds, head, isCurrent = () => true) {
+          const ids = detached(intentIds);
+          const base = detached(head);
+          return access('readwrite', (record) => {
+            if (!isCurrent()) throw new Error('Timeline command session is closed');
+            if (dispatching || record.pending?.outcome?.kind !== 'rejected'
+              || record.pending.intentId !== record.intents[0]?.id) {
+              throw new Error('Only a definitively rejected prefix can be rebased');
+            }
+            if (!ids.length || JSON.stringify(ids) !== JSON.stringify(record.intents.map((item) => item.id))) {
+              throw new Error('Retained work changed before explicit rebase');
+            }
+            const first = record.intents[0];
+            if ('create' in first.basis) throw new Error('A creation cannot be rebased onto another head');
+            // The payload is the original intent; only the base it is sent on moves. Dependants keep their
+            // predecessor link and take their base from the accepted result, as they did before.
+            if ('head' in first.basis) first.basis = { head: base };
+            first.readyBase = base;
+            for (const intent of record.intents) delete intent.conflict;
             delete record.pending;
             return detached(record);
           });

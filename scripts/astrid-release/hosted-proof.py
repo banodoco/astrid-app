@@ -7,6 +7,7 @@ No credentials, environment-file contents, or database bytes enter the artifacts
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import hashlib
 import json
 import os
@@ -23,6 +24,8 @@ import urllib.request
 import uuid
 import zlib
 
+from hosted_processes import compare_censuses, parse_ps, service_census
+
 BRANCH = "release/14/plan-61"
 BASE = "0bce7312f2fc8030b50286ed75b38d0232100820"
 PROJECT = "p61-live-proof"
@@ -31,6 +34,7 @@ TIMELINE = "61616161-6161-4161-8161-616161616161"
 TIMELINE_NAME = "Long-lived timeline"
 EDIT_NAME = "P61 copied-realm edit"
 KNOWN_START_ERROR = "accepted commit inputs changed during verification"
+CHAT_MODEL_TIMEOUT = b"Astrid model command failed (signal=SIGKILL, timeout=true)."
 
 
 def require(condition, message):
@@ -166,6 +170,108 @@ class Proof:
         root = root or self.root
         rows = subprocess.check_output(["ps", "-axo", "pid=,lstart=,command="], text=True)
         return [line.strip() for line in rows.splitlines() if str(root) + "/" in line and str(os.getpid()) != line.split()[0]]
+
+    def chat_timeout_observation(self, path):
+        if not path.exists():
+            return {"log_present": False, "count": 0, "byte_offsets": []}
+        raw = path.read_bytes()
+        offsets = [match.start() for match in re.finditer(re.escape(CHAT_MODEL_TIMEOUT), raw)]
+        return {"log_present": True, "bytes": len(raw), "sha256": hashlib.sha256(raw).hexdigest(),
+                "count": len(offsets), "byte_offsets": offsets,
+                "interpretation": "Observed child-command timeout kills; no causal attribution to update or a service restart."}
+
+    def c5_snapshot(self, label):
+        """Retain evidence before validating it, including when a probe fails."""
+        snapshot = {"root": str(self.root), "started_at": datetime.now(timezone.utc).isoformat(),
+                    "capture_errors": []}
+
+        def capture(name, operation, default):
+            try:
+                return operation()
+            except Exception as error:
+                snapshot["capture_errors"].append(f"{name}: {type(error).__name__}: {error}")
+                return default
+
+        def identity(path, fields):
+            value = read_json(path)
+            return {key: value.get(key) for key in fields}
+
+        # Register only redaction values, never retain credential files or env.
+        for data in [self.root / "data", Path(self.context.get("live_data", "/nonexistent-p61-live"))]:
+            try:
+                self.token(data)
+            except (OSError, ValueError, KeyError):
+                pass
+        ps = capture("full process census", lambda: subprocess.check_output(
+            ["ps", "-ww", "-axo", "pid=,ppid=,lstart=,command="], text=True,
+            env={**os.environ, "LC_ALL": "C"}), "")
+        (self.proof / (label + "-ps.txt")).write_text(self.clean(ps))
+        snapshot["processes"], snapshot["unparsed_ps_lines"] = parse_ps(ps)
+        support = self.root / "data/runtime"
+        snapshot["recorded_processes"] = capture("recorded processes", lambda: (self.root / "state/processes.tsv").read_text(), "")
+        snapshot["discovery"] = capture("Runtime discovery", lambda: identity(support / "discovery.json", [
+            "pid", "process_birth_id", "runtime_instance_id", "active_realm", "realm_root", "endpoint"]), {})
+        host_fields = ["pid", "process_birth_id", "runtime_instance_id", "runtime_epoch", "runtime_service_launch_id", "support_root", "source_checkout"]
+        snapshot["agent_host"] = capture("agent host registration", lambda: identity(support / "generic-host.json", host_fields), {})
+        snapshot["agent_ready"] = capture("agent host ready identity", lambda: identity(support / "generic-host.ready.json", host_fields), {})
+
+        def declarations():
+            version, _ = self.installed()
+            profile = read_json(version / "profile.json")
+            service_path = Path(profile["service_declaration"])
+            result = []
+            for service in read_json(service_path)["services"]:
+                argv = service["argv"]
+                require(bool(argv) and all(isinstance(arg, str) and arg for arg in argv), "Invalid service argv")
+                require(not any(arg.startswith("{") for arg in argv), "Expected concrete installed service argv")
+                result.append({"name": service["name"], "argv": argv, "declaration": str(service_path),
+                               "commands": sorted({" ".join(argv), " ".join([str(Path(argv[0]).resolve()), *argv[1:]])})})
+            return result
+
+        snapshot["service_declarations"] = capture("installed service declarations", declarations, [])
+        launchctl = capture("launchctl list", lambda: subprocess.check_output(["launchctl", "list"], text=True), "")
+        (self.proof / (label + "-launchctl-list.txt")).write_text(self.clean(launchctl))
+        snapshot["launchd_entries"] = {}
+        for line in launchctl.splitlines():
+            fields = line.split()
+            if len(fields) != 3 or "astrid" not in fields[2].lower():
+                continue
+            label_name = fields[2]
+            job = {"pid": int(fields[0]) if fields[0].isdigit() else None, "last_exit": fields[1]}
+
+            def launchd_identity():
+                result = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/{label_name}"],
+                                        text=True, capture_output=True, check=True)
+                # launchctl print includes environment values; retain identity fields only.
+                values = dict(re.findall(r"^\t(state|pid|runs|last exit code) = (.+)$", result.stdout, re.MULTILINE))
+                return {"print_pid": int(values["pid"]) if "pid" in values else None, **values}
+
+            observed = capture("launchd " + label_name, launchd_identity, {})
+            job.update({key: value for key, value in observed.items() if key != "pid"})
+            snapshot["launchd_entries"][label_name] = job
+        snapshot["candidate_launchd_plist"] = (self.root / "home/Library/LaunchAgents/haus.astrid.runtime.plist").exists()
+
+        def candidate_database():
+            realm_id = (self.root / "state/realm-id").read_text().strip()
+            return db_facts(support / "realms" / realm_id)
+
+        snapshot["database"] = capture("candidate read-only database/boot facts", candidate_database, {})
+        chat = self.root / "home/Library/Logs/Astrid Runtime/service-chat.log"
+        snapshot["chat_model_timeouts"] = capture("chat timeout observations", lambda: self.chat_timeout_observation(chat), {})
+        if chat.exists():
+            capture("retained chat log", lambda: (self.proof / (label + "-chat-service.log")).write_text(
+                self.clean(chat.read_text(errors="replace"))), None)
+        snapshot["census"] = capture("service identity selection", lambda: service_census(snapshot), None)
+        if snapshot["census"] is None:
+            snapshot["census"] = {"services": {}, "errors": list(snapshot["capture_errors"]), "other_process_observations": []}
+        snapshot["finished_at"] = datetime.now(timezone.utc).isoformat()
+        (self.proof / (label + ".json")).write_text(self.clean(json.dumps(snapshot, indent=2, sort_keys=True)) + "\n")
+        self.note(label + " persistent service identities", {
+            "services": snapshot["census"]["services"], "errors": snapshot["census"]["errors"],
+            "candidate_database": snapshot["database"], "chat_model_timeouts": snapshot["chat_model_timeouts"],
+            "other_process_observation_count": len(snapshot["census"]["other_process_observations"]),
+            "full_process_list": label + "-ps.txt", "full_snapshot": label + ".json"})
+        return snapshot
 
     def stop(self, label):
         self.run(label, ["bash", self.tool, "stop", BRANCH])
@@ -434,17 +540,27 @@ class Proof:
         require(after["heads"] == edited["heads"], "Restart changed the edited head/publication")
 
     def updates(self):
-        before_processes = self.processes()
         before_installer = {p.name: (p.stat().st_size, digest(p)) for p in (self.root / "logs").glob("install*.log")}
         before_heads = (self.root / "state/heads.tsv").read_text()
-        result = self.run("completion-05-unchanged-update", ["bash", self.tool, "update", BRANCH], expected=None)
+        before = self.c5_snapshot("completion-05-before")
+        try:
+            require(not before["census"]["errors"], "C5 before-service identities are incomplete; see retained snapshot")
+            result = self.run("completion-05-unchanged-update", ["bash", self.tool, "update", BRANCH], expected=None)
+        finally:
+            after = self.c5_snapshot("completion-05-after")
+            comparison = compare_censuses(before, after)
+            (self.proof / "completion-05-comparison.json").write_text(self.clean(json.dumps(comparison, indent=2, sort_keys=True)) + "\n")
+            self.note("completion-05 identity comparison", {key: value for key, value in comparison.items()
+                                                            if key != "other_process_observations"})
         if result.returncode:
             require("manifest changed" in result.stdout and "Nothing was changed" in result.stdout, "Unexpected update failure")
             self.note("completion-06-moved-pin-update", "Real branch movement observed; refusal and rebuild instructions above.")
             require(all(text in result.stdout for text in ["1) astrid-release stop", "2) keep the data: cp -c -R", "3) delete"]), "Missing rebuild steps")
             raise AssertionError("Real branches moved; moved-pin refusal exercised, unchanged-update proof needs a stable interval")
         require("unchanged" in result.stdout and "Nothing changed. The stack was left as it is." in result.stdout, "Unchanged update did not preserve running stack")
-        require(self.processes() == before_processes, "Unchanged update restarted a process")
+        # Lead 6994841405 item 1: service PID/start identities are the invariant.
+        # Child commands remain in both full snapshots and separate observations.
+        require(comparison["unchanged"], "Unchanged update restarted a long-lived service or identity proof is incomplete")
         require((self.root / "state/heads.tsv").read_text() == before_heads, "Unchanged update rewrote heads")
         require({p.name: (p.stat().st_size, digest(p)) for p in (self.root / "logs").glob("install*.log")} == before_installer, "Unchanged update invoked the installer")
         self.note("completion-06-moved-pin-update", "Not exercised in the real run: resolved branch heads did not move. Both Agent/Runtime refusal injections remain executed in release.test.mjs on this hosted Mac.")
@@ -544,6 +660,9 @@ class Proof:
             source = self.root / "state" / name
             if source.exists():
                 shutil.copyfile(source, target / name)
+        chat_observation = self.chat_timeout_observation(target / "runtime-service-chat.log")
+        write_json(target / "chat-model-timeouts.json", chat_observation)
+        self.note(label + " chat-model timeout observations", chat_observation)
         attempts = sorted((target).glob("release-start-attempt-*.log"))
         self.note(label + " first-start retry observation", {
             "failed_attempts": len(attempts), "guard_message_seen": any(KNOWN_START_ERROR in p.read_text() for p in attempts),

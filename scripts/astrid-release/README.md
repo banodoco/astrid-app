@@ -65,6 +65,35 @@ Installation uses `--autostart off --command off --skills off --skill-copies off
 
 GPU work through that entry uses the stack's own configuration and claims; the snapshot does not import live RunPod claims. **Release any machine claimed by the stack before manually deleting its root.** This is an operator obligation: `stop` stops local processes and keeps files; the script does not release rented machines. [Isolation](astrid-release#L263-L277) · [RunPod exclusion](realm-snapshot.sh#L68-L75) · [Stop](astrid-release#L101-L125).
 
+## Packet hosted proof: unchanged update
+
+R14-P61-02's [hosted proof](hosted-proof.py) runs only on a GitHub-hosted Mac.
+Under [Lead decision 6994841405, item 1](https://github.com/banodoco/astrid-dev/issues/796#issuecomment-6994841405),
+Completion 5 compares the PID and start time of the persistent Runtime, editor,
+agent host, chat service and Astrid launchd entries. Runtime discovery and the
+tool's recorded identities anchor the census; installed service declarations
+identify Runtime-owned host/chat processes. The editor comparison includes its
+proxy, Vite server, persistent wrappers and esbuild service. Relative commands
+are found through parent PIDs. Missing, ambiguous or changed identities fail.
+
+`completion-05-before.json` and `completion-05-after.json` retain the complete
+parsed process lists, service identities, other child-command observations and
+the candidate's read-only database facts, including epoch and boot identity.
+The corresponding `-ps.txt` files retain the full untruncated OS census, and
+`-launchctl-list.txt` retains the full launchd listing. The after snapshot and
+`completion-05-comparison.json` are written even when update fails or times out.
+Database bytes, credential files and launchd environment values are not copied.
+The candidate is installed with autostart off; the existing live launchd job
+must keep its identity, and no candidate launchd plist may appear.
+
+Short-lived child commands are observations, not service identity comparisons.
+The raw chat logs and `chat-model-timeouts.json` in each retained log snapshot
+record every exact model-command SIGKILL/timeout occurrence and byte offset.
+A repeat is reported to Lead without treating it as proof of a service restart.
+The [native C5 probes](test_hosted_processes.py) exercise service exits,
+replacement PIDs, reused PIDs with changed start times, child churn and missing
+evidence; they run in the existing PR macOS step and before the real stack run.
+
 ## Readiness and known limits
 
 READY requires a ready `rendering.render` capability, an answering editor page, Runtime health `ok`, and agreement between the copy's project names and the projects listed through the proxy. It does not render an output. The timeline-count check is weaker: it reports a skip if its query fails. [Readiness](astrid-release#L505-L550) · [Project/timeline checks](astrid-release#L562-L581).

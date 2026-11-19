@@ -86,6 +86,8 @@ jobs:
           node --test --test-reporter=spec --test-reporter-destination=stdout \
             --test-reporter=junit --test-reporter-destination="$P61_PROOF/startup.junit.xml" \
             "$P61_TOOL_CHECKOUT/scripts/astrid-release/startup.test.mjs"
+          python3 -B scripts/astrid-release/test_hosted_processes.py \
+            2>&1 | tee "$P61_PROOF/c5-processes.log"
       - name: Native attach, wrong-id, schema and read-only refusal cases
         shell: bash
         run: |
@@ -271,6 +273,7 @@ jobs:
           python3 --version
           sqlite3 --version
           node --test scripts/astrid-release/release.test.mjs scripts/astrid-release/workflow.test.mjs scripts/installer/manifest.test.mjs
+          python3 -B scripts/astrid-release/test_hosted_processes.py
           P61_NATIVE_ROOT="$(mktemp -d "$RUNNER_TEMP/p61-native.XXXXXXXX")"
           trap 'rm -rf "$P61_NATIVE_ROOT"' EXIT
           P61_RUNTIME_SHA="$(node -e '

@@ -15,7 +15,7 @@ jobs:
       matrix:
         include:
           - case_name: plan61-core-readiness
-            app_sha: 5aa11077510a7b2c92628db35548756f6d5bc712
+            app_sha: f1dbd17e87192e071a9dc908b12431fd673f9557
     env:
       APP_SHA: ${{ matrix.app_sha }}
       PROOF_WORKFLOW_SHA: ${{ github.workflow_sha }}

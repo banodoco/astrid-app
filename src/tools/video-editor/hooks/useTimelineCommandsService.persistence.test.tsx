@@ -545,8 +545,8 @@ describe('mounted prepared-media command persistence', () => {
             status: 'conflict', reason: 'dependency_changed', current: { revision_id: 'agent-r', publication_id: 'agent-p' },
           } },
       });
-      // The display is canonical now. Keep must preserve the already durable
-      // user draft, including its old CAS base, rather than copying that view.
+      // The display is canonical now. Keep resends the durable intent on the
+      // latest base with a new key, without recapturing the canonical view.
       const canonicalRead = vi.spyOn(provider, 'loadReferencedTimeline').mockResolvedValue({
         timeline: { config: latestConfig, configVersion: 1,
           head: { projectId: scope.projectId, timelineId: scope.timelineId,
@@ -555,15 +555,34 @@ describe('mounted prepared-media command persistence', () => {
         resolveAssetUrl: async (file) => file,
       });
       await act(async () => { await mounted.result.current.save.retrySaveAfterConflict(); });
-      expect(canonicalRead).toHaveBeenCalledOnce();
-      expect(mounted.result.current.save.isConflictExhausted).toBe(false);
+      expect(canonicalRead).not.toHaveBeenCalled();
+      expect(mounted.result.current.save.isConflictExhausted).toBe(true);
       expect(mounted.result.current.save.dataRef.current?.config.clips.some((clip) => clip.id === 'clip-0')).toBe(false);
       expect(mounted.result.current.save.dataRef.current?.config.clips.find((clip) => clip.id === 'later')?.at).toBe(6);
       expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
+      expect(send).toHaveBeenCalledTimes(2);
+      const [firstRequest, firstKey] = send.mock.calls[0]!;
+      const [secondRequest, secondKey] = send.mock.calls[1]!;
+      expect(secondRequest).toEqual({ ...firstRequest,
+        base_revision_id: 'agent-r', base_publication_id: 'agent-p' });
+      expect(secondKey).not.toBe(firstKey);
+      const keepCommitCalls = transportCalls.filter((call) => call.path.endsWith('/commit'));
+      expect(keepCommitCalls).toHaveLength(2);
+      expect(keepCommitCalls[1]).toEqual({ ...wire,
+        headers: { ...wire.headers, 'Idempotency-Key': secondKey },
+        rawBody: JSON.stringify(secondRequest), body: secondRequest });
+      const rebasedHead = { revisionId: 'agent-r', publicationId: 'agent-p' };
+      const rebasedOutcome = { kind: 'rejected', error: {
+        kind: 'conflict', code: 'dependency_changed',
+        message: 'dependency_changed: The prepared after-anchor source changed',
+        details: { ...refusal.details, base: { revision_id: 'agent-r', publication_id: 'agent-p' } },
+      } };
       const keptOwner = (await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)!;
-      expect(keptOwner.intents).toEqual(retained!.intents);
-      expect(keptOwner.pending).toEqual(retained!.pending);
-      expect(send).toHaveBeenCalledOnce();
+      expect(keptOwner.intents).toEqual(retained!.intents.map((intent) => ({ ...intent,
+        basis: { head: rebasedHead }, readyBase: rebasedHead, conflict: rebasedOutcome.error })));
+      expect(keptOwner.pending).toEqual({ ...retained!.pending,
+        request: { ...retained!.pending!.request, body: JSON.stringify(secondRequest), key: secondKey },
+        outcome: rebasedOutcome });
 
       // Reload the real retained owner against canonical B. Save them must
       // reopen the durable refusal, never capture this draft as a new edit.
@@ -584,17 +603,17 @@ describe('mounted prepared-media command persistence', () => {
       expect(recovered.result.current.save.recoveryDraft).toBeNull();
       expect(await loadTimelineDraft(scope.timelineId)).toEqual(draftBeforeKeep);
       expect((await createCommitOutbox().list(scope)).find((record) => record.ownerId === ownerId)).toEqual(ownerBeforeRetry);
-      expect(send).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledTimes(2);
       expect(recovered.result.current.save.dataRef.current?.config.clips).toEqual(latestData.config.clips);
 
       // Use latest is the explicit discard; it clears the slot and conflict
       // without publishing the retained edit over the other writer.
-      await act(async () => { await recovered!.result.current.save.reloadFromServer({ clearDraft: true }); });
+      await act(async () => { await recovered!.result.current.save.reloadFromServer({ clearDraft: true, discardRefusedSave: true }); });
       expect(recovered.result.current.save.isConflictExhausted).toBe(false);
       expect(recovered.result.current.save.recoveryDraft).toBeNull();
       expect(await loadTimelineDraft(scope.timelineId)).toBeNull();
       expect(recovered.result.current.save.dataRef.current?.config.clips).toEqual(latestData.config.clips);
-      expect(send).toHaveBeenCalledOnce();
+      expect(send).toHaveBeenCalledTimes(2);
     } finally {
       recovered?.unmount();
       mounted.unmount();

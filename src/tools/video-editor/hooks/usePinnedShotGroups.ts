@@ -57,18 +57,29 @@ function readPinnedShotGroups(dataRef: TimelineDataRef): NonNullable<ReturnType<
   return getPinnedShotGroups(dataRef) ?? [];
 }
 
-function getSyncableShotImages(shot: Shot | undefined) {
-  return selectTimelineImages(shot?.images ?? []);
+// The registry keeps a catalog association as both ids or neither. An image without a
+// resolvable primary variant can never be matched on the registry side, so it is left out
+// of the group on both sides of the comparison; otherwise every sync pass would rebuild it.
+function getAssociableShotImages(shot: Shot | undefined) {
+  return selectTimelineImages(shot?.images ?? []).filter((image) => (
+    typeof image.generation_id === 'string' && image.generation_id.length > 0
+    && typeof image.primary_variant_id === 'string' && image.primary_variant_id.length > 0
+  ));
 }
 
 function areStringArraysEqual(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+// Reports a clip's generation only when its entry also names the variant (both ids or neither).
 function getClipGenerationId(current: TimelineData, clipId: string): string | undefined {
   const assetKey = current.meta[clipId]?.asset;
-  const generationId = assetKey ? current.registry.assets[assetKey]?.generationId : undefined;
-  return typeof generationId === 'string' && generationId.length > 0 ? generationId : undefined;
+  const entry = assetKey ? current.registry.assets[assetKey] : undefined;
+  const generationId = entry?.generationId;
+  const variantId = entry?.variantId;
+  const associated = typeof generationId === 'string' && generationId.length > 0
+    && typeof variantId === 'string' && variantId.length > 0;
+  return associated ? generationId : undefined;
 }
 
 function getAverageDuration(actions: TimelineAction[]) {
@@ -225,7 +236,7 @@ export function usePinnedGroupSync({
         const storedTrackId = group.trackId;
 
         const shot = shots.find((candidate) => candidate.id === group.shotId);
-        const desiredImages = getSyncableShotImages(shot);
+        const desiredImages = getAssociableShotImages(shot);
         const desiredGenerationIds = desiredImages
           .map((image) => image.generation_id)
           .filter((generationId): generationId is string => typeof generationId === 'string' && generationId.length > 0);
@@ -321,6 +332,7 @@ export function usePinnedGroupSync({
 
           const generationData = {
             generationId: desiredGenerationId,
+            ...(desiredImage.primary_variant_id ? { variantId: desiredImage.primary_variant_id } : {}),
             variantType: 'image',
             imageUrl,
             thumbUrl: getThumbnailUrl(desiredImage) ?? imageUrl,

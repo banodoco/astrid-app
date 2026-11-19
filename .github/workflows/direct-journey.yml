@@ -51,6 +51,7 @@ jobs:
           path: astrid-app
       - name: Read the Agent and Runtime pins from the App manifest
         id: pins
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-01 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           node -e '
             const m = require("./astrid-app/public/install-manifest.json");
@@ -74,6 +75,7 @@ jobs:
 
       - name: Resolve effective checkout SHAs
         id: checkout-shas
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-04 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           app_head="$(git -C astrid-app rev-parse --verify HEAD)"
           runtime_head="$(git -C astrid-runtime rev-parse --verify HEAD)"
@@ -103,6 +105,7 @@ jobs:
 
       - name: Build the Runtime venv
         working-directory: astrid-runtime
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-08 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
@@ -110,6 +113,7 @@ jobs:
 
       - name: Build the Astrid venv
         working-directory: astrid-agent
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
@@ -121,6 +125,7 @@ jobs:
 
       - name: Install App dependencies, Chromium and ffmpeg
         working-directory: astrid-app
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-10 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           npm ci --legacy-peer-deps
           npx playwright install --with-deps chromium
@@ -143,17 +148,21 @@ jobs:
           AGENT_CHECKOUT_SHA: ${{ steps.checkout-shas.outputs.agent_head }}
           # A missing dependency in this job is a failure, never a skip (config/testing/skipRegistry.mjs).
           ASTRID_REQUIRE_LANES: direct-journey
-        run: npx playwright test -c playwright.direct.config.ts --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-11 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: npx playwright test -c playwright.direct.config.ts --reporter=json,list,./config/testing/playwrightSkipGuard.ts,./scripts/ci/ceiling_playwright.ts
 
       - name: Check the outcome counts
         if: ${{ !cancelled() }}
         working-directory: astrid-app
         env:
           REPORT: ${{ runner.temp }}/direct-journey.json
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-12 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: jq -f config/testing/direct-journey-outcome.jq --arg job direct --slurpfile allow config/testing/direct-journey-expected-failures.json "$REPORT"
 
       - name: Collect artifacts
         if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-13 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           mkdir -p "$RUNNER_TEMP/direct-artifacts"
           cp "${{ runner.temp }}/direct-journey.json" "$RUNNER_TEMP/direct-artifacts/" || true
@@ -166,6 +175,7 @@ jobs:
           if-no-files-found: warn
       - name: Collect the autostart-off card
         if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-15 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           mkdir -p "$RUNNER_TEMP/autostart-off-card"
           find "${{ runner.temp }}/direct-results" -name 'autostart-off-card.png' -exec cp {} "$RUNNER_TEMP/autostart-off-card/" \;
@@ -195,6 +205,14 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   three-products:
     runs-on: ubuntu-24.04
@@ -210,6 +228,7 @@ jobs:
           path: astrid-app
       - name: Read the Agent and Runtime pins from the App manifest
         id: pins
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-01 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           node -e '
             const m = require("./astrid-app/public/install-manifest.json");
@@ -233,6 +252,7 @@ jobs:
 
       - name: Resolve effective checkout SHAs
         id: checkout-shas
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-04 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           app_head="$(git -C astrid-app rev-parse --verify HEAD)"
           runtime_head="$(git -C astrid-runtime rev-parse --verify HEAD)"
@@ -262,6 +282,7 @@ jobs:
 
       - name: Build the Runtime venv
         working-directory: astrid-runtime
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-08 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
@@ -269,6 +290,7 @@ jobs:
 
       - name: Build the Astrid venv
         working-directory: astrid-agent
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
@@ -281,6 +303,7 @@ jobs:
       # fails at browser launch. ffmpeg makes the case's real VP8 and Opus media, and the host's ffmpeg renderer makes the render.
       - name: Install App dependencies, Chrome and ffmpeg
         working-directory: astrid-app
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-10 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           npm ci --legacy-peer-deps
           npx playwright install --with-deps chromium chrome
@@ -302,7 +325,9 @@ jobs:
           PLAYWRIGHT_JSON_OUTPUT_NAME: ${{ runner.temp }}/three-products.json
           PLAYWRIGHT_OUTPUT_DIR: ${{ runner.temp }}/three-products-results
           NODE_OPTIONS: --max-old-space-size=4096
-        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-11 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: npm run test:e2e:three-products -- --reporter=json,list,./config/testing/playwrightSkipGuard.ts,./scripts/ci/ceiling_playwright.ts
 
       # Pass rule (R-9, same as the direct journey): every case must pass except the named expected failures in config/testing/direct-journey-expected-failures.json (exactly those, each failing as expected). Durations are
       # written to three-products-summary.json and recorded, never judged (R-10).
@@ -311,10 +336,12 @@ jobs:
         working-directory: astrid-app
         env:
           REPORT: ${{ runner.temp }}/three-products.json
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-12 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: jq -f config/testing/direct-journey-outcome.jq --arg job three-products --slurpfile allow config/testing/direct-journey-expected-failures.json "$REPORT"
 
       - name: Collect artifacts
         if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-13 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           mkdir -p "$RUNNER_TEMP/three-products-artifacts"
           cp "${{ runner.temp }}/three-products.json" "$RUNNER_TEMP/three-products-artifacts/" || true
@@ -337,3 +364,11 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error

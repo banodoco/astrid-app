@@ -2,12 +2,13 @@
 // config/testing/skipRegistry.mjs. Use alongside a normal reporter:
 //   node --test --test-reporter=spec --test-reporter-destination=stdout \
 //     --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout ...
+import { observeNodeEvents } from '../ci/ceiling_node.mjs';
 import { classifySkips, formatSkipReport } from '../../config/testing/skipRegistry.mjs';
 
 export default async function* nodeSkipGuard(source) {
   const entries = [];
   let passed = 0;
-  for await (const event of source) {
+  for await (const event of observeNodeEvents(source)) {
     if (event.type !== 'test:pass' && event.type !== 'test:fail') continue;
     const { name, skip, todo, file, details } = event.data;
     if (event.type === 'test:pass' && skip === undefined && todo === undefined && details?.type !== 'suite') passed += 1;

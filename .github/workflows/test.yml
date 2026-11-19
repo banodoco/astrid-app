@@ -2,6 +2,8 @@
 name: Tests
 
 on:
+  schedule:
+    - cron: "17 1 * * *"
   push:
     branches: [main, release-1, "int/**", "release/*/main", "release/14/plan-39"]
   pull_request:
@@ -69,7 +71,7 @@ jobs:
           exit 1
 
   # Every accepted PR target runs Vitest and boundary checks, including the Plan 39 task PRs.
-  # release-tooling-macos stays push-only and runs on the push to the release branch.
+  # Native macOS release tooling is required on PRs too (Plan39 K2).
   vitest:
     # Pinned: Playwright does not support Chromium on ubuntu-latest (ubuntu 26.04) for this job.
     runs-on: ubuntu-24.04
@@ -79,8 +81,13 @@ jobs:
           # Full history for the git-backed checks that run on push.
           fetch-depth: 0
           filter: blob:none
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Read the Agent and Runtime pins from the App manifest
         id: pins
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-01 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           node -e '
             const m = require("./public/install-manifest.json");
@@ -96,13 +103,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - run: node --test scripts/installer/release.test.mjs
-      - run: npm ci --legacy-peer-deps
+      - name: Plan39 recorded command 04
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-04 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/ci/ceiling_node.mjs --test-reporter-destination=stdout scripts/installer/release.test.mjs
+      - name: Plan39 recorded command 05
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-05 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: npm ci --legacy-peer-deps
         id: dependencies
       - name: Check quarantine policy against the merge base
-        shell: bash
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-06 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         env:
-          QUARANTINE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || inputs.quarantine_base }}
+          QUARANTINE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || inputs.quarantine_base || (github.event_name == 'schedule' && github.sha) }}
         run: |
           if [[ -z "${QUARANTINE_BASE_REF:-}" || "$QUARANTINE_BASE_REF" == -* ]]; then
             echo "An explicit quarantine base ref is required." >&2
@@ -150,6 +162,7 @@ jobs:
           )
       - name: Prove result-integrity rejection cases
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-07 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: python3 -m unittest discover -s scripts/quality -p test_vitest_results.py
       # The P1 corpus tests read git blobs from the Agent at the release-12 pin (public/install-manifest.json).
       # ASTRID_AGENT_CHECKOUT points them there; a missing checkout fails the test instead of skipping it.
@@ -164,31 +177,34 @@ jobs:
       # Browser-backed unit tests launch Playwright's Chromium from the default cache.
       - name: Install Playwright Chromium
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: npx playwright install chromium
       - name: Prepare Vitest result directory
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: mkdir -p "$RUNNER_TEMP/vitest-results"
-        shell: bash
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-10 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
       - name: Run App Vitest suite
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        shell: bash
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-11 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: npm run test:app 2>&1 | tee "$RUNNER_TEMP/vitest-results/vitest-app.log"
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
           VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-app.xml
       - name: Run Node tests
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-12 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: npm run test:node
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
       - name: Run SDK boundary Vitest suite
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        shell: bash
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-13 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: npm run test:sdk-boundary 2>&1 | tee "$RUNNER_TEMP/vitest-results/vitest-sdk-boundary.log"
         env:
           VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-sdk-boundary.xml
       - name: Verify and summarize actual Vitest results
         if: always()
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-14 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: python3 scripts/quality/check-vitest-results.py "$RUNNER_TEMP/vitest-results"
       - name: Upload Vitest results
         if: always()
@@ -208,26 +224,54 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   release-tooling-macos:
-    if: ${{ github.event_name != 'pull_request' }}
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs scripts/release/verify-extension-ship.test.mjs
+      - name: Plan39 recorded command 02
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-02 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs scripts/release/verify-extension-ship.test.mjs
 
   # Cross-repo copies: every vendored artifact must match its selected producer commit.
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
+
   boundary:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
       - name: Check manifest pins against local locks
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-02 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
@@ -235,7 +279,9 @@ jobs:
           const manifest = JSON.parse(readFileSync('public/install-manifest.json', 'utf8'));
           console.log(checkLocalPins(manifest));
           NODE
-      - id: pins
+      - name: Plan39 recorded command 03
+        id: pins
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-03 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           node <<'NODE' >> "$GITHUB_OUTPUT"
           const fs = require('node:fs');
@@ -254,8 +300,25 @@ jobs:
           repository: banodoco/astrid-agent
           ref: ${{ steps.pins.outputs.agent_sha }}
           path: astrid-producer
-      - run: |
+      - name: Plan39 recorded command 06
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-06 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: |
           node scripts/vendor-lock.mjs check runtime.lock.json --producer runtime-producer
-      - run: node scripts/vendor-lock.mjs check config/astrid-cli-surface/vendor.lock.json --producer astrid-producer
-      - run: node --test scripts/quality/astrid-public-boundary.test.mjs
-      - run: node scripts/build/verify-astrid-vendor-sources.mjs
+      - name: Plan39 recorded command 07
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-07 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: node scripts/vendor-lock.mjs check config/astrid-cli-surface/vendor.lock.json --producer astrid-producer
+      - name: Plan39 recorded command 08
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-08 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/ci/ceiling_node.mjs --test-reporter-destination=stdout scripts/quality/astrid-public-boundary.test.mjs
+      - name: Plan39 recorded command 09
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: node scripts/build/verify-astrid-vendor-sources.mjs
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error

@@ -30,6 +30,7 @@ jobs:
           path: astrid-app
       - name: Read the Agent and Runtime pins from the App manifest
         id: pins
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-01 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           node -e '
             const m = require("./astrid-app/public/install-manifest.json");
@@ -52,6 +53,7 @@ jobs:
         env:
           EXPECTED_AGENT_SHA: ${{ steps.pins.outputs.agent_sha }}
           EXPECTED_RUNTIME_SHA: ${{ steps.pins.outputs.runtime_sha }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-04 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           actual_agent_sha=$(git -C astrid-agent rev-parse HEAD)
           actual_runtime_sha=$(git -C astrid-runtime rev-parse HEAD)
@@ -82,9 +84,11 @@ jobs:
           python-version: "3.11"
       - name: Install App dependencies
         working-directory: astrid-app
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-08 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: npm ci --legacy-peer-deps
       - name: Build the Agent venv for the checkout lane (with the sibling Runtime)
         working-directory: astrid-agent
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
@@ -95,11 +99,15 @@ jobs:
         env:
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-10 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: npm run test:checkout
       - name: Astrid composition lane
         working-directory: astrid-app
         env:
           ASTRID_CHECKOUT: ${{ github.workspace }}/astrid-agent
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-11 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: npm run test:astrid-composition
 
   # scripts/installer/bootstrap.test.mjs: the POSIX installer against a fixture, on both OSes it supports
@@ -110,6 +118,14 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('astrid-app/package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   installer-posix:
     strategy:
@@ -119,26 +135,60 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/installer/bootstrap.test.mjs
+      - name: Plan39 recorded command 02
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-02 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/installer/bootstrap.test.mjs
 
   # scripts/installer/bootstrap-powershell.test.mjs: the PowerShell installer under pwsh (preinstalled on ubuntu-latest).
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
+
   installer-powershell:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
-      - run: pwsh --version
-      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/installer/bootstrap-powershell.test.mjs
+      - name: Plan39 recorded command 02
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-02 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: pwsh --version
+      - name: Plan39 recorded command 03
+        if: ${{ !cancelled() }}
+        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-03 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/installer/bootstrap-powershell.test.mjs
 
   # The "quick: Astrid edit then App edit" case of three-products.spec.ts needs a Runtime realm that Astrid's own
   # journey adopts and describes (ASTRID_QUICK_DESCRIPTOR). `astrid.core.dev.journey --tier quick` builds a generated
   # reference realm, adopts it, starts the Runtime with its browser door, writes the descriptor and runs that one case
   # (playwright.three-products.config.ts greps it in when the variable is set), then renders the saved revision.
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
+
   quick-journey:
     runs-on: ubuntu-24.04
     # A hang guard only: the journey has no deadline of its own, and a stalled apt download once held a runner for 30 minutes.
@@ -151,6 +201,7 @@ jobs:
           filter: blob:none
       - name: Read the Agent and Runtime pins from the App manifest
         id: pins
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-01 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           node -e '
             const m = require("./astrid-app/public/install-manifest.json");
@@ -177,6 +228,7 @@ jobs:
         env:
           EXPECTED_AGENT_SHA: ${{ steps.pins.outputs.agent_sha }}
           EXPECTED_RUNTIME_SHA: ${{ steps.pins.outputs.runtime_sha }}
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-04 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           actual_agent_sha=$(git -C astrid-agent rev-parse HEAD)
           actual_runtime_sha=$(git -C astrid-runtime rev-parse HEAD)
@@ -203,20 +255,24 @@ jobs:
       # A stalled apt download once held a runner for 30 minutes: retry and time out every apt call in this job,
       # including the one inside `playwright install --with-deps`.
       - name: Harden apt
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-07 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           printf 'Acquire::Retries "5";\nAcquire::http::Timeout "30";\nAcquire::https::Timeout "30";\n' | sudo tee /etc/apt/apt.conf.d/99-lanes-retries
           sudo apt-get update
       - name: Install ffmpeg
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-08 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: sudo apt-get install -y --no-install-recommends ffmpeg
       # The App harness looks for the Runtime venv at <runtime>/.venv (it is only attached to here, never started by the case).
       - name: Build the Runtime venv
         working-directory: astrid-runtime
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
           .venv/bin/python -m runtime_protocol.cli --help > /dev/null
       - name: Build the Astrid venv (with the sibling Runtime)
         working-directory: astrid-agent
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-10 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           python -m venv .venv
           .venv/bin/python -m pip install -e .
@@ -225,6 +281,7 @@ jobs:
           (cd remotion && npx remotion browser ensure)
       - name: Install App dependencies and Chrome
         working-directory: astrid-app
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-11 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: |
           npm ci --legacy-peer-deps
           npx playwright install --with-deps chrome
@@ -232,6 +289,7 @@ jobs:
         working-directory: astrid-agent
         env:
           ASTRID_RUNTIME_CHECKOUT: ${{ github.workspace }}/astrid-runtime
+        shell: python -I "${{ github.workspace }}/astrid-app/scripts/ci/ceiling_capture.py" --step step-12 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
         run: .venv/bin/python -m astrid.core.dev.journey --tier quick --reference generated --app-checkout ../astrid-app --summary "$RUNNER_TEMP/quick-journey.json"
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
@@ -241,3 +299,11 @@ jobs:
             ${{ runner.temp }}/quick-journey.json
             ${{ runner.temp }}/quick-journey.txt
           if-no-files-found: warn
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error

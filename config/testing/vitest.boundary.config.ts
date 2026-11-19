@@ -1,3 +1,4 @@
+import CeilingVitest from '../../scripts/ci/ceiling_vitest';
 import SkipGuardReporter from './skipGuardReporter';
 import { SDK_VITEST_INCLUDE } from './vitestIncludes.mjs';
 import { defineConfig } from 'vitest/config';
@@ -44,8 +45,8 @@ export default defineConfig({
     allowOnly: false,
     includeTaskLocation: true,
     reporters: process.env.VITEST_JUNIT_OUTPUT
-      ? ['default', new SkipGuardReporter({ resultsFile: `${process.env.VITEST_JUNIT_OUTPUT}.jsonl` }), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
-      : ['default', new SkipGuardReporter()],
+      ? ['default', new CeilingVitest(), new SkipGuardReporter({ resultsFile: `${process.env.VITEST_JUNIT_OUTPUT}.jsonl` }), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
+      : ['default', new CeilingVitest(), new SkipGuardReporter()],
     environment: 'jsdom',
     include: SDK_VITEST_INCLUDE,
     setupFiles: [path.resolve(projectRoot, 'src/test/setup.ts')],

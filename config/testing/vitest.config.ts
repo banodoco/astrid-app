@@ -1,3 +1,4 @@
+import CeilingVitest from '../../scripts/ci/ceiling_vitest';
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
@@ -68,8 +69,8 @@ export default defineConfig({
     allowOnly: false,
     includeTaskLocation: true,
     reporters: process.env.VITEST_JUNIT_OUTPUT
-      ? ['default', new SkipGuardReporter({ resultsFile: `${process.env.VITEST_JUNIT_OUTPUT}.jsonl` }), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
-      : ['default', new SkipGuardReporter()],
+      ? ['default', new CeilingVitest(), new SkipGuardReporter({ resultsFile: `${process.env.VITEST_JUNIT_OUTPUT}.jsonl` }), ['junit', { outputFile: process.env.VITEST_JUNIT_OUTPUT }]]
+      : ['default', new CeilingVitest(), new SkipGuardReporter()],
     // Hang guard only (testing plan R-10): durations never fail a run, so the
     // per-test and per-hook ceilings are generous; only a genuine hang trips them.
     testTimeout: 120_000,

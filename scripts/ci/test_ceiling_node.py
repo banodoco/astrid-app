@@ -129,7 +129,7 @@ for await (const event of observeNodeEvents(source())) { /* Replay only recorded
         failures = [row for row in suite["tests"] if row["outcome"] == "failed"]
         self.assertEqual(len(failures), 1)
         self.assertIn("conditional failure", failures[0]["native_id"])
-        self.assertIn("ERR_ASSERTION", failures[0]["diagnostic"])
+        self.assertIn("ERR_TEST_FAILURE: Expected values to be strictly equal", failures[0]["diagnostic"])
         verdict = self.verdict(suite)
         self.assertEqual(verdict["verdict"], "FAIL", verdict)
         self.assertTrue(any("new red" in error for error in verdict["errors"]), verdict)

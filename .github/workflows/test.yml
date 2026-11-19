@@ -1,166 +1,190 @@
-# Default vitest run per push (testing plan UP.1). The checkout lane (npm run test:checkout) needs sibling repos and does not run here.
-name: Tests
+name: Release 14 exact-source App test evidence
 
-on:
-  push:
-    branches: [main, release-1, "int/**", "release/*/main"]
-  pull_request:
-    branches: [main, "release/*/main"]
-  workflow_dispatch:
+on: workflow_dispatch
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  # A later push to main must never cancel the release guard for an earlier one: every push to main is checked.
-  # Release mains (release/<N>/main) are exempt too: each push to them runs in full.
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !(startsWith(github.ref, 'refs/heads/release/') && endsWith(github.ref, '/main')) }}
+permissions:
+  contents: read
 
 jobs:
-  # Install tuple (manifest minus release/required, plus public/install*) and release move together:
-  # a tuple change needs release +1 exactly; otherwise release is unchanged. Base is the PR base or the push's before SHA.
-  release-guard:
-    # Only against main: inside a release branch the tuple may change more than once before publication,
-    # and the guard's "+1 exactly" is checked when main is fast-forwarded to the release branch.
-    if: ${{ (github.event_name == 'pull_request' && github.base_ref == 'main') || github.ref == 'refs/heads/main' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20.19.0"
-      - name: Check install tuple and release
-        env:
-          BASE_SHA: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}
-        run: node scripts/installer/release-guard.mjs "$BASE_SHA" HEAD --pins
-
-  # A pull request into a release branch comes from a branch of that release and names what it belongs
-  # to: the plan (a plan branch does so by its name) or the astrid-dev issue. See the Release skill,
-  # "How a release runs".
-  landing-reference:
-    name: landing reference
-    if: ${{ github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/') && endsWith(github.base_ref, '/main') }}
-    runs-on: ubuntu-latest
-    steps:
-      - name: The pull request comes from a branch of this release and names its plan or issue
-        env:
-          BASE_REF: ${{ github.base_ref }}
-          HEAD_REF: ${{ github.head_ref }}
-          TITLE: ${{ github.event.pull_request.title }}
-          BODY: ${{ github.event.pull_request.body }}
-        run: |
-          release="${BASE_REF#release/}"; release="${release%/main}"
-          if ! printf '%s' "$HEAD_REF" | grep -Eq "^release/${release}/[a-z0-9][a-z0-9-]*$" || [ "$HEAD_REF" = "$BASE_REF" ]; then
-            echo "::error::A pull request into ${BASE_REF} must come from a branch of that release: release/${release}/plan-<PP> or release/${release}/<topic>. This one comes from '${HEAD_REF}'."
-            exit 1
-          fi
-          if printf '%s' "$HEAD_REF" | grep -Eq "^release/${release}/plan-[0-9]+$"; then
-            echo "Plan branch: $HEAD_REF"; exit 0
-          fi
-          if printf '%s\n%s\n' "$TITLE" "$BODY" | grep -Eiq '(plan[ -]?[0-9]+|astrid-dev#[0-9]+|astrid-dev/issues/[0-9]+)'; then
-            echo "Reference found."; exit 0
-          fi
-          echo "::error::A pull request into a release branch must name the plan or the astrid-dev issue it belongs to, for example 'Plan 55' or 'banodoco/astrid-dev#721'."
-          exit 1
-
-  # Pull requests into main run only release-guard above. Pull requests into a release branch also run vitest and
-  # boundary; release-tooling-macos stays push-only (macOS runner cost) and runs on the push to the release branch.
   vitest:
-    if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/') && endsWith(github.base_ref, '/main')) }}
-    # Pinned: Playwright does not support Chromium on ubuntu-latest (ubuntu 26.04) for this job.
+    name: Native App evidence (${{ matrix.case_name }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 110
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case_name: p61-base
+            app_sha: 0bce7312f2fc8030b50286ed75b38d0232100820
+          - case_name: p61-candidate
+            app_sha: 75a83f5329aa6688cb32cf73836b20f557e2e2fb
+          - case_name: fix14-base
+            app_sha: a55ff290ed4f291420f21d340a5117c0f8b5a38a
+          - case_name: fix14-candidate
+            app_sha: 2c01a777992b4b78356680a31ab3200491b450a9
+    env:
+      APP_SHA: ${{ matrix.app_sha }}
+      PROOF_WORKFLOW_SHA: ${{ github.workflow_sha }}
+      PROOF_WORKFLOW_REF: ${{ github.workflow_ref }}
+    defaults:
+      run:
+        shell: bash
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out the exact App source
+        uses: actions/checkout@v4
         with:
-          # Full history for the git-backed checks that run on push.
+          ref: ${{ matrix.app_sha }}
           fetch-depth: 0
           filter: blob:none
-      - name: Read the Agent and Runtime pins from the App manifest
+          persist-credentials: false
+
+      - name: Set up Node as in the source Tests workflow
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.0'
+
+      - name: Record the source and prepare external proof tools
         id: pins
         run: |
-          node -e '
-            const m = require("./public/install-manifest.json");
-            const agent = m.agent?.sha, runtime = m.runtime?.sha;
-            for (const sha of [agent, runtime]) if (!/^[0-9a-f]{40}$/.test(sha ?? "")) throw new Error(`manifest pin is not a full SHA: ${sha}`);
-            require("fs").appendFileSync(process.env.GITHUB_OUTPUT, `agent_sha=${agent}\nruntime_sha=${runtime}\n`);'
-      - name: Restore npm cache (C-08)
-        id: c08-app-test-1
-        uses: actions/cache/restore@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20.19.0"
-      - run: node --test scripts/installer/release.test.mjs
-      - run: npm ci --legacy-peer-deps
-      # The P1 corpus tests read git blobs from the Agent at the release-12 pin (public/install-manifest.json).
-      # ASTRID_AGENT_CHECKOUT points them there; a missing checkout fails the test instead of skipping it.
-      - name: Check out the pinned Agent for the P1 corpus
+          set -euo pipefail
+          proof="$RUNNER_TEMP/app-proof"
+          mkdir -p "$proof"
+          echo "PROOF=$proof" >> "$GITHUB_ENV"
+          test "$(git rev-parse HEAD)" = "$APP_SHA"
+          test -z "$(git status --porcelain --untracked-files=no)"
+          { git rev-parse HEAD HEAD^{tree}; node -v; npm -v; } > "$proof/source.txt"
+          printf '%s\n' "$GITHUB_SHA" "$PROOF_WORKFLOW_SHA" "$PROOF_WORKFLOW_REF" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" > "$proof/workflow-identity.txt"
+          sha256sum package.json package-lock.json .github/workflows/test.yml public/install-manifest.json \
+            config/testing/{vitest.config.ts,vitest.boundary.config.ts,skipGuardReporter.ts,skipRegistry.mjs} > "$proof/source.sha256"
+          node --input-type=module <<'NODE' | tee "$proof/pins.txt" >> "$GITHUB_OUTPUT"
+          import fs from 'node:fs';
+          const manifest = JSON.parse(fs.readFileSync('public/install-manifest.json', 'utf8'));
+          for (const component of ['agent', 'runtime']) {
+            const sha = manifest[component]?.sha;
+            if (!/^[0-9a-f]{40}$/.test(sha)) throw Error('Invalid ' + component + ' SHA');
+            console.log(component + '_sha=' + sha);
+          }
+          NODE
+          curl --fail --silent --show-error --location \
+            https://raw.githubusercontent.com/banodoco/astrid-app/549e335dc766f373a8a40cc0690730db75295153/scripts/quality/check-vitest-results.py \
+            -o "$proof/check-vitest-results.py"
+          echo "2a03b5d7bcabf77debe960e36e04a86873f0ad5b2a43e81a13dea409a907f987  $proof/check-vitest-results.py" | sha256sum -c -
+          cat > "$proof/native-receipt.mjs" <<'REPORTER'
+          import { closeSync, openSync, writeSync } from 'node:fs';
+          import path from 'node:path';
+
+          export default class NativeReceipt {
+            onInit(ctx) { this.root = ctx.config.root; }
+            relative(file) { return path.relative(this.root, file).split(path.sep).join('/'); }
+            record(row) { writeSync(this.fd, JSON.stringify(row) + '\n'); }
+            identity(test) {
+              return { id: test.id, file: this.relative(test.module.moduleId), name: test.fullName,
+                expectedFailure: Boolean(test.options.fails), mode: test.options.mode };
+            }
+            onTestRunStart(specs) {
+              this.fd = openSync(process.env.VITEST_PROOF_STREAM, 'wx');
+              this.record({ event: 'start', version: 1, modules: specs.map(s => this.relative(s.moduleId)) });
+            }
+            onTestModuleCollected(module) {
+              this.record({ event: 'collected', file: this.relative(module.moduleId),
+                tests: [...module.children.allTests()].map(test => this.identity(test)) });
+            }
+            onTestCaseResult(test) {
+              const result = test.result();
+              this.record({ event: 'result', ...this.identity(test), state: result.state,
+                ...(result.state === 'skipped' && { note: result.note ?? '' }) });
+            }
+            onTestRunEnd(modules, errors, reason) {
+              const cases = modules.flatMap(module => [...module.children.allTests()]);
+              this.record({ event: 'end', tests: cases.length, pending: cases.filter(t => t.result().state === 'pending').length,
+                reason, unhandledErrors: errors.map(e => String(e.message ?? e)) });
+              closeSync(this.fd);
+            }
+          }
+          REPORTER
+          cat > "$proof/capture.sh" <<'CAPTURE'
+          #!/usr/bin/env bash
+          set -uo pipefail
+          label=$1
+          shift
+          printf '%q ' "$@" > "$PROOF/$label.command"
+          printf '\n' >> "$PROOF/$label.command"
+          "$@" 2>&1 | tee "$PROOF/$label.log"
+          statuses=("${PIPESTATUS[@]}")
+          printf '%s\n' "${statuses[0]}" > "$PROOF/$label.exit"
+          if [[ "${statuses[1]}" != 0 ]]; then exit "${statuses[1]}"; fi
+          exit "${statuses[0]}"
+          CAPTURE
+
+      - name: Run native installer tests
+        run: bash "$PROOF/capture.sh" installer node --test scripts/installer/release.test.mjs
+
+      - name: Install the tested project's dependency lock
+        run: npm ci --legacy-peer-deps
+
+      - name: Check out the manifest's Agent with full history
         uses: actions/checkout@v4
         with:
           repository: banodoco/astrid-agent
           ref: ${{ steps.pins.outputs.agent_sha }}
           path: astrid-agent
           fetch-depth: 0
-      # Browser-backed unit tests launch Playwright's Chromium from the default cache.
-      - name: Install Playwright Chromium
-        run: npx playwright install chromium
-      - run: npm test
+          persist-credentials: false
+
+      - name: Verify Agent identity and install native Chromium
+        id: setup
+        env:
+          AGENT_SHA: ${{ steps.pins.outputs.agent_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git -C astrid-agent rev-parse HEAD)" = "$AGENT_SHA"
+          git -C astrid-agent rev-parse HEAD HEAD^{tree} > "$PROOF/agent-identity.txt"
+          npx playwright install chromium
+          test -z "$(git status --porcelain --untracked-files=no)"
+
+      - name: Run full App suite with its original guard plus passive receipts
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
-      - run: npm run test:sdk-boundary
-
-  # The release tooling is macOS-only by design (lockf broker, BSD ps eww, darwin-pinned attestation), so the vitest job
-  # declares these cases as skipped (config/testing/skipRegistry.mjs: macos-release-process-containment, macos-lockf-broker)
-  # and this job runs exactly those files where the condition holds. Plain node: these files import only the repo.
-      - name: Save npm cache on main or int branches (C-08)
-        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/int/') || (startsWith(github.ref, 'refs/heads/release/') && endsWith(github.ref, '/main'))) && steps.c08-app-test-1.outputs.cache-hit != 'true' }}
-        uses: actions/cache/save@v4
-        with:
-          path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
-          key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
-
-  release-tooling-macos:
-    if: ${{ github.event_name != 'pull_request' }}
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version-file: .nvmrc
-      - run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs scripts/release/verify-extension-ship.test.mjs
-
-  # Cross-repo copies: every vendored artifact must match its selected producer commit.
-  boundary:
-    if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && startsWith(github.base_ref, 'release/') && endsWith(github.base_ref, '/main')) }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20.19.0"
-      - id: pins
         run: |
-          node <<'NODE' >> "$GITHUB_OUTPUT"
-          const fs = require('node:fs');
-          const runtime = JSON.parse(fs.readFileSync('runtime.lock.json', 'utf8'));
-          const astrid = JSON.parse(fs.readFileSync('config/astrid-cli-surface/vendor.lock.json', 'utf8'));
-          const manifest = JSON.parse(fs.readFileSync('public/install-manifest.json', 'utf8'));
-          process.stdout.write(`runtime_sha=${runtime.source_commit}\nastrid_sha=${astrid.source_commit}\nagent_sha=${manifest.agent.sha}\n`);
-          NODE
-      - uses: actions/checkout@v4
+          export VITEST_PROOF_STREAM="$PROOF/vitest-app.xml.jsonl"
+          bash "$PROOF/capture.sh" vitest-app npm run test:app -- \
+            --reporter=default --reporter=./config/testing/skipGuardReporter.ts \
+            --reporter="$PROOF/native-receipt.mjs" --reporter=junit \
+            --outputFile.junit="$PROOF/vitest-app.xml"
+
+      - name: Run original Node suite
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        env:
+          ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
+        run: bash "$PROOF/capture.sh" node-suite npm run test:node
+
+      - name: Run SDK boundary suite with its original guard plus passive receipts
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          export VITEST_PROOF_STREAM="$PROOF/vitest-sdk-boundary.xml.jsonl"
+          bash "$PROOF/capture.sh" vitest-sdk-boundary npm run test:sdk-boundary -- \
+            --reporter=default --reporter=./config/testing/skipGuardReporter.ts \
+            --reporter="$PROOF/native-receipt.mjs" --reporter=junit \
+            --outputFile.junit="$PROOF/vitest-sdk-boundary.xml"
+
+      - name: Reconcile raw IDs, JUnit cases and actual runner totals
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          git diff --name-status HEAD > "$PROOF/final-tracked-changes.txt"
+          bash "$PROOF/capture.sh" integrity python3 "$PROOF/check-vitest-results.py" "$PROOF"
+          test ! -s "$PROOF/final-tracked-changes.txt"
+
+      - name: Record evidence checksums
+        if: ${{ always() }}
+        run: |
+          cd "$RUNNER_TEMP/app-proof"
+          find . -type f ! -name evidence.sha256 -print0 | sort -z | xargs -0 -r sha256sum > evidence.sha256
+
+      - name: Retain raw receipts on success or failure
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
         with:
-          repository: banodoco/astrid-runtime
-          ref: ${{ steps.pins.outputs.runtime_sha }}
-          path: runtime-producer
-      - uses: actions/checkout@v4
-        with:
-          repository: banodoco/astrid-agent
-          ref: ${{ steps.pins.outputs.agent_sha }}
-          path: astrid-producer
-      - run: |
-          node scripts/vendor-lock.mjs check runtime.lock.json --producer runtime-producer
-      - run: node scripts/vendor-lock.mjs check config/astrid-cli-surface/vendor.lock.json --producer astrid-producer
-      - run: node --test scripts/quality/astrid-public-boundary.test.mjs
-      - run: node scripts/build/verify-astrid-vendor-sources.mjs
+          name: app-evidence-${{ matrix.case_name }}-${{ matrix.app_sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/app-proof/
+          if-no-files-found: error
+          retention-days: 30

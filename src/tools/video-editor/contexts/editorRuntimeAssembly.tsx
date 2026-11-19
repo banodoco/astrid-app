@@ -63,7 +63,7 @@ import { useTimelineState } from '@/tools/video-editor/hooks/useTimelineState.ts
 import { PUBLIC_TIMELINE_SERVICE_HOOKS, type TimelineHostServiceHooks } from '@/tools/video-editor/runtime/timelineHostServiceHooks.ts';
 import type { UseTimelineStateResult } from '@/tools/video-editor/hooks/useTimelineState.types.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
-import { useVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
+import { useVideoEditorRuntime, VideoEditorRuntimeProvider } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import {
   normalizeExtensionRuntime,
   type ExtensionRuntime,
@@ -597,6 +597,8 @@ export interface UseEditorRuntimeSyncOptions {
 
 export interface EditorRuntimeSync {
   store: UseTimelineStateResult['store'];
+  timelineEditability: UseTimelineStateResult['timelineEditability'];
+  timelineEditingReady: UseTimelineStateResult['timelineEditingReady'];
   editor: UseTimelineStateResult['editor'];
   transcriptHost?: import('../lib/transcript-panel-host.ts').TranscriptPanelHost;
   chrome: UseTimelineStateResult['chrome'];
@@ -648,7 +650,7 @@ export function useEditorRuntimeSync({
   const effectResources = useResolvedEffectCatalog(effectCatalog);
   const sequenceComponentResources = useResolvedSequenceComponentCatalog(sequenceComponentCatalog);
 
-  const { store, editor, chrome, editorOps } = useTimelineState(timelineServices, initialTimelineData);
+  const { store, editor, chrome, editorOps, timelineEditability, timelineEditingReady } = useTimelineState(timelineServices, initialTimelineData);
   const diagnosticCollection = useVideoEditorRuntime().diagnosticCollection;
   const activeExtensionIds = useMemo(
     () => new Set(extensionRuntime.extensions.map((ext) => ext.manifest.id as string)),
@@ -1033,6 +1035,8 @@ export function useEditorRuntimeSync({
 
   return {
     store,
+    timelineEditability,
+    timelineEditingReady,
     transcriptHost:editorOps.transcriptHost,
     editor,
     chrome,
@@ -1315,6 +1319,11 @@ export function EditorRuntimeScaffold({
   sync: EditorRuntimeSync;
   children: ReactNode;
 }) {
+  const runtime = useVideoEditorRuntime();
+  const editingRuntime = useMemo(() => ({
+    ...runtime,
+    timelineEditability: sync.timelineEditability ?? runtime.timelineEditability,
+  }), [runtime, sync.timelineEditability]);
   const inner = (
     <EffectCatalogProvider value={sync.effectResources}>
       <RuntimeEffectRegistryLifecycle
@@ -1354,7 +1363,9 @@ export function EditorRuntimeScaffold({
       <SequenceComponentCatalogProvider value={sync.sequenceComponentResources}>
         <SequenceComponentRegistryProvider components={sync.sequenceComponentResources.components}>
           <TimelineStoreProvider store={sync.store}>
-            {children}
+            <VideoEditorRuntimeProvider value={editingRuntime}>
+              {children}
+            </VideoEditorRuntimeProvider>
           </TimelineStoreProvider>
         </SequenceComponentRegistryProvider>
       </SequenceComponentCatalogProvider>

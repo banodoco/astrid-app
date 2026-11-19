@@ -1,0 +1,81 @@
+name: Plan 61 C4 readiness
+
+on:
+  pull_request:
+    branches: [release/14/plan-61]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  mounted-editor-readiness:
+    if: ${{ github.head_ref == 'p61/c4-edit-ready' }}
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: Record exact source and hosted Mac identity
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$RUNNER_OS" = macOS
+          mkdir -p c4-proof
+          {
+            git rev-parse HEAD HEAD^{tree}
+            sw_vers
+            uname -m
+            node --version
+            npm --version
+            shasum -a 256 .github/workflows/test.yml
+            shasum -a 256 src/tools/video-editor/contexts/VideoEditorProvider.readiness.test.tsx
+            shasum -a 256 src/tools/video-editor/components/AgentChat/AgentChat.projectContract.test.tsx
+          } | tee c4-proof/source.txt
+      - run: npm ci --legacy-peer-deps
+      - name: Preserve the repository test-policy checks
+        run: |
+          set -euo pipefail
+          {
+            npm run check:no-smoke-tests
+            npm run check:known-failures
+            npm run check:no-raw-skips
+            npm run check:skip-registry
+          } 2>&1 | tee c4-proof/policy.log
+      - name: Mounted readiness regression and existing affected tests
+        run: |
+          set -euo pipefail
+          tests=(
+            src/tools/video-editor/contexts/VideoEditorProvider.readiness.test.tsx
+            src/tools/video-editor/contexts/VideoEditorProvider.staging.test.tsx
+            src/tools/video-editor/contexts/VideoEditorProvider.test.tsx
+            src/tools/video-editor/contexts/EditorRuntimeProvider.test.tsx
+            src/tools/video-editor/hooks/useTimelineSave.test.tsx
+            src/tools/video-editor/hooks/useTimelineTrackManagement.persistence.test.tsx
+            src/tools/video-editor/lib/timeline-editability.test.ts
+            src/tools/video-editor/components/TimelineEditorShellToolbar.test.tsx
+            src/tools/video-editor/components/TimelineEditor/TimelineEditorCore.test.tsx
+            src/tools/video-editor/components/PropertiesPanel/PropertiesPanel.test.tsx
+            src/tools/video-editor/components/PropertiesPanel/PropertiesPanel.mounted.test.tsx
+          )
+          shasum -a 256 "${tests[@]}" | tee c4-proof/test-sha256.txt
+          ./node_modules/.bin/vitest run --config config/testing/vitest.config.ts \
+            "${tests[@]}" \
+            --reporter=verbose --reporter=./config/testing/skipGuardReporter.ts \
+            --reporter=junit --outputFile=c4-proof/readiness.junit.xml \
+            2>&1 | tee c4-proof/readiness.log
+      - name: Retain raw results including failing-before evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p61-c4-readiness-${{ github.run_id }}-${{ github.run_attempt }}
+          path: c4-proof/
+          if-no-files-found: error

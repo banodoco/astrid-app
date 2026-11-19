@@ -1,0 +1,54 @@
+{
+  "review": "6999421639",
+  "source_head": "d475e20d1f5baa7ae52964f3131502a9439c2845",
+  "collector_sha256": "1ca0aa5685ffd5faea197ccb56acba086b6502a6f44217f328df190eafb3448a",
+  "receipt_source": "../native-executed-proof.tar.gz",
+  "cases": [
+    {
+      "status": "completed",
+      "conclusion": "failure",
+      "verdict": "PASS",
+      "complete": true,
+      "collection_errors": [],
+      "artifact_sha256": [
+        "a177e231d8b3dd52961d7f092a54e0c50e445d23797acfd5739b5515d37de18d",
+        "33ed4680a6816f8010107d32f2fd0b85573428b77af42b07d1df34775b0c76f6"
+      ]
+    },
+    {
+      "status": "completed",
+      "conclusion": "cancelled",
+      "verdict": "PASS",
+      "complete": true,
+      "collection_errors": [],
+      "artifact_sha256": [
+        "a177e231d8b3dd52961d7f092a54e0c50e445d23797acfd5739b5515d37de18d",
+        "33ed4680a6816f8010107d32f2fd0b85573428b77af42b07d1df34775b0c76f6"
+      ]
+    },
+    {
+      "status": "in_progress",
+      "conclusion": null,
+      "verdict": "PASS",
+      "complete": true,
+      "collection_errors": [],
+      "artifact_sha256": [
+        "a177e231d8b3dd52961d7f092a54e0c50e445d23797acfd5739b5515d37de18d",
+        "33ed4680a6816f8010107d32f2fd0b85573428b77af42b07d1df34775b0c76f6"
+      ]
+    },
+    {
+      "status": "queued",
+      "conclusion": null,
+      "verdict": "PASS",
+      "complete": true,
+      "collection_errors": [],
+      "artifact_sha256": [
+        "a177e231d8b3dd52961d7f092a54e0c50e445d23797acfd5739b5515d37de18d",
+        "33ed4680a6816f8010107d32f2fd0b85573428b77af42b07d1df34775b0c76f6"
+      ]
+    }
+  ],
+  "test_exit": 1,
+  "fixture_only": true
+}

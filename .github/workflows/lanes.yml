@@ -21,6 +21,7 @@ jobs:
   checkout-lanes:
     runs-on: ubuntu-latest
     env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
       M4_TEST_AGENT_ROOT: ${{ github.workspace }}/astrid-agent
       M4_TEST_RUNTIME_ROOT: ${{ github.workspace }}/astrid-runtime
       M4_TEST_PYTHON: ${{ github.workspace }}/astrid-agent/.venv/bin/python
@@ -133,6 +134,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector
@@ -159,6 +162,8 @@ jobs:
 
   installer-powershell:
     runs-on: ubuntu-latest
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector
@@ -193,6 +198,8 @@ jobs:
     runs-on: ubuntu-24.04
     # A hang guard only: the journey has no deadline of its own, and a stalled apt download once held a runner for 30 minutes.
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
         with:

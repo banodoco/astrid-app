@@ -22,6 +22,8 @@ jobs:
   playwright-default:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector
@@ -75,6 +77,8 @@ jobs:
   playwright-timeline:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector
@@ -123,6 +127,8 @@ jobs:
   playwright-timeline-chrome-export:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector
@@ -184,6 +190,8 @@ jobs:
   extension-accessibility:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector
@@ -231,6 +239,8 @@ jobs:
   extension-visual:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector
@@ -278,6 +288,8 @@ jobs:
   extension-cross-browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
       - name: Set up Plan39 evidence collector

@@ -42,6 +42,8 @@ concurrency:
 jobs:
   direct-journey:
     runs-on: ubuntu-24.04
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       # The harness finds the Runtime at ../astrid-runtime and Agent at ../astrid-agent,
       # so all three repos are checked out as siblings under $GITHUB_WORKSPACE: App in astrid-app.
@@ -219,6 +221,8 @@ jobs:
     concurrency:
       group: three-products-${{ github.ref }}
       cancel-in-progress: true
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       # The harness finds Astrid at ../astrid-agent (ASTRID_CHECKOUT overrides) and the Runtime at ../astrid-runtime,
       # so all three checkouts are siblings under $GITHUB_WORKSPACE.

@@ -93,7 +93,7 @@
     "subtest-reconciliation-33.json.gz": "d2ed8dcba9bca122227c87ef582588e7b04b9630f24369afaa66bf0ff065008b",
     "workflow-bootstrap-proof.json": "d85995792aa4d077bde661219701eca9181dae26a02141de0b51ba91a738e30d",
     "workflow-command-comparison.json": "e07bd168424322a8e1dcea343d458ec6cd541b3d8658921ca10919f2ff1de71a",
-    "workflow-validation.json": "abd611cf595d6ffbf2ee5551d6d94ada25c715ac88ae97d79f7f7c19308d7af9"
+    "workflow-validation.json": "a6ff5c5e4fbaece058e92c4a050d97c27f8f67d074b43fba165a795b1564c840"
   },
   "workflow_validation": {
     "validator": "actionlint v1.7.7",
@@ -113,6 +113,89 @@
     "output": "",
     "scope": "All packet workflow files; external shellcheck/pyflakes are disabled because this check validates Actions schema and expression contexts.",
     "prior_failure": "GitHub rejected expressions in steps.shell before creating native jobs; prior implementation checkpoint is unqualified.",
-    "core_implementation_unchanged": true
+    "core_implementation_unchanged": true,
+    "matrix_environment_explicit_for_every_captured_job": true,
+    "captured_jobs": [
+      {
+        "workflow": ".github/workflows/test.yml",
+        "job": "vitest",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/test.yml",
+        "job": "release-tooling-macos",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/test.yml",
+        "job": "boundary",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/direct-journey.yml",
+        "job": "direct-journey",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/direct-journey.yml",
+        "job": "three-products",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/e2e.yml",
+        "job": "playwright-default",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/e2e.yml",
+        "job": "playwright-timeline",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/e2e.yml",
+        "job": "playwright-timeline-chrome-export",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/e2e.yml",
+        "job": "extension-accessibility",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/e2e.yml",
+        "job": "extension-visual",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/e2e.yml",
+        "job": "extension-cross-browser",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/lanes.yml",
+        "job": "checkout-lanes",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/lanes.yml",
+        "job": "installer-posix",
+        "matrix": {
+          "os": [
+            "ubuntu-latest",
+            "macos-latest"
+          ]
+        }
+      },
+      {
+        "workflow": ".github/workflows/lanes.yml",
+        "job": "installer-powershell",
+        "matrix": null
+      },
+      {
+        "workflow": ".github/workflows/lanes.yml",
+        "job": "quick-journey",
+        "matrix": null
+      }
+    ]
   }
 }

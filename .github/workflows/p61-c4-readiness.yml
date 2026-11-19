@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   mounted-editor-readiness:
-    if: ${{ github.head_ref == 'p61/c4-edit-ready' }}
+    if: ${{ github.head_ref == 'p61/c4-edit-ready' || github.head_ref == 'p61/c4-core-ready' }}
     runs-on: macos-latest
     timeout-minutes: 30
     steps:
@@ -38,6 +38,7 @@ jobs:
             npm --version
             shasum -a 256 .github/workflows/test.yml
             shasum -a 256 src/tools/video-editor/contexts/VideoEditorProvider.readiness.test.tsx
+            shasum -a 256 src/tools/video-editor/components/TimelineEditor/TimelineEditorCore.readiness.test.tsx
             shasum -a 256 src/tools/video-editor/components/AgentChat/AgentChat.projectContract.test.tsx
           } | tee c4-proof/source.txt
       - run: npm ci --legacy-peer-deps
@@ -63,6 +64,9 @@ jobs:
             src/tools/video-editor/lib/timeline-editability.test.ts
             src/tools/video-editor/components/TimelineEditorShellToolbar.test.tsx
             src/tools/video-editor/components/TimelineEditor/TimelineEditorCore.test.tsx
+            src/tools/video-editor/components/TimelineEditor/TimelineEditorCore.readiness.test.tsx
+            src/tools/video-editor/components/TimelineEditor/TimelineCanvas.test.tsx
+            src/tools/video-editor/components/TimelineEditor/TrackListRenderer.test.tsx
             src/tools/video-editor/components/PropertiesPanel/PropertiesPanel.test.tsx
             src/tools/video-editor/components/PropertiesPanel/PropertiesPanel.mounted.test.tsx
           )

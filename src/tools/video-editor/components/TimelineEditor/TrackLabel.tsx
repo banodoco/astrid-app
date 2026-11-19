@@ -45,6 +45,8 @@ interface TrackLabelContentProps {
   onChange: (trackId: string, patch: Partial<TrackDefinition>) => void;
   onRemove: (trackId: string) => void;
   readOnly?: boolean;
+  /** Retain the desktop name field during a save-readiness hold, without actions. */
+  showReadOnlyTrackName?: boolean;
   rowDragging?: boolean;
   dragListeners?: SyntheticListenerMap;
   dragAttributes?: DraggableAttributes;
@@ -325,6 +327,7 @@ export function TrackLabelContent({
   onChange,
   onRemove,
   readOnly = false,
+  showReadOnlyTrackName = false,
   rowDragging = false,
   dragListeners,
   dragAttributes,
@@ -395,6 +398,7 @@ export function TrackLabelContent({
 
   // Touch selects the track for the shared Inspector; desktop keeps hover actions.
   const showTrackActions = !readOnly && deviceClass === 'desktop';
+  const showTrackName = showTrackActions || (readOnly && showReadOnlyTrackName && deviceClass === 'desktop');
   const isSource = trackRole(track) === 'source';
 
   return (
@@ -419,26 +423,26 @@ export function TrackLabelContent({
 
         {/* Full label shown at rest; on desktop it fades out for the hover overlay */}
         <span
-          className={cn('min-w-0 flex-1 truncate', showTrackActions && (rowDragging ? 'opacity-0' : 'transition-opacity group-hover:opacity-0'))}
+          className={cn('min-w-0 flex-1 truncate', showTrackName && (rowDragging || readOnly ? 'opacity-0' : 'transition-opacity group-hover:opacity-0'))}
           title={displayLabel ?? track.label}
         >
           {displayLabel ?? track.label}
         </span>
 
-        {showTrackActions ? (
+        {showTrackName ? (
           /* Keep the existing activator mounted during a drag. The name stays
              visible without hover, and unrelated actions release its space. */
-          <div className={cn('absolute inset-0 flex items-center gap-1 px-2', rowDragging ? 'opacity-100' : 'opacity-0 transition-opacity group-hover:opacity-100')}>
+          <div className={cn('absolute inset-0 flex items-center gap-1 px-2', rowDragging || readOnly ? 'opacity-100' : 'opacity-0 transition-opacity group-hover:opacity-100')}>
             <span className={cn('shrink-0', isSource ? 'w-10' : 'w-[18px]')} />
             <input
               className="min-w-0 flex-1 bg-transparent text-xs outline-none"
               value={rowDragging ? displayLabel ?? track.label : track.label}
               aria-label="Track name"
-              readOnly={rowDragging}
-              onChange={(event) => onChange(track.id, { label: event.target.value })}
+              readOnly={readOnly || rowDragging}
+              onChange={readOnly ? undefined : (event) => onChange(track.id, { label: event.target.value })}
               onClick={(event) => event.stopPropagation()}
             />
-            <div className="flex shrink-0 items-center">
+            {showTrackActions && <div className="flex shrink-0 items-center">
               <Button
                 type="button"
                 variant="ghost"
@@ -468,7 +472,7 @@ export function TrackLabelContent({
               >
                 {confirmingDelete ? <Check className="h-3.5 w-3.5" /> : <Trash2 className="h-3.5 w-3.5" />}
               </Button>
-            </div>
+            </div>}
           </div>
         ) : null}
       </div>

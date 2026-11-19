@@ -87,7 +87,7 @@ jobs:
           python-version: "3.11"
       - name: Read the Agent and Runtime pins from the App manifest
         id: pins
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-01 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-01 --shell bash "{0}"
         run: |
           node -e '
             const m = require("./public/install-manifest.json");
@@ -105,14 +105,14 @@ jobs:
           node-version: "20.19.0"
       - name: Plan39 recorded command 04
         if: ${{ !cancelled() }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-04 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-04 --shell bash "{0}"
         run: node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/ci/ceiling_node.mjs --test-reporter-destination=stdout scripts/installer/release.test.mjs
       - name: Plan39 recorded command 05
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-05 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-05 --shell bash "{0}"
         run: npm ci --legacy-peer-deps
         id: dependencies
       - name: Check quarantine policy against the merge base
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-06 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-06 --shell bash "{0}"
         env:
           QUARANTINE_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before || inputs.quarantine_base || (github.event_name == 'schedule' && github.sha) }}
         run: |
@@ -162,7 +162,7 @@ jobs:
           )
       - name: Prove result-integrity rejection cases
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-07 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-07 --shell bash "{0}"
         run: python3 -m unittest discover -s scripts/quality -p test_vitest_results.py
       # The P1 corpus tests read git blobs from the Agent at the release-12 pin (public/install-manifest.json).
       # ASTRID_AGENT_CHECKOUT points them there; a missing checkout fails the test instead of skipping it.
@@ -177,34 +177,34 @@ jobs:
       # Browser-backed unit tests launch Playwright's Chromium from the default cache.
       - name: Install Playwright Chromium
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-09 --shell bash "{0}"
         run: npx playwright install chromium
       - name: Prepare Vitest result directory
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
         run: mkdir -p "$RUNNER_TEMP/vitest-results"
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-10 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-10 --shell bash "{0}"
       - name: Run App Vitest suite
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-11 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-11 --shell bash "{0}"
         run: npm run test:app 2>&1 | tee "$RUNNER_TEMP/vitest-results/vitest-app.log"
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
           VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-app.xml
       - name: Run Node tests
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-12 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-12 --shell bash "{0}"
         run: npm run test:node
         env:
           ASTRID_AGENT_CHECKOUT: ${{ github.workspace }}/astrid-agent
       - name: Run SDK boundary Vitest suite
         if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-13 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-13 --shell bash "{0}"
         run: npm run test:sdk-boundary 2>&1 | tee "$RUNNER_TEMP/vitest-results/vitest-sdk-boundary.log"
         env:
           VITEST_JUNIT_OUTPUT: ${{ runner.temp }}/vitest-results/vitest-sdk-boundary.xml
       - name: Verify and summarize actual Vitest results
         if: always()
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-14 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-14 --shell bash "{0}"
         run: python3 scripts/quality/check-vitest-results.py "$RUNNER_TEMP/vitest-results"
       - name: Upload Vitest results
         if: always()
@@ -246,7 +246,7 @@ jobs:
           node-version-file: .nvmrc
       - name: Plan39 recorded command 02
         if: ${{ !cancelled() }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-02 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-02 --shell bash "{0}"
         run: node --test --test-concurrency=1 --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/quality/node-skip-guard-reporter.mjs --test-reporter-destination=stdout scripts/release/bounded-command.test.mjs scripts/release/astrid-release-provenance.test.mjs scripts/release/verify-extension-ship.test.mjs
 
   # Cross-repo copies: every vendored artifact must match its selected producer commit.
@@ -271,7 +271,7 @@ jobs:
         with:
           node-version: "20.19.0"
       - name: Check manifest pins against local locks
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-02 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-02 --shell bash "{0}"
         run: |
           node --input-type=module <<'NODE'
           import { readFileSync } from 'node:fs';
@@ -281,7 +281,7 @@ jobs:
           NODE
       - name: Plan39 recorded command 03
         id: pins
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-03 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-03 --shell bash "{0}"
         run: |
           node <<'NODE' >> "$GITHUB_OUTPUT"
           const fs = require('node:fs');
@@ -301,18 +301,18 @@ jobs:
           ref: ${{ steps.pins.outputs.agent_sha }}
           path: astrid-producer
       - name: Plan39 recorded command 06
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-06 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-06 --shell bash "{0}"
         run: |
           node scripts/vendor-lock.mjs check runtime.lock.json --producer runtime-producer
       - name: Plan39 recorded command 07
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-07 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-07 --shell bash "{0}"
         run: node scripts/vendor-lock.mjs check config/astrid-cli-surface/vendor.lock.json --producer astrid-producer
       - name: Plan39 recorded command 08
         if: ${{ !cancelled() }}
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-08 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-08 --shell bash "{0}"
         run: node --test --test-reporter=spec --test-reporter-destination=stdout --test-reporter=./scripts/ci/ceiling_node.mjs --test-reporter-destination=stdout scripts/quality/astrid-public-boundary.test.mjs
       - name: Plan39 recorded command 09
-        shell: python -I "${{ github.workspace }}/scripts/ci/ceiling_capture.py" --step step-09 --matrix ${{ strategy.job-index || 0 }} --shell bash {0}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-09 --shell bash "{0}"
         run: node scripts/build/verify-astrid-vendor-sources.mjs
       - name: Retain actual Plan39 command and native result evidence
         if: always()

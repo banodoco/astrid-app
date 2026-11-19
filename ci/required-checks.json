@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "repository": "banodoco/astrid-app",
+  "authority": {
+    "plan": "Plan 39 K2/K3",
+    "source": "banodoco/astrid-dev@4223b30a2b56c7eb59da3a47b200516372bdca5a",
+    "decision": "6995664680",
+    "amendment": "6996255390"
+  },
+  "merge": [
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "vitest",
+      "kind": "tests"
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "release-tooling-macos",
+      "kind": "tests"
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "boundary",
+      "kind": "check"
+    }
+  ],
+  "release": [
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "vitest",
+      "kind": "tests"
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "release-tooling-macos",
+      "kind": "tests"
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "boundary",
+      "kind": "check"
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "checkout-lanes",
+      "kind": "tests"
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "installer-posix (ubuntu-latest)",
+      "kind": "journey"
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "installer-posix (macos-latest)",
+      "kind": "journey"
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "installer-powershell",
+      "kind": "journey"
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "quick-journey",
+      "kind": "journey"
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "playwright-default",
+      "kind": "tests"
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "playwright-timeline",
+      "kind": "tests"
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "playwright-timeline-chrome-export",
+      "kind": "tests"
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "extension-accessibility",
+      "kind": "tests"
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "extension-visual",
+      "kind": "tests"
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "extension-cross-browser",
+      "kind": "tests"
+    },
+    {
+      "workflow": "Direct Journey",
+      "workflow_file": "direct-journey.yml",
+      "job": "direct-journey",
+      "kind": "tests"
+    },
+    {
+      "workflow": "Direct Journey",
+      "workflow_file": "direct-journey.yml",
+      "job": "three-products",
+      "kind": "tests"
+    }
+  ]
+}

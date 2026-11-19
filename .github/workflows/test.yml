@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - case_name: plan61-release-sync
-            app_sha: 0360b698dd3b673b3361a3f1bdef948042d8d27e
+          - case_name: plan61-core-readiness
+            app_sha: 5aa11077510a7b2c92628db35548756f6d5bc712
     env:
       APP_SHA: ${{ matrix.app_sha }}
       PROOF_WORKFLOW_SHA: ${{ github.workflow_sha }}

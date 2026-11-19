@@ -1,0 +1,1187 @@
+{
+  "run_id": 44557257081,
+  "job_id": 135676576183,
+  "run_status": "completed",
+  "run_conclusion": "failure",
+  "job_status": "completed",
+  "job_conclusion": "failure",
+  "workflow_head": "3c99c7aa7f9a0079b5075351f6271239714c4bc4",
+  "tool_head": "d72ee39ded70346e5b22d952fba985c8a137b622",
+  "installed_heads": [
+    {
+      "path": "artifact/completion-02-fresh-first-run-logs/heads.tsv",
+      "raw": "release/14/plan-61 67428177b24989e230537ffe363aaa45b60bbd63 release/14/main ae929cdae7460c36cfbfd95599019a4c45f42e1c\n",
+      "app_ref": "release/14/plan-61",
+      "app_sha": "67428177b24989e230537ffe363aaa45b60bbd63",
+      "agent_ref": "release/14/main",
+      "agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_runtime": {
+        "sha": "2537fed24385ec1c24f48a812e09af4bb63fb794",
+        "schema_digest": "sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c"
+      },
+      "sha256": "09b840828594db79309c9a49490921dfa4f75630264509a682e25882a2599235"
+    },
+    {
+      "path": "artifact/completion-04-start-before-edit-logs/heads.tsv",
+      "raw": "release/14/plan-61 67428177b24989e230537ffe363aaa45b60bbd63 release/14/main ae929cdae7460c36cfbfd95599019a4c45f42e1c\n",
+      "app_ref": "release/14/plan-61",
+      "app_sha": "67428177b24989e230537ffe363aaa45b60bbd63",
+      "agent_ref": "release/14/main",
+      "agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_runtime": {
+        "sha": "2537fed24385ec1c24f48a812e09af4bb63fb794",
+        "schema_digest": "sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c"
+      },
+      "sha256": "09b840828594db79309c9a49490921dfa4f75630264509a682e25882a2599235"
+    },
+    {
+      "path": "artifact/failure-stack-logs/heads.tsv",
+      "raw": "release/14/plan-61 67428177b24989e230537ffe363aaa45b60bbd63 release/14/main ae929cdae7460c36cfbfd95599019a4c45f42e1c\n",
+      "app_ref": "release/14/plan-61",
+      "app_sha": "67428177b24989e230537ffe363aaa45b60bbd63",
+      "agent_ref": "release/14/main",
+      "agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_runtime": {
+        "sha": "2537fed24385ec1c24f48a812e09af4bb63fb794",
+        "schema_digest": "sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c"
+      },
+      "sha256": "09b840828594db79309c9a49490921dfa4f75630264509a682e25882a2599235"
+    },
+    {
+      "path": "artifact/final-stack-logs/heads.tsv",
+      "raw": "release/14/plan-61 67428177b24989e230537ffe363aaa45b60bbd63 release/14/main ae929cdae7460c36cfbfd95599019a4c45f42e1c\n",
+      "app_ref": "release/14/plan-61",
+      "app_sha": "67428177b24989e230537ffe363aaa45b60bbd63",
+      "agent_ref": "release/14/main",
+      "agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_agent_sha": "ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "manifest_runtime": {
+        "sha": "2537fed24385ec1c24f48a812e09af4bb63fb794",
+        "schema_digest": "sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c"
+      },
+      "sha256": "09b840828594db79309c9a49490921dfa4f75630264509a682e25882a2599235"
+    }
+  ],
+  "fresh_start_count": 1,
+  "warm_start_count": 1,
+  "recorded_command_count": 34,
+  "recorded_command_exit_counts": {
+    "0": 33,
+    "1": 1
+  },
+  "c4_original_command_result": {
+    "label": "completion-04-editor-edit",
+    "source": "artifact/run-record.md",
+    "line": 1649,
+    "command": "node /Users/runner/work/astrid-app/astrid-app/scripts/astrid-release/hosted-browser.mjs /Users/runner/astrid-release/release-14-plan-61 /Users/runner/work/_temp/p61-proof.tZCp6tzE edit",
+    "result": {
+      "exit": 1,
+      "seconds": 93.283
+    }
+  },
+  "c4_phase_exception": {
+    "title": "restart-edit FAIL",
+    "line": 1658,
+    "body": "AssertionError: completion-04-editor-edit: exit 1, expected 0"
+  },
+  "playback": {
+    "mode": "play",
+    "url": "http://127.0.0.1:2400/tools/video-editor?entry=editor",
+    "pageErrors": [],
+    "failedResponses": [
+      {
+        "status": 503,
+        "url": "http://127.0.0.1:2400/__astrid/local-update-status"
+      }
+    ],
+    "before": {
+      "revision": "authoring-parent-revision-ce78813152da6c2729561d10d847e5a213e430853abd19a62c022875cc0629da",
+      "publication": "txn-0bf5ca36e1e44d82b7b33f659e20d789"
+    },
+    "frameBefore": 0,
+    "framePlaying": 20,
+    "after": {
+      "revision": "authoring-parent-revision-ce78813152da6c2729561d10d847e5a213e430853abd19a62c022875cc0629da",
+      "publication": "txn-0bf5ca36e1e44d82b7b33f659e20d789"
+    },
+    "status": "PASS"
+  },
+  "edit": {
+    "mode": "edit",
+    "url": "http://127.0.0.1:2400/tools/video-editor?entry=editor",
+    "pageErrors": [],
+    "failedResponses": [
+      {
+        "status": 503,
+        "url": "http://127.0.0.1:2400/__astrid/local-update-status"
+      }
+    ],
+    "before": {
+      "revision": "authoring-parent-revision-ce78813152da6c2729561d10d847e5a213e430853abd19a62c022875cc0629da",
+      "publication": "txn-0bf5ca36e1e44d82b7b33f659e20d789"
+    },
+    "status": "FAIL",
+    "error": "Error: expect(received).not.toBe(expected) // Object.is equality\n\nExpected: not \"txn-0bf5ca36e1e44d82b7b33f659e20d789\"\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate"
+  },
+  "live_snapshots": {
+    "live-before.json": {
+      "bytes_sha256": "cbc1ae4ef2dba7f402a03c2b7f19bd03403b0cb267701317ec8f2475391c3cb4",
+      "json_equal_before": true,
+      "byte_equal_before": true,
+      "field_equal_before": {
+        "absent_paths": true,
+        "database": true,
+        "hashes": true,
+        "launchd_state": true,
+        "process": true,
+        "realm_id": true
+      },
+      "shasum_log_matches_recorded_hashes": true
+    },
+    "live-after-half-built.json": {
+      "bytes_sha256": "cbc1ae4ef2dba7f402a03c2b7f19bd03403b0cb267701317ec8f2475391c3cb4",
+      "json_equal_before": true,
+      "byte_equal_before": true,
+      "field_equal_before": {
+        "absent_paths": true,
+        "database": true,
+        "hashes": true,
+        "launchd_state": true,
+        "process": true,
+        "realm_id": true
+      },
+      "shasum_log_matches_recorded_hashes": true
+    },
+    "live-after.json": {
+      "bytes_sha256": "cbc1ae4ef2dba7f402a03c2b7f19bd03403b0cb267701317ec8f2475391c3cb4",
+      "json_equal_before": true,
+      "byte_equal_before": true,
+      "field_equal_before": {
+        "absent_paths": true,
+        "database": true,
+        "hashes": true,
+        "launchd_state": true,
+        "process": true,
+        "realm_id": true
+      },
+      "shasum_log_matches_recorded_hashes": true
+    }
+  },
+  "live_hash_path_count": 9,
+  "live_database": {
+    "heads": [
+      {
+        "project_id": "deca8ee706f04345b3d03647bec9b0ef",
+        "publication_id": "txn-0bf5ca36e1e44d82b7b33f659e20d789",
+        "revision_id": "authoring-parent-revision-ce78813152da6c2729561d10d847e5a213e430853abd19a62c022875cc0629da",
+        "timeline_id": "61616161-6161-4161-8161-616161616161"
+      }
+    ],
+    "runtime": {
+      "boot_id": "270bed5254084a768fe52a1fd85be95f",
+      "previous_boot_id": null,
+      "runtime_epoch": 1,
+      "started_at": "2026-11-19T15:57:21.199+00:00"
+    },
+    "schema": {
+      "format_id": "astrid-runtime-sqlite-v1",
+      "version": 33
+    },
+    "timeline_commit_history_count": 7
+  },
+  "live_realm_id": "8a00491b-088a-4758-92b9-3a34e580d2fc",
+  "live_process_identity_prefix": "12485 Thu Nov 19 15:57:20 2026",
+  "live_launchd_state": [
+    "state = running",
+    "runs = 1",
+    "pid = 12485",
+    "last exit code = (never exited)"
+  ],
+  "copied_database_before_edit": {
+    "heads": [
+      {
+        "project_id": "deca8ee706f04345b3d03647bec9b0ef",
+        "publication_id": "txn-0bf5ca36e1e44d82b7b33f659e20d789",
+        "revision_id": "authoring-parent-revision-ce78813152da6c2729561d10d847e5a213e430853abd19a62c022875cc0629da",
+        "timeline_id": "61616161-6161-4161-8161-616161616161"
+      }
+    ],
+    "runtime": {
+      "boot_id": "45046d9170554a5d91f2450a5e4d2b9d",
+      "previous_boot_id": "270bed5254084a768fe52a1fd85be95f",
+      "runtime_epoch": 2,
+      "started_at": "2026-11-19T16:02:24.502+00:00"
+    },
+    "schema": {
+      "format_id": "astrid-runtime-sqlite-v1",
+      "version": 33
+    },
+    "timeline_commit_history_count": 7
+  },
+  "half_built_database": {
+    "heads": [],
+    "runtime": {
+      "boot_id": "84aa3066b17540cba5a393d45728847e",
+      "previous_boot_id": null,
+      "runtime_epoch": 1,
+      "started_at": "2026-11-19T15:59:22.856+00:00"
+    },
+    "schema": {
+      "format_id": "astrid-runtime-sqlite-v1",
+      "version": 33
+    },
+    "timeline_commit_history_count": 0
+  },
+  "stop_censuses": [
+    {
+      "title": "completion-01-half-built-stop process census",
+      "line": 797,
+      "body": "[]",
+      "parsed": []
+    },
+    {
+      "title": "half-built stop process census",
+      "line": 825,
+      "body": "[]",
+      "parsed": []
+    },
+    {
+      "title": "completion-04-stop-before-count process census",
+      "line": 1328,
+      "body": "[]",
+      "parsed": []
+    },
+    {
+      "title": "final-owned-stack-stop process census",
+      "line": 1743,
+      "body": "[]",
+      "parsed": []
+    }
+  ],
+  "live_final_harness_assertion": {
+    "title": "completion-10-live-unchanged",
+    "line": 1827,
+    "body": "PASS: every CAS/config/install/plist/manifest hash, PID/start time, launchd state, head publication, history count and runtime epoch matches."
+  },
+  "minimum_recorded_available_KiB": 90873720,
+  "disk_cut_statements": [
+    {
+      "title": "initial-disk cuts",
+      "line": 26,
+      "body": "No runner toolchain or proof item has been removed to fit the run."
+    },
+    {
+      "title": "after-live-install-disk cuts",
+      "line": 271,
+      "body": "No runner toolchain or proof item has been removed to fit the run."
+    },
+    {
+      "title": "completion-02-fresh-first-run disk cuts",
+      "line": 960,
+      "body": "No runner toolchain or proof item has been removed to fit the run."
+    },
+    {
+      "title": "completion-04-start-before-edit disk cuts",
+      "line": 1384,
+      "body": "No runner toolchain or proof item has been removed to fit the run."
+    },
+    {
+      "title": "diagnostic-disk cuts",
+      "line": 1715,
+      "body": "No runner toolchain or proof item has been removed to fit the run."
+    },
+    {
+      "title": "final-disk cuts",
+      "line": 1884,
+      "body": "No runner toolchain or proof item has been removed to fit the run."
+    }
+  ],
+  "kind": "Original failing-before receipt; derived from retained run 44557257081, not a new execution",
+  "artifact": {
+    "id": 14551411190,
+    "url": "https://github.com/banodoco/astrid-app/actions/runs/44557257081/artifacts/14551411190",
+    "bytes": 5685100,
+    "sha256": "da8f936ca6e0835244be7cba84f0b86c55f7ceeb2e311e4f9815b5e3b2b4f2d3"
+  },
+  "command_results": [
+    {
+      "label": "initial-disk",
+      "source": "artifact/run-record.md",
+      "line": 17,
+      "command": "df -Pk /Users/runner /Users/runner/work/_temp",
+      "result": {
+        "exit": 0,
+        "seconds": 0.006
+      }
+    },
+    {
+      "label": "candidate identity",
+      "source": "artifact/run-record.md",
+      "line": 45,
+      "command": "git rev-parse HEAD",
+      "result": {
+        "exit": 0,
+        "seconds": 0.011
+      }
+    },
+    {
+      "label": "tool identity",
+      "source": "artifact/run-record.md",
+      "line": 67,
+      "command": "git -C /Users/runner/work/astrid-app/astrid-app/p61-startup-tool rev-parse HEAD",
+      "result": {
+        "exit": 0,
+        "seconds": 0.008
+      }
+    },
+    {
+      "label": "install-release13-live",
+      "source": "artifact/run-record.md",
+      "line": 238,
+      "command": "sh /Users/runner/work/astrid-app/astrid-app/public/install --manifest /Users/runner/work/_temp/p61-proof.tZCp6tzE/release13-manifest.json --yes --autostart on --command off --skills off --skill-copies off",
+      "result": {
+        "exit": 0,
+        "seconds": 110.591
+      }
+    },
+    {
+      "label": "after-live-install-disk",
+      "source": "artifact/run-record.md",
+      "line": 262,
+      "command": "df -Pk /Users/runner /Users/runner/work/_temp",
+      "result": {
+        "exit": 0,
+        "seconds": 0.054
+      }
+    },
+    {
+      "label": "generate real motion fixture",
+      "source": "artifact/run-record.md",
+      "line": 339,
+      "command": "/Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/tools/ffmpeg/ffmpeg -nostdin -hide_banner -y -f lavfi -i testsrc2=size=640x360:rate=30 -frames:v 300 -an -c:v libx264 -preset veryfast -crf 20 -pix_fmt yuv420p -movflags +faststart /Users/runner/work/_temp/p61-proof.tZCp6tzE/p61-motion-card.mp4",
+      "result": {
+        "exit": 0,
+        "seconds": 1.719
+      }
+    },
+    {
+      "label": "validate real motion fixture",
+      "source": "artifact/run-record.md",
+      "line": 378,
+      "command": "/Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/tools/ffmpeg/ffprobe -v error -select_streams v:0 -show_entries stream=codec_name,width,height,nb_frames,avg_frame_rate,duration -of json /Users/runner/work/_temp/p61-proof.tZCp6tzE/p61-motion-card.mp4",
+      "result": {
+        "exit": 0,
+        "seconds": 0.053
+      }
+    },
+    {
+      "label": "seed-project",
+      "source": "artifact/run-record.md",
+      "line": 400,
+      "command": "/Users/runner/.local/share/astrid/run-astrid projects create p61-live-proof --name 'P61 live proof' --idempotency-key p61-project-create --json",
+      "result": {
+        "exit": 0,
+        "seconds": 0.574
+      }
+    },
+    {
+      "label": "seed-timeline",
+      "source": "artifact/run-record.md",
+      "line": 422,
+      "command": "/Users/runner/.local/share/astrid/run-astrid timelines create 61616161-6161-4161-8161-616161616161 --project p61-live-proof --name 'Long-lived timeline' --canvas 640x360 --fps 30 --idempotency-key p61-timeline-create --json",
+      "result": {
+        "exit": 0,
+        "seconds": 1.191
+      }
+    },
+    {
+      "label": "seed-first-clip",
+      "source": "artifact/run-record.md",
+      "line": 444,
+      "command": "/Users/runner/.local/share/astrid/run-astrid timelines edit 61616161-6161-4161-8161-616161616161 --project p61-live-proof --add-layer media --layer-asset /Users/runner/work/_temp/p61-proof.tZCp6tzE/p61-colour-card.png --on 0 --for 10 --track V1 --id p61-clip --idempotency-key p61-first-clip --json",
+      "result": {
+        "exit": 0,
+        "seconds": 0.765
+      }
+    },
+    {
+      "label": "seed-video-clip",
+      "source": "artifact/run-record.md",
+      "line": 466,
+      "command": "/Users/runner/.local/share/astrid/run-astrid timelines edit 61616161-6161-4161-8161-616161616161 --project p61-live-proof --add-layer media --layer-asset /Users/runner/work/_temp/p61-proof.tZCp6tzE/p61-motion-card.mp4 --on 0 --for 10 --track V2 --id p61-video --idempotency-key p61-first-video --json",
+      "result": {
+        "exit": 0,
+        "seconds": 0.94
+      }
+    },
+    {
+      "label": "seed-history-1",
+      "source": "artifact/run-record.md",
+      "line": 488,
+      "command": "/Users/runner/.local/share/astrid/run-astrid timelines edit 61616161-6161-4161-8161-616161616161 --project p61-live-proof --clip parent/clip:p61-clip --on 0.25 --idempotency-key p61-history-1 --json",
+      "result": {
+        "exit": 0,
+        "seconds": 0.872
+      }
+    },
+    {
+      "label": "seed-history-2",
+      "source": "artifact/run-record.md",
+      "line": 510,
+      "command": "/Users/runner/.local/share/astrid/run-astrid timelines edit 61616161-6161-4161-8161-616161616161 --project p61-live-proof --clip parent/clip:p61-clip --on 0.5 --idempotency-key p61-history-2 --json",
+      "result": {
+        "exit": 0,
+        "seconds": 0.967
+      }
+    },
+    {
+      "label": "seed-history-3",
+      "source": "artifact/run-record.md",
+      "line": 532,
+      "command": "/Users/runner/.local/share/astrid/run-astrid timelines edit 61616161-6161-4161-8161-616161616161 --project p61-live-proof --clip parent/clip:p61-clip --on 0 --idempotency-key p61-history-3 --json",
+      "result": {
+        "exit": 0,
+        "seconds": 1.114
+      }
+    },
+    {
+      "label": "live-before shasum",
+      "source": "artifact/run-record.md",
+      "line": 606,
+      "command": "shasum -a 256 '/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/45/1fd5616d1078c3499cb18899fa8338c761e85fb04c16e4ea0e7ff7d7a3fe5e' '/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/bb/00962ad0db34396f71e40776f597a180b88891d8a901e004c314730ac81e50' /Users/runner/.astrid/astrid.env /Users/runner/.local/share/astrid-install.json /Users/runner/.local/share/astrid/install.json /Users/runner/Library/LaunchAgents/haus.astrid.runtime.plist /Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/manifest.json /Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/version.json /Users/runner/.local/share/astrid/current",
+      "result": {
+        "exit": 0,
+        "seconds": 0.125
+      }
+    },
+    {
+      "label": "half-built Agent resolution",
+      "source": "artifact/run-record.md",
+      "line": 676,
+      "command": "git ls-remote --heads https://github.com/banodoco/astrid-agent.git refs/heads/release/14/main",
+      "result": {
+        "exit": 0,
+        "seconds": 0.64
+      }
+    },
+    {
+      "label": "half-built derive manifest",
+      "source": "artifact/run-record.md",
+      "line": 697,
+      "command": "node /Users/runner/work/astrid-app/astrid-app/p61-startup-tool/scripts/installer/pin.mjs ae929cdae7460c36cfbfd95599019a4c45f42e1c --in /Users/runner/work/astrid-app/astrid-app/public/install-manifest.json --out /Users/runner/work/_temp/p61-proof.tZCp6tzE/half-built-manifest.json",
+      "result": {
+        "exit": 0,
+        "seconds": 1.025
+      }
+    },
+    {
+      "label": "half-built real installer",
+      "source": "artifact/run-record.md",
+      "line": 734,
+      "command": "sh /Users/runner/work/astrid-app/astrid-app/public/install --root /Users/runner/astrid-release/release-14-plan-61/program --data-root /Users/runner/astrid-release/release-14-plan-61/data --manifest /Users/runner/work/_temp/p61-proof.tZCp6tzE/half-built-manifest.json --yes --autostart off --command off --skills off --skill-copies off --no-browser",
+      "result": {
+        "exit": 0,
+        "seconds": 96.449
+      }
+    },
+    {
+      "label": "completion-01-half-built-stop",
+      "source": "artifact/run-record.md",
+      "line": 788,
+      "command": "bash /Users/runner/work/astrid-app/astrid-app/p61-startup-tool/scripts/astrid-release/astrid-release stop release/14/plan-61",
+      "result": {
+        "exit": 0,
+        "seconds": 7.288
+      }
+    },
+    {
+      "label": "half-built stop",
+      "source": "artifact/run-record.md",
+      "line": 816,
+      "command": "bash /Users/runner/work/astrid-app/astrid-app/p61-startup-tool/scripts/astrid-release/astrid-release stop release/14/plan-61",
+      "result": {
+        "exit": 0,
+        "seconds": 0.819
+      }
+    },
+    {
+      "label": "half-built keep data",
+      "source": "artifact/run-record.md",
+      "line": 843,
+      "command": "cp -c -R /Users/runner/astrid-release/release-14-plan-61/data /Users/runner/work/_temp/p61-proof.tZCp6tzE-kept-data/half-built",
+      "result": {
+        "exit": 0,
+        "seconds": 0.025
+      }
+    },
+    {
+      "label": "live-after-half-built shasum",
+      "source": "artifact/run-record.md",
+      "line": 879,
+      "command": "shasum -a 256 '/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/45/1fd5616d1078c3499cb18899fa8338c761e85fb04c16e4ea0e7ff7d7a3fe5e' '/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/bb/00962ad0db34396f71e40776f597a180b88891d8a901e004c314730ac81e50' /Users/runner/.astrid/astrid.env /Users/runner/.local/share/astrid-install.json /Users/runner/.local/share/astrid/install.json /Users/runner/Library/LaunchAgents/haus.astrid.runtime.plist /Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/manifest.json /Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/version.json /Users/runner/.local/share/astrid/current",
+      "result": {
+        "exit": 0,
+        "seconds": 0.104
+      }
+    },
+    {
+      "label": "completion-02-fresh-first-run disk",
+      "source": "artifact/run-record.md",
+      "line": 951,
+      "command": "df -Pk /Users/runner /Users/runner/work/_temp",
+      "result": {
+        "exit": 0,
+        "seconds": 0.007
+      }
+    },
+    {
+      "label": "completion-02-fresh-first-run",
+      "source": "artifact/run-record.md",
+      "line": 1044,
+      "command": "bash /Users/runner/work/astrid-app/astrid-app/p61-startup-tool/scripts/astrid-release/astrid-release release/14/plan-61",
+      "result": {
+        "exit": 0,
+        "seconds": 156.38
+      }
+    },
+    {
+      "label": "install Playwright browser",
+      "source": "artifact/run-record.md",
+      "line": 1254,
+      "command": "/Users/runner/astrid-release/release-14-plan-61/editor/node_modules/.bin/playwright install chromium",
+      "result": {
+        "exit": 0,
+        "seconds": 18.317
+      }
+    },
+    {
+      "label": "completion-03-existing-timeline-playback",
+      "source": "artifact/run-record.md",
+      "line": 1297,
+      "command": "node /Users/runner/work/astrid-app/astrid-app/scripts/astrid-release/hosted-browser.mjs /Users/runner/astrid-release/release-14-plan-61 /Users/runner/work/_temp/p61-proof.tZCp6tzE play",
+      "result": {
+        "exit": 0,
+        "seconds": 36.4
+      }
+    },
+    {
+      "label": "completion-04-stop-before-count",
+      "source": "artifact/run-record.md",
+      "line": 1319,
+      "command": "bash /Users/runner/work/astrid-app/astrid-app/p61-startup-tool/scripts/astrid-release/astrid-release stop release/14/plan-61",
+      "result": {
+        "exit": 0,
+        "seconds": 7.178
+      }
+    },
+    {
+      "label": "completion-04-start-before-edit disk",
+      "source": "artifact/run-record.md",
+      "line": 1375,
+      "command": "df -Pk /Users/runner /Users/runner/work/_temp",
+      "result": {
+        "exit": 0,
+        "seconds": 0.011
+      }
+    },
+    {
+      "label": "completion-04-start-before-edit",
+      "source": "artifact/run-record.md",
+      "line": 1445,
+      "command": "bash /Users/runner/work/astrid-app/astrid-app/p61-startup-tool/scripts/astrid-release/astrid-release release/14/plan-61",
+      "result": {
+        "exit": 0,
+        "seconds": 26.273
+      }
+    },
+    {
+      "label": "completion-04-editor-edit",
+      "source": "artifact/run-record.md",
+      "line": 1649,
+      "command": "node /Users/runner/work/astrid-app/astrid-app/scripts/astrid-release/hosted-browser.mjs /Users/runner/astrid-release/release-14-plan-61 /Users/runner/work/_temp/p61-proof.tZCp6tzE edit",
+      "result": {
+        "exit": 1,
+        "seconds": 93.283
+      }
+    },
+    {
+      "label": "diagnostic-disk",
+      "source": "artifact/run-record.md",
+      "line": 1706,
+      "command": "df -Pk /Users/runner /Users/runner/work/_temp",
+      "result": {
+        "exit": 0,
+        "seconds": 0.011
+      }
+    },
+    {
+      "label": "final-owned-stack-stop",
+      "source": "artifact/run-record.md",
+      "line": 1734,
+      "command": "bash /Users/runner/work/astrid-app/astrid-app/p61-startup-tool/scripts/astrid-release/astrid-release stop release/14/plan-61",
+      "result": {
+        "exit": 0,
+        "seconds": 6.741
+      }
+    },
+    {
+      "label": "live-after shasum",
+      "source": "artifact/run-record.md",
+      "line": 1770,
+      "command": "shasum -a 256 '/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/45/1fd5616d1078c3499cb18899fa8338c761e85fb04c16e4ea0e7ff7d7a3fe5e' '/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/bb/00962ad0db34396f71e40776f597a180b88891d8a901e004c314730ac81e50' /Users/runner/.astrid/astrid.env /Users/runner/.local/share/astrid-install.json /Users/runner/.local/share/astrid/install.json /Users/runner/Library/LaunchAgents/haus.astrid.runtime.plist /Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/manifest.json /Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/version.json /Users/runner/.local/share/astrid/current",
+      "result": {
+        "exit": 0,
+        "seconds": 0.175
+      }
+    },
+    {
+      "label": "final-disk",
+      "source": "artifact/run-record.md",
+      "line": 1875,
+      "command": "df -Pk /Users/runner /Users/runner/work/_temp",
+      "result": {
+        "exit": 0,
+        "seconds": 0.01
+      }
+    }
+  ],
+  "unrun_cases": [
+    {
+      "case": "C4.post-edit-stop",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "C4 edit failed before stop/count/restart",
+      "expected_receipts": [
+        {
+          "path": "completion-04-stop-after-edit.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C4.post-edit-history",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "C4 edit failed before exactly-one-commit database check",
+      "expected_receipts": [
+        {
+          "path": "copy-after-edit-before-restart.json",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C4.restart",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "C4 edit failed before restart",
+      "expected_receipts": [
+        {
+          "path": "completion-04-restart-edited-copy.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C4.verify-survival",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "C4 edit failed before edit-survives-restart browser and database checks",
+      "expected_receipts": [
+        {
+          "path": "completion-04-edit-survived-restart.log",
+          "present": false
+        },
+        {
+          "path": "copy-after-edit-after-restart.json",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C5.unchanged-update",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 15 skipped after C4 failure",
+      "expected_receipts": [
+        {
+          "path": "completion-05-unchanged-update.log",
+          "present": false
+        },
+        {
+          "path": "completion-05-before.json",
+          "present": false
+        },
+        {
+          "path": "completion-05-after.json",
+          "present": false
+        },
+        {
+          "path": "completion-05-comparison.json",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C6.real-moved-pin-refusal",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 15 skipped; fixture refusals are separate evidence",
+      "expected_receipts": []
+    },
+    {
+      "case": "C7.tracked-editor-refusal",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 15 skipped after C4 failure",
+      "expected_receipts": [
+        {
+          "path": "completion-07-tracked-editor-change.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C8.fresh-start-2",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 17 skipped; only initial fresh start executed",
+      "expected_receipts": [
+        {
+          "path": "fresh-first-start-2.log",
+          "present": false
+        },
+        {
+          "path": "live-after-fresh-2.json",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C8.fresh-start-3",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 17 skipped; warm pre-edit start is not a fresh-start repeat",
+      "expected_receipts": [
+        {
+          "path": "fresh-first-start-3.log",
+          "present": false
+        },
+        {
+          "path": "live-after-fresh-3.json",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C9.negative-phase-stop",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 16 skipped; always-run final owned cleanup succeeded separately",
+      "expected_receipts": [
+        {
+          "path": "completion-09-stop-before-negative-attach.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "C11.fresh-clone",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 17 skipped after C4 failure",
+      "expected_receipts": [
+        {
+          "path": "completion-11-fresh-clone.log",
+          "present": false
+        },
+        {
+          "path": "completion-11-fresh-clone-identity.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "negative.mistyped-branch",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 16 skipped",
+      "expected_receipts": [
+        {
+          "path": "negative-mistyped-branch.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "negative.non-mac-platform",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 16 skipped",
+      "expected_receipts": [
+        {
+          "path": "negative-non-Mac-platform-probe.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "negative.installed-wrong-realm-id",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 16 skipped; earlier native fixture uses its separate Runtime tuple",
+      "expected_receipts": [
+        {
+          "path": "negative-real-wrong-realm-id.log",
+          "present": false
+        }
+      ]
+    },
+    {
+      "case": "negative.installed-schema-refusal",
+      "outcome": "NOT EXECUTED / NO OUTCOME",
+      "reason": "Workflow step 16 skipped; earlier native fixture uses its separate Runtime tuple",
+      "expected_receipts": [
+        {
+          "path": "negative-schema-clone.log",
+          "present": false
+        },
+        {
+          "path": "negative-real-schema-refusal.log",
+          "present": false
+        }
+      ]
+    }
+  ],
+  "chat_timeout_occurrences": {
+    "snapshots": [
+      {
+        "label": "completion-02-fresh-first-run-logs",
+        "path": "artifact/completion-02-fresh-first-run-logs/runtime-service-chat.log",
+        "bytes": 82,
+        "sha256": "09b372e56a79d016344d82093799e185b65bc55d92187ed80c9f2e3eb046a0a2",
+        "count": 0,
+        "offsets": [],
+        "is_prefix_of_final_stream": true,
+        "job_log_line": 1570,
+        "observation_logged_at": "2026-11-19T16:02:34.6709940Z"
+      },
+      {
+        "label": "completion-04-start-before-edit-logs",
+        "path": "artifact/completion-04-start-before-edit-logs/runtime-service-chat.log",
+        "bytes": 183,
+        "sha256": "a2d8bd26389fa78ca91c0936613671fee2618d0136290fe305ce5aeff837d8b6",
+        "count": 1,
+        "offsets": [
+          82
+        ],
+        "is_prefix_of_final_stream": true,
+        "job_log_line": 1914,
+        "observation_logged_at": "2026-11-19T16:04:03.7108950Z"
+      },
+      {
+        "label": "failure-stack-logs",
+        "path": "artifact/failure-stack-logs/runtime-service-chat.log",
+        "bytes": 243,
+        "sha256": "988c80b9c4e74821c0eb403260232c4c70ddf254f5de5208399c3a732ae74250",
+        "count": 2,
+        "offsets": [
+          82,
+          183
+        ],
+        "is_prefix_of_final_stream": true,
+        "job_log_line": 2130,
+        "observation_logged_at": "2026-11-19T16:05:37.6742460Z"
+      },
+      {
+        "label": "final-stack-logs",
+        "path": "artifact/final-stack-logs/runtime-service-chat.log",
+        "bytes": 243,
+        "sha256": "988c80b9c4e74821c0eb403260232c4c70ddf254f5de5208399c3a732ae74250",
+        "count": 2,
+        "offsets": [
+          82,
+          183
+        ],
+        "is_prefix_of_final_stream": true,
+        "job_log_line": 2278,
+        "observation_logged_at": "2026-11-19T16:05:45.3657540Z"
+      }
+    ],
+    "raw_copied_occurrences": 5,
+    "distinct_kills": 2,
+    "distinct_occurrences": [
+      {
+        "distinct_stream_occurrence": 1,
+        "byte_offset": 82,
+        "stream_prefix_sha256": "09b372e56a79d016344d82093799e185b65bc55d92187ed80c9f2e3eb046a0a2",
+        "message": "Astrid model command failed (signal=SIGKILL, timeout=true).",
+        "exact_event_timestamp": null,
+        "last_absent_snapshot": {
+          "label": "completion-02-fresh-first-run-logs",
+          "path": "artifact/completion-02-fresh-first-run-logs/runtime-service-chat.log",
+          "bytes": 82,
+          "sha256": "09b372e56a79d016344d82093799e185b65bc55d92187ed80c9f2e3eb046a0a2",
+          "count": 0,
+          "offsets": [],
+          "is_prefix_of_final_stream": true,
+          "job_log_line": 1570,
+          "observation_logged_at": "2026-11-19T16:02:34.6709940Z"
+        },
+        "first_present_snapshot": {
+          "label": "completion-04-start-before-edit-logs",
+          "path": "artifact/completion-04-start-before-edit-logs/runtime-service-chat.log",
+          "bytes": 183,
+          "sha256": "a2d8bd26389fa78ca91c0936613671fee2618d0136290fe305ce5aeff837d8b6",
+          "count": 1,
+          "offsets": [
+            82
+          ],
+          "is_prefix_of_final_stream": true,
+          "job_log_line": 1914,
+          "observation_logged_at": "2026-11-19T16:04:03.7108950Z"
+        },
+        "copies": [
+          {
+            "snapshot": "completion-04-start-before-edit-logs",
+            "path": "artifact/completion-04-start-before-edit-logs/runtime-service-chat.log",
+            "byte_offset": 82,
+            "line": 3,
+            "message": "Astrid model command failed (signal=SIGKILL, timeout=true).",
+            "preceding_line": "Astrid chat listening on 127.0.0.1:51392",
+            "following_line": "Astrid chat listening on 127.0.0.1:52111",
+            "exact_event_timestamp": null,
+            "job_log_line": 1914,
+            "observation_logged_at": "2026-11-19T16:04:03.7108950Z"
+          },
+          {
+            "snapshot": "failure-stack-logs",
+            "path": "artifact/failure-stack-logs/runtime-service-chat.log",
+            "byte_offset": 82,
+            "line": 3,
+            "message": "Astrid model command failed (signal=SIGKILL, timeout=true).",
+            "preceding_line": "Astrid chat listening on 127.0.0.1:51392",
+            "following_line": "Astrid chat listening on 127.0.0.1:52111",
+            "exact_event_timestamp": null,
+            "job_log_line": 2130,
+            "observation_logged_at": "2026-11-19T16:05:37.6742460Z"
+          },
+          {
+            "snapshot": "final-stack-logs",
+            "path": "artifact/final-stack-logs/runtime-service-chat.log",
+            "byte_offset": 82,
+            "line": 3,
+            "message": "Astrid model command failed (signal=SIGKILL, timeout=true).",
+            "preceding_line": "Astrid chat listening on 127.0.0.1:51392",
+            "following_line": "Astrid chat listening on 127.0.0.1:52111",
+            "exact_event_timestamp": null,
+            "job_log_line": 2278,
+            "observation_logged_at": "2026-11-19T16:05:45.3657540Z"
+          }
+        ]
+      },
+      {
+        "distinct_stream_occurrence": 2,
+        "byte_offset": 183,
+        "stream_prefix_sha256": "a2d8bd26389fa78ca91c0936613671fee2618d0136290fe305ce5aeff837d8b6",
+        "message": "Astrid model command failed (signal=SIGKILL, timeout=true).",
+        "exact_event_timestamp": null,
+        "last_absent_snapshot": {
+          "label": "completion-04-start-before-edit-logs",
+          "path": "artifact/completion-04-start-before-edit-logs/runtime-service-chat.log",
+          "bytes": 183,
+          "sha256": "a2d8bd26389fa78ca91c0936613671fee2618d0136290fe305ce5aeff837d8b6",
+          "count": 1,
+          "offsets": [
+            82
+          ],
+          "is_prefix_of_final_stream": true,
+          "job_log_line": 1914,
+          "observation_logged_at": "2026-11-19T16:04:03.7108950Z"
+        },
+        "first_present_snapshot": {
+          "label": "failure-stack-logs",
+          "path": "artifact/failure-stack-logs/runtime-service-chat.log",
+          "bytes": 243,
+          "sha256": "988c80b9c4e74821c0eb403260232c4c70ddf254f5de5208399c3a732ae74250",
+          "count": 2,
+          "offsets": [
+            82,
+            183
+          ],
+          "is_prefix_of_final_stream": true,
+          "job_log_line": 2130,
+          "observation_logged_at": "2026-11-19T16:05:37.6742460Z"
+        },
+        "copies": [
+          {
+            "snapshot": "failure-stack-logs",
+            "path": "artifact/failure-stack-logs/runtime-service-chat.log",
+            "byte_offset": 183,
+            "line": 5,
+            "message": "Astrid model command failed (signal=SIGKILL, timeout=true).",
+            "preceding_line": "Astrid chat listening on 127.0.0.1:52111",
+            "following_line": "",
+            "exact_event_timestamp": null,
+            "job_log_line": 2130,
+            "observation_logged_at": "2026-11-19T16:05:37.6742460Z"
+          },
+          {
+            "snapshot": "final-stack-logs",
+            "path": "artifact/final-stack-logs/runtime-service-chat.log",
+            "byte_offset": 183,
+            "line": 5,
+            "message": "Astrid model command failed (signal=SIGKILL, timeout=true).",
+            "preceding_line": "Astrid chat listening on 127.0.0.1:52111",
+            "following_line": "",
+            "exact_event_timestamp": null,
+            "job_log_line": 2278,
+            "observation_logged_at": "2026-11-19T16:05:45.3657540Z"
+          }
+        ]
+      }
+    ],
+    "deduplication": "Same append-only chat log, verified byte-prefix snapshots; preserve separate offsets 82 and 183 despite identical message text. Later identical copies are not additional kills.",
+    "timestamp_limit": "The underlying chat log has no timestamps. observation_logged_at is the exact GitHub job-log timestamp when that snapshot count was printed, not the event time of the kill. No exact kill timestamp or causal attribution is invented."
+  },
+  "starts": [
+    {
+      "label": "completion-02-fresh-first-run",
+      "heads": "release/14/plan-61 67428177b24989e230537ffe363aaa45b60bbd63 release/14/main ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "realm_id": "8a00491b-088a-4758-92b9-3a34e580d2fc",
+      "retry_files": []
+    },
+    {
+      "label": "completion-04-start-before-edit",
+      "heads": "release/14/plan-61 67428177b24989e230537ffe363aaa45b60bbd63 release/14/main ae929cdae7460c36cfbfd95599019a4c45f42e1c",
+      "realm_id": "8a00491b-088a-4758-92b9-3a34e580d2fc",
+      "retry_files": []
+    }
+  ],
+  "live_hash_comparison": "path,before_sha256,after_half_built_sha256,after_final_sha256,all_equal\n/Users/runner/.astrid/astrid.env,799b3c0da8855e6bca893154f4e346180a225e7bd2e130c3f2b087755811f0c9,799b3c0da8855e6bca893154f4e346180a225e7bd2e130c3f2b087755811f0c9,799b3c0da8855e6bca893154f4e346180a225e7bd2e130c3f2b087755811f0c9,True\n/Users/runner/.local/share/astrid-install.json,96e50d8544ad0739989c10aaecbcfe7ca665ba009d9aaaa7c3494ef7b63fbe74,96e50d8544ad0739989c10aaecbcfe7ca665ba009d9aaaa7c3494ef7b63fbe74,96e50d8544ad0739989c10aaecbcfe7ca665ba009d9aaaa7c3494ef7b63fbe74,True\n/Users/runner/.local/share/astrid/current,c59fd14af31e04a31bb2570936ac9db1020fe22de44e363b8bee96c473be0648,c59fd14af31e04a31bb2570936ac9db1020fe22de44e363b8bee96c473be0648,c59fd14af31e04a31bb2570936ac9db1020fe22de44e363b8bee96c473be0648,True\n/Users/runner/.local/share/astrid/install.json,5c358b8385f12add5c9f777339e0d639917c68978238f96390bb8a3872586768,5c358b8385f12add5c9f777339e0d639917c68978238f96390bb8a3872586768,5c358b8385f12add5c9f777339e0d639917c68978238f96390bb8a3872586768,True\n/Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/manifest.json,7ef7ef9f8bc20c753b9ac713da8719803f0163a7069f5ad11f7b5998d5677110,7ef7ef9f8bc20c753b9ac713da8719803f0163a7069f5ad11f7b5998d5677110,7ef7ef9f8bc20c753b9ac713da8719803f0163a7069f5ad11f7b5998d5677110,True\n/Users/runner/.local/share/astrid/versions/9814193a-6855dfa8-ab30cf56/version.json,5aebf911fdd9a24d3c029d848adb8f717ae0c2376a295bf5bb9dbaec970cd426,5aebf911fdd9a24d3c029d848adb8f717ae0c2376a295bf5bb9dbaec970cd426,5aebf911fdd9a24d3c029d848adb8f717ae0c2376a295bf5bb9dbaec970cd426,True\n/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/45/1fd5616d1078c3499cb18899fa8338c761e85fb04c16e4ea0e7ff7d7a3fe5e,451fd5616d1078c3499cb18899fa8338c761e85fb04c16e4ea0e7ff7d7a3fe5e,451fd5616d1078c3499cb18899fa8338c761e85fb04c16e4ea0e7ff7d7a3fe5e,451fd5616d1078c3499cb18899fa8338c761e85fb04c16e4ea0e7ff7d7a3fe5e,True\n/Users/runner/Library/Application Support/Astrid Runtime/runtime/realms/8a00491b-088a-4758-92b9-3a34e580d2fc/cas/sha256/bb/00962ad0db34396f71e40776f597a180b88891d8a901e004c314730ac81e50,bb00962ad0db34396f71e40776f597a180b88891d8a901e004c314730ac81e50,bb00962ad0db34396f71e40776f597a180b88891d8a901e004c314730ac81e50,bb00962ad0db34396f71e40776f597a180b88891d8a901e004c314730ac81e50,True\n/Users/runner/Library/LaunchAgents/haus.astrid.runtime.plist,5872f9ac06ac10e243c0eeae69535a216f71de831f7d080555b9dfc0e7be94df,5872f9ac06ac10e243c0eeae69535a216f71de831f7d080555b9dfc0e7be94df,5872f9ac06ac10e243c0eeae69535a216f71de831f7d080555b9dfc0e7be94df,True\n",
+  "trace_sources": {
+    "C3": {
+      "zip": "/workspace/scratch/d96aaaca8866/evidence/p61-installed-44557257081/artifact/play-1795104173942-trace.zip",
+      "zip_bytes": 3039343,
+      "zip_sha256": "9a62a73e38394d092c142f16dc243d4de21a7b65cb6fb51045fbf76921893267",
+      "trace_member": {
+        "name": "trace.trace",
+        "bytes": 957727,
+        "sha256": "736c14ab783727648147ebea40058832c0fbd10f53e9ed6cf5f1e515aa9ac166"
+      },
+      "network_member": {
+        "name": "trace.network",
+        "bytes": 4554291,
+        "sha256": "6d0ccd74bd1c5c8f57b77ed52679e81b227a9640bb5a77b673658e3608b74423"
+      },
+      "snapshot_count": 42
+    },
+    "C4": {
+      "zip": "/workspace/scratch/d96aaaca8866/evidence/p61-installed-44557257081/artifact/edit-1795104244447-trace.zip",
+      "zip_bytes": 1685808,
+      "zip_sha256": "8aa082fb490e651db8b2c84a45491783a0e7c3441343e98efe45652549cf61d8",
+      "trace_member": {
+        "name": "trace.trace",
+        "bytes": 860268,
+        "sha256": "e7ed174f782a4942901e938145c80fa1ea074c3154896d846e01e4fceb096c43"
+      },
+      "network_member": {
+        "name": "trace.network",
+        "bytes": 5097073,
+        "sha256": "cd7f5f139de68df27811ac391e90a7cc53aa3c14b0d0cae6b83da08072e9d733"
+      },
+      "snapshot_count": 20
+    }
+  },
+  "trace_inventory": {
+    "C3": {
+      "request_count": 2142,
+      "method_counts": {
+        "GET": 2129,
+        "POST": 12,
+        "PUT": 1
+      },
+      "non_get_route_counts": [
+        {
+          "method": "POST",
+          "path": "/api/runtime/v1/handshake",
+          "count": 7
+        },
+        {
+          "method": "POST",
+          "path": "/api/astrid/v1/handshake",
+          "count": 1
+        },
+        {
+          "method": "PUT",
+          "path": "/api/runtime/v1/projects/selection",
+          "count": 1
+        },
+        {
+          "method": "POST",
+          "path": "/api/runtime/v1/projects/deca8ee706f04345b3d03647bec9b0ef/timelines/61616161-6161-4161-8161-616161616161/inspect",
+          "count": 3
+        },
+        {
+          "method": "POST",
+          "path": "/__astrid/local-update-status",
+          "count": 1
+        }
+      ],
+      "non_inspect_timeline_write_requests": []
+    },
+    "C4": {
+      "request_count": 2405,
+      "method_counts": {
+        "GET": 2356,
+        "POST": 48,
+        "PUT": 1
+      },
+      "non_get_route_counts": [
+        {
+          "method": "POST",
+          "path": "/api/runtime/v1/handshake",
+          "count": 25
+        },
+        {
+          "method": "POST",
+          "path": "/api/astrid/v1/handshake",
+          "count": 1
+        },
+        {
+          "method": "PUT",
+          "path": "/api/runtime/v1/projects/selection",
+          "count": 1
+        },
+        {
+          "method": "POST",
+          "path": "/api/runtime/v1/projects/deca8ee706f04345b3d03647bec9b0ef/timelines/61616161-6161-4161-8161-616161616161/inspect",
+          "count": 21
+        },
+        {
+          "method": "POST",
+          "path": "/__astrid/local-update-status",
+          "count": 1
+        }
+      ],
+      "non_inspect_timeline_write_requests": []
+    }
+  },
+  "native_fixture_pass_count": 130,
+  "native_fixture_limit": "37 focused JUnit + 4 startup JUnit + 30 census Python + 10 realm Python + 12 caller Python + 36 shell + 1 expected permission refusal. These do not supply missing installed outcomes.",
+  "preserved_journey_comparison": {
+    "total_ids": 59,
+    "paired_pass": 47,
+    "base_fail_to_candidate_pass": 1,
+    "unknown_base_outcomes": 11,
+    "unknown_base_candidate_pass": 7,
+    "unknown_base_candidate_existing_expected_fail": 4,
+    "unchanged": true
+  },
+  "limits": [
+    "Original C4 after-fill compressed DOM fragment is not reconstructed; transient input value remains unknown.",
+    "Existing trace does not record native input dispatch, controlled React props, or save-owner readiness.",
+    "No product cause or first lost internal transition is established.",
+    "Candidate database facts are the recorded pre-edit snapshot; they do not prove post-edit durability.",
+    "Two chat timeout event timestamps are unknown; quoted timestamps are observation times.",
+    "The separate plan-61 sync is not part of this comparison."
+  ],
+  "derived_source_hashes": {
+    "p61-installed-44557257081/terminal-receipts.json": "500e75e8b025b12fbcc843179010233a3580c3626f1589eb56f11ee54d3cfaab",
+    "p61-installed-44557257081/terminal-command-results.json": "a32ccef4518558ada8e65aac2c0fd4fc190fbbe4c2b4133556907af28d01be1f",
+    "p61-installed-44557257081/terminal-unrun-cases.json": "18967eb4d6faee1e28b6f71ad0a9eed317de0135455c5c7caf2d6ea8e595f6d4",
+    "p61-installed-44557257081/terminal-timeout-occurrences.json": "508cad7230f877d4797def1349cfa4e6ad9d99256f5cef249f75d991eff725bc",
+    "p61-installed-44557257081/terminal-live-hash-comparison.csv": "39e1c163173b79c59ef723b9e3497a29a293f763d2de40a7acf6fae31a49efd2",
+    "p61-c4-diagnostic/original-trace-observations.json": "01f003cc4c0bfdda4a4aa10fcf78f584de35f7b84b7665560169457b7e1ea5e4",
+    "p61-c4-diagnostic/original-trace-observations.md": "8038bfe5d407ed73d3b2de2cb0986c817acdc61b2362ed1609e4be93cc777444"
+  }
+}

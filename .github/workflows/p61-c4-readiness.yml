@@ -3,6 +3,14 @@ name: Plan 61 C4 readiness
 on:
   pull_request:
     branches: [release/14/plan-61]
+  # P61 C4 DIAGNOSTIC INPUT BEGIN
+  workflow_dispatch:
+    inputs:
+      diagnostic_sha:
+        description: Exact submitted p61/c4-input-diagnostic commit (Lead dispatch only)
+        type: string
+        required: true
+  # P61 C4 DIAGNOSTIC INPUT END
 
 permissions:
   contents: read
@@ -12,6 +20,113 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # P61 C4 DIAGNOSTIC JOB BEGIN
+  installed-c4-input-diagnostic:
+    name: Recorded-tuple C4 input diagnostic (not certification)
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: macos-latest
+    timeout-minutes: 150
+    env:
+      P61_DIAGNOSTIC_SHA: ${{ inputs.diagnostic_sha }}
+      P61_HARNESS_CHECKOUT: ${{ github.workspace }}/p61-frozen-harness
+      P61_TOOL_CHECKOUT: ${{ github.workspace }}/p61-startup-tool
+    steps:
+      - name: Check out the submitted observer source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Check out frozen App 310 harness
+        uses: actions/checkout@v4
+        with:
+          ref: 3c99c7aa7f9a0079b5075351f6271239714c4bc4
+          path: p61-frozen-harness
+          persist-credentials: false
+      - name: Check out frozen App 311 RB-9 tool
+        uses: actions/checkout@v4
+        with:
+          ref: d72ee39ded70346e5b22d952fba985c8a137b622
+          path: p61-startup-tool
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: p61-frozen-harness/.nvmrc
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Record diagnostic identity and preserve the original browser body
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$RUNNER_ENVIRONMENT" = github-hosted
+          test "$(uname -s)" = Darwin
+          test "$GITHUB_REPOSITORY" = banodoco/astrid-app
+          test "$GITHUB_REF" = refs/heads/p61/c4-input-diagnostic
+          test "$GITHUB_SHA" = "$P61_DIAGNOSTIC_SHA"
+          test "$(git rev-parse HEAD)" = "$P61_DIAGNOSTIC_SHA"
+          P61_PROOF="$(mktemp -d "$RUNNER_TEMP/p61-c4-diagnostic.XXXXXXXX")"
+          printf 'P61_PROOF=%s\n' "$P61_PROOF" >> "$GITHUB_ENV"
+          {
+            git rev-parse HEAD HEAD^{tree}
+            git -C "$P61_HARNESS_CHECKOUT" rev-parse HEAD
+            git -C "$P61_TOOL_CHECKOUT" rev-parse HEAD
+            sw_vers
+            uname -m
+            node --version
+            python3 --version
+            sqlite3 --version
+            df -Pk "$HOME" "$RUNNER_TEMP"
+            shasum -a 256 .github/workflows/p61-c4-readiness.yml
+            shasum -a 256 scripts/astrid-release/c4-diagnostic/*.py scripts/astrid-release/c4-diagnostic/*.mjs
+          } | tee "$P61_PROOF/runner.txt"
+          python3 -B scripts/astrid-release/c4-diagnostic/check.py \
+            --harness "$P61_HARNESS_CHECKOUT" | tee "$P61_PROOF/static-provenance.txt"
+      - name: Install the original frozen Release 13 live control
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py bootstrap
+      - name: Recreate the original live project, V1/V2 media and seven-row history
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py seed
+      - name: Preserve the original half-built-stop setup
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py half-built
+      - name: Original fresh attach and playback prefix on the recorded tuple
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py fresh
+      - name: Observe original C4 fill, Enter, blur and unchanged assertions
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py restart-edit
+      - name: Retain stack logs and disk facts
+        if: ${{ always() && env.P61_PROOF != '' }}
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py diagnostics
+      - name: Stop the owned candidate stack
+        if: ${{ always() && env.P61_PROOF != '' }}
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py cleanup
+      - name: Preserve the original live-before and live-after equality assertion
+        if: ${{ always() && env.P61_PROOF != '' }}
+        run: python3 -B scripts/astrid-release/c4-diagnostic/run.py final
+      - name: Hash the retained diagnostic evidence
+        if: ${{ always() && env.P61_PROOF != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import hashlib
+          import os
+          from pathlib import Path
+          root = Path(os.environ["P61_PROOF"])
+          files = sorted(p for p in root.rglob("*") if p.is_file() and p.name != "SHA256SUMS.txt")
+          (root / "SHA256SUMS.txt").write_text("".join(
+              hashlib.sha256(p.read_bytes()).hexdigest() + "  " + p.relative_to(root).as_posix() + "\n"
+              for p in files))
+          print("Retained diagnostic files:", len(files))
+          PY
+      - name: Retain C4 observations, original exits, traces and live safeguards
+        if: ${{ always() && env.P61_PROOF != '' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p61-c4-input-diagnostic-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.P61_PROOF }}/
+          if-no-files-found: error
+          retention-days: 30
+
+  # P61 C4 DIAGNOSTIC JOB END
   mounted-editor-readiness:
     if: ${{ github.head_ref == 'p61/c4-edit-ready' }}
     runs-on: macos-latest

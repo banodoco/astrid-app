@@ -1,0 +1,45 @@
+{
+  "schema": 1,
+  "repository": "astrid-app",
+  "authority": {
+    "dev_sha": "4223b30a2b56c7eb59da3a47b200516372bdca5a",
+    "decision": "6995664680",
+    "amendment": "6996255390",
+    "seed_and_reconciliation_decision": "6998651356",
+    "g1_report_sha256": "d4a4b2d5bce5324c47d0018db9ce651e979550c9361f74354caf65b939a99879",
+    "g2_report_sha256": "50760681220707845c9bd50e6795a0914fce9f705177359f6300ebc9324be522"
+  },
+  "admitted": 20,
+  "explicit_candidates_not_admitted": 1,
+  "native_inventory": 21250,
+  "owners": {
+    "R15-4 (PT8, PT10, PT11)": 15,
+    "R15-5 (PT9, PT15, PT16)": 4,
+    "PT4": 1
+  },
+  "source_artifacts": [
+    {
+      "artifact_id": 14425679839,
+      "group": "vitest-app.xml.jsonl.inventory.json",
+      "selected": 20894
+    },
+    {
+      "artifact_id": 14425679839,
+      "group": "vitest-sdk-boundary.xml.jsonl.inventory.json",
+      "selected": 335
+    }
+  ],
+  "not_admitted": [
+    {
+      "lane": "E2E/playwright-timeline",
+      "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",375,3,\"editor tour › Settings > Replay tour runs the whole tour again, and a reload after it does not restart it\",0]",
+      "owner": "R15-5 (PT9, PT15, PT16)",
+      "reason": "expected persisted tour status is undefined; matching diagnostic does not establish a non-persistence cause"
+    }
+  ],
+  "limits": [
+    "residual R15-1/R15-2 groups require supported cause evidence; no blanket admission",
+    "App identities use uniquely reconciled full source tuples; internal IDs remain unavailable in historical logs",
+    "no later exact-head product retirement receipt was found; executable fixture proof is separate"
+  ]
+}

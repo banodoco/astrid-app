@@ -1,0 +1,103 @@
+{
+  "validator": "actionlint v1.7.7",
+  "command": [
+    "actionlint",
+    "-shellcheck=",
+    "-pyflakes=",
+    "-oneline",
+    ".github/workflows/direct-journey.yml",
+    ".github/workflows/e2e.yml",
+    ".github/workflows/lanes.yml",
+    ".github/workflows/test.yml",
+    ".github/workflows/failure-ceiling.yml",
+    ".github/workflows/gate-integrity.yml"
+  ],
+  "exit": 0,
+  "output": "",
+  "scope": "All packet workflow files; external shellcheck/pyflakes are disabled because this check validates Actions schema and expression contexts.",
+  "prior_failure": "GitHub rejected expressions in steps.shell before creating native jobs; prior implementation checkpoint is unqualified.",
+  "core_implementation_unchanged": true,
+  "matrix_environment_explicit_for_every_captured_job": true,
+  "captured_jobs": [
+    {
+      "workflow": ".github/workflows/test.yml",
+      "job": "vitest",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/test.yml",
+      "job": "release-tooling-macos",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/test.yml",
+      "job": "boundary",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/direct-journey.yml",
+      "job": "direct-journey",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/direct-journey.yml",
+      "job": "three-products",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/e2e.yml",
+      "job": "playwright-default",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/e2e.yml",
+      "job": "playwright-timeline",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/e2e.yml",
+      "job": "playwright-timeline-chrome-export",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/e2e.yml",
+      "job": "extension-accessibility",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/e2e.yml",
+      "job": "extension-visual",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/e2e.yml",
+      "job": "extension-cross-browser",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/lanes.yml",
+      "job": "checkout-lanes",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/lanes.yml",
+      "job": "installer-posix",
+      "matrix": {
+        "os": [
+          "ubuntu-latest",
+          "macos-latest"
+        ]
+      }
+    },
+    {
+      "workflow": ".github/workflows/lanes.yml",
+      "job": "installer-powershell",
+      "matrix": null
+    },
+    {
+      "workflow": ".github/workflows/lanes.yml",
+      "job": "quick-journey",
+      "matrix": null
+    }
+  ]
+}

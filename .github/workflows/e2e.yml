@@ -4,6 +4,8 @@
 name: E2E
 
 on:
+  schedule:
+    - cron: "17 1 * * *"
   push:
     branches: [main, release-1, "int/**", "release/*/main"]
   workflow_dispatch:
@@ -20,8 +22,14 @@ jobs:
   playwright-default:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Restore npm cache (C-08)
         id: c08-app-e2e-6
         uses: actions/cache/restore@v4
@@ -31,13 +39,22 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - run: npm ci --legacy-peer-deps
-      - run: npx playwright install --with-deps chromium
+      - name: Plan39 recorded command 03
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-03 --shell bash "{0}"
+        run: npm ci --legacy-peer-deps
+      - name: Plan39 recorded command 04
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-04 --shell bash "{0}"
+        run: npx playwright install --with-deps chromium
       # The browser-renderer parity test reads the exported MP4 with ffprobe.
-      - run: |
+      - name: Plan39 recorded command 05
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-05 --shell bash "{0}"
+        run: |
           sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg
-      - run: npx playwright test --config playwright.config.ts
+      - name: Plan39 recorded command 06
+        if: ${{ !cancelled() }}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-06 --shell bash "{0}"
+        run: npx playwright test --config playwright.config.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: playwright-default-results, path: test-results, if-no-files-found: ignore }
@@ -48,12 +65,26 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   playwright-timeline:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Restore npm cache (C-08)
         id: c08-app-e2e-5
         uses: actions/cache/restore@v4
@@ -63,9 +94,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - run: npm ci --legacy-peer-deps
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e:timeline
+      - name: Plan39 recorded command 03
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-03 --shell bash "{0}"
+        run: npm ci --legacy-peer-deps
+      - name: Plan39 recorded command 04
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-04 --shell bash "{0}"
+        run: npx playwright install --with-deps chromium
+      - name: Plan39 recorded command 05
+        if: ${{ !cancelled() }}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-05 --shell bash "{0}"
+        run: npm run test:e2e:timeline
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: playwright-timeline-results, path: test-results, if-no-files-found: ignore }
@@ -77,12 +115,26 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   playwright-timeline-chrome-export:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Restore npm cache (C-08)
         id: c08-app-e2e-4
         uses: actions/cache/restore@v4
@@ -92,11 +144,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - run: npm ci --legacy-peer-deps
-      - run: npx playwright install --with-deps chrome
+      - name: Plan39 recorded command 03
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-03 --shell bash "{0}"
+        run: npm ci --legacy-peer-deps
+      - name: Plan39 recorded command 04
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-04 --shell bash "{0}"
+        run: npx playwright install --with-deps chrome
       # The H.264 export specs read frames with ffmpeg/ffprobe and compare pixels with ImageMagick 7's `magick`
       # driver (Ubuntu ships 6, which has no `magick`), so the pinned upstream AppImage is installed.
       - name: Install ffmpeg and ImageMagick 7
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-05 --shell bash "{0}"
         run: |
           sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get -o Acquire::Retries=3 install -y --no-install-recommends ffmpeg
@@ -107,7 +164,10 @@ jobs:
           printf '#!/bin/sh\nexec /opt/magick.AppImage --appimage-extract-and-run "$@"\n' | sudo tee /usr/local/bin/magick > /dev/null
           sudo chmod +x /usr/local/bin/magick
           magick -version
-      - run: npm run test:e2e:chrome-export
+      - name: Plan39 recorded command 06
+        if: ${{ !cancelled() }}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-06 --shell bash "{0}"
+        run: npm run test:e2e:chrome-export
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: playwright-timeline-chrome-export-results, path: test-results, if-no-files-found: ignore }
@@ -118,12 +178,26 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   extension-accessibility:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Restore npm cache (C-08)
         id: c08-app-e2e-3
         uses: actions/cache/restore@v4
@@ -133,9 +207,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - run: npm ci --legacy-peer-deps
-      - run: npx playwright install --with-deps chromium firefox webkit
-      - run: npm run test:e2e:extension-accessibility
+      - name: Plan39 recorded command 03
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-03 --shell bash "{0}"
+        run: npm ci --legacy-peer-deps
+      - name: Plan39 recorded command 04
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-04 --shell bash "{0}"
+        run: npx playwright install --with-deps chromium firefox webkit
+      - name: Plan39 recorded command 05
+        if: ${{ !cancelled() }}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-05 --shell bash "{0}"
+        run: npm run test:e2e:extension-accessibility
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: extension-accessibility-results, path: artifacts, if-no-files-found: ignore }
@@ -146,12 +227,26 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   extension-visual:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Restore npm cache (C-08)
         id: c08-app-e2e-2
         uses: actions/cache/restore@v4
@@ -161,9 +256,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - run: npm ci --legacy-peer-deps
-      - run: npx playwright install --with-deps chromium
-      - run: npm run test:e2e:extension-visual
+      - name: Plan39 recorded command 03
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-03 --shell bash "{0}"
+        run: npm ci --legacy-peer-deps
+      - name: Plan39 recorded command 04
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-04 --shell bash "{0}"
+        run: npx playwright install --with-deps chromium
+      - name: Plan39 recorded command 05
+        if: ${{ !cancelled() }}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-05 --shell bash "{0}"
+        run: npm run test:e2e:extension-visual
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: extension-visual-results, path: artifacts, if-no-files-found: ignore }
@@ -174,12 +276,26 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error
 
   extension-cross-browser:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    env:
+      ASTRID_CI_MATRIX: ${{ strategy.job-index || 0 }}
     steps:
       - uses: actions/checkout@v4
+      - name: Set up Plan39 evidence collector
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
       - name: Restore npm cache (C-08)
         id: c08-app-e2e-1
         uses: actions/cache/restore@v4
@@ -189,9 +305,16 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "20.19.0"
-      - run: npm ci --legacy-peer-deps
-      - run: npx playwright install --with-deps chrome chromium firefox webkit
-      - run: npm run test:e2e:extension-cross-browser
+      - name: Plan39 recorded command 03
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-03 --shell bash "{0}"
+        run: npm ci --legacy-peer-deps
+      - name: Plan39 recorded command 04
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-04 --shell bash "{0}"
+        run: npx playwright install --with-deps chrome chromium firefox webkit
+      - name: Plan39 recorded command 05
+        if: ${{ !cancelled() }}
+        shell: python -I -c "import os,runpy,sys; sys.argv.extend(['--matrix',os.environ['ASTRID_CI_MATRIX']]); runpy.run_path(os.path.join(os.environ['GITHUB_WORKSPACE'],'scripts/ci/ceiling_capture.py'),run_name='__main__')" --step step-05 --shell bash "{0}"
+        run: npm run test:e2e:extension-cross-browser
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: extension-cross-browser-results, path: artifacts, if-no-files-found: ignore }
@@ -201,3 +324,11 @@ jobs:
         with:
           path: "${{ runner.os == 'Windows' && '~/AppData/Local/npm-cache' || '~/.npm' }}"
           key: npm-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('package-lock.json') }}
+      - name: Retain actual Plan39 command and native result evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-ceiling-${{ github.job }}-${{ strategy.job-index || '0' }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/failure-ceiling/${{ github.job }}/
+          retention-days: 90
+          if-no-files-found: error

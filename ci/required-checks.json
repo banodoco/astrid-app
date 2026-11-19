@@ -1,0 +1,868 @@
+{
+  "version": 1,
+  "repository": "banodoco/astrid-app",
+  "authority": {
+    "plan": "Plan 39 K2/K3",
+    "source": "banodoco/astrid-dev@4223b30a2b56c7eb59da3a47b200516372bdca5a",
+    "decision": "6995664680",
+    "amendment": "6996255390"
+  },
+  "merge": [
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "vitest",
+      "kind": "tests",
+      "job_id": "vitest",
+      "commands": [
+        {
+          "id": "step-01",
+          "name": "Read the Agent and Runtime pins from the App manifest",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/vitest/release-node",
+          "dependency_tuple": {}
+        },
+        {
+          "id": "step-05",
+          "name": "Plan39 recorded command 05",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-06",
+          "name": "Check quarantine policy against the merge base",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-07",
+          "name": "Prove result-integrity rejection cases",
+          "kind": "check",
+          "optional": true
+        },
+        {
+          "id": "step-09",
+          "name": "Install Playwright Chromium",
+          "kind": "check",
+          "optional": true
+        },
+        {
+          "id": "step-10",
+          "name": "Prepare Vitest result directory",
+          "kind": "check",
+          "optional": true
+        },
+        {
+          "id": "step-11",
+          "name": "Run App Vitest suite",
+          "kind": "tests",
+          "optional": true,
+          "runner": "vitest",
+          "invocations": 1,
+          "lane": "Tests/vitest/app"
+        },
+        {
+          "id": "step-12",
+          "name": "Run Node tests",
+          "kind": "tests",
+          "optional": true,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/vitest/node"
+        },
+        {
+          "id": "step-13",
+          "name": "Run SDK boundary Vitest suite",
+          "kind": "tests",
+          "optional": true,
+          "runner": "vitest",
+          "invocations": 1,
+          "lane": "Tests/vitest/sdk-boundary"
+        },
+        {
+          "id": "step-14",
+          "name": "Verify and summarize actual Vitest results",
+          "kind": "check",
+          "optional": false
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+      }
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "release-tooling-macos",
+      "kind": "tests",
+      "job_id": "release-tooling-macos",
+      "commands": [
+        {
+          "id": "step-02",
+          "name": "Plan39 recorded command 02",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/release-tooling-macos"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "boundary",
+      "kind": "mixed",
+      "job_id": "boundary",
+      "commands": [
+        {
+          "id": "step-02",
+          "name": "Check manifest pins against local locks",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-06",
+          "name": "Plan39 recorded command 06",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-07",
+          "name": "Plan39 recorded command 07",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-08",
+          "name": "Plan39 recorded command 08",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/boundary"
+        },
+        {
+          "id": "step-09",
+          "name": "Plan39 recorded command 09",
+          "kind": "check",
+          "optional": false
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c",
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+      }
+    }
+  ],
+  "release": [
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "vitest",
+      "kind": "tests",
+      "job_id": "vitest",
+      "commands": [
+        {
+          "id": "step-01",
+          "name": "Read the Agent and Runtime pins from the App manifest",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/vitest/release-node",
+          "dependency_tuple": {}
+        },
+        {
+          "id": "step-05",
+          "name": "Plan39 recorded command 05",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-06",
+          "name": "Check quarantine policy against the merge base",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-07",
+          "name": "Prove result-integrity rejection cases",
+          "kind": "check",
+          "optional": true
+        },
+        {
+          "id": "step-09",
+          "name": "Install Playwright Chromium",
+          "kind": "check",
+          "optional": true
+        },
+        {
+          "id": "step-10",
+          "name": "Prepare Vitest result directory",
+          "kind": "check",
+          "optional": true
+        },
+        {
+          "id": "step-11",
+          "name": "Run App Vitest suite",
+          "kind": "tests",
+          "optional": true,
+          "runner": "vitest",
+          "invocations": 1,
+          "lane": "Tests/vitest/app"
+        },
+        {
+          "id": "step-12",
+          "name": "Run Node tests",
+          "kind": "tests",
+          "optional": true,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/vitest/node"
+        },
+        {
+          "id": "step-13",
+          "name": "Run SDK boundary Vitest suite",
+          "kind": "tests",
+          "optional": true,
+          "runner": "vitest",
+          "invocations": 1,
+          "lane": "Tests/vitest/sdk-boundary"
+        },
+        {
+          "id": "step-14",
+          "name": "Verify and summarize actual Vitest results",
+          "kind": "check",
+          "optional": false
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+      }
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "release-tooling-macos",
+      "kind": "tests",
+      "job_id": "release-tooling-macos",
+      "commands": [
+        {
+          "id": "step-02",
+          "name": "Plan39 recorded command 02",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/release-tooling-macos"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "Tests",
+      "workflow_file": "test.yml",
+      "job": "boundary",
+      "kind": "mixed",
+      "job_id": "boundary",
+      "commands": [
+        {
+          "id": "step-02",
+          "name": "Check manifest pins against local locks",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-06",
+          "name": "Plan39 recorded command 06",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-07",
+          "name": "Plan39 recorded command 07",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-08",
+          "name": "Plan39 recorded command 08",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Tests/boundary"
+        },
+        {
+          "id": "step-09",
+          "name": "Plan39 recorded command 09",
+          "kind": "check",
+          "optional": false
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c",
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+      }
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "checkout-lanes",
+      "kind": "tests",
+      "job_id": "checkout-lanes",
+      "commands": [
+        {
+          "id": "step-01",
+          "name": "Read the Agent and Runtime pins from the App manifest",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Verify and summarize manifest-pinned checkouts",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-08",
+          "name": "Install App dependencies",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-09",
+          "name": "Build the Agent venv for the checkout lane (with the sibling Runtime)",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-10",
+          "name": "Checkout lane",
+          "kind": "tests",
+          "optional": false,
+          "runner": "vitest",
+          "invocations": 1,
+          "lane": "Lanes/checkout-lanes/step-10"
+        },
+        {
+          "id": "step-11",
+          "name": "Astrid composition lane",
+          "kind": "tests",
+          "optional": false,
+          "runner": "vitest",
+          "invocations": 1,
+          "lane": "Lanes/checkout-lanes/step-11"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4",
+        "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c"
+      }
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "installer-posix (ubuntu-latest)",
+      "kind": "journey",
+      "job_id": "installer-posix",
+      "commands": [
+        {
+          "id": "step-02",
+          "name": "Plan39 recorded command 02",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Lanes/installer-posix (ubuntu-latest)"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "installer-posix (macos-latest)",
+      "kind": "journey",
+      "job_id": "installer-posix",
+      "commands": [
+        {
+          "id": "step-02",
+          "name": "Plan39 recorded command 02",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Lanes/installer-posix (macos-latest)"
+        }
+      ],
+      "matrix_index": "1",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "installer-powershell",
+      "kind": "journey",
+      "job_id": "installer-powershell",
+      "commands": [
+        {
+          "id": "step-02",
+          "name": "Plan39 recorded command 02",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "tests",
+          "optional": false,
+          "runner": "node",
+          "invocations": 1,
+          "lane": "Lanes/installer-powershell"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "Lanes",
+      "workflow_file": "lanes.yml",
+      "job": "quick-journey",
+      "kind": "journey",
+      "job_id": "quick-journey",
+      "commands": [
+        {
+          "id": "step-01",
+          "name": "Read the Agent and Runtime pins from the App manifest",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Verify and summarize manifest-pinned checkouts",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-07",
+          "name": "Harden apt",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-08",
+          "name": "Install ffmpeg",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-09",
+          "name": "Build the Runtime venv",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-10",
+          "name": "Build the Astrid venv (with the sibling Runtime)",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-11",
+          "name": "Install App dependencies and Chrome",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-12",
+          "name": "Run the quick journey",
+          "kind": "check",
+          "optional": false
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4",
+        "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c"
+      }
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "playwright-default",
+      "kind": "tests",
+      "job_id": "playwright-default",
+      "commands": [
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-05",
+          "name": "Plan39 recorded command 05",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-06",
+          "name": "Plan39 recorded command 06",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "E2E/playwright-default"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "playwright-timeline",
+      "kind": "tests",
+      "job_id": "playwright-timeline",
+      "commands": [
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-05",
+          "name": "Plan39 recorded command 05",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "E2E/playwright-timeline"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "playwright-timeline-chrome-export",
+      "kind": "tests",
+      "job_id": "playwright-timeline-chrome-export",
+      "commands": [
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-05",
+          "name": "Install ffmpeg and ImageMagick 7",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-06",
+          "name": "Plan39 recorded command 06",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "E2E/playwright-timeline-chrome-export"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "extension-accessibility",
+      "kind": "tests",
+      "job_id": "extension-accessibility",
+      "commands": [
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-05",
+          "name": "Plan39 recorded command 05",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "E2E/extension-accessibility"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "extension-visual",
+      "kind": "tests",
+      "job_id": "extension-visual",
+      "commands": [
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-05",
+          "name": "Plan39 recorded command 05",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "E2E/extension-visual"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "E2E",
+      "workflow_file": "e2e.yml",
+      "job": "extension-cross-browser",
+      "kind": "tests",
+      "job_id": "extension-cross-browser",
+      "commands": [
+        {
+          "id": "step-03",
+          "name": "Plan39 recorded command 03",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Plan39 recorded command 04",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-05",
+          "name": "Plan39 recorded command 05",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "E2E/extension-cross-browser"
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {}
+    },
+    {
+      "workflow": "Direct Journey",
+      "workflow_file": "direct-journey.yml",
+      "job": "direct-journey",
+      "kind": "tests",
+      "job_id": "direct-journey",
+      "commands": [
+        {
+          "id": "step-01",
+          "name": "Read the Agent and Runtime pins from the App manifest",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Resolve effective checkout SHAs",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-08",
+          "name": "Build the Runtime venv",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-09",
+          "name": "Build the Astrid venv",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-10",
+          "name": "Install App dependencies, Chromium and ffmpeg",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-11",
+          "name": "Run the journey",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "Direct Journey/direct-journey"
+        },
+        {
+          "id": "step-12",
+          "name": "Check the outcome counts",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-13",
+          "name": "Collect artifacts",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-15",
+          "name": "Collect the autostart-off card",
+          "kind": "check",
+          "optional": false
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4",
+        "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c"
+      }
+    },
+    {
+      "workflow": "Direct Journey",
+      "workflow_file": "direct-journey.yml",
+      "job": "three-products",
+      "kind": "tests",
+      "job_id": "three-products",
+      "commands": [
+        {
+          "id": "step-01",
+          "name": "Read the Agent and Runtime pins from the App manifest",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-04",
+          "name": "Resolve effective checkout SHAs",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-08",
+          "name": "Build the Runtime venv",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-09",
+          "name": "Build the Astrid venv",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-10",
+          "name": "Install App dependencies, Chrome and ffmpeg",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-11",
+          "name": "Run the three-product journey",
+          "kind": "tests",
+          "optional": false,
+          "runner": "playwright",
+          "invocations": 1,
+          "lane": "Direct Journey/three-products"
+        },
+        {
+          "id": "step-12",
+          "name": "Check the outcome counts",
+          "kind": "check",
+          "optional": false
+        },
+        {
+          "id": "step-13",
+          "name": "Collect artifacts",
+          "kind": "check",
+          "optional": false
+        }
+      ],
+      "matrix_index": "0",
+      "dependency_tuple": {
+        "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4",
+        "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c"
+      }
+    }
+  ]
+}

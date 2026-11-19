@@ -39,7 +39,7 @@ export default defineConfig({
   workers: 1,
   retries: 0,
   forbidOnly: !!process.env.CI,
-  reporter: [[process.env.CI ? 'github' : 'list'], ['./config/testing/playwrightSkipGuard.ts']],
+  reporter: [[process.env.CI ? 'github' : 'list'], ['./config/testing/playwrightSkipGuard.ts'], ['./scripts/ci/ceiling_playwright.ts']],
   outputDir: 'artifacts/extension-visual/test-results',
   snapshotPathTemplate: '{testDir}/visual-snapshots/{arg}{ext}',
   use: {

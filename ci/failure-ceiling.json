@@ -1,0 +1,1035 @@
+{
+  "schema": 1,
+  "repository": "banodoco/astrid-app",
+  "authority": {
+    "dev_sha": "4223b30a2b56c7eb59da3a47b200516372bdca5a",
+    "decision": "6995664680",
+    "amendment": "6996255390",
+    "seed_and_reconciliation_decision": "6998651356",
+    "g1_report_sha256": "d4a4b2d5bce5324c47d0018db9ce651e979550c9361f74354caf65b939a99879",
+    "g2_report_sha256": "50760681220707845c9bd50e6795a0914fce9f705177359f6300ebc9324be522"
+  },
+  "entries": [
+    {
+      "lane": "E2E/extension-visual",
+      "native_id": "[\"chromium-visual\",\"tests/e2e/extension-visual-regression.spec.ts\",154,5,\"desktop composed timeline › matches the composed extension timeline at desktop size\",0]",
+      "parameter": {
+        "project": "chromium-visual",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "PT4",
+      "source_owner": "PT4",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/extension-visual-regression.spec.ts:158:7",
+      "diagnostic": "Error: expect(locator).toHaveScreenshot(expected) failed\n\nLocator: locator('.timeline-wrapper')\n  Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.\n\n  Snapshot: composed-desktop.png\n\nCall log:\n  - Expect \"toHaveScreenshot(composed-desktop.png)\" with timeout 15000ms\n    - verifying given screenshot expectation\n  - waiting for locator('.timeline-wrapper')\n    - locator resolved to <div class=\"timeline-wrapper relative min-w-0 flex-1 overflow-hidden\">…</div>\n  - taking element screenshot\n    - disabled all CSS animations\n  - waiting for fonts to load...\n  - fonts loaded\n  - attempting scroll into view action\n    - waiting for element to be stable\n  - Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.\n  - waiting 100ms before taking screenshot\n  - waiting for locator('.timeline-wrapper')\n    - locator resolved to <div class=\"timeline-wrapper relative min-w-0 flex-1 overflow-hidden\">…</div>\n  - taking element screenshot\n    - disabled all CSS animations\n  - waiting for fonts to load...\n  - fonts loaded\n  - attempting scroll into view action\n    - waiting for element to be stable\n  - captured a stable screenshot\n  - Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/extension-visual",
+        "native_id": "[\"chromium-visual\",\"tests/e2e/extension-visual-regression.spec.ts\",154,5,\"desktop composed timeline › matches the composed extension timeline at desktop size\",0]",
+        "parameter": {
+          "project": "chromium-visual",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/extension-visual-regression.spec.ts:158:7",
+        "diagnostic": "Error: expect(locator).toHaveScreenshot(expected) failed\n\nLocator: locator('.timeline-wrapper')\n  Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.\n\n  Snapshot: composed-desktop.png\n\nCall log:\n  - Expect \"toHaveScreenshot(composed-desktop.png)\" with timeout 15000ms\n    - verifying given screenshot expectation\n  - waiting for locator('.timeline-wrapper')\n    - locator resolved to <div class=\"timeline-wrapper relative min-w-0 flex-1 overflow-hidden\">…</div>\n  - taking element screenshot\n    - disabled all CSS animations\n  - waiting for fonts to load...\n  - fonts loaded\n  - attempting scroll into view action\n    - waiting for element to be stable\n  - Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.\n  - waiting 100ms before taking screenshot\n  - waiting for locator('.timeline-wrapper')\n    - locator resolved to <div class=\"timeline-wrapper relative min-w-0 flex-1 overflow-hidden\">…</div>\n  - taking element screenshot\n    - disabled all CSS animations\n  - waiting for fonts to load...\n  - fonts loaded\n  - attempting scroll into view action\n    - waiting for element to be stable\n  - captured a stable screenshot\n  - Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369372026,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369372026"
+      },
+      "g2": {
+        "lane": "E2E/extension-visual",
+        "native_id": "[\"chromium-visual\",\"tests/e2e/extension-visual-regression.spec.ts\",154,5,\"desktop composed timeline › matches the composed extension timeline at desktop size\",0]",
+        "parameter": {
+          "project": "chromium-visual",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/extension-visual-regression.spec.ts:158:7",
+        "diagnostic": "Error: expect(locator).toHaveScreenshot(expected) failed\n\nLocator: locator('.timeline-wrapper')\n  Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.\n\n  Snapshot: composed-desktop.png\n\nCall log:\n  - Expect \"toHaveScreenshot(composed-desktop.png)\" with timeout 15000ms\n    - verifying given screenshot expectation\n  - waiting for locator('.timeline-wrapper')\n    - locator resolved to <div class=\"timeline-wrapper relative min-w-0 flex-1 overflow-hidden\">…</div>\n  - taking element screenshot\n    - disabled all CSS animations\n  - waiting for fonts to load...\n  - fonts loaded\n  - attempting scroll into view action\n    - waiting for element to be stable\n  - Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.\n  - waiting 100ms before taking screenshot\n  - waiting for locator('.timeline-wrapper')\n    - locator resolved to <div class=\"timeline-wrapper relative min-w-0 flex-1 overflow-hidden\">…</div>\n  - taking element screenshot\n    - disabled all CSS animations\n  - waiting for fonts to load...\n  - fonts loaded\n  - attempting scroll into view action\n    - waiting for element to be stable\n  - captured a stable screenshot\n  - Expected an image 1374px by 303px, received 1414px by 319px. 34653 pixels (ratio 0.08 of all image pixels) are different.",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409969,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409969"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+      "parameter": {
+        "project": "chromium-condensed",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT8",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-integrated.spec.ts:160:23",
+      "diagnostic": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: locator('.astrid-vision-part h3 button').first()\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-part h3 button').first()",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-integrated.spec.ts:160:23",
+        "diagnostic": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: locator('.astrid-vision-part h3 button').first()\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-part h3 button').first()",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-integrated.spec.ts:160:23",
+        "diagnostic": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: locator('.astrid-vision-part h3 button').first()\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-part h3 button').first()",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",175,1,\"principle cards use four reserved sigil colors, tinted panels and border-only hover feedback\",0]",
+      "parameter": {
+        "project": "chromium-condensed",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT10",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:200:90",
+      "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",175,1,\"principle cards use four reserved sigil colors, tinted panels and border-only hover feedback\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:200:90",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",175,1,\"principle cards use four reserved sigil colors, tinted panels and border-only hover feedback\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:200:90",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",381,1,\"aspiration hover animates only its arrow without underlining the title\",0]",
+      "parameter": {
+        "project": "chromium-condensed",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT10",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:399:6",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\nExpected: \"astrid-vision-arrow-nudge\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\n    14 × locator resolved to <span class=\"astrid-vision-card-arrow\">…</span>\n       - unexpected value \"none\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",381,1,\"aspiration hover animates only its arrow without underlining the title\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:399:6",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\nExpected: \"astrid-vision-arrow-nudge\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\n    14 × locator resolved to <span class=\"astrid-vision-card-arrow\">…</span>\n       - unexpected value \"none\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",381,1,\"aspiration hover animates only its arrow without underlining the title\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:399:6",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\nExpected: \"astrid-vision-arrow-nudge\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\n    14 × locator resolved to <span class=\"astrid-vision-card-arrow\">…</span>\n       - unexpected value \"none\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",435,1,\"every joined principle, including interior cards without physical left borders, gains a full hover box\",0]",
+      "parameter": {
+        "project": "chromium-condensed",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT10",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:452:91",
+      "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",435,1,\"every joined principle, including interior cards without physical left borders, gains a full hover box\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:452:91",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",435,1,\"every joined principle, including interior cards without physical left borders, gains a full hover box\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:452:91",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",352,1,\"principle sigils use softer faded page colors while their readable cue stays solid\",0]",
+      "parameter": {
+        "project": "chromium-condensed",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT11",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:370:36",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\nExpected: \"0.82\"\nReceived: \"0.58\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\n    14 × locator resolved to <span aria-hidden=\"true\" class=\"astrid-vision-principle-sigil\">…</span>\n       - unexpected value \"0.58\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",352,1,\"principle sigils use softer faded page colors while their readable cue stays solid\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:370:36",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\nExpected: \"0.82\"\nReceived: \"0.58\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\n    14 × locator resolved to <span aria-hidden=\"true\" class=\"astrid-vision-principle-sigil\">…</span>\n       - unexpected value \"0.58\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",352,1,\"principle sigils use softer faded page colors while their readable cue stays solid\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:370:36",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\nExpected: \"0.82\"\nReceived: \"0.58\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\n    14 × locator resolved to <span aria-hidden=\"true\" class=\"astrid-vision-principle-sigil\">…</span>\n       - unexpected value \"0.58\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",51,1,\"each principle animates a different part of its sigil on hover and respects reduced motion\",0]",
+      "parameter": {
+        "project": "chromium-condensed",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT11",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:64:55",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\nExpected: \"astrid-vision-sigil-orbit\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\n    14 × locator resolved to <g opacity=\".7\" fill=\"currentColor\" class=\"astrid-vision-sigil-orbit\">…</g>\n       - unexpected value \"none\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",51,1,\"each principle animates a different part of its sigil on hover and respects reduced motion\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:64:55",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\nExpected: \"astrid-vision-sigil-orbit\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\n    14 × locator resolved to <g opacity=\".7\" fill=\"currentColor\" class=\"astrid-vision-sigil-orbit\">…</g>\n       - unexpected value \"none\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",51,1,\"each principle animates a different part of its sigil on hover and respects reduced motion\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:64:55",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\nExpected: \"astrid-vision-sigil-orbit\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\n    14 × locator resolved to <g opacity=\".7\" fill=\"currentColor\" class=\"astrid-vision-sigil-orbit\">…</g>\n       - unexpected value \"none\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",72,1,\"technical wrangling takes three seconds to resolve and one second to return\",0]",
+      "parameter": {
+        "project": "chromium-condensed",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT11",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:91:24",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\nExpected: \"3s\"\nReceived: \"1s\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\n    14 × locator resolved to <g stroke-width=\"2.2\" stroke=\"currentColor\" class=\"astrid-vision-sigil-knot\">…</g>\n       - unexpected value \"1s\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",72,1,\"technical wrangling takes three seconds to resolve and one second to return\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:91:24",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\nExpected: \"3s\"\nReceived: \"1s\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\n    14 × locator resolved to <g stroke-width=\"2.2\" stroke=\"currentColor\" class=\"astrid-vision-sigil-knot\">…</g>\n       - unexpected value \"1s\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-condensed\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",72,1,\"technical wrangling takes three seconds to resolve and one second to return\",0]",
+        "parameter": {
+          "project": "chromium-condensed",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:91:24",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\nExpected: \"3s\"\nReceived: \"1s\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\n    14 × locator resolved to <g stroke-width=\"2.2\" stroke=\"currentColor\" class=\"astrid-vision-sigil-knot\">…</g>\n       - unexpected value \"1s\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-desktop\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+      "parameter": {
+        "project": "chromium-desktop",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT8",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-integrated.spec.ts:160:23",
+      "diagnostic": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: locator('.astrid-vision-part h3 button').first()\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-part h3 button').first()",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-desktop\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+        "parameter": {
+          "project": "chromium-desktop",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-integrated.spec.ts:160:23",
+        "diagnostic": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: locator('.astrid-vision-part h3 button').first()\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-part h3 button').first()",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-desktop\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+        "parameter": {
+          "project": "chromium-desktop",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-integrated.spec.ts:160:23",
+        "diagnostic": "Error: expect(locator).toHaveAttribute(expected) failed\n\nLocator: locator('.astrid-vision-part h3 button').first()\nExpected: \"false\"\nTimeout: 5000ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveAttribute\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-part h3 button').first()",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-desktop\",\"tests/e2e/video-editor-instance-lifecycle.spec.ts\",6,1,\"full and dialog editor lifetimes keep independent roots, commands, selection and renderers\",0]",
+      "parameter": {
+        "project": "chromium-desktop",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-5 (PT9, PT15, PT16)",
+      "source_owner": "PT9",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/video-editor-instance-lifecycle.spec.ts:34:146",
+      "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"dialog\"\nReceived: undefined",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-desktop\",\"tests/e2e/video-editor-instance-lifecycle.spec.ts\",6,1,\"full and dialog editor lifetimes keep independent roots, commands, selection and renderers\",0]",
+        "parameter": {
+          "project": "chromium-desktop",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/video-editor-instance-lifecycle.spec.ts:34:146",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"dialog\"\nReceived: undefined",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-desktop\",\"tests/e2e/video-editor-instance-lifecycle.spec.ts\",6,1,\"full and dialog editor lifetimes keep independent roots, commands, selection and renderers\",0]",
+        "parameter": {
+          "project": "chromium-desktop",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/video-editor-instance-lifecycle.spec.ts:34:146",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"dialog\"\nReceived: undefined",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+      "parameter": {
+        "project": "chromium-mobile",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT8",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-integrated.spec.ts:156:34",
+      "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 189\nReceived: 159",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-integrated.spec.ts:156:34",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 189\nReceived: 159",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-integrated.spec.ts\",124,1,\"A04/A05/A06/A07/A08 daylight palettes, resize, disclosure and live motion\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-integrated.spec.ts:156:34",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: 189\nReceived: 159",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",175,1,\"principle cards use four reserved sigil colors, tinted panels and border-only hover feedback\",0]",
+      "parameter": {
+        "project": "chromium-mobile",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT10",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:200:90",
+      "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",175,1,\"principle cards use four reserved sigil colors, tinted panels and border-only hover feedback\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:200:90",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",175,1,\"principle cards use four reserved sigil colors, tinted panels and border-only hover feedback\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:200:90",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",381,1,\"aspiration hover animates only its arrow without underlining the title\",0]",
+      "parameter": {
+        "project": "chromium-mobile",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT10",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:399:6",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\nExpected: \"astrid-vision-arrow-nudge\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\n    14 × locator resolved to <span class=\"astrid-vision-card-arrow\">…</span>\n       - unexpected value \"none\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",381,1,\"aspiration hover animates only its arrow without underlining the title\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:399:6",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\nExpected: \"astrid-vision-arrow-nudge\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\n    14 × locator resolved to <span class=\"astrid-vision-card-arrow\">…</span>\n       - unexpected value \"none\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",381,1,\"aspiration hover animates only its arrow without underlining the title\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:399:6",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\nExpected: \"astrid-vision-arrow-nudge\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-card-arrow')\n    14 × locator resolved to <span class=\"astrid-vision-card-arrow\">…</span>\n       - unexpected value \"none\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",435,1,\"every joined principle, including interior cards without physical left borders, gains a full hover box\",0]",
+      "parameter": {
+        "project": "chromium-mobile",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT10",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:452:91",
+      "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",435,1,\"every joined principle, including interior cards without physical left borders, gains a full hover box\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:452:91",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-hierarchy.spec.ts\",435,1,\"every joined principle, including interior cards without physical left borders, gains a full hover box\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-hierarchy.spec.ts:452:91",
+        "diagnostic": "Error: expect(received).toBe(expected) // Object.is equality\n\nExpected: \"1\"\nReceived: \"0\"\n\nCall Log:\n- Timeout 5000ms exceeded while waiting on the predicate",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",352,1,\"principle sigils use softer faded page colors while their readable cue stays solid\",0]",
+      "parameter": {
+        "project": "chromium-mobile",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT11",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:370:36",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\nExpected: \"0.82\"\nReceived: \"0.58\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\n    14 × locator resolved to <span aria-hidden=\"true\" class=\"astrid-vision-principle-sigil\">…</span>\n       - unexpected value \"0.58\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",352,1,\"principle sigils use softer faded page colors while their readable cue stays solid\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:370:36",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\nExpected: \"0.82\"\nReceived: \"0.58\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\n    14 × locator resolved to <span aria-hidden=\"true\" class=\"astrid-vision-principle-sigil\">…</span>\n       - unexpected value \"0.58\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",352,1,\"principle sigils use softer faded page colors while their readable cue stays solid\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:370:36",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\nExpected: \"0.82\"\nReceived: \"0.58\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').locator('.astrid-vision-principle-sigil').first()\n    14 × locator resolved to <span aria-hidden=\"true\" class=\"astrid-vision-principle-sigil\">…</span>\n       - unexpected value \"0.58\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",51,1,\"each principle animates a different part of its sigil on hover and respects reduced motion\",0]",
+      "parameter": {
+        "project": "chromium-mobile",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT11",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:64:55",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\nExpected: \"astrid-vision-sigil-orbit\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\n    14 × locator resolved to <g opacity=\".7\" fill=\"currentColor\" class=\"astrid-vision-sigil-orbit\">…</g>\n       - unexpected value \"none\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",51,1,\"each principle animates a different part of its sigil on hover and respects reduced motion\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:64:55",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\nExpected: \"astrid-vision-sigil-orbit\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\n    14 × locator resolved to <g opacity=\".7\" fill=\"currentColor\" class=\"astrid-vision-sigil-orbit\">…</g>\n       - unexpected value \"none\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",51,1,\"each principle animates a different part of its sigil on hover and respects reduced motion\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:64:55",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\nExpected: \"astrid-vision-sigil-orbit\"\nReceived: \"none\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').first().locator('.astrid-vision-sigil-orbit')\n    14 × locator resolved to <g opacity=\".7\" fill=\"currentColor\" class=\"astrid-vision-sigil-orbit\">…</g>\n       - unexpected value \"none\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-default",
+      "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",72,1,\"technical wrangling takes three seconds to resolve and one second to return\",0]",
+      "parameter": {
+        "project": "chromium-mobile",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-4 (PT8, PT10, PT11)",
+      "source_owner": "PT11",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:91:24",
+      "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\nExpected: \"3s\"\nReceived: \"1s\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\n    14 × locator resolved to <g stroke-width=\"2.2\" stroke=\"currentColor\" class=\"astrid-vision-sigil-knot\">…</g>\n       - unexpected value \"1s\"",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",72,1,\"technical wrangling takes three seconds to resolve and one second to return\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:91:24",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\nExpected: \"3s\"\nReceived: \"1s\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\n    14 × locator resolved to <g stroke-width=\"2.2\" stroke=\"currentColor\" class=\"astrid-vision-sigil-knot\">…</g>\n       - unexpected value \"1s\"",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369371821,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369371821"
+      },
+      "g2": {
+        "lane": "E2E/playwright-default",
+        "native_id": "[\"chromium-mobile\",\"tests/e2e/public-astrid-vision-sigils-nav.spec.ts\",72,1,\"technical wrangling takes three seconds to resolve and one second to return\",0]",
+        "parameter": {
+          "project": "chromium-mobile",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/public-astrid-vision-sigils-nav.spec.ts:91:24",
+        "diagnostic": "Error: expect(locator).toHaveCSS(expected) failed\n\nLocator:  locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\nExpected: \"3s\"\nReceived: \"1s\"\nTimeout:  5000ms\n\nCall log:\n  - Expect \"toHaveCSS\" with timeout 5000ms\n  - waiting for locator('.astrid-vision-standards-list > li').last().locator('.astrid-vision-sigil-knot')\n    14 × locator resolved to <g stroke-width=\"2.2\" stroke=\"currentColor\" class=\"astrid-vision-sigil-knot\">…</g>\n       - unexpected value \"1s\"",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409622,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409622"
+      }
+    },
+    {
+      "lane": "E2E/playwright-timeline",
+      "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",232,3,\"editor tour › runs the whole tour once, leaves the real editor with the composer focused, and never restarts\",0]",
+      "parameter": {
+        "project": "timeline-devices",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-5 (PT9, PT15, PT16)",
+      "source_owner": "PT16",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/timeline/editor-tour.spec.ts:250:11",
+      "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-timeline",
+        "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",232,3,\"editor tour › runs the whole tour once, leaves the real editor with the composer focused, and never restarts\",0]",
+        "parameter": {
+          "project": "timeline-devices",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/timeline/editor-tour.spec.ts:250:11",
+        "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369372355,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369372355"
+      },
+      "g2": {
+        "lane": "E2E/playwright-timeline",
+        "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",232,3,\"editor tour › runs the whole tour once, leaves the real editor with the composer focused, and never restarts\",0]",
+        "parameter": {
+          "project": "timeline-devices",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/timeline/editor-tour.spec.ts:250:11",
+        "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409652,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409652"
+      }
+    },
+    {
+      "lane": "E2E/playwright-timeline",
+      "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",323,3,\"editor tour › Esc leaves mid-tour, and a reload mid-tour does not bring it back\",0]",
+      "parameter": {
+        "project": "timeline-devices",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-5 (PT9, PT15, PT16)",
+      "source_owner": "PT16",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/timeline/editor-tour.spec.ts:328:11",
+      "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-timeline",
+        "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",323,3,\"editor tour › Esc leaves mid-tour, and a reload mid-tour does not bring it back\",0]",
+        "parameter": {
+          "project": "timeline-devices",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/timeline/editor-tour.spec.ts:328:11",
+        "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369372355,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369372355"
+      },
+      "g2": {
+        "lane": "E2E/playwright-timeline",
+        "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",323,3,\"editor tour › Esc leaves mid-tour, and a reload mid-tour does not bring it back\",0]",
+        "parameter": {
+          "project": "timeline-devices",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/timeline/editor-tour.spec.ts:328:11",
+        "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409652,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409652"
+      }
+    },
+    {
+      "lane": "E2E/playwright-timeline",
+      "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",357,3,\"editor tour › a skip at the welcome is remembered by the Runtime: with the browser flag gone, the tour stays away\",0]",
+      "parameter": {
+        "project": "timeline-devices",
+        "repeat": 0
+      },
+      "subtest": null,
+      "owner": "R15-5 (PT9, PT15, PT16)",
+      "source_owner": "PT16",
+      "release": 15,
+      "admission": "explained-inherited",
+      "stage": "tests/e2e/timeline/editor-tour.spec.ts:363:11",
+      "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+      "cause": "unchanged uniquely expanded source declaration and matching complete native error/stage; see app-source-tuple-stage-facts.json.gz",
+      "identity_basis": "project, file, declaration line/column, complete title, repeat index from unchanged source/config; internal ID unavailable historically",
+      "g1": {
+        "lane": "E2E/playwright-timeline",
+        "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",357,3,\"editor tour › a skip at the welcome is remembered by the Runtime: with the browser flag gone, the tour stays away\",0]",
+        "parameter": {
+          "project": "timeline-devices",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/timeline/editor-tour.spec.ts:363:11",
+        "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+        "sha": "0b6ef16152dc3fa11246ccc2007da630c66d1a1a",
+        "run_id": 43883625971,
+        "job_id": 133369372355,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/43883625971/job/133369372355"
+      },
+      "g2": {
+        "lane": "E2E/playwright-timeline",
+        "native_id": "[\"timeline-devices\",\"tests/e2e/timeline/editor-tour.spec.ts\",357,3,\"editor tour › a skip at the welcome is remembered by the Runtime: with the browser flag gone, the tour stays away\",0]",
+        "parameter": {
+          "project": "timeline-devices",
+          "repeat": 0
+        },
+        "subtest": null,
+        "outcome": "failed",
+        "stage": "tests/e2e/timeline/editor-tour.spec.ts:363:11",
+        "diagnostic": "Error: act 1 welcome is ready\n\nact 1 welcome is ready\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: true\nReceived: false\n\nCall Log:\n- Timeout 60000ms exceeded while waiting on the predicate",
+        "sha": "549e335dc766f373a8a40cc0690730db75295153",
+        "run_id": 44333940900,
+        "job_id": 134905409652,
+        "attempt": 1,
+        "source": "https://github.com/banodoco/astrid-app/actions/runs/44333940900/job/134905409652"
+      }
+    }
+  ],
+  "retired": []
+}

@@ -14,14 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - case_name: p61-base
-            app_sha: 0bce7312f2fc8030b50286ed75b38d0232100820
-          - case_name: p61-candidate
-            app_sha: 75a83f5329aa6688cb32cf73836b20f557e2e2fb
-          - case_name: fix14-base
-            app_sha: a55ff290ed4f291420f21d340a5117c0f8b5a38a
-          - case_name: fix14-candidate
-            app_sha: 2c01a777992b4b78356680a31ab3200491b450a9
+          - case_name: fix14-six-file-candidate
+            app_sha: f2b110f92139ba40e1ea4af498c6c1f23d0d3aac
     env:
       APP_SHA: ${{ matrix.app_sha }}
       PROOF_WORKFLOW_SHA: ${{ github.workflow_sha }}

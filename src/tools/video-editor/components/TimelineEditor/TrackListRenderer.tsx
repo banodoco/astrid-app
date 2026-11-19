@@ -116,6 +116,7 @@ interface SortableRowProps {
   pixelsPerSecond: number;
   isSelected: boolean;
   readOnly: boolean;
+  showReadOnlyTrackName: boolean;
   deviceClass: TimelineDeviceClass;
   clampedActionId: string | null;
   resizePreviewSnapshot: Readonly<Record<string, ResizeOverride>>;
@@ -167,6 +168,7 @@ interface TrackListRendererProps {
   onTrackDragEnd: (event: DragEndEvent) => void;
   trackSensors: ReturnType<typeof useSensors>;
   readOnly?: boolean;
+  showReadOnlyTrackName?: boolean;
 }
 
 function SortableRow({
@@ -178,6 +180,7 @@ function SortableRow({
   pixelsPerSecond,
   isSelected,
   readOnly,
+  showReadOnlyTrackName,
   deviceClass,
   clampedActionId,
   resizePreviewSnapshot,
@@ -243,6 +246,7 @@ function SortableRow({
           onChange={onTrackChange}
           onRemove={onRemoveTrack}
           readOnly={readOnly}
+          showReadOnlyTrackName={showReadOnlyTrackName}
           rowDragging={sortable.isDragging}
           dragListeners={sortable.listeners}
           dragAttributes={sortable.attributes}
@@ -375,6 +379,7 @@ function areSortableRowPropsEqual(left: SortableRowProps, right: SortableRowProp
     && left.shouldStackOverlappingActions === right.shouldStackOverlappingActions
     && left.onSelectTrack === right.onSelectTrack
     && left.readOnly === right.readOnly
+    && left.showReadOnlyTrackName === right.showReadOnlyTrackName
     && left.onTrackChange === right.onTrackChange
     && left.onRemoveTrack === right.onRemoveTrack
   );
@@ -407,6 +412,7 @@ export function TrackListRenderer({
   onTrackDragEnd,
   trackSensors,
   readOnly = false,
+  showReadOnlyTrackName = false,
 }: TrackListRendererProps) {
   const sortableTrackItems = React.useMemo(
     () => tracks.map((track) => `track-${track.id}`),
@@ -432,6 +438,7 @@ export function TrackListRenderer({
         pixelsPerSecond={pixelsPerSecond}
         isSelected={selectedTrackId === track.id}
         readOnly={readOnly}
+        showReadOnlyTrackName={showReadOnlyTrackName}
         deviceClass={deviceClass}
         clampedActionId={rowClampedActionId}
         resizePreviewSnapshot={rowResizePreview[index] ?? EMPTY_RESIZE_PREVIEW_SNAPSHOT}

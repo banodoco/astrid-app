@@ -238,7 +238,8 @@ function ShotTimelineEditorSurface({
     : chrome.watchdogTripped
       ? 'error'
       : chrome.saveStatus;
-  const saveStatusLabel = saveStatus === 'saved'
+  const saveStatusLabel = saveStatus === 'loading' ? 'Loading canonical timeline…'
+    : saveStatus === 'saved'
     ? 'Saved to canonical timeline'
     : saveStatus === 'saving'
       ? 'Saving canonical timeline…'

@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - case_name: fix14-six-file-candidate
-            app_sha: f2b110f92139ba40e1ea4af498c6c1f23d0d3aac
+          - case_name: plan61-release-sync
+            app_sha: 0360b698dd3b673b3361a3f1bdef948042d8d27e
     env:
       APP_SHA: ${{ matrix.app_sha }}
       PROOF_WORKFLOW_SHA: ${{ github.workflow_sha }}

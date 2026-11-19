@@ -340,7 +340,7 @@ function TimelineEditorShellCoreComponent({
     timelineId,
     conflictExhausted: chrome.isConflictExhausted,
     onKeepLocalChanges: chrome.retrySaveAfterConflict,
-    onDiscardRemoteChanges: chrome.reloadFromServer,
+    onDiscardRemoteChanges: () => chrome.reloadFromServer({ discardRefusedSave: true }),
   });
 
   useEffect(() => {
@@ -843,7 +843,7 @@ function TimelineEditorShellCoreComponent({
     >
       <span>{TIMELINE_CONFLICT_SENTENCE}</span>
       <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer()}>
+        <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
           {TIMELINE_CONFLICT_USE_LATEST}
         </Button>
         <Button type="button" size="sm" onClick={chrome.retrySaveAfterConflict}>

@@ -394,6 +394,7 @@ describe('useExternalDrop', () => {
     await result.current.onTimelineDrop(createDropEvent(storedData, ['application/x-generation', 'text/plain']));
 
     expect(registerGenerationAsset).toHaveBeenCalledTimes(1);
+    expect(registerGenerationAsset).toHaveBeenCalledWith(expect.objectContaining({ generationId: 'gallery-generation', variantId: 'gallery-variant' }));
     expect(handleAssetDrop).toHaveBeenCalledTimes(1);
     const registeredAssetId = handleAssetDrop.mock.calls[0]?.[0];
     expect(registeredAssetId).toEqual(expect.any(String));
@@ -974,7 +975,7 @@ describe('useExternalDrop', () => {
         id: 'shot-1',
         name: 'Shot 1',
         images: [
-          { generation_id: 'gen-1', imageUrl: 'https://example.com/1.png', thumbUrl: 'https://example.com/1-thumb.png', contentType: 'image/png', type: 'image' },
+          { generation_id: 'gen-1', primary_variant_id: 'variant-1', imageUrl: 'https://example.com/1.png', thumbUrl: 'https://example.com/1-thumb.png', contentType: 'image/png', type: 'image' },
           { generation_id: 'gen-2', imageUrl: 'https://example.com/2.png', thumbUrl: 'https://example.com/2-thumb.png', contentType: 'image/png', type: 'image' },
         ],
       }],
@@ -1059,6 +1060,10 @@ describe('useExternalDrop', () => {
     await result.current.onTimelineDrop(event);
 
     expect(registerGenerationAsset).toHaveBeenCalledTimes(2);
+    // Each shot image registers with the variant it shows; a shot image without one carries no variant.
+    expect(registerGenerationAsset).toHaveBeenNthCalledWith(1, expect.objectContaining({ generationId: 'gen-1', variantId: 'variant-1' }));
+    expect(registerGenerationAsset.mock.calls[1][0]).toMatchObject({ generationId: 'gen-2' });
+    expect(registerGenerationAsset.mock.calls[1][0]).not.toHaveProperty('variantId');
     expect(handleAssetDrop).not.toHaveBeenCalled();
     expect(applyEdit).toHaveBeenCalledTimes(1);
 

@@ -221,7 +221,6 @@ describe('buildAssetDropEdit media kind validation', () => {
 
     const registrationPlan = planFinalVideoGenerationAssetRegistration({
       assetId: 'asset-final',
-      generationId: 'final-video-1',
       imageUrl: 'https://example.com/final.mp4',
       thumbUrl: 'https://example.com/final-thumb.jpg',
       assetDurationSeconds: null,
@@ -234,7 +233,8 @@ describe('buildAssetDropEdit media kind validation', () => {
 
     expect(registrationPlan.assetEntry.duration).toBeUndefined();
     expect(registrationPlan.assetEntry.type).toBe('video/mp4');
-    expect(registrationPlan.assetEntry.generationId).toBe('final-video-1');
+    expect(registrationPlan.assetEntry).not.toHaveProperty('generationId');
+    expect(registrationPlan.assetEntry).not.toHaveProperty('variantId');
   });
 
   it('keeps external-drop registrations explicit about their unresolved five-second fallback', () => {

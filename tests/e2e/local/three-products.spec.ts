@@ -539,11 +539,26 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   // Opaque data and clears, in every revision.
   await expectOpaqueDataKept(harness, seed3);
 
-  // Keep is actionable: it stashes A+C durably and loads B without silently overwriting the agent.
+  // Keep resends the retained request on B with a new key. Its original guards
+  // still refuse the clash, so A+C stays durable without overwriting the agent.
+  const refusedOwner = (await commandOutboxes(page, seed3.timelineId))
+    .find((owner) => owner.pending?.outcome?.kind === 'rejected');
+  expect(refusedOwner?.pending).toBeDefined();
+  const refusedRequest = refusedOwner!.pending!.request;
+  const keepBase = (await history(harness, seed3)).head;
+  expect(keepBase.revision_id).toBe(headB);
+  const postsBeforeKeep = posts.length;
   await conflict.getByRole('button', { name: 'Keep my changes' }).click();
-  await expect(conflict).toHaveCount(0, CEILING);
-  await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
-  await selectClip(page, seed3.transitionClipId);
+  await expect.poll(() => posts.length, CEILING).toBe(postsBeforeKeep + 1);
+  const keepPost = posts[postsBeforeKeep];
+  await expect.poll(() => keepPost.status, CEILING).toBe(409);
+  expect(keepPost.base).toEqual(keepBase);
+  expect(JSON.parse(keepPost.body)).toEqual({ ...JSON.parse(refusedRequest.body),
+    base_revision_id: keepBase.revision_id, base_publication_id: keepBase.publication_id });
+  expect(keepPost.key).not.toBe(refusedRequest.key);
+  await expect(conflict).toBeVisible(CEILING);
+  await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue(stateB.trackLabel!);
+  // C selected this clip already; inspect it behind the still-visible refusal.
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i, CEILING);
   const kept = await timelineDraft(page, seed3.timelineId);
   expect(kept?.draft).toEqual(draftC.draft);
@@ -554,7 +569,8 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect([baseHead, headA]).toContain(kept?.baseHeadRevisionId);
   expect(await currentHead(harness)).toBe(headB);
 
-  // A reload offers that same draft. Retrying its original CAS cannot erase B; Use latest resolves it explicitly.
+  // A reload offers that same draft. Save them reopens the retained refusal
+  // without a third POST; Use latest resolves it explicitly.
   await sniff.navigate(page, () => page.reload({ waitUntil: 'commit' }));
   await page.waitForLoadState('load');
   await expectConnected(page);

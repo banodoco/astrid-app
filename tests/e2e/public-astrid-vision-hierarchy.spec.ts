@@ -7,7 +7,7 @@ test('pillars and principles open current gaps with correctly linked GitHub proj
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   }) as {
     pillars: { id: string; title: string }[];
@@ -65,7 +65,7 @@ test('pillar and principle detail scroll edges blur only when more content remai
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({
@@ -107,7 +107,7 @@ test('a dialog can be dismissed via its close button and returns focus to the ca
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({
@@ -130,7 +130,7 @@ test('mobile principle card has no redundant footer CTA, fills the touch target 
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({
@@ -176,7 +176,7 @@ test('principle cards use four reserved sigil colors, tinted panels and border-o
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({
@@ -206,7 +206,7 @@ test('mobile modal keeps the X fixed, scrolls within the panel and closes from t
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({
@@ -256,7 +256,7 @@ test('first touch outside the dialog only dismisses it and cannot click through 
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   }) as { principles: { id: string; title: string }[] };
   const context = await browser.newContext({
@@ -313,7 +313,7 @@ test('compact principle cards remain readable and open from title or sigil', asy
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   }) as { principles: { id: string; title: string }[] };
   await page.route(FEED, route => route.fulfill({
@@ -378,11 +378,11 @@ test('compact principle cards remain readable and open from title or sigil', asy
   }
 });
 
-test('aspiration hover animates only its arrow without underlining the title', async ({ page, request }) => {
+test('goal hover animates only its arrow without underlining the title', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({
@@ -436,7 +436,7 @@ test('every joined principle, including interior cards without physical left bor
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({
@@ -464,7 +464,7 @@ test('principle details cue sits bottom-left on the copy edge, with the sigil on
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const content = await response.json().then(value => {
-    for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+    for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; delete gap.aspiration; delete gap.supportingAspirations; }
     return value;
   });
   await page.route(FEED, route => route.fulfill({

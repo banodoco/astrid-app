@@ -1,4 +1,4 @@
-import type { PublicVisionCharacteristic, PublicVisionContent, PublicVisionGap, PublicVisionProject } from './publicVisionContent';
+import type { PublicVisionGoal, PublicVisionContent, PublicVisionGap, PublicVisionProject } from './publicVisionContent';
 
 export type VisionSubject = { kind: 'pillar' | 'principle'; id: string };
 export type VisionGapProjects = { gap: PublicVisionGap; projects: PublicVisionProject[] };
@@ -32,17 +32,17 @@ export function currentGapsForSubject(
     }));
 }
 
-export type VisionAspirationGaps = {
-  aspiration: PublicVisionCharacteristic;
+export type VisionGoalGaps = {
+  goal: PublicVisionGoal;
   gaps: VisionGapProjects[];
   hasMeasuredGap: boolean;
 };
 
-/** Group only by explicit primary aspiration. Older feeds keep their element-level list. */
-export function aspirationsForSubject(content: PublicVisionContent, subject: VisionSubject): {
-  aspirations: VisionAspirationGaps[];
+/** Group only by explicit primary goal. Older feeds keep their element-level list. */
+export function goalsForSubject(content: PublicVisionContent, subject: VisionSubject): {
+  goals: VisionGoalGaps[];
   legacyGaps: VisionGapProjects[];
-  hasAspirationLinks: boolean;
+  hasGoalLinks: boolean;
 } {
   const entry = (subject.kind === 'pillar' ? content.pillars : content.principles)
     .find(item => item.id === subject.id);
@@ -50,29 +50,29 @@ export function aspirationsForSubject(content: PublicVisionContent, subject: Vis
   // work; project status remains visible. The legacy current-work list stays unchanged.
   const current = currentGapsForSubject(content, subject, true);
   return {
-    aspirations: (entry?.characteristics ?? []).map(aspiration => {
-      const ref = subject.kind + ':' + subject.id + '/' + aspiration.id;
+    goals: (entry?.goals ?? []).map(goal => {
+      const ref = subject.kind + ':' + subject.id + '/' + goal.id;
       return {
-        aspiration,
-        gaps: current.filter(({ gap }) => gap.aspiration === ref),
-        hasMeasuredGap: content.gaps.some(gap => gap.aspiration === ref),
+        goal,
+        gaps: current.filter(({ gap }) => gap.goal === ref),
+        hasMeasuredGap: content.gaps.some(gap => gap.goal === ref),
       };
     }),
-    legacyGaps: currentGapsForSubject(content, subject).filter(({ gap }) => gap.aspiration === undefined),
-    hasAspirationLinks: content.gaps.some(gap => gap.aspiration !== undefined),
+    legacyGaps: currentGapsForSubject(content, subject).filter(({ gap }) => gap.goal === undefined),
+    hasGoalLinks: content.gaps.some(gap => gap.goal !== undefined),
   };
 }
 
-export function findAspiration(content: PublicVisionContent, reference: string): PublicVisionCharacteristic | undefined {
-  const [element, aspirationId] = reference.split('/');
+export function findGoal(content: PublicVisionContent, reference: string): PublicVisionGoal | undefined {
+  const [element, goalId] = reference.split('/');
   const [kind, id] = element.split(':');
   const subjects = kind === 'pillar' ? content.pillars : kind === 'principle' ? content.principles : [];
-  return subjects.find(subject => subject.id === id)?.characteristics?.find(item => item.id === aspirationId);
+  return subjects.find(subject => subject.id === id)?.goals?.find(item => item.id === goalId);
 }
 
 /** The template's optional decision lists are a terminal Markdown block.
  * Keep the public feed and authored text intact, separating only their presentation. */
-export function splitAspirationDetails(markdown: string): {
+export function splitGoalDetails(markdown: string): {
   explanation: string; guidance: string; label: string;
 } {
   const lines = markdown.split(/\r?\n/);

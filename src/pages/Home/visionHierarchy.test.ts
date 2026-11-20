@@ -1,7 +1,7 @@
 import { visionFixture, legacyVisionFixture } from '../../../tests/fixtures/public-vision';
 import { describe, expect, it } from 'vitest';
 import type { PublicVisionContent } from './publicVisionContent';
-import { aspirationsForSubject, findAspiration, currentGapsForSubject, splitAspirationDetails } from './visionHierarchy';
+import { goalsForSubject, findGoal, currentGapsForSubject, splitGoalDetails } from './visionHierarchy';
 
 const content = {
   gaps: [
@@ -39,67 +39,67 @@ describe('public vision hierarchy', () => {
 });
 
 
-describe('aspiration grouping', () => {
-  it('shows each gap once under its primary aspiration, not its supporting aspiration', () => {
+describe('goal grouping', () => {
+  it('shows each gap once under its primary goal, not its supporting goal', () => {
     const value = visionFixture();
-    const grouped = aspirationsForSubject(value, { kind: 'pillar', id: 'art' });
-    expect(grouped.aspirations.map(row => row.gaps.map(item => item.gap.id)))
+    const grouped = goalsForSubject(value, { kind: 'pillar', id: 'art' });
+    expect(grouped.goals.map(row => row.gaps.map(item => item.gap.id)))
       .toEqual([['AA-001', 'AA-002'], [], []]);
     expect(grouped.legacyGaps).toEqual([]);
-    expect(aspirationsForSubject(value, { kind: 'principle', id: 'open-by-design' })
-      .aspirations.every(row => row.gaps.length === 0)).toBe(true);
+    expect(goalsForSubject(value, { kind: 'principle', id: 'open-by-design' })
+      .goals.every(row => row.gaps.length === 0)).toBe(true);
   });
   it('counts all primary projects and chooses the lowest priority order, including legacy gapIds fallback', () => {
     const value = visionFixture();
     value.projects.reverse();
     delete value.projects[0].primaryGapId;
     value.projects[1].status = 'done';
-    const [first, empty] = aspirationsForSubject(value, { kind: 'pillar', id: 'art' }).aspirations[0].gaps;
+    const [first, empty] = goalsForSubject(value, { kind: 'pillar', id: 'art' }).goals[0].gaps;
     expect(first.projects.map(item => item.title)).toEqual(['Live composition', 'Reusable tools', 'Editable history']);
     expect(empty.projects).toEqual([]);
   });
   it('distinguishes no measured gap from a closed measured gap and keeps older feeds flat', () => {
-    const grouped = aspirationsForSubject(visionFixture(), { kind: 'pillar', id: 'art' });
-    expect(grouped.aspirations.map(item => item.hasMeasuredGap)).toEqual([true, true, false]);
-    const legacy = aspirationsForSubject(legacyVisionFixture(), { kind: 'pillar', id: 'art' });
-    expect(legacy.hasAspirationLinks).toBe(false);
+    const grouped = goalsForSubject(visionFixture(), { kind: 'pillar', id: 'art' });
+    expect(grouped.goals.map(item => item.hasMeasuredGap)).toEqual([true, true, false]);
+    const legacy = goalsForSubject(legacyVisionFixture(), { kind: 'pillar', id: 'art' });
+    expect(legacy.hasGoalLinks).toBe(false);
     expect(legacy.legacyGaps).toHaveLength(2);
-    expect(legacy.aspirations.every(row => row.gaps.length === 0)).toBe(true);
+    expect(legacy.goals.every(row => row.gaps.length === 0)).toBe(true);
   });
   it('resolves supporting labels without inventing a name for a broken reference', () => {
-    expect(findAspiration(visionFixture(), 'principle:open-by-design/agency')?.title).toBe('Creative agency');
-    expect(findAspiration(visionFixture(), 'pillar:art/missing')).toBeUndefined();
+    expect(findGoal(visionFixture(), 'principle:open-by-design/agency')?.title).toBe('Creative agency');
+    expect(findGoal(visionFixture(), 'pillar:art/missing')).toBeUndefined();
   });
 });
 
 
-describe('optional aspiration guidance', () => {
+describe('optional goal guidance', () => {
   const prose = 'Keep the full authored explanation, including its examples and tradeoffs.';
   const rules = '**We should:**\n\n- Preserve [the source](https://example.com).\n\n**We should never:**\n\n- Hide a consequential decision.';
   it('separates both terminal lists without rewriting either block', () => {
-    expect(splitAspirationDetails(prose + '\n\n' + rules)).toEqual({
+    expect(splitGoalDetails(prose + '\n\n' + rules)).toEqual({
       explanation: prose, guidance: rules, label: 'We should / We should never',
     });
   });
   it('leaves a plain explanation untouched with no empty disclosure', () => {
-    expect(splitAspirationDetails(prose)).toEqual({ explanation: prose, guidance: '', label: '' });
+    expect(splitGoalDetails(prose)).toEqual({ explanation: prose, guidance: '', label: '' });
   });
   it('does not interpret inline, quoted, indented or fenced examples as guidance', () => {
     for (const text of [prose + ' **We should:** keep this inline.', '> **We should:**\n> - A quoted example.',
       '    **We should:**\n    - An indented example.', '```md\n' + rules + '\n```', '~~~~md\n' + rules + '\n~~~~']) {
-      expect(splitAspirationDetails(text)).toEqual({ explanation: text, guidance: '', label: '' });
+      expect(splitGoalDetails(text)).toEqual({ explanation: text, guidance: '', label: '' });
     }
   });
   it('recognizes real lists following a fenced example and normalizes CRLF safely', () => {
     const introduction = '```md\n**We should:**\n```\n\n' + prose;
-    expect(splitAspirationDetails((introduction + '\n\n' + rules).replaceAll('\n', '\r\n')))
+    expect(splitGoalDetails((introduction + '\n\n' + rules).replaceAll('\n', '\r\n')))
       .toEqual({ explanation: introduction, guidance: rules, label: 'We should / We should never' });
   });
   it('preserves a partial legacy guidance block and ignores empty labels', () => {
     const legacy = '**We should never:**\n\n- Lose the artist’s work.';
-    expect(splitAspirationDetails(prose + '\n\n' + legacy)).toEqual({ explanation: prose, guidance: legacy, label: 'We should never' });
+    expect(splitGoalDetails(prose + '\n\n' + legacy)).toEqual({ explanation: prose, guidance: legacy, label: 'We should never' });
     const empty = prose + '\n\n**We should:**';
-    expect(splitAspirationDetails(empty).guidance).toBe('');
-    expect(splitAspirationDetails(empty).explanation).toBe(empty);
+    expect(splitGoalDetails(empty).guidance).toBe('');
+    expect(splitGoalDetails(empty).explanation).toBe(empty);
   });
 });

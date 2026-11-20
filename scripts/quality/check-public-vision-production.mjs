@@ -36,7 +36,7 @@ async function checkPage(browser, content) {
     await expect(page.locator('.astrid-vision-standards-list h3')).toHaveCount(content.principles.length);
     await expect(page.locator('.astrid-vision > #astrid-vision-parts')).toHaveCount(0);
     const firstPillar = page.locator('.astrid-vision-principles > li').first();
-    const goalCount = content.pillars[0].characteristics?.length ?? 0;
+    const goalCount = (content.pillars[0].goals ?? content.pillars[0].characteristics)?.length ?? 0;
     await expect(firstPillar.locator('.astrid-vision-subject-counts')).toContainText(`${goalCount} ${goalCount === 1 ? 'goal' : 'goals'}`);
     await page.evaluate(() => {
       const original = HTMLDialogElement.prototype.showModal;

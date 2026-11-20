@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
-import { aspirationsForSubject } from '../../src/pages/Home/visionHierarchy';
+import { parsePublicVisionContent, type PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
+import { goalsForSubject } from '../../src/pages/Home/visionHierarchy';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 const folder = 'test-results/vision-captures';
@@ -26,7 +26,7 @@ for (const width of [320, 390, 760, 1440]) {
   test(`real vision grid, counts and on-demand catalogs at ${width}px`, async ({ page, request }, info) => {
     const response = await request.get(FEED);
     expect(response.ok()).toBeTruthy();
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width, height: 900 });
@@ -37,12 +37,12 @@ for (const width of [320, 390, 760, 1440]) {
     await expect(page.locator('#astrid-vision-parts, #astrid-vision-projects')).toHaveCount(0);
     await expect(page.getByRole('navigation', { name: 'Vision page sections' }).getByRole('link')).toHaveCount(4);
     for (const [i, pillar] of feed.pillars.entries()) {
-      const hierarchy = aspirationsForSubject(feed, { kind: 'pillar', id: pillar.id });
-      const groups = [...hierarchy.aspirations.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
+      const hierarchy = goalsForSubject(feed, { kind: 'pillar', id: pillar.id });
+      const groups = [...hierarchy.goals.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
       const gaps = new Set(groups.map(item => item.gap.id)).size;
       const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
       await expect(cards.nth(i).locator('.astrid-vision-subject-counts'))
-        .toHaveText(`${hierarchy.aspirations.length} ${hierarchy.aspirations.length === 1 ? 'goal' : 'goals'} · ${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
+        .toHaveText(`${hierarchy.goals.length} ${hierarchy.goals.length === 1 ? 'goal' : 'goals'} · ${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
       await expect(cards.nth(i).locator('h3')).toHaveText(pillar.title);
       await expect(cards.nth(i).locator(':scope > p')).toHaveText(pillar.descriptor);
       expect(await cards.nth(i).evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
@@ -171,7 +171,7 @@ for (const width of [320, 390]) {
   test(`compact principles, text catalogs and reachable bottom controls at ${width}px`, async ({ page, request }, info) => {
     const response = await request.get(FEED);
     expect(response.ok()).toBeTruthy();
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width, height: 844 });
@@ -192,12 +192,12 @@ for (const width of [320, 390]) {
     })).toBeLessThan(2);
     for (const [index, principle] of feed.principles.entries()) {
       const card = cards.nth(index);
-      const hierarchy = aspirationsForSubject(feed, { kind: 'principle', id: principle.id });
-      const groups = [...hierarchy.aspirations.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
+      const hierarchy = goalsForSubject(feed, { kind: 'principle', id: principle.id });
+      const groups = [...hierarchy.goals.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
       const gaps = new Set(groups.map(item => item.gap.id)).size;
       const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
       await expect(card.locator('.astrid-vision-subject-counts'))
-        .toHaveText(`${hierarchy.aspirations.length} ${hierarchy.aspirations.length === 1 ? 'goal' : 'goals'} · ${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
+        .toHaveText(`${hierarchy.goals.length} ${hierarchy.goals.length === 1 ? 'goal' : 'goals'} · ${gaps} ${gaps === 1 ? 'gap' : 'gaps'} · ${projects} ${projects === 1 ? 'project' : 'projects'}`);
       await expect(card.locator('h3')).toHaveText(principle.title);
       await expect(card.locator('.astrid-vision-principle-statement')).toHaveText(principle.statement!);
       const geometry = await card.evaluate(node => {
@@ -335,7 +335,7 @@ for (const width of [390, 1440]) {
     // Same regression case, now with the owner's bounded back/forward contract.
     const response = await request.get(FEED);
     expect(response.ok()).toBeTruthy();
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -422,7 +422,7 @@ for (const width of [390, 1440]) {
 test('two-column mobile pillars animate in reading order as scroll advances and reverses', async ({ page, request }, info) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });

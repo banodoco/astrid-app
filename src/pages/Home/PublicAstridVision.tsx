@@ -13,7 +13,7 @@ import { VisionDetailDialog } from './VisionDetailDialog';
 import { VisionDialog } from './VisionDialog';
 import { VisionPrincipleSigil } from './VisionPrincipleSigil';
 import { VisionSectionNav } from './VisionSectionNav';
-import { aspirationsForSubject, type VisionSubject } from './visionHierarchy';
+import { goalsForSubject, type VisionSubject } from './visionHierarchy';
 import type { PublicVisionContent } from './publicVisionContent';
 import './PublicAstridVision.css';
 import './VisionMobileLayout.css';
@@ -76,11 +76,11 @@ function PixelArrow() {
 /** Count exactly the primary groups rendered in the subject popup, including
  * completed work where that popup includes it. Supporting links never duplicate counts. */
 function SubjectCounts({ content, subject }: { content: PublicVisionContent; subject: VisionSubject }) {
-  const hierarchy = aspirationsForSubject(content, subject);
-  const groups = [...hierarchy.aspirations.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
+  const hierarchy = goalsForSubject(content, subject);
+  const groups = [...hierarchy.goals.flatMap(item => item.gaps), ...hierarchy.legacyGaps];
   const gaps = new Set(groups.map(item => item.gap.id)).size;
   const projects = new Set(groups.flatMap(item => item.projects.map(project => project.id))).size;
-  const goals = hierarchy.aspirations.length;
+  const goals = hierarchy.goals.length;
   return <span className="astrid-vision-subject-counts">
     <span>{goals} {goals === 1 ? 'goal' : 'goals'}</span><span aria-hidden="true"> · </span>
     <span>{gaps} {gaps === 1 ? 'gap' : 'gaps'}</span><span aria-hidden="true"> · </span>

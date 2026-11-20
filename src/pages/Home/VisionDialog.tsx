@@ -241,7 +241,7 @@ export function VisionDialog({ title, eyebrow, identity, className = '', childre
   }, [identity]);
 
   // Show a fade only where scrollable content actually continues. Observe both the
-  // viewport and its content so expanded aspirations, gaps and projects update the edges too.
+  // viewport and its content so expanded goals, gaps and projects update the edges too.
   useLayoutEffect(() => {
     const viewport = scrollRef.current;
     const inner = scrollContentRef.current;

@@ -166,6 +166,12 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
       (item: PublicVisionGoal) => 'principle:' + principle.id + '/' + item.id)),
   ]);
   for (const gap of gaps) {
+    if ((gap.goal !== undefined && !nonempty(gap.goal)) ||
+        (gap.aspiration !== undefined && !nonempty(gap.aspiration)) ||
+        (gap.supportingGoals !== undefined && !Array.isArray(gap.supportingGoals)) ||
+        (gap.supportingAspirations !== undefined && !Array.isArray(gap.supportingAspirations))) {
+      throw new Error('Unresolved or duplicate public vision goals');
+    }
     if (gap.goal !== undefined && gap.aspiration !== undefined && gap.goal !== gap.aspiration) {
       throw new Error('Primary goal compatibility fields disagree');
     }

@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
+import { parsePublicVisionContent, type PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
 import { legacyVisionFixture, visionFixture } from '../fixtures/public-vision';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
@@ -213,7 +213,7 @@ test('exported candidate feed renders real Packs rules and real goal links', asy
   // The fixture fallback also keeps this test runnable without a sibling checkout.
   // Cross-repository CI always supplies the exact candidate source export.
   const file = process.env.PUBLIC_VISION_FEED_FILE;
-  const feed = file ? JSON.parse(readFileSync(file, 'utf8')) : visionFixture();
+  const feed = parsePublicVisionContent(file ? JSON.parse(readFileSync(file, 'utf8')) : visionFixture());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
@@ -224,7 +224,7 @@ test('exported candidate feed renders real Packs rules and real goal links', asy
   const expected = feed.gaps.filter((gap: { assessment: string; primaryAppliesTo: string }) =>
     gap.assessment !== 'closed' && gap.primaryAppliesTo === 'pillar:' + pillar.id);
   await expect(dialog.locator('[data-gap-id]')).toHaveCount(expected.length);
-  const packs = pillar.goals.find((item: { title: string }) => item.title.startsWith('Packs')) ?? pillar.goals[0];
+  const packs = pillar.goals!.find((item: { title: string }) => item.title.startsWith('Packs')) ?? pillar.goals![0];
   const goal = dialog.locator('.astrid-vision-details-goal').filter({ has: page.locator('summary strong', { hasText: packs.title }) });
   await goal.locator('.astrid-vision-details-goal > summary').click();
   const rules = goal.locator('.astrid-vision-guidance');

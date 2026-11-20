@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
 
-test('pillars and principles use the same progressive disclosure of characteristics', async ({ page, request }) => {
+test('pillars and principles use the same progressive disclosure of goals', async ({ page, request }) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
   const live = await response.json();
@@ -11,8 +11,8 @@ test('pillars and principles use the same progressive disclosure of characterist
   const enrich = (subject: { id: string; title: string }) => ({
     ...subject,
     statement: 'A single defining sentence.',
-    explanationMarkdown: 'This paragraph explains the overarching intent without listing the characteristics again.',
-    characteristics: [
+    explanationMarkdown: 'This paragraph explains the overarching intent without listing the goals again.',
+    goals: [
       { id: 'agency', title: 'Creator agency', summary: 'Creators retain meaningful decisions.',
         detailsMarkdown: 'Detailed control remains available throughout the work.' },
       { id: 'continuity', title: 'Sustained practice', summary: 'Projects stay editable over time.',
@@ -22,7 +22,7 @@ test('pillars and principles use the same progressive disclosure of characterist
   const feed = {
     ...live,
     gaps: live.gaps.map((gap: Record<string, unknown>) => {
-      const copy = { ...gap }; delete copy.aspiration; delete copy.supportingAspirations; return copy;
+      const copy = { ...gap }; delete copy.goal; delete copy.supportingGoals; return copy;
     }),
     pillars: live.pillars.map(enrich),
     principles: live.principles.map(enrich),
@@ -49,21 +49,21 @@ test('pillars and principles use the same progressive disclosure of characterist
       await expect(dialog.locator('.astrid-vision-details-statement'))
         .toHaveText(entry.statement);
       await expect(dialog.getByRole('region', { name: 'Goals' })).toBeVisible();
-      const characteristics = dialog.locator('.astrid-vision-details-characteristic');
-      await expect(characteristics).toHaveCount(2);
-      // One rule separates the characteristics from the gaps. The final
+      const goals = dialog.locator('.astrid-vision-details-goal');
+      await expect(goals).toHaveCount(2);
+      // One rule separates the goals from the gaps. The final
       // row must not draw another border immediately above it.
-      await expect(characteristics.last()).toHaveCSS('border-bottom-width', '0px');
+      await expect(goals.last()).toHaveCSS('border-bottom-width', '0px');
       await expect(dialog.locator('.astrid-vision-details-gaps')).toHaveCSS('border-top-width', '1px');
-      await expect(characteristics.locator('summary')).toContainText([
+      await expect(goals.locator('summary')).toContainText([
         'Creator agencyCreators retain meaningful decisions.',
         'Sustained practiceProjects stay editable over time.',
       ]);
-      await expect(characteristics.first()).not.toHaveAttribute('open', '');
-      await expect(characteristics.first().locator('.astrid-vision-details-characteristic-body')).toBeHidden();
-      await characteristics.first().locator('summary').click();
-      await expect(characteristics.first()).toHaveAttribute('open', '');
-      await expect(characteristics.first().locator('.astrid-vision-details-characteristic-body'))
+      await expect(goals.first()).not.toHaveAttribute('open', '');
+      await expect(goals.first().locator('.astrid-vision-details-goal-body')).toBeHidden();
+      await goals.first().locator('summary').click();
+      await expect(goals.first()).toHaveAttribute('open', '');
+      await expect(goals.first().locator('.astrid-vision-details-goal-body'))
         .toContainText('Detailed control remains available');
       await expect(dialog.getByRole('region', { name: 'Current gaps and projects' })).toBeVisible();
       await page.keyboard.press('Escape');

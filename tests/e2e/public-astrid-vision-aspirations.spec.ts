@@ -38,7 +38,7 @@ async function expectGapPresentation(row: Locator) {
 }
 
 for (const width of [1440, 390]) {
-  test(`aspiration → gap → independent project disclosures at ${width}px`, async ({ page }, info) => {
+  test(`goal → gap → independent project disclosures at ${width}px`, async ({ page }, info) => {
     await page.setViewportSize({ width, height: 900 });
     const feed = visionFixture();
     const intros = [
@@ -55,23 +55,23 @@ for (const width of [1440, 390]) {
     feed.projects[2].status = 'done';
     await openVision(page, feed);
     const dialog = page.getByRole('dialog');
-    const aspirations = dialog.locator('.astrid-vision-details-aspiration');
-    await expect(aspirations).toHaveCount(3);
-    const aspiration = aspirations.first();
-    const disclosure = aspiration.locator('.astrid-vision-details-characteristic');
+    const goals = dialog.locator('.astrid-vision-details-goal');
+    await expect(goals).toHaveCount(3);
+    const goal = goals.first();
+    const disclosure = goal.locator('.astrid-vision-details-goal');
     await expect(disclosure).not.toHaveAttribute('open', '');
-    const gaps = aspiration.locator('.astrid-vision-details-gap');
+    const gaps = goal.locator('.astrid-vision-details-gap');
     await expect(gaps).toHaveCount(2);
     const gapSummary = gaps.first().locator(':scope > summary');
     await expect(gapSummary).toContainText('Finish ambitious work');
     await expect(gapSummary).toContainText('3 projects');
     await expect(gapSummary).not.toContainText('Live composition');
-    await expect(aspiration.locator('.astrid-vision-details-gap-group-label')).toHaveText('Gaps');
+    await expect(goal.locator('.astrid-vision-details-gap-group-label')).toHaveText('Gaps');
     await expect(gaps.nth(1).locator('.astrid-vision-details-gap-preview')).toHaveCount(0);
     await expect(gaps.nth(1)).not.toContainText('No project yet');
-    await expect(dialog.locator('.astrid-vision-details-aspiration-empty')).toHaveCount(0);
-    await expect(aspirations.nth(1).locator('.astrid-vision-details-gap-group')).toHaveCount(0);
-    await expect(aspirations.nth(2).locator('.astrid-vision-details-gap-group')).toHaveCount(0);
+    await expect(dialog.locator('.astrid-vision-details-goal-empty')).toHaveCount(0);
+    await expect(goals.nth(1).locator('.astrid-vision-details-gap-group')).toHaveCount(0);
+    await expect(goals.nth(2).locator('.astrid-vision-details-gap-group')).toHaveCount(0);
     await expect(dialog.getByRole('region', { name: 'Current gaps and projects' })).toHaveCount(0);
     await expect(gaps.first().locator('.astrid-vision-details-gap-body')).toBeHidden();
     await expect(gaps.first().locator('.astrid-vision-project').first()).toBeHidden();
@@ -149,7 +149,7 @@ for (const width of [1440, 390]) {
     const projectsFor = (id: string) => feed.projects
       .filter(project => (project.primaryGapId ?? project.gapIds[0]) === id)
       .sort((a, b) => a.priorityOrder - b.priorityOrder);
-    const gap = feed.gaps.find(item => item.assessment !== 'closed' && item.aspiration &&
+    const gap = feed.gaps.find(item => item.assessment !== 'closed' && item.goal &&
       item.primaryAppliesTo?.startsWith('pillar:') && projectsFor(item.id).length >= 2);
     expect(gap).toBeDefined();
     const pillar = feed.pillars.find(item => 'pillar:' + item.id === gap!.primaryAppliesTo)!;
@@ -209,7 +209,7 @@ test('legacy gap cards also label the gap and put only desired state before proj
   }
 });
 
-test('exported candidate feed renders real Packs rules and real aspiration links', async ({ page }, info) => {
+test('exported candidate feed renders real Packs rules and real goal links', async ({ page }, info) => {
   // The fixture fallback also keeps this test runnable without a sibling checkout.
   // Cross-repository CI always supplies the exact candidate source export.
   const file = process.env.PUBLIC_VISION_FEED_FILE;
@@ -224,15 +224,15 @@ test('exported candidate feed renders real Packs rules and real aspiration links
   const expected = feed.gaps.filter((gap: { assessment: string; primaryAppliesTo: string }) =>
     gap.assessment !== 'closed' && gap.primaryAppliesTo === 'pillar:' + pillar.id);
   await expect(dialog.locator('[data-gap-id]')).toHaveCount(expected.length);
-  const packs = pillar.characteristics.find((item: { title: string }) => item.title.startsWith('Packs')) ?? pillar.characteristics[0];
-  const aspiration = dialog.locator('.astrid-vision-details-aspiration').filter({ has: page.locator('summary strong', { hasText: packs.title }) });
-  await aspiration.locator('.astrid-vision-details-characteristic > summary').click();
-  const rules = aspiration.locator('.astrid-vision-guidance');
+  const packs = pillar.goals.find((item: { title: string }) => item.title.startsWith('Packs')) ?? pillar.goals[0];
+  const goal = dialog.locator('.astrid-vision-details-goal').filter({ has: page.locator('summary strong', { hasText: packs.title }) });
+  await goal.locator('.astrid-vision-details-goal > summary').click();
+  const rules = goal.locator('.astrid-vision-guidance');
   await expect(rules.locator('.astrid-vision-guidance-body')).toBeHidden();
   await rules.locator('summary').click();
   await expect(rules.locator('.astrid-vision-guidance-body')).toBeVisible();
-  await expect(aspiration.locator('.astrid-vision-details-characteristic-body')).toContainText('We should never:');
-  await expect(aspiration.locator('.astrid-vision-details-characteristic-body ul')).toHaveCount(2);
+  await expect(goal.locator('.astrid-vision-details-goal-body')).toContainText('We should never:');
+  await expect(goal.locator('.astrid-vision-details-goal-body ul')).toHaveCount(2);
   mkdirSync('test-results/vision-captures', { recursive: true });
   await page.screenshot({ path: `test-results/vision-captures/${file ? 'candidate' : 'fixture'}-packs-${info.project.name}.png` });
 });
@@ -292,7 +292,7 @@ test.describe('a dismissal consumes precisely one gesture', () => {
       }, ending);
       await expect(dialog).toBeVisible();
     }
-    const disclosure = dialog.locator('.astrid-vision-details-characteristic').first();
+    const disclosure = dialog.locator('.astrid-vision-details-goal').first();
     await disclosure.locator(':scope > summary').focus();
     await page.keyboard.press('Enter');
     await expect(disclosure).toHaveAttribute('open', '');
@@ -303,13 +303,13 @@ test.describe('a dismissal consumes precisely one gesture', () => {
 });
 
 
-test('gap groups use singular labels and empty aspirations stay quiet', async ({ page }) => {
+test('gap groups use singular labels and empty goals stay quiet', async ({ page }) => {
   const feed = visionFixture();
   feed.gaps = [feed.gaps[0]];
   await openVision(page, feed);
   const dialog = page.getByRole('dialog');
   await expect(dialog.locator('.astrid-vision-details-gap-group-label')).toHaveText(['Gap']);
-  await expect(dialog.locator('.astrid-vision-details-gap-label, .astrid-vision-details-aspiration-empty')).toHaveCount(0);
+  await expect(dialog.locator('.astrid-vision-details-gap-label, .astrid-vision-details-goal-empty')).toHaveCount(0);
   await expect(dialog).not.toContainText('No gap is measured');
   await dialog.locator('.astrid-vision-details-gap > summary').click();
   await expectGapPresentation(dialog.locator('.astrid-vision-details-gap'));

@@ -9,7 +9,7 @@ export const PUBLIC_VISION_REPO_URL = 'https://github.com/banodoco/astrid-dev';
 /** One shared editorial format for pillars and guiding principles.
  * Fields are optional while legacy schema-v1 snapshots remain cached.
  * When present, all three must be present on all eight subjects. */
-export interface PublicVisionCharacteristic {
+export interface PublicVisionGoal {
   id: string;
   title: string;
   summary: string;
@@ -21,7 +21,9 @@ export interface PublicVisionSubject {
   bodyMarkdown: string;
   statement?: string;
   explanationMarkdown?: string;
-  characteristics?: PublicVisionCharacteristic[];
+  goals?: PublicVisionGoal[];
+  /** Read only for legacy published schema-v1 snapshots. */
+  characteristics?: PublicVisionGoal[];
 }
 export interface PublicVisionPillar extends PublicVisionSubject {
   descriptor: string;
@@ -35,7 +37,10 @@ export interface PublicVisionGap {
   appliesTo: string[];
   /** Primary relationship is explicit in new feeds; first appliesTo is the legacy fallback. */
   primaryAppliesTo?: string;
-  /** Plan 53 refs use <kind>:<element>/<aspiration>; absent in older v1 feeds. */
+  /** Stable identity: <pillar|principle>:<element>/<goal-slug>. */
+  goal?: string;
+  supportingGoals?: string[];
+  /** Read only for legacy published schema-v1 snapshots. */
   aspiration?: string;
   supportingAspirations?: string[];
   desiredMarkdown: string;
@@ -67,6 +72,9 @@ export interface PublicVisionContent {
   gaps: PublicVisionGap[];
   projects: PublicVisionProject[];
 }
+
+/** Deprecated TypeScript alias for snapshots produced before the Goals rename. */
+export type PublicVisionCharacteristic = PublicVisionGoal;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -118,17 +126,27 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
     throw new Error('Invalid public vision feed content');
   }
   const subjectsAll = [...pillars, ...principles];
+  const rowsFor = (subject: Record<string, unknown>): unknown[] | null => {
+    const rows = subject.goals ?? subject.characteristics;
+    return Array.isArray(rows) ? rows : null;
+  };
+  for (const subject of subjectsAll) {
+    if (subject.goals !== undefined && subject.characteristics !== undefined &&
+        JSON.stringify(subject.goals) !== JSON.stringify(subject.characteristics)) {
+      throw new Error('Goal compatibility fields disagree');
+    }
+  }
   const anyStructured = subjectsAll.some(p =>
-    'statement' in p || 'explanationMarkdown' in p || 'characteristics' in p);
+    'statement' in p || 'explanationMarkdown' in p || 'goals' in p || 'characteristics' in p);
   if (anyStructured && !subjectsAll.every(p =>
     nonempty(p.statement) && nonempty(p.explanationMarkdown) &&
-    Array.isArray(p.characteristics) && p.characteristics.length >= 2 &&
-    p.characteristics.length <= 6 &&
-    p.characteristics.every((c: unknown) => isRecord(c) &&
+    rowsFor(p) !== null && rowsFor(p)!.length >= 2 &&
+    rowsFor(p)!.length <= 6 &&
+    rowsFor(p)!.every((c: unknown) => isRecord(c) &&
       typeof c.id === 'string' && /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(c.id) &&
       nonempty(c.title) && nonempty(c.summary) && nonempty(c.detailsMarkdown)) &&
-    new Set(p.characteristics.map((c: { id: string }) => c.id)).size === p.characteristics.length)) {
-    throw new Error('Incomplete or malformed structured vision characteristics');
+    new Set(rowsFor(p)!.map((c: unknown) => isRecord(c) ? String(c.id) : '')).size === rowsFor(p)!.length)) {
+    throw new Error('Incomplete or malformed structured vision goals');
   }
   const unique = (items: Array<{ id: string }>) => new Set(items.map(item => item.id)).size === items.length;
   const ids = new Set(gaps.map(gap => gap.id));
@@ -141,28 +159,45 @@ export function parsePublicVisionContent(value: unknown): PublicVisionContent {
       !projects.every(project => project.gapIds.every(id => ids.has(id)))) {
     throw new Error('Unresolved or duplicate public vision relationships');
   }
-  const aspirationRefs = new Set([
-    ...pillars.flatMap(pillar => (pillar.characteristics ?? []).map(
-      (item: PublicVisionCharacteristic) => 'pillar:' + pillar.id + '/' + item.id)),
-    ...principles.flatMap(principle => (principle.characteristics ?? []).map(
-      (item: PublicVisionCharacteristic) => 'principle:' + principle.id + '/' + item.id)),
+  const goalRefs = new Set([
+    ...pillars.flatMap(pillar => (pillar.goals ?? pillar.characteristics ?? []).map(
+      (item: PublicVisionGoal) => 'pillar:' + pillar.id + '/' + item.id)),
+    ...principles.flatMap(principle => (principle.goals ?? principle.characteristics ?? []).map(
+      (item: PublicVisionGoal) => 'principle:' + principle.id + '/' + item.id)),
   ]);
   for (const gap of gaps) {
-    if (gap.aspiration === undefined && gap.supportingAspirations === undefined) continue;
-    const supporting = gap.supportingAspirations === undefined ? [] : gap.supportingAspirations;
-    if (!nonempty(gap.aspiration) || !aspirationRefs.has(gap.aspiration) ||
-        !Array.isArray(supporting) || !supporting.every(ref => nonempty(ref) && aspirationRefs.has(ref)) ||
-        new Set([gap.aspiration, ...supporting]).size !== supporting.length + 1) {
-      throw new Error('Unresolved or duplicate public vision aspirations');
+    if (gap.goal !== undefined && gap.aspiration !== undefined && gap.goal !== gap.aspiration) {
+      throw new Error('Primary goal compatibility fields disagree');
     }
-    const elements = [...new Set([gap.aspiration, ...supporting].map(ref => ref.split('/')[0]))];
+    if (gap.supportingGoals !== undefined && gap.supportingAspirations !== undefined &&
+        JSON.stringify(gap.supportingGoals) !== JSON.stringify(gap.supportingAspirations)) {
+      throw new Error('Supporting goal compatibility fields disagree');
+    }
+    const goal = gap.goal ?? gap.aspiration;
+    const supporting = gap.supportingGoals ?? gap.supportingAspirations;
+    if (goal === undefined && supporting === undefined) continue;
+    const references = supporting === undefined ? [] : supporting;
+    if (!nonempty(goal) || !goalRefs.has(goal) ||
+        !Array.isArray(references) || !references.every(ref => nonempty(ref) && goalRefs.has(ref)) ||
+        new Set([goal, ...references]).size !== references.length + 1) {
+      throw new Error('Unresolved or duplicate public vision goals');
+    }
+    const elements = [...new Set([goal, ...references].map(ref => ref.split('/')[0]))];
     if (elements[0] !== (gap.primaryAppliesTo ?? gap.appliesTo[0]) ||
         elements.length !== gap.appliesTo.length ||
         elements.some((ref, index) => ref !== gap.appliesTo[index])) {
-      throw new Error('Aspiration relationships disagree with their vision elements');
+      throw new Error('Goal relationships disagree with their vision elements');
     }
   }
-  return value as unknown as PublicVisionContent;
+  // Normalize both wire representations to one app-facing Goals model. Legacy
+  // keys remain available only for old snapshot consumers and cached clients.
+  return {
+    ...value,
+    pillars: pillars.map(subject => ({ ...subject, goals: subject.goals ?? subject.characteristics })),
+    principles: principles.map(subject => ({ ...subject, goals: subject.goals ?? subject.characteristics })),
+    gaps: gaps.map(gap => ({ ...gap, goal: gap.goal ?? gap.aspiration,
+      supportingGoals: gap.supportingGoals ?? gap.supportingAspirations })),
+  } as unknown as PublicVisionContent;
 }
 
 // One validated snapshot and one request owner for both Home preloading and

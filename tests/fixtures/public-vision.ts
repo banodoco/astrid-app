@@ -7,7 +7,7 @@ export function visionFixture(): PublicVisionContent {
   const subject = (id: string, title: string): PublicVisionSubject => ({
     id, title, bodyMarkdown: 'An open creative workspace.', statement: 'Creators shape the tools they use.',
     explanationMarkdown: 'Our tools should support ambitious work while keeping decisions in the hands of the people creating it.',
-    characteristics: [
+    goals: [
       { id: 'agency', title: 'Creative agency', summary: 'Creators direct their work.',
         detailsMarkdown: 'People can shape the tools around their work, inspect their choices and return to earlier decisions as they learn.\n\n**We should:**\n\n- Keep choices reversible.\n\n**We should never:**\n\n- Hide an irreversible choice.' },
       { id: 'continuity', title: 'Sustained practice', summary: 'Work stays editable over time.',
@@ -16,9 +16,9 @@ export function visionFixture(): PublicVisionContent {
         detailsMarkdown: 'Creators can explore unfamiliar directions without losing the work they have already made or the tools they understand.' },
     ],
   });
-  const gap = (id: string, title: string, aspiration: string) => ({
+  const gap = (id: string, title: string, goal: string) => ({
     id, title, assessment: 'open', assessmentDetail: 'Open',
-    appliesTo: ['pillar:art'], primaryAppliesTo: 'pillar:art', aspiration, supportingAspirations: [] as string[],
+    appliesTo: ['pillar:art'], primaryAppliesTo: 'pillar:art', goal, supportingGoals: [] as string[],
     desiredMarkdown: 'The creator can make the complete work.', currentMarkdown: 'A manual workaround is still required.',
     missingMarkdown: 'The reusable connection is missing.', closureEvidenceMarkdown: 'A creator completes the journey without the workaround.',
     githubUrl: base + 'vision/gaps/' + id + '-example.md',
@@ -34,7 +34,7 @@ export function visionFixture(): PublicVisionContent {
       .map(([id, title]) => subject(id, title)),
     gaps: [
       { ...gap('AA-001', 'Finish ambitious work', 'pillar:art/agency'),
-        supportingAspirations: ['principle:open-by-design/agency'], appliesTo: ['pillar:art', 'principle:open-by-design'] },
+        supportingGoals: ['principle:open-by-design/agency'], appliesTo: ['pillar:art', 'principle:open-by-design'] },
       gap('AA-002', 'Explore new media', 'pillar:art/agency'),
       { ...gap('AA-003', 'Keep creative history', 'pillar:art/continuity'), assessment: 'closed' },
     ],
@@ -48,6 +48,6 @@ export function visionFixture(): PublicVisionContent {
 
 export function legacyVisionFixture(): PublicVisionContent {
   const value = visionFixture();
-  for (const gap of value.gaps) { delete gap.aspiration; delete gap.supportingAspirations; }
+  for (const gap of value.gaps) { delete gap.goal; delete gap.supportingGoals; }
   return value;
 }

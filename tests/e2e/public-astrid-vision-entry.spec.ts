@@ -680,7 +680,7 @@ test('feedback follow-up every pillar and principle counts Goals and labels the 
     const cards = page.locator(kind === 'pillar' ? '.astrid-vision-principles > li' : '.astrid-vision-standards-list > li');
     await expect(cards).toHaveCount(entries.length);
     for (const [index, entry] of entries.entries()) {
-      const count = entry.characteristics?.length ?? 0;
+      const count = entry.goals?.length ?? 0;
       await expect.soft(cards.nth(index).locator('.astrid-vision-subject-counts')).toContainText(`${count} ${count === 1 ? 'goal' : 'goals'}`);
       expect.soft(await cards.nth(index).evaluate(node => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
     }
@@ -688,7 +688,7 @@ test('feedback follow-up every pillar and principle counts Goals and labels the 
     const dialog = page.getByRole('dialog');
     await expect.soft(dialog.getByRole('region', { name: 'Goals', exact: true })).toBeVisible();
     await expect.soft(dialog.getByRole('heading', { name: 'Goals', exact: true })).toBeVisible();
-    await expect(dialog.locator('.astrid-vision-details-aspiration')).toHaveCount(entries[0].characteristics!.length);
+    await expect(dialog.locator('.astrid-vision-details-goal')).toHaveCount(entries[0].goals!.length);
     await page.keyboard.press('Escape');
   }
   await page.locator('.astrid-vision-standards-list').scrollIntoViewIfNeeded();

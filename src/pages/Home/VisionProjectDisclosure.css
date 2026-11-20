@@ -12,7 +12,7 @@
 
 /* A gap expands into distinct readable project cards, not another accordion. */
 .astrid-vision-details-gap:not([open]) > .astrid-vision-details-gap-body,
-.astrid-vision-details-characteristic:not([open]) > .astrid-vision-details-characteristic-body,
+.astrid-vision-details-goal:not([open]) > .astrid-vision-details-goal-body,
 .astrid-vision-guidance:not([open]) > .astrid-vision-guidance-body { display: none; }
 .astrid-vision-project-disclosures > ul { display: grid; gap: 10px; }
 .astrid-vision-project-disclosures > ul > li { min-width: 0; padding: 0; border: 0; }

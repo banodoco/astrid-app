@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
+import { parsePublicVisionContent, type PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
 
 test.setTimeout(90_000);
 
@@ -25,7 +25,7 @@ for (const width of [390, 1440]) {
     if (width === 1440) test.use({ isMobile: false, deviceScaleFactor: 1, hasTouch: false });
     test(`opening every popup keeps the header and background stationary at ${width}px`, async ({ page, request }, info) => {
       const response = await request.get(FEED); expect(response.ok()).toBe(true);
-      const feed = await response.json() as PublicVisionContent;
+      const feed = parsePublicVisionContent(await response.json());
       await page.route(FEED, route => route.fulfill({ json: feed }));
       await page.setViewportSize({ width, height: 844 });
       await page.goto('/vision', { waitUntil: 'domcontentloaded' });
@@ -80,7 +80,7 @@ for (const width of [390, 1440]) {
 
 test('cold skeleton and loaded hero share layout without restarting a text entrance', async ({ page, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   await page.route(FEED, async route => { await gate; await route.fulfill({ json: feed }); });
@@ -101,7 +101,7 @@ test('cold skeleton and loaded hero share layout without restarting a text entra
 
 test('Home to Vision joins its pending preload and keeps headline line boxes stable', async ({ page, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   let release!: () => void;
   const gate = new Promise<void>(resolve => { release = resolve; });
   let requests = 0;
@@ -156,7 +156,7 @@ test('Home to Vision joins its pending preload and keeps headline line boxes sta
 // Use tablet emulation explicitly rather than resizing a 3x phone context.
 test('iPad single-screen Home rejects document overflow and remains fitted', async ({ browser, baseURL, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   const context = await browser.newContext({ baseURL, viewport: { width: 820, height: 1180 },
     screen: { width: 820, height: 1180 }, isMobile: true, hasTouch: true,
     deviceScaleFactor: 1, reducedMotion: 'reduce' });
@@ -207,7 +207,7 @@ test('iPad single-screen Home rejects document overflow and remains fitted', asy
 
 test('iPad returns from scrolled Vision at the top without a second adjustment', async ({ browser, baseURL, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   const context = await browser.newContext({ baseURL, viewport: { width: 820, height: 1180 },
     screen: { width: 820, height: 1180 }, isMobile: true, hasTouch: true,
     deviceScaleFactor: 1, reducedMotion: 'no-preference' });
@@ -300,7 +300,7 @@ for (const width of [375, 390, 414]) {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
     await page.setViewportSize({ width, height: 844 });
     const response = await request.get(FEED); expect(response.ok()).toBe(true);
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     const preloaded = page.waitForResponse(FEED);
     await page.goto('/home', { waitUntil: 'domcontentloaded' });
@@ -337,7 +337,7 @@ for (const width of [375, 390, 414]) {
 
 test('headline remains normal full-column flow on cold entry, reload and viewport changes', async ({ page, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto('/vision', { waitUntil: 'domcontentloaded' });
@@ -383,7 +383,7 @@ for (const scenario of [
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       await page.clock.setFixedTime(new Date(`2026-11-15T${scenario.hour}:00:00Z`));
       const response = await request.get(FEED); expect(response.ok()).toBe(true);
-      const feed = await response.json() as PublicVisionContent;
+      const feed = parsePublicVisionContent(await response.json());
       await page.route(FEED, route => route.fulfill({ json: feed }));
       await page.goto('/vision', { waitUntil: 'domcontentloaded' });
       await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4, { timeout: 30000 });
@@ -508,7 +508,7 @@ for (const scenario of [
 
 test('shared popup reveal respects reduced motion and cancels on early close', async ({ page, request }) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -549,7 +549,7 @@ test.describe('feedback follow-up desktop navigation', () => {
   test.use({ isMobile: false, hasTouch: false, deviceScaleFactor: 1 });
   test('scrolled Vision return keeps a visible shared mink without shifting Home', async ({ page, request }, info) => {
     const response = await request.get(FEED); expect(response.ok()).toBe(true);
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.setViewportSize({ width: 1440, height: 900 });
     await page.emulateMedia({ reducedMotion: 'no-preference' });
@@ -616,7 +616,7 @@ test.describe('feedback follow-up desktop navigation', () => {
 
 test('feedback follow-up arrows use free gutters and fall back on narrow screens', async ({ page, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -670,7 +670,7 @@ test('feedback follow-up arrows use free gutters and fall back on narrow screens
 
 test('feedback follow-up every pillar and principle counts Goals and labels the popup', async ({ page, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -698,7 +698,7 @@ test('feedback follow-up every pillar and principle counts Goals and labels the 
 
 test('closing native dialog preserves a subsequent explicit focus handoff', async ({ page, request }, info) => {
   const response = await request.get(FEED); expect(response.ok()).toBe(true);
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -737,7 +737,7 @@ for (const width of [390, 1440]) {
       await page.setViewportSize({ width, height: 844 });
       await page.emulateMedia({ reducedMotion: 'no-preference' });
       const response = await request.get(FEED); expect(response.ok()).toBe(true);
-      const feed = await response.json() as PublicVisionContent;
+      const feed = parsePublicVisionContent(await response.json());
       await page.route(FEED, route => route.fulfill({ json: feed }));
       await page.goto('/vision', { waitUntil: 'domcontentloaded' });
       await expect(page.locator('.astrid-vision-principles > li')).toHaveCount(4, { timeout: 30000 });

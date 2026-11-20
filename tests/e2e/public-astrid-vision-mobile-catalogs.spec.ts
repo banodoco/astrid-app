@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
+import { parsePublicVisionContent, type PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
 import { goalsForSubject } from '../../src/pages/Home/visionHierarchy';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
@@ -26,7 +26,7 @@ for (const width of [320, 390, 760, 1440]) {
   test(`real vision grid, counts and on-demand catalogs at ${width}px`, async ({ page, request }, info) => {
     const response = await request.get(FEED);
     expect(response.ok()).toBeTruthy();
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width, height: 900 });
@@ -171,7 +171,7 @@ for (const width of [320, 390]) {
   test(`compact principles, text catalogs and reachable bottom controls at ${width}px`, async ({ page, request }, info) => {
     const response = await request.get(FEED);
     expect(response.ok()).toBeTruthy();
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.setViewportSize({ width, height: 844 });
@@ -335,7 +335,7 @@ for (const width of [390, 1440]) {
     // Same regression case, now with the owner's bounded back/forward contract.
     const response = await request.get(FEED);
     expect(response.ok()).toBeTruthy();
-    const feed = await response.json() as PublicVisionContent;
+    const feed = parsePublicVisionContent(await response.json());
     await page.route(FEED, route => route.fulfill({ json: feed }));
     await page.setViewportSize({ width, height: 900 });
     await page.emulateMedia({ reducedMotion: 'reduce' });
@@ -422,7 +422,7 @@ for (const width of [390, 1440]) {
 test('two-column mobile pillars animate in reading order as scroll advances and reverses', async ({ page, request }, info) => {
   const response = await request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   await page.setViewportSize({ width: 390, height: 844 });
   await page.emulateMedia({ reducedMotion: 'no-preference' });

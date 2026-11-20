@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, writeFileSync } from 'node:fs';
-import type { PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
+import { parsePublicVisionContent, type PublicVisionContent } from '../../src/pages/Home/publicVisionContent';
 import { visionFixture } from '../fixtures/public-vision';
 
 const FEED = 'https://raw.githubusercontent.com/banodoco/astrid-dev/vision-published/vision.json';
@@ -9,7 +9,7 @@ const folder = 'test-results/vision-captures';
 async function pinLive(page: Page) {
   const response = await page.request.get(FEED);
   expect(response.ok()).toBeTruthy();
-  const feed = await response.json() as PublicVisionContent;
+  const feed = parsePublicVisionContent(await response.json());
   await page.route(FEED, route => route.fulfill({ json: feed }));
   return feed;
 }

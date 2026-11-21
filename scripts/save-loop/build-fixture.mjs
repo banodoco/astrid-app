@@ -17,7 +17,6 @@
 import {spawn, spawnSync} from 'node:child_process';
 import {createHash, randomUUID} from 'node:crypto';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
@@ -34,24 +33,71 @@ const videoCount = Math.round(clipTarget * 0.06);
 const audioCount = clipTarget - imageCount - videoCount;
 const visualTracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
 const audioTracks = ['A1', 'A2', 'A3'];
+let activeChild;
+let stopSignal;
+
+function stop(signal) {
+  if (stopSignal) return;
+  stopSignal = signal;
+  const exitCode = signal === 'SIGINT' ? 130 : 143;
+  const child = activeChild;
+  if (!child || child.exitCode !== null || child.signalCode !== null) {
+    process.exit(exitCode);
+  }
+
+  let escalation;
+  const finish = () => {
+    clearTimeout(escalation);
+    process.exit(exitCode);
+  };
+  child.once('exit', finish);
+  child.kill(signal);
+  escalation = setTimeout(() => {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    const finalWait = setTimeout(() => {
+      console.error(`build-fixture: owned child ${child.pid} did not exit after SIGKILL`);
+      process.exit(exitCode);
+    }, 2_000);
+    child.once('exit', () => clearTimeout(finalWait));
+  }, 2_000);
+}
+
+process.on('SIGINT', () => stop('SIGINT'));
+process.on('SIGTERM', () => stop('SIGTERM'));
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {stdio: 'inherit', ...options});
+    activeChild = child;
     let settled = false;
+    const stopChild = async (error) => {
+      if (settled) return;
+      settled = true;
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = new Promise(resolve => child.once('exit', resolve));
+        child.kill('SIGTERM');
+        await Promise.race([exited, new Promise(resolve => setTimeout(resolve, 2_000))]);
+        if (child.exitCode === null && child.signalCode === null) {
+          const exitedAfterKill = new Promise(resolve => child.once('exit', resolve));
+          child.kill('SIGKILL');
+          await Promise.race([exitedAfterKill, new Promise(resolve => setTimeout(resolve, 2_000))]);
+        }
+      }
+      if (activeChild === child) activeChild = null;
+      reject(error);
+    };
     const diskWatch = setInterval(() => {
       try {
         const free = freeBytes();
         if (free >= 15 * 1024 ** 3 || settled) return;
-        settled = true;
-        child.kill('SIGTERM');
-        reject(new Error(`stopping ${command}: ${(free / 1024 ** 3).toFixed(1)} GB free; Plan 77 floor is 15 GB`));
+        void stopChild(new Error(`stopping ${command}: ${(free / 1024 ** 3).toFixed(1)} GB free; Plan 77 floor is 15 GB`));
       } catch (error) {
-        if (!settled) { settled = true; child.kill('SIGTERM'); reject(error); }
+        void stopChild(error);
       }
     }, 10_000);
     const finish = callback => value => {
       clearInterval(diskWatch);
+      if (activeChild === child) activeChild = null;
       if (settled) return;
       settled = true;
       callback(value);
@@ -63,8 +109,7 @@ function run(command, args, options = {}) {
 }
 
 function freeBytes() {
-  const dir = os.platform() === 'linux' ? '/home/user' : os.homedir();
-  const result = spawnSync('df', ['-Pk', dir], {encoding: 'utf8'});
+  const result = spawnSync('df', ['-Pk', scratch], {encoding: 'utf8'});
   if (result.status !== 0) throw new Error(result.stderr || 'df failed');
   const availableKb = Number(result.stdout.trim().split(/\r?\n/).at(-1)?.trim().split(/\s+/)[3]);
   if (!Number.isFinite(availableKb)) throw new Error(`cannot parse free space from df: ${result.stdout}`);
@@ -544,8 +589,8 @@ async function main() {
   if (!Number.isInteger(clipTarget) || clipTarget < 616) throw new Error('SAVE_LOOP_CLIPS must be an integer >= 616');
   const ports = stackPorts(root);
   if (Number(origin.port) !== ports.editor) throw new Error(`SAVE_LOOP_BASE_URL port must match this stack's editor port ${ports.editor}`);
-  assertDisk();
   fs.mkdirSync(scratch, {recursive: true});
+  assertDisk();
   const mediaRoot = path.join(scratch, 'generated-media');
   const images = await mediaPool({dir: path.join(mediaRoot, 'images'), prefix: 'image-', suffix: '.png', count: imageCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `color=c=red:s=1920x1080:r=1:d=${imageCount}`,

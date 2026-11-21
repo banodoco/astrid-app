@@ -30,7 +30,9 @@ export type TimelineGestureReadBasis = {
   registry: AssetRegistry;
 } & ({ kind: 'track-label'; trackId: string; label: string } | ({ clipId: string } & ({ kind: 'split'; timeSeconds: number } | { kind: 'move'; trackId: string } | {
   kind: 'trim'; patch: Partial<Pick<TimelineConfig['clips'][number], 'from' | 'to' | 'hold' | 'speed'>>;
-} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext })));
+} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand;
+  /** Drops still in flight (this one included), by registry address and the entry each declared: the editor may already show them, and each drop's own save declares only its own asset. */
+  inFlight?: Readonly<Record<string, unknown>> } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext })));
 
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
@@ -493,6 +495,20 @@ export function createTimelineLocalSaveHandoff(options: {
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
+        if (gestureBasis?.kind === 'prepared-media' && gestureBasis.inFlight) {
+          // Another drop's asset is left to that drop's own save. It is ignored only at its declared address and
+          // value (and never this drop's own); any other registry difference still reaches the guards below.
+          const ownKey = gestureBasis.command.payload.asset.assetKey;
+          const declared = gestureBasis.inFlight;
+          const withoutOthers = (registry: AssetRegistry, includeOwn: boolean): AssetRegistry => {
+            const assets = registry.assets;
+            if (!assets) return registry;
+            return { ...registry, assets: Object.fromEntries(Object.entries(assets).filter(([key, entry]) =>
+              (key === ownKey && !includeOwn) || !Object.prototype.hasOwnProperty.call(declared, key) || !same(authoredJson(entry), authoredJson(declared[key])))) };
+          };
+          next.registry = withoutOthers(next.registry, false);
+          gestureBasis = { ...gestureBasis, registry: withoutOthers(gestureBasis.registry, true) };
+        }
         // A gesture proves its own effect below; an edit that names none must stay on rows the parent alone owns.
         const unnamedRefusal = hasChildren && gestureBasis === undefined
           ? unnamedEditRefusal(before, authoringSource, next) : undefined;

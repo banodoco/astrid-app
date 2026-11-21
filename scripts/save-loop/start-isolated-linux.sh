@@ -83,19 +83,24 @@ printf 'astrid-app-sl1-stack-v1 %s' "$ROOT" > "$OWNERSHIP_MARKER"
 chmod 600 "$OWNERSHIP_MARKER"
 
 cleanup_stack() {
-  local status=$? cleanup_status=0 pid version runtime_cli child_killer
+  local status=$? cleanup_status=0 pid version runtime_cli live_run_jobs
   trap - EXIT INT TERM
   if [[ -n "${RUN_CHILD_PID:-}" ]] && kill -0 "$RUN_CHILD_PID" 2>/dev/null; then
     echo "Stopping owned run child PID $RUN_CHILD_PID."
     kill -TERM "$RUN_CHILD_PID" 2>/dev/null || true
-    (
-      sleep 5
+    # Give sweep's bounded browser and Chrome teardown time to finish before
+    # escalating. jobs -pr avoids signaling a stale, already-reaped PID.
+    for _ in $(seq 1 100); do
+      live_run_jobs="$(jobs -pr)"
+      [[ " $live_run_jobs " == *" $RUN_CHILD_PID "* ]] || break
+      sleep 0.1
+    done
+    live_run_jobs="$(jobs -pr)"
+    if [[ " $live_run_jobs " == *" $RUN_CHILD_PID "* ]]; then
+      echo "Owned run child PID $RUN_CHILD_PID is still running after 10 seconds; sending KILL."
       kill -KILL "$RUN_CHILD_PID" 2>/dev/null || true
-    ) &
-    child_killer=$!
+    fi
     wait "$RUN_CHILD_PID" 2>/dev/null || true
-    kill "$child_killer" 2>/dev/null || true
-    wait "$child_killer" 2>/dev/null || true
     RUN_CHILD_PID=
   fi
   pid="${EDITOR_PID:-}"

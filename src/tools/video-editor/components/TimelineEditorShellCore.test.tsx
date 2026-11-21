@@ -2022,6 +2022,18 @@ describe('TimelineEditorShellCore — diverged conflict banner', () => {
     __conflictDialog = {};
   });
 
+  it('FIX16-R2-UNDO-UI offers Copy when a permanent refusal opens the conflict dialog', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    __chromeOverrides = { isConflictExhausted: true, permanentSaveRejection: true,
+      saveNotice: 'The Runtime refused this Undo.', copyRejectedSave };
+    __conflictDialog = { isOpen: true };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByText('This timeline changed somewhere else')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(copyRejectedSave).toHaveBeenCalledTimes(1);
+  });
+
   it('renders the diverged banner with the keep-mine and use-latest choices', () => {
     const reload = vi.fn();
     const keepMine = vi.fn();
@@ -2152,6 +2164,82 @@ describe('TimelineEditorShellCore — recovery draft banner', () => {
     expect(screen.getByRole('alert').textContent).toMatch(/changes have not been saved/i);
     fireEvent.click(screen.getByRole('button', { name: 'Retry save' }));
     expect(retryWatchdog).toHaveBeenCalled();
+  });
+
+  it('FIX16-UI offers the exact copy and explicit discard actions only for permanent rejection', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveNotice: 'This change is too large to save. Your changes are kept here but have not been saved.',
+      permanentSaveRejection: true,
+      copyRejectedSave, reloadFromServer,
+    };
+    const view = render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert').textContent).toContain('This change is too large to save.');
+    const copy = screen.getByRole('button', { name: 'Copy my change out' });
+    const discard = screen.getByRole('button', { name: 'Discard and reload the saved version' });
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(copy);
+    expect(copyRejectedSave).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep my unsaved edits' }));
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    // The other option is also an explicit, independently available action.
+    fireEvent.click(discard);
+    expect(reloadFromServer).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).toHaveBeenCalledWith({ discardRefusedSave: true });
+    view.unmount();
+
+    __chromeOverrides = {
+      saveNotice: 'Save not acknowledged',
+      permanentSaveRejection: false,
+      copyRejectedSave, reloadFromServer,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByRole('button', { name: 'Copy my change out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard and reload the saved version' })).toBeNull();
+  });
+
+  it('hides generic recovery Save them and Discard controls for a permanently rejected draft', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-10-08T13:43:57Z', baseVersion: 1 },
+      permanentSaveRejection: true,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByRole('button', { name: 'Save them' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
+  it('FIX16-UI confirms an exported file before canonical reload, never on download alone', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveNotice: 'Not saved: invalid request.',
+      permanentSaveRejection: true, copyRejectedSave, reloadFromServer,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'I saved the file — reload the saved version' }));
+    expect(reloadFromServer).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).toHaveBeenCalledWith({ discardRefusedSave: true });
+  });
+
+  it('FIX16-UI keeps edits untouched when a file export fails to start', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(false);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveNotice: 'Not saved: invalid request.',
+      permanentSaveRejection: true, copyRejectedSave, reloadFromServer,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(copyRejectedSave).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Keep a copy of your unsaved change')).toBeNull();
+    expect(reloadFromServer).not.toHaveBeenCalled();
   });
 
   it('does not render the recovery banner without a draft', () => {

@@ -298,8 +298,11 @@ describe('local editor saves through the durable outbox', () => {
     env.loadLatest.mockRejectedValueOnce(new Error('Offline'));
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(session.getState()).toMatchObject({ status: 'error', error: {
-      message: 'Draft retained; reload failed: Offline', failure: { code: 'invalid_timing', details },
+      kind: 'validation', code: 'invalid_timing', details,
+      message: expect.stringContaining('Invalid duration'),
     } });
+    // A permanent validation refusal never attempts canonical rollback at all.
+    expect(env.loadLatest).not.toHaveBeenCalled();
     expect(env.visible()).toEqual(trimmed);
     expect((await env.outboxes.list(scope))[0].intents).toHaveLength(2);
     await session.dispose();
@@ -422,7 +425,9 @@ describe('local editor saves through the durable outbox', () => {
     });
     await expect(session.flush()).rejects.toThrow('draft retained');
     expect(session.getState()).toMatchObject({ status: status === 409 ? 'conflict' : 'error', error: { code: 'binding_changed', details } });
-    expect(env.visible()).toEqual(canonical.canonicalDocument.parent_revision.payload);
+    // A real 409 displays canonical for conflict choice; 422 keeps the original
+    // dependent edit visible, without replacing it by the accepted prefix.
+    expect(env.visible()).toEqual(status === 409 ? canonical.canonicalDocument.parent_revision.payload : trimmed);
     const [stored] = await env.outboxes.list(scope);
     expect(stored.intents).toHaveLength(1);
     expect(stored.intents[0].payload).toEqual(originalRecord.intents[1].payload);

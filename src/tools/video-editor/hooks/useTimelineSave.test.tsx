@@ -278,6 +278,47 @@ async function settleInitialRecoveryCheck() {
   await flush();
 }
 
+async function setupRefusedSave(status: number) {
+  const locks = new Set<string>();
+  const originalLocks = Object.getOwnPropertyDescriptor(navigator, 'locks');
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+    request: async (name: string, _options: unknown, work: (lock: object | null) => Promise<unknown>) => {
+      if (locks.has(name)) return work(null);
+      locks.add(name);
+      try { return await work({}); } finally { locks.delete(name); }
+    },
+  } });
+  const restoreLocks = () => {
+    if (originalLocks) Object.defineProperty(navigator, 'locks', originalLocks);
+    else Reflect.deleteProperty(navigator, 'locks');
+  };
+  const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+  const head = { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'r0', headPublicationId: 'p0' };
+  const config = createDefaultTimelineConfig();
+  const registry = { assets: {} };
+  const canonical = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
+    { timelineId: scope.timelineId }).data.canonical_document;
+  canonical.parent_revision.payload = { config, clips: [], registry, occurrences: [] };
+  canonical.parent_revision.content_digest = fixtureDigest(canonical.parent_revision.payload);
+  const data = await buildTimelineData(config, registry, undefined, 1, undefined, head);
+  const send = vi.fn().mockRejectedValue(new ApiError(status, 'http_error', 'Refused timeline save'));
+  const mount = () => setup(async () => { throw new Error('No legacy save'); }, undefined, { data,
+    loadBasis: async () => ({ head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: canonical }),
+    capabilities: { commitTimeline: send, getRecoverableIdentity: async () => ({ actorId: scope.actorId, realmId: scope.realmId }) },
+  });
+  const edit = async (tab: ReturnType<typeof mount>, file: string, flush = false) => {
+    await vi.waitFor(() => expect(tab.hook.result.current.isTimelineEditingReady()).toBe(true));
+    const next = await buildTimelineData({ ...config, output: { ...config.output, file } }, registry, undefined, 1, undefined, head);
+    await act(async () => { tab.hook.result.current.commitData(next, { save: true }); });
+    if (flush) {
+      await act(async () => { await expect(tab.hook.result.current.flushPendingSave()).rejects.toThrow(); });
+    } else {
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+    }
+  };
+  return { mount, edit, locks, restoreLocks, send, scope };
+}
+
 describe('useTimelineSave — recovered draft durability', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -288,6 +329,88 @@ describe('useTimelineSave — recovered draft durability', () => {
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('generic recovery Discard clears only the exact snapshot that was offered', async () => {
+    const { mount, edit, locks, restoreLocks } = await setupRefusedSave(409);
+    const first = mount();
+    let reopened: ReturnType<typeof mount> | undefined;
+    try {
+      await edit(first, 'offered-snapshot.mp4', true);
+      first.hook.unmount();
+      await vi.waitFor(() => expect(locks.size).toBe(0));
+      reopened = mount();
+      await vi.waitFor(() => expect(reopened!.hook.result.current.recoveryDraft).toBeTruthy());
+      const offered = await loadTimelineDraft('timeline-1');
+      expect(offered?.draft?.config?.output?.file).toBe('offered-snapshot.mp4');
+      const replacement = { ...offered!, updatedAt: new Date(Date.now() + 1000).toISOString(),
+        draft: { ...offered!.draft, config: { ...offered!.draft.config, output: { ...offered!.draft.config.output, file: 'replacement.mp4' } } } };
+      await saveTimelineDraft('timeline-1', replacement.draft, replacement.baseVersion, {
+        ownerId: replacement.ownerId,
+        outboxOwnerId: replacement.outboxOwnerId,
+        draftIdentity: crypto.randomUUID(),
+      });
+      const loadedReplacement = await loadTimelineDraft('timeline-1');
+      expect(loadedReplacement?.draft?.config?.output?.file).toBe('replacement.mp4');
+      await act(async () => { await reopened!.hook.result.current.discardRecoveredDraft(); });
+      expect(await loadTimelineDraft('timeline-1')).toEqual(loadedReplacement);
+    } finally {
+      first.hook.unmount();
+      reopened?.hook.unmount();
+      restoreLocks();
+    }
+  });
+
+  it('does not export a reopened deferred edit after another tab replaces its shared snapshot', async () => {
+    const { mount, edit, locks, restoreLocks, scope } = await setupRefusedSave(413);
+    const first = mount();
+    let reopened: ReturnType<typeof mount> | undefined;
+    const originalBlob = Blob;
+    const originalUrl = URL;
+    let exported = false;
+    try {
+      await edit(first, 'rejected.mp4', true);
+      first.hook.unmount();
+      await vi.waitFor(() => expect(locks.size).toBe(0));
+      reopened = mount();
+      await vi.waitFor(() => expect(reopened!.hook.result.current.permanentSaveRejection).toBe(true));
+      await edit(reopened, 'reopened-deferred-edit.mp4');
+      const reopenedSnapshot = await loadTimelineDraft('timeline-1');
+      expect(reopenedSnapshot?.draft?.config?.output?.file).toBe('reopened-deferred-edit.mp4');
+      await saveTimelineDraft('timeline-1', {
+        ...reopenedSnapshot!.draft,
+        config: { ...reopenedSnapshot!.draft.config, output: { ...reopenedSnapshot!.draft.config.output, file: 'other-tab-replacement.mp4' } },
+      }, reopenedSnapshot!.baseVersion, {
+        ownerId: crypto.randomUUID(),
+        outboxOwnerId: crypto.randomUUID(),
+        draftIdentity: crypto.randomUUID(),
+      });
+      const currentSnapshot = await loadTimelineDraft('timeline-1');
+      expect(currentSnapshot?.draft?.config?.output?.file).toBe('other-tab-replacement.mp4');
+      globalThis.Blob = class extends Blob {
+        constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+          super(parts, options);
+          exported = true;
+        }
+      };
+      globalThis.URL = class extends URL {
+        static createObjectURL() { return 'blob:local-save'; }
+        static revokeObjectURL() {}
+      };
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        expect(await reopened.hook.result.current.copyRejectedSave()).toBe(false);
+        expect(exported).toBe(false);
+        expect(await loadTimelineDraft('timeline-1')).toEqual(currentSnapshot);
+        expect((await createCommitOutbox().list(scope))[0].intents.length).toBeGreaterThan(0);
+      } finally { click.mockRestore(); }
+    } finally {
+      first.hook.unmount();
+      reopened?.hook.unmount();
+      globalThis.Blob = originalBlob;
+      globalThis.URL = originalUrl;
+      restoreLocks();
+    }
   });
 
   it('keeps supported browser element saves on the current mounted persistence path', async () => {
@@ -511,6 +634,7 @@ describe('useTimelineSave — recovered draft durability', () => {
           await act(async () => { editing.result.current.handleSelectedClipChange({ hold: 1 }); });
           editing.unmount();
         }
+        const authoredClips = structuredClone(harness.hook.result.current.dataRef.current!.config.clips);
         await act(async () => {
           const saving = harness!.hook.result.current.flushPendingSave();
           if (['conflict', 'invalid', 'retry', 'dependent conflict'].includes(outcome)) await expect(saving).rejects.toThrow();
@@ -568,7 +692,10 @@ describe('useTimelineSave — recovered draft durability', () => {
         }
         if (outcome === 'invalid') {
           expect(stored.pending?.outcome).toMatchObject({ kind: 'rejected', error: { details: { code: 'selection_changed', path: ['commands', '0', 'args', 'old_media'], hint: 'Reload media', suggested_command: 'timeline show' } } });
-          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual(data.config.clips);
+          // The rejected creator change must stay on screen; the original test
+          // used to assert that validation reverted it to canonical clips.
+          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual(authoredClips);
+          expect(harness.hook.result.current.localSaveState).toMatchObject({ status: 'error', error: { kind: 'validation' } });
           return;
         }
         if (outcome === 'conflict') {
@@ -1483,6 +1610,151 @@ describe('useTimelineSave — recovered draft durability', () => {
     }
   });
 
+  it.each([400, 404, 405, 413, 422])('FIX16-R2-COPY-%s exports later edits and keeps edits added after Copy', async status => {
+    const { mount, edit, locks, restoreLocks, send, scope } = await setupRefusedSave(status);
+    const first = mount();
+    const originalBlob = Blob;
+    const originalUrl = URL;
+    let reopened: ReturnType<typeof mount> | undefined;
+    try {
+      await edit(first, 'authored.mp4', true);
+      await edit(first, 'later.mp4');
+      const [firstOwner] = await createCommitOutbox().list(scope);
+      let exported: string | undefined;
+      globalThis.Blob = class extends Blob {
+        constructor(parts?: BlobPart[], options?: BlobPropertyBag) {
+          super(parts, options);
+          exported = String(parts?.[0]);
+        }
+      };
+      globalThis.URL = class extends URL {
+        static createObjectURL() { return 'blob:local-save'; }
+        static revokeObjectURL() {}
+      };
+      const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+      try {
+        const copy = async (tab: ReturnType<typeof mount>) => {
+          expect(await tab.hook.result.current.copyRejectedSave()).toBe(true);
+          return JSON.parse(exported!);
+        };
+        const contents = await copy(first);
+        expect(contents.rejected_request).toEqual(firstOwner.pending?.request);
+        expect(contents.edits.map((edit: { payload: { after: unknown } }) => edit.payload.after))
+          .toMatchObject(['authored.mp4', 'later.mp4'].map(file => ({ parent_revision: { payload: { config: { output: { file } } } } })));
+        expect(contents.final_document.parent_revision.payload.config.output.file).toBe('later.mp4');
+
+        await edit(first, 'after-copy.mp4');
+        await act(async () => {
+          await expect(first.hook.result.current.reloadFromServer({ discardRefusedSave: true })).rejects.toThrow(/copy.*again/i);
+        });
+        expect(first.hook.result.current.dataRef.current?.config.output.file).toBe('after-copy.mp4');
+        expect((await createCommitOutbox().list(scope))[0].intents).toHaveLength(3);
+        first.hook.unmount();
+        await vi.waitFor(() => expect(locks.size).toBe(0));
+
+        reopened = mount();
+        await vi.waitFor(() => expect(reopened!.hook.result.current.permanentSaveRejection).toBe(true));
+        expect(reopened.hook.result.current.dataRef.current?.config.output.file).toBe('after-copy.mp4');
+        expect((await copy(reopened)).final_document.parent_revision.payload.config.output.file).toBe('after-copy.mp4');
+        await edit(reopened, 'edited-after-reopen.mp4');
+        expect(reopened.hook.result.current.dataRef.current?.config.output.file).toBe('edited-after-reopen.mp4');
+        const savedFile = await copy(reopened);
+        const before = {
+          visible: reopened.hook.result.current.dataRef.current?.config.output.file,
+          exported: savedFile.final_document.parent_revision.payload.config.output.file,
+          snapshot: savedFile.recovery_snapshot?.draft?.config?.output?.file,
+          recovery: reopened.hook.result.current.recoveryDraft,
+        };
+        await act(async () => { await reopened!.hook.result.current.reloadFromServer({ discardRefusedSave: true }); });
+        console.log('REOPEN RECEIPT', JSON.stringify({ before,
+          after: reopened.hook.result.current.dataRef.current?.config.output.file,
+          remainingIntents: (await createCommitOutbox().list(scope))[0].intents.length,
+          remainingSnapshot: await loadTimelineDraft('timeline-1'), posts: send.mock.calls.length }));
+        expect(JSON.stringify(savedFile)).toContain('edited-after-reopen.mp4');
+        expect((await createCommitOutbox().list(scope))[0].intents).toEqual([]);
+        expect(await loadTimelineDraft('timeline-1')).toBeNull();
+        expect(send).toHaveBeenCalledTimes(1);
+      } finally {
+        click.mockRestore();
+        globalThis.Blob = originalBlob;
+        globalThis.URL = originalUrl;
+      }
+    } finally {
+      first.hook.unmount();
+      reopened?.hook.unmount();
+      restoreLocks();
+      await vi.waitFor(() => expect(locks.size).toBe(0));
+    }
+  });
+
+  it.each([400,404,405,413,422])('REVIEW-TAB-DISCARD-%s preserves the other tab’s snapshot-only track label', async status => {
+    const { mount, edit, locks, restoreLocks, scope } = await setupRefusedSave(status);
+    const tabA = mount();
+    const tabB = mount();
+    let reopened: ReturnType<typeof mount> | undefined;
+    try {
+      await vi.waitFor(() => expect(tabB.hook.result.current.localSaveState?.ownerId).toBeTruthy());
+      await edit(tabA, 'tab-a.mp4', true);
+      tabA.hook.unmount();
+      await vi.waitFor(() => expect(locks.size).toBe(1));
+      reopened = mount();
+      await vi.waitFor(() => expect(reopened!.hook.result.current.permanentSaveRejection).toBe(true));
+      await vi.waitFor(() => expect(reopened!.hook.result.current.recoveryDraft).toBeTruthy());
+      expect(reopened.hook.result.current.isConflictExhausted).toBeFalsy();
+      const gestureStart = structuredClone(tabB.hook.result.current.dataRef.current!.config);
+      await edit(tabB, 'tab-b.mp4', true);
+      const displayed = tabB.hook.result.current.dataRef.current!;
+      const trackId = displayed.config.tracks[0].id;
+      const label = 'unique-tab-b-label';
+      const next = await buildTimelineData({ ...displayed.config, tracks: displayed.config.tracks.map(track =>
+        track.id === trackId ? { ...track, label } : track) }, displayed.registry, undefined, 1, undefined, displayed.head);
+      await act(async () => { tabB.hook.result.current.commitData(next, { save: true, gestureBasis: {
+        kind: 'track-label', trackId, label, config: gestureStart, registry: displayed.registry } }); });
+      await act(async () => { await vi.advanceTimersByTimeAsync(600); });
+      const before = await loadTimelineDraft('timeline-1');
+      expect(JSON.stringify(before?.draft)).toContain(label);
+      expect(JSON.stringify(await createCommitOutbox().list(scope))).not.toContain(label);
+      expect(JSON.stringify(tabB.hook.result.current.dataRef.current?.config.tracks)).toContain(label);
+      expect(before?.outboxOwnerId).toBe(tabB.hook.result.current.localSaveState?.ownerId);
+      await act(async () => { await reopened!.hook.result.current.discardRecoveredDraft(); });
+      const after = await loadTimelineDraft('timeline-1');
+      console.log('TAB RECEIPT', JSON.stringify({ before: before?.draft?.config?.tracks?.[0]?.label, after,
+        tabBIntents: (await createCommitOutbox().list(scope)).find(r=>r.ownerId===before?.outboxOwnerId)?.intents.length }));
+      expect(after).toEqual(before);
+    } finally {
+      tabA.hook.unmount();
+      tabB.hook.unmount();
+      reopened?.hook.unmount();
+      restoreLocks();
+    }
+  });
+
+  it.each([400, 404, 405, 413, 422])('FIX16-R2-TABS-%s discards only the originating tab snapshot', async status => {
+    const { mount, edit, locks, restoreLocks, send, scope } = await setupRefusedSave(status);
+    const tabA = mount();
+    const tabB = mount();
+    try {
+      await vi.waitFor(() => expect(tabB.hook.result.current.localSaveState?.ownerId).toBeTruthy());
+      await edit(tabA, 'tab-a.mp4', true);
+      await edit(tabB, 'tab-b.mp4', true);
+      await edit(tabB, 'tab-b-later.mp4');
+      const snapshotB = await loadTimelineDraft('timeline-1');
+      expect(snapshotB?.draft).toMatchObject({ config: { output: { file: 'tab-b-later.mp4' } } });
+      const ownerB = tabB.hook.result.current.localSaveState?.ownerId;
+      await act(async () => { await tabA.hook.result.current.reloadFromServer({ discardRefusedSave: true }); });
+      expect(await loadTimelineDraft('timeline-1')).toEqual(snapshotB);
+      const owners = await createCommitOutbox().list(scope);
+      expect(owners.find(owner => owner.ownerId === ownerB)?.intents).toHaveLength(2);
+      expect(owners.find(owner => owner.ownerId === tabA.hook.result.current.localSaveState?.ownerId)?.intents).toEqual([]);
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      tabA.hook.unmount();
+      tabB.hook.unmount();
+      restoreLocks();
+      await vi.waitFor(() => expect(locks.size).toBe(0));
+    }
+  });
+
   it.each(['accepted', 'merged', 'conflict', 'invalid', 'restart', 'restart after cleanup', 'dependent', 'merged dependent', 'late reply', 'strict'] as const)(
     'the production caller uses it: mounted local document %s', async (outcome) => {
       const dependent = outcome === 'dependent' || outcome === 'merged dependent';
@@ -1579,7 +1851,8 @@ describe('useTimelineSave — recovered draft durability', () => {
           steps: [{ command_ordinals: [0], intent: 'Save local editor changes' }] });
         if (outcome === 'conflict' || outcome === 'invalid') {
           expect(stored.intents).toHaveLength(1);
-          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(config.output.file);
+          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(
+            outcome === 'invalid' ? (dependent ? 'dependent.mp4' : 'authored.mp4') : config.output.file);
           expect(harness.hook.result.current.localSaveState?.status).toBe(outcome === 'conflict' ? 'conflict' : 'error');
         } else if (restart) {
           const exact = structuredClone(send.mock.calls[0]);

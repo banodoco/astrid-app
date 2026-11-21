@@ -8,6 +8,7 @@ import { Images, Loader2, Maximize2, Sparkles } from 'lucide-react';
 import { VIDEO_EDITOR_THEME_VARS } from '@/tools/video-editor/lib/themeTokens.ts';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/shared/components/ui/alert-dialog.tsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog.tsx';
+import { TimelineSaveNotice } from './TimelineSaveNotice.tsx';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { COARSE_TOUCH_TARGET } from '@/shared/components/ui/contracts/touchTarget.ts';
@@ -338,7 +339,7 @@ function TimelineEditorShellCoreComponent({
   });
   const conflict = useTimelineRealtime({
     timelineId,
-    conflictExhausted: chrome.isConflictExhausted,
+    conflictExhausted: chrome.isConflictExhausted && !chrome.permanentSaveRejection,
     onKeepLocalChanges: chrome.retrySaveAfterConflict,
     onDiscardRemoteChanges: () => chrome.reloadFromServer({ discardRefusedSave: true }),
   });
@@ -821,22 +822,12 @@ function TimelineEditorShellCoreComponent({
     </div>
   ) : null;
 
-  /** A local save the Runtime rejected, or removed from the queue: the reason, so the change is never dropped silently. */
-  const saveNoticeBanner = chrome.saveNotice ? (
-    <div
-      role="alert"
-      className="flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-    >
-      <span>{chrome.saveNotice}</span>
-    </div>
-  ) : null;
-
   /** Diverged banner (B4): a 409 means the document changed elsewhere. No
    *  silent overwrite — explicit Reload or Save as copy. */
   // A save conflict is a choice between two versions, not an error: neutral, not destructive red.
   // The dialog and this bar offer the same two buttons: the dialog is the one place while it is open, and this bar is
   // the way back to the choice once it was dismissed.
-  const conflictBanner = chrome.isConflictExhausted && !conflict.isOpen ? (
+  const conflictBanner = chrome.isConflictExhausted && !chrome.permanentSaveRejection && !conflict.isOpen ? (
     <div
       role="alert"
       className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
@@ -880,7 +871,7 @@ function TimelineEditorShellCoreComponent({
 
   /** Recovery draft banner (B9): a previous session left unsaved work in the
    *  one-slot draft. Offer Retry (re-POST the draft) or Discard. */
-  const recoveryBanner = chrome.recoveryDraft && !conflict.isOpen && !chrome.isConflictExhausted ? (
+  const recoveryBanner = chrome.recoveryDraft && !chrome.permanentSaveRejection && !conflict.isOpen && !chrome.isConflictExhausted ? (
     <div
       role="alert"
       className="flex items-center justify-between gap-3 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
@@ -914,7 +905,7 @@ function TimelineEditorShellCoreComponent({
       {conflictBanner}
       {incompatibleBanner}
       {watchdogBanner}
-      {saveNoticeBanner}
+      <TimelineSaveNotice />
       {recoveryBanner}
       {chrome.loadError && !(recoveryCardShowing && hasLoadedTimeline) ? (
         // The hosted build's "Astrid stopped" / "restarted" card already says what to do about the same failure.
@@ -1198,7 +1189,7 @@ function TimelineEditorShellCoreComponent({
         />
       )}
 
-      <AlertDialog open={conflict.isOpen} onOpenChange={conflict.setOpen}>
+      <AlertDialog open={conflict.isOpen && !chrome.permanentSaveRejection} onOpenChange={conflict.setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>This timeline changed somewhere else</AlertDialogTitle>

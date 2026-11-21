@@ -2202,6 +2202,16 @@ describe('TimelineEditorShellCore — recovery draft banner', () => {
     expect(screen.queryByRole('button', { name: 'Discard and reload the saved version' })).toBeNull();
   });
 
+  it('hides generic recovery Save them and Discard controls for a permanently rejected draft', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-10-08T13:43:57Z', baseVersion: 1 },
+      permanentSaveRejection: true,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByRole('button', { name: 'Save them' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
   it('FIX16-UI confirms an exported file before canonical reload, never on download alone', async () => {
     const copyRejectedSave = vi.fn().mockResolvedValue(true);
     const reloadFromServer = vi.fn().mockResolvedValue(undefined);

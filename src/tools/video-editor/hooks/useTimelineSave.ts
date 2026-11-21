@@ -575,6 +575,8 @@ export function useTimelineSave(
     baseVersion: number;
     retryAllowed: boolean;
   } | null>(null);
+  const offeredRecoverySnapshotRef = useRef<Awaited<ReturnType<typeof loadTimelineDraft>>>(null);
+  const recoveryRetrySeqRef = useRef<number | null>(null);
   const [recoveredAsDirty, setRecoveredAsDirty] = useState(false);
   const recoveryCheckedScopeRef = useRef<string | null>(null);
   const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
@@ -604,6 +606,8 @@ export function useTimelineSave(
     return { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: record.baseHeadRevisionId };
   }, [commit.dataRef, timelineId]);
   const offerRecovery = useCallback((record: TimelineDraftRecord) => {
+    recoveryRetrySeqRef.current = null;
+    offeredRecoverySnapshotRef.current = record;
     recoveryPendingRef.current = true;
     recoveryActiveRef.current = true;
     setRecoveryDraft({ updatedAt: record.updatedAt, baseVersion: record.baseVersion,
@@ -780,13 +784,16 @@ export function useTimelineSave(
     // or transport failure must leave the recovered work retryable.
     setRecoveredAsDirty(true);
     persistence.keepRefusedEditRef.current = true;
-    try { commit.commitData(recovered, { save: true }); } finally { persistence.keepRefusedEditRef.current = false; }
+    try {
+      commit.commitData(recovered, { save: true });
+      recoveryRetrySeqRef.current = commit.editSeqRef.current;
+    } finally { persistence.keepRefusedEditRef.current = false; }
   }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef, localDocumentSave, localOwner]);
 
   const rejectedSaveCopy = useRef<RejectedSaveCopy | undefined>(undefined);
   const cancelRejectedSaveCopy = useCallback(() => { rejectedSaveCopy.current = undefined; }, []);
   const reloadCanonicalFromServer = persistence.reloadFromServer;
-  const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => {
+  const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean; recoverySnapshot?: Awaited<ReturnType<typeof loadTimelineDraft>>; recoveryRetrySeq?: number }) => {
     const exportedSave = options?.discardRefusedSave ? rejectedSaveCopy.current : undefined;
     try {
       await reloadCanonicalFromServer(exportedSave ? { ...options, exportedSave } : options);
@@ -798,6 +805,8 @@ export function useTimelineSave(
     const shouldClearRecovery = options?.clearDraft ?? !options?.preserveDraft;
     if (shouldClearRecovery) {
       setRecoveryDraft(null);
+      offeredRecoverySnapshotRef.current = null;
+      recoveryRetrySeqRef.current = null;
       setRecoveredAsDirty(false);
       recoveryPendingRef.current = false;
       recoveryActiveRef.current = false;
@@ -806,17 +815,21 @@ export function useTimelineSave(
     }
   }, [cancelRejectedSaveCopy, clearDeferredRecoverySave, reloadCanonicalFromServer, resumeDeferredRecoverySave, toast]);
   const discardRecoveredDraft = useCallback(async () => {
+    if (isPermanentLocalSaveRejection(localSaveState)) return;
+    const offeredSnapshot = offeredRecoverySnapshotRef.current;
+    if (!offeredSnapshot) return;
     try {
       // Reload first. The persistence path clears the slot only after it has
       // built and committed fresh canonical data, so discarded content cannot
       // remain visible while the editor reports saved.
-      await reloadFromServer({ clearDraft: true });
+      await reloadFromServer({ clearDraft: true, recoverySnapshot: offeredSnapshot,
+        ...(recoveryRetrySeqRef.current === null ? {} : { recoveryRetrySeq: recoveryRetrySeqRef.current }) });
     } catch {
       return;
     }
     setRecoveryDraft(null);
     setRecoveredAsDirty(false);
-  }, [reloadFromServer]);
+  }, [isPermanentLocalSaveRejection, localSaveState, reloadFromServer]);
 
   const registrationTargetsRef = useRef(new WeakMap<OwnedRegistryMutation, { session: object; generation: number }>());
   // commit and persistence are fresh object literals on every render; their
@@ -962,6 +975,13 @@ export function useTimelineSave(
         ? await scopedSave.exportRejectedChange() : await session?.exportRejectedChange();
       if (!exportData) throw new Error('The original unsaved change is unavailable. Reopen the timeline to recover it.');
       const snapshot = await readOwnedRecoverySnapshot();
+      // Recovery edits are deferred from the local outbox. Their only
+      // exportable representation is the exact recovery snapshot. If another
+      // tab replaced the shared slot, do not issue a receipt that could later
+      // authorize discarding that sequence.
+      if ((recoveryPendingRef.current || recoveryActiveRef.current) && !snapshot) {
+        throw new Error('The recovery draft changed in another tab. Your current edits are still in this editor.');
+      }
       const current = captureSaveTarget();
       if (current.session !== target.session || current.generation !== target.generation || current.targetSeq !== target.targetSeq) {
         throw new Error('Your unsaved edits changed while copying. Copy them again.');
@@ -980,7 +1000,7 @@ export function useTimelineSave(
       toast.error(`Could not copy your change out: ${error instanceof Error ? error.message : String(error)}. Your changes are still retained.`);
       return false;
     }
-  }, [cancelRejectedSaveCopy, captureSaveTarget, localOwner, readOwnedRecoverySnapshot, scopedSave, timelineId, toast]);
+  }, [cancelRejectedSaveCopy, captureSaveTarget, localOwner, readOwnedRecoverySnapshot, recoveryActiveRef, recoveryPendingRef, scopedSave, timelineId, toast]);
 
   const retryPendingSaveAfterReconnect = useCallback(() => {
     if (isPermanentLocalSaveRejection(localSaveState)) return;

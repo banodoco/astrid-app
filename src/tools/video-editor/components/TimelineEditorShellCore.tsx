@@ -871,7 +871,7 @@ function TimelineEditorShellCoreComponent({
 
   /** Recovery draft banner (B9): a previous session left unsaved work in the
    *  one-slot draft. Offer Retry (re-POST the draft) or Discard. */
-  const recoveryBanner = chrome.recoveryDraft && !conflict.isOpen && !chrome.isConflictExhausted ? (
+  const recoveryBanner = chrome.recoveryDraft && !chrome.permanentSaveRejection && !conflict.isOpen && !chrome.isConflictExhausted ? (
     <div
       role="alert"
       className="flex items-center justify-between gap-3 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"

@@ -339,7 +339,7 @@ function TimelineEditorShellCoreComponent({
   });
   const conflict = useTimelineRealtime({
     timelineId,
-    conflictExhausted: chrome.isConflictExhausted,
+    conflictExhausted: chrome.isConflictExhausted && !chrome.permanentSaveRejection,
     onKeepLocalChanges: chrome.retrySaveAfterConflict,
     onDiscardRemoteChanges: () => chrome.reloadFromServer({ discardRefusedSave: true }),
   });
@@ -836,7 +836,10 @@ function TimelineEditorShellCoreComponent({
           }}>
             Copy my change out
           </Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
+          <Button type="button" size="sm" variant="outline" onClick={() => {
+            chrome.cancelRejectedSaveCopy?.();
+            void chrome.reloadFromServer({ discardRefusedSave: true }).catch(() => {});
+          }}>
             Discard and reload the saved version
           </Button>
         </div>
@@ -849,7 +852,7 @@ function TimelineEditorShellCoreComponent({
   // A save conflict is a choice between two versions, not an error: neutral, not destructive red.
   // The dialog and this bar offer the same two buttons: the dialog is the one place while it is open, and this bar is
   // the way back to the choice once it was dismissed.
-  const conflictBanner = chrome.isConflictExhausted && !conflict.isOpen ? (
+  const conflictBanner = chrome.isConflictExhausted && !chrome.permanentSaveRejection && !conflict.isOpen ? (
     <div
       role="alert"
       className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
@@ -1224,15 +1227,15 @@ function TimelineEditorShellCoreComponent({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep my unsaved edits</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
+            <AlertDialogCancel onClick={chrome.cancelRejectedSaveCopy}>Keep my unsaved edits</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true }).catch(() => {})}>
               I saved the file — reload the saved version
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={conflict.isOpen} onOpenChange={conflict.setOpen}>
+      <AlertDialog open={conflict.isOpen && !chrome.permanentSaveRejection} onOpenChange={conflict.setOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>This timeline changed somewhere else</AlertDialogTitle>

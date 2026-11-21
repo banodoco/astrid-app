@@ -26,6 +26,8 @@ export interface TimelineDraftRecord {
    * draft written by a newer edit (including undo/redo).
    */
   ownerId?: string;
+  /** Durable local save owner, when the draft mirrors an outbox. */
+  outboxOwnerId?: string;
   updatedAt: string;
   baseHeadRevisionId?: string | null;
   /** Scope evidence for immutable-head recovery; legacy unscoped heads are untrusted. */
@@ -40,6 +42,8 @@ export interface TimelineDraftRecoveryMetadata {
   recoveryKey?: string;
   /** Compare-and-delete owner for editor save acknowledgements. */
   ownerId?: string;
+  /** Durable local save owner, when the draft mirrors an outbox. */
+  outboxOwnerId?: string;
   baseHeadRevisionId?: string | null;
   baseHeadProjectId?: string;
   baseHeadTimelineId?: string;
@@ -132,6 +136,7 @@ function createDraftRecord(
     baseVersion,
     updatedAt: new Date().toISOString(),
     ...(recoveryMetadata.ownerId === undefined ? {} : { ownerId: recoveryMetadata.ownerId }),
+    ...(recoveryMetadata.outboxOwnerId === undefined ? {} : { outboxOwnerId: recoveryMetadata.outboxOwnerId }),
     ...(recoveryMetadata.baseHeadRevisionId !== undefined
       ? { baseHeadRevisionId: recoveryMetadata.baseHeadRevisionId }
       : {}),
@@ -414,7 +419,7 @@ export async function reconcileTimelineDraftHeadMarker(
 /** Clear only the recovery snapshot observed by an explicit reload/discard. */
 export async function clearTimelineDraftIfSnapshotMatches(
   recoveryKey: string,
-  snapshot: Pick<TimelineDraftRecord, 'updatedAt' | 'draftIdentity'>,
+  snapshot: Pick<TimelineDraftRecord, 'updatedAt' | 'draftIdentity' | 'ownerId'>,
 ): Promise<boolean> {
   if (typeof indexedDB === 'undefined') return false;
   const database = await openDatabase();
@@ -426,7 +431,7 @@ export async function clearTimelineDraftIfSnapshotMatches(
     request.addEventListener('success', () => {
       const current = request.result as TimelineDraftRecord | undefined;
       if (current?.updatedAt === snapshot.updatedAt
-        && current.draftIdentity === snapshot.draftIdentity) {
+        && current.draftIdentity === snapshot.draftIdentity && current.ownerId === snapshot.ownerId) {
         matched = true;
         store.delete(buildKey(recoveryKey));
       }

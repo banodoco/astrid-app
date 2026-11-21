@@ -2022,6 +2022,18 @@ describe('TimelineEditorShellCore — diverged conflict banner', () => {
     __conflictDialog = {};
   });
 
+  it('FIX16-R2-UNDO-UI offers Copy when a permanent refusal opens the conflict dialog', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    __chromeOverrides = { isConflictExhausted: true, permanentSaveRejection: true,
+      saveNotice: 'The Runtime refused this Undo.', copyRejectedSave };
+    __conflictDialog = { isOpen: true };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByText('This timeline changed somewhere else')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(copyRejectedSave).toHaveBeenCalledTimes(1);
+  });
+
   it('renders the diverged banner with the keep-mine and use-latest choices', () => {
     const reload = vi.fn();
     const keepMine = vi.fn();

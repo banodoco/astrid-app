@@ -395,6 +395,7 @@ function useTimelineChromeContextValue({
   saveNotice,
   permanentSaveRejection,
   copyRejectedSave,
+  cancelRejectedSaveCopy,
   retryWatchdog,
   retryPendingSave,
   flushPendingSave,
@@ -425,6 +426,7 @@ function useTimelineChromeContextValue({
   saveNotice: string | null;
   permanentSaveRejection: boolean;
   copyRejectedSave: () => Promise<boolean>;
+  cancelRejectedSaveCopy: () => void;
   retryWatchdog: () => void;
   retryPendingSave: () => void;
   flushPendingSave: () => Promise<number>;
@@ -483,6 +485,7 @@ function useTimelineChromeContextValue({
     saveNotice,
     permanentSaveRejection,
     copyRejectedSave,
+    cancelRejectedSaveCopy,
     retryWatchdog,
     retryPendingSave,
     flushPendingSave,
@@ -552,6 +555,7 @@ function useTimelineChromeContextValue({
     saveNotice,
     permanentSaveRejection,
     copyRejectedSave,
+    cancelRejectedSaveCopy,
     recoveryDraft,
     retryRecoveredDraft,
     discardRecoveredDraft,
@@ -1256,6 +1260,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     saveNotice: save.saveNotice,
     permanentSaveRejection: save.permanentSaveRejection,
     copyRejectedSave: save.copyRejectedSave,
+    cancelRejectedSaveCopy: save.cancelRejectedSaveCopy,
     retryWatchdog: save.retryWatchdog,
     retryPendingSave: save.retryPendingSave,
     flushPendingSave: save.flushPendingSave,

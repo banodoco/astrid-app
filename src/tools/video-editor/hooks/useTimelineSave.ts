@@ -6,6 +6,7 @@ import { persistedTranscriptItems } from '../data/typed/projectTranscript.ts';
 import type { RegistrationSaveOwner } from './timeline-state-types.ts';
 import {
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useLayoutEffect,
@@ -15,8 +16,8 @@ import {
 import type { InteractionStateRef } from '@/tools/video-editor/lib/interaction-state.ts';
 import { useTimelineCommit, type OwnedRegistryMutation, type TimelineEditMutation } from '@/tools/video-editor/hooks/useTimelineCommit.ts';
 import { TimelineEventBus } from '@/tools/video-editor/hooks/useTimelineEventBus.ts';
-import { useTimelinePersistence } from '@/tools/video-editor/hooks/useTimelinePersistence.ts';
-import { clearTimelineDraft, loadTimelineDraft } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
+import { useTimelinePersistence, type RejectedSaveCopy } from '@/tools/video-editor/hooks/useTimelinePersistence.ts';
+import { clearTimelineDraftIfSnapshotMatches, loadTimelineDraft } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { buildTimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { getStableConfigSignature } from '@/tools/video-editor/lib/config-utils.ts';
 import { withDefaultTimelineOutput } from '@/tools/video-editor/lib/defaults.ts';
@@ -24,11 +25,11 @@ import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/i
 import { usePollSync, type UsePollSyncQueries } from '@/tools/video-editor/hooks/usePollSync.ts';
 import type { TimelineStoreApi } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { useVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
-import { isDataProviderPersistenceEnabled, TimelineSaveError, type DataProvider, type TimelineHeadRevision } from '@/tools/video-editor/data/DataProvider.ts';
+import { isDataProviderPersistenceEnabled, TimelineSaveError, type DataProvider, type TimelineCommandBasis, type TimelineHeadRevision } from '@/tools/video-editor/data/DataProvider.ts';
 import type { TimelineDraftRecord } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { canonicalJsonStringify, parseTimelineBundle, type TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
-import { createTimelineLocalSaveHandoff, readTimelineOriginalSaveBasis, type TimelineLocalSaveHandoff, type TimelineOriginalSaveBasis, type TimelineSaveSource, type TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
+import { createTimelineLocalSaveHandoff, readTimelineOriginalSaveBasis, resolveTimelinePersistenceHandoff, TimelinePersistenceHandoffContext, type TimelineLocalSaveHandoff, type TimelineOriginalSaveBasis, type TimelineSaveSource, type TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
 import { createLocalSaveSession, isPermanentLocalSaveRejection, type LocalSaveSession, type LocalSaveState } from '../commands/localSaveSession.ts';
 import { downloadBlobAsFile } from '@/shared/runtime/browserDownloadRuntime.ts';
 import { toOutboxJson } from '../commands/commitOutbox.ts';
@@ -51,15 +52,12 @@ interface PendingOriginalSaveRead {
   settled: boolean;
 }
 
-// Rejections the user must be told about; a conflict keeps its own choice dialog.
-const REJECTED_SAVE_KINDS = ['validation', 'authorization', 'too_large', 'unsupported_route', 'rejected_request', 'refused'];
 /** The reason to show for a local save that was rejected or removed from the queue, or null. */
 function localSaveNotice(state: LocalSaveState | null): string | null {
   if (!state) return null;
   if (state.notice) return state.notice;
   const error = state.error;
-  if (state.status === 'error' && error && typeof error === 'object' && !Array.isArray(error)
-    && typeof error.kind === 'string' && REJECTED_SAVE_KINDS.includes(error.kind)
+  if (isPermanentLocalSaveRejection(state) && error && typeof error === 'object' && !Array.isArray(error)
     && typeof error.message === 'string') return error.message;
   return null;
 }
@@ -141,6 +139,8 @@ export function useTimelineSave(
     { status: 'ready'; value: TimelineOriginalSaveBasis } | { status: 'unavailable'; reason: string } | { status: 'loading' } | null
   >(null);
   const [localSaveState, setLocalSaveState] = useState<LocalSaveState | null>(null);
+  const scopedBinding = useContext(TimelinePersistenceHandoffContext);
+  const scopedSave = resolveTimelinePersistenceHandoff(scopedBinding, provider, timelineId);
   const localOwner = useMemo(() => ({ provider, timelineId, closed: false, started: false, generation: 0,
     initialization: 'pending' as 'pending' | 'ready' | 'error', operations: 0, operationError: false, failedOutbox: false,
     headKey: '', recovered: false,
@@ -189,11 +189,13 @@ export function useTimelineSave(
       catch (error) { recordDraftReloadFailure(); throw error; }
     },
     status: () => localOwner.session?.getState().status,
-    async discharge(mode) {
+    ownerId: () => localOwner.session?.getState().ownerId,
+    async discharge(mode, exported, stillCurrent) {
       // A failed bootstrap has no session and nothing queued to leave.
       const handoff = await localOwner.ready?.catch(() => undefined);
       if (localOwner.closed || !handoff) return;
-      await handoff.discharge?.(mode);
+      await handoff.discharge?.(mode, exported, stillCurrent);
+      if (localOwner.session?.getState().status === 'saved') localOwner.operationError = false;
     },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
     canUndo: () => localOwner.handoff?.canUndo() ?? false,
@@ -237,6 +239,7 @@ export function useTimelineSave(
       void localOwner.session?.dispose().catch(() => {});
     };
   }, [localOwner]);
+  useEffect(() => scopedSave?.subscribeState?.(setLocalSaveState), [scopedSave]);
   const { dataRef: localDataRef, editSeqRef: localEditSeqRef, commitData: adoptCanonicalData } = commit;
   const originalHeadKey = canonicalJsonStringify(commit.data?.head ?? null);
   // Updated only after commit. A suspended/aborted render cannot supply a
@@ -415,11 +418,11 @@ export function useTimelineSave(
           if (session.getState().status !== 'saved') break;
         }
         let initial = verified.initial;
-        if (owners.length && isPermanentLocalSaveRejection(session.getState())) {
-          // A rejected draft may originate from an older head than the current
-          // Runtime. Its display source was deliberately recovered on that
-          // verified original basis, not silently rebased onto today's head.
-          initial = session.getDisplayBasis();
+        if (owners.length && session.hasRejectedDisplay()) {
+          // The source and the handoff's authored document both start at the
+          // recovered suffix, on the original verified head.
+          initial = { ...session.getDisplayBasis(),
+            canonicalDocument: session.getDocument() as unknown as TimelineCommandBasis['canonicalDocument'] };
         }
         if (owners.length && session.getState().status === 'saved') {
           initial = await session.flush();
@@ -664,7 +667,7 @@ export function useTimelineSave(
           && canonicalJsonStringify(draftBundle) === canonicalJsonStringify(loadedBundle)
         ) {
           if (recoveryKey === timelineId) {
-            void clearTimelineDraft(recoveryKey).catch(() => {});
+            void clearTimelineDraftIfSnapshotMatches(recoveryKey, record).catch(() => {});
             return;
           }
           // Some providers hydrate this stable occurrence slot directly into
@@ -780,9 +783,18 @@ export function useTimelineSave(
     try { commit.commitData(recovered, { save: true }); } finally { persistence.keepRefusedEditRef.current = false; }
   }, [canonicalReloadInProgressRef, commit, configVersionRef, persistence, provider, recoveryKey, resolveAssetUrl, timelineEditability, trustedRecoveryHead, offerRecovery, recoveryActiveRef, localDocumentSave, localOwner]);
 
+  const rejectedSaveCopy = useRef<RejectedSaveCopy | undefined>(undefined);
+  const cancelRejectedSaveCopy = useCallback(() => { rejectedSaveCopy.current = undefined; }, []);
   const reloadCanonicalFromServer = persistence.reloadFromServer;
   const reloadFromServer = useCallback(async (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => {
-    await reloadCanonicalFromServer(options);
+    const exportedSave = options?.discardRefusedSave ? rejectedSaveCopy.current : undefined;
+    try {
+      await reloadCanonicalFromServer(exportedSave ? { ...options, exportedSave } : options);
+      if (exportedSave) cancelRejectedSaveCopy();
+    } catch (error) {
+      if (exportedSave) toast.error(error instanceof Error ? error.message : String(error));
+      throw error;
+    }
     const shouldClearRecovery = options?.clearDraft ?? !options?.preserveDraft;
     if (shouldClearRecovery) {
       setRecoveryDraft(null);
@@ -792,7 +804,7 @@ export function useTimelineSave(
       clearDeferredRecoverySave();
       resumeDeferredRecoverySave();
     }
-  }, [clearDeferredRecoverySave, reloadCanonicalFromServer, resumeDeferredRecoverySave]);
+  }, [cancelRejectedSaveCopy, clearDeferredRecoverySave, reloadCanonicalFromServer, resumeDeferredRecoverySave, toast]);
   const discardRecoveredDraft = useCallback(async () => {
     try {
       // Reload first. The persistence path clears the slot only after it has
@@ -940,33 +952,40 @@ export function useTimelineSave(
       .catch(error => toast.error(error instanceof Error ? error.message : String(error)));
   }, [commitApplyEdit, elementDataRef, elementTimelineRoutes, timelineId, toast, runElementSave]);
 
+  const { readOwnedRecoverySnapshot } = persistence;
   const copyRejectedSave = useCallback(async () => {
-    if (localOwner.closed || !localOwner.session) {
-      toast.error('The original unsaved change is unavailable. Reopen the timeline to recover it.');
-      return false;
-    }
+    cancelRejectedSaveCopy();
     try {
-      // The source of truth is the durable outbox, not a potentially stale
-      // rendered timeline or an attempted reconstruction from current state.
-      const exportData = await localOwner.session.exportRejectedChange();
-      const contents = JSON.stringify(exportData, null, 2) + '\n';
+      const target = captureSaveTarget();
+      const session = localOwner.closed ? undefined : localOwner.session;
+      const exportData = scopedSave?.exportRejectedChange
+        ? await scopedSave.exportRejectedChange() : await session?.exportRejectedChange();
+      if (!exportData) throw new Error('The original unsaved change is unavailable. Reopen the timeline to recover it.');
+      const snapshot = await readOwnedRecoverySnapshot();
+      const current = captureSaveTarget();
+      if (current.session !== target.session || current.generation !== target.generation || current.targetSeq !== target.targetSeq) {
+        throw new Error('Your unsaved edits changed while copying. Copy them again.');
+      }
+      // The snapshot also preserves changes that could not be captured as
+      // commands. Include the exact owned snapshot before allowing its removal.
+      const contents = JSON.stringify({ ...exportData, ...(snapshot ? { recovery_snapshot: snapshot } : {}) }, null, 2) + '\n';
       downloadBlobAsFile(new Blob([contents], { type: 'application/json;charset=utf-8' }),
         `astrid-unsaved-change-${timelineId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
-      // Starting a browser download cannot prove the file was saved. The shell
-      // requires a second explicit confirmation before returning to canonical.
+      rejectedSaveCopy.current = { target, snapshot, outbox: {
+        requestKey: exportData.rejected_request.key,
+        intentIds: exportData.edits.map((edit) => edit.id),
+      } };
       return true;
     } catch (error) {
       toast.error(`Could not copy your change out: ${error instanceof Error ? error.message : String(error)}. Your changes are still retained.`);
       return false;
     }
-  }, [localOwner, timelineId, toast]);
+  }, [cancelRejectedSaveCopy, captureSaveTarget, localOwner, readOwnedRecoverySnapshot, scopedSave, timelineId, toast]);
 
   const retryPendingSaveAfterReconnect = useCallback(() => {
-    // Reconnection is not a creator choice: an acknowledged permanent refusal
-    // must never be replayed just because the Runtime has come back online.
-    if (isPermanentLocalSaveRejection(localOwner.session?.getState())) return;
+    if (isPermanentLocalSaveRejection(localSaveState)) return;
     persistence.retryPendingSave();
-  }, [localOwner, persistence.retryPendingSave]);
+  }, [localSaveState, persistence.retryPendingSave]);
 
   return {
     elementTimelineRoutes,
@@ -974,6 +993,7 @@ export function useTimelineSave(
     localSaveState,
     permanentSaveRejection: isPermanentLocalSaveRejection(localSaveState),
     copyRejectedSave,
+    cancelRejectedSaveCopy,
     originalLocalSaveBasis,
     timelineEditingReady,
     isTimelineEditingReady,

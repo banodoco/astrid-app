@@ -322,7 +322,12 @@ describe('registered parent element outbox handoff', () => {
         expect(stored.intents).toHaveLength(1);
         expect(JSON.stringify(stored.intents)).toContain('"red"');
         expect(stored.pending?.outcome).toMatchObject({ kind: 'rejected', error: { details: { reason: 'dependency_changed' } } });
-        expect(mounted.getEditor().dataRef.current?.config.clips[0].elementRef).toBeUndefined();
+        const displayed = mounted.getEditor().dataRef.current?.config.clips[0];
+        if (outcome === 'invalid') {
+          expect(displayed).toMatchObject({ elementRef: mounted.operation.element, params: { color: 'red' } });
+        } else {
+          expect(displayed?.elementRef).toBeUndefined();
+        }
       } else {
         expect(stored.intents).toHaveLength(0);
         expect(result).toMatchObject({ head: { headRevisionId: 'r1', headPublicationId: 'p1' }, config: { clips: [

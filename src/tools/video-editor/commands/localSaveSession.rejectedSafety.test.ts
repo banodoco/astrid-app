@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createLocalSaveSession } from './localSaveSession.ts';
+import { createLocalSaveSession, isPermanentLocalSaveRejection } from './localSaveSession.ts';
 import { toOutboxJson } from './commitOutbox.ts';
 import { ApiError, type CanonicalDocument } from '@/integrations/runtime/generated.ts';
 import { environment, h0, scope } from './__tests__/localSaveSessionEnvironment.ts';
@@ -150,4 +150,46 @@ describe('FIX-16 rejected save safety: original IDs and durable suffix', () => {
     expect(session.getState().status).toBe('error');
     await session.dispose();
   });
+});
+
+it.each([400, 404, 405, 413, 422])('FIX16-R2-UNDO-%s keeps a refused inverse available to Copy', async status => {
+  const env = environment();
+  const session = await env.mount();
+  try {
+    const before = session.getDocument();
+    await session.append({ before, after: before, label: 'Undo timeline', reads: [],
+      commands: [{ schema_version: 1, op: 'timeline.inverse', version: '1', select: null,
+        args: { publications: ['p0'] } }] });
+    env.send.mockRejectedValueOnce(new ApiError(status, 'http_error', 'Permanent failure'));
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    expect(session.getState().status).toBe('conflict');
+    expect(isPermanentLocalSaveRejection(session.getState())).toBe(true);
+    const [stored] = await env.outboxes.list(scope);
+    expect(await session.exportRejectedChange()).toMatchObject({ rejected_request: stored.pending?.request,
+      edits: [{ id: stored.intents[0].id, payload: stored.intents[0].payload }] });
+    expect(env.send).toHaveBeenCalledTimes(1);
+  } finally { await session.dispose(); }
+});
+
+it('FIX16-R2-PREVIEW-422 copies the original rejected bytes even when preview fails on reopen', async () => {
+  const env = environment();
+  const first = await env.mount();
+  await env.append(first);
+  env.send.mockRejectedValueOnce(new ApiError(422, 'invalid', 'Bad config'));
+  await expect(first.flush()).rejects.toThrow('draft retained');
+  const [stored] = await env.outboxes.list(scope);
+  await first.dispose();
+
+  env.prepareDisplay.mockRejectedValueOnce(new Error('Unrenderable draft'));
+  const reopened = await env.mount();
+  try {
+    await reopened.recover(stored.ownerId);
+    expect(reopened.getState()).toMatchObject({ status: 'error', error: {
+      kind: 'validation', message: expect.stringContaining('Unrenderable draft'),
+    } });
+    expect(await reopened.exportRejectedChange()).toMatchObject({ rejected_request: stored.pending?.request,
+      edits: [{ id: stored.intents[0].id, payload: stored.intents[0].payload }], final_document: env.pair.after });
+    expect((await env.outboxes.list(scope))[0].pending).toEqual(stored.pending);
+    expect(env.send).toHaveBeenCalledTimes(1);
+  } finally { await reopened.dispose(); }
 });

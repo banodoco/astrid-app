@@ -32,8 +32,8 @@ const ratioTarget = Number(process.env.SAVE_LOOP_COMMIT_RATIO || 15);
 const imageCount = Math.round(clipTarget * 0.25);
 const videoCount = Math.round(clipTarget * 0.06);
 const audioCount = clipTarget - imageCount - videoCount;
-const visualTracks = ['video-1', 'video-2', 'video-3', 'video-4', 'video-5', 'video-6'];
-const audioTracks = ['audio-1', 'audio-2', 'audio-3'];
+const visualTracks = ['V1', 'V2', 'V3', 'V4', 'V5', 'V6'];
+const audioTracks = ['A1', 'A2', 'A3'];
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -163,6 +163,54 @@ async function post(base, route, body, key) {
   return value;
 }
 
+async function get(base, route) {
+  const response = await fetch(`${base.replace(/\/$/, '')}/api/runtime${route}`);
+  const raw = await response.text();
+  let value;
+  try { value = JSON.parse(raw); } catch { throw new Error(`${route}: HTTP ${response.status}: ${raw.slice(0, 300)}`); }
+  if (!response.ok) throw new Error(`${route}: HTTP ${response.status}: ${JSON.stringify(value).slice(0, 400)}`);
+  return value;
+}
+
+function stackPorts(root) {
+  const portsFile = path.join(root, 'ports');
+  const stackInfoFile = path.join(root, 'stack-info.txt');
+  const ports = {};
+  if (fs.existsSync(portsFile)) {
+    const values = fs.readFileSync(portsFile, 'utf8').trim().split(/[\s,]+/);
+    if (/^\d+$/.test(values[0] || '')) ports.editor = Number(values[0]);
+    if (/^\d+$/.test(values[1] || '')) ports.proxy = Number(values[1]);
+    if (/^\d+$/.test(values[2] || '')) ports.door = Number(values[2]);
+  }
+  if (fs.existsSync(stackInfoFile)) {
+    const value = fs.readFileSync(stackInfoFile, 'utf8');
+    for (const [key, label] of [['editor', 'EDITOR_PORT'], ['proxy', 'PROXY_PORT'], ['door', 'DOOR_PORT']]) {
+      if (ports[key]) continue;
+      const match = value.match(new RegExp(`^${label}=(\\d+)$`, 'm'));
+      if (match) ports[key] = Number(match[1]);
+    }
+  }
+  if (!ports.editor || !ports.door) throw new Error(`could not resolve editor and Runtime door ports from ${portsFile} or ${stackInfoFile}`);
+  return ports;
+}
+
+function sha256ObjectId(file) {
+  return `sha256:${createHash('sha256').update(fs.readFileSync(file)).digest('hex')}`;
+}
+
+function runtimeMediaIds(value, found = new Set()) {
+  if (Array.isArray(value)) {
+    for (const child of value) runtimeMediaIds(child, found);
+  } else if (value && typeof value === 'object') {
+    for (const [key, child] of Object.entries(value)) {
+      if ((key === 'media_id' || key === 'object_id')
+          && typeof child === 'string' && /^sha256:[0-9a-f]{64}$/.test(child)) found.add(child);
+      runtimeMediaIds(child, found);
+    }
+  }
+  return found;
+}
+
 function findString(value, field) {
   if (!value || typeof value !== 'object') return undefined;
   if (typeof value[field] === 'string' && value[field]) return value[field];
@@ -187,13 +235,25 @@ visual, audio = cfg['visual_tracks'], cfg['audio_tracks']
 count = cfg['clip_target']
 image_n, video_n = round(count * .25), round(count * .06)
 audio_n = count - image_n - video_n
+expected_object_ids = cfg['expected_object_ids']
+expected_object_ids_by_kind = cfg['expected_object_ids_by_kind']
+bootstrap_track_ids = {'V1', 'A1'}
+canonical_documents = {}
+last_results = {}
+
+def runtime_payload(doc):
+    return ((doc.get('parent_revision') or {}).get('payload')
+            if isinstance(doc.get('parent_revision'), dict) else None) or {}
 
 def root_clips(doc):
-    parent = doc.get('parent', {})
-    return parent.get('clips', (parent.get('config', {}) or {}).get('clips', []))
+    parent = doc.get('parent') or runtime_payload(doc)
+    config = parent.get('config', {}) or {}
+    rows = parent.get('clips')
+    if not isinstance(rows, list) or not rows: rows = config.get('clips', [])
+    return rows if isinstance(rows, list) else []
 
 def root_tracks(doc):
-    parent = doc.get('parent', {})
+    parent = doc.get('parent') or runtime_payload(doc)
     rows = parent.get('tracks')
     if not isinstance(rows, list): rows = (parent.get('config', {}) or {}).get('tracks', [])
     return rows if isinstance(rows, list) else []
@@ -201,8 +261,31 @@ def root_tracks(doc):
 def placement_rows(doc):
     rows = doc.get('placements')
     if not isinstance(rows, list):
-        rows = (doc.get('parent', {}) or {}).get('occurrences', [])
+        parent = doc.get('parent') or runtime_payload(doc)
+        rows = parent.get('occurrences', [])
     return rows if isinstance(rows, list) else []
+
+def registry_assets(doc):
+    parent = doc.get('parent') or runtime_payload(doc)
+    registry = parent.get('registry', (parent.get('config', {}) or {}).get('registry', {}))
+    return registry.get('assets', {}) if isinstance(registry, dict) else {}
+
+def canonical_media_ids(doc):
+    found = set()
+    def walk(value):
+        if isinstance(value, dict):
+            for key, child in value.items():
+                if key in {'media_id', 'object_id'} and isinstance(child, str) and child.startswith('sha256:'):
+                    found.add(child)
+                walk(child)
+        elif isinstance(value, list):
+            for child in value: walk(child)
+    walk(doc)
+    return found
+
+def canonical_document_bytes(doc):
+    return len(json.dumps(doc, sort_keys=True, separators=(',', ':'),
+                          ensure_ascii=False, allow_nan=False).encode('utf-8'))
 
 batch_size = 12
 outbox_root = cfg['outbox_root']
@@ -221,7 +304,17 @@ def commit_batch(tl, timeline, label, key, edit, command_count):
            'elapsed_ms': elapsed_ms}
     if not row['receipt_id'] or not row['accepted_revision_id'] or row['status'] == 'preview':
         raise RuntimeError(f'{label} omitted accepted receipt or revision')
+    document = data.get('canonical_document')
+    parent_revision = document.get('parent_revision', {}) if isinstance(document, dict) else {}
+    if (not isinstance(document, dict) or document.get('project_id') != project
+            or document.get('timeline_id') != timeline
+            or not isinstance(parent_revision, dict) or parent_revision.get('revision_id') != row['accepted_revision_id']
+            or not parent_revision.get('content_digest')):
+        raise RuntimeError(f'{label} omitted its matching canonical Runtime document')
+    row['content_digest'] = parent_revision['content_digest']
     receipts.append(row)
+    canonical_documents[timeline] = document
+    last_results[timeline] = row
     print(f"accepted {label}: {command_count} commands receipt={row['receipt_id']} revision={row['accepted_revision_id']}", flush=True)
 
 def populate(timeline, *, control=False):
@@ -229,10 +322,18 @@ def populate(timeline, *, control=False):
     with AstridClient.open_existing_from_launcher() as client:
         tl = Timeline.open(project, timeline, client=client,
                            outbox_path=os.path.join(outbox_root, f'{timeline}.json'))
-        track_rows = [(track, 'visual') for track in visual] + [(track, 'audio') for track in audio]
+        initial_tracks = root_tracks(tl.document())
+        initial = {row.get('id'): row for row in initial_tracks if isinstance(row, dict)}
+        if (len(initial_tracks) != 2 or set(initial) != bootstrap_track_ids
+                or initial['V1'].get('kind') != 'visual' or initial['A1'].get('kind') != 'audio'):
+            raise RuntimeError(f'expected Runtime bootstrap tracks V1 visual and A1 audio; got {initial_tracks!r}')
+        track_rows = [] if control else (
+            [(track, 'visual') for track in visual if track not in initial]
+            + [(track, 'audio') for track in audio if track not in initial])
         def make_tracks(t):
             for track, kind in track_rows: t.track(track, kind=kind)
-        commit_batch(tl, timeline, 'Seed fixture tracks', f'p77-{timeline}-tracks', make_tracks, len(track_rows))
+        if track_rows:
+            commit_batch(tl, timeline, 'Add missing fixture tracks', f'p77-{timeline}-tracks', make_tracks, len(track_rows))
 
         if control:
             clip_rows = [('video', 0, visual[0], 10, 4, 'control-video-0000')]
@@ -277,7 +378,21 @@ def populate(timeline, *, control=False):
                     targets[kind].append(clip_id)
             commit_batch(tl, timeline, f'Add fixture clips {start + 1}-{start + len(batch)}',
                          f'p77-{timeline}-clips-{start}', make_clips, len(batch))
-        document = tl.document()
+        document = canonical_documents[timeline]
+        actual_tracks = root_tracks(document)
+        visual_count = sum(row.get('kind') == 'visual' for row in actual_tracks)
+        audio_count = sum(row.get('kind') == 'audio' for row in actual_tracks)
+        if not control and (len(actual_tracks) != 9 or visual_count != 6 or audio_count != 3
+                            or {row.get('id') for row in actual_tracks} != set(visual + audio)):
+            raise RuntimeError(f'expected exactly 9 fixture tracks (6 visual, 3 audio); got {actual_tracks!r}')
+        if control and (len(actual_tracks) != 2 or visual_count != 1 or audio_count != 1):
+            raise RuntimeError(f'expected two bootstrap control tracks; got {actual_tracks!r}')
+        actual_ids = canonical_media_ids(document)
+        required_ids = set(expected_object_ids if not control else expected_object_ids_by_kind['video'][:1])
+        missing_ids = sorted(required_ids - actual_ids)
+        if missing_ids: raise RuntimeError(f'accepted Runtime document is missing {len(missing_ids)} expected media identities')
+        unexpected_ids = sorted(actual_ids - required_ids)
+        if unexpected_ids: raise RuntimeError(f'accepted Runtime document contains {len(unexpected_ids)} unexpected media identities')
         clip_id = targets['video'][0]
         clip = next((row for row in root_clips(document) if row.get('id') == clip_id), None)
         if clip is None: raise RuntimeError(f'public SDK document has no clip {clip_id}')
@@ -285,20 +400,21 @@ def populate(timeline, *, control=False):
         warm_times = []
         for i in range(5):
             target = initial + (1 / 30 if i % 2 == 0 else 0)
-            started = time.perf_counter()
-            tl.move(f'parent/clip:{clip_id}', target)
-            tl.commit(label='Warm fixture clip move',
-                      idempotency_key=f'p77-warm-move-{timeline}-{clip_id}-{i}')
-            warm_times.append((time.perf_counter() - started) * 1000)
-    return document, targets, warm_times
+            def move_clip(t, target=target): t.move(f'parent/clip:{clip_id}', target)
+            commit_batch(tl, timeline, 'Warm fixture clip move',
+                         f'p77-warm-move-{timeline}-{clip_id}-{i}', move_clip, 1)
+            warm_times.append(receipts[-1]['elapsed_ms'])
+        document = canonical_documents[timeline]
+        actual_staged_track_count = len({row.get('id') for row in root_tracks(document)} - bootstrap_track_ids)
+        if actual_staged_track_count != len(track_rows):
+            raise RuntimeError(f'staged {len(track_rows)} tracks but Runtime document contains {actual_staged_track_count}')
+    return document, targets, warm_times, actual_staged_track_count, actual_tracks
 
-heavy_doc, heavy_targets, heavy_times = populate(timeline_id)
-control_doc, control_targets, control_times = populate(control_id, control=True)
-doc_bytes = len(json.dumps(heavy_doc, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode())
-control_bytes = len(json.dumps(control_doc, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode())
-parent = heavy_doc.get('parent', {})
-registry = parent.get('registry', (parent.get('config', {}) or {}).get('registry', {}))
-assets = registry.get('assets', {}) if isinstance(registry, dict) else {}
+heavy_doc, heavy_targets, heavy_times, created_track_count, heavy_track_rows = populate(timeline_id)
+control_doc, control_targets, control_times, _, control_track_rows = populate(control_id, control=True)
+doc_bytes = canonical_document_bytes(heavy_doc)
+control_bytes = canonical_document_bytes(control_doc)
+assets = registry_assets(heavy_doc)
 clips = {row.get('id'): row for row in root_clips(heavy_doc) if isinstance(row, dict)}
 tracks = {row.get('id'): row for row in root_tracks(heavy_doc) if isinstance(row, dict)}
 for wanted in visual + audio:
@@ -323,9 +439,16 @@ for shot in shots:
                         'track_id': row.get('track'), 'track_role': 'visual', 'name': shot['name']})
 measurement = {
     'clip_count': len(root_clips(heavy_doc)), 'document_bytes': doc_bytes,
+    'document_bytes_source': 'accepted Runtime response data.canonical_document, canonical JSON',
     'registry_asset_count': len(assets),
+    'created_track_count': created_track_count,
+    'total_track_count': len(heavy_track_rows),
+    'visual_track_count': sum(row.get('kind') == 'visual' for row in heavy_track_rows),
+    'audio_track_count': sum(row.get('kind') == 'audio' for row in heavy_track_rows),
     'sdk_commit_batch_size': batch_size,
     'accepted_commit_receipts': receipts,
+    'accepted_heavy_head': last_results[timeline_id],
+    'runtime_object_ids': sorted(canonical_media_ids(heavy_doc)),
     'heavy_warm_move_samples_ms': heavy_times,
     'one_clip_warm_move_samples_ms': control_times,
     'heavy_warm_move_median_ms': statistics.median(heavy_times),
@@ -333,7 +456,7 @@ measurement = {
     'warm_move_median_ratio': statistics.median(heavy_times) / statistics.median(control_times),
     'one_clip_document_bytes': control_bytes, 'one_clip_count': len(root_clips(control_doc)),
     'named': {'tracks': [{'id': row['id'], 'label': row.get('label', row['id']),
-                          'kind': row['kind'], 'role': row.get('role', 'output')}
+                          'kind': row['kind'], **({'role': row['role']} if 'role' in row else {})}
                          for row in root_tracks(heavy_doc) if row.get('id') in visual + audio],
               'video': clip_targets(heavy_targets['video'], 'video'),
               'audio': clip_targets(heavy_targets['audio'], 'audio'),
@@ -347,8 +470,14 @@ print(json.dumps(measurement, sort_keys=True))
 
 async function main() {
   if (!root || !baseUrl) throw new Error('set SAVE_LOOP_ROOT and SAVE_LOOP_BASE_URL for the isolated SL-1 stack');
-  if (!/^https?:\/\//.test(baseUrl)) throw new Error('SAVE_LOOP_BASE_URL must be the editor origin');
+  const origin = new URL(baseUrl);
+  if (!['http:', 'https:'].includes(origin.protocol)) throw new Error('SAVE_LOOP_BASE_URL must use HTTP or HTTPS');
+  if (!['localhost', '127.0.0.1', '[::1]'].includes(origin.hostname))
+    throw new Error('save-loop fixture creation requires the owned local isolated stack');
+  if (origin.pathname !== '/' || origin.search || origin.hash) throw new Error('SAVE_LOOP_BASE_URL must be a local origin without a path or query');
   if (!Number.isInteger(clipTarget) || clipTarget < 616) throw new Error('SAVE_LOOP_CLIPS must be an integer >= 616');
+  const ports = stackPorts(root);
+  if (Number(origin.port) !== ports.editor) throw new Error(`SAVE_LOOP_BASE_URL port must match this stack's editor port ${ports.editor}`);
   assertDisk();
   fs.mkdirSync(scratch, {recursive: true});
   const mediaRoot = path.join(scratch, 'generated-media');
@@ -368,6 +497,18 @@ async function main() {
   assertUniqueAssets(images, 'image');
   assertUniqueAssets(videos, 'video');
   assertUniqueAssets(audios, 'audio');
+  const objectIdsByKind = {
+    image: images.map(sha256ObjectId),
+    video: videos.map(sha256ObjectId),
+    audio: audios.map(sha256ObjectId),
+  };
+  const expectedObjectIds = [...objectIdsByKind.image, ...objectIdsByKind.video, ...objectIdsByKind.audio];
+  if (expectedObjectIds.length !== clipTarget || new Set(expectedObjectIds).size !== expectedObjectIds.length)
+    throw new Error(`expected ${clipTarget} unique generated media object identities; got ${expectedObjectIds.length}`);
+  const dropFiles = images.slice(0, 3);
+  const dropObjectIds = dropFiles.map(sha256ObjectId);
+  if (dropFiles.length !== 3 || dropObjectIds.some((id, index) => id !== objectIdsByKind.image[index]))
+    throw new Error('drop file identities are not paired with their generated Runtime object IDs');
   assertDisk();
 
   const nonce = randomUUID().slice(0, 8);
@@ -379,18 +520,7 @@ async function main() {
   if (!projectId) throw new Error(`Runtime omitted created project id: ${JSON.stringify(projectReply).slice(0, 400)}`);
   const timelineId = `save-loop-heavy-${nonce}`;
   const oneClipTimelineId = `save-loop-one-${nonce}`;
-  const portsFile = path.join(root, 'ports');
-  const stackInfoFile = path.join(root, 'stack-info.txt');
-  let doorPort;
-  if (fs.existsSync(portsFile)) {
-    const values = fs.readFileSync(portsFile, 'utf8').trim().split(/[\s,]+/);
-    if (values.length >= 3 && /^\d+$/.test(values[2])) doorPort = Number(values[2]);
-  }
-  if (!doorPort && fs.existsSync(stackInfoFile)) {
-    const match = fs.readFileSync(stackInfoFile, 'utf8').match(/^DOOR_PORT=(\d+)$/m);
-    if (match) doorPort = Number(match[1]);
-  }
-  if (!doorPort) throw new Error(`could not resolve Runtime door port from ${portsFile} or ${stackInfoFile}`);
+  const doorPort = ports.door;
   const createTimeline = async (id, name) => {
     const response = await post(baseUrl, `/v1/projects/${encodeURIComponent(projectId)}/timelines`,
       {timeline_id: id, name}, `p77-${id}`);
@@ -421,9 +551,11 @@ async function main() {
   const outboxRoot = path.join(scratch, `outbox-${nonce}`);
   fs.mkdirSync(outboxRoot, {recursive: true});
   const media = {image: images, video: videos, audio: audios};
+  const expectedObjectIdsByKind = objectIdsByKind;
   fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId,
     one_clip_timeline_id: oneClipTimelineId, clip_target: clipTarget, media, shots,
-    visual_tracks: visualTracks, audio_tracks: audioTracks, outbox_root: outboxRoot}));
+    visual_tracks: visualTracks, audio_tracks: audioTracks, outbox_root: outboxRoot,
+    expected_object_ids: expectedObjectIds, expected_object_ids_by_kind: expectedObjectIdsByKind}));
   fs.writeFileSync(scriptPath, sdkScript, {mode: 0o600});
   try {
     await run(python, ['-I', scriptPath], {env: {...process.env,
@@ -438,6 +570,26 @@ async function main() {
   }
   const measurement = JSON.parse(fs.readFileSync(measurementPath, 'utf8'));
   fs.rmSync(measurementPath, {force: true});
+  const timelineIndex = await get(baseUrl, `/v1/projects/${encodeURIComponent(projectId)}/timelines`);
+  const head = (timelineIndex.items || []).find(row => row.timeline_id === timelineId);
+  if (!head?.head_revision_id || !head?.head_publication_id)
+    throw new Error('public Runtime timeline index omitted the fixture head revision or publication');
+  const headRevisionRoute = `/v1/projects/${encodeURIComponent(projectId)}/timelines/${encodeURIComponent(timelineId)}`
+    + `/composition-revisions/${encodeURIComponent(head.head_revision_id)}`;
+  const headRevision = await get(baseUrl, headRevisionRoute);
+  if (headRevision.revision_id !== head.head_revision_id
+      || headRevision.revision_id !== measurement.accepted_heavy_head.accepted_revision_id
+      || headRevision.content_digest !== measurement.accepted_heavy_head.content_digest
+      || head.head_publication_id !== measurement.accepted_heavy_head.receipt_id)
+    throw new Error('public Runtime head does not match the final accepted SDK receipt and canonical document');
+  const headObjectIds = [...runtimeMediaIds(headRevision.payload)].sort();
+  const missingHeadIds = expectedObjectIds.filter(objectId => !headObjectIds.includes(objectId));
+  const unexpectedHeadIds = headObjectIds.filter(objectId => !expectedObjectIds.includes(objectId));
+  if (missingHeadIds.length || unexpectedHeadIds.length)
+    throw new Error(`public Runtime head media identity set differs (missing ${missingHeadIds.length}, unexpected ${unexpectedHeadIds.length})`);
+  measurement.actual_head = {revision_id: headRevision.revision_id,
+    publication_id: head.head_publication_id, content_digest: headRevision.content_digest,
+    verified_object_id_count: headObjectIds.length, route: `/api/runtime${headRevisionRoute}`};
   assertDisk();
   const {named, ...measuredValues} = measurement;
   const passed = measurement.clip_count >= clipTarget && measurement.document_bytes >= byteTarget
@@ -459,7 +611,8 @@ async function main() {
     },
     shots,
     media: {synthetic: true, asset_counts: {image: images.length, video: videos.length, audio: audios.length},
-      drop_files: images.slice(0, 3)},
+      retained_object_ids: expectedObjectIds, drop_files: dropFiles,
+      drop_object_ids: dropObjectIds},
     measurement: {...measuredValues, targets: {clip_count: clipTarget, document_bytes: byteTarget,
       warm_move_median_ratio: ratioTarget}, status: passed ? 'pass' : 'fail'},
     live_proof: {stack_url: baseUrl, generated_at: new Date().toISOString(), second_machine: 'pending'},

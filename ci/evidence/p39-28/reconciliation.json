@@ -1,0 +1,1542 @@
+{
+  "schema": 1,
+  "base": "da6e7cc8f8ed33b22e4710b161ba2d4995bd0ea1",
+  "seal": "0700e981be5dfbfc229784b8ade69869f62716dd",
+  "protected_sha256": {
+    "ci/required-checks.json": "75f73c3f601284284c4cd85ef5a01206f8729204758c72d4084b412f936e1850",
+    "ci/failure-ceiling.json": "5e586d14b0d95be343383e5f9e0a0dcb601eaa33a4429fac989fd214931cb06c",
+    "ci/test-inventory.json.gz": "5d7e92666e59879c65760718e6204515a1e71217eeae7a4d638870c18aadccd0",
+    "scripts/ci/failure_ceiling.py": "a5e977a0e8744973f35f10ac682b1ef4b80c6250a71c3a9bca93584b5c4145ed",
+    "scripts/ci/ceiling_adapters.py": "fadd505b101bf3d9c77d54c66b32a485943f54eef66303bf1f519518c19e0a92",
+    "scripts/ci/ceiling_hosted.py": "392a0265587f3431d1b8286629006be274a0cff83633b0250b91bc5b57dd11b1"
+  },
+  "candidate_inventory_sha256": "936828bc6a84d4e0cc49b444b454bd38f230a6403201ac6e1ae85f0ef7f3f96d",
+  "seed_rows": 21250,
+  "candidate_rows": 22074,
+  "passing_additions": 824,
+  "additions_by_lane": {
+    "Tests/vitest/release-node": 21,
+    "Tests/vitest/app": 263,
+    "Tests/vitest/node": 465,
+    "Tests/release-tooling-macos": 66,
+    "Tests/boundary": 9
+  },
+  "held_skips": 26,
+  "all_native_suites_reproduced_from_unchanged_collector": true,
+  "full_added_rows_identical_across_original_and_sync": true,
+  "all_protected_rows_and_inventory_metadata_unchanged": true,
+  "jobs": {
+    "original": {
+      "Tests/vitest/release-node": {
+        "head": "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "run_id": 44611475170,
+        "job_id": 135868982860,
+        "attempt": 1,
+        "artifact_id": 14573784366,
+        "artifact_sha256": "sha256:87802461c53cacf88da9e4da5304e3bf7714111c06f9fa13fcee7012b5c14b88",
+        "step": "step-04",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+          "tuple": {
+            "banodoco/astrid-app": "6ab05e41d5201ee1c7c722731001b68378a9fc26"
+          },
+          "step": "step-04",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44611475170",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "ef2a7c5e9dad85014a1f85fc5b3482f6119188f3d9e82bd93e471ae1c6647bab",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795121236.1377385,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795121236.8301945
+        },
+        "command_json_sha256": "04c8aa89d2e4cca1674918b2b42d698a5508fae12ab00c5fb2e0122eaf6c8879",
+        "stream": "step-04/node-2560-1795121236181.jsonl",
+        "stream_sha256": "4d08b8791aeefde247b29ffe4cf5b4cc124298fe33cd4938ecb1c47e31117072",
+        "count": 21,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 21
+        }
+      },
+      "Tests/vitest/app": {
+        "head": "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "run_id": 44611475170,
+        "job_id": 135868982860,
+        "attempt": 1,
+        "artifact_id": 14573784366,
+        "artifact_sha256": "sha256:87802461c53cacf88da9e4da5304e3bf7714111c06f9fa13fcee7012b5c14b88",
+        "step": "step-11",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+          "tuple": {
+            "banodoco/astrid-app": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+          },
+          "step": "step-11",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44611475170",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "bbd1189425042892500a64b67923278f62c26539236b99cda533805b55c1d877",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795121308.315059,
+          "complete": true,
+          "raw_exit": 1,
+          "finished_at": 1795122376.0798442
+        },
+        "command_json_sha256": "6667b43a5429e0ee0af76777332a51b692b7ffc8a515a33cd40a4c768937c31b",
+        "stream": "step-11/vitest-3226-1795121319176.jsonl",
+        "stream_sha256": "404a288afc164551d933b2e6979de18368e78849cab78765be34dfa99baf1a2f",
+        "count": 21153,
+        "raw_exit": 1,
+        "outcomes": {
+          "passed": 21143,
+          "failed": 10
+        }
+      },
+      "Tests/vitest/node": {
+        "head": "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "run_id": 44611475170,
+        "job_id": 135868982860,
+        "attempt": 1,
+        "artifact_id": 14573784366,
+        "artifact_sha256": "sha256:87802461c53cacf88da9e4da5304e3bf7714111c06f9fa13fcee7012b5c14b88",
+        "step": "step-12",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+          "tuple": {
+            "banodoco/astrid-app": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+          },
+          "step": "step-12",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44611475170",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "92cbc68d05b5657e26ac1ce1e3f83f3f58487fbcd70e36400726ac8eda8616ef",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795122376.1604698,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795122494.2021234
+        },
+        "command_json_sha256": "c23b65b3f1be54a0fca4f6c19e8d6ce957117ee1708c10887fa7b75589a96f0c",
+        "stream": "step-12/node-21381-1795122376323.jsonl",
+        "stream_sha256": "8af77d19260421e35f2b133db62f139bb4a6439ff158cb7eedf558006e0c6ed8",
+        "count": 491,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 465,
+          "skipped": 26
+        }
+      },
+      "Tests/vitest/sdk-boundary": {
+        "head": "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "run_id": 44611475170,
+        "job_id": 135868982860,
+        "attempt": 1,
+        "artifact_id": 14573784366,
+        "artifact_sha256": "sha256:87802461c53cacf88da9e4da5304e3bf7714111c06f9fa13fcee7012b5c14b88",
+        "step": "step-13",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+          "tuple": {
+            "banodoco/astrid-app": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+          },
+          "step": "step-13",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44611475170",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "b70bdfaaa942c1930589491c20f3756b136d2585e48a2c9691fdb1c56e531b83",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795122494.280369,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795122496.8953578
+        },
+        "command_json_sha256": "514755cc60edf46332398dd9a91dfb849de7e06846e5dfa3411c324e69d35b47",
+        "stream": "step-13/vitest-31318-1795122495315.jsonl",
+        "stream_sha256": "feaf4ce720f9f8020e8f3bee846f1184f35676f859cb23867ff59287adf2b3d8",
+        "count": 335,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 335
+        }
+      },
+      "Tests/release-tooling-macos": {
+        "head": "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "run_id": 44611475170,
+        "job_id": 135868982557,
+        "attempt": 1,
+        "artifact_id": 14572749262,
+        "artifact_sha256": "sha256:92a98075f61f529844050b9d27b52d290a735aac8490e7bc1cc017611440da72",
+        "step": "step-02",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+          "tuple": {
+            "banodoco/astrid-app": "6ab05e41d5201ee1c7c722731001b68378a9fc26"
+          },
+          "step": "step-02",
+          "job": "release-tooling-macos",
+          "matrix_index": "0",
+          "run_id": "44611475170",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "6c9bb5d7b86383b4dd98b8a4b262388bf38f377bda6fd2fe8226b7cacc68488e",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795121593.067515,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795122191.1809762
+        },
+        "command_json_sha256": "de22c8106c6229c5ecda413ddcffcd8cc43091444a9a97a77318267be8d8f294",
+        "stream": "step-02/node-1282-1795121593202.jsonl",
+        "stream_sha256": "2e00c15b05535429dfb1a97475f899239ea5ef508bbb68801ec8c8f5caf2480d",
+        "count": 66,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 66
+        }
+      },
+      "Tests/boundary": {
+        "head": "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "run_id": 44611475170,
+        "job_id": 135868982855,
+        "attempt": 1,
+        "artifact_id": 14573303545,
+        "artifact_sha256": "sha256:3fb62acc87f53a16dbfc7bfdb929a6496908666a0c84c1a4de6e4b1fdbc0653f",
+        "step": "step-08",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+          "tuple": {
+            "banodoco/astrid-app": "6ab05e41d5201ee1c7c722731001b68378a9fc26",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4",
+            "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c"
+          },
+          "step": "step-08",
+          "job": "boundary",
+          "matrix_index": "0",
+          "run_id": "44611475170",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "372d5cdb6349fe9bf68257ed8e86dcff7ec02e333bad1f8b2da443b399bb0139",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795122220.7618258,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795122220.8592708
+        },
+        "command_json_sha256": "3c8bcb3e87d99ac3644df036f1bae83899be3381ccd0598be4829c8268e1ffd4",
+        "stream": "step-08/node-2561-1795122220796.jsonl",
+        "stream_sha256": "90fcea7d409d7e3099ab1afd56b40aae20e54e281a3db3cfb8840ad751b994de",
+        "count": 9,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 9
+        }
+      }
+    },
+    "sync": {
+      "Tests/vitest/release-node": {
+        "head": "75daac1cc8e174258b71b35766712fe5a8204727",
+        "run_id": 44616853834,
+        "job_id": 135887741423,
+        "attempt": 1,
+        "artifact_id": 14579335457,
+        "artifact_sha256": "sha256:e031a70ab4fc99716c7204a955f7244a40c145a057247325f048dac48c5de3b6",
+        "step": "step-04",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+          "tuple": {
+            "banodoco/astrid-app": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b"
+          },
+          "step": "step-04",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44616853834",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "ef2a7c5e9dad85014a1f85fc5b3482f6119188f3d9e82bd93e471ae1c6647bab",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795124497.3319046,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795124497.777561
+        },
+        "command_json_sha256": "498b2c6c3767fdd02ad44aabf8161dacb15a4a9e1f24dffe362dcc286b4b9004",
+        "stream": "step-04/node-2245-1795124497362.jsonl",
+        "stream_sha256": "e01198e8136b149424ef00bb349007b744a4b2f8f4750b81a7536d466bf9a886",
+        "count": 21,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 21
+        }
+      },
+      "Tests/vitest/app": {
+        "head": "75daac1cc8e174258b71b35766712fe5a8204727",
+        "run_id": 44616853834,
+        "job_id": 135887741423,
+        "attempt": 1,
+        "artifact_id": 14579335457,
+        "artifact_sha256": "sha256:e031a70ab4fc99716c7204a955f7244a40c145a057247325f048dac48c5de3b6",
+        "step": "step-11",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+          "tuple": {
+            "banodoco/astrid-app": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+          },
+          "step": "step-11",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44616853834",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "bbd1189425042892500a64b67923278f62c26539236b99cda533805b55c1d877",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795124549.540548,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795125265.816763
+        },
+        "command_json_sha256": "a763c035a4bc6fe60d8c140402bfdf66ffefd5506c9ca6d94ca3c61b1b87ad5c",
+        "stream": "step-11/vitest-2896-1795124557280.jsonl",
+        "stream_sha256": "47b6fcf2f41fffbcfbb96404376389a505f8442c4dea54b4a81a7005a8ea0de9",
+        "count": 21153,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 21153
+        }
+      },
+      "Tests/vitest/node": {
+        "head": "75daac1cc8e174258b71b35766712fe5a8204727",
+        "run_id": 44616853834,
+        "job_id": 135887741423,
+        "attempt": 1,
+        "artifact_id": 14579335457,
+        "artifact_sha256": "sha256:e031a70ab4fc99716c7204a955f7244a40c145a057247325f048dac48c5de3b6",
+        "step": "step-12",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+          "tuple": {
+            "banodoco/astrid-app": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+          },
+          "step": "step-12",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44616853834",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "92cbc68d05b5657e26ac1ce1e3f83f3f58487fbcd70e36400726ac8eda8616ef",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795125265.8730872,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795125354.2629263
+        },
+        "command_json_sha256": "3d69927330ca864e1ae3eb0bc9343c3e95d30a1ed484fa64b294eee913f3ce14",
+        "stream": "step-12/node-21004-1795125265986.jsonl",
+        "stream_sha256": "89cb4e61de4a581767f555a1039ae4225d5148f7faee11faa3cd0275ada86aa4",
+        "count": 491,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 465,
+          "skipped": 26
+        }
+      },
+      "Tests/vitest/sdk-boundary": {
+        "head": "75daac1cc8e174258b71b35766712fe5a8204727",
+        "run_id": 44616853834,
+        "job_id": 135887741423,
+        "attempt": 1,
+        "artifact_id": 14579335457,
+        "artifact_sha256": "sha256:e031a70ab4fc99716c7204a955f7244a40c145a057247325f048dac48c5de3b6",
+        "step": "step-13",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+          "tuple": {
+            "banodoco/astrid-app": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4"
+          },
+          "step": "step-13",
+          "job": "vitest",
+          "matrix_index": "0",
+          "run_id": "44616853834",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "b70bdfaaa942c1930589491c20f3756b136d2585e48a2c9691fdb1c56e531b83",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795125354.323465,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795125356.14185
+        },
+        "command_json_sha256": "4186ae315f0e0bc9fa7403197403e469cdf060cc6847f3389d2a975206e26212",
+        "stream": "step-13/vitest-30947-1795125355060.jsonl",
+        "stream_sha256": "feaf4ce720f9f8020e8f3bee846f1184f35676f859cb23867ff59287adf2b3d8",
+        "count": 335,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 335
+        }
+      },
+      "Tests/release-tooling-macos": {
+        "head": "75daac1cc8e174258b71b35766712fe5a8204727",
+        "run_id": 44616853834,
+        "job_id": 135887742096,
+        "attempt": 1,
+        "artifact_id": 14581141786,
+        "artifact_sha256": "sha256:0c2a53c763ecf94eb77d891339f23869b753ec7dfa86c36290e6c84ff42a07dd",
+        "step": "step-02",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+          "tuple": {
+            "banodoco/astrid-app": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b"
+          },
+          "step": "step-02",
+          "job": "release-tooling-macos",
+          "matrix_index": "0",
+          "run_id": "44616853834",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "6c9bb5d7b86383b4dd98b8a4b262388bf38f377bda6fd2fe8226b7cacc68488e",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795126651.825678,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795127262.261486
+        },
+        "command_json_sha256": "544c609e164080d7d94f504ead528a1f3292d8a126b4b7143d922af2c16daf05",
+        "stream": "step-02/node-1420-1795126651923.jsonl",
+        "stream_sha256": "592cef08d0ec8d3ee7ce6f9ced36a5bf1360c3a16af7cee78e9099bfbc48279e",
+        "count": 66,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 66
+        }
+      },
+      "Tests/boundary": {
+        "head": "75daac1cc8e174258b71b35766712fe5a8204727",
+        "run_id": 44616853834,
+        "job_id": 135887742013,
+        "attempt": 1,
+        "artifact_id": 14579058763,
+        "artifact_sha256": "sha256:82f9b2ce3efa25aa05d5a7a8f127cf9a712fb25753de4688169970762dbf56ba",
+        "step": "step-08",
+        "command": {
+          "schema": 1,
+          "repository": "banodoco/astrid-app",
+          "head": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+          "tuple": {
+            "banodoco/astrid-app": "b94a0a15f2b101fef7a3b5c62ba2f572dc1ec59b",
+            "banodoco/astrid-agent": "9814193a73f606719e81883a8be197d27dd361d4",
+            "banodoco/astrid-runtime": "6855dfa8df65cf8ae4c002b57134d6505493c17c"
+          },
+          "step": "step-08",
+          "job": "boundary",
+          "matrix_index": "0",
+          "run_id": "44616853834",
+          "attempt": "1",
+          "shell": "bash",
+          "command_sha256": "372d5cdb6349fe9bf68257ed8e86dcff7ec02e333bad1f8b2da443b399bb0139",
+          "installed_sources": {},
+          "tuple_conflicts": [],
+          "started_at": 1795126195.0710342,
+          "complete": true,
+          "raw_exit": 0,
+          "finished_at": 1795126195.1952684
+        },
+        "command_json_sha256": "5492c95dfa3ceaa21b2363844fc0567427bc1854e6b27369a9369cff6c4c1c99",
+        "stream": "step-08/node-2761-1795126195113.jsonl",
+        "stream_sha256": "552ab1e63bc7ad271d9cd92d300e637ed90c00363eb3045f4548cfda678b7e0e",
+        "count": 9,
+        "raw_exit": 0,
+        "outcomes": {
+          "passed": 9
+        }
+      }
+    }
+  },
+  "required_commands": {
+    "vitest": [
+      "Tests/vitest/release-node",
+      "Tests/vitest/app",
+      "Tests/vitest/node",
+      "Tests/vitest/sdk-boundary"
+    ],
+    "release-tooling-macos": [
+      "Tests/release-tooling-macos"
+    ],
+    "boundary": [
+      "Tests/boundary"
+    ]
+  },
+  "per_id_loss_lanes": {
+    "merge": [
+      "Tests/vitest/app",
+      "Tests/vitest/sdk-boundary"
+    ],
+    "release": [
+      "E2E/extension-visual",
+      "E2E/playwright-default",
+      "E2E/playwright-timeline",
+      "Tests/vitest/app",
+      "Tests/vitest/sdk-boundary"
+    ]
+  },
+  "reconciliation": [
+    {
+      "id": "RS1.3-nine-literal-missing-IDs",
+      "status": "resolved",
+      "authority": "6998651356",
+      "reason": "eight exact aliases and ID9's two explicit coverage replacements accepted by Lead; no global rename or masking allowance"
+    },
+    {
+      "id": "complete-native-inventory",
+      "status": "unknown",
+      "reason": "lanes without a full retained census must supply complete native collection; see seed-summary.json"
+    }
+  ],
+  "replays": {
+    "original-before": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 855,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/trusted",
+        "--report",
+        "<replay>/original-before-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/original-before-tuple.json",
+        "--output",
+        "<replay>/original-before-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "original-candidate": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 31,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/original-candidate-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/original-candidate-tuple.json",
+        "--output",
+        "<replay>/original-candidate-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "sync-before": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 855,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/trusted",
+        "--report",
+        "<replay>/sync-before-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/sync-before-tuple.json",
+        "--output",
+        "<replay>/sync-before-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "sync-candidate": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 31,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/sync-candidate-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/sync-candidate-tuple.json",
+        "--output",
+        "<replay>/sync-candidate-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "admission-loss-Tests-boundary": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 5,
+      "unknown": [],
+      "last_error": "new inventory ID lacks a passing receipt: ('Tests/boundary', '[\"scripts/quality/astrid-public-boundary.test.mjs\",119,1,0,\"projection objects require their declared keys and primitive types\"]', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/admission-loss-Tests-boundary-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/admission-loss-Tests-boundary-tuple.json",
+        "--output",
+        "<replay>/admission-loss-Tests-boundary-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "admission-loss-Tests-release-tooling-macos": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 5,
+      "unknown": [],
+      "last_error": "new inventory ID lacks a passing receipt: ('Tests/release-tooling-macos', '[\"scripts/release/astrid-release-provenance.test.mjs\",137,3,1,\"rejects hidden index flags that can conceal modified worktree bytes\"]', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/admission-loss-Tests-release-tooling-macos-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/admission-loss-Tests-release-tooling-macos-tuple.json",
+        "--output",
+        "<replay>/admission-loss-Tests-release-tooling-macos-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "admission-loss-Tests-vitest-app": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 5,
+      "unknown": [],
+      "last_error": "new inventory ID lacks a passing receipt: ('Tests/vitest/app', '-29725394_0_0', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/admission-loss-Tests-vitest-app-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/admission-loss-Tests-vitest-app-tuple.json",
+        "--output",
+        "<replay>/admission-loss-Tests-vitest-app-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "admission-loss-Tests-vitest-node": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 5,
+      "unknown": [],
+      "last_error": "new inventory ID lacks a passing receipt: ('Tests/vitest/node', '[\"scripts/acceptance/verify-local-project-gallery.test.mjs\",15,1,0,\"parses compact matrix rows\"]', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/admission-loss-Tests-vitest-node-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/admission-loss-Tests-vitest-node-tuple.json",
+        "--output",
+        "<replay>/admission-loss-Tests-vitest-node-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "admission-loss-Tests-vitest-release-node": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 5,
+      "unknown": [],
+      "last_error": "new inventory ID lacks a passing receipt: ('Tests/vitest/release-node', '[\"scripts/installer/release.test.mjs\",104,1,0,\"no tuple change and no release change passes, including a valid required floor\"]', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/admission-loss-Tests-vitest-release-node-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/admission-loss-Tests-vitest-release-node-tuple.json",
+        "--output",
+        "<replay>/admission-loss-Tests-vitest-release-node-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "prospective-loss-Tests-boundary": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 31,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/prospective-trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/prospective-loss-Tests-boundary-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/prospective-loss-Tests-boundary-tuple.json",
+        "--output",
+        "<replay>/prospective-loss-Tests-boundary-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "prospective-loss-Tests-release-tooling-macos": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 31,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/prospective-trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/prospective-loss-Tests-release-tooling-macos-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/prospective-loss-Tests-release-tooling-macos-tuple.json",
+        "--output",
+        "<replay>/prospective-loss-Tests-release-tooling-macos-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "prospective-loss-Tests-vitest-app": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 32,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"-29725394_0_0\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/prospective-trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/prospective-loss-Tests-vitest-app-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/prospective-loss-Tests-vitest-app-tuple.json",
+        "--output",
+        "<replay>/prospective-loss-Tests-vitest-app-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "prospective-loss-Tests-vitest-node": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 31,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/prospective-trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/prospective-loss-Tests-vitest-node-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/prospective-loss-Tests-vitest-node-tuple.json",
+        "--output",
+        "<replay>/prospective-loss-Tests-vitest-node-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "prospective-loss-Tests-vitest-release-node": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 31,
+      "unknown": [],
+      "last_error": "native ID source binding changed: ('Tests/vitest/app', '2003482884_0_73', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/prospective-trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/candidate",
+        "--report",
+        "<replay>/prospective-loss-Tests-vitest-release-node-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/prospective-loss-Tests-vitest-release-node-tuple.json",
+        "--output",
+        "<replay>/prospective-loss-Tests-vitest-release-node-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "original-skip-addition-refused": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 5,
+      "unknown": [],
+      "last_error": "new inventory ID lacks a passing receipt: ('Tests/vitest/node', '[\"scripts/release/bounded-command.test.mjs\",115,3,1,\"returns spawnSync-shaped success output and immutable invocation details\"]', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/unapproved-skip",
+        "--report",
+        "<replay>/original-skip-addition-refused-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "1f589e85269fb1aae205399bb9f1b0da4fe2446e",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/original-skip-addition-refused-tuple.json",
+        "--output",
+        "<replay>/original-skip-addition-refused-verdict.json"
+      ],
+      "stderr": ""
+    },
+    "sync-skip-addition-refused": {
+      "process_exit": 1,
+      "verdict": "FAIL",
+      "errors": 5,
+      "unknown": [],
+      "last_error": "new inventory ID lacks a passing receipt: ('Tests/vitest/node', '[\"scripts/release/bounded-command.test.mjs\",115,3,1,\"returns spawnSync-shaped success output and immutable invocation details\"]', 'null', 'null')",
+      "lost_ids": [
+        "lost ID: [\"Tests/vitest/app\",\"200591529_0_2\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_3\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_4\",\"null\",\"null\"]",
+        "lost ID: [\"Tests/vitest/app\",\"200591529_1_5\",\"null\",\"null\"]"
+      ],
+      "command": [
+        "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python3",
+        "-I",
+        "<replay>/trusted/scripts/ci/failure_ceiling.py",
+        "--candidate",
+        "<replay>/unapproved-skip",
+        "--report",
+        "<replay>/sync-skip-addition-refused-observed.json",
+        "--repository",
+        "banodoco/astrid-app",
+        "--head",
+        "75daac1cc8e174258b71b35766712fe5a8204727",
+        "--tier",
+        "merge",
+        "--tuple",
+        "<replay>/sync-skip-addition-refused-tuple.json",
+        "--output",
+        "<replay>/sync-skip-addition-refused-verdict.json"
+      ],
+      "stderr": ""
+    }
+  },
+  "controls": {
+    "admission-loss-Tests-boundary": {
+      "kind": "synthetic input only",
+      "identity": [
+        "Tests/boundary",
+        "[\"scripts/quality/astrid-public-boundary.test.mjs\",119,1,0,\"projection objects require their declared keys and primitive types\"]",
+        "null",
+        "null"
+      ],
+      "expected": "missing proposed PASS refused",
+      "detected": true
+    },
+    "admission-loss-Tests-release-tooling-macos": {
+      "kind": "synthetic input only",
+      "identity": [
+        "Tests/release-tooling-macos",
+        "[\"scripts/release/astrid-release-provenance.test.mjs\",137,3,1,\"rejects hidden index flags that can conceal modified worktree bytes\"]",
+        "null",
+        "null"
+      ],
+      "expected": "missing proposed PASS refused",
+      "detected": true
+    },
+    "admission-loss-Tests-vitest-app": {
+      "kind": "synthetic input only",
+      "identity": [
+        "Tests/vitest/app",
+        "-29725394_0_0",
+        "null",
+        "null"
+      ],
+      "expected": "missing proposed PASS refused",
+      "detected": true
+    },
+    "admission-loss-Tests-vitest-node": {
+      "kind": "synthetic input only",
+      "identity": [
+        "Tests/vitest/node",
+        "[\"scripts/acceptance/verify-local-project-gallery.test.mjs\",15,1,0,\"parses compact matrix rows\"]",
+        "null",
+        "null"
+      ],
+      "expected": "missing proposed PASS refused",
+      "detected": true
+    },
+    "admission-loss-Tests-vitest-release-node": {
+      "kind": "synthetic input only",
+      "identity": [
+        "Tests/vitest/release-node",
+        "[\"scripts/installer/release.test.mjs\",104,1,0,\"no tuple change and no release change passes, including a valid required floor\"]",
+        "null",
+        "null"
+      ],
+      "expected": "missing proposed PASS refused",
+      "detected": true
+    },
+    "prospective-loss-Tests-boundary": {
+      "kind": "synthetic prospective base, not a qualifying run",
+      "identity": [
+        "Tests/boundary",
+        "[\"scripts/quality/astrid-public-boundary.test.mjs\",119,1,0,\"projection objects require their declared keys and primitive types\"]",
+        "null",
+        "null"
+      ],
+      "per_id_loss_detected": false,
+      "interpretation": "Only App is in the sealed merge loss-check lanes; all verdicts still FAIL."
+    },
+    "prospective-loss-Tests-release-tooling-macos": {
+      "kind": "synthetic prospective base, not a qualifying run",
+      "identity": [
+        "Tests/release-tooling-macos",
+        "[\"scripts/release/astrid-release-provenance.test.mjs\",137,3,1,\"rejects hidden index flags that can conceal modified worktree bytes\"]",
+        "null",
+        "null"
+      ],
+      "per_id_loss_detected": false,
+      "interpretation": "Only App is in the sealed merge loss-check lanes; all verdicts still FAIL."
+    },
+    "prospective-loss-Tests-vitest-app": {
+      "kind": "synthetic prospective base, not a qualifying run",
+      "identity": [
+        "Tests/vitest/app",
+        "-29725394_0_0",
+        "null",
+        "null"
+      ],
+      "per_id_loss_detected": true,
+      "interpretation": "Only App is in the sealed merge loss-check lanes; all verdicts still FAIL."
+    },
+    "prospective-loss-Tests-vitest-node": {
+      "kind": "synthetic prospective base, not a qualifying run",
+      "identity": [
+        "Tests/vitest/node",
+        "[\"scripts/acceptance/verify-local-project-gallery.test.mjs\",15,1,0,\"parses compact matrix rows\"]",
+        "null",
+        "null"
+      ],
+      "per_id_loss_detected": false,
+      "interpretation": "Only App is in the sealed merge loss-check lanes; all verdicts still FAIL."
+    },
+    "prospective-loss-Tests-vitest-release-node": {
+      "kind": "synthetic prospective base, not a qualifying run",
+      "identity": [
+        "Tests/vitest/release-node",
+        "[\"scripts/installer/release.test.mjs\",104,1,0,\"no tuple change and no release change passes, including a valid required floor\"]",
+        "null",
+        "null"
+      ],
+      "per_id_loss_detected": false,
+      "interpretation": "Only App is in the sealed merge loss-check lanes; all verdicts still FAIL."
+    },
+    "skip_addition": {
+      "kind": "synthetic input only",
+      "identity": [
+        "Tests/vitest/node",
+        "[\"scripts/release/bounded-command.test.mjs\",115,3,1,\"returns spawnSync-shaped success output and immutable invocation details\"]",
+        "null",
+        "null"
+      ],
+      "detected_on_both_observations": true
+    }
+  },
+  "first_refusal_and_unreached": {
+    "original": {
+      "first_binding_identity": {
+        "lane": "Tests/vitest/app",
+        "native_id": "2003482884_0_73",
+        "parameter": null,
+        "subtest": null,
+        "source": {
+          "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+          "name": "useTimelinePersistence — interaction gating > keep discharges a refused native save and leaves the conflict card"
+        }
+      },
+      "zero_based_index": 1307,
+      "outcomes_before_refusal": {
+        "passed": 1307
+      },
+      "outcomes_after_refusal": {
+        "passed": 20731,
+        "failed": 10,
+        "skipped": 26
+      },
+      "later_binding_mismatches": [
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_74",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > latest discharges a refused native save and leaves the conflict card"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_75",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > a reload that is not the \"use latest\" choice keeps the refused native save and its card"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_76",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > direct reload adopts server state and clears a diverged recovery draft"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_77",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > Retry then Discard before debounce cancels the recovered publication and reopens canonical"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_78",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > waits for an in-flight acknowledgement before Discard reads canonical and never drains queued B"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_79",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > keeps recovery and reports reload failure instead of claiming Discard succeeded"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_80",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > explicit canonical reload bypasses and clears a stable occurrence recovery slot"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "665265590_0_65",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/timelineLocalSaveHandoff.test.ts",
+            "name": "upstream local document handoff > saves a track-label change without its own gesture beside child shots, leaving the shot closure as it was"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "1999584564_0_70",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/commands/trackLabelCapture.test.ts",
+            "name": "portable parent track label capture > refuses non-JSON authored input Thu Nov 19 2026 20:54:39 GMT+0000 (Coordinated Universal Time)"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_0_0",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration catalog association > writes generationId and variantId together"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_0_1",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration catalog association > writes neither id when the variant is unknown"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_1_0",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration content type > reads the MIME type from metadata so a Runtime video is not registered as a still image"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_1_1",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration content type > keeps generation names on the asset registry entry for timeline labels"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_1_2",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration content type > collects original filename, display name, and prompt from generation records"
+          }
+        }
+      ],
+      "unreached_checks": [
+        "Remaining per-ID source checks",
+        "Later failure/retirement and skip-allowance checks",
+        "Final removed-entry execution/pass validation",
+        "Historical reconciliation loop"
+      ]
+    },
+    "sync": {
+      "first_binding_identity": {
+        "lane": "Tests/vitest/app",
+        "native_id": "2003482884_0_73",
+        "parameter": null,
+        "subtest": null,
+        "source": {
+          "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+          "name": "useTimelinePersistence — interaction gating > keep discharges a refused native save and leaves the conflict card"
+        }
+      },
+      "zero_based_index": 1299,
+      "outcomes_before_refusal": {
+        "passed": 1299
+      },
+      "outcomes_after_refusal": {
+        "passed": 20749,
+        "skipped": 26
+      },
+      "later_binding_mismatches": [
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_74",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > latest discharges a refused native save and leaves the conflict card"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_75",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > a reload that is not the \"use latest\" choice keeps the refused native save and its card"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_76",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > direct reload adopts server state and clears a diverged recovery draft"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_77",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > Retry then Discard before debounce cancels the recovered publication and reopens canonical"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_78",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > waits for an in-flight acknowledgement before Discard reads canonical and never drains queued B"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_79",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > keeps recovery and reports reload failure instead of claiming Discard succeeded"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "2003482884_0_80",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/useTimelinePersistence.test.tsx",
+            "name": "useTimelinePersistence — interaction gating > explicit canonical reload bypasses and clears a stable occurrence recovery slot"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "665265590_0_65",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/hooks/timelineLocalSaveHandoff.test.ts",
+            "name": "upstream local document handoff > saves a track-label change without its own gesture beside child shots, leaving the shot closure as it was"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "1999584564_0_70",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/commands/trackLabelCapture.test.ts",
+            "name": "portable parent track label capture > refuses non-JSON authored input Thu Nov 19 2026 21:46:41 GMT+0000 (Coordinated Universal Time)"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_0_0",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration catalog association > writes generationId and variantId together"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_0_1",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration catalog association > writes neither id when the variant is unknown"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_1_0",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration content type > reads the MIME type from metadata so a Runtime video is not registered as a still image"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_1_1",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration content type > keeps generation names on the asset registry entry for timeline labels"
+          }
+        },
+        {
+          "lane": "Tests/vitest/app",
+          "native_id": "200591529_1_2",
+          "parameter": null,
+          "subtest": null,
+          "source": {
+            "file": "src/tools/video-editor/lib/timeline-asset-plans.test.ts",
+            "name": "planGenerationAssetRegistration content type > collects original filename, display name, and prompt from generation records"
+          }
+        }
+      ],
+      "unreached_checks": [
+        "Remaining per-ID source checks",
+        "Later failure/retirement and skip-allowance checks",
+        "Final removed-entry execution/pass validation",
+        "Historical reconciliation loop"
+      ]
+    }
+  },
+  "limits": [
+    "Replays preserve original observation heads and tuples; they are not executions at the packet head.",
+    "First source-binding exception prevents remaining bindings, later outcomes, skip allowances and final reconciliation checks from completing.",
+    "Four Node lanes are required commands but absent from both per-ID loss tier lists; preserve and submit for trusted policy disposition.",
+    "The 26 Linux skip identities cannot be admitted using Darwin lane PASS receipts.",
+    "Four missing identities, all fifteen source-binding differences and all original failure records remain protected."
+  ]
+}

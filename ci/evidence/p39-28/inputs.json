@@ -1,0 +1,66 @@
+{
+  "repository": "banodoco/astrid-app",
+  "packet": "R14-P39-28",
+  "base": "da6e7cc8f8ed33b22e4710b161ba2d4995bd0ea1",
+  "seal": "0700e981be5dfbfc229784b8ade69869f62716dd",
+  "evidence": {
+    "original": {
+      "verdict_run": 44611474919,
+      "artifact_id": 14575905046,
+      "url": "https://github.com/banodoco/astrid-app/actions/runs/44611474919/artifacts/14575905046",
+      "archive_sha256": "5cdc949cb7bd6b6027183f22588ecbf05d40a7d059e9d2c27be932d97a261e45",
+      "files": {
+        "original-observed.json.gz": {
+          "decoded_sha256": "b9831eb8d26edcfcbe7654430a80aeda5f6e79fc8a7bddcc0bdaaa242926b7ba",
+          "bytes": 13186326
+        },
+        "original-verdict.json.gz": {
+          "decoded_sha256": "6eac0e3be8fad125e145fc89be78ece11fe9d61dbbff3d0a3d5acec4d35d39e5",
+          "bytes": 171735
+        }
+      }
+    },
+    "sync": {
+      "verdict_run": 44616853958,
+      "artifact_id": 14579968624,
+      "url": "https://github.com/banodoco/astrid-app/actions/runs/44616853958/artifacts/14579968624",
+      "archive_sha256": "fb99edbc9e7270fae18e4bd29a7bab48015aa552fd280d24b56d7ad0c986f4f1",
+      "files": {
+        "sync-observed.json.gz": {
+          "decoded_sha256": "8146fe4a76ac32c57eeee873d920a874e39d3ba6f92902500d4a13401c25bc43",
+          "bytes": 13185133
+        },
+        "sync-verdict.json.gz": {
+          "decoded_sha256": "3e36950f86cb61a6c8550fc85bcca2364098c94ac407a2fafd39de2cb7925119",
+          "bytes": 171735
+        }
+      }
+    }
+  },
+  "protected_files": {
+    "ci/test-inventory.json.gz": {
+      "sha256": "5d7e92666e59879c65760718e6204515a1e71217eeae7a4d638870c18aadccd0",
+      "git_blob": "fe910c40a8259cd0595533737582762fe43f29c8"
+    },
+    "ci/failure-ceiling.json": {
+      "sha256": "5e586d14b0d95be343383e5f9e0a0dcb601eaa33a4429fac989fd214931cb06c",
+      "git_blob": "d22f644b3ed766e6cb39f2ba77e90406e5025dbe"
+    },
+    "ci/required-checks.json": {
+      "sha256": "75f73c3f601284284c4cd85ef5a01206f8729204758c72d4084b412f936e1850",
+      "git_blob": "299103219232b5a10eaae24b0a21322cbc4b588a"
+    },
+    "scripts/ci/failure_ceiling.py": {
+      "sha256": "a5e977a0e8744973f35f10ac682b1ef4b80c6250a71c3a9bca93584b5c4145ed",
+      "git_blob": "6a973757c01b9c4fe0484501ec7eb1b17d65c008"
+    },
+    "scripts/ci/ceiling_adapters.py": {
+      "sha256": "fadd505b101bf3d9c77d54c66b32a485943f54eef66303bf1f519518c19e0a92",
+      "git_blob": "2ebb6f342d098553a49209aecb2d758f71882747"
+    },
+    "scripts/ci/ceiling_hosted.py": {
+      "sha256": "392a0265587f3431d1b8286629006be274a0cff83633b0250b91bc5b57dd11b1",
+      "git_blob": "1b7e05c32e5bd61086dcf97df2abafbc9aac6406"
+    }
+  }
+}

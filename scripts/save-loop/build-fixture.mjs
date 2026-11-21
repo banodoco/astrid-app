@@ -221,7 +221,9 @@ function findString(value, field) {
 }
 
 const sdkScript = String.raw`
-import json, os, statistics, time
+import hashlib, json, os, statistics, time
+from collections.abc import Mapping
+from pathlib import Path
 from astrid.sdk import AstridClient
 from astrid.sdk.timeline.api import Timeline
 
@@ -240,6 +242,60 @@ expected_object_ids_by_kind = cfg['expected_object_ids_by_kind']
 bootstrap_track_ids = {'V1', 'A1'}
 canonical_documents = {}
 last_results = {}
+media_selections = {'image': [], 'video': [], 'audio': []}
+media_import_receipts = []
+
+def response_data(response):
+    if isinstance(response, Mapping) and isinstance(response.get('data'), Mapping):
+        return dict(response['data']), response.get('receipt')
+    if isinstance(response, Mapping): return dict(response), None
+    raise RuntimeError('Runtime media route returned a non-object response')
+
+def import_media_selections(client):
+    from astrid.sdk.authoring_media import _metadata
+
+    workspace = client._remote._transport
+    started = time.perf_counter()
+    total = sum(len(rows) for rows in media.values())
+    complete = 0
+    for kind in ('image', 'video', 'audio'):
+        for path in media[kind]:
+            local_path = Path(path)
+            metadata = _metadata(local_path)
+            payload = local_path.read_bytes()
+            digest = 'sha256:' + hashlib.sha256(payload).hexdigest()
+            if digest != metadata['digest']:
+                raise RuntimeError(f'generated {kind} media changed during import: {local_path.name}')
+            key = 'p77-import-' + hashlib.sha256((project + ':' + digest).encode()).hexdigest()
+            response = workspace.import_project_media(
+                project, payload, media_type=metadata['media_type'], filename=metadata['filename'],
+                expected_digest=digest, idempotency_key=key,
+                **{name: metadata[name] for name in ('width', 'height', 'duration_seconds') if name in metadata},
+            )
+            imported, receipt = response_data(response)
+            receipt_id = receipt.get('receipt_id') if isinstance(receipt, Mapping) else None
+            if (imported.get('status') != 'completed' or imported.get('asset_id') != digest
+                    or not imported.get('generation_id') or not imported.get('variant_id') or not receipt_id):
+                raise RuntimeError(f'Runtime did not accept generated media import {local_path.name}')
+            selectors = {'asset': imported['variant_id'], 'generation_id': imported['generation_id'],
+                         'variant_id': imported['variant_id']}
+            selected_response = workspace.get_project_media_selection(project, selectors)
+            selected, _ = response_data(selected_response)
+            if (set(selected) != {'asset', 'generation_id', 'variant_id', 'object_id', 'catalog_digest'}
+                    or selected.get('object_id') != digest
+                    or selected.get('generation_id') != imported['generation_id']
+                    or selected.get('variant_id') != imported['variant_id']):
+                raise RuntimeError(f'Runtime selection did not match imported generated media {local_path.name}')
+            media_selections[kind].append(selected)
+            media_import_receipts.append({
+                'kind': kind, 'object_id': digest, 'generation_id': imported['generation_id'],
+                'variant_id': imported['variant_id'],
+                'receipt_id': receipt_id,
+            })
+            complete += 1
+            if complete % 50 == 0 or complete == total:
+                print(f'accepted media imports {complete}/{total} in {(time.perf_counter() - started) * 1000:.1f} ms receipt={receipt_id}', flush=True)
+    return (time.perf_counter() - started) * 1000
 
 def runtime_payload(doc):
     return ((doc.get('parent_revision') or {}).get('payload')
@@ -315,7 +371,7 @@ def commit_batch(tl, timeline, label, key, edit, command_count):
     receipts.append(row)
     canonical_documents[timeline] = document
     last_results[timeline] = row
-    print(f"accepted {label}: {command_count} commands receipt={row['receipt_id']} revision={row['accepted_revision_id']}", flush=True)
+    print(f"accepted {label}: {command_count} commands elapsed={elapsed_ms:.1f}ms receipt={row['receipt_id']} revision={row['accepted_revision_id']}", flush=True)
 
 def populate(timeline, *, control=False):
     targets = {'video': [], 'audio': [], 'image': []}
@@ -334,30 +390,16 @@ def populate(timeline, *, control=False):
             for track, kind in track_rows: t.track(track, kind=kind)
         if track_rows:
             commit_batch(tl, timeline, 'Add missing fixture tracks', f'p77-{timeline}-tracks', make_tracks, len(track_rows))
+        media_import_elapsed_ms = import_media_selections(client) if not control else 0
 
         if control:
             clip_rows = [('video', 0, visual[0], 10, 4, 'control-video-0000')]
         else:
             clip_rows = []
-            for start in range(0, len(shots), batch_size):
-                batch = list(enumerate(shots))[start:start + batch_size]
-                def make_occurrences(t, batch=batch):
-                    for i, shot in batch:
-                        occurrence_id = f'fixture-occurrence-{i:02d}'
-                        t.command({
-                            'schema_version': 1, 'op': 'occurrence.create', 'version': '1',
-                            'select': 'parent',
-                            'args': {'occurrence_id': occurrence_id,
-                                     'shot_id': shot['shot_id'], 'name': shot['name'],
-                                     'track': visual[i % len(visual)], 'on': i * 4.25, 'duration': 4},
-                            'created': [f"shot:{shot['shot_id']}", f'occurrence:{occurrence_id}'],
-                        }, label='Create generated fixture shot occurrence')
-                commit_batch(tl, timeline, f'Create fixture shots {start + 1}-{start + len(batch)}',
-                             f'p77-{timeline}-shots-{start}', make_occurrences, len(batch))
             for i in range(count):
                 if i < image_n:
                     kind, index = 'image', i
-                    track, at, hold = visual[i % 5], (i // 5) * 6, 5
+                    track, at, hold = visual[1 + (i % 4)], (i // 4) * 6, 5
                 elif i < image_n + video_n:
                     kind, index = 'video', i - image_n
                     track, at, hold = visual[5], (i - image_n) * 5.2, 4
@@ -372,12 +414,28 @@ def populate(timeline, *, control=False):
             def make_clips(t, batch=batch):
                 for kind, index, track, at, hold, clip_id in batch:
                     try:
-                        t.add(media[kind][index], at=at, hold=hold, track=track, id=clip_id)
+                        t.add(media_selections[kind][index], at=at, hold=hold, track=track, id=clip_id)
                     except Exception as error:
                         raise RuntimeError(f'{kind} media {index}, clip {clip_id}, hold {hold}: {error}') from error
                     targets[kind].append(clip_id)
             commit_batch(tl, timeline, f'Add fixture clips {start + 1}-{start + len(batch)}',
                          f'p77-{timeline}-clips-{start}', make_clips, len(batch))
+        if not control:
+            for start in range(0, len(shots), batch_size):
+                batch = list(enumerate(shots))[start:start + batch_size]
+                def make_occurrences(t, batch=batch):
+                    for i, shot in batch:
+                        occurrence_id = f'fixture-occurrence-{i:02d}'
+                        t.command({
+                            'schema_version': 1, 'op': 'occurrence.create', 'version': '1',
+                            'select': 'parent',
+                            'args': {'occurrence_id': occurrence_id,
+                                     'shot_id': shot['shot_id'], 'name': shot['name'],
+                                     'track': visual[0], 'on': i * 4.25, 'duration': 4},
+                            'created': [f"shot:{shot['shot_id']}", f'occurrence:{occurrence_id}'],
+                        }, label='Create generated fixture shot occurrence')
+                commit_batch(tl, timeline, f'Create fixture shots {start + 1}-{start + len(batch)}',
+                             f'p77-{timeline}-shots-{start}', make_occurrences, len(batch))
         document = canonical_documents[timeline]
         actual_tracks = root_tracks(document)
         visual_count = sum(row.get('kind') == 'visual' for row in actual_tracks)
@@ -408,10 +466,10 @@ def populate(timeline, *, control=False):
         actual_staged_track_count = len({row.get('id') for row in root_tracks(document)} - bootstrap_track_ids)
         if actual_staged_track_count != len(track_rows):
             raise RuntimeError(f'staged {len(track_rows)} tracks but Runtime document contains {actual_staged_track_count}')
-    return document, targets, warm_times, actual_staged_track_count, actual_tracks
+    return document, targets, warm_times, actual_staged_track_count, actual_tracks, media_import_elapsed_ms
 
-heavy_doc, heavy_targets, heavy_times, created_track_count, heavy_track_rows = populate(timeline_id)
-control_doc, control_targets, control_times, _, control_track_rows = populate(control_id, control=True)
+heavy_doc, heavy_targets, heavy_times, created_track_count, heavy_track_rows, media_import_elapsed_ms = populate(timeline_id)
+control_doc, control_targets, control_times, _, control_track_rows, _ = populate(control_id, control=True)
 doc_bytes = canonical_document_bytes(heavy_doc)
 control_bytes = canonical_document_bytes(control_doc)
 assets = registry_assets(heavy_doc)
@@ -437,6 +495,8 @@ for shot in shots:
     if row is None: raise RuntimeError(f'published document omitted occurrence for {shot["shot_id"]}')
     occurrences.append({'occurrence_id': row['occurrence_id'], 'shot_id': row['shot_id'],
                         'track_id': row.get('track'), 'track_role': 'visual', 'name': shot['name']})
+if {row['track_id'] for row in occurrences} != {'V1'}:
+    raise RuntimeError('fixture shot occurrences do not use reserved placement lane V1')
 measurement = {
     'clip_count': len(root_clips(heavy_doc)), 'document_bytes': doc_bytes,
     'document_bytes_source': 'accepted Runtime response data.canonical_document, canonical JSON',
@@ -445,7 +505,13 @@ measurement = {
     'total_track_count': len(heavy_track_rows),
     'visual_track_count': sum(row.get('kind') == 'visual' for row in heavy_track_rows),
     'audio_track_count': sum(row.get('kind') == 'audio' for row in heavy_track_rows),
+    'placement_lane_id': 'V1',
     'sdk_commit_batch_size': batch_size,
+    'media_import_count': len(media_import_receipts),
+    'media_import_receipt_count': sum(bool(row.get('receipt_id')) for row in media_import_receipts),
+    'media_import_elapsed_ms': media_import_elapsed_ms,
+    'clip_commit_elapsed_ms': sum(row['elapsed_ms'] for row in receipts if row['timeline_id'] == timeline_id and row['label'].startswith('Add fixture clips')),
+    'shot_commit_elapsed_ms': sum(row['elapsed_ms'] for row in receipts if row['timeline_id'] == timeline_id and row['label'].startswith('Create fixture shots')),
     'accepted_commit_receipts': receipts,
     'accepted_heavy_head': last_results[timeline_id],
     'runtime_object_ids': sorted(canonical_media_ids(heavy_doc)),
@@ -602,6 +668,7 @@ async function main() {
     tracks: {
       visual: named.tracks.filter(row => row.kind === 'visual'),
       audio: named.tracks.filter(row => row.kind === 'audio'),
+      occurrence_track_id: named.occurrences[0].track_id,
     },
     clips: {
       video: {primary: named.video[0], repeated_delete_and_split: named.video.slice(1, 10)},

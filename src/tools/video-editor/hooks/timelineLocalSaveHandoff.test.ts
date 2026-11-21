@@ -35,7 +35,7 @@ vi.mock('@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx', async imp
 }));
 
 const contractFixture = vi.hoisted(() => ({ digest: 'sha256:unsupported-test-fixture' }));
-const CURRENT_V2_DIGEST = 'sha256:9c9e746eb5138f5e92baf5bcd87e8598c6aa92597c92083956b24517c4071923';
+const CURRENT_V2_DIGEST = 'sha256:2c6a76e17b4441398ab91e3e9d6283a719fd5b08807447db9dbf2ecc5e1339a2';
 
 vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),

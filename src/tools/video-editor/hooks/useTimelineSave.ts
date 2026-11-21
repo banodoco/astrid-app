@@ -29,7 +29,8 @@ import type { TimelineDraftRecord } from '@/tools/video-editor/data/timelineDraf
 import { canonicalJsonStringify, parseTimelineBundle, type TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { createTimelineLocalSaveHandoff, readTimelineOriginalSaveBasis, type TimelineLocalSaveHandoff, type TimelineOriginalSaveBasis, type TimelineSaveSource, type TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
-import { createLocalSaveSession, type LocalSaveSession, type LocalSaveState } from '../commands/localSaveSession.ts';
+import { createLocalSaveSession, isPermanentLocalSaveRejection, type LocalSaveSession, type LocalSaveState } from '../commands/localSaveSession.ts';
+import { downloadBlobAsFile } from '@/shared/runtime/browserDownloadRuntime.ts';
 import { toOutboxJson } from '../commands/commitOutbox.ts';
 import { emitTimelineSaveDiagnostic, markTimelineSaveRejection } from '../lib/timeline-diagnostics.ts';
 export { shouldAcceptPolledData } from '@/tools/video-editor/lib/timeline-save-utils.ts';
@@ -933,10 +934,29 @@ export function useTimelineSave(
       .catch(error => toast.error(error instanceof Error ? error.message : String(error)));
   }, [commitApplyEdit, elementDataRef, elementTimelineRoutes, timelineId, toast, runElementSave]);
 
+  const copyRejectedSave = useCallback(async () => {
+    if (localOwner.closed || !localOwner.session) {
+      toast.error('The original unsaved change is unavailable. Reopen the timeline to recover it.');
+      return;
+    }
+    try {
+      // The source of truth is the durable outbox, not a potentially stale
+      // rendered timeline or an attempted reconstruction from current state.
+      const exportData = await localOwner.session.exportRejectedChange();
+      const contents = JSON.stringify(exportData, null, 2) + '\n';
+      downloadBlobAsFile(new Blob([contents], { type: 'application/json;charset=utf-8' }),
+        `astrid-unsaved-change-${timelineId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
+    } catch (error) {
+      toast.error(`Could not copy your change out: ${error instanceof Error ? error.message : String(error)}. Your changes are still retained.`);
+    }
+  }, [localOwner, timelineId, toast]);
+
   return {
     elementTimelineRoutes,
     localDocumentSave,
     localSaveState,
+    permanentSaveRejection: isPermanentLocalSaveRejection(localSaveState),
+    copyRejectedSave,
     originalLocalSaveBasis,
     timelineEditingReady,
     isTimelineEditingReady,

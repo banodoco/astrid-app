@@ -240,6 +240,7 @@ def populate(timeline, *, control=False):
                     'args': {'occurrence_id': f'fixture-occurrence-{i:02d}',
                              'shot_id': shot['shot_id'], 'name': shot['name'],
                              'track': visual[i % len(visual)], 'on': i * 4.25, 'duration': 4},
+                    'created': [f"shot:{shot['shot_id']}", f"occurrence:fixture-occurrence-{i:02d}"],
                 }, label='Create generated fixture shot occurrence')
     with AstridClient.open_existing_from_launcher() as client:
         tl = Timeline.open(project, timeline, client=client)
@@ -354,6 +355,18 @@ async function main() {
   if (!projectId) throw new Error(`Runtime omitted created project id: ${JSON.stringify(projectReply).slice(0, 400)}`);
   const timelineId = `save-loop-heavy-${nonce}`;
   const oneClipTimelineId = `save-loop-one-${nonce}`;
+  const portsFile = path.join(root, 'ports');
+  const stackInfoFile = path.join(root, 'stack-info.txt');
+  let doorPort;
+  if (fs.existsSync(portsFile)) {
+    const values = fs.readFileSync(portsFile, 'utf8').trim().split(/[\s,]+/);
+    if (values.length >= 3 && /^\d+$/.test(values[2])) doorPort = Number(values[2]);
+  }
+  if (!doorPort && fs.existsSync(stackInfoFile)) {
+    const match = fs.readFileSync(stackInfoFile, 'utf8').match(/^DOOR_PORT=(\d+)$/m);
+    if (match) doorPort = Number(match[1]);
+  }
+  if (!doorPort) throw new Error(`could not resolve Runtime door port from ${portsFile} or ${stackInfoFile}`);
   const createTimeline = async (id, name) => {
     const response = await post(baseUrl, `/v1/projects/${encodeURIComponent(projectId)}/timelines`,
       {timeline_id: id, name}, `p77-${id}`);
@@ -361,15 +374,10 @@ async function main() {
   };
   await createTimeline(timelineId, 'Generated heavy timeline');
   await createTimeline(oneClipTimelineId, 'One-clip timing control');
-  const shots = [];
-  for (let i = 0; i < 46; i++) {
-    const name = `Fixture shot ${String(i + 1).padStart(2, '0')}`;
-    const response = await post(baseUrl, `/v1/projects/${encodeURIComponent(projectId)}/shots`,
-      {name, metadata: {synthetic: true}}, `p77-shot-${nonce}-${i}`);
-    const shotId = findString(response, 'shot_id') || findString(response, 'id');
-    if (!shotId) throw new Error(`Runtime omitted created shot id: ${JSON.stringify(response).slice(0, 300)}`);
-    shots.push({shot_id: shotId, name});
-  }
+  const shots = Array.from({length: 46}, (_, i) => ({
+    shot_id: `fixture-shot-${nonce}-${String(i + 1).padStart(2, '0')}`,
+    name: `Fixture shot ${String(i + 1).padStart(2, '0')}`,
+  }));
 
   const versionsDir = path.resolve(root, 'program/versions');
   const installedVersions = fs.readdirSync(versionsDir).filter(name => name !== 'current'
@@ -395,7 +403,7 @@ async function main() {
     await run(python, ['-I', scriptPath], {env: {...process.env,
       HOME: path.resolve(root, 'home'), TMPDIR: stackTmp, XDG_DATA_HOME: xdgData,
       XDG_CONFIG_HOME: xdgConfig, ASTRID_RUNTIME_DATA_ROOT: path.resolve(root, 'data'),
-      ASTRID_RUNTIME_DOOR_PORT: '17502', ASTRID_RUNTIME_CLI: runtimeCli,
+      ASTRID_RUNTIME_DOOR_PORT: String(doorPort), ASTRID_RUNTIME_CLI: runtimeCli,
       ASTRID_RUNTIME_LAUNCHER: runtimeCli,
       SAVE_LOOP_CONFIG_PATH: configPath, SAVE_LOOP_MEASUREMENT_PATH: measurementPath}});
   } finally {

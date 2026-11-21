@@ -204,6 +204,7 @@ describe('local editor saves through the durable outbox', () => {
     });
     await session.flush();
     expect(env.visible()).toEqual(mergedTrim);
+    expect(env.visible()).toEqual({ ...trimmed, meta: { opaque: null, agent: 'preserved' } });
     const next = { ...mergedTrim, meta: { ...mergedTrim.meta, note: null } };
     await session.append({ before: mergedTrim, after: next, label: 'Note' });
     expect((await env.outboxes.list(scope))[0].intents[0].payload).toMatchObject({ before: mergedTrim, after: next });

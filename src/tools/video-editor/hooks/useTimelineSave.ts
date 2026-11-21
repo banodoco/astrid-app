@@ -161,6 +161,10 @@ export function useTimelineSave(
   const [bootstrapEpoch, setBootstrapEpoch] = useState(0);
   const restartLocalSession = useCallback(() => {
     const old = localOwner.session;
+    // Clear a prior bootstrap failure immediately while this owner is being
+    // replaced. The status bar must describe the pending replacement, not the
+    // failed session being retired.
+    localOwner.initialization = 'pending';
     if (old) {
       // A session that started but could not settle its owners is retired; the next bootstrap recovers them again.
       localOwner.generation++;

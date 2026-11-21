@@ -393,6 +393,8 @@ function useTimelineChromeContextValue({
   watchdogTripped,
   watchdogReason,
   saveNotice,
+  permanentSaveRejection,
+  copyRejectedSave,
   retryWatchdog,
   retryPendingSave,
   flushPendingSave,
@@ -421,6 +423,8 @@ function useTimelineChromeContextValue({
   watchdogTripped: boolean;
   watchdogReason: 'timeout' | 'lost-edit' | null;
   saveNotice: string | null;
+  permanentSaveRejection: boolean;
+  copyRejectedSave: () => Promise<void>;
   retryWatchdog: () => void;
   retryPendingSave: () => void;
   flushPendingSave: () => Promise<number>;
@@ -477,6 +481,8 @@ function useTimelineChromeContextValue({
     watchdogTripped,
     watchdogReason,
     saveNotice,
+    permanentSaveRejection,
+    copyRejectedSave,
     retryWatchdog,
     retryPendingSave,
     flushPendingSave,
@@ -544,6 +550,8 @@ function useTimelineChromeContextValue({
     watchdogReason,
     watchdogTripped,
     saveNotice,
+    permanentSaveRejection,
+    copyRejectedSave,
     recoveryDraft,
     retryRecoveredDraft,
     discardRecoveredDraft,
@@ -1246,6 +1254,8 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     watchdogTripped: save.watchdogTripped,
     watchdogReason: save.watchdogReason,
     saveNotice: save.saveNotice,
+    permanentSaveRejection: save.permanentSaveRejection,
+    copyRejectedSave: save.copyRejectedSave,
     retryWatchdog: save.retryWatchdog,
     retryPendingSave: save.retryPendingSave,
     flushPendingSave: save.flushPendingSave,

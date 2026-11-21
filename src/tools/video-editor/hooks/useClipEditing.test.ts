@@ -996,7 +996,7 @@ describe('usePinnedGroupSync', () => {
         },
         {
           assets: {
-            'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1' },
+            'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1', variantId: 'variant-1' },
           },
         },
       ),
@@ -1005,16 +1005,17 @@ describe('usePinnedGroupSync', () => {
       id: 'shot-1',
       name: 'Shot 1',
       images: [
-        { generation_id: 'gen-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
-        { generation_id: 'gen-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
+        { generation_id: 'gen-1', primary_variant_id: 'variant-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
+        { generation_id: 'gen-2', primary_variant_id: 'variant-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
       ],
     } as Shot];
-    const registerGenerationAsset = vi.fn((generation: { generationId: string; imageUrl: string }) => {
+    const registerGenerationAsset = vi.fn((generation: { generationId: string; variantId: string; imageUrl: string }) => {
       const assetId = 'asset-2';
       dataRef.current.registry.assets[assetId] = {
         file: generation.imageUrl,
         type: 'image/png',
         generationId: generation.generationId,
+        variantId: generation.variantId,
       };
       return assetId;
     });
@@ -1070,7 +1071,7 @@ describe('usePinnedGroupSync', () => {
         },
         {
           assets: {
-            'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1' },
+            'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1', variantId: 'variant-1' },
           },
         },
       ),
@@ -1084,8 +1085,8 @@ describe('usePinnedGroupSync', () => {
         id: 'shot-1',
         name: 'Shot 1',
         images: [
-          { generation_id: 'gen-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
-          { generation_id: 'gen-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
+          { generation_id: 'gen-1', primary_variant_id: 'variant-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
+          { generation_id: 'gen-2', primary_variant_id: 'variant-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
         ],
       } as Shot],
       registerGenerationAsset: vi.fn(() => {
@@ -1093,6 +1094,7 @@ describe('usePinnedGroupSync', () => {
           file: 'https://example.com/two.png',
           type: 'image/png',
           generationId: 'gen-2',
+          variantId: 'variant-2',
         };
         return 'asset-2';
       }),
@@ -1247,7 +1249,7 @@ describe('usePinnedGroupSync', () => {
         },
         {
           assets: {
-            'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1' },
+            'asset-1': { file: 'one.png', type: 'image/png', generationId: 'gen-1', variantId: 'variant-1' },
           },
         },
       ),
@@ -1256,16 +1258,17 @@ describe('usePinnedGroupSync', () => {
       id: 'shot-1',
       name: 'Shot 1',
       images: [
-        { generation_id: 'gen-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
-        { generation_id: 'gen-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
+        { generation_id: 'gen-1', primary_variant_id: 'variant-1', imageUrl: 'https://example.com/one.png', type: 'image/png', timeline_frame: 0 },
+        { generation_id: 'gen-2', primary_variant_id: 'variant-2', imageUrl: 'https://example.com/two.png', type: 'image/png', timeline_frame: 1 },
       ],
     } as Shot];
-    const registerGenerationAsset = vi.fn((generation: { generationId: string; imageUrl: string }) => {
+    const registerGenerationAsset = vi.fn((generation: { generationId: string; variantId: string; imageUrl: string }) => {
       const assetId = 'asset-2';
       dataRef.current.registry.assets[assetId] = {
         file: generation.imageUrl,
         type: 'image/png',
         generationId: generation.generationId,
+        variantId: generation.variantId,
       };
       return assetId;
     });

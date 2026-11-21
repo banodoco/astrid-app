@@ -1132,11 +1132,7 @@ export function useTimelinePersistence({
         .catch(() => {})
         .then(() => {
           if (typeof indexedDB === 'undefined') throw new Error('Durable timeline storage is unavailable.');
-          return saveTimelineDraft(
-          timelineId,
-          draft,
-          draftBaseVersion,
-          {
+          const write = (outboxOwnerId?: string) => saveTimelineDraft(timelineId, draft, draftBaseVersion, {
             ...recoveryMetadata,
             ...(provider.saveTimelineAtHead ? {
               baseHeadRevisionId: head?.headRevisionId,
@@ -1144,10 +1140,11 @@ export function useTimelinePersistence({
               baseHeadTimelineId: head?.timelineId,
             } : {}),
             ownerId: draftOwnerId,
-            outboxOwnerId: snapshot.session.localDocumentSave?.ownerId?.(),
+            outboxOwnerId,
             draftIdentity,
-          },
-        ); })
+          });
+          return snapshot.session.localDocumentSave?.writeRecoveryDraft?.(write) ?? write();
+        })
       : Promise.resolve()).then(() => { snapshot.session.storageFailure = undefined; }, (error: unknown) => {
         snapshot.session.storageFailure = error;
         recordDraftReloadFailure();
@@ -1706,7 +1703,15 @@ export function useTimelinePersistence({
         if (reloadCancelledRef.current) {
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
-        const ownedSnapshot = options?.discardRefusedSave ? await readOwnedRecoverySnapshot() : null;
+        const shouldClearDraft = (options?.clearDraft ?? !options?.preserveDraft) && isDataProviderPersistenceEnabled(provider);
+        const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
+        const ownedSnapshot = shouldClearDraft || exported ? await readOwnedRecoverySnapshot() : null;
+        // An older scoped provider can expose an unowned recovery slot. Capture
+        // that slot before the canonical read so a later writer cannot become
+        // the target of this reload.
+        const legacySnapshot = shouldClearDraft && !options?.discardRefusedSave
+          && options?.recoverySnapshot === undefined && !ownedSnapshot && recoveryKey !== timelineId
+          ? await loadTimelineDraft(recoveryKey) : null;
         if (exported
           && canonicalJsonStringify(ownedSnapshot) !== canonicalJsonStringify(exported.snapshot)) {
           throw new Error('Your unsaved edits changed. Copy them again before reloading.');
@@ -1748,11 +1753,9 @@ export function useTimelinePersistence({
 
         // Compare-and-delete the chosen snapshot. A different tab can write
         // a new one even while the current tab is reloading.
-        const shouldClearDraft = (options?.clearDraft ?? !options?.preserveDraft) && isDataProviderPersistenceEnabled(provider);
-        const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
         let recoverySnapshot = !shouldClearDraft ? null
           : options?.recoverySnapshot !== undefined ? options.recoverySnapshot
-            : options?.discardRefusedSave ? ownedSnapshot : await loadTimelineDraft(recoveryKey);
+            : ownedSnapshot ?? (legacySnapshot && !legacySnapshot.ownerId && !legacySnapshot.outboxOwnerId ? legacySnapshot : null);
         if (shouldClearDraft && options?.recoverySnapshot) {
           // Discard starts from the exact record the user was offered. Retry
           // may meanwhile have replaced it with a session-owned copy. An ACK
@@ -1781,8 +1784,14 @@ export function useTimelinePersistence({
         const canReload = () => !reloadCancelledRef.current && activeTargetRef.current === session;
         if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
 
+        const beforeDischarge = dataRef.current;
+        let nativeReceipt: TimelineSaveReceipt | void = undefined;
         if (options?.discardRefusedSave) {
-          await session.localDocumentSave?.discharge?.('latest', exported?.outbox, canReload);
+          if (exported?.outbox || session.localDocumentSave?.ownerId) {
+            nativeReceipt = await session.localDocumentSave?.discharge?.('latest', exported?.outbox, canReload);
+          } else {
+            nativeReceipt = await session.localDocumentSave?.discharge?.('latest');
+          }
         }
         if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
         if (recoverySnapshot && !await clearTimelineDraftIfSnapshotMatches(recoveryKey, recoverySnapshot)) {
@@ -1813,14 +1822,24 @@ export function useTimelinePersistence({
         latestScheduledSaveRef.current = null;
         editSeqRef.current = savedSeqRef.current;
         session.acknowledgedSeq = savedSeqRef.current;
-        logConfigVersionUpdate('reload', loadedTimeline.configVersion);
-        configVersionRef.current = loadedTimeline.configVersion;
-        headRevisionRef.current = loadedTimeline.head;
-        store?.getState().setConfigVersion(loadedTimeline.configVersion);
+        // The durable owner can adopt a verified display while it discharges.
+        // A preliminary provider reload may have returned no physical head,
+        // or a head from before the owner's in-flight request finished.
+        const displayed = dataRef.current;
+        const adoptedNative = nativeReceipt && displayed && displayed.editProjection?.kind !== 'local'
+          && (displayed !== beforeDischarge || !loadedTimeline.head)
+          && canonicalJsonStringify(displayed.head) === canonicalJsonStringify(nativeReceipt.head)
+          ? { data: displayed, version: nativeReceipt.configVersion } : null;
+        const canonicalData = adoptedNative?.data ?? reloadedData;
+        const version = adoptedNative?.version ?? loadedTimeline.configVersion;
+        logConfigVersionUpdate('reload', version);
+        configVersionRef.current = version;
+        headRevisionRef.current = canonicalData.head;
+        store?.getState().setConfigVersion(version);
         // Keep a reloaded assembly bundle reachable downstream so the next
         // save cannot silently drop the server-owned source items.
         loadedBundleRef.current = bundle;
-        commitData(reloadedData, {
+        commitData(canonicalData, {
           save: false,
           skipHistory: true,
           updateLastSavedSignature: true,

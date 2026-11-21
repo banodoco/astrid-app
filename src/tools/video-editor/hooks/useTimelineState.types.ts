@@ -266,8 +266,9 @@ export interface TimelineChromeContextValue {
    * left unsaved work. The shell offers Retry / Discard.
    */
   recoveryDraft: { updatedAt: string; baseVersion: number; retryAllowed?: boolean; baseGone?: boolean } | null;
-  retryRecoveredDraft: () => void;
-  discardRecoveredDraft: () => void;
+  recoveryRestoreAllowed: boolean;
+  retryRecoveredDraft: () => void | Promise<void>;
+  discardRecoveredDraft: () => void | Promise<void>;
   /** The one description of unsaved work (null when nothing is waiting) and its two actions. */
   saveBar: SaveBarInput | null;
   tryAgain: () => void | Promise<void>;

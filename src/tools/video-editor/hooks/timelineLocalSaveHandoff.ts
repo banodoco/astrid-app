@@ -39,13 +39,14 @@ export interface TimelineLocalSaveHandoff {
   /** The durable local save session's state, when the owner has one. */
   status?(): string | undefined;
   ownerId?(): string | undefined;
+  writeRecoveryDraft?: LocalSaveSession['writeRecoveryDraft'];
   subscribeState?(listener: (state: LocalSaveState) => void): () => void;
   exportRejectedChange?(): ReturnType<LocalSaveSession['exportRejectedChange']>;
   /**
    * Leave a refused save. `latest` drops the rejected change and its dependants; `keep` resends them on the
    * latest head. Resolves once the owner is saved and the next edit can save; throws if it is not.
    */
-  discharge?(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent?: () => boolean): Promise<void>;
+  discharge?(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent?: () => boolean): Promise<TimelineSaveReceipt | void>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
   canUndo(): boolean;
@@ -55,7 +56,8 @@ export interface TimelineLocalSaveHandoff {
 }
 
 /** Scoped editors supply their own verified physical-image join and durable owner. */
-export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status' | 'ownerId' | 'subscribeState' | 'exportRejectedChange' | 'discharge'>;
+export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status' | 'ownerId'
+  | 'writeRecoveryDraft' | 'subscribeState' | 'exportRejectedChange' | 'discharge'>;
 export interface TimelinePersistenceBinding {
   readonly provider: DataProvider;
   readonly timelineId: string;
@@ -1060,6 +1062,7 @@ export function createTimelineLocalSaveHandoff(options: {
       document = structuredClone(basis.canonicalDocument);
       sourceChecked = false;
       targets = historyTargets(basis.history, basis.head, options.session.actorId);
+      return adopted.receipt;
     },
     remoteHistoryAvailable,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,

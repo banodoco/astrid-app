@@ -6,8 +6,8 @@ import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
 import { AlertCircle, Film } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { SaveBar } from '@/tools/video-editor/components/SaveBar.tsx';
-import { VideoEditorProvider } from '@/tools/video-editor/contexts/VideoEditorProvider.tsx';
 import { TimelineSaveNotice } from '@/tools/video-editor/components/TimelineSaveNotice.tsx';
+import { VideoEditorProvider } from '@/tools/video-editor/contexts/VideoEditorProvider.tsx';
 import { TimelineEditorCore } from '@/tools/video-editor/components/TimelineEditor/TimelineEditorCore.tsx';
 import { RemotionPreview } from '@/tools/video-editor/components/PreviewPanel/RemotionPreview.tsx';
 import type { PreviewRevision } from '@/tools/video-editor/components/PreviewPanel/previewRevision.ts';
@@ -341,9 +341,9 @@ function ShotTimelineEditorSurface({
 }
 export function ShotTimelineRecoveryControls() {
   const chrome = useTimelineChromeContext();
+  const recovery = chrome.recoveryDraft;
   if (chrome.permanentSaveRejection) return <TimelineSaveNotice />;
   if (chrome.saveBar) return <SaveBar bar={chrome.saveBar} onTryAgain={chrome.tryAgain} onDiscard={chrome.discardUnsaved} />;
-  const recovery = chrome.recoveryDraft;
   if (!recovery && !chrome.isConflictExhausted) {
     return null;
   }

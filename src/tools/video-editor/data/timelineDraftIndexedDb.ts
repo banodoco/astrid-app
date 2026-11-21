@@ -237,6 +237,22 @@ export async function loadTimelineDraft(
   return record ?? null;
 }
 
+/** An outbox owner may be referenced by either an editor or an occurrence's recovery key. */
+export async function hasOutboxRecoveryDraft(ownerId: string): Promise<boolean> {
+  const database = await openDatabase();
+  try {
+    return await new Promise<boolean>((resolve, reject) => {
+      const transaction = database.transaction(DRAFT_STORE_NAME, 'readonly');
+      const request = transaction.objectStore(DRAFT_STORE_NAME).getAll();
+      request.addEventListener('error', () => reject(request.error));
+      request.addEventListener('success', () => resolve((request.result as TimelineDraftRecord[])
+        .some((draft) => draft.outboxOwnerId === ownerId)));
+    });
+  } finally {
+    database.close();
+  }
+}
+
 export async function clearTimelineDraft(timelineId: string, expectedOwnerId?: string): Promise<void> {
   if (typeof indexedDB === 'undefined') {
     return;
@@ -430,8 +446,7 @@ export async function clearTimelineDraftIfSnapshotMatches(
     let matched = false;
     request.addEventListener('success', () => {
       const current = request.result as TimelineDraftRecord | undefined;
-      if (current?.updatedAt === snapshot.updatedAt
-        && current.draftIdentity === snapshot.draftIdentity && current.ownerId === snapshot.ownerId) {
+      if (current && JSON.stringify(current) === JSON.stringify(snapshot)) {
         matched = true;
         store.delete(buildKey(recoveryKey));
       }

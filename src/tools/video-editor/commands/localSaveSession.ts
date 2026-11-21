@@ -3,6 +3,7 @@ import { ApiError } from '@/integrations/runtime/generated.ts';
 import { classifyRuntimeCommitFailure, type RuntimeCommitFailureKind } from '@/integrations/runtime/client.ts';
 import { supportsFullV2Commit } from '@/integrations/runtime/contract-metadata.ts';
 import type { TimelineCommandBasis, TimelineCommitResult } from '../data/DataProvider.ts';
+import { hasOutboxRecoveryDraft } from '../data/timelineDraftIndexedDb.ts';
 import { documentPatchIntent } from './documentPatchIntent.ts';
 import {
   createCommitOutbox,
@@ -55,6 +56,8 @@ interface Options {
   initial: TimelineCommandBasis;
   document: OutboxJson;
   outboxes?: ReturnType<typeof createCommitOutbox>;
+  /** Let a tab continue independently when it cannot claim the retained owner it found. */
+  skipRetainedOwners?: boolean;
   send(request: CommitRequest, key: string): Promise<TimelineCommitResult>;
   loadLatest(): Promise<TimelineCommandBasis>;
   /** Build with the upstream editor, then return a synchronous adoption callback. */
@@ -143,7 +146,9 @@ function isSingleTrackLabelDraft(record: OutboxRecord): boolean {
 
 /** One existing durable owner; commands and guards are never recaptured after an ACK. */
 export async function createLocalSaveSession(options: Options) {
-  const storage = options.outboxes ?? createCommitOutbox();
+  const storage = options.outboxes ?? createCommitOutbox({
+    isRecoveryOwner: hasOutboxRecoveryDraft,
+  });
   let basis = clone(options.initial);
   let displayBasis = clone(options.initial);
   let document = toOutboxJson(options.document);
@@ -167,6 +172,9 @@ export async function createLocalSaveSession(options: Options) {
   let retryDelay = RETRY_FIRST_MS;
   // Bumped first thing by Discard: a send loop that started before it must not dispatch another request.
   let discardEpoch = 0;
+  let discarding = false;
+  let changingOwner = false;
+  const recoveryWrites = new Set<Promise<void>>();
   let retryTimer: ReturnType<typeof setTimeout> | undefined;
   function clearRetry() {
     if (retryTimer) clearTimeout(retryTimer);
@@ -285,6 +293,7 @@ export async function createLocalSaveSession(options: Options) {
 
   async function pump() {
     if (sending) return sending;
+    if (discarding || changingOwner) return;
     sending = (async () => {
       const epoch = discardEpoch;
       while (!closed && epoch === discardEpoch) {
@@ -381,32 +390,6 @@ export async function createLocalSaveSession(options: Options) {
     return sending;
   }
 
-  // Total Discard (see discharge). Nothing is kept: not the claimed owner, not the others in the outbox.
-  async function discardAll() {
-    discardEpoch++;
-    clearRetry();
-    generation++;
-    if (sending) await sending.catch(() => {});
-    clearRetry();
-    await writes.catch(() => {});
-    release?.();
-    await lifetime;
-    box = undefined; lifetime = undefined; release = undefined;
-    await storage.discardScope(options.scope);
-    record = undefined; writeError = undefined; recoveryError = undefined;
-    replaying = false; adoptedAcceptance = undefined; retryDelay = RETRY_FIRST_MS;
-    writes = Promise.resolve();
-    state = { status: 'saved', recoverableOwners: [] };
-    options.changed(clone(state));
-    await claim();
-    const at = generation;
-    try { await resetToCanonical(at); }
-    catch (error) {
-      publish('error', { message: `Discarded; reload failed: ${errorMessage(error)}` });
-      throw error;
-    }
-  }
-
   async function claim(ownerId?: string) {
     if (closed || lifetime) throw new Error('Local save owner is closed or already claimed');
     let ready!: () => void;
@@ -454,15 +437,16 @@ export async function createLocalSaveSession(options: Options) {
     }
   }
 
-  // Rows that can never be sent (another realm, or empty and unheld) are removed before anything is listed.
-  await storage.prune(options.scope).catch(() => {});
+  // A retained row from a previous realm may still be the creator's only copy.
+  if (!options.skipRetainedOwners) await storage.prune(options.scope).catch(() => {});
   const owners = (await storage.list(options.scope)).filter((owner) => owner.intents.length || owner.pending);
   state.recoverableOwners = owners.map((owner) => owner.ownerId);
-  if (owners.length) publish('recovery');
+  if (owners.length && !options.skipRetainedOwners) publish('recovery');
   else await claim();
 
   function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
     assertOpen();
+    if (discarding || changingOwner) throw new LocalSaveDeclined('Wait for the saved timeline to reload before editing again');
     // A displayed permanently refused chain can accept dependent edits without retrying it.
     const retaining = state.status === 'error' && isPermanentLocalSaveRejection(state) && rejectedDisplayReady
       && (documentIntent !== undefined || Boolean(input.commands?.length));
@@ -504,6 +488,15 @@ export async function createLocalSaveSession(options: Options) {
     getDisplayBasis: () => clone(displayBasis),
     getDocument: () => clone(document),
     hasRejectedDisplay: () => rejectedDisplayReady,
+    /** Hold the owner's claim through any draft write that records its ID. */
+    async writeRecoveryDraft(write: (ownerId?: string) => Promise<void>) {
+      const ownerId = !closed && !discarding && !changingOwner && box ? state.ownerId : undefined;
+      if (!ownerId) return write();
+      const task = write(ownerId);
+      recoveryWrites.add(task);
+      try { await task; }
+      finally { recoveryWrites.delete(task); }
+    },
     /** Verified physical images with locally authored payloads; still an unsent intent. */
     appendDocument(input: Omit<Parameters<typeof documentPatchIntent>[0], 'basis'>): Promise<void> {
       assertOpen();
@@ -523,49 +516,84 @@ export async function createLocalSaveSession(options: Options) {
       if (state.status !== 'saved') throw new Error('Local saves remain unacknowledged; draft retained');
       return clone(basis);
     },
-    /**
-     * Only a deliberate 'latest' choice discards a rejected chain. 'keep' retries transient/head conflicts.
-     */
+    /** Only an explicit 'latest' choice can remove the offered owner and its edits. */
     async discharge(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent = () => true) {
       assertOpen();
-      if (sending) await sending.catch(() => {});
-      const at = generation;
-      await writes;
-      if (closed) return;
-      clearRetry();
-      record = await box!.read();
-      if (record.pending?.outcome?.kind !== 'rejected') {
-        if (mode === 'latest') await discardAll();
-        return;
-      }
-      const ids = record.intents.map((intent) => intent.id);
-      if (exported && (record.pending.request.key !== exported.requestKey || !same(ids, exported.intentIds))) {
-        throw new Error('Your unsaved edits changed. Copy them again before reloading.');
-      }
+      if (discarding) throw new LocalSaveDeclined('The saved timeline is already reloading');
       if (mode === 'keep') {
-        if (PERMANENT_REJECTION_KINDS.has(rejectionKind(record.pending.outcome.error) ?? '')) {
+        clearRetry();
+        await sending?.catch(() => {});
+        await writes;
+        assertOpen();
+        record = await box!.read();
+        if (permanentRejection(record)) {
           throw new Error('This save was permanently rejected. Copy my change out, or explicitly discard and reload.');
         }
-        await rebaseOntoLatest();
-        publish('dirty');
+        if (record.pending?.outcome?.kind === 'rejected') {
+          await rebaseOntoLatest();
+          publish('dirty');
+        }
+        // A transport retry keeps the exact pending request and idempotency key.
         await pump();
         return;
       }
-      // Build the new canonical display before resolving durable bytes, so a failed reload keeps every edit.
-      const latest = await options.loadLatest();
-      checkBasis(latest);
-      const prepared = await options.prepareDisplay(clone(latest));
-      const canResolve = () => !closed && at === generation && stillCurrent();
-      if (!canResolve()) throw new Error('Your unsaved edits changed during reload.');
-      record = await box!.resolveRejected(ids, undefined, canResolve);
-      basis = clone(latest);
-      displayBasis = clone(latest);
-      document = toOutboxJson(prepared.document);
-      prepared.adopt();
-      delete state.notice;
-      rejectedDisplayReady = false;
-      replaying = false;
-      publish('saved');
+
+      // An in-flight request may finish. Do not dispatch its suffix or let
+      // another capture change the owner's contents while Discard is running.
+      discarding = true;
+      discardEpoch++;
+      clearRetry();
+      try {
+        await sending?.catch(() => {});
+        clearRetry();
+        await writes;
+        await Promise.allSettled(recoveryWrites);
+        if (closed) return;
+        const owner = box!;
+        const offered = await owner.read();
+        if (exported && (offered.pending?.request.key !== exported.requestKey
+          || !same(offered.intents.map((intent) => intent.id), exported.intentIds))) {
+          throw new Error('Your unsaved edits changed. Copy them again before reloading.');
+        }
+        if (!offered.intents.length && !offered.pending && !writeError) return;
+
+        // Build the replacement before touching durable work. The owner claim
+        // and exact record are rechecked in the same transaction as deletion.
+        const latest = await options.loadLatest();
+        checkBasis(latest);
+        const prepared = await options.prepareDisplay(clone(latest));
+        const canonicalDocument = toOutboxJson(prepared.document);
+        const siblings = (await storage.list(options.scope))
+          .filter((row) => row.ownerId !== offered.ownerId && (row.intents.length || row.pending))
+          .map((row) => row.ownerId);
+        const canResolve = () => !closed && box === owner && stillCurrent();
+        if (!canResolve()) throw new Error('Your unsaved edits changed during reload.');
+        await owner.discard(offered, canResolve);
+
+        release?.();
+        await lifetime;
+        box = undefined;
+        lifetime = undefined;
+        release = undefined;
+        if (closed) return;
+        basis = clone(latest);
+        displayBasis = clone(latest);
+        document = canonicalDocument;
+        if (stillCurrent()) prepared.adopt();
+        writeError = undefined;
+        recoveryError = undefined;
+        rejectedDisplayReady = false;
+        replaying = false;
+        adoptedAcceptance = undefined;
+        retryDelay = RETRY_FIRST_MS;
+        state.recoverableOwners = siblings;
+        // Future edits belong to a fresh owner. The discarded claim never
+        // recreates the old row, even if its former snapshot is retried.
+        await claim();
+      } finally {
+        discarding = false;
+        if (state.status === 'retry' && !closed) scheduleRetry();
+      }
     },
     /** Downloadable, self-contained original intent chain; nothing is consumed. */
     async exportRejectedChange() {
@@ -601,18 +629,22 @@ export async function createLocalSaveSession(options: Options) {
       }
     },
     async recover(ownerId: string) {
+      if (discarding || changingOwner) throw new Error('The timeline owner is already changing');
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');
       if (box) {
         // Several editor sessions can each leave work behind. Recover them one at a time, each only
         // after the previous owner has fully settled, so a later one is rebased onto what landed.
         if (state.status !== 'saved') throw new Error('Finish the current owner before recovering another');
         const remaining = state.recoverableOwners;
+        changingOwner = true;
+        await Promise.allSettled(recoveryWrites);
         release?.();
         await lifetime;
         box = undefined; lifetime = undefined; release = undefined;
         state = { ...state, status: 'recovery', recoverableOwners: remaining };
       }
-      await claim(ownerId);
+      try { await claim(ownerId); }
+      finally { changingOwner = false; }
       await pump();
     },
     /** Stops a waiting automatic retry now (Discard must not race it). */
@@ -621,7 +653,11 @@ export async function createLocalSaveSession(options: Options) {
       closed = true;
       clearRetry();
       try { await writes; if (writeError) throw writeError; }
-      finally { release?.(); await lifetime; }
+      finally {
+        await Promise.allSettled(recoveryWrites);
+        release?.();
+        await lifetime;
+      }
     },
   };
 }

@@ -412,6 +412,7 @@ function createInitialChromeSlice(): TimelineChromeContextValue {
     isTimelineDraftDurableForReload: () => false,
     isTimelineSavePending: () => true,
     recoveryDraft: null,
+    recoveryRestoreAllowed: false,
     retryRecoveredDraft: noop,
     discardRecoveredDraft: noop,
     saveBar: null,

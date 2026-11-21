@@ -95,6 +95,8 @@ export type OutboxRequestBuilder = (
 export interface ClaimedOutbox {
   read(): Promise<OutboxRecord>;
   assertActive(): void;
+  /** Remove only this exact claimed snapshot; stale claims or changed bytes are retained. */
+  discard(snapshot: OutboxRecord, isCurrent?: () => boolean): Promise<void>;
   reserveCreate(payload: OutboxJson, request: OutboxRequest): Promise<string>;
   append(payload: OutboxJson, basis: OutboxBasis): Promise<string>;
   cancel(intentId: string): Promise<void>;
@@ -200,6 +202,8 @@ function placementInput(input: OutboxPlacementInput): OutboxPlacementInput {
 export function createCommitOutbox(options: {
   indexedDB?: IDBFactory;
   exclusiveLock?: OutboxExclusiveLock;
+  /** True means this owner is referenced by a durable scoped recovery draft and must be retained. */
+  isRecoveryOwner?: (ownerId: string) => Promise<boolean>;
 } = {}) {
   const factory = options.indexedDB ?? globalThis.indexedDB;
   const lock = options.exclusiveLock ?? browserLock;
@@ -251,77 +255,44 @@ export function createCommitOutbox(options: {
     });
   }
 
-  /**
-   * Total Discard: remove every owner row for this timeline. A claim another tab holds is fenced, not waited
-   * for: its next access finds no row (or a different generation) and throws "Stale outbox claim".
-   */
-  async function discardScope(scope: OutboxScope): Promise<void> {
-    const { projectId, timelineId } = scope;
-    scopeKey({ ...scope }, '_');
-    // Every row of this project and timeline, whatever realm or actor wrote it: a row from a realm that no
-    // longer exists can never be sent, and is exactly what a stack rebuild leaves behind.
-    await transaction<void>('readwrite', (store, finish) => {
-      const request = store.getAll();
-      request.addEventListener('success', () => {
-        for (const record of request.result as OutboxRecord[]) {
-          if (record.scope.projectId === projectId && record.scope.timelineId === timelineId) {
-            store.delete(scopeKey(record.scope, record.ownerId));
-          }
-        }
-        finish(undefined);
-      });
-    });
-  }
-
-  // Nothing left to send: no queued intent, no request in flight, and no placement continuation (those record
-  // conflicts the person must see and accepted placements that guard against a duplicate, so they stay).
-  // A create ACK (`accepted.creation`) and the original init link are kept: bootstrap resumes from them.
-  // An accepted prefix alone is history, not work: it is only read to rebase intents that are still queued.
-  const hasNothingToSend = (record: OutboxRecord) => !record.intents.length && !record.pending
-    && !record.placementContinuations?.length && !record.initialization && !record.accepted?.creation
+  // Keep any record with durable receipts, pending work, or continuations. Deletion requires a full empty proof.
+  const hasNothingToSend = (record: OutboxRecord) => Array.isArray(record.intents) && record.intents.length === 0
+    && record.pending === undefined && (record.placementContinuations?.length ?? 0) === 0
+    && record.initialization === undefined && record.accepted?.creation === undefined
     && (record.accepted?.value as { kind?: string } | undefined)?.kind !== 'timeline-initialized';
 
-  /** Delete an owner's row when its claim ends with nothing to send, so rows do not accumulate one per session. */
+  /** Runs under the owner's exclusive lock. A missing or failed check keeps the row. */
   async function releaseEmpty(key: string, generation: number): Promise<void> {
+    if (!options.isRecoveryOwner) return;
+    const candidate = await transaction<OutboxRecord | undefined>('readonly', (store, finish) => {
+      const read = store.get(key);
+      read.addEventListener('success', () => finish(read.result as OutboxRecord | undefined));
+    });
+    if (!candidate || candidate.generation !== generation || !hasNothingToSend(candidate)
+      || await options.isRecoveryOwner(candidate.ownerId) !== false) return;
+
     await transaction<void>('readwrite', (store, finish) => {
       const read = store.get(key);
       read.addEventListener('success', () => {
-        const current = read.result as OutboxRecord | undefined;
-        if (current && current.generation === generation && hasNothingToSend(current)) store.delete(key);
+        if (JSON.stringify(read.result) === JSON.stringify(candidate)) store.delete(key);
         finish(undefined);
       });
     });
   }
 
-  /**
-   * On session start: delete this timeline's rows that can never be sent. That is every row written under another
-   * realm, and every empty row of this realm that no live editor holds (a live editor's own empty owner holds its
-   * lock, so it is skipped and never fenced).
-   */
+  /** Remove only proven-empty, unreferenced owners of this timeline. */
   async function prune(scope: OutboxScope): Promise<void> {
-    const { realmId, projectId, timelineId } = scope;
-    scopeKey({ ...scope }, '_');
-    // Only this timeline's rows are read: another timeline's record must never be able to stop the prune.
+    if (!options.isRecoveryOwner) return;
+    scopeKey(scope, '_');
     const rows = await transaction<OutboxRecord[]>('readonly', (store, finish) => {
       const request = store.getAll();
       request.addEventListener('success', () => finish((request.result as OutboxRecord[])
-        .filter((record) => record.scope.projectId === projectId && record.scope.timelineId === timelineId)));
+        .filter((row) => row.scope.projectId === scope.projectId && row.scope.timelineId === scope.timelineId)));
     });
-    for (const record of rows) {
-      if (record.scope.realmId === realmId && !hasNothingToSend(record)) continue;
-      const key = scopeKey(record.scope, record.ownerId);
-      try {
-        await lock(`${DATABASE}:${key}`, () => transaction<void>('readwrite', (store, finish) => {
-          const read = store.get(key);
-          read.addEventListener('success', () => {
-            const current = read.result as OutboxRecord | undefined;
-            if (current && current.generation === record.generation) store.delete(key);
-            finish(undefined);
-          });
-        }));
-      } catch {
-        // Held by a live editor: not ours to remove.
-      }
+    for (const row of rows) {
+      if (!hasNothingToSend(row)) continue;
+      const key = scopeKey(row.scope, row.ownerId);
+      await lock(`${DATABASE}:${key}`, () => releaseEmpty(key, row.generation)).catch(() => {});
     }
   }
 
@@ -358,7 +329,7 @@ export function createCommitOutbox(options: {
         if (!active) throw new Error('Stale outbox claim');
       }
 
-      function access<T>(mode: IDBTransactionMode, change: (record: OutboxRecord) => T): Promise<T> {
+      function access<T>(mode: IDBTransactionMode, change: (record: OutboxRecord) => T, remove = false): Promise<T> {
         let failure: unknown;
         return transaction<T>(mode, (store, finish) => {
           const request = store.get(key);
@@ -368,7 +339,10 @@ export function createCommitOutbox(options: {
               if (!active || current?.generation !== generation) throw new Error('Stale outbox claim');
               const record = detached(current);
               const result = change(record);
-              if (mode === 'readwrite') store.put(record, key);
+              if (mode === 'readwrite') {
+                if (remove) store.delete(key);
+                else store.put(record, key);
+              }
               finish(result);
             } catch (error) {
               // Throwing from an IDB event handler alone does not reject the caller's promise.
@@ -382,6 +356,16 @@ export function createCommitOutbox(options: {
       const outbox: ClaimedOutbox = {
         read: () => access('readonly', detached),
         assertActive,
+        async discard(snapshot, isCurrent) {
+          const expected = detached(snapshot);
+          await access('readwrite', (record) => {
+            if (isCurrent && !isCurrent()) throw new Error('Timeline command session is closed');
+            if (JSON.stringify(record) !== JSON.stringify(expected)
+              || record.ownerId !== ownerId || JSON.stringify(record.scope) !== JSON.stringify(scope)) {
+              throw new Error('Outbox record changed before discard');
+            }
+          }, true);
+        },
         async reserveCreate(payload, request) {
           const intent = newIntent(payload, { create: true });
           const exact = detached(request);
@@ -644,7 +628,6 @@ export function createCommitOutbox(options: {
 
   return {
     list,
-    discardScope,
     prune,
     create: <T>(scope: OutboxScope, work: (outbox: ClaimedOutbox, ownerId: string) => Promise<T>) =>
       own(scope, crypto.randomUUID(), true, work),

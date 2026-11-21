@@ -42,17 +42,21 @@ function acceptedResult(document: ReturnType<typeof documentPair>['after'], head
   return { response, accepted: head, canonicalDocument: response.data.canonical_document, graph: {}, receipt: response.receipt } as TimelineCommitResult;
 }
 
-export function environment() {
+export function environment(isRecoveryOwner: (ownerId: string) => Promise<boolean> = async () => false) {
   const pair = documentPair();
   const initial: TimelineCommandBasis = { head: h0, canonicalDocument: pair.document };
   // Like the browser's exclusive lock: a name held by a live claim is refused, so prune never removes a live owner.
   const held = new Set<string>();
   const idb = createFakeIndexedDB();
-  const outboxes = createCommitOutbox({ indexedDB: idb, exclusiveLock: async (key, work) => {
-    if (held.has(key)) throw new Error('Outbox is already claimed');
-    held.add(key);
-    try { return await work(); } finally { held.delete(key); }
-  } });
+  const outboxes = createCommitOutbox({
+    indexedDB: idb,
+    isRecoveryOwner,
+    exclusiveLock: async (key, work) => {
+      if (held.has(key)) throw new Error('Outbox is already claimed');
+      held.add(key);
+      try { return await work(); } finally { held.delete(key); }
+    },
+  });
   const send = vi.fn<(request: import('@/integrations/runtime/timeline-commit-types.ts').CommitRequest, key: string) => Promise<TimelineCommitResult>>();
   let visible: OutboxJson = toOutboxJson(pair.document);
   const sourceHead: TimelineHeadRevision = { projectId: scope.projectId, timelineId: scope.timelineId,

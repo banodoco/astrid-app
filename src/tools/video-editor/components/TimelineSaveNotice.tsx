@@ -2,20 +2,23 @@ import { useState } from 'react';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/shared/components/ui/alert-dialog.tsx';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { useTimelineChromeContext } from '../hooks/timelineStore.ts';
+import { SaveBar } from './SaveBar.tsx';
 
 export function TimelineSaveNotice() {
   const chrome = useTimelineChromeContext();
   const [confirmExportReload, setConfirmExportReload] = useState(false);
   if (!chrome.saveNotice && !chrome.permanentSaveRejection) return null;
+  const bar = chrome.saveBar ?? {
+    kind: 'refused' as const,
+    headline: chrome.saveNotice ?? 'This timeline change could not be saved.',
+    action: 'pending' as const,
+  };
 
   return (
     <>
-      <div
-        role="alert"
-        className="flex flex-wrap items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-      >
-        <span>{chrome.saveNotice ?? 'This timeline change could not be saved.'}</span>
-        {chrome.permanentSaveRejection && (
+      <SaveBar bar={bar} className="border-destructive/40 bg-destructive/10 text-destructive"
+        children={<span>{chrome.saveNotice ?? bar.headline}</span>}
+        actions={chrome.permanentSaveRejection ? (
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             <Button type="button" size="sm" variant="outline" onClick={() => {
               void chrome.copyRejectedSave().then(started => { if (started) setConfirmExportReload(true); });
@@ -29,8 +32,7 @@ export function TimelineSaveNotice() {
               Discard and reload the saved version
             </Button>
           </div>
-        )}
-      </div>
+        ) : undefined} />
       <AlertDialog open={confirmExportReload && chrome.permanentSaveRejection} onOpenChange={setConfirmExportReload}>
         <AlertDialogContent>
           <AlertDialogHeader>

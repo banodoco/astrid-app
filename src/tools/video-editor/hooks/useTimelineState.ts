@@ -403,6 +403,7 @@ function useTimelineChromeContextValue({
   isTimelineDraftDurableForReload,
   isTimelineSavePending,
   recoveryDraft,
+  recoveryRestoreAllowed,
   retryRecoveredDraft,
   discardRecoveredDraft,
   saveBar,
@@ -438,6 +439,7 @@ function useTimelineChromeContextValue({
   isTimelineDraftDurableForReload: () => boolean;
   isTimelineSavePending: () => boolean;
   recoveryDraft: ReturnType<typeof useTimelineSave>['recoveryDraft'];
+  recoveryRestoreAllowed: boolean;
   retryRecoveredDraft: ReturnType<typeof useTimelineSave>['retryRecoveredDraft'];
   discardRecoveredDraft: ReturnType<typeof useTimelineSave>['discardRecoveredDraft'];
   saveBar: ReturnType<typeof useTimelineSave>['saveBar'];
@@ -501,6 +503,7 @@ function useTimelineChromeContextValue({
     isTimelineDraftDurableForReload,
     isTimelineSavePending,
     recoveryDraft,
+    recoveryRestoreAllowed,
     retryRecoveredDraft,
     discardRecoveredDraft,
     saveBar,
@@ -569,6 +572,7 @@ function useTimelineChromeContextValue({
     copyRejectedSave,
     cancelRejectedSaveCopy,
     recoveryDraft,
+    recoveryRestoreAllowed,
     retryRecoveredDraft,
     discardRecoveredDraft,
     saveBar,
@@ -1284,6 +1288,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     isTimelineDraftDurableForReload: save.isTimelineDraftDurableForReload,
     isTimelineSavePending: save.isTimelineSavePending,
     recoveryDraft: save.recoveryDraft,
+    recoveryRestoreAllowed: save.recoveryRestoreAllowed,
     retryRecoveredDraft: save.retryRecoveredDraft,
     discardRecoveredDraft: save.discardRecoveredDraft,
     saveBar: save.saveBar,

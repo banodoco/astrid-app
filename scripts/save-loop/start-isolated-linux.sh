@@ -11,6 +11,9 @@ ROOT="$SCRATCH/stack"
 OMP_REPO="$SCRATCH/omp-source-cache"
 OWNERSHIP_MARKER="$ROOT/.sl1-stack-owned"
 fail() { echo "STOP: $*" >&2; exit 1; }
+if [[ "$(uname -s)" == Darwin ]]; then
+  command -v lsof >/dev/null || fail 'lsof is required on macOS to verify owned editor identity.'
+fi
 [[ "$SCRATCH" == /* ]] || fail 'SL1_SCRATCH must be an absolute path.'
 mkdir -p "$SCRATCH"
 [[ ! -L "$SCRATCH" && "$(cd -P -- "$SCRATCH" && pwd -P)" == "$SCRATCH" ]] \
@@ -80,11 +83,20 @@ printf 'astrid-app-sl1-stack-v1 %s' "$ROOT" > "$OWNERSHIP_MARKER"
 chmod 600 "$OWNERSHIP_MARKER"
 
 cleanup_stack() {
-  local status=$? cleanup_status=0 pid version runtime_cli
+  local status=$? cleanup_status=0 pid version runtime_cli child_killer
   trap - EXIT INT TERM
   if [[ -n "${RUN_CHILD_PID:-}" ]] && kill -0 "$RUN_CHILD_PID" 2>/dev/null; then
+    echo "Stopping owned run child PID $RUN_CHILD_PID."
     kill -TERM "$RUN_CHILD_PID" 2>/dev/null || true
+    (
+      sleep 5
+      kill -KILL "$RUN_CHILD_PID" 2>/dev/null || true
+    ) &
+    child_killer=$!
     wait "$RUN_CHILD_PID" 2>/dev/null || true
+    kill "$child_killer" 2>/dev/null || true
+    wait "$child_killer" 2>/dev/null || true
+    RUN_CHILD_PID=
   fi
   pid="${EDITOR_PID:-}"
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then

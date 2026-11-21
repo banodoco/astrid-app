@@ -26,4 +26,4 @@ available_kib="$(df -Pk "$base" | awk 'NR == 2 {print $4}')"
 unset SAVE_LOOP_CLIPS SAVE_LOOP_DOCUMENT_BYTES SAVE_LOOP_COMMIT_RATIO SAVE_LOOP_RESULTS
 run_dir="$(mktemp -d "$base/run.XXXXXXXX")"
 echo "Run outputs: $run_dir"
-SL1_SCRATCH="$run_dir" SL1_ON_DEMAND=1 "$APP/scripts/save-loop/start-isolated-linux.sh"
+exec env SL1_SCRATCH="$run_dir" SL1_ON_DEMAND=1 "$APP/scripts/save-loop/start-isolated-linux.sh"

@@ -25,22 +25,36 @@ export function checkDisk() {
     throw new Error(`save-loop requires at least 15 GiB free at ${diskPath} (available KiB: ${available})`);
   }
 }
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+async function exitedWithin(proc, ms) {
+  if (proc.exitCode !== null || proc.signalCode !== null) return true;
+  return Promise.race([
+    once(proc, 'exit').then(() => true, () => true),
+    delay(ms).then(() => false),
+  ]);
+}
 export async function open({onCleanup} = {}){
   checkDisk();
   const profile=fs.mkdtempSync(path.join(os.tmpdir(),'save-loop-'));
   let proc, browser;
   async function close(){
-    try { if (browser) await browser.close(); } catch {}
-    if (proc && proc.exitCode === null && proc.signalCode === null) {
-      const exited=once(proc, 'exit').catch(()=>{});
-      proc.kill('SIGTERM');
-      await Promise.race([exited, new Promise(r=>setTimeout(r,2000))]);
-      if (proc.exitCode === null && proc.signalCode === null) {
-        proc.kill('SIGKILL');
-        await Promise.race([exited, new Promise(r=>setTimeout(r,2000))]);
+    try {
+      if (browser) {
+        await Promise.race([
+          Promise.resolve().then(() => browser.close()).catch(() => {}),
+          delay(2000),
+        ]);
       }
+    } finally {
+      if (proc && proc.exitCode === null && proc.signalCode === null) {
+        try { proc.kill('SIGTERM'); } catch {}
+        if (!await exitedWithin(proc, 2000)) {
+          try { proc.kill('SIGKILL'); } catch {}
+          await exitedWithin(proc, 2000);
+        }
+      }
+      fs.rmSync(profile,{recursive:true,force:true});
     }
-    fs.rmSync(profile,{recursive:true,force:true});
   }
   if (onCleanup) onCleanup(close);
   try {

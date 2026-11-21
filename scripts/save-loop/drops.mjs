@@ -37,7 +37,7 @@ function fixtureDropFiles(fixture) {
 function visualTrack(fixture) {
   const tracks = fixture?.tracks?.visual;
   if (!Array.isArray(tracks)) throw new Error('fixture.tracks.visual must be an array');
-  const track = tracks.find((item) => item && typeof item.id === 'string' && item.id && item.kind === 'visual');
+  const track = tracks.find((item) => item && typeof item.id === 'string' && item.id && (item.kind === 'visual' || item.role === 'visual'));
   if (!track) throw new Error('fixture has no eligible visual track');
   return track;
 }
@@ -165,7 +165,7 @@ function dropVerifier({ page, name, expectedPlacements, gestureEvidence }) {
     if (placements.length !== expectedPlacements) {
       throw new Error(`${name}: expected ${expectedPlacements} distinct placements, observed ${placements.length}; ${JSON.stringify(observations)}`);
     }
-    if (!(Number.isFinite(before?.headCount) && Number.isFinite(after?.headCount) && after.headCount > before.headCount)
+    if (!(Number.isFinite(before?.headCount) && Number.isFinite(after?.headCount) && after.headCount === 1 && before.headCount === 1)
       || !observations.headRevisionChanged || !observations.publicationChanged) {
       throw new Error(`${name}: placements did not advance the public timeline head; ${JSON.stringify(observations)}`);
     }
@@ -193,15 +193,14 @@ export async function dropScenarios({ page, fixture, helpers }) {
   const trackSelector = `[data-row-id="${selectorValue(track.id)}"]`;
 
   const libraryEvidence = { current: null };
-  const librarySources = await visibleLibrarySources(page, files);
-  if (!librarySources.length) {
-    throw new Error(`no visible public-library drag item matches generated media types ${files.map((file) => path.extname(file)).join(', ')}`);
-  }
-  const source = page.locator('[draggable="true"]').nth(librarySources[0].metadata.index);
   const library = scenario({
     page, helpers, name: 'public library item drag x3', expectedPlacements: 3,
     gestureEvidence: libraryEvidence,
     gesture: async ({ iteration }) => {
+      const librarySources = await visibleLibrarySources(page, files);
+      if (!librarySources.length) throw new Error('no visible public-library drag item matches generated media');
+      const source = page.locator('[draggable="true"]').nth(librarySources[0].metadata.index);
+      for (let drag = 0; drag < 3; drag += 1) {
       await source.scrollIntoViewIfNeeded();
       await page.evaluate(() => {
         window.__saveLoopDropDragTypes = [];
@@ -209,7 +208,7 @@ export async function dropScenarios({ page, fixture, helpers }) {
           window.__saveLoopDropDragTypes = Array.from(event.dataTransfer?.types || []);
         }, { once: true });
       });
-      const point = await trackPoint(page, track.id, iteration - 1);
+      const point = await trackPoint(page, track.id, iteration - 1 + drag);
       await source.dragTo(page.locator(trackSelector).first(), {
         targetPosition: { x: Math.max(1, Math.min(point.width - 1, point.offsetX)), y: point.height / 2 },
         timeout: 10000,
@@ -222,6 +221,7 @@ export async function dropScenarios({ page, fixture, helpers }) {
       };
       if (!dragTypes.includes('asset-key') || !dragTypes.some((type) => type.startsWith('asset-kind:'))) {
         throw new Error(`selected draggable is not a public-library asset; DOM=${JSON.stringify(libraryEvidence.current)}`);
+      }
       }
     },
   });

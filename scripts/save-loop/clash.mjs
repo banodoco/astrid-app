@@ -220,19 +220,22 @@ export async function clashScenario({page, secondPage, fixture, helpers}) {
         && secondActor?.requestBasis?.revision === before?.headRevision
         && secondActor?.requestBasis?.publication === before?.publicationId;
       const secondSaved = secondActor?.status >= 200 && secondActor?.status < 300
-        && secondAcceptedHead?.headRevision && secondAcceptedHead.headRevision !== before?.headRevision;
+        && secondAcceptedHead?.headRevision && secondAcceptedHead.headRevision !== before?.headRevision
+        && secondAcceptedHead?.revision?.content_digest !== before?.revision?.content_digest;
       const acceptedStateStillCurrent = secondAcceptedHead?.headRevision === after?.headRevision
         && secondAcceptedHead?.publicationId === after?.publicationId
         && secondAcceptedHead?.revision?.content_digest === after?.revision?.content_digest
         && secondAcceptedHead?.headCount === 1 && after?.headCount === 1;
       const noClipLost = Array.isArray(before?.clipIds) && Array.isArray(after?.clipIds)
         && before.clipIds.every(id => after.clipIds.includes(id));
+      const noOccurrenceLost = Array.isArray(before?.entities?.occurrenceIds) && Array.isArray(after?.entities?.occurrenceIds)
+        && before.entities.occurrenceIds.every(id => after.entities.occurrenceIds.includes(id));
       const targetRemains = after?.clipIds?.includes(clip.clip_id) === true;
       const allInputsTargetSameClip = requestUsesClip(observedRequest?.body, clip.clip_id)
         && secondActor?.requestTargetsClip === true;
       const pass = firstConflict && refusal && !!visibleReason && result?.try_again_visible === true
         && result?.discard_visible === true && sameInitialBasis && secondSaved
-        && acceptedStateStillCurrent && noClipLost && targetRemains && allInputsTargetSameClip && !routeFailure;
+        && acceptedStateStillCurrent && noClipLost && noOccurrenceLost && targetRemains && allInputsTargetSameClip && !routeFailure;
       return {
         pass,
         reason: pass ? 'second actor save remained current; first actor received a real 409 with the visible recovery reason and actions'
@@ -257,7 +260,7 @@ export async function clashScenario({page, secondPage, fixture, helpers}) {
           } : null, commitStatuses: (result?.commit_requests ?? []).map(statusOf),
             visibleReason, tryAgain: result?.try_again_visible === true, discard: result?.discard_visible === true},
           sameClipId: clip.clip_id,
-          noClipLost,
+          noClipLost, noOccurrenceLost,
           routeFailure,
         },
       };

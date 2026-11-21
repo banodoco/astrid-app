@@ -14,7 +14,7 @@
  */
 import fs from 'fs';
 
-const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE';
+const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE [--broken-probe|--broken-probe-only]';
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) { console.log(usage); process.exit(0); }
 function flag(name) {
@@ -38,6 +38,8 @@ if (fs.existsSync(resultsPath)) throw new Error('results file already exists; us
 process.env.SAVE_LOOP_PROJECT = fixture.project_id;
 process.env.SAVE_LOOP_TIMELINE = fixture.timeline_id;
 const baseUrl = process.env.SAVE_LOOP_BASE_URL;
+const origin = new URL(baseUrl);
+if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Error('save-loop requires a local isolated stack');
 const helpers = await import('./lib.mjs');
 const {createRecorder} = await import('./assert.mjs');
 const {editScenarios, repeatScenarios} = await import('./edits.mjs');
@@ -52,15 +54,29 @@ try {
   const secondPage = await context.newPage();
   await secondPage.setViewportSize({width:1700, height:1500});
   await secondPage.goto(helpers.URL_);
+  const project = await page.evaluate(async projectId => {
+    const response = await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`, {credentials:'same-origin', cache:'no-store'});
+    if (!response.ok) throw new Error(`sandbox project read failed (${response.status})`);
+    const body = await response.json(); return body?.data ?? body;
+  }, fixture.project_id);
+  if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
+    throw new Error('project is not the synthetic Plan 77 sandbox fixture');
+  fs.appendFileSync(resultsPath, JSON.stringify({type:'run', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
   const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath});
   const contextArgs = {page, fixture, helpers};
-  const descriptors = [
+  let descriptors = [
     ...await editScenarios(contextArgs),
     ...await repeatScenarios(contextArgs),
     ...await dropScenarios(contextArgs),
     await clashScenario({...contextArgs, secondPage}),
   ];
-  fs.appendFileSync(resultsPath, JSON.stringify({type:'run', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
+  if (args.includes('--broken-probe') || args.includes('--broken-probe-only')) {
+    if (args.includes('--broken-probe-only')) descriptors = [];
+    descriptors.push({
+    name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
+    gesture:async()=>{}, cleanup:context=>context.helpers.restoreScenario(context),
+    });
+  }
   for (const descriptor of descriptors) {
     if (!descriptor || typeof descriptor.name !== 'string' || typeof descriptor.gesture !== 'function' ||
         !['saved','clash'].includes(descriptor.expected) || typeof descriptor.cleanup !== 'function') {
@@ -83,7 +99,8 @@ try {
         fs.appendFileSync(resultsPath, JSON.stringify({type:'row', ...row}) + '\n');
       }
       try {
-        await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
+        const cleanup = await descriptor.cleanup({page, secondPage, fixture, helpers, result:row});
+        fs.appendFileSync(resultsPath, JSON.stringify({type:'cleanup', name:descriptor.name, iteration, result:cleanup ?? null}) + '\n');
       } catch (error) {
         const failure = {type:'cleanup_failure', name:descriptor.name, iteration, error:String(error?.message || error)};
         fs.appendFileSync(resultsPath, JSON.stringify(failure) + '\n');

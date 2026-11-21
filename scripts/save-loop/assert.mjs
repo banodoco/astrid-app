@@ -270,7 +270,7 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
   if (expected === 'saved') {
     const acceptedCommit = commit.some((entry) => entry.status >= 200 && entry.status < 300);
     const savedAt = result.badge_transitions
-      .filter((entry) => entry.state === 'saved' && entry.at >= result.row_started_at)
+      .filter((entry) => entry.state === 'saved' && entry.at >= result.gesture_ended_at)
       .at(-1)?.at;
     const observedIntermediate = result.badge_transitions.some((entry) =>
       entry.state === 'saving' || entry.state === 'not saved' || entry.state === 'error');
@@ -282,7 +282,7 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
     if (!observedIntermediate && savedAt < result.gesture_ended_at) {
       return {pass: false, reason: 'Saved was already present without a row-specific save-state transition'};
     }
-    if ((disappearedClips.length || disappearedOccurrences.length || removedMediaRefs.length) && !hasScenarioVerify) {
+    if ((disappearedClips.length || disappearedOccurrences.length || removedMediaRefs.length) && !result.allow_removals) {
       return {pass: false, reason: 'clip, occurrence or fixture media references disappeared; scenario verify must account for intended split/delete deltas'};
     }
     return {pass: true, reason: disappearedClips.length || disappearedOccurrences.length || removedMediaRefs.length
@@ -314,16 +314,18 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
 
   const timelineKey = `/v1/projects/${encodeURIComponent(fixture.project_id)}/timelines/${encodeURIComponent(fixture.timeline_id)}`;
   const networkEvents = [];
+  const requests = new WeakMap();
   const clock = await page.evaluate(() => ({wall: Date.now(), page: performance.timeOrigin + performance.now()}));
   const toPageTime = (wallTime) => clock.page + (wallTime - clock.wall);
   const onRequest = (request) => {
     if (request.method() !== 'POST' || !request.url().includes(timelineKey) || !COMMIT_PATH.test(request.url())) return;
-    networkEvents.push({method: request.method(), url: request.url(), requestAt: toPageTime(Date.now()), status: null});
+    const event = {method: request.method(), url: request.url(), requestAt: toPageTime(Date.now()), status: null};
+    requests.set(request, event); networkEvents.push(event);
   };
   const onResponse = (response) => {
     const request = response.request();
     if (request.method() !== 'POST' || !request.url().includes(timelineKey) || !COMMIT_PATH.test(request.url())) return;
-    const matched = [...networkEvents].reverse().find((event) => event.url === request.url() && event.status === null);
+    const matched = requests.get(request);
     if (matched) {
       matched.responseAt = toPageTime(Date.now());
       matched.status = response.status();
@@ -331,7 +333,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
   };
   const onRequestFailed = (request) => {
     if (request.method() !== 'POST' || !request.url().includes(timelineKey) || !COMMIT_PATH.test(request.url())) return;
-    const matched = [...networkEvents].reverse().find((event) => event.url === request.url() && event.status === null);
+    const matched = requests.get(request);
     if (matched) matched.error = request.failure()?.errorText ?? 'request failed';
   };
   page.on('request', onRequest);
@@ -339,6 +341,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
   page.on('requestfailed', onRequestFailed);
 
   async function runRow(descriptor) {
+    await installBadgeObserver(page);
     const rowStartedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
     const eventStart = networkEvents.length;
     let before;
@@ -350,6 +353,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
       name: descriptor?.name ?? 'unnamed scenario',
       iteration: descriptor?.iteration ?? null,
       expected: descriptor?.expected ?? null,
+      allow_removals: descriptor?.allowRemovals === true,
       pass: false,
       reason: 'row did not complete',
       ms: null,
@@ -367,7 +371,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
       result.badge_before = observerStart.badge;
       const transitionCount = observerStart.transitions.length;
 
-      gestureOutput = await descriptor.gesture({page, fixture, before});
+      gestureOutput = await descriptor.gesture({page, fixture, before, helpers: await import('./lib.mjs'), iteration: descriptor.iteration, mark: () => {}});
       const gestureClock = await page.evaluate(() => ({at: performance.timeOrigin + performance.now()}));
       gestureEndedAt = Number.isFinite(gestureOutput?.gesture_ended_at)
         ? gestureOutput.gesture_ended_at
@@ -382,9 +386,9 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
       while (Date.now() < deadline) {
         finalState = await readObserverState(page);
         const changedTransitions = finalState.transitions.slice(transitionCount);
-        const hasSavedTransition = changedTransitions.some((entry) => entry.state === 'saved');
+        const hasSavedTransition = changedTransitions.some((entry) => entry.state === 'saved' && entry.at >= gestureEndedAt) && finalState.badge.state === 'saved';
         const hasRefusal = finalState.badge.state === 'not saved' && finalState.badge.barCount > 0;
-        if (descriptor.expected === 'saved' ? hasSavedTransition : hasRefusal) break;
+        if (hasRefusal || (descriptor.expected === 'saved' && hasSavedTransition && !networkEvents.slice(eventStart).some(entry => entry.status === null))) break;
         await page.waitForTimeout(50);
       }
       finalState ??= await readObserverState(page);
@@ -409,12 +413,13 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
       result.after = {headRevision: after.headRevision, publicationId: after.publicationId,
         clipIds: after.clipIds, mediaRefs: after.mediaRefs, headCount: after.headCount};
       const assertion = defaultAssertion(descriptor.expected, before, after, result, typeof descriptor.verify === 'function');
+      result.pass = assertion.pass;
       let custom = {pass: true};
       if (typeof descriptor.verify === 'function') {
         verifierCalled = true;
         const value = await descriptor.verify({before, after, result});
         custom = typeof value === 'boolean' ? {pass: value, reason: value ? undefined : 'scenario-specific verification failed'}
-          : value && typeof value === 'object' ? value : {pass: false, reason: 'scenario verify returned no assertion'};
+          : value && typeof value === 'object' ? (Object.hasOwn(value, 'pass') ? value : {pass:true, evidence:value}) : value === undefined ? {pass:true} : {pass:false, reason:'scenario verification failed'};
       }
       result.pass = assertion.pass && custom.pass === true;
       result.reason = [assertion.reason, custom.reason].filter(Boolean).join('; ');
@@ -425,6 +430,13 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
       result.reason = reasonOf(error);
       result.error = reasonOf(error);
       result.ms = null;
+      // Preserve an independently read after-head for guarded cleanup even on gesture errors.
+      if (before && !after) {
+        try {
+          after = await publicSnapshot(page, baseUrl, fixture);
+          result.after = {headRevision:after.headRevision, publicationId:after.publicationId, clipIds:after.clipIds, mediaRefs:after.mediaRefs, headCount:after.headCount};
+        } catch (snapshotError) { result.after_snapshot_error = reasonOf(snapshotError); }
+      }
       // A failed public read is evidence of a failed row, never a synthetic head/count.
       if (before && !result.commit_requests) result.commit_requests = toRecordTimes(networkEvents.slice(eventStart));
     }
@@ -435,7 +447,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
         verifierCalled = true;
         const value = await descriptor.verify({before, after, result});
         const custom = typeof value === 'boolean' ? {pass: value, reason: value ? undefined : 'scenario-specific verification failed'}
-          : value && typeof value === 'object' ? value : {pass: false, reason: 'scenario verify returned no assertion'};
+          : value && typeof value === 'object' ? (Object.hasOwn(value, 'pass') ? value : {pass:true, evidence:value}) : value === undefined ? {pass:true} : {pass:false, reason:'scenario verification failed'};
         result.verify_evidence = custom.evidence;
         if (custom.pass !== true) result.pass = false;
         if (custom.reason) result.reason = `${result.reason}; ${custom.reason}`;

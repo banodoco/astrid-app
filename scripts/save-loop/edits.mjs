@@ -20,7 +20,7 @@ function targetsFor(fixture, kind) {
     return [primaryAudio, ...(fixture.clips?.audio?.additional ?? [])].filter((item) => targetId(item));
   }
   if (kind === 'video-delete' || kind === 'video-split') {
-    return (fixture.clips?.video?.repeated_delete_and_split ?? [primary]).filter((item) => targetId(item));
+    return [primary, ...(fixture.clips?.video?.repeated_delete_and_split ?? [])].filter((item) => targetId(item));
   }
   return [primary].filter((item) => targetId(item));
 }
@@ -63,6 +63,7 @@ function verifySaved({ before, after }, name) {
   if (!before || !after) throw new Error(`${name}: recorder did not provide before/after state`);
   const advanced = after.headRevision !== before.headRevision || after.revision !== before.revision;
   if (!advanced) throw new Error(`${name}: gesture did not advance the saved revision`);
+  return {pass:true};
 }
 
 function verifyDeleted({ before, after }, name, count) {
@@ -77,10 +78,13 @@ function verifySplit({ before, after }, name) {
 }
 
 function descriptor({ name, kind, targets, repetitions, perform, verify }) {
+  let rowFixture;
   return {
     name,
     expected: 'saved',
+    allowRemovals: kind.endsWith('-delete') || kind.endsWith('-split'),
     async gesture({ page, fixture, helpers, iteration, mark }) {
+      rowFixture = fixture;
       const allTargets = targets(fixture);
       const target = targetForIteration(allTargets, iteration, name, destructive(kind) ? repetitions : 1);
       for (let index = 0; index < repetitions; index += 1) {
@@ -92,7 +96,16 @@ function descriptor({ name, kind, targets, repetitions, perform, verify }) {
       }
       mark();
     },
-    verify: verify ? (state) => verify(state, name, repetitions) : (state) => verifySaved(state, name),
+    verify: async (state) => {
+      if (verify) await verify(state, name, repetitions); else verifySaved(state, name);
+      if (kind === 'video-delete' || kind === 'audio-delete') {
+        const permitted = new Set(targets(rowFixture).map(targetId));
+        const removed = state.before.clipIds.filter(id => !state.after.clipIds.includes(id));
+        if (removed.length !== repetitions || removed.some(id => !permitted.has(id)))
+          throw new Error(`${name}: removed unexpected clips: ${removed.join(', ')}`);
+      }
+      return {pass:true};
+    },
     cleanup: (context) => context.helpers.restoreScenario(context),
   };
 }
@@ -104,7 +117,7 @@ function clipScenarios() {
       perform: async ({ page, helpers, item, index }) => {
         const id = assertTarget(item, 'video move');
         const rect = await clipRect(page, helpers, id);
-        const delta = Math.max(18, Math.min(64, rect.w * 0.08)) * (index % 2 ? -1 : 1);
+        const delta = Math.max(18, Math.min(64, rect.w * 0.08)) * (index % 2 ? -0.5 : 1);
         await helpers.drag(page, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.x + rect.w / 2 + delta, rect.y + rect.h / 2);
       },
     },
@@ -173,7 +186,7 @@ function clipScenarios() {
       kind: 'audio-move-same-track',
       perform: async ({ page, helpers, item, index }) => {
         const rect = await clipRect(page, helpers, assertTarget(item, 'audio move'));
-        const delta = Math.max(16, Math.min(56, rect.w * 0.07)) * (index % 2 ? -1 : 1);
+        const delta = Math.max(16, Math.min(56, rect.w * 0.07)) * (index % 2 ? -0.5 : 1);
         await helpers.drag(page, rect.x + rect.w / 2, rect.y + rect.h / 2, rect.x + rect.w / 2 + delta, rect.y + rect.h / 2);
       },
     },
@@ -245,7 +258,6 @@ function trackScenarios(repetitions) {
 function shotScenarios(fixture, repetitions) {
   const occurrences = fixture.clips?.shot_occurrences ?? [];
   return ['move', 'trim', 'delete'].flatMap((operation) => {
-    if (occurrences.length < repetitions) return [];
     return [descriptor({
       name: `shot-${operation}`, kind: `shot-${operation}`, repetitions,
       targets: () => occurrences,
@@ -258,7 +270,7 @@ function shotScenarios(fixture, repetitions) {
         const rect = await label.boundingBox();
         if (!rect) throw new Error(`shot occurrence ${occurrenceId} is not rendered on track ${trackId}`);
         if (operation === 'move') {
-          const delta = Math.max(16, Math.min(48, rect.width * 0.06)) * (index % 2 ? -1 : 1);
+          const delta = Math.max(16, Math.min(48, rect.width * 0.06)) * (index % 2 ? -0.5 : 1);
           await helpers.drag(page, rect.x + rect.width / 2, rect.y + rect.height / 2, rect.x + rect.width / 2 + delta, rect.y + rect.height / 2);
         } else if (operation === 'trim') {
           const right = index % 2 === 0;

@@ -42,7 +42,7 @@ export async function open(){
     fs.rmSync(profile,{recursive:true,force:true});
   }
   try {
-    proc=spawn(CHROME,['--headless=new','--remote-debugging-port=0','--user-data-dir='+profile,'--disk-cache-size=1','--media-cache-size=1','--no-first-run','--window-size=1700,1500','about:blank'],{stdio:'ignore'});
+    proc=spawn(CHROME,['--headless=new',...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),'--remote-debugging-port=0','--user-data-dir='+profile,'--disk-cache-size=1','--media-cache-size=1','--no-first-run','--window-size=1700,1500','about:blank'],{stdio:'ignore'});
     let ready=false, port;
     let spawnError; proc.on('error', error=>{spawnError=error;});
     for(let i=0;i<40;i++){
@@ -92,3 +92,48 @@ export async function dropFile(p,x,y,name='sweep.png'){
   await p.evaluate(({x,y,b64,name})=>{ const bin=atob(b64); const u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++)u[i]=bin.charCodeAt(i); const f=new File([u],name,{type:'image/png'}); const dt=new DataTransfer(); dt.items.add(f); const t=document.elementFromPoint(x,y); for(const ty of ['dragenter','dragover','drop']){ t.dispatchEvent(new DragEvent(ty,{bubbles:true,cancelable:true,clientX:x,clientY:y,dataTransfer:dt})); } },{x,y,b64,name});
 }
 export const clipIds=p=>p.evaluate(()=>[...new Set([...document.querySelectorAll('[data-clip-id]')].map(e=>e.getAttribute('data-clip-id')+'@'+e.getAttribute('data-row-id')))]);
+
+// Restore only the exact head observed by the row; a concurrent change aborts.
+export async function restoreScenario({page, secondPage, fixture, result}) {
+  const before = result?.before;
+  const after = result?.after;
+  if (!before?.headRevision || !after?.headRevision || !after?.publicationId) {
+    throw new Error('cannot safely restore: row did not capture both public head and publication');
+  }
+  const base = `/api/runtime/v1/projects/${encodeURIComponent(fixture.project_id)}/timelines/${encodeURIComponent(fixture.timeline_id)}`;
+  const restored = await page.evaluate(async ({base, before, after}) => {
+    const read = async path => {
+      const response = await fetch(path, {cache:'no-store', credentials:'same-origin'});
+      if (!response.ok) throw new Error(`cleanup read failed (${response.status})`);
+      const value = await response.json();
+      return value?.data ?? value;
+    };
+    const current = await read(base);
+    if (current.head_revision_id !== after.headRevision || current.head_publication_id !== after.publicationId)
+      throw new Error('cleanup refused: public head changed since row evidence');
+    if (current.head_revision_id === before.headRevision) return {changed:false};
+    const response = await fetch(`${base}/composition-revisions/${encodeURIComponent(before.headRevision)}/restore`, {
+      method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json','Idempotency-Key':crypto.randomUUID()},
+      body:JSON.stringify({expected_head:current.head_revision_id,expected_publication_id:current.head_publication_id}),
+    });
+    const body = await response.json().catch(()=>null);
+    if (!response.ok || !['accepted','rebased','merged'].includes(body?.data?.status) || !body?.receipt)
+      throw new Error(`guarded restore failed (${response.status}): ${JSON.stringify(body).slice(0,500)}`);
+    const restoredHead = await read(base);
+    const [original, restoredRevision] = await Promise.all([
+      read(`${base}/composition-revisions/${encodeURIComponent(before.headRevision)}`),
+      read(`${base}/composition-revisions/${encodeURIComponent(restoredHead.head_revision_id)}`),
+    ]);
+    if (!original.content_digest || original.content_digest !== restoredRevision.content_digest)
+      throw new Error('guarded restore did not reproduce original content digest');
+    return {changed:true, headRevision:restoredHead.head_revision_id, publicationId:restoredHead.head_publication_id};
+  }, {base, before, after});
+  // Evidence is already recorded. Discard any refused local draft before reload.
+  for (const tab of [page, secondPage].filter(Boolean)) {
+    const discard = tab.getByRole('button', {name:'Discard', exact:true});
+    if (await discard.isVisible().catch(()=>false)) await discard.click();
+    await tab.reload();
+    await tab.waitForFunction(()=>[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0 && /^saved$/i.test((e.textContent||'').trim())), null, {timeout:60000});
+  }
+  return restored;
+}

@@ -121,8 +121,8 @@ describe('the App classifies real error responses', () => {
     expect(error).toBeInstanceOf(ApiError);
     const body = fixture.body as { code: string; message: string };
     expect(error).toMatchObject({ ...body, status: 409, message: `${body.code}: ${body.message}` });
-    expect(classifyRuntimeCommitFailure(error)).toBe('refused');
-    expect(isRuntimeConflict(error)).toBe(false);
+    expect(classifyRuntimeCommitFailure(error)).toBe('conflict');
+    expect(isRuntimeConflict(error)).toBe(true);
     expect(isRuntimeCanonicalPayloadConflict(error)).toBe(false);
   });
 

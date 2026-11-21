@@ -2120,7 +2120,6 @@ describe('VideoEditorProvider', () => {
           mediaType: 'image',
           source: 'registered',
           entry: expect.objectContaining({
-            generationId: 'generation-1',
             file: 'https://example.com/image.png',
             type: 'image/png',
             name: 'Still life',
@@ -2130,6 +2129,8 @@ describe('VideoEditorProvider', () => {
         }),
       }),
     }));
+    expect(edit.command.payload.asset.entry).not.toHaveProperty('generationId');
+    expect(edit.command.payload.asset.entry).not.toHaveProperty('variantId');
     expect(edit.command.payload).not.toHaveProperty('trackId');
     expect(edit.command.payload).not.toHaveProperty('clipSpanSeconds');
     const assetId = edit.command.payload.asset.assetKey;
@@ -2424,10 +2425,11 @@ describe('VideoEditorProvider', () => {
     expect(response).toEqual({ ok: true, data: { assetId: expect.any(String) } });
     if (!response.ok) throw new Error('registration should be accepted');
     expect(patchRegistry).toHaveBeenCalledWith(response.data.assetId, expect.objectContaining({
-      generationId: 'generation-1',
       file: 'https://example.com/image.png',
       type: 'image/png',
     }), 'https://example.com/image.png');
+    expect(patchRegistry.mock.calls[0][1]).not.toHaveProperty('generationId');
+    expect(patchRegistry.mock.calls[0][1]).not.toHaveProperty('variantId');
     expect(registerAsset).not.toHaveBeenCalled();
     expect(unpatchRegistry).not.toHaveBeenCalled();
     // Acceptance queues the canonical save. Durable failure/acknowledgement
@@ -4628,12 +4630,13 @@ describe('VideoEditorProvider clip-type registry scoped cleanup', () => {
         entry: {
           file: 'https://example.com/image.png',
           type: 'image/png',
-          generationId: 'generation-1',
           media_id: 'media-1',
         },
         source: 'registered',
       },
     });
+    expect(mutation.command.payload.asset.entry).not.toHaveProperty('generationId');
+    expect(mutation.command.payload.asset.entry).not.toHaveProperty('variantId');
     expect(Object.hasOwn(mutation.command.payload, 'trackId')).toBe(false);
     expect(Object.hasOwn(mutation.command.payload, 'clipSpanSeconds')).toBe(false);
     expect(JSON.parse(JSON.stringify(mutation.command))).toStrictEqual(mutation.command);

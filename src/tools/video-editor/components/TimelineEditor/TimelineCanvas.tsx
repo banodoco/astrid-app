@@ -140,6 +140,7 @@ export interface TimelineCanvasProps {
   onRemoveTrack: (trackId: string) => void;
   onTrackDragEnd: (event: DragEndEvent, lanes?: readonly DataLaneView[]) => void;
   readOnly?: boolean;
+  showReadOnlyTrackName?: boolean;
   trackSensors: ReturnType<typeof useSensors>;
   onCursorDrag: (time: number) => void;
   onClickTimeArea: (time: number) => void;
@@ -334,6 +335,7 @@ export const TimelineCanvas = forwardRef<TimelineCanvasHandle, TimelineCanvasPro
   onRemoveTrack,
   onTrackDragEnd,
   readOnly = false,
+  showReadOnlyTrackName = false,
   trackSensors,
   onCursorDrag,
   onClickTimeArea,
@@ -1404,6 +1406,7 @@ export const TimelineCanvas = forwardRef<TimelineCanvasHandle, TimelineCanvasPro
             tracks={tracks}
             rowLayout={rowLayout}
             readOnly={readOnly}
+            showReadOnlyTrackName={showReadOnlyTrackName}
             renderDataLane={(laneId) => (
           <DataLaneList
             data={laneDataForDisplay}

@@ -13,6 +13,7 @@ import { useTimelineChromeContext } from '@/tools/video-editor/hooks/timelineSto
 import { clampTimelineScaleWidth, TIMELINE_ZOOM_STEP } from '@/tools/video-editor/lib/timeline-scale.ts';
 
 const STATUS_VARIANT = {
+  loading: 'secondary',
   saved: 'default',
   saving: 'secondary',
   dirty: 'outline',
@@ -276,7 +277,7 @@ export function TimelineEditorShellToolbar({
     // Quiet when all is well: a word appears only while a save is pending or has not landed.
     const quietStatus = notSaved || chrome.saveStatus === 'error'
       ? 'Not saved'
-      : chrome.saveStatus === 'saved' ? null : 'Saving…';
+      : chrome.saveStatus === 'loading' ? 'Loading…' : chrome.saveStatus === 'saved' ? null : 'Saving…';
     return (
       <div
         className={cn(

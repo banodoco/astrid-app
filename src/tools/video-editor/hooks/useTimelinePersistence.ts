@@ -41,7 +41,7 @@ import { generateUUID } from '@/shared/lib/taskCreation/ids.ts';
 import { emitTimelineSaveDiagnostic, isTimelineDiagnosticsEnabled } from '@/tools/video-editor/lib/timeline-diagnostics.ts';
 import { TimelinePersistenceHandoffContext, isTimelineAuthoringRefusal, resolveTimelinePersistenceHandoff, type TimelineGestureReadBasis, type TimelinePersistenceHandoff } from './timelineLocalSaveHandoff.ts';
 
-export type SaveStatus = 'saved' | 'saving' | 'dirty' | 'retrying' | 'error';
+export type SaveStatus = 'loading' | 'saved' | 'saving' | 'dirty' | 'retrying' | 'error';
 
 const TIMELINE_SYNC_LOG_TAG = '[TimelineSync]';
 const SAVE_DEBOUNCE_MS = 500;

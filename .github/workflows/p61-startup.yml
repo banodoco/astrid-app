@@ -1,0 +1,36 @@
+name: Plan 61 first-start guard
+on:
+  pull_request:
+    branches: [release/14/plan-61]
+    paths:
+      - .github/workflows/p61-startup.yml
+      - scripts/astrid-release/startup.test.mjs
+      - scripts/astrid-release/startup-log.py
+      - scripts/astrid-release/astrid-release
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  startup:
+    if: ${{ github.event_name == 'pull_request' && github.head_ref == 'p61/rb-9' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+      - name: RB-9 startup refusal and bounded retry
+        run: |
+          node --test --test-reporter=spec --test-reporter-destination=stdout \
+            --test-reporter=junit --test-reporter-destination=startup.junit.xml \
+            scripts/astrid-release/startup.test.mjs
+      - name: Retain native startup outcomes
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: p61-startup-${{ github.run_id }}-${{ github.run_attempt }}
+          path: startup.junit.xml
+          if-no-files-found: error

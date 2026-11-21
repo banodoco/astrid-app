@@ -1,5 +1,5 @@
 import { resolveTrackTransform } from '@banodoco/timeline-composition';
-import { getAdmittedElementReadiness, isLegacyElementRef, LEGACY_ELEMENT_REASON, getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
+import { getAdmittedElementReadiness, admittedElementFailure, isLegacyElementRef, LEGACY_ELEMENT_REASON, getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
 import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment, useVideoConfig } from 'remotion';
 import { Component, createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type FC, type ReactNode } from 'react';
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
@@ -479,8 +479,10 @@ const elementUnavailableDetail = (ref: NonNullable<ResolvedTimelineClip['element
   const exact = `Element ${ref.id}@${ref.revision} requires its exact admitted pack revision. Embedded source is preserved for migration and is not executed.`;
   const admission = getAdmittedElementReadiness();
   if (isLegacyElementRef(ref)) return `${LEGACY_ELEMENT_REASON} ${exact}`;
+  const failure = admittedElementFailure(ref);
+  if (failure) return `Project elements did not load (${failure}). ${exact}`;
   if (admission.phase === 'loading') return `Project elements are still loading. ${exact}`;
-  return admission.phase === 'error' ? `Project elements did not load (${admission.error}). ${exact}` : exact;
+  return admission.phase === 'error' && !Object.keys(admission.failures).length ? `Project elements did not load (${admission.error}). ${exact}` : exact;
 };
 
 const GeneratedModulePlaceholderSequence: FC<{

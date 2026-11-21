@@ -2154,6 +2154,37 @@ describe('TimelineEditorShellCore — recovery draft banner', () => {
     expect(retryWatchdog).toHaveBeenCalled();
   });
 
+  it('FIX16-UI offers the exact copy and explicit discard actions only for permanent rejection', () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(undefined);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveNotice: 'This change is too large to save. Your changes are kept here but have not been saved.',
+      permanentSaveRejection: true,
+      copyRejectedSave, reloadFromServer,
+    };
+    const view = render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert').textContent).toContain('This change is too large to save.');
+    const copy = screen.getByRole('button', { name: 'Copy my change out' });
+    const discard = screen.getByRole('button', { name: 'Discard and reload the saved version' });
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(copy);
+    expect(copyRejectedSave).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(discard);
+    expect(reloadFromServer).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).toHaveBeenCalledWith({ discardRefusedSave: true });
+    view.unmount();
+
+    __chromeOverrides = {
+      saveNotice: 'Save not acknowledged',
+      permanentSaveRejection: false,
+      copyRejectedSave, reloadFromServer,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByRole('button', { name: 'Copy my change out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard and reload the saved version' })).toBeNull();
+  });
+
   it('does not render the recovery banner without a draft', () => {
     render(<TimelineEditorShellCore timelineId="test-timeline" />);
     expect(screen.queryByText(/You have unsaved changes/)).toBeNull();

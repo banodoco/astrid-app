@@ -1,0 +1,56 @@
+[
+  {
+    "path": "original/pt2-native-cases.json.gz",
+    "uncompressed_bytes": 109095,
+    "uncompressed_sha256": "a434d68879930ac753e42e3b1b8b081660d8daf506a2d52f7b16bb10951900e0",
+    "sha256": "c0b7339a168bda3246100b5014996e0aa1c2037ed5feaaac1ac2fa8931fdf7c2"
+  },
+  {
+    "path": "original/pt2-causes.json.gz",
+    "uncompressed_bytes": 127495,
+    "uncompressed_sha256": "577638ed9182533c08dcf92371d0ed0be51907c03dba328dc445990dfeecb474",
+    "sha256": "f67889fda764ffbd3bb1131ef9e77c1bd109d024cc84ebd473b041275386bae1"
+  },
+  {
+    "path": "original/outside-pt2-original-failures.json.gz",
+    "uncompressed_bytes": 9744,
+    "uncompressed_sha256": "9a5a92215d5275dffc76572ac838021d3497829db9202310778a6c8c781b1106",
+    "sha256": "1e8e4a1310b2e00ff79b4faf1b5bfed31d4342f1ee2c75ef5f461c506c9d1f65"
+  },
+  {
+    "path": "original/g2-chrome-resource-findings.json.gz",
+    "uncompressed_bytes": 9547,
+    "uncompressed_sha256": "1cc936b2e06fc836ee73218b418a59b1882132379a1b56198fa844e05467b2c4",
+    "sha256": "8300b1dd17e0cb8921015e1c4a684e3d5224345a0f3bb7880b3526a413c558da"
+  },
+  {
+    "path": "original/g2-timeline-resource-findings.json.gz",
+    "uncompressed_bytes": 7715,
+    "uncompressed_sha256": "982e17064ac13e984cfec8c6507faf4eb24de5aab07f5dc5b55555f33a445682",
+    "sha256": "8809d9ac671689ea8c3870dbe61221b39eca83a93567e85ada3444d8569074e6"
+  },
+  {
+    "path": "original/playwright-timeline.log.gz",
+    "uncompressed_bytes": 217400,
+    "uncompressed_sha256": "163fddc3dde5037365306800dc4cb0f70c68d78c602bd5649dbf457db901197c",
+    "sha256": "af136dbbe5370705572bdccffd31a169321dde72628ce41ee312c982ec7c1ffa"
+  },
+  {
+    "path": "original/playwright-timeline-chrome-export.log.gz",
+    "uncompressed_bytes": 110119,
+    "uncompressed_sha256": "533da3dde5f2cc0904e467a6b618ccca2fa47b49c3b24e7ff84b65aceffe03de",
+    "sha256": "cd0e012345aa0a5aaff2dabf9987b6d2f4011776d9ce2c15ad09b8e9e79281f0"
+  },
+  {
+    "path": "original/extension-cross-browser.log.gz",
+    "uncompressed_bytes": 223154,
+    "uncompressed_sha256": "b0d245d99e508498cf2614d7ac3128a0a0229cef1e9c384feb3ffadedcbe82b3",
+    "sha256": "0285a0282386428880903b131262513aeb3cf44f86c5de7dc14148c5a49d1640"
+  },
+  {
+    "path": "original/extension-accessibility.log.gz",
+    "uncompressed_bytes": 256180,
+    "uncompressed_sha256": "fd79839957eaa4278feea92a426645d5688b9d4e251a4d2a83d338a40cd10593",
+    "sha256": "f4eac39109c04ca213dbf9f12a1f315d436bbb64d76e0695ba44950ee6a06c36"
+  }
+]

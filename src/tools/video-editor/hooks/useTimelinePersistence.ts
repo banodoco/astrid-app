@@ -184,6 +184,9 @@ interface ScheduledSave {
   baseHead?: TimelineHeadRevision;
   /** Complete document value used for recovery/draft comparison. */
   effectiveBundle: TimelineBundleEnvelope | null;
+  /** Exact recovery draft value/version written for this scheduled edit. */
+  draft: { config: TimelineConfig; registry: AssetRegistry; bundle: TimelineBundleEnvelope | null };
+  draftBaseVersion: number;
   /** Provider wire semantics: undefined preserves an already stored bundle. */
   wireBundle: TimelineBundleEnvelope | null | undefined;
   /** Waits for a queued descendant's draft base to advance before sending it. */
@@ -1206,7 +1209,9 @@ export function useTimelinePersistence({
     reloadPreservedSeqRef.current = null;
     emitTimelineSaveDiagnostic('schedule', () => ({ timelineId, owner: diagnosticOwner ?? session.identity,
       mounted: getDataRef().current, source: nextData, gesture: options?.gestureBasis,
-      clipId: options?.gestureBasis?.clipId ?? selectedClipIdRef.current,
+      clipId: options?.gestureBasis && 'clipId' in options.gestureBasis
+        ? options.gestureBasis.clipId
+        : selectedClipIdRef.current,
       generation: diagnosticOwner?.generation ?? session.generation, closed: diagnosticOwner?.closed,
       sessionPresent: diagnosticOwner ? Boolean(diagnosticOwner.session) : undefined }));
     // Recovery is an explicit CAS decision. Preserve the latest visible edit
@@ -1777,8 +1782,7 @@ export function useTimelinePersistence({
         if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
 
         if (options?.discardRefusedSave) {
-          if (exported) await session.localDocumentSave?.discharge?.('latest', exported.outbox, canReload);
-          else await session.localDocumentSave?.discharge?.('latest');
+          await session.localDocumentSave?.discharge?.('latest', exported?.outbox, canReload);
         }
         if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
         if (recoverySnapshot && !await clearTimelineDraftIfSnapshotMatches(recoveryKey, recoverySnapshot)) {

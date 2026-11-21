@@ -463,11 +463,11 @@ export async function createLocalSaveSession(options: Options) {
 
   function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
     assertOpen();
-    // Never accept another edit while retained bytes are unresolved or replaying. The caller
-    // rolls the declined gesture back; it remains in the editor until the original save is resolved.
-    if (writeError || ['conflict', 'error'].includes(state.status)) throw new LocalSaveDeclined('Resolve retained local saves before editing again');
-    // The visible closure is canonical while a replayed suffix still names its original chain.
-    if (replaying) throw new LocalSaveDeclined('Wait for retained dependent saves to finish revalidation before editing again');
+    // A displayed permanently refused chain can accept dependent edits without retrying it.
+    const retaining = state.status === 'error' && isPermanentLocalSaveRejection(state) && rejectedDisplayReady
+      && (documentIntent !== undefined || Boolean(input.commands?.length));
+    if (writeError || state.status === 'conflict' || (state.status === 'error' && !retaining)) throw new LocalSaveDeclined('Resolve retained local saves before editing again');
+    if (replaying && !retaining) throw new LocalSaveDeclined('Wait for retained dependent saves to finish revalidation before editing again');
     const save = toOutboxJson({ ...input, kind: 'local-save', displayBasis,
       ...(options.sourceKey ? { sourceKey: options.sourceKey } : {}),
       ...(documentIntent ? { documentIntent } : {}) }) as unknown as StoredSave;

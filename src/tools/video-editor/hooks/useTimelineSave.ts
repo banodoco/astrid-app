@@ -1039,7 +1039,8 @@ export function useTimelineSave(
   const saveStatus = localSaveState && (['blocked', 'conflict', 'error', 'recovery', 'retry'].includes(localSaveState.status) || localSaveState.notice)
     ? 'error' as const : !timelineEditingReady ? 'loading' as const : localSaveState?.status === 'saving' ? 'saving' as const : localSaveState?.status === 'dirty' ? 'dirty' as const : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty' as const : persistence.saveStatus;
   const recoveryRestoreAllowed = Boolean(!recoveryActionRefused && recoveryDraft?.retryAllowed !== false
-    && saveStatus !== 'error' && !localOwner.operationError && !localOwner.failedOutbox);
+    && saveStatus !== 'error' && saveStatus !== 'saving' && saveStatus !== 'loading'
+    && localOwner.operations === 0 && !localOwner.operationError && !localOwner.failedOutbox);
   return {
     elementTimelineRoutes,
     localDocumentSave,

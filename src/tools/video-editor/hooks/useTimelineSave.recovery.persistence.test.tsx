@@ -556,6 +556,44 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     hook.unmount();
   });
 
+  it('disables Restore while its save is awaiting acknowledgement', async () => {
+    const recovered = timelineConfig('r13-pending-restore');
+    await putRecoveryRecord({
+      key: recoveryKey,
+      timelineId,
+      draft: { config: recovered, registry, bundle: null },
+      ownerId: 'r13-owner',
+      draftIdentity: 'r13-pending-draft',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+      baseVersion: 5,
+      baseHeadProjectId: 'project',
+      baseHeadTimelineId: timelineId,
+      baseHeadRevisionId: 'original-head',
+    });
+    let acknowledge!: (value: { configVersion: number; head: TimelineHeadRevision }) => void;
+    const saveTimelineAtHead = vi.fn(() => new Promise<{ configVersion: number; head: TimelineHeadRevision }>((resolve) => {
+      acknowledge = resolve;
+    }));
+    const { hook } = await mountRecoveryEditor({
+      seedRecovery: false,
+      head: { projectId: 'project', timelineId, headRevisionId: 'original-head' },
+      draftMetadata: { baseHeadProjectId: 'project', baseHeadTimelineId: timelineId, baseHeadRevisionId: 'original-head' },
+      saveTimelineAtHead,
+    });
+    await waitFor(() => expect(hook.result.current.recoveryRestoreAllowed).toBe(true));
+
+    vi.useFakeTimers();
+    await act(async () => { await hook.result.current.retryRecoveredDraft(); });
+    await advance(600);
+    expect(saveTimelineAtHead).toHaveBeenCalledTimes(1);
+    expect(hook.result.current.recoveryRestoreAllowed).toBe(false);
+
+    acknowledge({ configVersion: 13, head: { projectId: 'project', timelineId, headRevisionId: 'restored-head' } });
+    await advance(0);
+    vi.useRealTimers();
+    hook.unmount();
+  });
+
   it('keeps an R13 snapshot after Restore meets a guarded head refusal and disables Restore', async () => {
     const recovered = timelineConfig('r13-refused-restore');
     await putRecoveryRecord({

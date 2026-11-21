@@ -479,7 +479,7 @@ export function createTimelineLocalSaveHandoff(options: {
     return baseline;
   }
   const handoff: TimelineLocalSaveHandoff = {
-    capture(input, gestureBasis) {
+    capture(input, inputGestureBasis) {
       try {
         const next = structuredClone(input);
         checkHead(initial, source, 'capture-source-head-unavailable');
@@ -488,18 +488,15 @@ export function createTimelineLocalSaveHandoff(options: {
         const parent = before.parent_revision.payload;
         const hasChildren = before.shot_revisions.length || before.internal_timeline_revisions.length
           || (Array.isArray(parent.occurrences) && parent.occurrences.length);
-        const parentGesture = gestureBasis?.kind === 'move' || gestureBasis?.kind === 'transition-clear';
-        const trackLabelGesture = gestureBasis?.kind === 'track-label';
-        // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
-        const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
         if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
         if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
         authoredJson(next); // Reject non-finite editor values before mutating the chain.
-        if (gestureBasis?.kind === 'prepared-media' && gestureBasis.inFlight) {
+        const normalizeGestureBasis = (basis: typeof inputGestureBasis) => {
+          if (basis?.kind !== 'prepared-media' || !basis.inFlight) return basis;
           // Another drop's asset is left to that drop's own save. It is ignored only at its declared address and
           // value (and never this drop's own); any other registry difference still reaches the guards below.
-          const ownKey = gestureBasis.command.payload.asset.assetKey;
-          const declared = gestureBasis.inFlight;
+          const ownKey = basis.command.payload.asset.assetKey;
+          const declared = basis.inFlight;
           const withoutOthers = (registry: AssetRegistry, includeOwn: boolean): AssetRegistry => {
             const assets = registry.assets;
             if (!assets) return registry;
@@ -507,8 +504,13 @@ export function createTimelineLocalSaveHandoff(options: {
               (key === ownKey && !includeOwn) || !Object.prototype.hasOwnProperty.call(declared, key) || !same(authoredJson(entry), authoredJson(declared[key])))) };
           };
           next.registry = withoutOthers(next.registry, false);
-          gestureBasis = { ...gestureBasis, registry: withoutOthers(gestureBasis.registry, true) };
-        }
+          return { ...basis, registry: withoutOthers(basis.registry, true) };
+        };
+        const gestureBasis = normalizeGestureBasis(inputGestureBasis);
+        const parentGesture = gestureBasis?.kind === 'move' || gestureBasis?.kind === 'transition-clear';
+        const trackLabelGesture = gestureBasis?.kind === 'track-label';
+        // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
+        const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
         // A gesture proves its own effect below; an edit that names none must stay on rows the parent alone owns.
         const unnamedRefusal = hasChildren && gestureBasis === undefined
           ? unnamedEditRefusal(before, authoringSource, next) : undefined;

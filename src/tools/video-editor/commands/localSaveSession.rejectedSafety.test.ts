@@ -114,6 +114,29 @@ describe('FIX-16 rejected save safety: original IDs and durable suffix', () => {
     await session.dispose();
   });
 
+  it('FIX16-REMOTEHEAD retains the original display basis when the server head moved during reload', async () => {
+    const env = environment();
+    const first = await env.mount();
+    await env.append(first);
+    env.send.mockRejectedValueOnce(new ApiError(422, 'invalid_request', 'HTTP 422'));
+    await expect(first.flush()).rejects.toThrow('draft retained');
+    const [durable] = await env.outboxes.list(scope);
+    await first.dispose();
+
+    const remote = env.accepted(env.pair.document, { revisionId: 'remote-r1', publicationId: 'remote-p1' });
+    const reopened = await env.mount({ head: remote.accepted, canonicalDocument: remote.canonicalDocument });
+    expect(reopened.getState().recoverableOwners).toContain(durable.ownerId);
+    await reopened.recover(durable.ownerId);
+    expect(reopened.getState()).toMatchObject({ status: 'error', error: { kind: 'validation' } });
+    expect(reopened.getBasis().head).toEqual(remote.accepted);
+    expect(reopened.getDisplayBasis().head).toEqual(h0);
+    expect(reopened.getDocument()).toEqual(JSON.parse(JSON.stringify(env.pair.after)));
+    expect(env.visible()).toEqual(JSON.parse(JSON.stringify(env.pair.after)));
+    expect(env.send).toHaveBeenCalledTimes(1);
+    expect((await env.outboxes.list(scope))[0].pending).toEqual(durable.pending);
+    await reopened.dispose();
+  });
+
   it('FIX16-CHOICE never discards a rejected save merely by flushing again', async () => {
     const env = environment();
     const session = await env.mount();

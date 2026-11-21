@@ -568,7 +568,12 @@ describe('useTimelineSave — recovered draft durability', () => {
         }
         if (outcome === 'invalid') {
           expect(stored.pending?.outcome).toMatchObject({ kind: 'rejected', error: { details: { code: 'selection_changed', path: ['commands', '0', 'args', 'old_media'], hint: 'Reload media', suggested_command: 'timeline show' } } });
-          expect(harness.hook.result.current.dataRef.current!.config.clips).toEqual(data.config.clips);
+          // The rejected creator change must stay on screen; the original test
+          // used to assert that validation reverted it to canonical clips.
+          const displayed = harness.hook.result.current.dataRef.current!.config.clips;
+          expect(displayed).toHaveLength(mode === 'video' ? 4 : 1);
+          expect(displayed[mode === 'video' ? 1 : 0].id).toBe(bornId);
+          expect(harness.hook.result.current.localSaveState).toMatchObject({ status: 'error', error: { kind: 'validation' } });
           return;
         }
         if (outcome === 'conflict') {
@@ -1579,7 +1584,8 @@ describe('useTimelineSave — recovered draft durability', () => {
           steps: [{ command_ordinals: [0], intent: 'Save local editor changes' }] });
         if (outcome === 'conflict' || outcome === 'invalid') {
           expect(stored.intents).toHaveLength(1);
-          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(config.output.file);
+          expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe(
+            outcome === 'invalid' ? (dependent ? 'dependent.mp4' : 'authored.mp4') : config.output.file);
           expect(harness.hook.result.current.localSaveState?.status).toBe(outcome === 'conflict' ? 'conflict' : 'error');
         } else if (restart) {
           const exact = structuredClone(send.mock.calls[0]);

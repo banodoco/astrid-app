@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Build and launch the SL-1 disposable Linux stack from this App checkout.
+# Build and supervise the SL-1 disposable Linux stack from this App checkout.
+# Invoke with `scripts/save-loop/start-isolated-linux.sh`; leave it in the foreground.
+# Press Ctrl+C to stop this editor and its isolated Runtime. Do not nohup this wrapper.
 set -Eeuo pipefail
 umask 077
 
@@ -73,18 +75,23 @@ chmod 700 "$ROOT" "$ROOT/home" "$ROOT/tmp" "$ROOT/logs"
 printf 'astrid-app-sl1-stack-v1 %s' "$ROOT" > "$OWNERSHIP_MARKER"
 chmod 600 "$OWNERSHIP_MARKER"
 
-KEEP_STACK=0
-cleanup_failed_launch() {
-  result=$?
-  (( result == 0 || KEEP_STACK == 1 )) && return 0
-  if [[ -f "$ROOT/editor.pid" ]]; then
-    pid="$(cat "$ROOT/editor.pid")"
-    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
-      if owned_editor_matches "$pid"; then
-        kill -TERM "$pid" 2>/dev/null || true
-        for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+cleanup_stack() {
+  local status=$? cleanup_status=0 pid version runtime_cli
+  trap - EXIT INT TERM
+  pid="${EDITOR_PID:-}"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    if owned_editor_matches "$pid"; then
+      kill -TERM "$pid" 2>/dev/null || true
+      for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 1; done
+      if kill -0 "$pid" 2>/dev/null; then
+        echo "STOP: owned editor PID $pid did not stop cleanly; see $ROOT/logs/editor.log" >&2
+        cleanup_status=1
+      else
         wait "$pid" 2>/dev/null || true
       fi
+    else
+      echo "STOP: editor PID $pid no longer matches this stack; it was left alone." >&2
+      cleanup_status=1
     fi
   fi
   version="$(cat "$ROOT/program/current" 2>/dev/null || true)"
@@ -92,10 +99,17 @@ cleanup_failed_launch() {
   if [[ -n "$version" && -x "$runtime_cli" ]]; then
     HOME="$ROOT/home" XDG_DATA_HOME="$ROOT/home/.local/share" XDG_STATE_HOME="$ROOT/home/.local/state" \
       "$runtime_cli" down --profile astrid --data-root "$ROOT/data" --json \
-      >"$ROOT/logs/runtime-stop-on-failure.log" 2>&1 || true
+      >"$ROOT/logs/runtime-stop.log" 2>&1 || {
+        echo "STOP: isolated Runtime shutdown failed; see $ROOT/logs/runtime-stop.log" >&2
+        cleanup_status=1
+      }
   fi
+  if (( status == 0 && cleanup_status != 0 )); then status=1; fi
+  exit "$status"
 }
-trap cleanup_failed_launch EXIT
+trap cleanup_stack EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Match the release runbook's three isolated loopback ports without claiming its protected ports.
 pick_port() {
@@ -207,9 +221,8 @@ ASTRID_RUNTIME_DOOR_PORT="$DOOR_PORT" sh "$APP/public/install" --root "$ROOT/pro
 (cd "$APP" && npm ci 2>&1 | tee "$ROOT/logs/npm-ci.log")
 
 cd "$APP"
-nohup env PORT="$EDITOR_PORT" VITE_ASTRID_DYNAMIC_PROXY_PORT="$PROXY_PORT" \
+env PORT="$EDITOR_PORT" VITE_ASTRID_DYNAMIC_PROXY_PORT="$PROXY_PORT" \
   node "$APP/scripts/dev-local-workspace.mjs" --data-root "$ROOT/data" \
-  </dev/null \
   >"$ROOT/logs/editor.log" 2>&1 &
 EDITOR_PID=$!
 printf '%s\n' "$EDITOR_PID" > "$ROOT/editor.pid"
@@ -228,6 +241,22 @@ node --input-type=module - "$EDITOR_PORT" "$ROOT/sandbox.json" <<'NODE'
 import fs from 'node:fs';
 const [port, output] = process.argv.slice(2);
 const base = `http://127.0.0.1:${port}/api/runtime`;
+const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+let health;
+for (let attempt = 0; attempt < 180; attempt++) {
+  try {
+    const response = await fetch(`${base}/v1/health`, { signal: AbortSignal.timeout(2000) });
+    if (response.ok) {
+      const candidate = await response.json();
+      if (candidate.status === 'ok' && candidate.protocol === 'workspace.v1') {
+        health = candidate;
+        break;
+      }
+    }
+  } catch { /* Runtime proxy may not be ready yet. */ }
+  await pause(500);
+}
+if (!health) throw new Error('Runtime API did not report workspace.v1/ok through the editor proxy');
 const post = async (path, key, value) => {
   const response = await fetch(`${base}${path}`, {
     method: 'POST',
@@ -242,9 +271,19 @@ const project = await post('/v1/projects', 'sl1-sandbox-project-v1', {
   name: 'SL-1 Empty Sandbox', slug: 'sl-1-empty-sandbox',
   metadata: { purpose: 'SL-1 isolated save-loop fixture' },
 });
+if (typeof project.project_id !== 'string' || !project.project_id) {
+  throw new Error(`Sandbox project creation returned no project ID: ${JSON.stringify(project)}`);
+}
 const timeline = await post(`/v1/projects/${encodeURIComponent(project.project_id)}/timelines`,
   'sl1-sandbox-timeline-v1', { timeline_id: 'sl-1-empty-timeline', name: 'SL-1 Empty Timeline' });
+if (timeline.project_id !== project.project_id
+    || timeline.timeline_id !== 'sl-1-empty-timeline'
+    || !Array.isArray(timeline.shots) || timeline.shots.length !== 0
+    || !Array.isArray(timeline.references) || timeline.references.length !== 0) {
+  throw new Error(`Sandbox API returned an incomplete or nonempty timeline: ${JSON.stringify(timeline)}`);
+}
 const result = {
+  runtimeHealth: { status: health.status, protocol: health.protocol, runtimeInstanceId: health.runtime_instance_id },
   projectId: project.project_id,
   projectName: project.name,
   timelineId: timeline.timeline_id,
@@ -275,4 +314,5 @@ printf 'STACK_ROOT=%s\nAPP_SHA=%s\nAGENT_SHA=%s\nRUNTIME_SHA=%s\nEDITOR_PORT=%s\
   | tee "$ROOT/stack-info.txt"
 echo "Editor URL: $EDITOR_URL"
 echo "Logs: $ROOT/logs"
-KEEP_STACK=1
+echo "Stop this owned editor and Runtime with Ctrl+C. The wrapper remains attached until stopped."
+wait "$EDITOR_PID"

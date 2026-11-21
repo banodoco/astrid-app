@@ -13,12 +13,14 @@ import { useTimelineChromeSelector, useTimelineDataSelector, useTimelinePlayback
 import { isDataProviderPersistenceEnabled } from '@/tools/video-editor/data/DataProvider.ts';
 import { useOptionalVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditorRuntimeContext.tsx';
 import { useVideoEditorPreviewComposition } from './useVideoEditorPreviewComposition.ts';
+import type { ShotPlacementFinding } from '@/tools/video-editor/data/shotCompositionProjection.ts';
 import type { PreviewRevision } from './previewRevision.ts';
 
 export interface VideoEditorPreviewSurface {
   slotRef: RefCallback<HTMLDivElement>;
   portal: ReactPortal | null;
   hasConfig: boolean;
+  placementFindings?: readonly ShotPlacementFinding[];
 }
 
 export function useVideoEditorPreviewSurface({
@@ -173,5 +175,6 @@ export function useVideoEditorPreviewSurface({
     slotRef,
     portal,
     hasConfig: Boolean(previewConfig),
-  }), [portal, previewConfig, slotRef]);
+    placementFindings: compositionResolution.placementFindings,
+  }), [portal, previewConfig, slotRef, compositionResolution.placementFindings]);
 }

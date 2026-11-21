@@ -36,6 +36,8 @@ import {
   canonicalizeTimelinePair,
   cloneTimelineExtras,
   projectTimelineTracksForDisplay,
+  placementFindingsToIssues,
+  type TimelineDomainIssue,
   serializeTimelineConfigSnapshot,
 } from '@/tools/video-editor/lib/timeline-domain.ts';
 import { buildAssetReferenceMap } from '@/tools/video-editor/lib/asset-registry.ts';
@@ -59,6 +61,7 @@ export interface ClipMeta {
   y?: number;
   width?: number;
   height?: number;
+  fit?: TimelineClip['fit'];
   cropTop?: number;
   cropBottom?: number;
   cropLeft?: number;
@@ -95,6 +98,8 @@ export type TimelineEditProjection =
 export interface TimelineData {
   config: TimelineConfig;
   configVersion: number;
+  /** Transient load diagnostics; never authored or serialized. */
+  migrationIssues?: TimelineDomainIssue[];
   head?: import('../data/DataProvider.ts').TimelineHeadRevision;
   /** Fact about this displayed snapshot; never part of authored config. */
   editProjection?: TimelineEditProjection;
@@ -186,6 +191,7 @@ const getDefaultClipMeta = (clip: TimelineClip): ClipMeta => {
     y: clip.y,
     width: clip.width,
     height: clip.height,
+    fit: clip.fit,
     cropTop: clip.cropTop,
     cropBottom: clip.cropBottom,
     cropLeft: clip.cropLeft,
@@ -358,6 +364,7 @@ export const rowsToConfig = (
         y: clipMeta.y,
         width: clipMeta.width,
         height: clipMeta.height,
+        fit: clipMeta.fit,
         cropTop: clipMeta.cropTop,
         cropBottom: clipMeta.cropBottom,
         cropLeft: clipMeta.cropLeft,
@@ -490,10 +497,15 @@ export const assembleTimelineData = ({
   // and spurious 409 version conflicts. Configs that already carry a valid
   // `resolution` pass through verbatim (identity preserved).
   const outputMissingResolution = config.output?.resolution == null;
-  const canonicalConfig = outputMissingResolution ? withDefaultTimelineOutput(config) : config;
+  const migrationIssues: TimelineDomainIssue[] = [];
+  const canonicalConfig = outputMissingResolution
+    ? withDefaultTimelineOutput(config, findings => migrationIssues.push(...placementFindingsToIssues(findings, 'pair-aware')))
+    : config;
   const canonicalOutput = outputMissingResolution ? canonicalConfig.output : resolvedConfig.output;
+  const normalizedClips = new Map(canonicalConfig.clips.map(clip => [clip.id, clip]));
   const canonicalResolvedConfig = outputMissingResolution
-    ? { ...resolvedConfig, output: canonicalOutput }
+    ? {...resolvedConfig, output: canonicalOutput, tracks: canonicalConfig.tracks ?? resolvedConfig.tracks,
+      clips: resolvedConfig.clips.map(clip => ({...clip, ...normalizedClips.get(clip.id)}))}
     : resolvedConfig;
   const nameBasis = deriveClipNameBasis(
     canonicalResolvedConfig.clips,
@@ -535,6 +547,7 @@ export const assembleTimelineData = ({
   return {
     config: canonicalConfig,
     configVersion,
+    ...(migrationIssues.length ? {migrationIssues} : {}),
     ...(head ? { head } : {}),
     registry,
     resolvedConfig: canonicalResolvedConfig,
@@ -557,6 +570,16 @@ export const assembleTimelineData = ({
   };
 };
 
+/**
+ * The single rule for when output defaults are materialized: only when the authored
+ * output has no resolution. A config that authors a resolution is displayed verbatim,
+ * including when optional fields (background, background_scale) are absent.
+ */
+export const materializeAuthoredOutput = (
+  config: TimelineConfig,
+  onMigration?: Parameters<typeof withDefaultTimelineOutput>[1],
+): TimelineConfig => config.output?.resolution == null ? withDefaultTimelineOutput(config, onMigration) : config;
+
 export const buildTimelineData = async (
   config: TimelineConfig,
   registry: AssetRegistry,
@@ -566,11 +589,13 @@ export const buildTimelineData = async (
   head?: import('../data/DataProvider.ts').TimelineHeadRevision,
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
-  const canonical = canonicalizeTimelinePair(config, registry);
+  const priorIssues: TimelineDomainIssue[] = [];
+  const input = materializeAuthoredOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')));
+  const canonical = canonicalizeTimelinePair(input, registry);
   const displayConfig = projectTimelineTracksForDisplay(canonical.config);
   const resolvedConfig = await resolveTimelineConfig(displayConfig, canonical.registry, urlResolver);
 
-  return assembleTimelineData({
+  return {...assembleTimelineData({
     config: displayConfig,
     configVersion,
     head,
@@ -580,7 +605,7 @@ export const buildTimelineData = async (
     assetMap: buildAssetMap(canonical.registry),
     sourceItemsBySchemaRef,
     transcriptReferences,
-  });
+  }), migrationIssues: [...priorIssues, ...canonical.issues]};
 };
 
 function isAssetResolverArg(value: unknown): value is AssetResolver {
@@ -607,7 +632,9 @@ export const buildTimelineDataWithResolver = async (
   head?: import('../data/DataProvider.ts').TimelineHeadRevision,
   transcriptReferences?: TranscriptReferences,
 ): Promise<TimelineData> => {
-  const canonical = canonicalizeTimelinePair(config, registry);
+  const priorIssues: TimelineDomainIssue[] = [];
+  const input = materializeAuthoredOutput(config, findings => priorIssues.push(...placementFindingsToIssues(findings, 'pair-aware')));
+  const canonical = canonicalizeTimelinePair(input, registry);
   const displayConfig = projectTimelineTracksForDisplay(canonical.config);
 
   const urlResolver: UrlResolver = (file, entry, assetId) => {
@@ -643,7 +670,7 @@ export const buildTimelineDataWithResolver = async (
     }
   }
 
-  return assembleTimelineData({
+  return {...assembleTimelineData({
     config: displayConfig,
     configVersion,
     head,
@@ -653,7 +680,7 @@ export const buildTimelineDataWithResolver = async (
     assetMap: buildAssetMap(canonical.registry),
     sourceItemsBySchemaRef,
     transcriptReferences,
-  });
+  }), migrationIssues: [...priorIssues, ...canonical.issues]};
 };
 
 export function loadTimelineJsonFromProvider(
@@ -685,7 +712,7 @@ export function loadTimelineJsonFromProvider(
       } : assetResolver;
       // E4 seam 4/5: the loaded bundle's SOURCE items ride into assembly
       // data so lanes repaint after reload (views still derive render-side).
-      return buildTimelineDataWithResolver(
+      const data = await buildTimelineDataWithResolver(
         loadedTimeline.config,
         registry,
         loadResolver,
@@ -695,6 +722,7 @@ export function loadTimelineJsonFromProvider(
         loadedTimeline.head,
         loadedTimeline.bundle?.transcriptReferences,
       );
+      return {...data, migrationIssues: [...placementFindingsToIssues(loadedTimeline.placementFindings ?? [], 'pair-aware'), ...(data.migrationIssues ?? [])]};
     })();
   }
 
@@ -716,7 +744,7 @@ export function loadTimelineJsonFromProvider(
     const urlResolver = loaded.resolveAssetUrl
       ?? explicitUrlResolver
       ?? ((file: string) => provider.resolveAssetUrl(file));
-    return buildTimelineData(
+    const data = await buildTimelineData(
       loadedTimeline.config,
       registry,
       urlResolver,
@@ -725,6 +753,7 @@ export function loadTimelineJsonFromProvider(
       loadedTimeline.head,
       loadedTimeline.bundle?.transcriptReferences,
     );
+    return {...data, migrationIssues: [...placementFindingsToIssues(loadedTimeline.placementFindings ?? [], 'pair-aware'), ...(data.migrationIssues ?? [])]};
   })();
 }
 

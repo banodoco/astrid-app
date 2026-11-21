@@ -16,11 +16,11 @@ export const RUNTIME_ACCEPTED_SCHEMA_DIGESTS = [
 export const RUNTIME_COMPONENT_MANIFEST_SHA256 = COMPONENT_MANIFEST_SHA256;
 export const RUNTIME_TARGETED_EXECUTION_CAPABILITY = 'execution_binding.targeted.v1' as const;
 
-/** Full-v2 Timeline ABI, restricted to the published round-1b generated contract. */
+/** Full-v2 Timeline ABI, restricted to the reviewed C2 Runtime contract at 2d490617691c64c054a7c59c5c6ca9898c613c50. */
 export function supportsFullV2Commit(): boolean {
   return PROTOCOL === 'workspace.v1' && (CONTRACT_VERSION as string) === '0.2.14'
     && COMPONENT_MANIFEST_SHA256 === 'sha256:7b74a8df08c86bbd8168d11272f13abd3e76becc2bcb4cbed799f11dc2f85f34'
-    && SCHEMA_DIGEST === 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c'
+    && SCHEMA_DIGEST === 'sha256:9c9e746eb5138f5e92baf5bcd87e8598c6aa92597c92083956b24517c4071923'
     && (OPERATIONS as readonly string[]).includes('commitTimeline')
     && (OPERATIONS as readonly string[]).includes('listTimelineCommits');
 }

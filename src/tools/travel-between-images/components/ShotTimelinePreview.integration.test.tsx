@@ -397,7 +397,7 @@ describe('shot timeline popup real recovery integration', () => {
       },
     });
     expect(recovery?.draft.config).toBeTruthy();
-    expect(screen.getByRole('alert')).toHaveTextContent('This timeline changed elsewhere');
+    expect(screen.getByRole('alert')).toHaveTextContent('This timeline changed somewhere else');
   });
 
   it.each([
@@ -436,18 +436,19 @@ describe('shot timeline popup real recovery integration', () => {
       { wrapper: wrapper() },
     );
 
-    const reloadButton = await screen.findByRole('button', { name: 'Reload' });
-    expect(screen.getByRole('alert')).toHaveTextContent('Recovered unsaved changes');
+    const reloadButton = await screen.findByRole('button', { name: 'Discard' });
+    expect(screen.getByRole('alert')).toHaveTextContent('You have unsaved changes');
     fireEvent.click(reloadButton);
 
     if (failReload) {
       await waitFor(() => expect(loadCanonical).toHaveBeenCalledTimes(2));
-      await waitFor(() => expect(screen.getByRole('button', { name: 'Reload' })).toBeInTheDocument());
+      await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument());
       expect(await loadTimelineDraft(recoveryKey)).toMatchObject({ draftIdentity: 'durable-popup-recovery' });
-      expect(screen.getByRole('alert')).toHaveTextContent('Recovered unsaved changes');
+      // The failed Discard says why, instead of repeating the generic recovery headline.
+      expect(screen.getByRole('alert')).toHaveTextContent('canonical reload unavailable');
       expect(screen.getByRole('region', { name: 'Shot timeline' })).toHaveAttribute('data-shot-timeline-status', 'ready');
     } else {
-      await waitFor(() => expect(screen.queryByText('Recovered unsaved changes')).toBeNull());
+      await waitFor(() => expect(screen.queryByText('You have unsaved changes')).toBeNull());
       await waitFor(() => expect(screen.getByRole('region', { name: 'Shot timeline' })).toHaveAttribute('data-shot-timeline-head-revision-id', 'head-reload-canonical'));
       expect(document.querySelector('[data-shot-timeline-canvas="true"]'))
         .toHaveAttribute('data-shot-timeline-clip-assets', expect.stringContaining(':0.7:'));
@@ -496,8 +497,8 @@ describe('shot timeline popup real recovery integration', () => {
     expect(screen.queryByText('Updating canonical shot; editing is paused.')).toBeNull();
     expect(screen.getByRole('region', { name: 'Shot timeline' }))
       .toHaveAttribute('data-shot-timeline-head-revision-id', compositionH1.headRevisionId);
-    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('Recovered unsaved changes'));
-    const retryButton = screen.getByRole('button', { name: 'Retry' });
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent('You have unsaved changes'));
+    const retryButton = screen.getByRole('button', { name: 'Try again' });
     fireEvent.click(retryButton);
 
     await waitFor(() => expect(publish).toHaveBeenCalledTimes(1), { timeout: 5000 });

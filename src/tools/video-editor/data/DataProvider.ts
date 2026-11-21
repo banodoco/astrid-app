@@ -104,6 +104,8 @@ export interface TimelineCommitCapability {
 }
 
 export interface LoadedTimeline {
+  /** Transient package migration findings from this load; never serialized. */
+  placementFindings?: import('@banodoco/timeline-composition').PlacementMigrationFinding[];
   config: TimelineConfig;
   configVersion: number;
   head?: TimelineHeadRevision;

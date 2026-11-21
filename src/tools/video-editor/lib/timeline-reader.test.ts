@@ -781,7 +781,7 @@ describe('createTimelineReader — track summaries', () => {
     const track = reader.snapshot().tracks[0];
     // Extension data plus the always-present track-scale semantics marker
     // (`applyTrackScaleBakeMigration` stamps every canonicalized track).
-    expect(track.app).toEqual({ customKey: 'value', scaleAppliesToPositionedClips: true });
+    expect(track.app).toEqual({ customKey: 'value', scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
   });
 
   it('carries only the canonical semantics marker when the track has no extension app data', async () => {
@@ -790,7 +790,7 @@ describe('createTimelineReader — track summaries', () => {
     const reader = createTimelineReader({ data });
 
     for (const track of reader.snapshot().tracks) {
-      expect(track.app).toEqual({ scaleAppliesToPositionedClips: true });
+      expect(track.app).toEqual({ scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
     }
   });
 });
@@ -1287,6 +1287,7 @@ describe('createTimelineReader — representative timeline snapshots', () => {
     expect(snap.tracks[0].app).toEqual({
       'com.example.ext': { trackMeta: true },
       scaleAppliesToPositionedClips: true,
+      clipPlacementVersion: 1,
     });
 
     // App data

@@ -36,11 +36,6 @@ import { compileFunction } from 'node:vm';
 import ts from 'typescript';
 import p2TourSource from '../../../../tests/e2e/local/three-products.p2-tour.spec.ts?raw';
 
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
-
 vi.stubGlobal('indexedDB', createFakeIndexedDB());
 vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({
   invalidateReferencedTimelineCache: vi.fn(),
@@ -279,6 +274,49 @@ async function settleInitialRecoveryCheck() {
 }
 
 describe('useTimelineSave — recovered draft durability', () => {
+  it('clears a bootstrap error to loading while a restarted local owner becomes ready', async () => {
+    const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+    const head = { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'r0', headPublicationId: 'p0' };
+    const config = createDefaultTimelineConfig();
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
+      { timelineId: scope.timelineId }).data.canonical_document;
+    document.parent_revision.payload = { config, clips: [], registry: { assets: {} }, occurrences: [] };
+    document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+    const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const data = await buildTimelineData(config, { assets: {} }, undefined, 1, undefined, head);
+    let finishRetry!: (value: typeof initial) => void;
+    const loadBasis = vi.fn()
+      .mockRejectedValueOnce(new Error('Initial history unavailable'))
+      .mockImplementationOnce(() => new Promise<typeof initial>(resolve => { finishRetry = resolve; }));
+    const harness = setup(async () => { throw new Error('No legacy save'); }, undefined, { data, loadBasis,
+      capabilities: { getRecoverableIdentity: async () => ({ realmId: scope.realmId, actorId: scope.actorId }), commitTimeline: vi.fn() } });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.saveStatus).toBe('error'));
+      expect(harness.hook.result.current.localSaveState).toMatchObject({ status: 'error' });
+      expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'refused', action: 'restart' });
+
+      let retry!: Promise<void>;
+      act(() => { retry = harness.hook.result.current.tryAgain(); });
+      await vi.waitFor(() => expect(loadBasis).toHaveBeenCalledTimes(2));
+      expect(harness.hook.result.current.saveStatus).toBe('loading');
+      expect(harness.hook.result.current.localSaveState).toBeNull();
+      expect(harness.hook.result.current.saveBar).toBeNull();
+
+      await act(async () => { finishRetry(initial); await retry; });
+      await vi.waitFor(() => expect(harness.hook.result.current.timelineEditingReady).toBe(true));
+      expect(harness.hook.result.current.saveStatus).toBe('saved');
+      expect(harness.hook.result.current.saveBar).toBeNull();
+    } finally {
+      harness.hook.unmount();
+      if (lockDescriptor) Object.defineProperty(navigator, 'locks', lockDescriptor);
+      else Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     resetFakeIndexedDB();
@@ -1000,8 +1038,9 @@ describe('useTimelineSave — recovered draft durability', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(500); });
       await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
       expect(send).toHaveBeenCalledTimes(2);
-      expect(adopted!.head?.headRevisionId).toBe('r1');
-      expect(adopted!.config.clips).toEqual(splitConfig.clips);
+      // The queue was not empty when split was accepted: the screen kept the person's own split-and-trim.
+      expect(adopted!.head?.headRevisionId).toBe('r0');
+      expect(adopted!.config.clips).toEqual(trimmedConfig.clips);
       const request = send.mock.calls[1][0];
       expect(request).toMatchObject({ api_version: 1, project_id: head.projectId, timeline_id: head.timelineId,
         base_revision_id: 'r1', base_publication_id: 'p1', merge: 'fields', dry_run: false,
@@ -1539,9 +1578,10 @@ describe('useTimelineSave — recovered draft durability', () => {
           next.canonicalDocument.parent_revision.revision_id = 'r2';
           next.canonicalDocument.parent_revision.payload.config = JSON.parse(JSON.stringify(second.config));
           send.mockImplementationOnce(async (request) => {
-            // Observe the mounted assembly at transmission, before B can ACK.
-            expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r1');
-            expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('authored.mp4');
+            // Observe the mounted assembly at transmission, before B can ACK: while B is queued the screen still shows
+            // the person's own latest document; the accepted one is taken when the queue drains.
+            expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r0');
+            expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('dependent.mp4');
             expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1',
               commands: [{ args: { changes: [{ before: { state: 'present', value: 'authored.mp4' }, value: 'dependent.mp4' }] } }] });
             return next;
@@ -1704,7 +1744,8 @@ describe('useTimelineSave — recovered draft durability', () => {
       expect(await createCommitOutbox().list({ ...scope, realmId: 'stale-realm', actorId: 'stale-actor' })).toEqual([]);
       expect(harness.hook.result.current.originalLocalSaveBasis).toMatchObject({ status: 'ready', value: { initial } });
       const owners = await createCommitOutbox().list(scope);
-      expect(owners).toHaveLength(boundary === 'claim' ? 2 : 1);
+      // The cancelled claim's empty owner is removed when the next session starts, so one owner remains.
+      expect(owners).toHaveLength(1);
       const currentOwner = owners.find(owner => owner.ownerId === harness.hook.result.current.localSaveState?.ownerId)!;
       expect(currentOwner).toBeDefined();
       expect(owners.every(owner => owner.intents.length === 0)).toBe(true);

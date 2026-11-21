@@ -244,3 +244,36 @@ describe('applyTrackScaleBakeMigration — one-time track-scale semantics bake',
     }
   });
 });
+
+describe('shared clip placement migration', () => {
+  it('persists the legacy fit choice and both markers once, preserving explicit fit', () => {
+    const config: TimelineConfig = {
+      output: {resolution: '1280x720', fps: 30, file: 'out.mp4'},
+      tracks: [{id: 'V1', kind: 'visual', label: 'V1', fit: 'contain'}],
+      clips: [
+        {id: 'legacy', at: 0, track: 'V1', clipType: 'media', asset: 'a', x: 10, cropLeft: 0.2},
+        {id: 'authored', at: 1, track: 'V1', clipType: 'media', asset: 'a', x: 20, fit: 'contain'},
+      ],
+    };
+    const first = canonicalizeTimelineConfigSnapshot(config);
+    expect(first.config.clips[0]).toMatchObject({fit: 'cover', x: 10, cropLeft: 0.2});
+    expect(first.config.clips[1]).toMatchObject({fit: 'contain', x: 20});
+    expect(first.config.tracks?.[0].app).toMatchObject({scaleAppliesToPositionedClips: true, clipPlacementVersion: 1});
+    expect(first.issues.some(issue => issue.code === 'clip_placement_migrated')).toBe(true);
+    const second = canonicalizeTimelineConfigSnapshot(first.config);
+    expect(second.config).toEqual(first.config);
+    expect(second.issues.some(issue => issue.code === 'clip_placement_migrated')).toBe(false);
+  });
+});
+
+it('reports authored canvas materialization as a timeline finding before track repair', () => {
+  const input = {theme_overrides: {visual: {canvas: {width: 1280, height: 720, fps: 24}}}, tracks: [{id: 'V1', kind: 'visual', label: 'V1', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}}], clips: [{id: 'c', at: 0, track: 'V1', clipType: 'media', asset: 'a', x: 40}]} as unknown as TimelineConfig;
+  const before = structuredClone(input);
+  const result = canonicalizeTimelineConfigSnapshot(input);
+  const issue = result.issues.find(item => item.details?.kind === 'canvas');
+  expect(issue).toMatchObject({message: 'Using the timeline canvas setting in memory; it has not been written to output.', details: {source: 'theme_overrides.visual.canvas', before: undefined, after: {resolution: '1280x720', fps: 24, file: 'output.mp4'}}});
+  expect(issue?.message).not.toContain('undefined');
+  expect(result.config.clips[0]).toMatchObject({x: 40});
+  expect(result.config.tracks?.[0].app).toMatchObject({scaleAppliesToPositionedClips: true, clipPlacementVersion: 1});
+  expect(input).toEqual(before);
+});

@@ -1,3 +1,5 @@
+import {newTrackPlacementMarkers} from '@/tools/video-editor/lib/placement-markers.ts';
+import { normalizeClipPlacementWithFindings, type PlacementMigrationFinding } from '@banodoco/timeline-composition';
 import type { TimelineConfig, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import { resolveTimelineRenderTheme } from '@/tools/video-editor/compositions/installed-themes.ts';
 
@@ -10,6 +12,7 @@ export const DEFAULT_VIDEO_TRACKS: TrackDefinition[] = [
     fit: 'contain',
     opacity: 1,
     blendMode: 'normal',
+    app: newTrackPlacementMarkers(),
   },
   {
     id: 'A1',
@@ -19,6 +22,7 @@ export const DEFAULT_VIDEO_TRACKS: TrackDefinition[] = [
     fit: 'contain',
     opacity: 1,
     blendMode: 'normal',
+    app: newTrackPlacementMarkers(),
   },
 ];
 
@@ -39,7 +43,7 @@ export function createDefaultTimelineConfig(): TimelineConfig {
   return {
     output: { ...DEFAULT_OUTPUT },
     clips: [],
-    tracks: DEFAULT_VIDEO_TRACKS.map((track) => ({ ...track })),
+    tracks: DEFAULT_VIDEO_TRACKS.map((track) => ({ ...track, app: newTrackPlacementMarkers() })),
   };
 }
 
@@ -65,8 +69,10 @@ export function createDefaultTimelineConfig(): TimelineConfig {
  * (slug or overrides); otherwise nothing changes.
  */
 export function withDefaultTimelineOutput(
-  config: Partial<TimelineConfig> & { output?: Partial<TimelineConfig['output']> },
+  input: Partial<TimelineConfig> & { output?: Partial<TimelineConfig['output']> },
+  onMigration?: (findings: PlacementMigrationFinding[]) => void,
 ): TimelineConfig {
+  let config = input;
   const existingOutput = config.output ?? ({} as Partial<TimelineConfig['output']>);
 
   const themeBound = config.theme !== undefined || config.theme_overrides !== undefined;
@@ -81,7 +87,7 @@ export function withDefaultTimelineOutput(
     && typeof themeCanvas.fps === 'number'
   ) ? themeCanvas.fps : undefined;
 
-  const output: TimelineConfig['output'] = {
+  let output: TimelineConfig['output'] = {
     resolution: existingOutput.resolution ?? canvasResolution ?? DEFAULT_OUTPUT.resolution,
     fps: existingOutput.fps ?? canvasFps ?? DEFAULT_OUTPUT.fps,
     file: existingOutput.file ?? DEFAULT_OUTPUT.file,
@@ -90,10 +96,30 @@ export function withDefaultTimelineOutput(
       existingOutput.background_scale !== undefined ? existingOutput.background_scale : DEFAULT_OUTPUT.background_scale,
   };
 
+  // The package materializes an authored canvas, or the exact canvas this
+  // editor historically resolved for a standalone media timeline.
+  if (config.output?.resolution === undefined) {
+    const tracks = new Map((config.tracks ?? []).map(track => [track.id, track]));
+    const hasVisualMedia = (config.clips ?? []).some(clip => clip.asset
+      && tracks.get(clip.track)?.kind !== 'audio'
+      && (!clip.clipType || ['media', 'image', 'video', 'hold'].includes(clip.clipType)));
+    if (hasVisualMedia || config.theme_overrides?.visual?.canvas !== undefined) {
+      const [width, height] = output.resolution.split('x').map(Number);
+      const result = normalizeClipPlacementWithFindings(
+        {...config, clips: config.clips ?? [], tracks: config.tracks ?? []} as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0],
+        hasVisualMedia ? {legacyCanvas: {width, height, fps: output.fps, source: 'app-resolved'}} : undefined,
+      );
+      config = result.config as unknown as typeof config;
+      if (input.tracks === undefined) config = {...config, tracks: undefined};
+      output = {...output, ...config.output};
+      onMigration?.(result.findings);
+    }
+  }
+
   return {
     output,
     clips: config.clips ?? [],
-    tracks: config.tracks ?? DEFAULT_VIDEO_TRACKS.map((track) => ({ ...track })),
+    tracks: config.tracks ?? DEFAULT_VIDEO_TRACKS.map(({app: _newTrackMarkers, ...track}) => ({...track})),
     ...('theme' in config ? { theme: config.theme } : {}),
     ...('theme_overrides' in config ? { theme_overrides: config.theme_overrides } : {}),
     ...('generation_defaults' in config ? { generation_defaults: config.generation_defaults } : {}),

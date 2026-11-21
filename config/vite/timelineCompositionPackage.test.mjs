@@ -22,16 +22,17 @@ const configs = [
 ];
 
 test('root and lock use the approved immutable source-commit artifact', () => {
-  const artifact = 'vendor/artifacts/banodoco-timeline-composition-a5908fac2b43c5d7b17a45cd4687d7caccf1806451e1f081aee3e912fe64ca89.tgz';
+  const artifact = 'vendor/artifacts/banodoco-timeline-composition-0.0.19.tgz';
   const bytes = fs.readFileSync(path.join(appRoot, artifact));
   const root = JSON.parse(fs.readFileSync(path.join(appRoot, 'package.json'), 'utf8'));
   const lock = JSON.parse(fs.readFileSync(path.join(appRoot, 'package-lock.json'), 'utf8'));
   const installed = lock.packages[`node_modules/${packageName}`];
-  assert.equal(bytes.length, 73235);
-  assert.equal(createHash('sha256').update(bytes).digest('hex'), 'a5908fac2b43c5d7b17a45cd4687d7caccf1806451e1f081aee3e912fe64ca89');
+  assert.equal(bytes.length, 77278);
+  assert.equal(createHash('sha256').update(bytes).digest('hex'), '536f8a9133eb4b95324c25169e823db1472e5504a07738ae6b54c03709ace7e5');
   assert.equal(root.dependencies[packageName], `file:${artifact}`);
   assert.equal(lock.packages[''].dependencies[packageName], root.dependencies[packageName]);
-  assert.equal(installed.version, '0.0.15');
+  assert.equal(installed.version, '0.0.19');
+  assert.equal(manifest.gitHead, '3b8d27191ebfaf65f5f02e83afdb4fddbe236b58');
   assert.equal(installed.resolved, `file:${artifact}`);
   assert.equal(installed.integrity, `sha512-${createHash('sha512').update(bytes).digest('base64')}`);
   assert.equal(root.devDependencies['@remotion/layout-utils'], '4.0.509');
@@ -51,26 +52,19 @@ for (const configFile of configs) {
         path.join(appRoot, 'src/tools/video-editor/compositions/TimelineRenderer.tsx'),
         path.join(checkout, 'remotion/src/ThreeTimelineComposition.tsx'),
       ];
-      assert.equal(manifest.version, '0.0.15');
+      assert.equal(manifest.version, '0.0.19');
       for (const [subpath, entry] of Object.entries(manifest.exports)) {
         if (subpath === './package.json') continue;
         const specifier = packageName + subpath.slice(1);
         for (const importer of importers) {
           const resolved = await resolve(specifier, importer);
           assert.ok(resolved, `${specifier} from ${importer}`);
-          // The edge lane deliberately keeps its source aliases. Production
-          // Vite uses the pinned archive's public export map for every
-          // Composition subpath, including the generated registries and theme.
-          if (configFile === 'config/testing/vitest.edge.config.ts') {
-            assert.ok(path.resolve(resolved).startsWith(path.resolve(appRoot, 'vendor/timeline-composition')));
+          const expectedPath = path.join(packageRoot, entry.import);
+          if (fs.existsSync(resolved)) {
+            assert.equal(fs.realpathSync(resolved), fs.realpathSync(expectedPath));
           } else {
-            const expectedPath = path.join(packageRoot, entry.import);
-            if (fs.existsSync(resolved)) {
-              assert.equal(fs.realpathSync(resolved), fs.realpathSync(expectedPath));
-            } else {
-              assert.equal(path.resolve(resolved), path.resolve(packageRoot, subpath.slice(2)));
-              assert.ok(fs.existsSync(expectedPath), `${specifier} archive target`);
-            }
+            assert.equal(path.resolve(resolved), path.resolve(packageRoot, subpath.slice(2)));
+            assert.ok(fs.existsSync(expectedPath), `${specifier} archive target`);
           }
         }
       }

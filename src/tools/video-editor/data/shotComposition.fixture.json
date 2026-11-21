@@ -2,6 +2,7 @@
   "schema_version": 1,
   "parent_composition": {
     "config": {
+      "output": {"resolution": "1920x1080", "fps": 30, "file": "output.mp4"},
       "app": {
         "visualSeamContract": {
           "gaps": [
@@ -37,6 +38,7 @@
         "revision_id": "timeline-beta-a",
         "content_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "timeline": {
+          "output": {"resolution": "1920x1080", "fps": 30, "file": "output.mp4"},
           "tracks": [{"id": "video", "kind": "visual"}, {"id": "audio", "kind": "audio"}],
           "clips": [{"id": "beta-video", "clip_type": "media", "track": "video", "at_ms": 0, "duration_ms": 1200, "asset_id": "beta-image", "app": {"visualBoundary": {"intentionalPause": true}}}]
         }
@@ -75,6 +77,7 @@
         "revision_id": "timeline-alpha-a",
         "content_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
         "timeline": {
+          "output": {"resolution": "1920x1080", "fps": 30, "file": "output.mp4"},
           "tracks": [{"id": "video", "kind": "visual"}, {"id": "audio", "kind": "audio"}],
           "clips": [{"id": "alpha-video", "clip_type": "media", "track": "video", "at_ms": 0, "duration_ms": 2000, "asset_id": "alpha-image", "app": {"visualBoundary": {"intentionalPause": true}}}, {"id": "alpha-audio", "clip_type": "media", "track": "audio", "at_ms": 0, "duration_ms": 2000, "asset_id": "alpha-audio"}]
         }
@@ -110,6 +113,7 @@
         "revision_id": "timeline-alpha-b",
         "content_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
         "timeline": {
+          "output": {"resolution": "1920x1080", "fps": 30, "file": "output.mp4"},
           "tracks": [{"id": "video", "kind": "visual"}, {"id": "audio", "kind": "audio"}],
           "clips": [{"id": "alpha-video-b", "clip_type": "media", "track": "video", "at_ms": 0, "duration_ms": 2600, "asset_id": "alpha-image", "app": {"visualBoundary": {"intentionalPause": true}}}]
         }
@@ -130,6 +134,7 @@
         "revision_id": "timeline-alpha-copy-a",
         "content_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
         "timeline": {
+          "output": {"resolution": "1920x1080", "fps": 30, "file": "output.mp4"},
           "tracks": [{"id": "video", "kind": "visual"}, {"id": "audio", "kind": "audio"}],
           "clips": [{"id": "alpha-copy-video", "clip_type": "media", "track": "video", "at_ms": 0, "duration_ms": 2000, "asset_id": "alpha-copy-image", "app": {"visualBoundary": {"intentionalPause": true}}}]
         }

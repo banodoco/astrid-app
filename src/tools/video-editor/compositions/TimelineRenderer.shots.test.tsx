@@ -30,7 +30,7 @@ import type {
   AstridElementHost,
 } from '@/tools/video-editor/runtime/astrid-element-host.ts';
 
-const mockSequenceState = vi.hoisted(() => ({ frame: 0, windowing: false }));
+const mockSequenceState = vi.hoisted(() => ({ frame: 0, windowing: false, width: 1920, height: 1080 }));
 
 vi.mock('remotion', async () => {
   return {
@@ -63,6 +63,7 @@ vi.mock('remotion', async () => {
       );
     },
     useCurrentFrame: () => mockSequenceState.frame,
+    useVideoConfig: () => ({width: mockSequenceState.width, height: mockSequenceState.height, fps: 30}),
     useRemotionEnvironment: () => ({ isRendering: false, isClientSideRendering: false }),
   };
 });
@@ -70,7 +71,7 @@ vi.mock('remotion', async () => {
 // The child timeline's clips render through VisualClipSequence; replace it
 // with a marker so tests can assert the cached child config actually mounts.
 vi.mock('@/tools/video-editor/compositions/VisualClip.tsx', () => ({
-  VisualClipSequence: () => <div data-testid="child-shot-content">child-shot-content</div>,
+  VisualClipSequence: ({clip}: {clip: {x?: number; width?: number; fit?: string}}) => <div data-testid="child-shot-content" data-x={clip.x} data-width={clip.width} data-fit={clip.fit}>child-shot-content</div>,
 }));
 
 vi.mock('@/tools/video-editor/compositions/AudioAnalysisProvider', () => ({
@@ -473,4 +474,36 @@ describe('ShotClipSequence referenced-timeline cache', () => {
     expect(loadSpy).toHaveBeenCalledTimes(2);
     second.unmount();
   });
+});
+
+it('refuses a legacy referenced shot whose child canvas differs from the Player before drawing', async () => {
+  const child = childConfig();
+  mockSequenceState.width = 1280;
+  mockSequenceState.height = 720;
+  child.tracks[0].scale = 2;
+  child.clips[0] = {...child.clips[0], x: 0, y: 0, width: 1920, height: 1080};
+  const {provider} = makeProvider({load: async () => ({timeline: {config: child, configVersion: 1}, registry: {assets: {}}, resolveAssetUrl: async file => file})});
+  renderShot(provider, 'different-canvas');
+  const alert = await screen.findByTestId('shot-preview-unsupported-canvas');
+  expect(alert).toHaveTextContent("Shot clip 'shot-1'");
+  expect(alert).toHaveTextContent('different-canvas');
+  expect(alert).toHaveTextContent('output.resolution');
+  expect(screen.queryByTestId('child-shot-content')).toBeNull();
+  mockSequenceState.width = 1920;
+  mockSequenceState.height = 1080;
+});
+
+
+it('normalizes a same-canvas legacy child once before nesting it', async () => {
+  const child = childConfig();
+  child.tracks[0].scale = 2;
+  child.clips[0] = {...child.clips[0], clipType: 'media', asset: 'a', x: 0, y: 0, width: 1920, height: 1080};
+  const original = structuredClone(child);
+  const {provider} = makeProvider({load: async () => ({timeline: {config: child, configVersion: 1}, registry: {assets: {a: {file: 'a.png', type: 'image/png', resolution: '1920x1080'}}}, resolveAssetUrl: async file => file})});
+  renderShot(provider, 'same-canvas');
+  const marker = await screen.findByTestId('child-shot-content');
+  expect(marker).toHaveAttribute('data-x', '480');
+  expect(marker).toHaveAttribute('data-width', '960');
+  expect(marker).toHaveAttribute('data-fit', 'cover');
+  expect(child).toEqual(original);
 });

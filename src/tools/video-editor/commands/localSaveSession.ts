@@ -13,6 +13,14 @@ import {
   type OutboxScope,
 } from './commitOutbox.ts';
 
+/**
+ * A new edit was declined because earlier retained saves are still unresolved or replaying. It never entered
+ * the queue, so the caller undoes it on screen and says why. Plan 18 CC-5 deletes the declines: a new edit then
+ * queues behind the retained ones. (Awaiting the replay here is not enough: the edit was authored on the
+ * handoff's chain, which only a flush re-bases, so it would fail the same-document check once the replay ends.)
+ */
+export class LocalSaveDeclined extends Error {}
+
 /** Authored bytes supplied by the local editor, never produced by an executor here. */
 export interface LocalSave {
   before: OutboxJson;
@@ -45,6 +53,8 @@ interface Options {
   /** Build with the upstream editor, then return a synchronous adoption callback. */
   prepareDisplay(basis: TimelineCommandBasis, draft?: OutboxJson): Promise<{ document: OutboxJson; adopt(): void }>;
   changed(state: LocalSaveState): void;
+  /** Called each time an intent is accepted: the save is making progress. */
+  progress?(): void;
 }
 
 const same = (a: OutboxJson, b: OutboxJson): boolean => {
@@ -120,6 +130,25 @@ export async function createLocalSaveSession(options: Options) {
   let recoveryError: unknown;
   let writeError: unknown;
   let state: LocalSaveState = { status: 'saved', recoverableOwners: [] };
+  // An unavailable Runtime is retried on its own, doubling the wait up to 30 s; Try again retries at once.
+  const RETRY_FIRST_MS = 1000;
+  const RETRY_MAX_MS = 30_000;
+  let retryDelay = RETRY_FIRST_MS;
+  // Bumped first thing by Discard: a send loop that started before it must not dispatch another request.
+  let discardEpoch = 0;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  function clearRetry() {
+    if (retryTimer) clearTimeout(retryTimer);
+    retryTimer = undefined;
+  }
+  function scheduleRetry() {
+    clearRetry();
+    retryTimer = setTimeout(() => {
+      retryTimer = undefined;
+      if (!closed && box && state.status === 'retry') void pump().catch(() => {});
+    }, retryDelay);
+    retryDelay = Math.min(retryDelay * 2, RETRY_MAX_MS);
+  }
 
   function publish(status: LocalSaveState['status'], error?: OutboxJson) {
     if (closed) return;
@@ -208,7 +237,8 @@ export async function createLocalSaveSession(options: Options) {
   async function pump() {
     if (sending) return sending;
     sending = (async () => {
-      while (!closed) {
+      const epoch = discardEpoch;
+      while (!closed && epoch === discardEpoch) {
         const at = generation;
         await writes;
         if (closed || !box || writeError) return;
@@ -216,14 +246,16 @@ export async function createLocalSaveSession(options: Options) {
         if (at !== generation) continue;
         if (await rollback()) return;
         if (closed || writeError || at !== generation) return;
-        if ((record.accepted && record.accepted.intentId !== adoptedAcceptance) || (!record.intents.length && !record.accepted)) {
-          // Runtime owns suffix revalidation. Install its complete landed closure
-          // before sending the next ORIGINAL intent, never execute/recapture it here.
+        // While edits are still queued, the screen keeps showing the person's own latest document: an accept only
+        // advances the base the next record is sent on (`basis`, above). The server's document is taken when the
+        // queue is empty. Runtime owns suffix revalidation, so the next ORIGINAL intent is sent as stored and never
+        // recaptured here; nothing about the send reads the screen. (Plan 63 CC-5b / Plan 18 TL-5 make this exact.)
+        if (!record.intents.length && (!record.accepted || record.accepted.intentId !== adoptedAcceptance)) {
           const prepared = await options.prepareDisplay(clone(basis));
           if (closed || writeError || at !== generation) return;
           displayBasis = clone(basis);
           document = toOutboxJson(prepared.document);
-          replaying = record.intents.length > 0;
+          replaying = false;
           prepared.adopt();
           adoptedAcceptance = record.accepted?.intentId;
         }
@@ -238,6 +270,7 @@ export async function createLocalSaveSession(options: Options) {
         const fullV2 = supportsFullV2Commit();
         if ((!save.commands && !(fullV2 && save.documentIntent))
           || (!fullV2 && save.commands?.some((command) => command.op === 'doc.patch'))) { publish('blocked', dtoGap); return; }
+        if (epoch !== discardEpoch) return;
         publish('saving');
         const acceptedId = record.accepted?.intentId;
         record = await box.dispatch((intent, head) => {
@@ -282,15 +315,47 @@ export async function createLocalSaveSession(options: Options) {
           const result = record.accepted.value as unknown as TimelineCommitResult;
           basis = { head: result.accepted, canonicalDocument: result.canonicalDocument, graph: result.graph };
           delete state.notice;
+          options.progress?.();
         }
         if (await rollback()) return;
-        if (record.pending) { publish('retry', record.pending.outcome?.kind === 'retry' ? record.pending.outcome.error : undefined); return; }
+        if (record.pending) {
+          publish('retry', record.pending.outcome?.kind === 'retry' ? record.pending.outcome.error : undefined);
+          scheduleRetry();
+          return;
+        }
+        retryDelay = RETRY_FIRST_MS;
       }
     })().catch((error) => {
       publish('error', { message: errorMessage(error) });
       throw error;
     }).finally(() => { sending = undefined; });
     return sending;
+  }
+
+  // Total Discard (see discharge). Nothing is kept: not the claimed owner, not the others in the outbox.
+  async function discardAll() {
+    discardEpoch++;
+    clearRetry();
+    generation++;
+    if (sending) await sending.catch(() => {});
+    clearRetry();
+    await writes.catch(() => {});
+    release?.();
+    await lifetime;
+    box = undefined; lifetime = undefined; release = undefined;
+    await storage.discardScope(options.scope);
+    record = undefined; writeError = undefined; recoveryError = undefined;
+    replaying = false; adoptedAcceptance = undefined; retryDelay = RETRY_FIRST_MS;
+    writes = Promise.resolve();
+    state = { status: 'saved', recoverableOwners: [] };
+    options.changed(clone(state));
+    await claim();
+    const at = generation;
+    try { await resetToCanonical(at); }
+    catch (error) {
+      publish('error', { message: `Discarded; reload failed: ${errorMessage(error)}` });
+      throw error;
+    }
   }
 
   async function claim(ownerId?: string) {
@@ -340,6 +405,8 @@ export async function createLocalSaveSession(options: Options) {
     }
   }
 
+  // Rows that can never be sent (another realm, or empty and unheld) are removed before anything is listed.
+  await storage.prune(options.scope).catch(() => {});
   const owners = (await storage.list(options.scope)).filter((owner) => owner.intents.length || owner.pending);
   state.recoverableOwners = owners.map((owner) => owner.ownerId);
   if (owners.length) publish('recovery');
@@ -347,10 +414,12 @@ export async function createLocalSaveSession(options: Options) {
 
   function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
     assertOpen();
-    if (writeError || ['conflict', 'error'].includes(state.status)) throw new Error('Resolve retained local saves before editing again');
+    // Stopgap: the save bar declines the edit and shows its own headline; these throws are assertions only.
+    // Plan 18 CC-5 deletes them, so a new edit queues behind the retained ones.
+    if (writeError || ['conflict', 'error'].includes(state.status)) throw new LocalSaveDeclined('Resolve retained local saves before editing again');
     // The visible closure is now canonical, while the retained suffix still
     // describes its original local chain. Do not author a new edit between them.
-    if (replaying) throw new Error('Wait for retained dependent saves to finish revalidation before editing again');
+    if (replaying) throw new LocalSaveDeclined('Wait for retained dependent saves to finish revalidation before editing again');
     const save = toOutboxJson({ ...input, kind: 'local-save', displayBasis,
       ...(documentIntent ? { documentIntent } : {}) }) as unknown as StoredSave;
     if (!save.label.trim() || (save.commands && !save.commands.length)) throw new Error('Local save requires a label and nonempty commands');
@@ -366,8 +435,9 @@ export async function createLocalSaveSession(options: Options) {
       if (save.documentIntent) {
         save.documentIntent = toOutboxJson({ ...save.documentIntent as Record<string, OutboxJson>, basis: authoredBasis });
       }
+      // No read-back here: it re-transfers the whole record (every queued document) once per edit, and pump reads
+      // the record itself before anything is sent.
       await box!.append(toOutboxJson(save), authoredBasis);
-      record = await box!.read();
     });
     writes = write.catch((error) => {
       writeError = error;
@@ -401,32 +471,28 @@ export async function createLocalSaveSession(options: Options) {
       return clone(basis);
     },
     /**
-     * Leave a refused save. `latest` drops the rejected change and everything built on it and adopts the
-     * accepted head; `keep` resends them on the latest head and resolves when that save settles. Does nothing
-     * when nothing is rejected.
+     * The two ways out of any unsaved state, whatever it is (unavailable, refused, head moved, recovered).
+     * `latest` is Discard: every retained owner of this timeline is deleted, then the accepted head is adopted
+     * and a fresh owner claimed. `keep` is Try again: the retained chain is resent now, on the latest head when
+     * it was refused. Does nothing when nothing is retained.
      */
     async discharge(mode: 'latest' | 'keep') {
+      if (closed) return;
+      if (mode === 'latest') { await discardAll(); return; }
       assertOpen();
       if (sending) await sending.catch(() => {});
       if (closed) return;
+      clearRetry();
       record = await box!.read();
-      if (record.pending?.outcome?.kind !== 'rejected') return;
-      const ids = record.intents.map((intent) => intent.id);
-      const at = generation;
-      if (mode === 'keep') {
-        await rebaseOntoLatest();
-        publish('dirty');
-        await pump();
+      if (!record.intents.length && !record.pending) {
+        // Nothing to resend: Try again acknowledges a notice about a change that was already removed.
+        if (state.notice) { delete state.notice; publish(state.status); }
         return;
       }
-      record = await box!.resolveRejected(ids, undefined, () => !closed);
-      delete state.notice;
-      publish('saved');
-      try { await resetToCanonical(at); }
-      catch (error) {
-        publish('error', { message: `Removed change; reload failed: ${errorMessage(error)}` });
-        throw error;
-      }
+      if (record.pending?.outcome?.kind === 'rejected') await rebaseOntoLatest();
+      retryDelay = RETRY_FIRST_MS;
+      publish('dirty');
+      await pump();
     },
     async recover(ownerId: string) {
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');
@@ -443,8 +509,11 @@ export async function createLocalSaveSession(options: Options) {
       await claim(ownerId);
       await pump();
     },
+    /** Stops a waiting automatic retry now (Discard must not race it). */
+    cancelRetry: clearRetry,
     async dispose() {
       closed = true;
+      clearRetry();
       try { await writes; if (writeError) throw writeError; }
       finally { release?.(); await lifetime; }
     },

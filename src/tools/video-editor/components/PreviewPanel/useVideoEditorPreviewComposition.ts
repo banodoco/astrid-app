@@ -6,7 +6,7 @@ import type { ResolvedTimelineConfig } from '../../types/index.ts';
 /** Both the stage and panel stills include in-progress edits inside placed shots. */
 export function useVideoEditorPreviewComposition(resolvedConfig: ResolvedTimelineConfig | null | undefined) {
   const runtime = useOptionalVideoEditorRuntime();
-  const hasShotClips = Boolean(resolvedConfig?.clips.some((clip) => clip.clipType === 'shot'));
+  const hasShotClips = Boolean(resolvedConfig?.clips?.some((clip) => clip.clipType === 'shot'));
   const composition = runtime?.userId === null
     ? runtime.shots?.canonicalDraft?.composition ?? runtime.shots?.canonicalComposition
     : null;

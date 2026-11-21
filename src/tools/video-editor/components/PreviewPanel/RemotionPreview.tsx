@@ -103,8 +103,9 @@ function FirstFrameCover({ settling, children }: { settling: boolean; children: 
 
 // Both branches use Remotion's composition viewport, so loading occupies the
 // exact video bounds at every resolution and stage size without a second fit.
-function PreviewComposition({ preparing, settling, previewRevision: _previewRevision, ...props }: ComponentProps<typeof TimelineRenderer> & { preparing: boolean; settling: boolean; previewRevision: PreviewRevision }) {
-  if (preparing) return <PreviewLoadingPlaceholder />;
+// Never gated on admitted-element readiness: media plays while project elements load, and an element clip whose
+// component is not (yet) available shows its own placeholder with the reason (TimelineRenderer).
+function PreviewComposition({ settling, previewRevision: _previewRevision, ...props }: ComponentProps<typeof TimelineRenderer> & { settling: boolean; previewRevision: PreviewRevision }) {
   return (
     <FirstFrameCover settling={settling}>
       <TimelineRenderer {...props} />
@@ -250,7 +251,6 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
   const outputConfig = outputProjection.excludedClipIds.length ? outputProjection.config : deferredConfig;
   const admissionReadiness = useSyncExternalStore(subscribeAdmittedElementReadiness, getAdmittedElementReadiness, getAdmittedElementReadiness);
   const projectId = runtime?.project?.projectId;
-  const preparing = Boolean(projectId && runtime?.astridElementHost?.isPreviewPreparing?.(projectId, outputConfig.clips));
   const hasMissingPackRef = outputConfig.clips.some(clip => {
     const ref = clip.elementRef;
     return ref?.packId && !runtime?.astridElementHost?.resolveComponent(ref.id, ref.kind, ref.packId, ref.revision);
@@ -267,11 +267,10 @@ const RemotionPreviewComponent = forwardRef<PreviewHandle, RemotionPreviewProps>
   const renderedConfig = useMemo(() => (tourIdle ? { ...outputConfig, clips: [] } : outputConfig), [outputConfig, tourIdle]);
   const inputProps = useMemo(() => ({
     config: renderedConfig,
-    preparing,
     settling: shotsSettling,
     previewRevision: delivery.revision,
     ...(runtime?.astridElementHost ? { astridElementHost: runtime.astridElementHost } : {}),
-  }), [delivery.revision, renderedConfig, preparing, shotsSettling, runtime?.astridElementHost]);
+  }), [delivery.revision, renderedConfig, shotsSettling, runtime?.astridElementHost]);
   // The tour's demo timeline can never be saved, so "Unsaved local" and "Preview unavailable" would only be noise.
   const touring = tourIdle;
   const displayedRevisionLabel = touring ? '' : previewRevisionLabel(delivery.revision);

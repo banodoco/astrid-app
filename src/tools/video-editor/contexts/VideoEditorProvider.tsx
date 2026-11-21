@@ -1,4 +1,5 @@
 import { admittedCatalogEntries, getAdmittedElementSelection, subscribeAdmittedElements, setAdmittedElementScope, refreshAdmittedElements } from '../runtime/admitted-elements';
+import { useVideoEditorPreviewComposition } from '../components/PreviewPanel/useVideoEditorPreviewComposition.ts';
 import { bindElementParameterOwner } from '../hooks/useTimelineSave.ts';
 import type { ExtensionPendingWorkState } from '@/sdk/context.ts';
 import { useEffects } from '@/tools/video-editor/hooks/useEffects.ts';
@@ -265,8 +266,11 @@ function AgentChatBridgeRegistration({ operationsEnabled = true, elementTimeline
     };
   }, [configVersion, data?.configVersion, resolvedConfig]);
   const resolvedClips = resolvedConfig?.clips ?? EMPTY_RESOLVED_CLIPS;
+  // Scope the project elements the preview actually renders: the canonical composition expands placed shots into the
+  // clips (and element refs) that the authoring config only holds as shots.
+  const renderedClips = useVideoEditorPreviewComposition(resolvedConfig).config?.clips ?? resolvedClips;
   const admission = useSyncExternalStore(subscribeAdmittedElements, getAdmittedElementSelection, getAdmittedElementSelection);
-  const packRefsKey = JSON.stringify(resolvedClips.flatMap(clip=>{
+  const packRefsKey = JSON.stringify(renderedClips.flatMap(clip=>{
     const ref=clip.elementRef;
     if(!ref?.packId)return [];
     const builtIn=astridElementHost?.descriptors.some(entry=>!entry.componentPath.startsWith('external/')&&entry.id===ref.id&&entry.kind===ref.kind&&entry.packId===ref.packId&&entry.revision===ref.revision);

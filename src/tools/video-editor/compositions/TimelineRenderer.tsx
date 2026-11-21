@@ -466,6 +466,7 @@ const elementUnavailableDetail = (ref: NonNullable<ResolvedTimelineClip['element
   const exact = `Element ${ref.id}@${ref.revision} requires its exact admitted pack revision. Embedded source is preserved for migration and is not executed.`;
   const admission = getAdmittedElementReadiness();
   if (isLegacyElementRef(ref)) return `${LEGACY_ELEMENT_REASON} ${exact}`;
+  if (admission.phase === 'loading') return `Project elements are still loading. ${exact}`;
   return admission.phase === 'error' ? `Project elements did not load (${admission.error}). ${exact}` : exact;
 };
 

@@ -2057,6 +2057,26 @@ describe('TimelineRenderer owner-qualified Astrid references', () => {
     expect(screen.getByTestId('generated-module-placeholder')).toHaveTextContent('Project elements did not load (Runtime is not reachable)');
   });
 
+  it('keeps every other clip mounted while a project element is still loading, and names the wait on that clip only', async () => {
+    const admissions = await import('../runtime/admitted-elements');
+    const ref = { id: 'slow-element', kind: 'effect' as const, packId: 'project_loading', revision: 'loading-revision' };
+    admissions.setAdmittedElementScope('loading-project', [ref]);
+    // The scope change leaves the readiness at `loading`: nothing has been listed yet.
+    expect(admissions.getAdmittedElementReadiness().phase).toBe('loading');
+    const view = render(<TimelineRenderer astridElementHost={fixtureAstridElementHost} config={{
+      ...buildConfig(),
+      tracks: [{ id: 'V1', kind: 'visual' }, { id: 'frames', kind: 'visual' }],
+      clips: [
+        { id: 'plain-picture', clipType: 'hold', track: 'frames', at: 0, hold: 1 },
+        { id: 'needs-slow-element', track: 'V1', at: 0, hold: 1, clipType: 'effect-layer', elementRef: ref },
+      ],
+    }} />);
+    expect(view.container.querySelector('[data-clip-id="plain-picture"]')).not.toBeNull();
+    const placeholder = screen.getByTestId('generated-module-placeholder');
+    expect(placeholder).toHaveAttribute('data-clip-id', 'needs-slow-element');
+    expect(placeholder).toHaveTextContent('Project elements are still loading.');
+  });
+
   it.each(['local', 'rendering'])('passes the %s owner to the component bridge', (packId) => {
     const Owned: FC<{ clip: { id: string } }> = ({ clip }) => <div data-testid="owner-preview">{clip.id}</div>;
     astridElementComponentMock.mockImplementation((id: string, kind: string, owner?: string) => (

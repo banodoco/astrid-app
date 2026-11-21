@@ -245,6 +245,11 @@ export interface TimelineChromeContextValue {
   watchdogReason: 'timeout' | 'lost-edit' | null;
   /** Why a local change was rejected or removed from the save queue; null when there is nothing to say. */
   saveNotice: string | null;
+  /** A permanently rejected local save stays in the durable outbox until an explicit choice. */
+  permanentSaveRejection: boolean;
+  /** Downloads the original rejected request and all dependent authored edits, without consuming them. */
+  copyRejectedSave: () => Promise<boolean>;
+  cancelRejectedSaveCopy: () => void;
   retryWatchdog: () => void;
   /**
    * Astrid answered again after a stop: sends the save that never got an answer now (does nothing when none waits, or
@@ -261,8 +266,9 @@ export interface TimelineChromeContextValue {
    * left unsaved work. The shell offers Retry / Discard.
    */
   recoveryDraft: { updatedAt: string; baseVersion: number; retryAllowed?: boolean; baseGone?: boolean } | null;
-  retryRecoveredDraft: () => void;
-  discardRecoveredDraft: () => void;
+  recoveryRestoreAllowed: boolean;
+  retryRecoveredDraft: () => void | Promise<void>;
+  discardRecoveredDraft: () => void | Promise<void>;
   /** The one description of unsaved work (null when nothing is waiting) and its two actions. */
   saveBar: SaveBarInput | null;
   tryAgain: () => void | Promise<void>;

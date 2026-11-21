@@ -1,10 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { createFakeIndexedDB } from 'fake-indexeddb';
 import { ApiError } from '@/integrations/runtime/generated.ts';
 import type { CanonicalDocument } from '@/integrations/runtime/generated.ts';
 import { toOutboxJson } from './commitOutbox.ts';
 import { createLocalSaveSession, LocalSaveDeclined, type LocalSaveSession } from './localSaveSession.ts';
 import { environment, h0, scope } from './__tests__/localSaveSessionEnvironment.ts';
 import { saveBarInput } from '../hooks/saveBar.ts';
+import { clearTimelineDraft, hasOutboxRecoveryDraft, saveTimelineDraft } from '../data/timelineDraftIndexedDb.ts';
 
 const h1 = { revisionId: 'r1', publicationId: 'p1' };
 const h2 = { revisionId: 'r2', publicationId: 'p2' };
@@ -27,8 +29,8 @@ function laterDocument(base: CanonicalDocument, label: string): CanonicalDocumen
 }
 
 /** One timeline whose Runtime head has moved to r1, with sessions that can mount on it. */
-function world() {
-  const env = environment();
+function world(isRecoveryOwner?: Parameters<typeof environment>[0]) {
+  const env = environment(isRecoveryOwner);
   const latest = env.accepted(env.pair.document, h1);
   const mount = () => createLocalSaveSession({ scope, initial: env.initial, document: toOutboxJson(env.initial.canonicalDocument),
     outboxes: env.outboxes, send: env.send, loadLatest: async () => ({ head: h1, canonicalDocument: latest.canonicalDocument }),
@@ -41,6 +43,7 @@ function world() {
   return { env, latest, mount, retained, laterEdit };
 }
 
+// Lead ruling of 21 Nov (R14 App int merge: FIX-16 cross-tab rule wins)
 describe('Discard is total: any unsaved state, one or two retained owners, before and after a reload', () => {
   describe.each(Object.keys(failures) as Array<keyof typeof failures>)('%s', (failure) => {
     describe.each([1, 2])('with %i retained owner(s)', (ownerCount) => {
@@ -70,14 +73,19 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
         expect(saveBarInput({ local: session.getState(), recoveryDraft: null, conflictExhausted: false,
           schemaIncompatible: false, watchdogTripped: false, saveError: null, bootstrapFailed: false })).not.toBeNull();
         const before = (await env.outboxes.list(scope)).map((owner) => owner.ownerId);
+        const offeredOwner = session.getState().ownerId;
+        expect(offeredOwner).toBeTruthy();
+        expect(before).toContain(offeredOwner);
 
         await session.discharge('latest');
 
         expect(session.getState().status).toBe('saved');
-        expect(session.getState().recoverableOwners).toEqual([]);
-        expect(await retained()).toEqual([]);
-        // Every owner that existed is gone, not just emptied.
-        expect((await env.outboxes.list(scope)).map((owner) => owner.ownerId).filter((id) => before.includes(id))).toEqual([]);
+        const preserved = before.filter((id) => id !== offeredOwner);
+        expect(session.getState().recoverableOwners).toEqual(preserved);
+        expect((await retained()).map((owner) => owner.ownerId)).toEqual(preserved);
+        // Discard deletes only the exact owner claimed for this action.
+        expect((await env.outboxes.list(scope)).map((owner) => owner.ownerId)).not.toContain(offeredOwner);
+        expect((await env.outboxes.list(scope)).map((owner) => owner.ownerId).filter((id) => before.includes(id))).toEqual(preserved);
         expect(saveBarInput({ local: session.getState(), recoveryDraft: null, conflictExhausted: false,
           schemaIncompatible: false, watchdogTripped: false, saveError: null, bootstrapFailed: false })).toBeNull();
 
@@ -86,12 +94,12 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
         await laterEdit(session, 'Next');
         await expect(session.flush()).resolves.toMatchObject({ head: { revisionId: 'r2' } });
 
-        // And after a reload nothing comes back.
+        // A preserved sibling remains recoverable after a reload.
         await session.dispose();
         const reopened = await mount();
-        expect(reopened.getState().status).toBe('saved');
-        expect(reopened.getState().recoverableOwners).toEqual([]);
-        expect(await retained()).toEqual([]);
+        expect(reopened.getState().status).toBe(preserved.length ? 'recovery' : 'saved');
+        expect(reopened.getState().recoverableOwners).toEqual(preserved);
+        expect((await retained()).map((owner) => owner.ownerId)).toEqual(preserved);
         await reopened.dispose();
       });
     });
@@ -129,29 +137,66 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
     expect(session.getState().status).toBe('saved');
   });
 
-  it('fences a second tab that still holds a discarded owner: its next write fails and resurrects nothing', async () => {
-    const { env, mount, retained, laterEdit, latest } = world();
-    env.send.mockRejectedValue(new TypeError('Failed to fetch'));
+  it('discards only the offered owner while preserving a newer retained owner from another tab', async () => {
+    const { env, mount, retained } = world();
+    const offeredTab = await mount();
+    const otherTab = await mount();
+    env.send.mockRejectedValueOnce(failures.refused());
+    await env.append(offeredTab);
+    await expect(offeredTab.flush()).rejects.toThrow();
+    const offeredOwner = offeredTab.getState().ownerId;
+    env.send.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const newerDocument = laterDocument(env.pair.document, 'Other tab edit');
+    await otherTab.appendDocument({ before: env.pair.document, after: newerDocument, label: 'Other tab edit',
+      roots: [{ ref: 'parent', revisionId: h0.revisionId, contentDigest: env.pair.document.parent_revision.content_digest }],
+      step: { id: 'other-tab-step', label: 'Other tab edit', intent: 'Keep the later edit', tags: [] } });
+    await expect(otherTab.flush()).rejects.toThrow();
+
+    const otherOwner = otherTab.getState().ownerId;
+    expect(offeredOwner).toBeTruthy();
+    expect(otherOwner).toBeTruthy();
+    expect(otherOwner).not.toBe(offeredOwner);
+    const tabBSnapshot = (await retained()).find((owner) => owner.ownerId === otherOwner);
+    expect(tabBSnapshot?.intents[0].payload).toMatchObject({ label: 'Other tab edit' });
+
+    await offeredTab.discharge('latest');
+
+    expect(await retained()).toEqual([tabBSnapshot]);
+    expect((await env.outboxes.list(scope)).map((owner) => owner.ownerId)).not.toContain(offeredOwner);
+
+    env.send.mockReset();
+    env.send.mockImplementation(async () => env.accepted(newerDocument, h2));
+    await otherTab.discharge('keep');
+    await expect(otherTab.flush()).resolves.toMatchObject({ head: { revisionId: 'r2' } });
+    expect(await retained()).toEqual([]);
+
+    await offeredTab.dispose();
+    await otherTab.dispose();
+  });
+
+  it('preserves another tab owner and lets that tab continue flushing after the offered owner is discarded', async () => {
+    const { env, mount, retained, latest } = world();
     const tabA = await mount();
+    const tabB = await mount();
+    env.send.mockRejectedValueOnce(failures.refused());
     await env.append(tabA);
     await expect(tabA.flush()).rejects.toThrow();
-    const tabB = await mount();
-    for (const owner of tabB.getState().recoverableOwners) await tabB.recover(owner).catch(() => {});
+    const oldOwner = tabA.getState().ownerId;
+    env.send.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    await env.append(tabB);
+    await expect(tabB.flush()).rejects.toThrow();
 
-    await tabB.discharge('latest');
-    expect(await retained()).toEqual([]);
-
-    // Tab A still believes it owns the deleted row: the generation check refuses it.
+    await tabA.discharge('latest');
+    expect((await env.outboxes.list(scope)).map((owner) => owner.ownerId)).not.toContain(oldOwner);
+    expect((await retained()).map((owner) => owner.ownerId)).toEqual([tabB.getState().ownerId]);
     env.send.mockReset();
     env.send.mockImplementation(async () => env.accepted(latest.canonicalDocument, h2));
-    await expect(laterEdit(tabA, 'Stale tab')).rejects.toThrow();
-    expect(await retained()).toEqual([]);
-    expect(env.send).not.toHaveBeenCalled();
+    await tabB.discharge('keep');
+    await expect(tabB.flush()).resolves.toMatchObject({ head: { revisionId: 'r2' } });
   });
 
   it('retries an unavailable Runtime by itself, with a growing wait, and Try again retries at once', async () => {
     const { env, mount } = world();
-    const { vi } = await import('vitest');
     vi.useFakeTimers();
     try {
       env.send.mockRejectedValue(new TypeError('Failed to fetch'));
@@ -189,15 +234,14 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
       }
     }
 
-    it('are deleted when the session starts, so a stale row never becomes a recoverable owner', async () => {
+    it('preserves nonempty rows and prunes only proven-empty rows when the session starts', async () => {
       const { env, mount } = world();
       await leaveRows(env);
       expect((await rows(env)).length).toBe(32);
       const session = await mount();
       expect(session.getState().status).toBe('saved');
       expect(session.getState().recoverableOwners).toEqual([]);
-      // Only the session's own fresh owner is left.
-      expect(await rows(env)).toHaveLength(1);
+      expect((await rows(env)).map((row) => row.ownerId)).toEqual(['old-with-edit', session.getState().ownerId]);
       await session.dispose();
     });
 
@@ -207,16 +251,48 @@ describe('Discard is total: any unsaved state, one or two retained owners, befor
       expect(await rows(env)).toEqual([]);
     });
 
-    it('are all deleted by Discard whatever realm wrote them', async () => {
+    it('keeps an empty owner while a draft write links it to an occurrence recovery slot', async () => {
+      const previousIndexedDb = globalThis.indexedDB;
+      vi.stubGlobal('indexedDB', createFakeIndexedDB());
+      const { env, mount } = world(hasOutboxRecoveryDraft);
+      const recoveryKey = 'parent:shot:occurrence';
+      try {
+        const session = await mount();
+        const ownerId = session.getState().ownerId;
+        let finishWrite!: () => void;
+        const pendingWrite = new Promise<void>((resolve) => { finishWrite = resolve; });
+        const writing = session.writeRecoveryDraft(async (outboxOwnerId) => {
+          expect(outboxOwnerId).toBe(ownerId);
+          await pendingWrite;
+          await saveTimelineDraft(scope.timelineId, { config: env.pair.config }, 1, { recoveryKey, outboxOwnerId });
+        });
+        const disposing = session.dispose();
+        finishWrite();
+        await Promise.all([writing, disposing]);
+
+        await (await mount()).dispose();
+        expect((await rows(env)).map((row) => row.ownerId)).toEqual([ownerId]);
+        await clearTimelineDraft(recoveryKey);
+        await (await mount()).dispose();
+        expect(await rows(env)).toEqual([]);
+      } finally {
+        vi.stubGlobal('indexedDB', previousIndexedDb);
+      }
+    });
+
+    it('preserves unrelated owners and old-realm nonempty rows during Discard', async () => {
       const { env, mount } = world();
       const session = await mount();
       await leaveRows(env);
       env.send.mockRejectedValue(failures.refused());
       await env.append(session);
       await expect(session.flush()).rejects.toThrow();
+      expect((await env.outboxes.list(oldScope)).find((row) => row.ownerId === 'old-with-edit')?.intents).toHaveLength(1);
       await session.discharge('latest');
       const left = await rows(env);
-      expect(left.filter((row) => row.realmId === 'old-realm' || row.intents.length || row.pending)).toEqual([]);
+      expect(left.map((row) => row.ownerId)).toContain('old-with-edit');
+      expect(left.map((row) => row.ownerId)).toContain('old-empty');
+      expect(left.find((row) => row.ownerId === 'old-with-edit')?.intents).toHaveLength(1);
       expect(session.getState().status).toBe('saved');
     });
   });

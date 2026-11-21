@@ -393,6 +393,9 @@ function useTimelineChromeContextValue({
   watchdogTripped,
   watchdogReason,
   saveNotice,
+  permanentSaveRejection,
+  copyRejectedSave,
+  cancelRejectedSaveCopy,
   retryWatchdog,
   retryPendingSave,
   flushPendingSave,
@@ -400,6 +403,7 @@ function useTimelineChromeContextValue({
   isTimelineDraftDurableForReload,
   isTimelineSavePending,
   recoveryDraft,
+  recoveryRestoreAllowed,
   retryRecoveredDraft,
   discardRecoveredDraft,
   saveBar,
@@ -425,6 +429,9 @@ function useTimelineChromeContextValue({
   watchdogTripped: boolean;
   watchdogReason: 'timeout' | 'lost-edit' | null;
   saveNotice: string | null;
+  permanentSaveRejection: boolean;
+  copyRejectedSave: () => Promise<boolean>;
+  cancelRejectedSaveCopy: () => void;
   retryWatchdog: () => void;
   retryPendingSave: () => void;
   flushPendingSave: () => Promise<number>;
@@ -432,6 +439,7 @@ function useTimelineChromeContextValue({
   isTimelineDraftDurableForReload: () => boolean;
   isTimelineSavePending: () => boolean;
   recoveryDraft: ReturnType<typeof useTimelineSave>['recoveryDraft'];
+  recoveryRestoreAllowed: boolean;
   retryRecoveredDraft: ReturnType<typeof useTimelineSave>['retryRecoveredDraft'];
   discardRecoveredDraft: ReturnType<typeof useTimelineSave>['discardRecoveredDraft'];
   saveBar: ReturnType<typeof useTimelineSave>['saveBar'];
@@ -485,6 +493,9 @@ function useTimelineChromeContextValue({
     watchdogTripped,
     watchdogReason,
     saveNotice,
+    permanentSaveRejection,
+    copyRejectedSave,
+    cancelRejectedSaveCopy,
     retryWatchdog,
     retryPendingSave,
     flushPendingSave,
@@ -492,6 +503,7 @@ function useTimelineChromeContextValue({
     isTimelineDraftDurableForReload,
     isTimelineSavePending,
     recoveryDraft,
+    recoveryRestoreAllowed,
     retryRecoveredDraft,
     discardRecoveredDraft,
     saveBar,
@@ -556,7 +568,11 @@ function useTimelineChromeContextValue({
     watchdogReason,
     watchdogTripped,
     saveNotice,
+    permanentSaveRejection,
+    copyRejectedSave,
+    cancelRejectedSaveCopy,
     recoveryDraft,
+    recoveryRestoreAllowed,
     retryRecoveredDraft,
     discardRecoveredDraft,
     saveBar,
@@ -1262,6 +1278,9 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     watchdogTripped: save.watchdogTripped,
     watchdogReason: save.watchdogReason,
     saveNotice: save.saveNotice,
+    permanentSaveRejection: save.permanentSaveRejection,
+    copyRejectedSave: save.copyRejectedSave,
+    cancelRejectedSaveCopy: save.cancelRejectedSaveCopy,
     retryWatchdog: save.retryWatchdog,
     retryPendingSave: save.retryPendingSave,
     flushPendingSave: save.flushPendingSave,
@@ -1269,6 +1288,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     isTimelineDraftDurableForReload: save.isTimelineDraftDurableForReload,
     isTimelineSavePending: save.isTimelineSavePending,
     recoveryDraft: save.recoveryDraft,
+    recoveryRestoreAllowed: save.recoveryRestoreAllowed,
     retryRecoveredDraft: save.retryRecoveredDraft,
     discardRecoveredDraft: save.discardRecoveredDraft,
     saveBar: save.saveBar,

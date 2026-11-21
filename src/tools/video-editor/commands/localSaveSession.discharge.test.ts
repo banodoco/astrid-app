@@ -104,25 +104,29 @@ describe('a refused save can always be discharged', () => {
       expect(env.send.mock.calls[1][0].base_revision_id).toBe(h1.revisionId);
     });
 
-    it('"keep" resends it on the latest head and the next edit saves', async () => {
+    it('"keep" does not resend an invalid request; explicit discard permits a next save', async () => {
       const { env, latest, session } = await rejected();
+      await expect(session.discharge('keep')).rejects.toThrow('permanently rejected');
+      expect(session.getState().status).toBe('error');
+      expect(env.send).toHaveBeenCalledTimes(1);
+      const copied = await session.exportRejectedChange();
+      expect(copied).toMatchObject({ format: 'astrid.rejected-local-save/v1' });
+      await session.discharge('latest');
+      expect(session.getState().status).toBe('saved');
+      expect(session.getDocument()).toEqual(JSON.parse(JSON.stringify(latest.canonicalDocument)));
       const saved = env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' });
       env.send.mockImplementation(async () => saved);
-      await session.discharge('keep');
-      expect(session.getState().status).toBe('saved');
+      await laterEdit(env, session, latest.canonicalDocument, 'Next');
+      await expect(session.flush()).resolves.toMatchObject({ head: { revisionId: 'r2' } });
+      expect(env.send).toHaveBeenCalledTimes(2);
       expect(env.send.mock.calls[1][0].base_revision_id).toBe(h1.revisionId);
-      const next = env.accepted(saved.canonicalDocument, { revisionId: 'r3', publicationId: 'p3' });
-      env.send.mockImplementation(async () => next);
-      await session.appendDocument({ before: session.getDocument() as unknown as CanonicalDocument, after: laterDocument(saved.canonicalDocument, 'Next'), label: 'Next',
-        roots: [{ ref: 'parent', revisionId: 'r2', contentDigest: saved.canonicalDocument.parent_revision.content_digest }],
-        step: { id: 'n', label: 'Next', intent: 'Next', tags: [] } } as Parameters<typeof session.appendDocument>[0]);
-      await expect(session.flush()).resolves.toMatchObject({ head: { revisionId: 'r3' } });
     });
 
-    it('a real refusal on "keep" refuses again and is still dischargeable', async () => {
+    it('a permanently refused save cannot be sent a second time and remains dischargeable', async () => {
       const { env, session } = await rejected();
       env.send.mockRejectedValue(validationRefusal());
-      await session.discharge('keep');
+      await expect(session.discharge('keep')).rejects.toThrow('permanently rejected');
+      expect(env.send).toHaveBeenCalledTimes(1);
       expect(session.getState().status).toBe('error');
       await session.discharge('latest');
       expect(session.getState().status).toBe('saved');
@@ -137,7 +141,14 @@ describe('a refused save can always be discharged', () => {
       await reopened.recover(owner).catch(() => {});
       expect(reopened.getState().status).toBe('error');
       env.send.mockImplementation(async () => env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' }));
-      await reopened.discharge(mode);
+      if (mode === 'keep') {
+        await expect(reopened.discharge(mode)).rejects.toThrow('permanently rejected');
+        expect(reopened.getState().status).toBe('error');
+        expect(env.send).toHaveBeenCalledTimes(1);
+        await reopened.discharge('latest');
+      } else {
+        await reopened.discharge(mode);
+      }
       expect(reopened.getState().status).toBe('saved');
       expect((await env.outboxes.list(scope)).filter((entry) => entry.intents.length || entry.pending)).toEqual([]);
     });

@@ -143,6 +143,7 @@ describe('useTimelineSave stable occurrence recovery', () => {
     }, store));
 
     await waitFor(() => expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 7 }));
+    const offeredSnapshot = await loadTimelineDraft(recoveryKey);
     expect(hook.result.current.saveStatus).toBe('dirty');
     expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
 
@@ -163,7 +164,11 @@ describe('useTimelineSave stable occurrence recovery', () => {
     expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
 
     await act(async () => { await hook.result.current.discardRecoveredDraft(); });
-    expect(reloadFromServer).toHaveBeenLastCalledWith({ clearDraft: true });
+    expect(reloadFromServer).toHaveBeenLastCalledWith(expect.objectContaining({
+      clearDraft: true,
+      recoverySnapshot: offeredSnapshot,
+      recoveryRetrySeq: expect.any(Number),
+    }));
     expect(hook.result.current.recoveryDraft).toBeNull();
     expect(hook.result.current.saveStatus).toBe('saved');
     expect(await loadTimelineDraft(recoveryKey)).toBeNull();

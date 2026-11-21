@@ -2005,9 +2005,329 @@ describe('TimelineEditorShellCore — phone layout', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The one save bar: every unsaved state shows the same bar with the same two buttons.
+// Diverged (409) banner (plan-v5 B4)
 // ---------------------------------------------------------------------------
 
+describe('TimelineEditorShellCore — diverged conflict banner', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __clearSlotRenderers();
+    __clearRuntimeContext();
+    __deviceClass = 'desktop';
+    __chromeOverrides = {};
+  });
+
+  afterEach(() => {
+    __chromeOverrides = {};
+    __conflictDialog = {};
+  });
+
+  it('FIX16-R2-UNDO-UI offers Copy when a permanent refusal opens the conflict dialog', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    __chromeOverrides = { isConflictExhausted: true, permanentSaveRejection: true,
+      saveNotice: 'The Runtime refused this Undo.', copyRejectedSave };
+    __conflictDialog = { isOpen: true };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByText('This timeline changed somewhere else')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(copyRejectedSave).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders the diverged banner with the keep-mine and use-latest choices', () => {
+    const reload = vi.fn();
+    const keepMine = vi.fn();
+    __chromeOverrides = {
+      isConflictExhausted: true,
+      reloadFromServer: reload,
+      retrySaveAfterConflict: keepMine,
+    };
+
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    expect(screen.getByText('Keep your changes, or switch to the latest version.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Use latest version' }));
+    expect(reload).toHaveBeenCalled();
+    expect(keepMine).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep my changes' }));
+    expect(keepMine).toHaveBeenCalled();
+  });
+
+  it('shows the diverged banner as a choice, in neutral colours, never destructive red', () => {
+    __chromeOverrides = { isConflictExhausted: true };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    const banner = screen.getByText('Keep your changes, or switch to the latest version.').closest('[role="alert"]') as HTMLElement;
+    expect(banner.className).toContain('text-foreground');
+    expect(banner.className).not.toContain('destructive');
+  });
+
+  it('makes keeping the person\'s changes the primary choice, and switching to the latest version the outline one', () => {
+    __chromeOverrides = { isConflictExhausted: true };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    expect(screen.getByRole('button', { name: 'Keep my changes' }).className).toContain('bg-primary');
+    expect(screen.getByRole('button', { name: 'Use latest version' }).className).not.toContain('bg-primary');
+  });
+
+  it('offers the choice in one place only: the dialog while it is open, the inline bar once it was dismissed', () => {
+    __chromeOverrides = { isConflictExhausted: true };
+    __conflictDialog = { isOpen: true };
+    const { unmount } = render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    // Open: the dialog alone has the buttons, and the bar says nothing beside it.
+    expect(screen.getAllByRole('button', { name: 'Keep my changes' }, { hidden: true })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Use latest version' }, { hidden: true })).toHaveLength(1);
+    expect(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Keep my changes' })).toBeTruthy();
+    expect(screen.getAllByText('Keep your changes, or switch to the latest version.')).toHaveLength(1);
+    unmount();
+
+    // Dismissed (Escape): the bar is the way back to the same choice, and the dialog is gone.
+    __conflictDialog = { isOpen: false };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Keep my changes' })).toHaveLength(1);
+    expect(screen.getAllByRole('button', { name: 'Use latest version' })).toHaveLength(1);
+  });
+
+  it('does not render the diverged banner when clean', () => {
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByText('Keep your changes, or switch to the latest version.')).toBeNull();
+  });
+
+  it('the save conflict dialog says the timeline changed somewhere else, with Keep my changes as its primary action', () => {
+    const keepLocalChanges = vi.fn();
+    const discardAndReload = vi.fn();
+    __conflictDialog = { isOpen: true, keepLocalChanges, discardAndReload };
+
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    const dialog = screen.getByRole('alertdialog');
+    expect(within(dialog).getByText('This timeline changed somewhere else')).toBeTruthy();
+    expect(within(dialog).getByText('Keep your changes, or switch to the latest version.')).toBeTruthy();
+    const keep = within(dialog).getByRole('button', { name: 'Keep my changes' });
+    const latest = within(dialog).getByRole('button', { name: 'Use latest version' });
+    expect(keep.className).toContain('bg-primary');
+    expect(latest.className).not.toContain('bg-primary');
+    fireEvent.click(latest);
+    expect(discardAndReload).toHaveBeenCalledOnce();
+    expect(keepLocalChanges).not.toHaveBeenCalled();
+    fireEvent.click(within(screen.getByRole('alertdialog')).getByRole('button', { name: 'Keep my changes' }));
+    expect(keepLocalChanges).toHaveBeenCalledOnce();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Recovery draft (plan-v5 B9)
+// ---------------------------------------------------------------------------
+
+describe('TimelineEditorShellCore — recovery draft banner', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __clearSlotRenderers();
+    __clearRuntimeContext();
+    __deviceClass = 'desktop';
+    __chromeOverrides = {};
+  });
+
+  afterEach(() => {
+    __chromeOverrides = {};
+  });
+
+  it('R13 offers Restore and Discard for an IndexedDB recovery record', () => {
+    const restore = vi.fn();
+    const discard = vi.fn();
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+      retryRecoveredDraft: restore,
+      discardRecoveredDraft: discard,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('We kept your unsaved edit.');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(restore).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(discard).toHaveBeenCalledTimes(1);
+  });
+
+  it('R13 keeps FIX-16 rejection actions visible and hides generic Restore after rejection', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+      saveNotice: 'This change is too large to save. Your changes are kept here but have not been saved.',
+      permanentSaveRejection: true,
+      copyRejectedSave: vi.fn(),
+      reloadFromServer: vi.fn(),
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('button', { name: 'Copy my change out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Discard and reload the saved version' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
+  it('R13 makes Restore the primary action for an eligible recovered draft', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('We kept your unsaved edit.');
+    expect(screen.getByRole('button', { name: 'Restore' }).className).toContain('bg-primary');
+    expect(screen.getByRole('button', { name: 'Discard' }).className).not.toContain('bg-primary');
+  });
+
+  it('R13 hides the recovery notice while keeping FIX-16 stop copy after permanent rejection', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+      saveNotice: 'This change is too large to save. Your changes are kept here but have not been saved.',
+      permanentSaveRejection: true,
+      copyRejectedSave: vi.fn(),
+      reloadFromServer: vi.fn(),
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert').textContent).toContain('This change is too large to save.');
+    expect(screen.queryByText('We kept your unsaved edit.')).toBeNull();
+  });
+
+  it('offers Save them and Discard for a recovered draft, naming only the time of day', () => {
+    const retry = vi.fn();
+    const discard = vi.fn();
+    const updatedAt = '2026-08-11T21:00:00.000Z';
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt, baseVersion: 159 },
+      retryRecoveredDraft: retry,
+      discardRecoveredDraft: discard,
+    };
+
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    const time = new Date(updatedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    expect(screen.getByText(`You have unsaved changes from ${time}.`)).toBeTruthy();
+    expect(screen.queryByText(/previous session|draft from|Retry or Discard/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Save them' }));
+    expect(retry).toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(discard).toHaveBeenCalled();
+  });
+
+  it('shows a persistent watchdog alert with Retry save when the bridge never acknowledged an edit', () => {
+    const retryWatchdog = vi.fn();
+    __chromeOverrides = { watchdogTripped: true, watchdogReason: 'timeout', retryWatchdog };
+
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    expect(screen.getByRole('alert').textContent).toMatch(/changes have not been saved/i);
+    fireEvent.click(screen.getByRole('button', { name: 'Retry save' }));
+    expect(retryWatchdog).toHaveBeenCalled();
+  });
+
+  it('FIX16-UI offers the exact copy and explicit discard actions only for permanent rejection', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveNotice: 'This change is too large to save. Your changes are kept here but have not been saved.',
+      permanentSaveRejection: true,
+      copyRejectedSave, reloadFromServer,
+    };
+    const view = render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert').textContent).toContain('This change is too large to save.');
+    const copy = screen.getByRole('button', { name: 'Copy my change out' });
+    const discard = screen.getByRole('button', { name: 'Discard and reload the saved version' });
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(copy);
+    expect(copyRejectedSave).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Keep my unsaved edits' }));
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    // The other option is also an explicit, independently available action.
+    fireEvent.click(discard);
+    expect(reloadFromServer).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).toHaveBeenCalledWith({ discardRefusedSave: true });
+    view.unmount();
+
+    __chromeOverrides = {
+      saveNotice: 'Save not acknowledged',
+      permanentSaveRejection: false,
+      copyRejectedSave, reloadFromServer,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByRole('button', { name: 'Copy my change out' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard and reload the saved version' })).toBeNull();
+  });
+
+  it('hides generic recovery Save them and Discard controls for a permanently rejected draft', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-10-08T13:43:57Z', baseVersion: 1 },
+      permanentSaveRejection: true,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByRole('button', { name: 'Save them' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
+  it('FIX16-UI confirms an exported file before canonical reload, never on download alone', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveNotice: 'Not saved: invalid request.',
+      permanentSaveRejection: true, copyRejectedSave, reloadFromServer,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'I saved the file — reload the saved version' }));
+    expect(reloadFromServer).toHaveBeenCalledTimes(1);
+    expect(reloadFromServer).toHaveBeenCalledWith({ discardRefusedSave: true });
+  });
+
+  it('FIX16-UI keeps edits untouched when a file export fails to start', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(false);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveNotice: 'Not saved: invalid request.',
+      permanentSaveRejection: true, copyRejectedSave, reloadFromServer,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(copyRejectedSave).toHaveBeenCalledTimes(1));
+    expect(screen.queryByText('Keep a copy of your unsaved change')).toBeNull();
+    expect(reloadFromServer).not.toHaveBeenCalled();
+  });
+
+  it('does not render the recovery banner without a draft', () => {
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.queryByText(/You have unsaved changes/)).toBeNull();
+  });
+  it('hides recovery controls while the conflict surface is active', () => {
+    __chromeOverrides = {
+      isConflictExhausted: true,
+      recoveryDraft: { updatedAt: '2026-10-08T13:43:57Z', baseVersion: 1 },
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByText('Keep your changes, or switch to the latest version.')).toBeTruthy();
+    expect(screen.queryByText(/You have unsaved changes/)).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Save them' })).toBeNull();
+  });
+  it('marks unknown recovery provenance and disables Save them', () => {
+    const retry = vi.fn();
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-10-08T13:43:57Z', baseVersion: 1, retryAllowed: false },
+      retryRecoveredDraft: retry,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByText(/original editing head is unknown/i)).toBeTruthy();
+    const button = screen.getByRole('button', { name: 'Save them' });
+    expect(button.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(button);
+    expect(retry).not.toHaveBeenCalled();
+  });
+});
 describe('TimelineEditorShellCore — the save bar', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -2052,12 +2372,41 @@ describe('TimelineEditorShellCore — the save bar', () => {
     expect(screen.getByText(`You have unsaved changes. Since ${time}.`)).toBeTruthy();
   });
 
+  it('keeps rejection export confirmation and eligible Restore beside an actual save bar', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveBar: { kind: 'refused', headline: 'Rejected by server', action: 'pending' },
+      saveNotice: 'Not saved: invalid request.', permanentSaveRejection: true,
+      copyRejectedSave, reloadFromServer,
+    };
+    const view = render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    view.unmount();
+
+    const restore = vi.fn();
+    const discard = vi.fn();
+    __chromeOverrides = {
+      saveBar: { kind: 'waiting', headline: 'Save awaiting confirmation', action: 'watchdog' },
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true, retryRecoveredDraft: restore, discardRecoveredDraft: discard,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('We kept your unsaved edit.');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(restore).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument();
+  });
+
   it('shows nothing, and no dialog, when nothing is unsaved', () => {
     render(<TimelineEditorShellCore timelineId="test-timeline" />);
     expect(document.querySelector('[data-save-bar]')).toBeNull();
     expect(screen.queryByRole('alertdialog')).toBeNull();
   });
 });
+
 
   it('does not snap a live dataItem target back to the timeline placeholder (groken LIVE-1)', () => {
     __liveInspectorTarget.value = {

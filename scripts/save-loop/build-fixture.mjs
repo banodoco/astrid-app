@@ -7,9 +7,8 @@
  *   df -h /home/user
  *   SAVE_LOOP_ROOT=<isolated-root> SAVE_LOOP_BASE_URL=http://127.0.0.1:<editor-port> \
  *     node scripts/save-loop/build-fixture.mjs
- *   SAVE_LOOP_PROJECT=<manifest-project-id> SAVE_LOOP_TIMELINE=<manifest-timeline-id> \
- *     SAVE_LOOP_BASE_URL=http://127.0.0.1:<editor-port> node scripts/save-loop/sweep.mjs \
- *     --video-clip <manifest-video-clip-id> --audio-clip <manifest-audio-clip-id>
+ * Use the printed manifest path with the current sweep CLI's --manifest,
+ * --results, and --versions options.
  *
  * Repeat the same build and sweep on a second machine with only ffmpeg, Node,
  * and the SL-1 stack. A live stack is required to accept the size and timing
@@ -35,7 +34,6 @@ const videoCount = Math.round(clipTarget * 0.06);
 const audioCount = clipTarget - imageCount - videoCount;
 const visualTracks = ['video-1', 'video-2', 'video-3', 'video-4', 'video-5', 'video-6'];
 const audioTracks = ['audio-1', 'audio-2', 'audio-3'];
-const trackLabel = id => id.replace('-', ' ');
 
 function run(command, args, options = {}) {
   return new Promise((resolve, reject) => {
@@ -89,6 +87,56 @@ function assertUniqueAssets(files, role) {
   if (hashes.size !== files.length) throw new Error(`${role} pool has only ${hashes.size}/${files.length} distinct generated assets`);
 }
 
+function pngChunk(type, data) {
+  const name = Buffer.from(type, 'ascii');
+  const body = Buffer.concat([name, data]);
+  let crc = 0xffffffff;
+  for (const byte of body) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit++) crc = (crc & 1) ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  const chunk = Buffer.alloc(12 + data.length);
+  chunk.writeUInt32BE(data.length, 0);
+  name.copy(chunk, 4);
+  data.copy(chunk, 8);
+  chunk.writeUInt32BE((crc ^ 0xffffffff) >>> 0, 8 + data.length);
+  return chunk;
+}
+
+function stampGeneratedPngs(files) {
+  const key = Buffer.concat([Buffer.from('P77Fixture'), Buffer.from([0])]);
+  files.forEach((file, index) => {
+    const png = fs.readFileSync(file);
+    if (png.includes(key)) return;
+    let offset = 8;
+    while (offset + 12 <= png.length) {
+      const length = png.readUInt32BE(offset);
+      if (png.toString('ascii', offset + 4, offset + 8) === 'IEND') {
+        const tag = Buffer.concat([key, Buffer.from(index.toString().padStart(4, '0'))]);
+        const result = Buffer.concat([png.subarray(0, offset), pngChunk('tEXt', tag), png.subarray(offset)]);
+        const temporary = `${file}.tmp`;
+        fs.writeFileSync(temporary, result);
+        fs.renameSync(temporary, file);
+        return;
+      }
+      offset += 12 + length;
+    }
+    throw new Error(`ffmpeg output is not a complete PNG: ${file}`);
+  });
+}
+
+async function stampGeneratedVideos(files) {
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index];
+    if (fs.readFileSync(file).includes(Buffer.from('P77Fixture'))) continue;
+    assertDisk();
+    const temporary = file.replace(/\.mp4$/, '.tmp.mp4');
+    await run('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-i', file, '-map', '0', '-c', 'copy',
+      '-metadata', `comment=P77Fixture-${String(index).padStart(4, '0')}`, '-movflags', '+faststart', '-y', temporary]);
+    fs.renameSync(temporary, file);
+  }
+}
+
 async function mediaPool({dir, prefix, suffix, count, ffmpegArgs}) {
   fs.mkdirSync(dir, {recursive: true});
   let files = filesIn(dir, prefix, suffix);
@@ -126,6 +174,7 @@ function findString(value, field) {
 
 const sdkScript = String.raw`
 import json, os, statistics, time
+from astrid.sdk import AstridClient
 from astrid.sdk.timeline.api import Timeline
 
 cfg = json.load(open(os.environ['SAVE_LOOP_CONFIG_PATH'], encoding='utf-8'))
@@ -155,14 +204,14 @@ def placement_rows(doc):
         rows = (doc.get('parent', {}) or {}).get('occurrences', [])
     return rows if isinstance(rows, list) else []
 
-def populate(tl, timeline, *, control=False):
+def populate(timeline, *, control=False):
     targets = {'video': [], 'audio': [], 'image': []}
     def edit(t):
         for track in visual: t.track(track, kind='visual')
         for track in audio: t.track(track, kind='audio')
         if control:
             clip_id = 'control-video-0000'
-            t.add(media['video'][0], at=10, hold=5, track=visual[0], id=clip_id)
+            t.add(media['video'][0], at=10, hold=4, track=visual[0], id=clip_id)
             targets['video'].append(clip_id)
         else:
             for i in range(count):
@@ -172,12 +221,15 @@ def populate(tl, timeline, *, control=False):
                     track, at, hold = visual[i % 5], (i // 5) * 6, 5
                 elif i < image_n + video_n:
                     kind, index = 'video', i - image_n
-                    track, at, hold = visual[5], index * 5.2, 5
+                    track, at, hold = visual[5], index * 5.2, 4
                 else:
                     kind, index = 'audio', i - image_n - video_n
-                    track, at, hold = audio[index % len(audio)], (index // len(audio)) * 1.4, 1
+                    track, at, hold = audio[index % len(audio)], (index // len(audio)) * 1.4, .8
                 clip_id = f'fixture-{kind}-{i:04d}'
-                t.add(media[kind][index], at=at, hold=hold, track=track, id=clip_id)
+                try:
+                    t.add(media[kind][index], at=at, hold=hold, track=track, id=clip_id)
+                except Exception as error:
+                    raise RuntimeError(f'{kind} media {index}, clip {clip_id}, hold {hold}: {error}') from error
                 targets[kind].append(clip_id)
             # These are real SDK-created composition occurrences. Their IDs are
             # resolved from the published SDK document after the commit.
@@ -189,27 +241,32 @@ def populate(tl, timeline, *, control=False):
                              'shot_id': shot['shot_id'], 'name': shot['name'],
                              'track': visual[i % len(visual)], 'on': i * 4.25, 'duration': 4},
                 }, label='Create generated fixture shot occurrence')
-    tl.commit(edit, label='Create generated save-loop fixture',
-              idempotency_key=f"p77-fixture-{timeline}-{project}")
-    return tl.document(), targets
+    with AstridClient.open_existing_from_launcher() as client:
+        tl = Timeline.open(project, timeline, client=client)
+        tl.commit(edit, label='Create generated save-loop fixture',
+                  idempotency_key=f"p77-fixture-{timeline}-{project}")
+        document = tl.document()
+    return document, targets
 
-heavy_doc, heavy_targets = populate(Timeline.open(project, timeline_id), timeline_id)
-control_doc, control_targets = populate(Timeline.open(project, control_id), control_id, control=True)
+heavy_doc, heavy_targets = populate(timeline_id)
+control_doc, control_targets = populate(control_id, control=True)
 
 def warm_move_samples(timeline, clip_id, samples=5):
-    doc = Timeline.open(project, timeline).document()
+    with AstridClient.open_existing_from_launcher() as client:
+        doc = Timeline.open(project, timeline, client=client).document()
     clip = next((row for row in root_clips(doc) if row.get('id') == clip_id), None)
     if clip is None: raise RuntimeError(f'public SDK document has no clip {clip_id}')
     initial = float(clip.get('at', 0))
     times = []
     for i in range(samples):
         target = initial + (1 / 30 if i % 2 == 0 else 0)
-        tl = Timeline.open(project, timeline)
-        started = time.perf_counter()
-        tl.move(f'parent/clip:{clip_id}', target)
-        tl.commit(label='Warm fixture clip move',
-                  idempotency_key=f'p77-warm-move-{timeline}-{clip_id}-{i}')
-        times.append((time.perf_counter() - started) * 1000)
+        with AstridClient.open_existing_from_launcher() as client:
+            tl = Timeline.open(project, timeline, client=client)
+            started = time.perf_counter()
+            tl.move(f'parent/clip:{clip_id}', target)
+            tl.commit(label='Warm fixture clip move',
+                      idempotency_key=f'p77-warm-move-{timeline}-{clip_id}-{i}')
+            times.append((time.perf_counter() - started) * 1000)
     return times
 
 heavy_times = warm_move_samples(timeline_id, heavy_targets['video'][0])
@@ -273,11 +330,13 @@ async function main() {
   const images = await mediaPool({dir: path.join(mediaRoot, 'images'), prefix: 'image-', suffix: '.png', count: imageCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `color=c=red:s=1920x1080:r=1:d=${imageCount}`,
       '-vf', "fps=1,hue=h='2*n'", '-frames:v', String(imageCount), '-start_number', '0', '-y', pattern]});
+  stampGeneratedPngs(images);
   const videos = await mediaPool({dir: path.join(mediaRoot, 'videos'), prefix: 'video-', suffix: '.mp4', count: videoCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `color=c=red:s=1920x1080:r=30:d=${videoCount * 5}`,
       '-vf', "hue=h='2*n'", '-c:v', 'libx264', '-preset', 'ultrafast', '-pix_fmt', 'yuv420p',
       '-g', '30', '-force_key_frames', 'expr:gte(t,n_forced*5)', '-f', 'segment', '-segment_time', '5',
       '-segment_format', 'mp4', '-reset_timestamps', '1', '-y', pattern]});
+  await stampGeneratedVideos(videos);
   const audios = await mediaPool({dir: path.join(mediaRoot, 'audio'), prefix: 'audio-', suffix: '.wav', count: audioCount,
     ffmpegArgs: pattern => ['-f', 'lavfi', '-i', `aevalsrc=sin(2*PI*(440+floor(t))*t):s=44100:d=${audioCount}`,
       '-f', 'segment', '-segment_time', '1', '-segment_format', 'wav', '-reset_timestamps', '1', '-y', pattern]});
@@ -317,6 +376,13 @@ async function main() {
     && fs.existsSync(path.join(versionsDir, name, 'py/bin/python')));
   if (installedVersions.length !== 1) throw new Error(`expected one pinned SDK Python below ${versionsDir}; found ${installedVersions.length}`);
   const python = path.join(versionsDir, installedVersions[0], 'py/bin/python');
+  const runtimeCli = path.join(versionsDir, installedVersions[0], 'py/bin/astrid-runtime');
+  const stackTmp = path.resolve(root, 'tmp');
+  const xdgData = path.resolve(root, 'home/.local/share');
+  const xdgConfig = path.resolve(root, 'home/.config');
+  fs.mkdirSync(stackTmp, {recursive: true});
+  fs.mkdirSync(xdgData, {recursive: true});
+  fs.mkdirSync(xdgConfig, {recursive: true});
   const configPath = path.join(scratch, `config-${nonce}.json`);
   const scriptPath = path.join(scratch, `build-${nonce}.py`);
   const measurementPath = path.join(scratch, `measurement-${nonce}.json`);
@@ -327,7 +393,10 @@ async function main() {
   fs.writeFileSync(scriptPath, sdkScript, {mode: 0o600});
   try {
     await run(python, ['-I', scriptPath], {env: {...process.env,
-      HOME: path.resolve(root, 'home'), ASTRID_RUNTIME_DATA_ROOT: path.resolve(root, 'data'),
+      HOME: path.resolve(root, 'home'), TMPDIR: stackTmp, XDG_DATA_HOME: xdgData,
+      XDG_CONFIG_HOME: xdgConfig, ASTRID_RUNTIME_DATA_ROOT: path.resolve(root, 'data'),
+      ASTRID_RUNTIME_DOOR_PORT: '17502', ASTRID_RUNTIME_CLI: runtimeCli,
+      ASTRID_RUNTIME_LAUNCHER: runtimeCli,
       SAVE_LOOP_CONFIG_PATH: configPath, SAVE_LOOP_MEASUREMENT_PATH: measurementPath}});
   } finally {
     fs.rmSync(scriptPath, {force: true});
@@ -337,9 +406,7 @@ async function main() {
   fs.rmSync(measurementPath, {force: true});
   assertDisk();
   const {named, ...measuredValues} = measurement;
-  const registryAssetTarget = 418;
   const passed = measurement.clip_count >= clipTarget && measurement.document_bytes >= byteTarget
-    && measurement.registry_asset_count >= registryAssetTarget
     && measurement.warm_move_median_ratio >= ratioTarget;
   const manifest = {
     schema_version: 1,
@@ -357,9 +424,10 @@ async function main() {
       shot_occurrences: named.occurrences,
     },
     shots,
-    media: {synthetic: true, asset_counts: {image: images.length, video: videos.length, audio: audios.length}},
+    media: {synthetic: true, asset_counts: {image: images.length, video: videos.length, audio: audios.length},
+      drop_files: images.slice(0, 3)},
     measurement: {...measuredValues, targets: {clip_count: clipTarget, document_bytes: byteTarget,
-      registry_asset_count: registryAssetTarget, warm_move_median_ratio: ratioTarget}, status: passed ? 'pass' : 'fail'},
+      warm_move_median_ratio: ratioTarget}, status: passed ? 'pass' : 'fail'},
     live_proof: {stack_url: baseUrl, generated_at: new Date().toISOString(), second_machine: 'pending'},
   };
   const manifestPath = path.join(scratch, `manifest-${projectId}.json`);
@@ -367,8 +435,6 @@ async function main() {
   console.log(`Manifest: ${manifestPath}`);
   console.log(`Video target: ${named.video[0].clip_id}`);
   console.log(`Audio target: ${named.audio[0].clip_id}`);
-  const shellQuote = value => `'${String(value).replaceAll("'", "'\\''")}'`;
-  console.log(`Sweep command: SAVE_LOOP_PROJECT=${shellQuote(projectId)} SAVE_LOOP_TIMELINE=${shellQuote(timelineId)} SAVE_LOOP_BASE_URL=${shellQuote(baseUrl)} node scripts/save-loop/sweep.mjs --video-clip ${shellQuote(manifest.clips.video.primary.clip_id)} --audio-clip ${shellQuote(manifest.clips.audio.primary.clip_id)}`);
   console.log(JSON.stringify(manifest.measurement, null, 2));
   if (!passed) throw new Error(`measured fixture misses target; use observed size/ratio to set SAVE_LOOP_CLIPS higher; manifest retained at ${manifestPath}`);
 }

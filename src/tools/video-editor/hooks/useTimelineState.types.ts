@@ -243,6 +243,10 @@ export interface TimelineChromeContextValue {
   watchdogReason: 'timeout' | 'lost-edit' | null;
   /** Why a local change was rejected or removed from the save queue; null when there is nothing to say. */
   saveNotice: string | null;
+  /** A permanently rejected local save stays in the durable outbox until an explicit choice. */
+  permanentSaveRejection: boolean;
+  /** Downloads the original rejected request and all dependent authored edits, without consuming them. */
+  copyRejectedSave: () => Promise<void>;
   retryWatchdog: () => void;
   /**
    * Astrid answered again after a stop: sends the save that never got an answer now (does nothing when none waits, or

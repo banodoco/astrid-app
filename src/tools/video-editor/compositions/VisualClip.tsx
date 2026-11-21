@@ -1,6 +1,6 @@
 import { getEffectiveClipVolume } from '@/tools/video-editor/lib/clip-volume.ts';
-import { useEffect, useMemo, useState, type CSSProperties, type FC, type ReactNode } from 'react';
-import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment, useVideoConfig } from 'remotion';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type FC, type ReactNode } from 'react';
+import { AbsoluteFill, Sequence, useCurrentFrame, useDelayRender, useRemotionEnvironment, useVideoConfig } from 'remotion';
 import { ReadinessImage } from '@astrid/packs/rendering/shared/readiness-image';
 import { ReadinessVideo } from './ReadinessVideo.tsx';
 import {
@@ -158,6 +158,37 @@ const isRecord = (value: unknown): value is Record<string, unknown> => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
 );
 
+const IntrinsicSizeDelay: FC<{
+  source: string;
+  mediaType: string;
+  result: { source: string; type: string; size: { width: number; height: number } | null; failed: boolean } | null;
+}> = ({ source, mediaType, result }) => {
+  const { delayRender, continueRender, cancelRender } = useDelayRender();
+  const pendingHandle = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    pendingHandle.current = delayRender(`Intrinsic dimensions for ${source}`);
+    return () => {
+      const handle = pendingHandle.current;
+      pendingHandle.current = null;
+      if (handle !== null) continueRender(handle);
+    };
+  }, [source, mediaType, delayRender, continueRender]);
+  useLayoutEffect(() => {
+    if (result?.source !== source || result.type !== mediaType || pendingHandle.current === null) return;
+    const handle = pendingHandle.current;
+    pendingHandle.current = null;
+    if (result.failed) {
+      try {
+        cancelRender(new Error(`Could not load intrinsic dimensions for ${source}`));
+      } catch {
+        // Remotion may throw the cancellation through React after recording it.
+      }
+    }
+    else if (result.size) continueRender(handle);
+  }, [source, mediaType, result, continueRender, cancelRender]);
+  return null;
+};
+
 function materialRefsForClip(
   clip: ResolvedTimelineClip,
   materialRefs: readonly RenderMaterialRef[] | undefined,
@@ -181,32 +212,46 @@ function shouldRenderMaterialPlaceholder(status: RenderPlannerMaterialStatus): b
   return status.state === 'missing' || status.state === 'pending' || status.state === 'stale' || status.state === 'failed';
 }
 
-const VisualAsset: FC<VisualClipProps> = ({ clip, track, fps }) => {
+const VisualAsset: FC<VisualClipProps & { isRendering: boolean }> = ({ clip, track, fps, isRendering }) => {
   const { width: compositionWidth, height: compositionHeight } = useVideoConfig();
   const previewMediaFailure = useOptionalPreviewMediaFailure();
-  const [naturalSize, setNaturalSize] = useState<{width: number; height: number} | null>(null);
-  const [sizeFailed, setSizeFailed] = useState(false);
+  const [probeResult, setProbeResult] = useState<{source: string; type: string; size: {width: number; height: number} | null; failed: boolean} | null>(null);
   const declaredSize = intrinsicMediaSize(clip.assetEntry);
   const resolution = clip.assetEntry?.resolution;
   const source = clip.assetEntry?.src;
   const type = clip.assetEntry?.type;
+  const supportedType = type?.startsWith('image') ? 'image' : type?.startsWith('video') ? 'video' : null;
+  const needsProbe = Boolean(source && supportedType && typeof document !== 'undefined' && !(Number.isFinite(declaredSize.width) && Number.isFinite(declaredSize.height)));
+
   useEffect(() => {
-    setNaturalSize(null);
-    setSizeFailed(false);
-    if ((Number.isFinite(declaredSize.width) && Number.isFinite(declaredSize.height)) || !source || typeof document === 'undefined') return;
+    if (!needsProbe || !source || typeof document === 'undefined') return;
+    let active = true;
+    const finish = (result: {size: {width: number; height: number} | null; failed: boolean}) => {
+      if (!active) return;
+      setProbeResult({source, type: type ?? '', ...result});
+    };
     const media = document.createElement(type?.startsWith('image') ? 'img' : 'video');
     const loaded = () => {
       const width = media instanceof HTMLImageElement ? media.naturalWidth : media.videoWidth;
       const height = media instanceof HTMLImageElement ? media.naturalHeight : media.videoHeight;
-      if (width > 0 && height > 0) setNaturalSize({width, height});
-      else setSizeFailed(true);
+      if (width > 0 && height > 0) finish({size: {width, height}, failed: false});
+      else {
+        finish({size: null, failed: true});
+      }
     };
-    const failed = () => setSizeFailed(true);
+    const failed = () => {
+      finish({size: null, failed: true});
+    };
     media.addEventListener('error', failed);
     media.addEventListener(type?.startsWith('image') ? 'load' : 'loadedmetadata', loaded);
     media.src = source;
-    return () => { media.removeEventListener('error', failed); media.removeEventListener(type?.startsWith('image') ? 'load' : 'loadedmetadata', loaded); media.removeAttribute('src'); };
-  }, [source, type, resolution]);
+    return () => {
+      active = false;
+      media.removeEventListener('error', failed);
+      media.removeEventListener(type?.startsWith('image') ? 'load' : 'loadedmetadata', loaded);
+      media.removeAttribute('src');
+    };
+  }, [source, type, resolution, declaredSize.width, declaredSize.height, needsProbe]);
   // Never silent-null when a built-in clip is missing its asset.
   // Render a labeled red band so the gap is obvious in preview/export.
   if (!clip.assetEntry) {
@@ -254,9 +299,13 @@ const VisualAsset: FC<VisualClipProps> = ({ clip, track, fps }) => {
       />
     );
   }
-  const size = Number.isFinite(declaredSize.width) && Number.isFinite(declaredSize.height) ? declaredSize : naturalSize;
-  if (!size && sizeFailed) return <div role="alert" data-testid="preview-media-error">{`Clip '${clip.id}' asset '${clip.asset ?? clip.assetEntry.file ?? mediaSrc}' could not load intrinsic dimensions`}</div>;
-  if (!size) return null;
+  const currentProbe = probeResult?.source === source && probeResult.type === (type ?? '') ? probeResult : null;
+  const size = Number.isFinite(declaredSize.width) && Number.isFinite(declaredSize.height) ? declaredSize : currentProbe?.size;
+  const delayProbe = isRendering && needsProbe && source && supportedType && type
+    ? <IntrinsicSizeDelay source={source} mediaType={type} result={probeResult} />
+    : null;
+  if (!size && currentProbe?.failed) return <>{delayProbe}<div role="alert" data-testid="preview-media-error">{`Clip '${clip.id}' asset '${clip.asset ?? clip.assetEntry.file ?? mediaSrc}' could not load intrinsic dimensions`}</div></>;
+  if (!size) return delayProbe;
   const placement = resolveClipPlacement({clip, track, canvas: {width: compositionWidth, height: compositionHeight}, intrinsic: size});
   const renderBounds = placement.local.clip;
   const mediaBounds = placement.local.media;
@@ -288,13 +337,18 @@ const VisualAsset: FC<VisualClipProps> = ({ clip, track, fps }) => {
 
   if (isImage) {
     return (
+      <>
+      {delayProbe}
       <div style={viewportStyle}>
         <ReadinessImage src={mediaSrc} mediaId={clip.id} style={mediaStyle} crossOrigin="anonymous" />
       </div>
+      </>
     );
   }
 
   return (
+    <>
+    {delayProbe}
     <div style={viewportStyle}>
       <ReadinessVideo
         clipId={clip.id}
@@ -313,6 +367,7 @@ const VisualAsset: FC<VisualClipProps> = ({ clip, track, fps }) => {
         onLoadedData={mediaFailure?.onLoadedData}
       />
     </div>
+    </>
   );
 };
 
@@ -401,7 +456,7 @@ export const VisualClip: FC<VisualClipProps> = ({
 
   const content: ReactNode = (
     <ClipTransition clip={clip} fps={fps}>
-      <VisualAsset clip={clip} track={track} fps={fps} />
+      <VisualAsset clip={clip} track={track} fps={fps} isRendering={environment.isRendering || environment.isClientSideRendering} />
       {renderUnsupportedShaderExport && shader ? (
         <UnsupportedClipShaderExportBody clipId={clip.id} shaderId={shader.shaderId} />
       ) : null}

@@ -424,7 +424,7 @@ function useTimelineChromeContextValue({
   watchdogReason: 'timeout' | 'lost-edit' | null;
   saveNotice: string | null;
   permanentSaveRejection: boolean;
-  copyRejectedSave: () => Promise<void>;
+  copyRejectedSave: () => Promise<boolean>;
   retryWatchdog: () => void;
   retryPendingSave: () => void;
   flushPendingSave: () => Promise<number>;

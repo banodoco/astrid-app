@@ -21,7 +21,7 @@ const entry = (revision: string, digest: string): ProjectElementEntry => ({
   authoring: { packRoot: '/canonical', descriptorPath: '/canonical/element.yaml', componentPath: '/canonical/component.tsx', status: 'ready' },
 });
 const list = (projectId: string, selectionDigest: string, elements: ProjectElementEntry[], realmId = 'realm'): ProjectElementList => ({
-  version: 1, projectId, realmId, selectionDigest, projects: [], elements,
+  version: 1, projectId, realmId, selectionDigest, legacy: [], projects: [], elements,
 });
 
 describe('atomic admitted host refresh', () => {
@@ -221,5 +221,60 @@ describe('atomic admitted host refresh', () => {
     await expect(host.refreshAdmittedElements()).resolves.toBe(before);
     expect(host.getAdmittedElementSelection().projectId).toBeNull();
     expect(host.getAdmittedElementReadiness().phase).toBe('ready');
+  });
+
+  it('aborts a pending bundle fetch on a project switch and never evaluates or publishes it', async () => {
+    host.setAdmittedElementScope('project-a', [ref('old')]);
+    const evaluated = vi.fn();
+    let aborted = false;
+    const started = deferred<void>();
+    const load = vi.fn((_entry: ProjectElementEntry) => new Promise<ProjectElementComponent>((resolve, reject) => {
+      // Stands in for fetch + digest check + import(): once the project is left, nothing may reach evaluation.
+      started.resolve(undefined as never);
+      setTimeout(() => { if (aborted) reject(new Error('aborted')); else { evaluated(); resolve(Blocks); } }, 0);
+    }));
+    const loading = host.refreshAdmittedElements(async () => list('project-a', digestOf('a'), [entry('old', digestOf('1'))]), load);
+    await started.promise;
+    host.setAdmittedElementScope('project-b', [ref('old')]);
+    aborted = true;
+    await loading;
+
+    expect(host.getAdmittedElementSelection().components).toEqual({});
+    expect(host.getAdmittedElementSelection().projectId).toBe('project-b');
+    expect(host.admittedComponent(ref('old'))).toBeUndefined();
+    expect(host.getAdmittedElementReadiness()).toMatchObject({ projectId: 'project-b', phase: 'loading' });
+    expect(evaluated).not.toHaveBeenCalled();
+  });
+
+  it('aborts the in-flight list fetch itself when the scope changes', async () => {
+    vi.doMock('@/integrations/runtime/connection', () => ({ runtimeOrigin: () => '', runtimeApiBase: () => '/api/runtime' }));
+    vi.resetModules();
+    host = await import('./admitted-elements');
+    const signals: AbortSignal[] = [];
+    vi.stubGlobal('fetch', vi.fn((_url: string, init: RequestInit) => {
+      signals.push(init.signal as AbortSignal);
+      return new Promise((_resolve, reject) => init.signal!.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError'))));
+    }));
+    try {
+      host.setAdmittedElementScope('project-a', [ref('old')]);
+      const loading = host.refreshAdmittedElements();
+      await vi.waitFor(() => expect(signals).toHaveLength(1));
+      expect(signals[0].aborted).toBe(false);
+      host.setAdmittedElementScope('project-b', []);
+      expect(signals[0].aborted).toBe(true);
+      await loading;
+      expect(host.getAdmittedElementReadiness()).toMatchObject({ projectId: 'project-b', phase: 'loading' });
+    } finally { vi.unstubAllGlobals(); vi.doUnmock('@/integrations/runtime/connection'); }
+  });
+
+  it('reports legacy elements by name so their clips can say they need re-admitting', async () => {
+    host.setAdmittedElementScope('project', [ref('old')]);
+    const legacy = [{ packId: 'project_pack', kind: 'effect' as const, id: 'blocks' }];
+    await host.refreshAdmittedElements(async () => ({ ...list('project', digestOf('a'), []), legacy }), async () => Blocks);
+
+    expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'ready', legacy });
+    expect(host.isLegacyElementRef(ref('old'))).toBe(true);
+    expect(host.isLegacyElementRef({ ...ref('old'), id: 'other' })).toBe(false);
+    expect(host.LEGACY_ELEMENT_REASON).toBe('Project elements admitted before this version need re-admitting: run project-pack admit again.');
   });
 });

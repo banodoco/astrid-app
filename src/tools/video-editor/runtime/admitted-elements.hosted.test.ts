@@ -26,19 +26,26 @@ const DIGEST = createHash('sha256').update(SOURCE).digest('hex');
 const REF = { packId: 'project_pack', kind: 'effect' as const, id: 'blocks', revision: 'r1' };
 
 function installImportMap() {
-  const script = document.createElement('script');
-  script.type = 'importmap';
-  script.id = 'astrid-extension-importmap';
-  script.textContent = '{"imports":{"react":"/assets/react.js","react/jsx-runtime":"/assets/jsx.js","remotion":"/assets/remotion.js"}}';
-  document.head.appendChild(script);
+  const bindings = Object.fromEntries(['react', 'react/jsx-runtime', 'remotion'].map((name, index) => [
+    name, { url: `/assets/shared-${index}.js`, sha256: String(index).repeat(64), version: '1.0.0' }]));
+  for (const [id, type, body] of [
+    ['astrid-extension-importmap', 'importmap', { imports: Object.fromEntries(Object.entries(bindings).map(([name, binding]) => [name, binding.url])) }],
+    ['astrid-extension-shared-modules', 'application/json', { version: 1, shared_modules: bindings }],
+  ] as const) {
+    const script = document.createElement('script');
+    script.type = type;
+    script.id = id;
+    script.textContent = JSON.stringify(body);
+    document.head.appendChild(script);
+  }
 }
 
 function listBody(url = `/api/runtime/packs/project-elements/project/${DIGEST}.js`) {
   return {
-    version: 1, projectId: 'project', selectionDigest: 'a'.repeat(64), projects: [], realmId: 'realm',
+    version: 1, projectId: 'project', selectionDigest: 'a'.repeat(64), legacy: [], projects: [], realmId: 'realm',
     elements: [{
       ref: REF, digest: DIGEST, url,
-      descriptor: { id: 'blocks', kind: 'effect', packId: 'project_pack', revision: 'r1', label: 'Blocks', description: '',
+      descriptor: { id: 'blocks', kind: 'effect', packId: 'project_pack', revision: 'r1', label: 'Blocks', description: '', componentPath: 'elements/blocks/component.tsx',
         parameters: [], defaults: {}, renderability: { preview: 'supported', browserExport: 'supported', workerExport: 'unknown' } },
       authoring: { packRoot: '/canonical', descriptorPath: '/canonical/element.yaml', componentPath: '/canonical/component.tsx', status: 'ready' },
     }],
@@ -61,13 +68,13 @@ beforeEach(async () => {
   fetchMock.mockReset();
   vi.stubGlobal('fetch', fetchMock);
   vi.resetModules();
-  document.getElementById('astrid-extension-importmap')?.remove();
+  for (const id of ['astrid-extension-importmap', 'astrid-extension-shared-modules']) document.getElementById(id)?.remove();
   installImportMap();
   host = await import('./admitted-elements');
 });
 afterEach(() => {
   vi.unstubAllGlobals();
-  document.getElementById('astrid-extension-importmap')?.remove();
+  for (const id of ['astrid-extension-importmap', 'astrid-extension-shared-modules']) document.getElementById(id)?.remove();
 });
 
 describe('element admissions on the hosted build', () => {

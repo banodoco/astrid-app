@@ -13,16 +13,24 @@ vi.mock('@/integrations/runtime/connection.ts', () => ({
 const loader = () => import('./admittedElementLoader');
 const digestOf = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 const COMPONENT_SOURCE = 'export default function Blocks() { return null; }';
-const IMPORT_MAP = '{"imports":{"react":"/assets/react.js","react/jsx-runtime":"/assets/jsx.js","remotion":"/assets/remotion.js"}}';
+const BINDINGS = Object.fromEntries((['react', 'react/jsx-runtime', 'remotion'] as const).map((specifier, index) => [
+  specifier, { url: `/assets/shared-${index}.js`, sha256: String(index).repeat(64), version: '1.0.0' },
+]));
+const IMPORT_MAP = JSON.stringify({ imports: Object.fromEntries(Object.entries(BINDINGS).map(([name, binding]) => [name, binding.url])) });
+const LOCK = JSON.stringify({ version: 1, shared_modules: BINDINGS });
 
-function installImportMap(body: string | null = IMPORT_MAP) {
-  document.getElementById('astrid-extension-importmap')?.remove();
+function installScript(id: string, type: string, body: string | null) {
+  document.getElementById(id)?.remove();
   if (body === null) return;
   const script = document.createElement('script');
-  script.type = 'importmap';
-  script.id = 'astrid-extension-importmap';
+  script.type = type;
+  script.id = id;
   script.textContent = body;
   document.head.appendChild(script);
+}
+function installImportMap(body: string | null = IMPORT_MAP, lock: string | null = body === null ? null : LOCK) {
+  installScript('astrid-extension-importmap', 'importmap', body);
+  installScript('astrid-extension-shared-modules', 'application/json', lock);
 }
 
 function readBlobText(blob: Blob): Promise<string> {
@@ -39,13 +47,14 @@ function entryFor(digest: string, revision = 'r1') {
     ref: { packId: 'project_pack', kind: 'effect' as const, id: 'blocks', revision },
     digest,
     url: `/api/runtime/packs/project-elements/project/${digest}.js`,
-    descriptor: { id: 'blocks', kind: 'effect', packId: 'project_pack', revision } as never,
+    descriptor: { id: 'blocks', kind: 'effect', packId: 'project_pack', revision, label: 'Blocks', description: '', componentPath: 'elements/blocks/component.tsx',
+      parameters: [], defaults: {}, renderability: { preview: 'supported', browserExport: 'supported', workerExport: 'unknown' } } as never,
     authoring: { packRoot: '/canonical', descriptorPath: '/canonical/element.yaml', componentPath: '/canonical/component.tsx', status: 'ready' },
   };
 }
 
 function listBody(elements: unknown[], overrides: Record<string, unknown> = {}) {
-  return { version: 1, projectId: 'project', selectionDigest: 'a'.repeat(64), projects: [], realmId: 'realm', elements, ...overrides };
+  return { version: 1, projectId: 'project', selectionDigest: 'a'.repeat(64), legacy: [], projects: [], realmId: 'realm', elements, ...overrides };
 }
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -104,6 +113,39 @@ describe('project element list parsing', () => {
     expect(() => parseProjectElementList(listBody([bad]), 'project')).toThrow('inexact project element ref');
   });
 
+  it('keeps the legacy refs the Runtime lists by name', async () => {
+    const { parseProjectElementList } = await loader();
+    const legacy = [{ packId: 'project_pack', kind: 'effect', id: 'old' }];
+    expect(parseProjectElementList(listBody([], { legacy }), 'project').legacy).toEqual(legacy);
+  });
+
+  it.each([
+    ['no legacy field', (body: Record<string, unknown>) => { const { legacy: _legacy, ...rest } = body; return rest; }],
+    ['a malformed legacy ref', (body: Record<string, unknown>) => ({ ...body, legacy: [{ packId: 'p', kind: 'sound', id: 'x' }] })],
+  ])('rejects a list with %s', async (_label, mutate) => {
+    const { parseProjectElementList } = await loader();
+    expect(() => parseProjectElementList(mutate(listBody([])), 'project')).toThrow('invalid project element list');
+  });
+
+  it.each([
+    ['no renderability', (d: Record<string, unknown>) => { delete d.renderability; }],
+    ['a renderability without preview', (d: Record<string, unknown>) => { d.renderability = { browserExport: 'supported', workerExport: 'unknown' }; }],
+    ['a non-array parameters field', (d: Record<string, unknown>) => { d.parameters = {}; }],
+    ['no label', (d: Record<string, unknown>) => { delete d.label; }],
+    ['a descriptor that names another element', (d: Record<string, unknown>) => { d.id = 'other'; }],
+  ])('rejects an entry whose descriptor has %s as a plain failure', async (_label, mutate) => {
+    const { parseProjectElementList } = await loader();
+    const bad = entryFor('b'.repeat(64));
+    mutate(bad.descriptor as unknown as Record<string, unknown>);
+    expect(() => parseProjectElementList(listBody([bad]), 'project')).toThrow('incomplete descriptor for the element blocks');
+  });
+
+  it('rejects an entry without the authoring paths the editor shows', async () => {
+    const { parseProjectElementList } = await loader();
+    const bad = { ...entryFor('b'.repeat(64)), authoring: { packRoot: '/canonical' } };
+    expect(() => parseProjectElementList(listBody([bad]), 'project')).toThrow('incomplete descriptor');
+  });
+
   it('rejects two entries with the same exact ref', async () => {
     const { parseProjectElementList } = await loader();
     const digest = 'b'.repeat(64);
@@ -117,7 +159,7 @@ describe('Runtime project element list fixture', () => {
     const { parseProjectElementList } = await loader();
     const list = parseProjectElementList(fixture, fixture.projectId);
     expect(list).toEqual({ version: 1, projectId: fixture.projectId, realmId: fixture.realmId,
-      selectionDigest: fixture.selectionDigest, projects: fixture.projects, elements: fixture.elements });
+      selectionDigest: fixture.selectionDigest, legacy: fixture.legacy, projects: fixture.projects, elements: fixture.elements });
   });
 });
 
@@ -162,8 +204,42 @@ describe('importing one admitted bundle', () => {
     fetchMock.mockResolvedValue({ ok: true, redirected: false, arrayBuffer: async () => new TextEncoder().encode(COMPONENT_SOURCE).buffer });
 
     await expect(importProjectElement(entryFor(digestOf(COMPONENT_SOURCE)), new AbortController().signal))
-      .rejects.toThrow('no import map for react, react/jsx-runtime, remotion');
+      .rejects.toThrow('no pinned extension import map');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a scoped import map', JSON.stringify({ imports: JSON.parse(IMPORT_MAP).imports, scopes: { '/x/': {} } }), LOCK],
+    ['an import map that disagrees with the lock', IMPORT_MAP.replace('shared-0', 'shared-9'), LOCK],
+    ['a lock binding with a malformed digest', IMPORT_MAP, LOCK.replace('0'.repeat(64), 'xyz')],
+    ['a map missing remotion', JSON.stringify({ imports: { react: '/assets/shared-0.js' } }), LOCK],
+  ])('applies the extension loader\'s check to %s', async (_label, map, lock) => {
+    const { importProjectElement } = await loader();
+    installImportMap(map, lock);
+    await expect(importProjectElement(entryFor(digestOf(COMPONENT_SOURCE)), new AbortController().signal))
+      .rejects.toThrow(/Singleton binding mismatch|pinned import map/);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('never evaluates a bundle whose project was left while its bytes were being fetched', async () => {
+    const { importProjectElement } = await loader();
+    const controller = new AbortController();
+    let release!: () => void;
+    fetchMock.mockImplementation(async () => {
+      await new Promise<void>(resolve => { release = resolve; });
+      return { ok: true, redirected: false, arrayBuffer: async () => new TextEncoder().encode(COMPONENT_SOURCE).buffer };
+    });
+    const importModule = vi.fn(async () => ({ default: () => null }));
+    const createObjectURL = vi.spyOn(URL, 'createObjectURL');
+
+    const pending = importProjectElement(entryFor(digestOf(COMPONENT_SOURCE)), controller.signal, importModule);
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    controller.abort();
+    release();
+
+    await expect(pending).rejects.toThrow();
+    expect(importModule).not.toHaveBeenCalled();
+    expect(createObjectURL).not.toHaveBeenCalled();
   });
 
   it('imports the verified bytes from a blob URL and returns the default-exported component', async () => {

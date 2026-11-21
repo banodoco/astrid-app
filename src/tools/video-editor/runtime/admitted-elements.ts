@@ -1,6 +1,6 @@
 import type { AstridElementDescriptor } from './astrid-element-host';
 import { ASTRID_BRIDGE_REQUEST_TIMEOUT_MS } from '../data/astridBridgeWire';
-import { elementKey, importProjectElement, readProjectElementList, type ElementRef, type ProjectElementComponent, type ProjectElementEntry, type ProjectElementList } from './admittedElementLoader';
+import { elementKey, importProjectElement, readProjectElementList, type ElementRef, type ProjectElementComponent, type ProjectElementEntry, type LegacyElementRef, type ProjectElementList } from './admittedElementLoader';
 
 export type AdmittedDescriptor = AstridElementDescriptor & {label:string; description:string; parameters:import('../types/index').ParameterSchema; defaults:Record<string,unknown>; renderability:{preview:'supported'|'blocked'|'unknown';browserExport:'supported'|'blocked'|'unknown';workerExport:'supported'|'blocked'|'unknown'}};
 export type ProjectElementAuthoring = {
@@ -21,9 +21,15 @@ const listeners = new Set<() => void>();
 // Pack selection talks to the same local Runtime as editor data requests.
 // Reuse its request budget for the list read plus browser module admission.
 export const ADMITTED_ELEMENT_LOAD_TIMEOUT_MS = ASTRID_BRIDGE_REQUEST_TIMEOUT_MS;
-type AdmissionReadiness = {projectId: string | null; refKeys: readonly string[]; phase: 'idle' | 'loading' | 'ready' | 'error'; error: string | null};
+type AdmissionReadiness = {projectId: string | null; refKeys: readonly string[]; phase: 'idle' | 'loading' | 'ready' | 'error'; error: string | null;
+  /** Elements the Runtime lists by name only (admitted before it kept their bundles); they need re-admitting. */
+  legacy: readonly LegacyElementRef[]};
+export const LEGACY_ELEMENT_REASON = 'Project elements admitted before this version need re-admitting: run project-pack admit again.';
+export const isLegacyElementRef = (ref: {packId?: string; kind: string; id: string}) => (
+  readiness.legacy.some(entry => entry.packId === ref.packId && entry.kind === ref.kind && entry.id === ref.id)
+);
 const readinessListeners = new Set<() => void>();
-let readiness: AdmissionReadiness = {projectId: null, refKeys: [], phase: 'idle', error: null};
+let readiness: AdmissionReadiness = {projectId: null, refKeys: [], phase: 'idle', error: null, legacy: []};
 const publishReadiness = (next: AdmissionReadiness) => {
   readiness = next;
   readinessListeners.forEach(listener => listener());
@@ -41,13 +47,16 @@ let currentSignature = '';
 // Verified bundles by digest. A digest names exact bytes, so a re-read of the same admitted build reuses its module.
 const importedByDigest = new Map<string, ProjectElementComponent>();
 let generation = 0;
+// The in-flight refresh's fetches. A scope change or a newer refresh aborts them, so a module requested for one
+// project is never fetched on, evaluated or published once the editor has moved on.
+let inFlight: AbortController | null = null;
 let lastLoggedFailure: string | null = null;
 let scope: {projectId:string;refs:Array<ElementRef>}|null=null;
 export function setAdmittedElementScope(projectId:string,refs:NonNullable<typeof scope>['refs']) {
   const next={projectId,refs:[...new Map(refs.map(ref=>[refKey(ref),ref])).values()].sort((a,b)=>refKey(a).localeCompare(refKey(b)))};
   if(JSON.stringify(scope)===JSON.stringify(next))return;
-  const changed=scope?.projectId!==projectId;scope=next;++generation;
-  publishReadiness({projectId, refKeys: next.refs.map(refKey), phase: 'loading', error: null});
+  const changed=scope?.projectId!==projectId;scope=next;++generation;inFlight?.abort();
+  publishReadiness({projectId, refKeys: next.refs.map(refKey), phase: 'loading', error: null, legacy: changed ? [] : readiness.legacy});
   if(changed){current={...EMPTY_SELECTION,projectId};currentSignature='';listeners.forEach(listener=>listener());}
 }
 
@@ -69,6 +78,8 @@ export async function refreshAdmittedElements(
   const requestedScope = scope;
   const readList = read ?? (async () => (requestedScope ? readProjectElementList(requestedScope.projectId, controller.signal) : null));
   const request = ++generation;
+  inFlight?.abort();
+  inFlight = controller;
   const requestedReadiness = {...readiness, phase: 'loading' as const, error: null};
   publishReadiness(requestedReadiness);
   let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -82,7 +93,7 @@ export async function refreshAdmittedElements(
     const list = await Promise.race([readList(), deadline]);
     if (request !== generation) return current;
     if (!list) {
-      publishReadiness({...requestedReadiness, phase:'ready'});
+      publishReadiness({...requestedReadiness, phase:'ready', legacy: []});
       return current;
     }
     if (requestedScope && list.projectId !== requestedScope.projectId) throw new Error('Element selection belongs to another project');
@@ -92,7 +103,9 @@ export async function refreshAdmittedElements(
     const components = await Promise.race([Promise.all(wanted.map(async entry => {
       const imported = importedByDigest.get(entry.digest);
       if (imported) return imported;
+      if (request !== generation) throw new DOMException('The editor moved to another project.', 'AbortError');
       const component = await loadEntry(entry);
+      if (request !== generation) throw new DOMException('The editor moved to another project.', 'AbortError');
       if (typeof component !== 'function') throw new Error(`Project element ${entry.ref.id} is not a component.`);
       importedByDigest.set(entry.digest, component);
       while (importedByDigest.size > 128) importedByDigest.delete(importedByDigest.keys().next().value!);
@@ -101,7 +114,7 @@ export async function refreshAdmittedElements(
     if (request !== generation) return current;
     const signature = JSON.stringify([list.projectId, list.realmId, list.selectionDigest, wanted.map(entry => [refKey(entry.ref), entry.digest])]);
     if (signature === currentSignature) {
-      publishReadiness({...requestedReadiness, phase:'ready'});
+      publishReadiness({...requestedReadiness, phase:'ready', legacy: list.legacy});
       return current;
     }
     // import() returns an exotic module namespace: freezing it throws even when each export is valid.
@@ -112,20 +125,21 @@ export async function refreshAdmittedElements(
       components: Object.freeze(Object.fromEntries(wanted.map((entry, index) => [refKey(entry.ref), components[index]])))});
     currentSignature = signature;
     listeners.forEach(listener => listener());
-    publishReadiness({...requestedReadiness, phase:'ready'});
+    publishReadiness({...requestedReadiness, phase:'ready', legacy: list.legacy});
     return current;
   } catch (error) {
     // A failed list never rejects into prompts, mount or element adapters: the readiness store carries the reason,
     // elements stay unloaded, and clips that need them show the placeholder with that reason.
     const reason = error instanceof Error ? error.message : String(error);
     if (request === generation) publishReadiness({...requestedReadiness, phase:'error', error:reason});
-    if (reason !== lastLoggedFailure) {
+    if (request === generation && reason !== lastLoggedFailure) {
       lastLoggedFailure = reason;
       console.error(`Project elements unavailable: ${reason}`);
     }
     return current;
   } finally {
     clearTimeout(timeout);
+    if (inFlight === controller) inFlight = null;
   }
 }
 export function admittedComponent(ref: {packId?: string; kind: string; id: string; revision: string}) {

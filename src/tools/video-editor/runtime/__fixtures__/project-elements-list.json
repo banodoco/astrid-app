@@ -33,6 +33,13 @@
       "url": "/api/runtime/packs/project-elements/fixture-project/ff85a15cf48c1cf8710ca8042a145e1672cd207c4ecb88ac88a515876ba3604f.js"
     }
   ],
+  "legacy": [
+    {
+      "id": "wipe",
+      "kind": "transition",
+      "packId": "project_0123456789abcdef0123"
+    }
+  ],
   "projectId": "fixture-project",
   "projects": [
     {

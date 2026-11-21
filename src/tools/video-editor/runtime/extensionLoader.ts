@@ -47,31 +47,14 @@ import {
   syncEnabledPackLockEntries,
 } from '@/tools/video-editor/runtime/extensionLockMetadata';
 import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection';
+import {
+  SHARED_SPECIFIERS, SHA256, SharedModulesError, assertHostSharedModules, canonical, importRuntimeModule,
+  isRecord as record,
+} from '@/tools/video-editor/runtime/runtimeModuleImport';
 
 const moduleLeases = new WeakMap<AstridExtension, () => void>();
 export function releaseAdmittedExtensionAssets(extension: AstridExtension): void {
   moduleLeases.get(extension)?.();
-}
-
-/** Build-time singleton bindings; the browser never constructs an import map. */
-const SHARED_SPECIFIERS = [
-  'react', 'react/jsx-runtime', 'react/jsx-dev-runtime',
-  'react-dom/client', 'remotion', '@astrid/editor-sdk',
-] as const;
-const SHA256 = /^[a-f0-9]{64}$/;
-
-function record(value: unknown): value is Record<string, any> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** Canonical JSON used by the builder and Runtime for artifact identity M. */
-function canonical(value: any): string {
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  if (record(value)) {
-    return `{${Object.keys(value).filter((key) => value[key] !== undefined).sort()
-      .map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(',')}}`;
-  }
-  return JSON.stringify(value);
 }
 
 /**
@@ -129,29 +112,11 @@ async function importAdmittedExtension(
   }
   // Both scripts are emitted before the host module script by the build plugin.
   // Fail closed in development or older releases without the pinned map.
-  const mapElement = document.getElementById('astrid-extension-importmap');
-  const lockElement = document.getElementById('astrid-extension-shared-modules');
-  let map: any;
-  let lock: any;
   try {
-    map = JSON.parse(mapElement?.textContent ?? '');
-    const envelope = JSON.parse(lockElement?.textContent ?? '');
-    if (envelope.version !== 1) throw new Error('Unsupported shared-module lock');
-    lock = envelope.shared_modules;
-  } catch {
-    throw moduleError('loader/shared-modules', 'The host build has no pinned extension import map.');
-  }
-  if (mapElement?.getAttribute('type') !== 'importmap' || !record(map?.imports) || map.scopes !== undefined || !record(lock)
-    || canonical(Object.keys(artifact.sharedModules).sort()) !== canonical([...SHARED_SPECIFIERS].sort())) {
-    throw moduleError('loader/shared-modules', 'All six host singleton bindings are required.');
-  }
-  for (const specifier of SHARED_SPECIFIERS) {
-    const binding = artifact.sharedModules[specifier];
-    if (!record(binding) || !SHA256.test(binding.sha256) || typeof binding.version !== 'string'
-      || typeof binding.url !== 'string' || !/^\/assets\/[a-zA-Z0-9_.-]+\.js$/.test(binding.url)
-      || map.imports[specifier] !== binding.url || canonical(binding) !== canonical(lock[specifier])) {
-      throw moduleError('loader/shared-modules', `Singleton binding mismatch for ${specifier}. Rebuild against this host release.`);
-    }
+    assertHostSharedModules(SHARED_SPECIFIERS, artifact.sharedModules);
+  } catch (error) {
+    if (error instanceof SharedModulesError) throw moduleError('loader/shared-modules', error.message);
+    throw error;
   }
   const acquireLease = async (): Promise<string> => {
     const leased = await fetch(`${runtimeApiBase()}/packs/leases/${artifact.packId}/${artifact.digest}`, {
@@ -226,7 +191,7 @@ async function importAdmittedExtension(
   });
   let namespace: any;
   try {
-    namespace = await import(/* @vite-ignore */ new URL(entryUrl, location.origin).href);
+    namespace = await importRuntimeModule(new URL(entryUrl, location.origin).href);
   } catch (error) {
     releaseLease();
     throw moduleError('loader/module-import-failed', `Entry or chunk import failed: ${String(error)}`);

@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react';
 import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection';
-import { computeSha256 } from './extensionIntegrity';
+import { assertHostSharedModules, fetchVerifiedBytes, importRuntimeModule, isRecord as record, SHA256, SharedModulesError } from './runtimeModuleImport';
 import type { AdmittedDescriptor, AdmittedElement, ProjectElementAuthoring } from './admitted-elements';
 import type { AstridElementComponentProps } from './astrid-element-host';
 
@@ -13,19 +13,35 @@ export type ProjectElementEntry = {
   ref: ElementRef; digest: string; url: string;
   descriptor: AdmittedDescriptor; authoring: AdmittedElement['authoring'];
 };
+/** An element admitted before the Runtime kept its compiled bundle: listed by name, never loadable until re-admitted. */
+export type LegacyElementRef = { packId: string; kind: ElementRef['kind']; id: string };
 export type ProjectElementList = {
-  version: 1; projectId: string; realmId: string; selectionDigest: string;
+  version: 1; projectId: string; realmId: string; selectionDigest: string; legacy: readonly LegacyElementRef[];
   projects: readonly ProjectElementAuthoring[]; elements: readonly ProjectElementEntry[];
 };
 export type ProjectElementComponent = ComponentType<AstridElementComponentProps>;
 
-const SHA256 = /^[a-f0-9]{64}$/;
 const KINDS = new Set(['effect', 'animation', 'transition']);
-/** Bare specifiers the admitted bundles leave external; the document's import map must bind each one. */
+const SUPPORT = new Set(['supported', 'blocked', 'unknown']);
+/** Bare specifiers the admitted bundles leave external; the document's pinned import map must bind each one. */
 const HOST_SPECIFIERS = ['react', 'react/jsx-runtime', 'remotion'] as const;
-const IMPORT_MAP_ID = 'astrid-extension-importmap';
 
-const record = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
+const text = (value: unknown): value is string => typeof value === 'string';
+const allText = (value: Record<string, unknown>, keys: readonly string[]) => keys.every(key => text(value[key]));
+/** The descriptor fields the editor's catalog and placeholders read, so a consumer never meets a missing one. */
+const validDescriptor = (descriptor: Record<string, unknown>, ref: Record<string, unknown>) => (
+  descriptor.packId === ref.packId && descriptor.kind === ref.kind && descriptor.id === ref.id && descriptor.revision === ref.revision
+  && allText(descriptor, ['label', 'description', 'componentPath']) && !!descriptor.label && !!descriptor.componentPath
+  && Array.isArray(descriptor.parameters) && descriptor.parameters.every((parameter: unknown) => record(parameter) && text(parameter.name) && text(parameter.type))
+  && record(descriptor.defaults) && record(descriptor.renderability) && Object.keys(descriptor.renderability).length === 3
+  && ['preview', 'browserExport', 'workerExport'].every(key => SUPPORT.has(descriptor.renderability[key]))
+);
+const validAuthoring = (authoring: Record<string, unknown>) => allText(authoring, ['packRoot', 'descriptorPath', 'componentPath', 'status']);
+const validProject = (project: unknown) => record(project)
+  && allText(project, ['projectId', 'packId', 'packRoot', 'status', 'initCommand', 'admitCommand', 'inspectCommand']);
+const validLegacy = (entry: unknown) => record(entry) && text(entry.packId) && !!entry.packId && text(entry.id) && !!entry.id
+  && text(entry.kind) && KINDS.has(entry.kind);
+
 const runtimeOriginPath = (projectId: string, digest: string) => (
   `${runtimeApiBase()}/packs/project-elements/${encodeURIComponent(projectId)}/${digest}.js`.slice(runtimeOrigin().length)
 );
@@ -39,7 +55,8 @@ export const elementKey = (ref: ElementRef) => JSON.stringify([ref.packId, ref.k
 export function parseProjectElementList(value: unknown, projectId: string): ProjectElementList {
   if (!record(value) || value.version !== 1 || value.projectId !== projectId || typeof value.realmId !== 'string' || !value.realmId
     || typeof value.selectionDigest !== 'string' || !SHA256.test(value.selectionDigest)
-    || !Array.isArray(value.projects) || !Array.isArray(value.elements)) {
+    || !Array.isArray(value.projects) || !value.projects.every(validProject)
+    || !Array.isArray(value.legacy) || !value.legacy.every(validLegacy) || !Array.isArray(value.elements)) {
     throw new Error('Runtime returned an invalid project element list.');
   }
   const keys = new Set<string>();
@@ -53,13 +70,16 @@ export function parseProjectElementList(value: unknown, projectId: string): Proj
       || typeof ref.revision !== 'string' || !ref.revision || typeof ref.kind !== 'string' || !KINDS.has(ref.kind)) {
       throw new Error('Runtime returned an inexact project element ref.');
     }
+    if (!validDescriptor(entry.descriptor, ref) || !validAuthoring(entry.authoring)) {
+      throw new Error(`Runtime returned an incomplete descriptor for the element ${ref.id}.`);
+    }
     const key = elementKey(ref as unknown as ElementRef);
     if (keys.has(key)) throw new Error(`Runtime listed the element ${ref.id} twice.`);
     keys.add(key);
     return entry as unknown as ProjectElementEntry;
   });
   return { version: 1, projectId, realmId: value.realmId, selectionDigest: value.selectionDigest,
-    projects: value.projects as ProjectElementAuthoring[], elements };
+    legacy: value.legacy as LegacyElementRef[], projects: value.projects as ProjectElementAuthoring[], elements };
 }
 
 /** Reads the project's currently admitted refs. Re-read on every call; nothing is cached on the Runtime's side. */
@@ -73,31 +93,25 @@ export async function readProjectElementList(projectId: string, signal: AbortSig
   return parseProjectElementList(await response.json(), projectId);
 }
 
-/** The browser's import map is the only place bare specifiers resolve; a page without it cannot run any admitted element. */
-function assertHostImportMap(): void {
-  const element = document.getElementById(IMPORT_MAP_ID);
-  let imports: unknown;
-  try { imports = element?.getAttribute('type') === 'importmap' ? JSON.parse(element.textContent ?? '').imports : undefined; } catch { imports = undefined; }
-  const missing = HOST_SPECIFIERS.filter(specifier => !record(imports) || typeof imports[specifier] !== 'string');
-  if (missing.length) throw new Error(`The editor page has no import map for ${missing.join(', ')}. Rebuild the editor or restart the dev server.`);
-}
-
 /**
  * Fetches one admitted bundle, verifies its bytes against the digest the Runtime named, then imports the verified bytes
  * themselves (from a blob URL), so the executed module is exactly what was hashed.
+ *
+ * `signal` is the project's lifetime: it is checked after the fetch and BEFORE the module is evaluated, so a bundle
+ * fetched for a project the editor has since left is never evaluated. Once `import()` has begun the bytes execute and
+ * that cannot be undone; the caller still never publishes the result of an aborted request.
  */
 export async function importProjectElement(
   entry: ProjectElementEntry,
   signal: AbortSignal,
-  importModule: (url: string) => Promise<{ default?: unknown }> = (url) => import(/* @vite-ignore */ url),
+  importModule: (url: string) => Promise<{ default?: unknown }> = importRuntimeModule,
 ): Promise<ProjectElementComponent> {
-  assertHostImportMap();
-  const response = await fetch(`${runtimeOrigin()}${entry.url}`, { cache: 'no-store', credentials: 'same-origin', signal });
-  if (!response.ok || response.redirected) throw new Error(`Project element ${entry.ref.id} could not be read from the Runtime.`);
-  const bytes = new Uint8Array(await response.arrayBuffer());
-  if (await computeSha256(bytes) !== entry.digest) {
-    throw new Error(`Project element ${entry.ref.id} does not match the digest the Runtime admitted; reload the editor.`);
+  try { assertHostSharedModules(HOST_SPECIFIERS); } catch (error) {
+    if (error instanceof SharedModulesError) throw new Error(`${error.message} Rebuild the editor or reload it.`);
+    throw error;
   }
+  const bytes = await fetchVerifiedBytes(`${runtimeOrigin()}${entry.url}`, entry.digest, signal, `Project element ${entry.ref.id}`);
+  signal.throwIfAborted();
   const moduleUrl = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
   let namespace: { default?: unknown };
   try {
@@ -107,6 +121,7 @@ export async function importProjectElement(
   } finally {
     URL.revokeObjectURL(moduleUrl);
   }
+  signal.throwIfAborted();
   if (typeof namespace.default !== 'function') throw new Error(`Project element ${entry.ref.id} must default-export its component.`);
   return namespace.default as ProjectElementComponent;
 }

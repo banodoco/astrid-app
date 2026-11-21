@@ -1,4 +1,4 @@
-import { getAdmittedElementReadiness, getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
+import { getAdmittedElementReadiness, isLegacyElementRef, LEGACY_ELEMENT_REASON, getAdmittedElementSelection, subscribeAdmittedElements } from '../runtime/admitted-elements';
 import { AbsoluteFill, Sequence, useCurrentFrame, useRemotionEnvironment } from 'remotion';
 import { Component, createContext, memo, useContext, useMemo, useSyncExternalStore, type ComponentType, type FC, type ReactNode } from 'react';
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
@@ -465,6 +465,7 @@ const AstridAnimationPreviewSequence: FC<{
 const elementUnavailableDetail = (ref: NonNullable<ResolvedTimelineClip['elementRef']>) => {
   const exact = `Element ${ref.id}@${ref.revision} requires its exact admitted pack revision. Embedded source is preserved for migration and is not executed.`;
   const admission = getAdmittedElementReadiness();
+  if (isLegacyElementRef(ref)) return `${LEGACY_ELEMENT_REASON} ${exact}`;
   return admission.phase === 'error' ? `Project elements did not load (${admission.error}). ${exact}` : exact;
 };
 

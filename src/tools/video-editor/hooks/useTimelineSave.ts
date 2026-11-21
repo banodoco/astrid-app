@@ -415,6 +415,12 @@ export function useTimelineSave(
           if (session.getState().status !== 'saved') break;
         }
         let initial = verified.initial;
+        if (owners.length && isPermanentLocalSaveRejection(session.getState())) {
+          // A rejected draft may originate from an older head than the current
+          // Runtime. Its display source was deliberately recovered on that
+          // verified original basis, not silently rebased onto today's head.
+          initial = session.getDisplayBasis();
+        }
         if (owners.length && session.getState().status === 'saved') {
           initial = await session.flush();
           const latest = await provider.loadTimelineCommandBasis!(timelineId);

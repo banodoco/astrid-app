@@ -955,6 +955,13 @@ export function useTimelineSave(
     }
   }, [localOwner, timelineId, toast]);
 
+  const retryPendingSaveAfterReconnect = useCallback(() => {
+    // Reconnection is not a creator choice: an acknowledged permanent refusal
+    // must never be replayed just because the Runtime has come back online.
+    if (isPermanentLocalSaveRejection(localOwner.session?.getState())) return;
+    persistence.retryPendingSave();
+  }, [localOwner, persistence.retryPendingSave]);
+
   return {
     elementTimelineRoutes,
     localDocumentSave,
@@ -995,7 +1002,7 @@ export function useTimelineSave(
     watchdogTripped: persistence.watchdogTripped,
     watchdogReason: persistence.watchdogReason,
     retryWatchdog: persistence.retryWatchdog,
-    retryPendingSave: persistence.retryPendingSave,
+    retryPendingSave: retryPendingSaveAfterReconnect,
     // The conflict dialog owns resolution after a rejected Retry. Retain the
     // durable slot and recovery state, but never expose both surfaces at once.
     recoveryDraft: persistence.isConflictExhausted ? null : recoveryDraft,

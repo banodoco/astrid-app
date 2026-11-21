@@ -8,6 +8,7 @@ import { Images, Loader2, Maximize2, Sparkles } from 'lucide-react';
 import { VIDEO_EDITOR_THEME_VARS } from '@/tools/video-editor/lib/themeTokens.ts';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/shared/components/ui/alert-dialog.tsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog.tsx';
+import { TimelineSaveNotice } from './TimelineSaveNotice.tsx';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { COARSE_TOUCH_TARGET } from '@/shared/components/ui/contracts/touchTarget.ts';
@@ -329,7 +330,6 @@ function TimelineEditorShellCoreComponent({
   const hasLoadedTimeline = Boolean(editorData.resolvedConfig);
   const holdsBoot = useFirstLoadHold(hasLoadedTimeline || Boolean(chrome.loadError));
   const recoveryCardShowing = useRecoveryCardShowing();
-  const [confirmExportReload, setConfirmExportReload] = useState(false);
   // Astrid answering again clears the card. What failed while it was stopped is retried here, so the page carries on as
   // the card promised ("Your changes are kept"): a timeline read that failed is read again, and an edit that was never
   // saved is saved now, without waiting for another edit.
@@ -822,31 +822,6 @@ function TimelineEditorShellCoreComponent({
     </div>
   ) : null;
 
-  /** A permanent refusal keeps every authored intent and dependent edit until the user chooses. */
-  const saveNoticeBanner = chrome.saveNotice ? (
-    <div
-      role="alert"
-      className="flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-    >
-      <span>{chrome.saveNotice}</span>
-      {chrome.permanentSaveRejection && (
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={() => {
-            void chrome.copyRejectedSave().then(started => { if (started) setConfirmExportReload(true); });
-          }}>
-            Copy my change out
-          </Button>
-          <Button type="button" size="sm" variant="outline" onClick={() => {
-            chrome.cancelRejectedSaveCopy?.();
-            void chrome.reloadFromServer({ discardRefusedSave: true }).catch(() => {});
-          }}>
-            Discard and reload the saved version
-          </Button>
-        </div>
-      )}
-    </div>
-  ) : null;
-
   /** Diverged banner (B4): a 409 means the document changed elsewhere. No
    *  silent overwrite — explicit Reload or Save as copy. */
   // A save conflict is a choice between two versions, not an error: neutral, not destructive red.
@@ -930,7 +905,7 @@ function TimelineEditorShellCoreComponent({
       {conflictBanner}
       {incompatibleBanner}
       {watchdogBanner}
-      {saveNoticeBanner}
+      <TimelineSaveNotice />
       {recoveryBanner}
       {chrome.loadError && !(recoveryCardShowing && hasLoadedTimeline) ? (
         // The hosted build's "Astrid stopped" / "restarted" card already says what to do about the same failure.
@@ -1213,27 +1188,6 @@ function TimelineEditorShellCoreComponent({
           onOpenChange={setIsCommandPaletteOpen}
         />
       )}
-
-      {/* A browser download can be blocked. Never discard the outbox until
-          the creator confirms the exported file actually exists. */}
-      <AlertDialog open={confirmExportReload && chrome.permanentSaveRejection} onOpenChange={setConfirmExportReload}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Keep a copy of your unsaved change</AlertDialogTitle>
-            <AlertDialogDescription>
-              Astrid started a JSON file download containing your original rejected change and all edits built on it.
-              Check that the file is safely stored before you continue. Reloading the saved version removes these
-              unsaved edits from the editor; they stay in your downloaded file.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={chrome.cancelRejectedSaveCopy}>Keep my unsaved edits</AlertDialogCancel>
-            <AlertDialogAction onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true }).catch(() => {})}>
-              I saved the file — reload the saved version
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
 
       <AlertDialog open={conflict.isOpen && !chrome.permanentSaveRejection} onOpenChange={conflict.setOpen}>
         <AlertDialogContent>

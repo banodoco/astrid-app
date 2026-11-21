@@ -23,9 +23,9 @@ describe('Runtime compatibility metadata', () => {
     );
   });
 
-  it('enables the inspected provisional Timeline ABI without claiming a published Runtime pin', () => {
+  it('enables the inspected Timeline ABI at the exact generated Runtime pin', () => {
     expect(PROTOCOL).toBe('workspace.v1');
-    expect(CONTRACT_VERSION).toBe('0.2.14');
+    expect(CONTRACT_VERSION).toBe('0.2.15');
     expect(OPERATIONS as readonly string[]).toContain('commitTimeline');
     expect(OPERATIONS as readonly string[]).toContain('listTimelineCommits');
     expect(supportsFullV2Commit()).toBe(true);

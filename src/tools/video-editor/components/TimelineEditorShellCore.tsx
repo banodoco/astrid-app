@@ -821,13 +821,23 @@ function TimelineEditorShellCoreComponent({
     </div>
   ) : null;
 
-  /** A local save the Runtime rejected, or removed from the queue: the reason, so the change is never dropped silently. */
+  /** A permanent refusal keeps every authored intent and dependent edit until the user chooses. */
   const saveNoticeBanner = chrome.saveNotice ? (
     <div
       role="alert"
       className="flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
     >
       <span>{chrome.saveNotice}</span>
+      {chrome.permanentSaveRejection && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2">
+          <Button type="button" size="sm" variant="outline" onClick={() => void chrome.copyRejectedSave()}>
+            Copy my change out
+          </Button>
+          <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
+            Discard and reload the saved version
+          </Button>
+        </div>
+      )}
     </div>
   ) : null;
 

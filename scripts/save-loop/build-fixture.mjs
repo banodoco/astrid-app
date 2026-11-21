@@ -204,74 +204,96 @@ def placement_rows(doc):
         rows = (doc.get('parent', {}) or {}).get('occurrences', [])
     return rows if isinstance(rows, list) else []
 
+batch_size = 12
+outbox_root = cfg['outbox_root']
+receipts = []
+
+def commit_batch(tl, timeline, label, key, edit, command_count):
+    started = time.perf_counter()
+    result = tl.commit(edit, label=label, idempotency_key=key)
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    data = result.get('data', {})
+    receipt = result.get('receipt', {})
+    row = {'timeline_id': timeline, 'label': label, 'command_count': command_count,
+           'status': data.get('status'),
+           'receipt_id': receipt.get('receipt_id'),
+           'accepted_revision_id': data.get('accepted_revision_id'),
+           'elapsed_ms': elapsed_ms}
+    if not row['receipt_id'] or not row['accepted_revision_id'] or row['status'] == 'preview':
+        raise RuntimeError(f'{label} omitted accepted receipt or revision')
+    receipts.append(row)
+    print(f"accepted {label}: {command_count} commands receipt={row['receipt_id']} revision={row['accepted_revision_id']}", flush=True)
+
 def populate(timeline, *, control=False):
     targets = {'video': [], 'audio': [], 'image': []}
-    def edit(t):
-        for track in visual: t.track(track, kind='visual')
-        for track in audio: t.track(track, kind='audio')
+    with AstridClient.open_existing_from_launcher() as client:
+        tl = Timeline.open(project, timeline, client=client,
+                           outbox_path=os.path.join(outbox_root, f'{timeline}.json'))
+        track_rows = [(track, 'visual') for track in visual] + [(track, 'audio') for track in audio]
+        def make_tracks(t):
+            for track, kind in track_rows: t.track(track, kind=kind)
+        commit_batch(tl, timeline, 'Seed fixture tracks', f'p77-{timeline}-tracks', make_tracks, len(track_rows))
+
         if control:
-            clip_id = 'control-video-0000'
-            t.add(media['video'][0], at=10, hold=4, track=visual[0], id=clip_id)
-            targets['video'].append(clip_id)
+            clip_rows = [('video', 0, visual[0], 10, 4, 'control-video-0000')]
         else:
+            clip_rows = []
+            for start in range(0, len(shots), batch_size):
+                batch = list(enumerate(shots))[start:start + batch_size]
+                def make_occurrences(t, batch=batch):
+                    for i, shot in batch:
+                        occurrence_id = f'fixture-occurrence-{i:02d}'
+                        t.command({
+                            'schema_version': 1, 'op': 'occurrence.create', 'version': '1',
+                            'select': 'parent',
+                            'args': {'occurrence_id': occurrence_id,
+                                     'shot_id': shot['shot_id'], 'name': shot['name'],
+                                     'track': visual[i % len(visual)], 'on': i * 4.25, 'duration': 4},
+                            'created': [f"shot:{shot['shot_id']}", f'occurrence:{occurrence_id}'],
+                        }, label='Create generated fixture shot occurrence')
+                commit_batch(tl, timeline, f'Create fixture shots {start + 1}-{start + len(batch)}',
+                             f'p77-{timeline}-shots-{start}', make_occurrences, len(batch))
             for i in range(count):
-                if i % 100 == 0: print(f'heavy fixture: staged {i}/{count}', flush=True)
                 if i < image_n:
                     kind, index = 'image', i
                     track, at, hold = visual[i % 5], (i // 5) * 6, 5
                 elif i < image_n + video_n:
                     kind, index = 'video', i - image_n
-                    track, at, hold = visual[5], index * 5.2, 4
+                    track, at, hold = visual[5], (i - image_n) * 5.2, 4
                 else:
                     kind, index = 'audio', i - image_n - video_n
-                    track, at, hold = audio[index % len(audio)], (index // len(audio)) * 1.4, .8
-                clip_id = f'fixture-{kind}-{i:04d}'
-                try:
-                    t.add(media[kind][index], at=at, hold=hold, track=track, id=clip_id)
-                except Exception as error:
-                    raise RuntimeError(f'{kind} media {index}, clip {clip_id}, hold {hold}: {error}') from error
-                targets[kind].append(clip_id)
-            # These are real SDK-created composition occurrences. Their IDs are
-            # resolved from the published SDK document after the commit.
-            for i, shot in enumerate(shots):
-                t.command({
-                    'schema_version': 1, 'op': 'occurrence.create', 'version': '1',
-                    'select': 'parent',
-                    'args': {'occurrence_id': f'fixture-occurrence-{i:02d}',
-                             'shot_id': shot['shot_id'], 'name': shot['name'],
-                             'track': visual[i % len(visual)], 'on': i * 4.25, 'duration': 4},
-                    'created': [f"shot:{shot['shot_id']}", f"occurrence:fixture-occurrence-{i:02d}"],
-                }, label='Create generated fixture shot occurrence')
-    with AstridClient.open_existing_from_launcher() as client:
-        tl = Timeline.open(project, timeline, client=client)
-        tl.commit(edit, label='Create generated save-loop fixture',
-                  idempotency_key=f"p77-fixture-{timeline}-{project}")
+                    audio_index = index
+                    track, at, hold = audio[audio_index % len(audio)], (audio_index // len(audio)) * 1.4, .8
+                clip_rows.append((kind, index, track, at, hold, f'fixture-{kind}-{i:04d}'))
+
+        for start in range(0, len(clip_rows), batch_size):
+            batch = clip_rows[start:start + batch_size]
+            def make_clips(t, batch=batch):
+                for kind, index, track, at, hold, clip_id in batch:
+                    try:
+                        t.add(media[kind][index], at=at, hold=hold, track=track, id=clip_id)
+                    except Exception as error:
+                        raise RuntimeError(f'{kind} media {index}, clip {clip_id}, hold {hold}: {error}') from error
+                    targets[kind].append(clip_id)
+            commit_batch(tl, timeline, f'Add fixture clips {start + 1}-{start + len(batch)}',
+                         f'p77-{timeline}-clips-{start}', make_clips, len(batch))
         document = tl.document()
-    return document, targets
-
-heavy_doc, heavy_targets = populate(timeline_id)
-control_doc, control_targets = populate(control_id, control=True)
-
-def warm_move_samples(timeline, clip_id, samples=5):
-    with AstridClient.open_existing_from_launcher() as client:
-        doc = Timeline.open(project, timeline, client=client).document()
-    clip = next((row for row in root_clips(doc) if row.get('id') == clip_id), None)
-    if clip is None: raise RuntimeError(f'public SDK document has no clip {clip_id}')
-    initial = float(clip.get('at', 0))
-    times = []
-    for i in range(samples):
-        target = initial + (1 / 30 if i % 2 == 0 else 0)
-        with AstridClient.open_existing_from_launcher() as client:
-            tl = Timeline.open(project, timeline, client=client)
+        clip_id = targets['video'][0]
+        clip = next((row for row in root_clips(document) if row.get('id') == clip_id), None)
+        if clip is None: raise RuntimeError(f'public SDK document has no clip {clip_id}')
+        initial = float(clip.get('at', 0))
+        warm_times = []
+        for i in range(5):
+            target = initial + (1 / 30 if i % 2 == 0 else 0)
             started = time.perf_counter()
             tl.move(f'parent/clip:{clip_id}', target)
             tl.commit(label='Warm fixture clip move',
                       idempotency_key=f'p77-warm-move-{timeline}-{clip_id}-{i}')
-            times.append((time.perf_counter() - started) * 1000)
-    return times
+            warm_times.append((time.perf_counter() - started) * 1000)
+    return document, targets, warm_times
 
-heavy_times = warm_move_samples(timeline_id, heavy_targets['video'][0])
-control_times = warm_move_samples(control_id, control_targets['video'][0])
+heavy_doc, heavy_targets, heavy_times = populate(timeline_id)
+control_doc, control_targets, control_times = populate(control_id, control=True)
 doc_bytes = len(json.dumps(heavy_doc, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode())
 control_bytes = len(json.dumps(control_doc, sort_keys=True, separators=(',', ':'), ensure_ascii=False).encode())
 parent = heavy_doc.get('parent', {})
@@ -302,6 +324,8 @@ for shot in shots:
 measurement = {
     'clip_count': len(root_clips(heavy_doc)), 'document_bytes': doc_bytes,
     'registry_asset_count': len(assets),
+    'sdk_commit_batch_size': batch_size,
+    'accepted_commit_receipts': receipts,
     'heavy_warm_move_samples_ms': heavy_times,
     'one_clip_warm_move_samples_ms': control_times,
     'heavy_warm_move_median_ms': statistics.median(heavy_times),
@@ -394,10 +418,12 @@ async function main() {
   const configPath = path.join(scratch, `config-${nonce}.json`);
   const scriptPath = path.join(scratch, `build-${nonce}.py`);
   const measurementPath = path.join(scratch, `measurement-${nonce}.json`);
+  const outboxRoot = path.join(scratch, `outbox-${nonce}`);
+  fs.mkdirSync(outboxRoot, {recursive: true});
   const media = {image: images, video: videos, audio: audios};
   fs.writeFileSync(configPath, JSON.stringify({project_id: projectId, timeline_id: timelineId,
     one_clip_timeline_id: oneClipTimelineId, clip_target: clipTarget, media, shots,
-    visual_tracks: visualTracks, audio_tracks: audioTracks}));
+    visual_tracks: visualTracks, audio_tracks: audioTracks, outbox_root: outboxRoot}));
   fs.writeFileSync(scriptPath, sdkScript, {mode: 0o600});
   try {
     await run(python, ['-I', scriptPath], {env: {...process.env,

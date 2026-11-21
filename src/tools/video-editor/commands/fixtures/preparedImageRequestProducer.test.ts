@@ -91,6 +91,56 @@ describe('prepared image request producer fixture', () => {
     await expect(access(malformedOutput)).rejects.toThrow();
   });
 
+  it('accepts the verified provider-defaulted source and refuses a changed source with the same defaults', async () => {
+    const fixture = input();
+    const canonical = fixture.canonicalDocument;
+    const parent = canonical.parent_revision.payload;
+    delete parent.config.clips;
+    canonical.parent_revision.content_digest = fixtureDigest(parent);
+    const original = structuredClone(canonical);
+    const digest = canonical.parent_revision.content_digest;
+    const head = { projectId: fixture.projectId, timelineId: fixture.timelineId,
+      headRevisionId: fixture.head.revisionId, headPublicationId: fixture.head.publicationId };
+    const { bundle: _bundle, ...config } = parent.config;
+    const loaded = { ...config, clips: structuredClone(parent.clips) } as unknown as TimelineConfig;
+    const data = await buildTimelineData({ ...loaded, ...withDefaultTimelineOutput(loaded) }, parent.registry as unknown as AssetRegistry);
+    expect(data.config.output).toMatchObject({ file: 'output.mp4', background: null, background_scale: null });
+    const source = { config: data.config, registry: data.registry, head };
+    const command = buildPlacePreparedMediaCommand({ prepared: fixture.preparedAsset, trackId: 'V1', time: 2,
+      forceNewTrack: false, insertAtTop: false });
+    const preview = previewPreparedMediaCommand(data, command)!;
+    const row = preview.nextData.config.clips.at(-1)!;
+    const next = { ...source, config: structuredClone(preview.nextData.config), registry: structuredClone(preview.nextData.registry) };
+    const gesture: TimelineGestureReadBasis = { kind: 'prepared-media', config: source.config,
+      registry: source.registry, clipId: row.id, command };
+    const sourceBefore = structuredClone(source);
+    const nextBefore = structuredClone(next);
+    const gestureBefore = structuredClone(gesture);
+    const initial = { head: fixture.head, canonicalDocument: canonical };
+    const scope = { realmId: 'fixture', actorId: 'fixture', projectId: fixture.projectId, timelineId: fixture.timelineId };
+    const makeSession = () => createLocalSaveSession({ scope, initial, document: toOutboxJson(canonical),
+      outboxes: createCommitOutbox({ indexedDB: createFakeIndexedDB(), exclusiveLock: async (_key, work) => work() }),
+      send: vi.fn(), loadLatest: async () => initial, changed: () => {},
+      prepareDisplay: async () => { throw new Error('No acceptance in capture test'); } });
+    const good = await makeSession();
+    const bad = await makeSession();
+    try {
+      const accepted = createTimelineLocalSaveHandoff({ initial, source, session: good, adopted: () => {} });
+      await accepted.capture(next, gesture);
+      const changed = structuredClone(source);
+      changed.config.clips[0].at = 99;
+      expect(changed.config.output).toEqual(source.config.output);
+      const refused = createTimelineLocalSaveHandoff({ initial, source: changed, session: bad, adopted: () => {} });
+      await expect(refused.capture(next, gesture)).rejects.toThrow('upstream source differs from the verified authored parent');
+      expect(bad.getDocument()).toEqual(original);
+      expect(canonical).toEqual(original);
+      expect(canonical.parent_revision.content_digest).toBe(digest);
+      expect(source).toEqual(sourceBefore);
+      expect(next).toEqual(nextBefore);
+      expect(gesture).toEqual(gestureBefore);
+    } finally { await good.dispose(); await bad.dispose(); }
+  });
+
   it.each(['valid', 'existing asset', 'asset alias', 'existing asset alias', 'forged asset', 'forged clip', 'existing clip', 'generic', 'child row', 'occurrence lane', 'placement lane', 'head', 'foreign timeline', 'gesture basis',
     'local child mutation', 'registry', 'missing selection', 'extra selection', 'wrong recipe', 'wrong command', 'track mutation',
     'additional row', 'bundle', 'unknown gesture', 'source mismatch', 'child selection', 'mirrors'] as const)('preserves a mixed raw parent closure and bounds the prepared recipe: %s', async (kind) => {

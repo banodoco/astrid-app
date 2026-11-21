@@ -18,13 +18,14 @@ const RESULTS=process.env.SAVE_LOOP_RESULTS||'results.jsonl';
 export const URL_=`${need('SAVE_LOOP_BASE_URL')}/tools/video-editor?project=${encodeURIComponent(need('SAVE_LOOP_PROJECT'))}&timeline=${encodeURIComponent(need('SAVE_LOOP_TIMELINE'))}`;
 // Check before every browser run, including recovery/reopens. Never use the owner realm.
 export function checkDisk() {
-  const output = execFileSync('df', ['-Pk', '/home/user'], {encoding:'utf8'}).trim().split('\n');
+  const diskPath = process.env.SAVE_LOOP_ROOT || os.homedir();
+  const output = execFileSync('df', ['-Pk', diskPath], {encoding:'utf8'}).trim().split('\n');
   const available = Number(output.at(-1).trim().split(/\s+/)[3]);
   if (!Number.isFinite(available) || available < 15 * 1024 * 1024) {
-    throw new Error(`save-loop requires at least 15 GiB free at /home/user (available KiB: ${available})`);
+    throw new Error(`save-loop requires at least 15 GiB free at ${diskPath} (available KiB: ${available})`);
   }
 }
-export async function open(){
+export async function open({onCleanup} = {}){
   checkDisk();
   const profile=fs.mkdtempSync(path.join(os.tmpdir(),'save-loop-'));
   let proc, browser;
@@ -41,6 +42,7 @@ export async function open(){
     }
     fs.rmSync(profile,{recursive:true,force:true});
   }
+  if (onCleanup) onCleanup(close);
   try {
     proc=spawn(CHROME,['--headless=new',...(process.getuid?.() === 0 ? ['--no-sandbox'] : []),'--remote-debugging-port=0','--user-data-dir='+profile,'--disk-cache-size=1','--media-cache-size=1','--no-first-run','--window-size=1700,1500','about:blank'],{stdio:'ignore'});
     let ready=false, port;

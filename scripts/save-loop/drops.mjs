@@ -37,7 +37,7 @@ function fixtureDropFiles(fixture) {
 function visualTrack(fixture) {
   const tracks = fixture?.tracks?.visual;
   if (!Array.isArray(tracks)) throw new Error('fixture.tracks.visual must be an array');
-  const track = tracks.find((item) => item && typeof item.id === 'string' && item.id && (item.kind === 'visual' || item.role === 'visual'));
+  const track = tracks.find((item) => item && typeof item.id === 'string' && item.id && item.id !== fixture.tracks.occurrence_track_id && (item.kind === 'visual' || item.role === 'visual'));
   if (!track) throw new Error('fixture has no eligible visual track');
   return track;
 }

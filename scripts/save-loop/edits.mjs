@@ -127,7 +127,7 @@ function clipScenarios() {
         const id = assertTarget(item, 'video cross-track move');
         const current = await page.locator(`[data-clip-id="${id}"]`).first().getAttribute('data-row-id');
         const rows = fixture.tracks?.visual ?? [];
-        const destination = rows.find((track) => track.id !== current)?.id;
+        const destination = rows.find((track) => track.id !== current && track.id !== fixture.tracks.occurrence_track_id)?.id;
         if (!destination) throw new Error('video cross-track move needs two visual tracks in the fixture manifest');
         await dragClipToRow(page, helpers, id, destination);
       },

@@ -16,16 +16,20 @@ mkdir -p "$SCRATCH"
 [[ ! -L "$SCRATCH" && "$(cd -P -- "$SCRATCH" && pwd -P)" == "$SCRATCH" ]] \
   || fail "Scratch path must be canonical and contain no symlink: $SCRATCH"
 
-available_kib="$(df -Pk /home/user | awk 'NR == 2 {print $4}')"
+available_kib="$(df -Pk "$SCRATCH" | awk 'NR == 2 {print $4}')"
 if (( available_kib < 15 * 1024 * 1024 )); then
-  fail "only $((available_kib / 1024)) MiB free on /home/user (need at least 15 GiB)."
+  fail "only $((available_kib / 1024)) MiB free on $SCRATCH (need at least 15 GiB)."
 fi
 
 owned_editor_matches() {
   local pid="$1" args cwd
   [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null || return 1
   args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
-  cwd="$(readlink -f "/proc/$pid/cwd" 2>/dev/null || true)"
+  if [[ "$(uname -s)" == Darwin ]]; then
+    cwd="$(lsof -a -p "$pid" -d cwd -Fn 2>/dev/null | sed -n 's/^n//p' || true)"
+  else
+    cwd="$(readlink "/proc/$pid/cwd" 2>/dev/null || true)"
+  fi
   [[ "$args" == *"dev-local-workspace.mjs"* && "$args" == *"$ROOT/data"* && "$cwd" == "$APP" ]]
 }
 
@@ -78,6 +82,10 @@ chmod 600 "$OWNERSHIP_MARKER"
 cleanup_stack() {
   local status=$? cleanup_status=0 pid version runtime_cli
   trap - EXIT INT TERM
+  if [[ -n "${RUN_CHILD_PID:-}" ]] && kill -0 "$RUN_CHILD_PID" 2>/dev/null; then
+    kill -TERM "$RUN_CHILD_PID" 2>/dev/null || true
+    wait "$RUN_CHILD_PID" 2>/dev/null || true
+  fi
   pid="${EDITOR_PID:-}"
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
     if owned_editor_matches "$pid"; then
@@ -134,7 +142,7 @@ PROXY_PORT="$(pick_port 17500 17599)"
 DOOR_PORT="$(pick_port "$((PROXY_PORT + 1))" 17599)"
 printf '%s\n' "$EDITOR_PORT,$PROXY_PORT,$DOOR_PORT" > "$ROOT/ports"
 
-mapfile -t source_pins < <(node --input-type=module - "$APP" <<'NODE'
+source_pins="$(node --input-type=module - "$APP" <<'NODE'
 import fs from 'node:fs';
 const app = process.argv[2];
 const agent = JSON.parse(fs.readFileSync(`${app}/public/install-manifest.json`, 'utf8')).agent?.sha;
@@ -145,10 +153,10 @@ if (!/^[0-9a-f]{40}$/.test(agent ?? '') || !/^[0-9a-f]{40}$/.test(runtime ?? '')
 console.log(agent);
 console.log(runtime);
 NODE
-)
-[[ "${#source_pins[@]}" == 2 ]] || fail 'Could not read the committed App Agent and Runtime pins.'
-AGENT_SHA="${source_pins[0]}"
-RUNTIME_SHA="${source_pins[1]}"
+)"
+AGENT_SHA="$(printf '%s\n' "$source_pins" | sed -n '1p')"
+RUNTIME_SHA="$(printf '%s\n' "$source_pins" | sed -n '2p')"
+[[ -n "$AGENT_SHA" && -n "$RUNTIME_SHA" ]] || fail 'Could not read the committed App Agent and Runtime pins.'
 MANIFEST="$ROOT/install-manifest.json"
 node "$APP/scripts/installer/pin.mjs" "$AGENT_SHA" --in "$APP/public/install-manifest.json" --out "$MANIFEST"
 node --input-type=module - "$MANIFEST" "$AGENT_SHA" "$RUNTIME_SHA" <<'NODE'
@@ -294,7 +302,7 @@ fs.writeFileSync(output, `${JSON.stringify(result, null, 2)}\n`);
 console.log(`Created sandbox project ${result.projectId} with empty timeline ${result.timelineId}`);
 NODE
 
-mapfile -t sandbox_ids < <(node --input-type=module - "$ROOT/sandbox.json" <<'NODE'
+sandbox_ids="$(node --input-type=module - "$ROOT/sandbox.json" <<'NODE'
 import fs from 'node:fs';
 const sandbox = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
 if (typeof sandbox.projectId !== 'string' || typeof sandbox.timelineId !== 'string') {
@@ -303,10 +311,10 @@ if (typeof sandbox.projectId !== 'string' || typeof sandbox.timelineId !== 'stri
 console.log(sandbox.projectId);
 console.log(sandbox.timelineId);
 NODE
-)
-[[ "${#sandbox_ids[@]}" == 2 ]] || fail 'Sandbox manifest did not provide a project and timeline ID.'
-PROJECT_ID="${sandbox_ids[0]}"
-TIMELINE_ID="${sandbox_ids[1]}"
+)"
+PROJECT_ID="$(printf '%s\n' "$sandbox_ids" | sed -n '1p')"
+TIMELINE_ID="$(printf '%s\n' "$sandbox_ids" | sed -n '2p')"
+[[ -n "$PROJECT_ID" && -n "$TIMELINE_ID" ]] || fail 'Sandbox manifest did not provide a project and timeline ID.'
 EDITOR_URL="http://127.0.0.1:$EDITOR_PORT/tools/video-editor?connect=1&project=$PROJECT_ID&timeline=$TIMELINE_ID"
 APP_SHA="$(git -C "$APP" rev-parse HEAD)"
 printf 'STACK_ROOT=%s\nAPP_SHA=%s\nAGENT_SHA=%s\nRUNTIME_SHA=%s\nEDITOR_PORT=%s\nPROXY_PORT=%s\nDOOR_PORT=%s\nPROJECT_ID=%s\nTIMELINE_ID=%s\nEDITOR_URL=%s\n' \
@@ -314,5 +322,32 @@ printf 'STACK_ROOT=%s\nAPP_SHA=%s\nAGENT_SHA=%s\nRUNTIME_SHA=%s\nEDITOR_PORT=%s\
   | tee "$ROOT/stack-info.txt"
 echo "Editor URL: $EDITOR_URL"
 echo "Logs: $ROOT/logs"
-echo "Stop this owned editor and Runtime with Ctrl+C. The wrapper remains attached until stopped."
-wait "$EDITOR_PID"
+if [[ "${SL1_ON_DEMAND:-0}" == 1 ]]; then
+  export SAVE_LOOP_ROOT="$ROOT" SAVE_LOOP_BASE_URL="http://127.0.0.1:$EDITOR_PORT" SAVE_LOOP_SCRATCH="$SCRATCH/fixture"
+  mkdir -p "$SAVE_LOOP_SCRATCH"
+  node --input-type=module - "$SCRATCH/versions.json" "$APP_SHA" "$AGENT_SHA" "$RUNTIME_SHA" <<'NODE'
+import fs from 'node:fs';
+const [file, app, agent, runtime] = process.argv.slice(2);
+fs.writeFileSync(file, JSON.stringify({app, agent, runtime}, null, 2) + '\n');
+NODE
+  node "$APP/scripts/save-loop/build-fixture.mjs" >"$SCRATCH/fixture.log" 2>&1 &
+  RUN_CHILD_PID=$!
+  wait "$RUN_CHILD_PID" || fail "Fixture failed; see $SCRATCH/fixture.log"
+  RUN_CHILD_PID=
+  manifest="$(node --input-type=module - "$SAVE_LOOP_SCRATCH" <<'NODE'
+import fs from 'node:fs';
+import path from 'node:path';
+const dir = process.argv[2];
+const names = fs.readdirSync(dir).filter(name => /^manifest-.+\.json$/.test(name));
+if (names.length !== 1) throw new Error(`Expected one fixture manifest, found ${names.length}`);
+console.log(path.join(dir, names[0]));
+NODE
+)"
+  node "$APP/scripts/save-loop/sweep.mjs" --manifest "$manifest" --results "$SCRATCH/results.jsonl" --versions "$SCRATCH/versions.json" &
+  RUN_CHILD_PID=$!
+  wait "$RUN_CHILD_PID"
+  RUN_CHILD_PID=
+else
+  echo "Stop this owned editor and Runtime with Ctrl+C. The wrapper remains attached until stopped."
+  wait "$EDITOR_PID"
+fi

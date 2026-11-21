@@ -44,10 +44,15 @@ if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Erro
 const helpers = await import('./lib.mjs');
 const {createRecorder} = await import('./assert.mjs');
 let browser;
+for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+  process.once(signal, async () => {
+    try { if (browser) await browser.close(); } finally { process.exit(code); }
+  });
+}
 let failed = false;
 const rows = [];
 try {
-  const {b, p: page, context} = await helpers.open();
+  const {b, p: page, context} = await helpers.open({onCleanup: close => { browser = {close}; }});
   browser = b;
   let secondPage;
   const project = await page.evaluate(async projectId => {

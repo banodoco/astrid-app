@@ -937,7 +937,7 @@ export function useTimelineSave(
   const copyRejectedSave = useCallback(async () => {
     if (localOwner.closed || !localOwner.session) {
       toast.error('The original unsaved change is unavailable. Reopen the timeline to recover it.');
-      return;
+      return false;
     }
     try {
       // The source of truth is the durable outbox, not a potentially stale
@@ -946,8 +946,12 @@ export function useTimelineSave(
       const contents = JSON.stringify(exportData, null, 2) + '\n';
       downloadBlobAsFile(new Blob([contents], { type: 'application/json;charset=utf-8' }),
         `astrid-unsaved-change-${timelineId.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`);
+      // Starting a browser download cannot prove the file was saved. The shell
+      // requires a second explicit confirmation before returning to canonical.
+      return true;
     } catch (error) {
       toast.error(`Could not copy your change out: ${error instanceof Error ? error.message : String(error)}. Your changes are still retained.`);
+      return false;
     }
   }, [localOwner, timelineId, toast]);
 

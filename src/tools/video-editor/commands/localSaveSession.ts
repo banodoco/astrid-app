@@ -9,6 +9,7 @@ import {
   toOutboxJson,
   type ClaimedOutbox,
   type OutboxJson,
+  type OutboxIntent,
   type OutboxRecord,
   type OutboxScope,
 } from './commitOutbox.ts';
@@ -33,7 +34,12 @@ export interface LocalSave {
   group_id?: CommitRequest['group_id'];
 }
 
-type StoredSave = LocalSave & { kind: 'local-save'; displayBasis: TimelineCommandBasis; documentIntent?: OutboxJson };
+type StoredSave = LocalSave & {
+  kind: 'local-save';
+  displayBasis: TimelineCommandBasis;
+  documentIntent?: OutboxJson;
+  sourceKey?: string;
+};
 export interface LocalSaveState {
   status: 'saved' | 'dirty' | 'saving' | 'retry' | 'conflict' | 'blocked' | 'recovery' | 'error';
   ownerId?: string;
@@ -45,6 +51,7 @@ export interface LocalSaveState {
 
 interface Options {
   scope: OutboxScope;
+  sourceKey?: string;
   initial: TimelineCommandBasis;
   document: OutboxJson;
   outboxes?: ReturnType<typeof createCommitOutbox>;
@@ -72,6 +79,27 @@ const rejectionKind = (error: OutboxJson | undefined): string | undefined => err
   ? error.kind : undefined;
 const rejectionMessage = (error: OutboxJson | undefined): string => error && typeof error === 'object' && !Array.isArray(error) && typeof error.message === 'string'
   ? error.message : 'This change could not be saved.';
+const PERMANENT_REJECTION_KINDS = new Set([
+  'too_large', 'validation', 'authorization', 'unsupported_route', 'rejected_request', 'refused',
+]);
+function permanentRejection(record: OutboxRecord | undefined) {
+  const pending = record?.pending;
+  return pending?.outcome?.kind === 'rejected'
+    && PERMANENT_REJECTION_KINDS.has(rejectionKind(pending.outcome.error) ?? '')
+    ? { request: pending.request, error: pending.outcome.error } : undefined;
+}
+
+/** Identifies the exact outbox prefix and suffix in a downloaded file. */
+export interface RejectedSaveReceipt {
+  requestKey: string;
+  intentIds: string[];
+}
+
+/** Only the owner of a permanently refused save may offer copy or explicit discard. */
+export function isPermanentLocalSaveRejection(state: LocalSaveState | null | undefined): boolean {
+  return (state?.status === 'error' || state?.status === 'conflict')
+    && PERMANENT_REJECTION_KINDS.has(rejectionKind(state.error) ?? '');
+}
 
 /** User-facing reason for a permanent rejection; undefined keeps the raw error message. */
 function permanentRejectionMessage(kind: RuntimeCommitFailureKind, error: unknown): string | undefined {
@@ -79,10 +107,12 @@ function permanentRejectionMessage(kind: RuntimeCommitFailureKind, error: unknow
     const details = error instanceof ApiError ? error.details : undefined;
     const limit = typeof details?.max_bytes === 'number' ? ` The limit is ${details.max_bytes} bytes.`
       : typeof details?.limit === 'number' ? ` The limit is ${details.limit}.` : '';
-    return `This change is too large to save.${limit}`;
+    return `This change is too large to save.${limit} Your changes are kept here but have not been saved.`;
   }
   if (kind === 'unsupported_route') return 'This version of Astrid does not support this save. Your changes are kept but not saved until Astrid is updated.';
-  if (kind === 'rejected_request') return 'The Runtime refused this save, and sending it again would not change the result. Your changes are kept but not saved.';
+  if (kind === 'rejected_request' || kind === 'refused') return `${errorMessage(error)}. Your changes are kept but not saved.`;
+  if (kind === 'validation') return `The Runtime rejected this change as invalid: ${errorMessage(error)}. Your changes are kept here but have not been saved.`;
+  if (kind === 'authorization') return 'The Runtime did not authorize this save. Your changes are kept here but have not been saved.';
   return undefined;
 }
 const dtoGap = { code: 'commit_contract_unavailable',
@@ -127,6 +157,7 @@ export async function createLocalSaveSession(options: Options) {
   let generation = 0;
   let adoptedAcceptance: string | undefined;
   let replaying = false;
+  let rejectedDisplayReady = false;
   let recoveryError: unknown;
   let writeError: unknown;
   let state: LocalSaveState = { status: 'saved', recoverableOwners: [] };
@@ -183,19 +214,19 @@ export async function createLocalSaveSession(options: Options) {
     prepared.adopt();
   }
 
-  // A payload the Runtime will never accept cannot succeed on retry, and left at the
-  // head it blocks every later edit. Remove it from the queue and tell the user what
-  // was dropped. Edits built on top of it depend on it, so they are removed too.
-  async function discardOversized(failure: OutboxJson): Promise<boolean> {
-    const at = generation;
-    const current = record!;
-    record = await box!.resolveRejected(current.intents.map((intent) => intent.id), undefined, () => !closed);
-    state = { ...state, notice: `${rejectionMessage(failure)} It was not saved and has been removed from the save queue, `
-      + 'so later edits can save. Edits made on top of it were removed with it.' };
-    publish('saved');
-    try { await resetToCanonical(at); }
-    catch (error) { publish('error', { message: `Removed change; reload failed: ${errorMessage(error)}` }); }
-    return false;
+  // A permanently rejected request is never retried or removed automatically.
+  // Show the exact authored suffix on its original verified head, including edits
+  // made on top of the rejected change. The durable outbox remains untouched.
+  async function restoreRejectedDraft(at: number) {
+    if (!record?.intents.length) return;
+    const first = saveOf(record.intents[0].payload);
+    const last = saveOf(record.intents[record.intents.length - 1].payload);
+    const prepared = await options.prepareDisplay(clone(first.displayBasis), clone(last.after));
+    if (closed || at !== generation) return;
+    displayBasis = clone(first.displayBasis);
+    document = clone(last.after);
+    prepared.adopt();
+    rejectedDisplayReady = true;
   }
 
   // Resend the rejected chain unchanged, on the head the Runtime has now. The Runtime revalidates the
@@ -210,12 +241,12 @@ export async function createLocalSaveSession(options: Options) {
   async function rollback() {
     const failure = record?.pending?.outcome;
     if (failure?.kind !== 'rejected') return false;
-    if (rejectionKind(failure.error) === 'too_large') return discardOversized(failure.error);
     const inverse = record?.intents.some((intent) => {
       const commands = saveOf(intent.payload).commands;
       return commands?.some((command) => command.op === 'timeline.inverse') ?? false;
     }) ?? false;
     const at = generation;
+    const permanent = permanentRejection(record);
     // Retain the entire rejected chain in the outbox.
     // A guarded inverse refusal is an authoritative-history conflict even
     // when Runtime reports the guard as a typed refusal/validation response;
@@ -223,13 +254,31 @@ export async function createLocalSaveSession(options: Options) {
     const conflict = inverse || (failure.error && typeof failure.error === 'object' && !Array.isArray(failure.error)
       && failure.error.kind === 'conflict');
     publish(conflict ? 'conflict' : 'error', failure.error);
-    // Keep the original draft and head together; never present it as an edit
-    // of the newer Runtime head or resend it automatically.
+    // Permanent 4xx: preserve both the original rejected change and all edits
+    // on top, visually and in the outbox, across a reload. Never send it again.
+    if (!conflict && permanent) {
+      try { await restoreRejectedDraft(at); }
+      catch (error) {
+        const original = permanent.error;
+        if (closed || at !== generation) return true;
+        publish('error', { ...(original && typeof original === 'object' && !Array.isArray(original) ? original : {}),
+          message: `${rejectionMessage(original)} Local change retained; preview could not be restored: ${errorMessage(error)}` });
+      }
+      return true;
+    }
+    // Conflict: keep the original intent and head together while showing the
+    // authoritative latest version. A track-label draft can stay visible.
     if (conflict && record && isSingleTrackLabelDraft(record)) return true;
     try {
       await resetToCanonical(at);
     } catch (error) {
-      publish('error', { failure: failure.error, message: `Draft retained; reload failed: ${errorMessage(error)}` });
+      if (closed || at !== generation) return true;
+      if (permanent) {
+        publish('conflict', toOutboxJson({ ...permanent.error as object,
+          message: `${rejectionMessage(permanent.error)} Saved history could not be reloaded: ${errorMessage(error)}` }));
+      } else {
+        publish('error', { failure: failure.error, message: `Draft retained; reload failed: ${errorMessage(error)}` });
+      }
     }
     return true;
   }
@@ -380,7 +429,7 @@ export async function createLocalSaveSession(options: Options) {
       // A recovered accepted prefix must win over its old optimistic suffix,
       // including when the next request already has uncertain durable bytes.
       replaying = !!record.accepted && record.intents.length > 0;
-      if (record.intents.length && !record.accepted) {
+      if (record.intents.length && !record.accepted && !permanentRejection(record)) {
         displayBasis = clone(saveOf(record.intents[0].payload).displayBasis);
         checkBasis(displayBasis);
         document = clone(saveOf(record.intents[record.intents.length - 1].payload).after);
@@ -414,19 +463,19 @@ export async function createLocalSaveSession(options: Options) {
 
   function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
     assertOpen();
-    // Stopgap: the save bar declines the edit and shows its own headline; these throws are assertions only.
-    // Plan 18 CC-5 deletes them, so a new edit queues behind the retained ones.
+    // Never accept another edit while retained bytes are unresolved or replaying. The caller
+    // rolls the declined gesture back; it remains in the editor until the original save is resolved.
     if (writeError || ['conflict', 'error'].includes(state.status)) throw new LocalSaveDeclined('Resolve retained local saves before editing again');
-    // The visible closure is now canonical, while the retained suffix still
-    // describes its original local chain. Do not author a new edit between them.
+    // The visible closure is canonical while a replayed suffix still names its original chain.
     if (replaying) throw new LocalSaveDeclined('Wait for retained dependent saves to finish revalidation before editing again');
     const save = toOutboxJson({ ...input, kind: 'local-save', displayBasis,
+      ...(options.sourceKey ? { sourceKey: options.sourceKey } : {}),
       ...(documentIntent ? { documentIntent } : {}) }) as unknown as StoredSave;
     if (!save.label.trim() || (save.commands && !save.commands.length)) throw new Error('Local save requires a label and nonempty commands');
     if (!same(save.before, document)) throw new Error('Local save must follow the actual authored local document');
     document = clone(save.after);
     generation++;
-    publish('dirty');
+    if (!retaining) publish('dirty');
     const write = writes.then(async () => {
       if (writeError) throw writeError;
       record = await box!.read();
@@ -450,7 +499,11 @@ export async function createLocalSaveSession(options: Options) {
     /** The actor whose edits this session's Undo/Redo may target. */
     actorId: options.scope.actorId,
     getState: () => clone(state),
+    getBasis: () => clone(basis),
+    /** The original verified read basis used to restore an unsaved rejected change. */
+    getDisplayBasis: () => clone(displayBasis),
     getDocument: () => clone(document),
+    hasRejectedDisplay: () => rejectedDisplayReady,
     /** Verified physical images with locally authored payloads; still an unsent intent. */
     appendDocument(input: Omit<Parameters<typeof documentPatchIntent>[0], 'basis'>): Promise<void> {
       assertOpen();
@@ -471,28 +524,81 @@ export async function createLocalSaveSession(options: Options) {
       return clone(basis);
     },
     /**
-     * The two ways out of any unsaved state, whatever it is (unavailable, refused, head moved, recovered).
-     * `latest` is Discard: every retained owner of this timeline is deleted, then the accepted head is adopted
-     * and a fresh owner claimed. `keep` is Try again: the retained chain is resent now, on the latest head when
-     * it was refused. Does nothing when nothing is retained.
+     * Only a deliberate 'latest' choice discards a rejected chain. 'keep' retries transient/head conflicts.
      */
-    async discharge(mode: 'latest' | 'keep') {
-      if (closed) return;
-      if (mode === 'latest') { await discardAll(); return; }
+    async discharge(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent = () => true) {
       assertOpen();
       if (sending) await sending.catch(() => {});
+      const at = generation;
+      await writes;
       if (closed) return;
       clearRetry();
       record = await box!.read();
-      if (!record.intents.length && !record.pending) {
-        // Nothing to resend: Try again acknowledges a notice about a change that was already removed.
-        if (state.notice) { delete state.notice; publish(state.status); }
+      if (record.pending?.outcome?.kind !== 'rejected') {
+        if (mode === 'latest') await discardAll();
         return;
       }
-      if (record.pending?.outcome?.kind === 'rejected') await rebaseOntoLatest();
-      retryDelay = RETRY_FIRST_MS;
-      publish('dirty');
-      await pump();
+      const ids = record.intents.map((intent) => intent.id);
+      if (exported && (record.pending.request.key !== exported.requestKey || !same(ids, exported.intentIds))) {
+        throw new Error('Your unsaved edits changed. Copy them again before reloading.');
+      }
+      if (mode === 'keep') {
+        if (PERMANENT_REJECTION_KINDS.has(rejectionKind(record.pending.outcome.error) ?? '')) {
+          throw new Error('This save was permanently rejected. Copy my change out, or explicitly discard and reload.');
+        }
+        await rebaseOntoLatest();
+        publish('dirty');
+        await pump();
+        return;
+      }
+      // Build the new canonical display before resolving durable bytes, so a failed reload keeps every edit.
+      const latest = await options.loadLatest();
+      checkBasis(latest);
+      const prepared = await options.prepareDisplay(clone(latest));
+      const canResolve = () => !closed && at === generation && stillCurrent();
+      if (!canResolve()) throw new Error('Your unsaved edits changed during reload.');
+      record = await box!.resolveRejected(ids, undefined, canResolve);
+      basis = clone(latest);
+      displayBasis = clone(latest);
+      document = toOutboxJson(prepared.document);
+      prepared.adopt();
+      delete state.notice;
+      rejectedDisplayReady = false;
+      replaying = false;
+      publish('saved');
+    },
+    /** Downloadable, self-contained original intent chain; nothing is consumed. */
+    async exportRejectedChange() {
+      assertOpen();
+      if (sending) await sending.catch(() => {});
+      await writes;
+      const current = await box!.read();
+      const pending = permanentRejection(current);
+      if (!pending || current.intents.length === 0) throw new Error('There is no permanently rejected change to copy');
+      const last = saveOf(current.intents[current.intents.length - 1].payload);
+      return {
+        format: 'astrid.rejected-local-save/v1',
+        scope: { project_id: options.scope.projectId, timeline_id: options.scope.timelineId },
+        rejection: pending.error ?? null,
+        rejected_request: { method: pending.request.method, path: pending.request.path,
+          key: pending.request.key, body: pending.request.body },
+        edits: current.intents.map(({ id, basis: originalBasis, payload }) => ({ id, basis: originalBasis, payload })),
+        final_document: last.after,
+      };
+    },
+    async recoverRejected(matchesLegacy: (intent: OutboxIntent) => boolean) {
+      if (state.status !== 'recovery') return;
+      const candidate = (await storage.list(options.scope)).find((owner) =>
+        state.recoverableOwners.includes(owner.ownerId) && permanentRejection(owner)
+        && owner.intents.length > 0 && owner.intents.every((intent) => {
+          const payload = intent.payload as Partial<StoredSave> | null;
+          return payload?.kind === 'local-save' && (payload.sourceKey === undefined
+            ? matchesLegacy(intent) : payload.sourceKey === options.sourceKey);
+        }));
+      if (candidate && state.status === 'recovery') {
+        await claim(candidate.ownerId);
+        await pump();
+      }
     },
     async recover(ownerId: string) {
       if (!state.recoverableOwners.includes(ownerId)) throw new Error('Choose an explicitly listed local save owner');

@@ -1,7 +1,7 @@
 import { createContext } from 'react';
 import { normalizeClipPlacementWithFindings } from '@banodoco/timeline-composition';
 import type { CanonicalDocument, CommitRequest, EditCommand, HistoryPage } from '@/integrations/runtime/timeline-commit-types.ts';
-import { LocalSaveDeclined, type LocalSaveSession } from '../commands/localSaveSession.ts';
+import { LocalSaveDeclined, type LocalSaveSession, type LocalSaveState, type RejectedSaveReceipt } from '../commands/localSaveSession.ts';
 import { toOutboxJson, type OutboxJson } from '../commands/commitOutbox.ts';
 import { canonicalJsonStringify, type TimelineBundleEnvelope } from '../data/typed/timelineBundle.ts';
 import { authoringBundleFromDocument, type AuthoringBundle } from '../commands/authoringBundle.ts';
@@ -38,11 +38,14 @@ export interface TimelineLocalSaveHandoff {
   flush(): Promise<TimelineSaveReceipt>;
   /** The durable local save session's state, when the owner has one. */
   status?(): string | undefined;
+  ownerId?(): string | undefined;
+  subscribeState?(listener: (state: LocalSaveState) => void): () => void;
+  exportRejectedChange?(): ReturnType<LocalSaveSession['exportRejectedChange']>;
   /**
    * Leave a refused save. `latest` drops the rejected change and its dependants; `keep` resends them on the
    * latest head. Resolves once the owner is saved and the next edit can save; throws if it is not.
    */
-  discharge?(mode: 'latest' | 'keep'): Promise<void>;
+  discharge?(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent?: () => boolean): Promise<void>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
   canUndo(): boolean;
@@ -52,7 +55,7 @@ export interface TimelineLocalSaveHandoff {
 }
 
 /** Scoped editors supply their own verified physical-image join and durable owner. */
-export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status' | 'discharge'>;
+export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status' | 'ownerId' | 'subscribeState' | 'exportRejectedChange' | 'discharge'>;
 export interface TimelinePersistenceBinding {
   readonly provider: DataProvider;
   readonly timelineId: string;
@@ -1030,9 +1033,10 @@ export function createTimelineLocalSaveHandoff(options: {
         throw error;
       }
     },
-    async discharge(mode) {
+    async discharge(mode, exported, stillCurrent) {
       let failure: unknown;
-      try { await options.session.discharge(mode); } catch (error) { failure = error; }
+      try { await options.session.discharge(mode, exported, stillCurrent); }
+      catch (error) { if (exported) throw error; failure = error; }
       const state = options.session.getState();
       if (state.status !== 'saved') {
         const message = object(state.error) && typeof state.error.message === 'string' ? state.error.message
@@ -1040,10 +1044,22 @@ export function createTimelineLocalSaveHandoff(options: {
         if (state.status === 'conflict') throw new TimelineVersionConflictError(message);
         refuse(message);
       }
-      // The session document is canonical again (or the saved result); the next capture authors from it.
-      document = structuredClone(options.session.getDocument()) as unknown as CanonicalDocument;
-      authoringSource = structuredClone(source);
+      // After the creator discards or a conflict saves successfully, both
+      // the session and editor must author subsequent gestures from the new
+      // authenticated head. Reusing the original pre-discharge source would
+      // silently attach them to an obsolete revision.
+      const basis = options.session.getBasis();
+      const adopted = options.adopted(basis);
+      const head = adopted.receipt.head;
+      if (head.projectId !== basis.canonicalDocument.project_id || head.timelineId !== basis.canonicalDocument.timeline_id
+        || head.headRevisionId !== basis.head.revisionId || head.headPublicationId !== basis.head.publicationId
+        || !same(adopted.source.head, head)) refuse('canonical assembly did not adopt the discharged head');
+      initial = structuredClone(basis);
+      source = structuredClone(adopted.source);
+      authoringSource = structuredClone(adopted.source);
+      document = structuredClone(basis.canonicalDocument);
       sourceChecked = false;
+      targets = historyTargets(basis.history, basis.head, options.session.actorId);
     },
     remoteHistoryAvailable,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,

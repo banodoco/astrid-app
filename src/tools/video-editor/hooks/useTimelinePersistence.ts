@@ -31,6 +31,7 @@ import {
   clearTimelineDraftIfSnapshotMatches,
   advanceTimelineDraftBaseAfterHeadAcknowledgement,
   loadTimelineDraft,
+  type TimelineDraftRecord,
   saveTimelineDraft,
 } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { recordShotTimelinePhase } from '@/tools/video-editor/lib/shot-timeline-timing.ts';
@@ -40,6 +41,8 @@ import type { CommitDataOptions, ScheduleSaveFn } from '@/tools/video-editor/hoo
 import { generateUUID } from '@/shared/lib/taskCreation/ids.ts';
 import { emitTimelineSaveDiagnostic, isTimelineDiagnosticsEnabled } from '@/tools/video-editor/lib/timeline-diagnostics.ts';
 import { TimelinePersistenceHandoffContext, isTimelineAuthoringRefusal, resolveTimelinePersistenceHandoff, type TimelineGestureReadBasis, type TimelinePersistenceHandoff } from './timelineLocalSaveHandoff.ts';
+
+import type { RejectedSaveReceipt } from '../commands/localSaveSession.ts';
 
 export type SaveStatus = 'loading' | 'saved' | 'saving' | 'dirty' | 'retrying' | 'error';
 
@@ -77,6 +80,21 @@ const WATCHDOG_GRACE_MS =
   SAVE_DEBOUNCE_MS + BRIDGE_REQUEST_TIMEOUT_MS + 2 * SAVE_ERROR_RETRY_BASE_MS;
 
 type ConfigVersionUpdateSource = 'save' | 'reload';
+
+export interface RejectedSaveCopy {
+  target: TimelineSaveTarget;
+  outbox: RejectedSaveReceipt;
+  snapshot: TimelineDraftRecord | null;
+}
+
+interface ReloadOptions {
+  clearDraft?: boolean;
+  preserveDraft?: boolean;
+  discardRefusedSave?: boolean;
+  exportedSave?: RejectedSaveCopy;
+  recoverySnapshot?: TimelineDraftRecord | null;
+  recoveryRetrySeq?: number;
+}
 
 interface UseTimelinePersistenceOptions {
   store?: TimelineStoreApi;
@@ -246,7 +264,8 @@ export interface UseTimelinePersistenceResult {
   /** Reopen resolution for a native refusal already retained in the recovered outbox. */
   restoreRetainedConflict: () => void;
   schemaIncompatible: ReadonlyArray<TimelineSchemaIssue> | null;
-  reloadFromServer: (options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => Promise<void>;
+  readOwnedRecoverySnapshot: () => Promise<TimelineDraftRecord | null>;
+  reloadFromServer: (options?: ReloadOptions) => Promise<void>;
   retrySaveAfterConflict: () => Promise<void>;
   isSavingRef: MutableRefObject<boolean>;
   /** Mirrors isConflictExhausted for the poll gate. */
@@ -1122,6 +1141,7 @@ export function useTimelinePersistence({
               baseHeadTimelineId: head?.timelineId,
             } : {}),
             ownerId: draftOwnerId,
+            outboxOwnerId: snapshot.session.localDocumentSave?.ownerId?.(),
             draftIdentity,
           },
         ); })
@@ -1189,13 +1209,15 @@ export function useTimelinePersistence({
       clipId: options?.gestureBasis?.clipId ?? selectedClipIdRef.current,
       generation: diagnosticOwner?.generation ?? session.generation, closed: diagnosticOwner?.closed,
       sessionPresent: diagnosticOwner ? Boolean(diagnosticOwner.session) : undefined }));
-    // Recovery is an explicit CAS decision. Do not replace the recovered
-    // record with a new-session edit before the user chooses Retry or Discard;
-    // keep the edit in memory and resume it after that decision. The previous
-    // ordering silently replaced the old recovery record and then returned,
-    // leaving the UI looking saved even though no POST had happened.
+    // Recovery is an explicit CAS decision. Preserve the latest visible edit
+    // durably while deferring its normal outbox capture until that decision.
     if (recoveryPendingRef?.current || recoveryActiveRef?.current) {
       // A resumed deferred save carries several edits and has no valid restore point; never revert it.
+      // Keep the browser recovery slot current while recovery controls are open,
+      // so Copy can include these edits and bind its confirmation to this sequence.
+      const snapshot = createRecoverySave(nextData, editSeqRef.current);
+      latestScheduledSaveRef.current = snapshot;
+      void snapshot.draftWrite.catch(() => {});
       beforeEditRef.current = null;
       deferredDuringRecoveryRef.current = {
         data: nextData,
@@ -1305,7 +1327,7 @@ export function useTimelinePersistence({
       recordShotTimelinePhase(scheduledSave.traceId, 'debounce-fired');
       void doSave(scheduledSave);
     }, SAVE_DEBOUNCE_MS);
-  }, [armWatchdog, createScheduledSave, disarmWatchdog, doSave, editSeqRef, getInteractionStateRef, isConflictExhausted, persistenceEnabled, schemaIncompatible, recoveryPendingRef, recoveryActiveRef]);
+  }, [armWatchdog, createRecoverySave, createScheduledSave, disarmWatchdog, doSave, editSeqRef, getInteractionStateRef, isConflictExhausted, persistenceEnabled, schemaIncompatible, recoveryPendingRef, recoveryActiveRef]);
 
   const scheduleSave = useCallback<ScheduleSaveFn>((nextData, options) => {
     scheduleSaveWithCapture(nextData, options);
@@ -1631,11 +1653,28 @@ export function useTimelinePersistence({
     });
   }, [getInteractionStateRef, scheduleSaveWithCapture]);
 
-  const reloadFromServer = useCallback((options?: { clearDraft?: boolean; preserveDraft?: boolean; discardRefusedSave?: boolean }) => {
+  const readOwnedRecoverySnapshot = useCallback(async (): Promise<TimelineDraftRecord | null> => {
+    const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
+    const scheduled = latestScheduledSaveRef.current;
+    const draftOwnerId = scheduled?.session === session ? scheduled.draftOwnerId : undefined;
+    const outboxOwnerId = session.localDocumentSave?.ownerId?.();
+    await waitForRecoveryDraftWrites();
+    const snapshot = await loadTimelineDraft(recoveryKey);
+    return snapshot && (draftOwnerId ? snapshot.ownerId === draftOwnerId
+      : Boolean(outboxOwnerId && snapshot.outboxOwnerId === outboxOwnerId)) ? snapshot : null;
+  }, [provider, session, timelineId, waitForRecoveryDraftWrites]);
+
+  const reloadFromServer = useCallback((options?: ReloadOptions) => {
     // Recovery Retry may still be in its asynchronous read/build phase, outside
     // the save queue. Invalidate it for every canonical reload entry point,
     // including the internal Save-as-copy path below.
     onCanonicalReloadStart?.();
+    const exported = options?.exportedSave;
+    if (exported && (exported.target.session !== session.identity
+      || exported.target.generation !== session.generation || exported.target.targetSeq !== editSeqRef.current
+      || reloadPromiseRef.current)) {
+      return Promise.reject(new Error('Your unsaved edits changed. Copy them again before reloading.'));
+    }
     if (reloadPromiseRef.current) return reloadPromiseRef.current;
 
     reloadInProgressRef.current = true;
@@ -1662,9 +1701,11 @@ export function useTimelinePersistence({
         if (reloadCancelledRef.current) {
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
-        // A refused save is queued durably and would refuse every later edit. Only the explicit "Use latest
-        // version" choice drops it, with whatever was built on it; any other reload keeps it and its card.
-        if (options?.discardRefusedSave) await session.localDocumentSave?.discharge?.('latest');
+        const ownedSnapshot = options?.discardRefusedSave ? await readOwnedRecoverySnapshot() : null;
+        if (exported
+          && canonicalJsonStringify(ownedSnapshot) !== canonicalJsonStringify(exported.snapshot)) {
+          throw new Error('Your unsaved edits changed. Copy them again before reloading.');
+        }
 
         const loaded = provider.saveTimelineAtHead && provider.loadReferencedTimeline
           ? await provider.loadReferencedTimeline(timelineId)
@@ -1700,30 +1741,50 @@ export function useTimelinePersistence({
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
 
-        // Clear only the exact durable draft snapshot the user chose to
-        // discard. IndexedDB compares and deletes in one transaction, so a
-        // newer edit written concurrently cannot be erased by this reload.
-        const shouldClearDraft = options?.clearDraft ?? !options?.preserveDraft;
-        if (shouldClearDraft && isDataProviderPersistenceEnabled(provider)) {
-          await waitForRecoveryDraftWrites();
-          if (reloadCancelledRef.current) {
-            throw new Error('Canonical reload was superseded by a new timeline edit.');
-          }
-          const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
-          const recoverySnapshot = await loadTimelineDraft(recoveryKey);
-          if (reloadCancelledRef.current) {
-            throw new Error('Canonical reload was superseded by a new timeline edit.');
-          }
-          if (recoverySnapshot) {
-            const cleared = await clearTimelineDraftIfSnapshotMatches(recoveryKey, recoverySnapshot);
-            if (!cleared) {
-              throw new Error('The recovery draft changed during reload; it was kept for safety.');
-            }
-          }
-          if (reloadCancelledRef.current) {
-            throw new Error('Canonical reload was superseded by a new timeline edit.');
+        // Compare-and-delete the chosen snapshot. A different tab can write
+        // a new one even while the current tab is reloading.
+        const shouldClearDraft = (options?.clearDraft ?? !options?.preserveDraft) && isDataProviderPersistenceEnabled(provider);
+        const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
+        let recoverySnapshot = !shouldClearDraft ? null
+          : options?.recoverySnapshot !== undefined ? options.recoverySnapshot
+            : options?.discardRefusedSave ? ownedSnapshot : await loadTimelineDraft(recoveryKey);
+        if (shouldClearDraft && options?.recoverySnapshot) {
+          // Discard starts from the exact record the user was offered. Retry
+          // may meanwhile have replaced it with a session-owned copy. An ACK
+          // may remove it, but a different current record must never become
+          // the deletion target.
+          const currentSnapshot = await loadTimelineDraft(recoveryKey);
+          if (!currentSnapshot) recoverySnapshot = null;
+          else if (currentSnapshot.draftIdentity !== options.recoverySnapshot.draftIdentity
+            || currentSnapshot.ownerId !== options.recoverySnapshot.ownerId
+            || currentSnapshot.updatedAt !== options.recoverySnapshot.updatedAt) {
+            // Retry writes a fresh owner/timestamp for its own replacement
+            // snapshot. Permit that copy only while Retry's scheduled edit is
+            // still the latest edit. A later edit advances the sequence and
+            // cannot be adopted as the Retry copy.
+            const retrySave = latestScheduledSaveRef.current;
+            const isRetryCopy = options.recoveryRetrySeq !== undefined
+              && editSeqRef.current === options.recoveryRetrySeq
+              && retrySave?.seq === options.recoveryRetrySeq
+              && currentSnapshot.ownerId === retrySave.draftOwnerId
+              && currentSnapshot.baseVersion === retrySave.draftBaseVersion
+              && canonicalJsonStringify(currentSnapshot.draft) === canonicalJsonStringify(retrySave.draft);
+            if (!isRetryCopy) throw new Error('The recovery draft changed during reload; it was kept for safety.');
+            recoverySnapshot = currentSnapshot;
           }
         }
+        const canReload = () => !reloadCancelledRef.current && activeTargetRef.current === session;
+        if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
+
+        if (options?.discardRefusedSave) {
+          if (exported) await session.localDocumentSave?.discharge?.('latest', exported.outbox, canReload);
+          else await session.localDocumentSave?.discharge?.('latest');
+        }
+        if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
+        if (recoverySnapshot && !await clearTimelineDraftIfSnapshotMatches(recoveryKey, recoverySnapshot)) {
+          throw new Error('The recovery draft changed during reload; it was kept for safety.');
+        }
+        if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
 
         clearErrorRetry();
         clearWatchdog();
@@ -1793,6 +1854,7 @@ export function useTimelinePersistence({
     editSeqRef,
     logConfigVersionUpdate,
     provider,
+    readOwnedRecoverySnapshot,
     resolveAssetUrl,
     scheduleSaveWithCapture,
     savedSeqRef,
@@ -1937,6 +1999,7 @@ export function useTimelinePersistence({
     isConflictExhausted,
     restoreRetainedConflict,
     schemaIncompatible,
+    readOwnedRecoverySnapshot,
     reloadFromServer,
     retrySaveAfterConflict,
     isSavingRef,

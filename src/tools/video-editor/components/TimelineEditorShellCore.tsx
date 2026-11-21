@@ -6,8 +6,10 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { CommandPalette } from '@/tools/video-editor/components/CommandPalette/CommandPalette.tsx';
 import { Images, Loader2, Maximize2, Sparkles } from 'lucide-react';
 import { VIDEO_EDITOR_THEME_VARS } from '@/tools/video-editor/lib/themeTokens.ts';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/shared/components/ui/alert-dialog.tsx';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/shared/components/ui/dialog.tsx';
 import { SaveBar } from './SaveBar.tsx';
+import { TimelineSaveNotice } from './TimelineSaveNotice.tsx';
 import { Button } from '@/shared/components/ui/button.tsx';
 import { cn } from '@/shared/components/ui/contracts/cn.ts';
 import { COARSE_TOUCH_TARGET } from '@/shared/components/ui/contracts/touchTarget.ts';
@@ -326,7 +328,12 @@ function TimelineEditorShellCoreComponent({
     if (chrome.loadError) chrome.retryLoad();
     if (chrome.saveStatus === 'error' || chrome.saveStatus === 'dirty') chrome.retryPendingSave();
   });
-  useTimelineRealtime({ timelineId });
+  const conflict = useTimelineRealtime({
+    timelineId,
+    conflictExhausted: chrome.isConflictExhausted && !chrome.permanentSaveRejection,
+    onKeepLocalChanges: chrome.retrySaveAfterConflict,
+    onDiscardRemoteChanges: () => chrome.reloadFromServer({ discardRefusedSave: true }),
+  });
 
   useEffect(() => {
     bootDiagnostics();
@@ -788,6 +795,93 @@ function TimelineEditorShellCoreComponent({
     </div>
   );
 
+  /** Write-ack watchdog banner: an edit went unacknowledged (or was dropped on
+   *  the null-data path). Persistent and actionable — never a silent badge. */
+  const watchdogBanner = chrome.watchdogTripped ? (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    >
+      <span>
+        {chrome.watchdogReason === 'lost-edit'
+          ? 'Your edits could not be applied — the timeline is not loaded yet. Reload the timeline before editing.'
+          : 'Your changes have not been saved: the save never got a confirmation.'}
+      </span>
+      <Button type="button" size="sm" variant="outline" onClick={chrome.retryWatchdog}>
+        {chrome.watchdogReason === 'lost-edit' ? 'Dismiss' : 'Retry save'}
+      </Button>
+    </div>
+  ) : null;
+
+  /** Diverged banner (B4): a 409 means the document changed elsewhere. No
+   *  silent overwrite — explicit Reload or Save as copy. */
+  // A save conflict is a choice between two versions, not an error: neutral, not destructive red.
+  // The dialog and this bar offer the same two buttons: the dialog is the one place while it is open, and this bar is
+  // the way back to the choice once it was dismissed.
+  const conflictBanner = chrome.isConflictExhausted && !chrome.permanentSaveRejection && !conflict.isOpen ? (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-3 border-b border-border bg-muted/40 px-3 py-2 text-sm text-foreground"
+    >
+      <span>{TIMELINE_CONFLICT_SENTENCE}</span>
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
+          {TIMELINE_CONFLICT_USE_LATEST}
+        </Button>
+        <Button type="button" size="sm" onClick={chrome.retrySaveAfterConflict}>
+          {TIMELINE_CONFLICT_KEEP_MINE}
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
+  /** Schema rejection banner: the server could not validate the payload.
+   *  Freeze autosave until the user explicitly adopts the server version. */
+  const incompatibleBanner = chrome.schemaIncompatible ? (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-3 border-b border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+    >
+      <span>
+        The timeline could not be saved because the payload is incompatible with the server schema.
+        {chrome.schemaIncompatible.length > 0 && (
+          <span className="ml-2 text-xs opacity-80">
+            {chrome.schemaIncompatible.map((issue) => {
+              const location = issue.pointer ? ` at ${issue.pointer}` : '';
+              const detail = issue.message ? `: ${issue.message}` : '';
+              return `${issue.code ?? 'schema_error'}${location}${detail}`;
+            }).join('; ')}
+          </span>
+        )}
+      </span>
+      <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer()}>
+        Reload
+      </Button>
+    </div>
+  ) : null;
+
+  /** Recovery draft banner (B9): a previous session left unsaved work in the
+   *  one-slot draft. Offer Retry (re-POST the draft) or Discard. */
+  const recoveryBanner = chrome.recoveryDraft && !chrome.permanentSaveRejection && !conflict.isOpen && !chrome.isConflictExhausted ? (
+    <div
+      role="alert"
+      className="flex items-center justify-between gap-3 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
+    >
+      <span>
+        You have unsaved changes from {formatDraftTime(chrome.recoveryDraft.updatedAt)}.
+        {chrome.recoveryDraft.retryAllowed === false && ' The original editing head is unknown. This draft is preserved; discard it or resolve it explicitly before saving.'}
+      </span>
+      <div className="flex items-center gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={chrome.recoveryDraft.retryAllowed === false} onClick={() => void chrome.retryRecoveredDraft()}>
+          Save them
+        </Button>
+        <Button type="button" size="sm" variant="outline" onClick={() => void chrome.discardRecoveredDraft()}>
+          Discard
+        </Button>
+      </div>
+    </div>
+  ) : null;
+
   /** The timeline region, contained so a render throw under it cannot take the
    *  toolbar (and therefore undo) down with it. Shared by all three layout
    *  branches — the boundary is per-branch instance, which is what we want: a
@@ -804,6 +898,11 @@ function TimelineEditorShellCoreComponent({
           onTryAgain={drop.tryAgain} onDiscard={drop.discard} />
       ))}
       {chrome.saveBar ? <SaveBar bar={chrome.saveBar} onTryAgain={chrome.tryAgain} onDiscard={chrome.discardUnsaved} /> : null}
+      {conflictBanner}
+      {incompatibleBanner}
+      {watchdogBanner}
+      <TimelineSaveNotice />
+      {recoveryBanner}
       {chrome.loadError && !(recoveryCardShowing && hasLoadedTimeline) ? (
         // The hosted build's "Astrid stopped" / "restarted" card already says what to do about the same failure.
         recoveryCardShowing ? null : <TimelineLoadErrorCard message={chrome.loadError.message} onRetry={chrome.retryLoad} />
@@ -1085,6 +1184,19 @@ function TimelineEditorShellCoreComponent({
           onOpenChange={setIsCommandPaletteOpen}
         />
       )}
+
+      <AlertDialog open={conflict.isOpen && !chrome.permanentSaveRejection} onOpenChange={conflict.setOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>This timeline changed somewhere else</AlertDialogTitle>
+            <AlertDialogDescription>{TIMELINE_CONFLICT_SENTENCE}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => void conflict.discardAndReload()}>{TIMELINE_CONFLICT_USE_LATEST}</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void conflict.keepLocalChanges()}>{TIMELINE_CONFLICT_KEEP_MINE}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

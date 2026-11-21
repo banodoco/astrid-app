@@ -674,13 +674,14 @@ export class AstridAgentSessionStore {
         return;
       }
 
-      await refreshProjectElementContext(projectId);
+      // Scoping happens synchronously; loading the list and modules must not block chat.
+      void refreshProjectElementContext(projectId).catch(() => {});
+      const projectAuthoring = captured?.projectAuthoring ?? structuredClone(projectPackContext(projectId));
+      if (captured && !captured.projectAuthoring) captured.projectAuthoring = projectAuthoring;
       checkCurrent();
       const astridAgentContext = await import('@/tools/video-editor/runtime/astridAgentContext.ts');
       if (signal.aborted) return;
-      // The first attempt records project authoring after its refresh; retries resend that same record.
-      if (captured && editorContext.projectId && !captured.projectAuthoring) captured.projectAuthoring = structuredClone(projectPackContext(editorContext.projectId));
-      const contextSnapshot = astridAgentContext.buildAstridAgentContextSnapshot(editorContext, input.attachments ?? [], input.requestId, captured?.projectAuthoring);
+      const contextSnapshot = astridAgentContext.buildAstridAgentContextSnapshot(editorContext, input.attachments ?? [], input.requestId, projectAuthoring);
       const context = astridAgentContext.serializeAstridAgentContext(contextSnapshot);
       const sceneBinding = sceneScopeForRequest(sessionId, contextSnapshot.request_id, editorContext);
       if (sceneBinding) {

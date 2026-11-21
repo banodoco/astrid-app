@@ -264,6 +264,7 @@ export interface TimelineChromeContextValue {
    * left unsaved work. The shell offers Retry / Discard.
    */
   recoveryDraft: { updatedAt: string; baseVersion: number; retryAllowed?: boolean } | null;
+  recoveryRestoreAllowed: boolean;
   retryRecoveredDraft: () => void;
   discardRecoveredDraft: () => void;
   startRender: TimelineStartRender;

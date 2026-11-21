@@ -2134,6 +2134,64 @@ describe('TimelineEditorShellCore — recovery draft banner', () => {
     __chromeOverrides = {};
   });
 
+  it('R13 offers Restore and Discard for an IndexedDB recovery record', () => {
+    const restore = vi.fn();
+    const discard = vi.fn();
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+      retryRecoveredDraft: restore,
+      discardRecoveredDraft: discard,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('We kept your unsaved edit.');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(restore).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
+    expect(discard).toHaveBeenCalledTimes(1);
+  });
+
+  it('R13 keeps FIX-16 rejection actions visible and hides generic Restore after rejection', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+      saveNotice: 'This change is too large to save. Your changes are kept here but have not been saved.',
+      permanentSaveRejection: true,
+      copyRejectedSave: vi.fn(),
+      reloadFromServer: vi.fn(),
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('button', { name: 'Copy my change out' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Discard and reload the saved version' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Restore' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Discard' })).toBeNull();
+  });
+
+  it('R13 makes Restore the primary action for an eligible recovered draft', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('We kept your unsaved edit.');
+    expect(screen.getByRole('button', { name: 'Restore' }).className).toContain('bg-primary');
+    expect(screen.getByRole('button', { name: 'Discard' }).className).not.toContain('bg-primary');
+  });
+
+  it('R13 hides the recovery notice while keeping FIX-16 stop copy after permanent rejection', () => {
+    __chromeOverrides = {
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true,
+      saveNotice: 'This change is too large to save. Your changes are kept here but have not been saved.',
+      permanentSaveRejection: true,
+      copyRejectedSave: vi.fn(),
+      reloadFromServer: vi.fn(),
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert').textContent).toContain('This change is too large to save.');
+    expect(screen.queryByText('We kept your unsaved edit.')).toBeNull();
+  });
+
   it('offers Save them and Discard for a recovered draft, naming only the time of day', () => {
     const retry = vi.fn();
     const discard = vi.fn();

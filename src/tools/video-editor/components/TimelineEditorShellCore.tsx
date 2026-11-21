@@ -329,6 +329,7 @@ function TimelineEditorShellCoreComponent({
   const hasLoadedTimeline = Boolean(editorData.resolvedConfig);
   const holdsBoot = useFirstLoadHold(hasLoadedTimeline || Boolean(chrome.loadError));
   const recoveryCardShowing = useRecoveryCardShowing();
+  const [confirmExportReload, setConfirmExportReload] = useState(false);
   // Astrid answering again clears the card. What failed while it was stopped is retried here, so the page carries on as
   // the card promised ("Your changes are kept"): a timeline read that failed is read again, and an edit that was never
   // saved is saved now, without waiting for another edit.
@@ -830,7 +831,9 @@ function TimelineEditorShellCoreComponent({
       <span>{chrome.saveNotice}</span>
       {chrome.permanentSaveRejection && (
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button type="button" size="sm" variant="outline" onClick={() => void chrome.copyRejectedSave()}>
+          <Button type="button" size="sm" variant="outline" onClick={() => {
+            void chrome.copyRejectedSave().then(started => { if (started) setConfirmExportReload(true); });
+          }}>
             Copy my change out
           </Button>
           <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
@@ -1207,6 +1210,27 @@ function TimelineEditorShellCoreComponent({
           onOpenChange={setIsCommandPaletteOpen}
         />
       )}
+
+      {/* A browser download can be blocked. Never discard the outbox until
+          the creator confirms the exported file actually exists. */}
+      <AlertDialog open={confirmExportReload && chrome.permanentSaveRejection} onOpenChange={setConfirmExportReload}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Keep a copy of your unsaved change</AlertDialogTitle>
+            <AlertDialogDescription>
+              Astrid started a JSON file download containing your original rejected change and all edits built on it.
+              Check that the file is safely stored before you continue. Reloading the saved version removes these
+              unsaved edits from the editor; they stay in your downloaded file.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep my unsaved edits</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void chrome.reloadFromServer({ discardRefusedSave: true })}>
+              I saved the file — reload the saved version
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={conflict.isOpen} onOpenChange={conflict.setOpen}>
         <AlertDialogContent>

@@ -14,7 +14,7 @@ vi.mock('@/tools/video-editor/compositions/TimelineRenderer', () => ({
 }));
 
 const playerListeners = new Map<string, Set<(...args: any[]) => void>>();
-const playerPropsHistory: Array<{ config: ResolvedTimelineConfig; durationInFrames?: number; moveToBeginningWhenEnded?: boolean; astridElementHost?: AstridElementHost; numberOfSharedAudioTags?: number }> = [];
+const playerPropsHistory: Array<{ config: ResolvedTimelineConfig; durationInFrames?: number; moveToBeginningWhenEnded?: boolean; astridElementHost?: AstridElementHost; numberOfSharedAudioTags?: number; inputKeys?: string[] }> = [];
 const playerHandles: Array<{
   seekTo: ReturnType<typeof vi.fn>;
   getCurrentFrame: ReturnType<typeof vi.fn>;
@@ -31,6 +31,7 @@ vi.mock('@remotion/player', async () => {
       ref: React.Ref<unknown>,
     ) {
       playerPropsHistory.push({
+        inputKeys: Object.keys(props.inputProps),
         config: props.inputProps.config,
         durationInFrames: props.durationInFrames,
         moveToBeginningWhenEnded: props.moveToBeginningWhenEnded,
@@ -164,7 +165,7 @@ describe('RemotionPreview', () => {
     vi.useRealTimers();
   });
 
-  it('shows a theme-aware placeholder until scoped pack preparation finishes without remounting the Player', async () => {
+  it('never replaces the Player surface while scoped pack preparation is loading: the composition is not gated on it', async () => {
     setAdmittedElementScope('preview-loading-project', []);
     const host: AstridElementHost = {
       descriptors: [], sequenceRegistry: {}, resolveComponent: () => undefined,
@@ -175,14 +176,9 @@ describe('RemotionPreview', () => {
       <RemotionPreview config={makeConfig('preparing')} onTimeUpdate={vi.fn()} playerContainerRef={createRef<HTMLDivElement>()}/>
     </VideoEditorRuntimeProvider>);
     const player=screen.getByTestId('mock-player');
-    expect(screen.getByRole('status')).toHaveAccessibleName('Loading preview');
-    expect(screen.getByRole('status').textContent).toBe('');
-    // The editor's one loading language: card paper with the muted skeleton pulse.
-    expect(screen.getByRole('status')).toHaveClass('bg-card');
-    expect(screen.getByRole('status').firstElementChild).toHaveClass('bg-muted/40', 'animate-pulse');
-    expect(player).toContainElement(screen.getByRole('status'));
+    // The composition receives no `preparing` input: nothing in the preview waits on element readiness.
+    expect(playerPropsHistory.at(-1)?.inputKeys).not.toContain('preparing');
     await act(async()=>{await refreshAdmittedElements(async()=>null);});
-    expect(screen.queryByRole('status')).not.toBeInTheDocument();
     expect(screen.getByTestId('mock-player')).toBe(player);
     expect(player.parentElement).not.toHaveStyle({visibility:'hidden'});
   });

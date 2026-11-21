@@ -34,8 +34,6 @@ import {MosaicImage, mosaicBlockAt, paintMosaic, type MosaicRamp, type Rect} fro
 // inside the rect; the label sits under it.
 
 type Zone = {x: number; y: number; w: number; h: number};
-/** Edge feather of the inset rect: one size for every edge, or per edge. A size <= 1 is a fraction of the frame width, larger is px. */
-type Feather = number | {left?: number; top?: number; right?: number; bottom?: number};
 type Inset = {x: number; y: number; w: number; h: number; radius?: number; shadow?: boolean | string; border?: string};
 type Params = {
   src?: string;
@@ -67,56 +65,11 @@ type Params = {
   tint?: {color?: string; opacity?: number} | null;
   /** Framed rect (canvas px) for the picture on the background field. Omit to fill the frame. */
   inset?: Inset | null;
-  /** Keyframes for the inset rect (clip frames, canvas px). Segments ease with the ease of the key they arrive at (default easeOut). */
-  insetKeys?: {at: number; x: number; y: number; w: number; h: number; feather?: Feather; ease?: 'linear' | 'easeOut'}[];
-  /** Soften the inset rect's edges to transparent (the background field shows through) with a CSS mask. A key's own feather overrides it for that key. */
-  feather?: Feather;
 };
 
 const SOFT_SHADOW = '0 28px 64px rgba(21, 19, 17, 0.18), 0 3px 8px rgba(21, 19, 17, 0.10)';
 
-const featherPx = (f: unknown, width: number): {l: number; t: number; r: number; b: number} => {
-  const size = (n: unknown): number => {
-    const v = finiteNumber(n, 0);
-    return Math.max(0, v <= 1 ? v * width : v);
-  };
-  const o = f && typeof f === 'object' ? (f as Record<string, unknown>) : null;
-  return o ? {l: size(o.left), t: size(o.top), r: size(o.right), b: size(o.bottom)} : {l: size(f), t: size(f), r: size(f), b: size(f)};
-};
-
-const easeOutCubic = (t: number): number => 1 - Math.pow(1 - Math.min(1, Math.max(0, t)), 3);
-
-// The inset rect at `frame`: the keyframed x/y/w/h (held outside the keys) merged over the static inset (radius, shadow, border).
-const insetAt = (inset: unknown, keys: Params['insetKeys'], feather: Feather | undefined, frame: number, width: number): unknown => {
-  const pts = (Array.isArray(keys) ? keys : []).filter((k) => k && Number.isFinite(k.at)).sort((a, b) => a.at - b.at);
-  const base = featherPx(feather, width);
-  if (pts.length === 0) return inset && typeof inset === 'object' ? {...inset, feather: base} : inset;
-  const fOf = (k: (typeof pts)[number]): ReturnType<typeof featherPx> => (k.feather === undefined ? base : featherPx(k.feather, width));
-  let rect = pts[pts.length - 1];
-  let fe = fOf(rect);
-  if (frame <= pts[0].at) {
-    rect = pts[0];
-    fe = fOf(rect);
-  }
-  else if (frame < rect.at) {
-    for (let i = 1; i < pts.length; i += 1) {
-      if (frame <= pts[i].at) {
-        const a = pts[i - 1];
-        const b = pts[i];
-        const t = (frame - a.at) / (b.at - a.at);
-        const e = b.ease === 'linear' ? t : easeOutCubic(t);
-        const fa = fOf(a);
-        const fb = fOf(b);
-        fe = {l: fa.l + (fb.l - fa.l) * e, t: fa.t + (fb.t - fa.t) * e, r: fa.r + (fb.r - fa.r) * e, b: fa.b + (fb.b - fa.b) * e};
-        rect = {at: frame, x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e, w: a.w + (b.w - a.w) * e, h: a.h + (b.h - a.h) * e};
-        break;
-      }
-    }
-  }
-  return {...(inset && typeof inset === 'object' ? inset : {}), x: rect.x, y: rect.y, w: rect.w, h: rect.h, feather: fe};
-};
-
-const insetOf = (value: unknown, width: number, height: number): (Required<Pick<Inset, 'x' | 'y' | 'w' | 'h' | 'radius'>> & {shadow: string; border: string | null; feather: {l: number; t: number; r: number; b: number}}) | null => {
+const insetOf = (value: unknown, width: number, height: number): (Required<Pick<Inset, 'x' | 'y' | 'w' | 'h' | 'radius'>> & {shadow: string; border: string | null}) | null => {
   if (!value || typeof value !== 'object') return null;
   const v = value as Inset;
   const w = Math.round(clamp(finiteNumber(v.w, 0), 0, width));
@@ -131,19 +84,7 @@ const insetOf = (value: unknown, width: number, height: number): (Required<Pick<
     radius: Math.max(0, finiteNumber(v.radius, 12)),
     shadow,
     border: typeof v.border === 'string' ? v.border : null,
-    feather: (v as {feather?: unknown}).feather && typeof (v as {feather?: unknown}).feather === 'object'
-      ? ((v as unknown as {feather: {l: number; t: number; r: number; b: number}}).feather)
-      : {l: 0, t: 0, r: 0, b: 0},
   };
-};
-
-// CSS mask that fades the inset rect's edges to transparent; one gradient per feathered edge, intersected.
-const featherMask = (f: {l: number; t: number; r: number; b: number}): CSSProperties => {
-  const edges: [number, string][] = [[f.l, 'to right'], [f.t, 'to bottom'], [f.r, 'to left'], [f.b, 'to top']];
-  const layers = edges.filter(([n]) => n > 0.5).map(([n, dir]) => `linear-gradient(${dir}, transparent 0, #000 ${n}px)`);
-  if (layers.length === 0) return {};
-  const image = layers.join(', ');
-  return {maskImage: image, maskComposite: 'intersect', WebkitMaskImage: image, WebkitMaskComposite: 'source-in'} as CSSProperties;
 };
 
 const MONO = `'${FAMILY.label}', monospace`;
@@ -285,7 +226,7 @@ export default function AmFootage(props: ElementComponentProps): ReactElement | 
   }
 
   // ---- Real media (or a stand-in still) on the slot.
-  const inset = insetOf(insetAt(p.inset, p.insetKeys, p.feather, frame, width), width, height);
+  const inset = insetOf(p.inset, width, height);
   // The picture box: the inset rect, or the whole frame.
   const boxW = inset ? inset.w : width;
   const boxH = inset ? inset.h : height;
@@ -353,7 +294,6 @@ export default function AmFootage(props: ElementComponentProps): ReactElement | 
             borderRadius: inset.radius,
             boxShadow: [ring, inset.shadow === 'none' ? null : inset.shadow].filter(Boolean).join(', ') || 'none',
             background,
-            ...featherMask(inset.feather),
           }}
         >
           {picture}

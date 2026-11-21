@@ -281,12 +281,26 @@ function checkSource(initial: TimelineCommandBasis, source: TimelineSaveSource) 
   const parentClips = !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips)
     ? canonicalizeTimelinePair({ ...loaded, clips: structuredClone(parent.clips) } as TimelineConfig,
       structuredClone(parent.registry) as unknown as AssetRegistry) : undefined;
+  // Derive the provider-defaulted view from the verified parent only when
+  // the ordinary views did not match. Preserve physical top-level clips.
+  const matchesProviderView = () => {
+    const candidates = [config as unknown as TimelineConfig];
+    if (!Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips)) {
+      candidates.push({ ...config, clips: structuredClone(parent.clips) } as TimelineConfig);
+    }
+    return candidates.some(candidate => {
+      const defaulted = { ...candidate, ...withDefaultTimelineOutput(candidate) } as TimelineConfig;
+      const view = canonicalizeTimelinePair(defaulted, structuredClone(parent.registry) as unknown as AssetRegistry);
+      return same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(view.config)));
+    });
+  };
   // Accept the original raw view or main's actual load/build view. No arbitrary
   // display snapshot can establish an authored entity binding.
   if ((!same(authoredJson(source.config), authoredJson(loaded))
     && !same(authoredJson(source.config), authoredJson(projected.config))
     && !same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(projected.config)))
-    && !(parentClips && same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(parentClips.config)))))
+    && !(parentClips && same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(parentClips.config))))
+    && !matchesProviderView())
     || !same(authoredJson(source.registry), authoredJson(projected.registry))) {
     refuse('upstream source differs from the verified authored parent', 'source-parent-mismatch');
   }

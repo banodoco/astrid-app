@@ -34,6 +34,7 @@ import { useRenderState } from '@/tools/video-editor/hooks/useRenderState.ts';
 import { useTimelineHistory } from '@/tools/video-editor/hooks/useTimelineHistory.ts';
 import { useTimelineQueries } from '@/tools/video-editor/hooks/useTimelineQueries.ts';
 import { useTimelineSave } from '@/tools/video-editor/hooks/useTimelineSave.ts';
+import { withTimelineSaveReadiness } from '@/tools/video-editor/lib/timeline-editability.ts';
 import { useTimelineSelection } from '@/tools/video-editor/hooks/useTimelineSelection.ts';
 import {
   createTimelineStore,
@@ -640,6 +641,12 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
   const [contextTarget, setContextTarget] = useState(initialInteractionPolicyRef.current.contextTarget);
   const [inspectorTarget, setInspectorTarget] = useState(initialInteractionPolicyRef.current.inspectorTarget);
   const save = useTimelineSave(queries, runtime.provider, interactionStateRef, store, initialTimelineData);
+  // Publish a new policy when readiness changes so context consumers update;
+  // retained mutation callbacks still query the current owner at invocation.
+  const timelineEditability = useMemo(
+    () => withTimelineSaveReadiness(runtime.timelineEditability, save.isTimelineEditingReady),
+    [runtime.timelineEditability, save.isTimelineEditingReady, save.timelineEditingReady],
+  );
   const pendingWorkRegistry = useMemo(createPendingWorkRegistry, []);
   if (store.getState().pendingWorkRegistry !== pendingWorkRegistry) {
     store.setState({ pendingWorkRegistry });
@@ -658,18 +665,18 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     commitData: save.commitData,
     interactionStateRef,
     pendingOpsRef: save.pendingOpsRef,
-    editability: runtime.timelineEditability,
+    editability: timelineEditability,
     remoteHistory: save.localDocumentSave,
   });
   const derived = useDerivedTimeline(save.data, save.selectedClipId, save.selectedTrackId);
   const timelineDataRef = save.dataRef;
   const commitTimelineData = save.commitData;
   const flushTimelineSave = save.flushPendingSave;
-  const canPersistVisualSeamConfig = runtime.timelineEditability?.checkTimeline?.().allowed ?? true;
+  const canPersistVisualSeamConfig = timelineEditability.checkTimeline?.().allowed ?? true;
   const persistVisualSeamConfig = useCallback(async (acknowledgedConfig: ResolvedTimelineConfig) => {
     const current = timelineDataRef.current;
     if (!current) throw new Error('Timeline data is no longer available.');
-    const permission = runtime.timelineEditability?.checkTimeline?.();
+    const permission = timelineEditability.checkTimeline?.();
     if (permission && !permission.allowed) {
       throw new Error(`Timeline edits are temporarily unavailable (${permission.reason ?? 'read-only'}).`);
     }
@@ -693,7 +700,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     if (timelineDataRef.current !== current) throw new Error('Timeline changed while saving visual boundary declarations.');
     commitTimelineData(nextData, { save: true, semantic: true });
     await flushTimelineSave();
-  }, [commitTimelineData, flushTimelineSave, resolveAssetUrl, runtime.timelineEditability, timelineDataRef]);
+  }, [commitTimelineData, flushTimelineSave, resolveAssetUrl, timelineEditability, timelineDataRef]);
   const render = useRenderState(
     derived.resolvedConfig,
     derived.renderMetadata,
@@ -722,7 +729,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     selectedTrackId,
     saveStatus,
     setSelectedTrackId,
-    applyEdit,
+    applyEdit: applySaveEdit,
     patchRegistry,
     unpatchRegistry,
     reloadFromServer,
@@ -730,6 +737,10 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     pendingOpsRef,
     isLoading,
   } = save;
+  const applyEdit = useCallback<typeof applySaveEdit>((mutation, options) => {
+    if (timelineEditability.checkTimeline?.().allowed === false) return;
+    applySaveEdit(mutation, options);
+  }, [applySaveEdit, timelineEditability]);
   const {
     compositionSize,
     trackScaleMap,
@@ -785,7 +796,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     createManualCheckpoint,
     jumpToCheckpoint,
     checkpoints,
-    editability: runtime.timelineEditability,
+    editability: timelineEditability,
   });
 
   const {
@@ -881,7 +892,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     scaleWidth,
     startLeft: getTimelineLabelWidth(deviceClass),
     rowHeight: ROW_HEIGHT,
-    editability: runtime.timelineEditability,
+    editability: timelineEditability,
   });
 
   const assetManagement = services.useAssetManagement({
@@ -900,7 +911,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
   const clipResize = useClipResize({
     dataRef,
     applyEdit,
-    editability: runtime.timelineEditability,
+    editability: timelineEditability,
   });
 
   const clipEditing = useClipEditing({
@@ -961,7 +972,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     setSelectedTrackId,
     applyEdit,
     eventBus: save.eventBus,
-    editability: runtime.timelineEditability,
+    editability: timelineEditability,
     protectedTrackIds: canonicalShotTrackIds,
   });
 
@@ -1116,7 +1127,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
   const transcriptHost = useProjectTranscriptHost({
     dataRef: save.dataRef,
     commitData: save.commitData,
-    editability: runtime.timelineEditability,
+    editability: timelineEditability,
     repository: transcriptDocuments,
     assets: transcriptAssets,
     items: dataKindItemsHost,
@@ -1289,6 +1300,8 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
 
   return {
     store,
+    timelineEditability,
+    timelineEditingReady: save.timelineEditingReady,
     editor: { ...editor, elementTimelineRoutes: save.elementTimelineRoutes },
     editorData,
     editorOps,

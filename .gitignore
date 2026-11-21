@@ -52,6 +52,7 @@ temp/
 !docs/structure_detail/*.md
 !docs/blog/*.md
 !docs/quality/*.md
+!scripts/astrid-release/README.md
 !docs/fully-local-update.md
 !docs/local-update-canary.md
 !vendor/astrid-browser/remotion/public/fonts/FONT_PROVENANCE.md

@@ -44,6 +44,7 @@ import type { RenderExportDestination } from '@/tools/video-editor/lib/renderRou
 import type { VisualSeamReport } from '@/tools/video-editor/data/visualSeamContract.ts';
 import type { SaveStatus } from '@/tools/video-editor/hooks/useTimelineSave.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
+import type { TimelineEditability } from '@/tools/video-editor/lib/timeline-editability.ts';
 import type { SelectClipOptions, UseTimelineMultiSelectResult } from '@/shared/state/selectionStore.ts';
 import type {
   MobileInteractionPolicy,
@@ -278,6 +279,8 @@ export interface TimelinePlaybackContextValue {
 
 export interface UseTimelineStateResult {
   store: TimelineStoreApi;
+  timelineEditability?: TimelineEditability;
+  timelineEditingReady?: boolean;
   editor: TimelineEditorContextValue & { elementTimelineRoutes?: import('../runtime/element-adapter.ts').ElementTimelineRoutes };
   editorData: TimelineEditorDataContextValue;
   editorOps: TimelineEditorOpsContextValue;

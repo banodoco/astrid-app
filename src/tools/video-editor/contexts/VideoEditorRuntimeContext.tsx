@@ -107,6 +107,9 @@ export interface VideoEditorRuntimeContextValue {
   timelineViewStore?: TimelineViewStoreApi;
   /** Host-owned runtime lock/read-only state; never serialized in timeline data. */
   timelineEditability?: TimelineEditability;
+  /** Presentation only: the host permits edits but the save owner has no handoff.
+   * Admission always uses timelineEditability, including during this hold. */
+  timelineSaveReadinessHeld?: boolean;
 }
 
 export const VideoEditorRuntimeContext = createContext<VideoEditorRuntimeContextValue | null>(null);

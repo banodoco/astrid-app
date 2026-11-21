@@ -148,6 +148,12 @@ export function useTimelineSave(
     handoff: undefined as TimelineLocalSaveHandoff | undefined,
     session: undefined as LocalSaveSession | undefined }), [provider, timelineId]);
   const usesLocalDocumentSave = Boolean(provider.loadTimelineCommandBasis && provider.commitTimeline && provider.getRecoverableIdentity);
+  // The original read and a session's initial Saved notification both precede
+  // the handoff. UI gestures must wait for the owner that can actually save them.
+  const isTimelineEditingReady = useCallback(() => !usesLocalDocumentSave || (
+    !localOwner.closed && localOwner.initialization === 'ready' && Boolean(localOwner.handoff)
+  ), [localOwner, usesLocalDocumentSave]);
+  const timelineEditingReady = isTimelineEditingReady();
   const localOperationBoundaryRef = useRef(invalidateDraftReload);
   // Stable from the first render: a gesture during assembly cannot fall through
   // to the old snapshot writer while the verified original is being loaded.
@@ -962,6 +968,8 @@ export function useTimelineSave(
     localDocumentSave,
     localSaveState,
     originalLocalSaveBasis,
+    timelineEditingReady,
+    isTimelineEditingReady,
     data: commit.data,
     dataRef: commit.dataRef,
     isConflictExhausted: persistence.isConflictExhausted,
@@ -970,7 +978,7 @@ export function useTimelineSave(
     selectedClipId: commit.selectedClipId,
     selectedTrackId: commit.selectedTrackId,
     saveStatus: localSaveState && (['blocked', 'conflict', 'error', 'recovery', 'retry'].includes(localSaveState.status) || localSaveState.notice)
-      ? 'error' : localSaveState?.status === 'saving' ? 'saving' : localSaveState?.status === 'dirty' ? 'dirty' : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty' : persistence.saveStatus,
+      ? 'error' : !timelineEditingReady ? 'loading' : localSaveState?.status === 'saving' ? 'saving' : localSaveState?.status === 'dirty' ? 'dirty' : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty' : persistence.saveStatus,
     schemaIncompatible: persistence.schemaIncompatible,
     flushPendingSave: persistence.flushPendingSave,
     preserveTimelineDraftForReload: persistence.preserveTimelineDraftForReload,

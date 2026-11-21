@@ -120,6 +120,7 @@ describe('useTimelineSave stable occurrence recovery', () => {
       isConflictExhausted: false,
       schemaIncompatible: null,
       isSavingRef: { current: false },
+      keepRefusedEditRef: { current: false },
       reloadFromServer,
       retrySaveAfterConflict: vi.fn(),
       watchdogTripped: false,

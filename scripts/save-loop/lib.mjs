@@ -4,34 +4,66 @@
 //   SAVE_LOOP_PROJECT       project id to open in the editor
 //   SAVE_LOOP_TIMELINE      timeline id to open in the editor
 //   SAVE_LOOP_PLAYWRIGHT    optional module specifier for playwright (default 'playwright')
-//   SAVE_LOOP_CDP_PORT_BASE optional first remote-debugging port to try (default 9300)
 //   SAVE_LOOP_RESULTS       optional results file appended per row (default ./results.jsonl)
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import {fileURLToPath} from 'url';
-import {spawn} from 'child_process';
+import {spawn, execFileSync} from 'child_process';
+import {once} from 'events';
 const {chromium}=await import(process.env.SAVE_LOOP_PLAYWRIGHT||'playwright');
 function need(name){ const v=process.env[name]; if(!v){ throw new Error(`missing env ${name} (see scripts/save-loop/lib.mjs header or run sweep.mjs --help)`); } return v; }
 const CHROME=need('SAVE_LOOP_CHROME');
-const PORT_BASE=Number(process.env.SAVE_LOOP_CDP_PORT_BASE||9300);
 const RESULTS=process.env.SAVE_LOOP_RESULTS||'results.jsonl';
 export const URL_=`${need('SAVE_LOOP_BASE_URL')}/tools/video-editor?project=${encodeURIComponent(need('SAVE_LOOP_PROJECT'))}&timeline=${encodeURIComponent(need('SAVE_LOOP_TIMELINE'))}`;
+// Check before every browser run, including recovery/reopens. Never use the owner realm.
+export function checkDisk() {
+  const output = execFileSync('df', ['-Pk', '/home/user'], {encoding:'utf8'}).trim().split('\n');
+  const available = Number(output.at(-1).trim().split(/\s+/)[3]);
+  if (!Number.isFinite(available) || available < 15 * 1024 * 1024) {
+    throw new Error(`save-loop requires at least 15 GiB free at /home/user (available KiB: ${available})`);
+  }
+}
 export async function open(){
-  const port=PORT_BASE+Math.floor(Math.random()*400); const PROF=path.join(os.tmpdir(),'save-loop-'+process.pid+'-'+port);
-  const proc=spawn(CHROME,['--headless=new','--remote-debugging-port='+port,'--user-data-dir='+PROF,'--disk-cache-size=1','--media-cache-size=1','--no-first-run','--window-size=1700,1500','about:blank'],{stdio:'ignore'});
-  for(let i=0;i<40;i++){ try{ const r=await fetch('http://127.0.0.1:'+port+'/json/version'); if(r.ok) break; }catch{} await new Promise(r=>setTimeout(r,500)); }
-  const b0 = await chromium.connectOverCDP('http://127.0.0.1:'+port);
-  const b={close:async()=>{try{await b0.close()}catch{}; proc.kill(); await new Promise(r=>setTimeout(r,1500)); fs.rmSync(PROF,{recursive:true,force:true});}};
-  const ctx = b0.contexts()[0];
-  const p = ctx.pages()[0]; await p.setViewportSize({width:1700,height:1500});
-  const ev=[]; p.__ev=ev;
-  p.on('request',r=>{ if(r.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())) r.__t=Date.now(); });
-  p.on('response',async r=>{ const q=r.request(); if(q.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())){ let body=''; if(/commit/.test(r.url())){try{body=(await r.text()).slice(0,400)}catch{}} let req=''; ev.push({t:Date.now(),url:r.url().replace(/.*\/api\//,''),status:r.status(),body,req}); }});
-  await p.goto(URL_);
-  await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
-  await p.waitForTimeout(15000);
-  return {b,p,ev};
+  checkDisk();
+  const profile=fs.mkdtempSync(path.join(os.tmpdir(),'save-loop-'));
+  let proc, browser;
+  async function close(){
+    try { if (browser) await browser.close(); } catch {}
+    if (proc && proc.exitCode === null && proc.signalCode === null) {
+      const exited=once(proc, 'exit').catch(()=>{});
+      proc.kill('SIGTERM');
+      await Promise.race([exited, new Promise(r=>setTimeout(r,2000))]);
+      if (proc.exitCode === null && proc.signalCode === null) {
+        proc.kill('SIGKILL');
+        await Promise.race([exited, new Promise(r=>setTimeout(r,2000))]);
+      }
+    }
+    fs.rmSync(profile,{recursive:true,force:true});
+  }
+  try {
+    proc=spawn(CHROME,['--headless=new','--remote-debugging-port=0','--user-data-dir='+profile,'--disk-cache-size=1','--media-cache-size=1','--no-first-run','--window-size=1700,1500','about:blank'],{stdio:'ignore'});
+    let ready=false, port;
+    let spawnError; proc.on('error', error=>{spawnError=error;});
+    for(let i=0;i<40;i++){
+      if (spawnError) throw spawnError;
+      try { port=Number(fs.readFileSync(path.join(profile,'DevToolsActivePort'),'utf8').split('\n')[0]); } catch {}
+      if (proc.exitCode !== null || proc.signalCode !== null) throw new Error('Chrome exited before CDP was ready');
+      try { const r=port && await fetch('http://127.0.0.1:'+port+'/json/version'); if(r.ok) {ready=true; break;} } catch {}
+      await new Promise(r=>setTimeout(r,500));
+    }
+    if (!ready) throw new Error('Chrome CDP did not become ready');
+    browser=await chromium.connectOverCDP('http://127.0.0.1:'+port);
+    const ctx=browser.contexts()[0];
+    const p=ctx.pages()[0]; await p.setViewportSize({width:1700,height:1500});
+    const ev=[]; p.__ev=ev;
+    p.on('request',r=>{ if(r.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())) r.__t=Date.now(); });
+    p.on('response',async r=>{ const q=r.request(); if(q.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())){ let body=''; if(/commit/.test(r.url())){try{body=(await r.text()).slice(0,400)}catch{}} ev.push({t:Date.now(),requestTime:q.__t,url:r.url().replace(/.*\/api\//,''),status:r.status(),body}); }});
+    await p.goto(URL_);
+    await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
+    await p.waitForTimeout(15000);
+    return {b:{close},p,ev,context:ctx};
+  } catch(error) { await close(); throw error; }
 }
 export async function badge(p){ return await p.evaluate(()=>{ for(const e of document.querySelectorAll('div,span,button')){ if(e.children.length===0){ const t=(e.textContent||'').trim(); if(/^(saved|saving\.*|not saved|error|unsaved\.*|save failed)$/i.test(t)) return t.toLowerCase(); } } return '?'; }); }
 // run a gesture, wait for settle, return result

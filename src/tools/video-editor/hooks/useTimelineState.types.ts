@@ -246,7 +246,7 @@ export interface TimelineChromeContextValue {
   /** A permanently rejected local save stays in the durable outbox until an explicit choice. */
   permanentSaveRejection: boolean;
   /** Downloads the original rejected request and all dependent authored edits, without consuming them. */
-  copyRejectedSave: () => Promise<void>;
+  copyRejectedSave: () => Promise<boolean>;
   retryWatchdog: () => void;
   /**
    * Astrid answered again after a stop: sends the save that never got an answer now (does nothing when none waits, or

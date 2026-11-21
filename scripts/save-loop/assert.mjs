@@ -203,6 +203,7 @@ async function publicSnapshot(page, baseUrl, fixture) {
   }
   const publicationId = timeline?.head_publication_id ?? timeline?.headPublicationId ?? null;
   const entities = idsInPayload(payload);
+  if (!entities.clipIds.length) throw new Error('public revision exposes no clip IDs; cannot verify disappeared work');
   const mediaRefs = fixtureMediaTokens(fixture.media).filter((token) => payloadText.includes(token)).sort();
   return {
     project_id: fixture.project_id,

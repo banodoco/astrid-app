@@ -98,10 +98,10 @@ function descriptor({ name, kind, targets, repetitions, perform, verify }) {
     },
     verify: async (state) => {
       if (verify) await verify(state, name, repetitions); else verifySaved(state, name);
-      if (kind === 'video-delete' || kind === 'audio-delete') {
+      if (kind === 'video-delete' || kind === 'audio-delete' || kind === 'video-split') {
         const permitted = new Set(targets(rowFixture).map(targetId));
         const removed = state.before.clipIds.filter(id => !state.after.clipIds.includes(id));
-        if (removed.length !== repetitions || removed.some(id => !permitted.has(id)))
+        if ((kind !== 'video-split' && removed.length !== repetitions) || removed.length > repetitions || removed.some(id => !permitted.has(id)))
           throw new Error(`${name}: removed unexpected clips: ${removed.join(', ')}`);
       }
       return {pass:true};

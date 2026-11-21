@@ -274,6 +274,49 @@ async function settleInitialRecoveryCheck() {
 }
 
 describe('useTimelineSave — recovered draft durability', () => {
+  it('clears a bootstrap error to loading while a restarted local owner becomes ready', async () => {
+    const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+    const head = { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'r0', headPublicationId: 'p0' };
+    const config = createDefaultTimelineConfig();
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
+      { timelineId: scope.timelineId }).data.canonical_document;
+    document.parent_revision.payload = { config, clips: [], registry: { assets: {} }, occurrences: [] };
+    document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+    const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const data = await buildTimelineData(config, { assets: {} }, undefined, 1, undefined, head);
+    let finishRetry!: (value: typeof initial) => void;
+    const loadBasis = vi.fn()
+      .mockRejectedValueOnce(new Error('Initial history unavailable'))
+      .mockImplementationOnce(() => new Promise<typeof initial>(resolve => { finishRetry = resolve; }));
+    const harness = setup(async () => { throw new Error('No legacy save'); }, undefined, { data, loadBasis,
+      capabilities: { getRecoverableIdentity: async () => ({ realmId: scope.realmId, actorId: scope.actorId }), commitTimeline: vi.fn() } });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.saveStatus).toBe('error'));
+      expect(harness.hook.result.current.localSaveState).toMatchObject({ status: 'error' });
+      expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'refused', action: 'restart' });
+
+      let retry!: Promise<void>;
+      act(() => { retry = harness.hook.result.current.tryAgain(); });
+      await vi.waitFor(() => expect(loadBasis).toHaveBeenCalledTimes(2));
+      expect(harness.hook.result.current.saveStatus).toBe('loading');
+      expect(harness.hook.result.current.localSaveState).toBeNull();
+      expect(harness.hook.result.current.saveBar).toBeNull();
+
+      await act(async () => { finishRetry(initial); await retry; });
+      await vi.waitFor(() => expect(harness.hook.result.current.timelineEditingReady).toBe(true));
+      expect(harness.hook.result.current.saveStatus).toBe('saved');
+      expect(harness.hook.result.current.saveBar).toBeNull();
+    } finally {
+      harness.hook.unmount();
+      if (lockDescriptor) Object.defineProperty(navigator, 'locks', lockDescriptor);
+      else Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     resetFakeIndexedDB();

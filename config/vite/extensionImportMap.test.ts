@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from '@playwright/test';
+import { build as esbuild } from 'esbuild';
 import { build, createServer as createViteServer, loadConfigFromFile, type ViteDevServer } from 'vite';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { ExtensionSharedModuleLock } from './extensionImportMap';
@@ -110,7 +111,7 @@ describe('extension shared module import map dev server', () => {
     const base = `http://127.0.0.1:${address.port}`;
     try {
       const names = ['react', 'react-jsx-runtime', 'react-jsx-dev-runtime', 'react-dom-client', 'remotion', 'astrid-editor-sdk'];
-      const reactWrapper = await fetch(`${base}/astrid-extension-shared/react.js`);
+      const reactWrapper = await fetch(`${base}/assets/astrid-extension-shared-react.js`);
       expect(reactWrapper.status).toBe(200);
       expect(reactWrapper.headers.get('content-type')).toContain('text/javascript');
       const wrapperBody = await reactWrapper.text();
@@ -118,7 +119,7 @@ describe('extension shared module import map dev server', () => {
       expect(wrapperBody).not.toMatch(/from "react"/);
 
       for (const name of names) {
-        const response = await fetch(`${base}/astrid-extension-shared/${name}.js`);
+        const response = await fetch(`${base}/assets/astrid-extension-shared-${name}.js`);
         expect(response.status, name).toBe(200);
       }
 
@@ -138,17 +139,128 @@ describe('extension shared module import map dev server', () => {
       expect(importMap).toBeLessThan(html.indexOf('<script type="module"'));
       const imports = JSON.parse(/id="astrid-extension-importmap">(.*?)<\/script>/.exec(html)![1]).imports as Record<string, string>;
       expect(imports).toEqual({
-        react: '/astrid-extension-shared/react.js',
-        'react/jsx-runtime': '/astrid-extension-shared/react-jsx-runtime.js',
-        'react/jsx-dev-runtime': '/astrid-extension-shared/react-jsx-dev-runtime.js',
-        'react-dom/client': '/astrid-extension-shared/react-dom-client.js',
-        remotion: '/astrid-extension-shared/remotion.js',
-        '@astrid/editor-sdk': '/astrid-extension-shared/astrid-editor-sdk.js',
+        react: '/assets/astrid-extension-shared-react.js',
+        'react/jsx-runtime': '/assets/astrid-extension-shared-react-jsx-runtime.js',
+        'react/jsx-dev-runtime': '/assets/astrid-extension-shared-react-jsx-dev-runtime.js',
+        'react-dom/client': '/assets/astrid-extension-shared-react-dom-client.js',
+        remotion: '/assets/astrid-extension-shared-remotion.js',
+        '@astrid/editor-sdk': '/assets/astrid-extension-shared-astrid-editor-sdk.js',
       });
+
+      // The lock rides beside the map, with the digest of the exact wrapper bytes the dev server answers with, and the
+      // loader's one strict check passes on it unrelaxed.
+      const lock = JSON.parse(/id="astrid-extension-shared-modules">(.*?)<\/script>/.exec(html)![1]) as ExtensionSharedModuleLock;
+      expect(lock.version).toBe(1);
+      for (const [specifier, binding] of Object.entries(lock.shared_modules)) {
+        const served = await (await fetch(`${base}${binding.url}`)).text();
+        expect(binding.sha256, specifier).toBe(createHash('sha256').update(served).digest('hex'));
+        expect(binding.url, specifier).toBe(imports[specifier]);
+      }
+      const { assertHostSharedModules, SHARED_SPECIFIERS, IMPORT_MAP_ID, SHARED_MODULES_ID } = await import('../../src/tools/video-editor/runtime/runtimeModuleImport');
+      const body = (id: string) => new RegExp(`id="${id}">(.*?)</script>`).exec(html)![1];
+      const original = (globalThis as { document?: unknown }).document;
+      (globalThis as { document?: unknown }).document = { getElementById: (id: string) => (id === IMPORT_MAP_ID || id === SHARED_MODULES_ID
+        ? { textContent: body(id), getAttribute: () => (id === IMPORT_MAP_ID ? 'importmap' : 'application/json') } : null) };
+      try {
+        expect(() => assertHostSharedModules(SHARED_SPECIFIERS, lock.shared_modules)).not.toThrow();
+        expect(() => assertHostSharedModules(['react', 'react/jsx-runtime', 'remotion'])).not.toThrow();
+      } finally { (globalThis as { document?: unknown }).document = original; }
     } finally {
       await server.close();
     }
   }, 60_000);
+
+  it('runs the real loader in Chromium against the dev-emitted map and lock', async () => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'astrid-extension-import-map-dev-e2e-')));
+    tempRoots.push(root);
+    const elementSource = "import { AbsoluteFill } from 'remotion'; import { useState } from 'react';"
+      + " export default function Dev() { const [t] = useState('dev element'); return <AbsoluteFill>{t}</AbsoluteFill>; }";
+    const built = await esbuild({
+      stdin: { contents: elementSource, loader: 'tsx', resolveDir: APP_ROOT }, bundle: true, write: false, format: 'esm',
+      platform: 'browser', target: 'es2020', jsx: 'automatic', logLevel: 'silent', external: ['react', 'react/jsx-runtime', 'remotion'],
+      outfile: 'out.js',
+    });
+    const bytes = built.outputFiles[0].text;
+    const digest = createHash('sha256').update(bytes).digest('hex');
+    await writeFixture(root, 'page.ts', `import { createElement } from 'react'; import { createRoot } from 'react-dom/client';
+            import { readProjectElementList, importProjectElement } from '@/tools/video-editor/runtime/admittedElementLoader';
+            window.admit = async () => {
+              const controller = new AbortController();
+              const list = await readProjectElementList('dev-project', controller.signal);
+              const Component = await importProjectElement(list.elements[0], controller.signal);
+              const host = document.getElementById('app'); createRoot(host).render(createElement(Component));
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              return host.textContent;
+            };`);
+    const PAGE = `/@fs${root}/page.ts`;
+    const { createExtensionImportMapPlugin } = await import('./extensionImportMap');
+    const server = await createViteServer({
+      configFile: false, root: APP_ROOT, cacheDir: path.join(root, '.vite'), logLevel: 'silent', appType: 'custom',
+      server: { middlewareMode: true, hmr: false }, resolve: { alias: [{ find: /^@\/(?!integrations\/runtime\/connection$)/, replacement: `${path.join(APP_ROOT, 'src')}/` }, { find: /^@astrid\/editor-sdk$/, replacement: path.join(APP_ROOT, 'src/sdk/index.ts') }] },
+      optimizeDeps: { noDiscovery: true, include: ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client', 'remotion'] },
+      plugins: [{
+        name: 'dev-e2e-page', enforce: 'pre',
+        resolveId(id) {
+          if (id === '@/integrations/runtime/connection') return '\0dev-e2e-connection';
+          return id === PAGE ? '\0page' : null;
+        },
+        load(id) {
+          if (id === '\0dev-e2e-connection') return 'export const runtimeOrigin = () => location.origin; export const runtimeApiBase = () => location.origin + "/api/runtime";';
+          if (id !== '\0page') return null;
+          return `import { createElement } from 'react'; import { createRoot } from 'react-dom/client';
+            import { readProjectElementList, importProjectElement } from '@/tools/video-editor/runtime/admittedElementLoader';
+            window.admit = async () => {
+              const controller = new AbortController();
+              const list = await readProjectElementList('dev-project', controller.signal);
+              const Component = await importProjectElement(list.elements[0], controller.signal);
+              const host = document.getElementById('app'); createRoot(host).render(createElement(Component));
+              await new Promise((resolve) => setTimeout(resolve, 100));
+              return host.textContent;
+            };`;
+        },
+      }, createExtensionImportMapPlugin()],
+    });
+    const http = createHttpServer(async (request, response) => {
+      const url = new URL(request.url ?? '/', 'http://x');
+      const send = (type: string, body: string) => { response.setHeader('content-type', type); response.end(body); };
+      if (url.pathname === '/') {
+        return send('text/html', await server.transformIndexHtml('/', `<!doctype html><html><head></head><body><div id="app"></div><script type="module" src="${PAGE}"></script></body></html>`));
+      }
+      if (url.pathname === '/api/runtime/packs/project-elements') {
+        return send('application/json', JSON.stringify({
+          version: 1, projectId: 'dev-project', realmId: 'realm', selectionDigest: 'a'.repeat(64), legacy: [], projects: [],
+          elements: [{
+            ref: { packId: 'project_dev', kind: 'effect', id: 'dev', revision: 'r1' }, digest,
+            url: `/api/runtime/packs/project-elements/dev-project/${digest}.js`,
+            descriptor: { packId: 'project_dev', kind: 'effect', id: 'dev', revision: 'r1', label: 'Dev', description: '', componentPath: 'elements/dev/component.tsx',
+              parameters: [], defaults: {}, renderability: { preview: 'supported', browserExport: 'supported', workerExport: 'unknown' } },
+            authoring: { packRoot: '/w', descriptorPath: '/w/d', componentPath: '/w/c', status: 'admitted' },
+          }],
+        }));
+      }
+      if (url.pathname === `/api/runtime/packs/project-elements/dev-project/${digest}.js`) return send('text/javascript', bytes);
+      server.middlewares(request, response, () => { response.statusCode = 404; response.end(); });
+    });
+    servers.push(http);
+    await new Promise<void>((resolve) => http.listen(0, '127.0.0.1', resolve));
+    // Let the dev optimizer settle on every dependency the page and wrappers import before the browser loads them, so
+    // React is pre-bundled once (a mid-load re-optimize would hand the browser two React copies, which is a test artifact).
+    await server.transformIndexHtml('/', '<html><head></head><body></body></html>');
+    await server.transformRequest(PAGE);
+    await server.waitForRequestsIdle();
+    const browser = await chromium.launch();
+    browsers.push(browser);
+    try {
+      const page = await browser.newPage();
+      const errors: string[] = [];
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.goto(`http://127.0.0.1:${(http.address() as { port: number }).port}/`, );
+      await page.waitForFunction(() => typeof (window as unknown as { admit?: unknown }).admit === 'function', undefined, { timeout: 60_000 });
+      const rendered = await page.evaluate(() => (window as unknown as { admit: () => Promise<string> }).admit());
+      expect(errors).toEqual([]);
+      expect(rendered).toBe('dev element');
+    } finally { await server.close(); }
+  }, 120_000);
 });
 
 describe('extension shared module import map build', () => {

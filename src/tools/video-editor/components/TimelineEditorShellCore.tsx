@@ -869,21 +869,28 @@ function TimelineEditorShellCoreComponent({
     </div>
   ) : null;
 
-  /** Recovery draft banner (B9): a previous session left unsaved work in the
-   *  one-slot draft. Offer Retry (re-POST the draft) or Discard. */
+  /** A previous session left an unsaved edit in the IndexedDB recovery slot. */
   const recoveryBanner = chrome.recoveryDraft && !chrome.permanentSaveRejection && !conflict.isOpen && !chrome.isConflictExhausted ? (
     <div
       role="alert"
       className="flex items-center justify-between gap-3 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
     >
       <span>
-        You have unsaved changes from {formatDraftTime(chrome.recoveryDraft.updatedAt)}.
-        {chrome.recoveryDraft.retryAllowed === false && ' The original editing head is unknown. This draft is preserved; discard it or resolve it explicitly before saving.'}
+        {chrome.recoveryRestoreAllowed
+          ? 'We kept your unsaved edit.'
+          : <>You have unsaved changes from {formatDraftTime(chrome.recoveryDraft.updatedAt)}.
+            {chrome.recoveryDraft.retryAllowed === false && ' The original editing head is unknown. This draft is preserved; discard it or resolve it explicitly before saving.'}</>}
       </span>
       <div className="flex items-center gap-2">
-        <Button type="button" size="sm" variant="outline" disabled={chrome.recoveryDraft.retryAllowed === false} onClick={() => void chrome.retryRecoveredDraft()}>
-          Save them
-        </Button>
+        {chrome.recoveryRestoreAllowed ? (
+          <Button type="button" size="sm" variant="default" onClick={() => void chrome.retryRecoveredDraft()}>
+            Restore
+          </Button>
+        ) : (
+          <Button type="button" size="sm" variant="outline" disabled={chrome.recoveryDraft.retryAllowed === false} onClick={() => void chrome.retryRecoveredDraft()}>
+            Save them
+          </Button>
+        )}
         <Button type="button" size="sm" variant="outline" onClick={() => void chrome.discardRecoveredDraft()}>
           Discard
         </Button>

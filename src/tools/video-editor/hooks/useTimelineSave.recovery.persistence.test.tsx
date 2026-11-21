@@ -21,10 +21,42 @@ vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({
   invalidateReferencedTimelineCache: vi.fn(),
 }));
 vi.mock('@/tools/video-editor/hooks/usePollSync.ts', () => ({ usePollSync: vi.fn() }));
+vi.mock('@/shared/components/ui/runtime/sonner.tsx', () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
 const timelineId = 'shot-recovery-live-session';
 const recoveryKey = 'parent:shot:recovery-integration';
 const registry = { assets: {} };
+
+async function putRecoveryRecord(record: {
+  key: string;
+  timelineId: string;
+  draft: { config: TimelineConfig; registry: typeof registry; bundle: null };
+  ownerId: string;
+  draftIdentity: string;
+  updatedAt: string;
+  baseVersion: number;
+  baseHeadProjectId?: string;
+  baseHeadTimelineId?: string;
+  baseHeadRevisionId?: string;
+}) {
+  const request = indexedDB.open('astrid.timeline-drafts', 1);
+  const database = await new Promise<IDBDatabase>((resolve, reject) => {
+    request.addEventListener('upgradeneeded', () => {
+      if (!request.result.objectStoreNames.contains('timeline-drafts')) {
+        request.result.createObjectStore('timeline-drafts', { keyPath: 'key' });
+      }
+    });
+    request.addEventListener('success', () => resolve(request.result));
+    request.addEventListener('error', () => reject(request.error));
+  });
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction('timeline-drafts', 'readwrite');
+    transaction.objectStore('timeline-drafts').put(record);
+    transaction.addEventListener('complete', () => resolve());
+    transaction.addEventListener('error', () => reject(transaction.error));
+  });
+  database.close();
+}
 
 function timelineConfig(label: string): TimelineConfig {
   const base = createDefaultTimelineConfig();
@@ -90,6 +122,7 @@ async function mountRecoveryEditor(options?: {
       error: null,
       refetchShots: vi.fn(),
     },
+    toast: { success: vi.fn(() => 'toast'), error: vi.fn(() => 'toast'), warning: vi.fn(() => 'toast'), info: vi.fn(() => 'toast') },
   } as unknown as VideoEditorRuntimeContextValue;
   const wrapper = ({ children }: { children: React.ReactNode }) => React.createElement(
     QueryClientProvider,
@@ -117,7 +150,7 @@ async function mountRecoveryEditor(options?: {
   if (options?.seedRecovery !== false) {
     await waitFor(() => expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 }));
   }
-  return { hook, provider, canonical, recovered, canonicalData };
+  return { hook, provider, canonical, recovered, canonicalData, runtime };
 }
 
 async function advance(ms: number) {
@@ -426,6 +459,166 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
 
     await advance(1000);
     expect(saveTimeline).toHaveBeenCalledTimes(1);
+    hook.unmount();
+  });
+
+  it('R13 restores an IndexedDB slot through the recovery action and saves the next edit normally', async () => {
+    const { hook, provider, recovered } = await mountRecoveryEditor();
+    const offered = await loadTimelineDraft(recoveryKey);
+    expect(offered).toMatchObject({
+      key: recoveryKey,
+      timelineId: 'previous-shot-session',
+      baseVersion: 5,
+      draft: { config: { clips: recovered.clips }, registry },
+    });
+    await waitFor(() => expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 }));
+
+    vi.useFakeTimers();
+    await act(async () => { await hook.result.current.retryRecoveredDraft(); });
+    await advance(600);
+    expect(provider.saveTimeline).toHaveBeenCalledWith(
+      timelineId, expect.objectContaining({ clips: recovered.clips }), 5, expect.anything(), undefined,
+    );
+
+    const edit = timelineConfig('post-restore-edit');
+    const editedData = await buildTimelineData(edit, registry, provider.resolveAssetUrl, 5);
+    act(() => { hook.result.current.commitData(editedData, { save: true }); });
+    await advance(600);
+    expect(provider.saveTimeline).toHaveBeenLastCalledWith(
+      timelineId, expect.objectContaining({ clips: edit.clips }), 13, expect.anything(), undefined,
+    );
+    hook.unmount();
+  });
+
+  it('R13 discard clears only the offered snapshot and leaves another recovery slot intact', async () => {
+    const otherKey = `${recoveryKey}:other`;
+    await saveTimelineDraft('other-session', { config: timelineConfig('unrelated'), registry }, 2, { recoveryKey: otherKey });
+    const { hook } = await mountRecoveryEditor();
+    const offered = await loadTimelineDraft(recoveryKey);
+    await act(async () => { await hook.result.current.discardRecoveredDraft(); });
+    expect(await loadTimelineDraft(recoveryKey)).toBeNull();
+    expect(await loadTimelineDraft(otherKey)).toMatchObject({
+      timelineId: 'other-session', baseVersion: 2,
+      draft: { config: { output: { file: 'unrelated.mp4' } } },
+    });
+    expect(offered).not.toBeNull();
+    hook.unmount();
+    await clearTimelineDraft(otherKey);
+  });
+
+  it('R13 does not clear the offered slot until Restore has been acknowledged', async () => {
+    const saveTimeline = vi.fn(async () => 13);
+    const { hook } = await mountRecoveryEditor({ saveTimeline });
+    const before = await loadTimelineDraft(recoveryKey);
+    expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: before?.baseVersion });
+    expect((await loadTimelineDraft(recoveryKey))?.draft.config.clips).toEqual(before?.draft.config.clips);
+    vi.useFakeTimers();
+    await act(async () => { await hook.result.current.retryRecoveredDraft(); });
+    expect((await loadTimelineDraft(recoveryKey))?.draft.config.clips).toEqual(before?.draft.config.clips);
+    await advance(600);
+    vi.useRealTimers();
+    await waitFor(async () => expect(await loadTimelineDraft(recoveryKey)).toBeNull());
+    hook.unmount();
+  });
+
+  it('offers a raw R13 IndexedDB record, restores it, saves an edit, and confirms restoration', async () => {
+    const recovered = timelineConfig('raw-r13-recovered');
+    await putRecoveryRecord({
+      key: recoveryKey,
+      timelineId,
+      draft: { config: recovered, registry, bundle: null },
+      ownerId: 'r13-owner',
+      draftIdentity: 'r13-draft-identity',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+      baseVersion: 5,
+    });
+    const { hook, provider, runtime } = await mountRecoveryEditor({ seedRecovery: false });
+    await waitFor(() => expect(hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 }));
+    expect(hook.result.current.recoveryDraft?.retryAllowed).toBe(true);
+    expect(await loadTimelineDraft(recoveryKey)).toMatchObject({
+      key: recoveryKey,
+      timelineId,
+      ownerId: 'r13-owner',
+      draftIdentity: 'r13-draft-identity',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+      baseVersion: 5,
+      draft: { config: { clips: recovered.clips }, registry, bundle: null },
+    });
+
+    vi.useFakeTimers();
+    await act(async () => { await hook.result.current.retryRecoveredDraft(); });
+    await advance(600);
+    expect(provider.saveTimeline).toHaveBeenCalledWith(
+      timelineId, expect.objectContaining({ clips: recovered.clips }), 5, expect.anything(), undefined,
+    );
+    expect(runtime.toast.success).toHaveBeenCalledWith('Restored your unsaved edit.');
+    expect(await loadTimelineDraft(recoveryKey)).toBeNull();
+    hook.unmount();
+  });
+
+  it('keeps an R13 snapshot after Restore meets a guarded head refusal and disables Restore', async () => {
+    const recovered = timelineConfig('r13-refused-restore');
+    await putRecoveryRecord({
+      key: recoveryKey,
+      timelineId,
+      draft: { config: recovered, registry, bundle: null },
+      ownerId: 'r13-owner',
+      draftIdentity: 'r13-refused-draft',
+      updatedAt: '2020-01-01T00:00:00.000Z',
+      baseVersion: 5,
+      baseHeadProjectId: 'project',
+      baseHeadTimelineId: timelineId,
+      baseHeadRevisionId: 'original-head',
+    });
+    const saveTimelineAtHead = vi.fn(async () => { throw new TimelineVersionConflictError('remote publication'); });
+    const { hook } = await mountRecoveryEditor({
+      seedRecovery: false,
+      head: { projectId: 'project', timelineId, headRevisionId: 'current-head' },
+      draftMetadata: { baseHeadProjectId: 'project', baseHeadTimelineId: timelineId, baseHeadRevisionId: 'original-head' },
+      saveTimelineAtHead,
+    });
+    await waitFor(() => expect(hook.result.current.recoveryDraft).toMatchObject({ retryAllowed: true }));
+    expect(hook.result.current.recoveryRestoreAllowed).toBe(true);
+    const offeredSnapshot = await loadTimelineDraft(recoveryKey);
+    expect(offeredSnapshot).toMatchObject({ draft: { config: { clips: recovered.clips } } });
+
+    vi.useFakeTimers();
+    await act(async () => { await hook.result.current.retryRecoveredDraft(); });
+    await advance(600);
+
+    expect(saveTimelineAtHead).toHaveBeenCalledWith(timelineId, expect.anything(), {
+      projectId: 'project', timelineId, headRevisionId: 'original-head',
+    }, registry, undefined);
+    expect(hook.result.current.recoveryRestoreAllowed).toBe(false);
+    expect(await loadTimelineDraft(recoveryKey)).toMatchObject({
+      draft: { config: { clips: recovered.clips, output: { file: recovered.output.file } } },
+      baseHeadProjectId: 'project',
+      baseHeadTimelineId: timelineId,
+      baseHeadRevisionId: 'original-head',
+    });
+    hook.unmount();
+  });
+
+  it('preserves a newer snapshot written into the offered slot while guarded Discard reloads canonical', async () => {
+    const { hook } = await mountRecoveryEditor();
+    await waitFor(() => expect(hook.result.current.recoveryDraft).not.toBeNull());
+    const replacement = timelineConfig('same-slot-newer-snapshot');
+    await saveTimelineDraft(timelineId, { config: replacement, registry, bundle: null }, 8, {
+      recoveryKey,
+      ownerId: 'newer-owner',
+      draftIdentity: 'newer-same-slot-identity',
+    });
+    const newerSnapshot = await loadTimelineDraft(recoveryKey);
+    expect(newerSnapshot).toMatchObject({
+      key: recoveryKey,
+      timelineId,
+      baseVersion: 8,
+      draftIdentity: 'newer-same-slot-identity',
+      draft: { config: { output: { file: replacement.output.file } } },
+    });
+
+    await act(async () => { await hook.result.current.discardRecoveredDraft(); });
+    expect(await loadTimelineDraft(recoveryKey)).toEqual(newerSnapshot);
     hook.unmount();
   });
 });

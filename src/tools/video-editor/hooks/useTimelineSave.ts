@@ -52,7 +52,7 @@ interface PendingOriginalSaveRead {
 }
 
 // Rejections the user must be told about; a conflict keeps its own choice dialog.
-const REJECTED_SAVE_KINDS = ['validation', 'authorization', 'too_large', 'unsupported_route', 'rejected_request'];
+const REJECTED_SAVE_KINDS = ['validation', 'authorization', 'too_large', 'unsupported_route', 'rejected_request', 'refused'];
 /** The reason to show for a local save that was rejected or removed from the queue, or null. */
 function localSaveNotice(state: LocalSaveState | null): string | null {
   if (!state) return null;

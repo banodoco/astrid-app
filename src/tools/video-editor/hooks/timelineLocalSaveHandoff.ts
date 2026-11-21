@@ -951,10 +951,22 @@ export function createTimelineLocalSaveHandoff(options: {
         if (state.status === 'conflict') throw new TimelineVersionConflictError(message);
         refuse(message);
       }
-      // The session document is canonical again (or the saved result); the next capture authors from it.
-      document = structuredClone(options.session.getDocument()) as unknown as CanonicalDocument;
-      authoringSource = structuredClone(source);
+      // After the creator discards or a conflict saves successfully, both
+      // the session and editor must author subsequent gestures from the new
+      // authenticated head. Reusing the original pre-discharge source would
+      // silently attach them to an obsolete revision.
+      const basis = options.session.getBasis();
+      const adopted = options.adopted(basis);
+      const head = adopted.receipt.head;
+      if (head.projectId !== basis.canonicalDocument.project_id || head.timelineId !== basis.canonicalDocument.timeline_id
+        || head.headRevisionId !== basis.head.revisionId || head.headPublicationId !== basis.head.publicationId
+        || !same(adopted.source.head, head)) refuse('canonical assembly did not adopt the discharged head');
+      initial = structuredClone(basis);
+      source = structuredClone(adopted.source);
+      authoringSource = structuredClone(adopted.source);
+      document = structuredClone(basis.canonicalDocument);
       sourceChecked = false;
+      targets = historyTargets(basis.history, basis.head, options.session.actorId);
     },
     remoteHistoryAvailable,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,

@@ -2057,6 +2057,33 @@ describe('TimelineRenderer owner-qualified Astrid references', () => {
     expect(screen.getByTestId('generated-module-placeholder')).toHaveTextContent('Project elements did not load (Runtime is not reachable)');
   });
 
+  it('renders a healthy project element and names a failed bundle only on its own placeholder', async () => {
+    const admissions = await import('../runtime/admitted-elements');
+    const good = { id: 'healthy-element', kind: 'effect' as const, packId: 'project_partial', revision: 'one' };
+    const bad = { ...good, id: 'bad-element' };
+    const missing = { ...good, id: 'unlisted-element' };
+    const host: AstridElementHost = { ...fixtureAstridElementHost,
+      get descriptors() { return admissions.getAdmittedElementSelection().elements.map(element => element.descriptor); },
+      resolveComponent(id, kind, packId, revision) { return revision ? admissions.admittedComponent({ id, kind, packId, revision }) : undefined; },
+    };
+    admissions.setAdmittedElementScope('partial-project', [good, bad, missing]);
+    const makeEntry = (ref: typeof good, digit: string) => ({ ref, digest: digit.repeat(64), url: '/bundle.js',
+      descriptor: { ...ref, componentPath: '/component.tsx' } as never,
+      authoring: { packRoot: '/pack', descriptorPath: '/pack/element.yaml', componentPath: '/pack/component.tsx', status: 'ready' } });
+    const Healthy: FC = () => <div data-testid="healthy-project-element">healthy</div>;
+    await act(async () => { await admissions.refreshAdmittedElements(async () => ({ version: 1, projectId: 'partial-project',
+      realmId: 'realm', selectionDigest: 'd'.repeat(64), projects: [], legacy: [], elements: [makeEntry(good, '1'), makeEntry(bad, '2')] }),
+      async entry => { if (entry.ref.id === bad.id) throw new Error('bad bundle rejected'); return Healthy as never; }); });
+    render(<TimelineRenderer astridElementHost={host} config={{ ...buildConfig(), clips: [good, bad, missing].map((ref, i) => ({
+      id: `partial-${i}`, track: 'V1', at: i, hold: 1, clipType: 'effect-layer', elementRef: ref,
+    })) }} />);
+    expect(screen.getByTestId('healthy-project-element')).toBeInTheDocument();
+    const placeholders = screen.getAllByTestId('generated-module-placeholder');
+    expect(placeholders).toHaveLength(2);
+    expect(placeholders[0]).toHaveTextContent('bad bundle rejected');
+    expect(placeholders[1]).not.toHaveTextContent('bad bundle rejected');
+  });
+
   it('keeps every other clip mounted while a project element is still loading, and names the wait on that clip only', async () => {
     const admissions = await import('../runtime/admitted-elements');
     const ref = { id: 'slow-element', kind: 'effect' as const, packId: 'project_loading', revision: 'loading-revision' };

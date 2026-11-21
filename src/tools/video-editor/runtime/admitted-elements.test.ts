@@ -180,6 +180,65 @@ describe('atomic admitted host refresh', () => {
     expect(host.getAdmittedElementReadiness()).toMatchObject({ phase: 'error', error: expect.stringContaining('does not match') });
   });
 
+  it('activates a healthy sibling, reports only the failed ref, and retries the same list', async () => {
+    const good = entry('good', digestOf('1'));
+    const bad = entry('bad', digestOf('2'));
+    host.setAdmittedElementScope('project', [good.ref, bad.ref]);
+    let fail = true;
+    const read = async () => list('project', digestOf('a'), [good, bad]);
+    const load = vi.fn(async (item: ProjectElementEntry) => {
+      if (item === bad && fail) throw new Error('bad bundle rejected');
+      return Blocks;
+    });
+    await host.refreshAdmittedElements(read, load);
+    expect(host.admittedComponent(good.ref)).toBe(Blocks);
+    expect(host.admittedComponent(bad.ref)).toBeUndefined();
+    expect(host.admittedElementFailure(bad.ref)).toBe('bad bundle rejected');
+    expect(host.admittedElementFailure(good.ref)).toBeUndefined();
+    fail = false;
+    await host.refreshAdmittedElements(read, load);
+    expect(host.admittedComponent(bad.ref)).toBe(Blocks);
+    expect(host.admittedElementFailure(bad.ref)).toBeUndefined();
+    expect(load).toHaveBeenCalledTimes(3);
+  });
+
+  it('retains the previous verified exact-ref build when its replacement fails alongside a healthy sibling', async () => {
+    const old = entry('old', digestOf('1'));
+    const replacement = entry('old', digestOf('2'));
+    const sibling = entry('sibling', digestOf('3'));
+    const Sibling: ProjectElementComponent = () => null;
+    host.setAdmittedElementScope('project', [old.ref, sibling.ref]);
+    await host.refreshAdmittedElements(async () => list('project', digestOf('a'), [old]), async () => Blocks);
+    await host.refreshAdmittedElements(async () => list('project', digestOf('b'), [replacement, sibling]), async item => {
+      if (item === replacement) throw new Error('replacement rejected');
+      return Sibling;
+    });
+    expect(host.admittedComponent(old.ref)).toBe(Blocks);
+    expect(host.admittedComponent(sibling.ref)).toBe(Sibling);
+    expect(host.admittedElementFailure(old.ref)).toBe('replacement rejected');
+  });
+
+  it('retains a fulfilled sibling when another bundle stalls and ignores the late completion', async () => {
+    vi.useFakeTimers();
+    try {
+      const good = entry('good', digestOf('1'));
+      const slow = entry('slow', digestOf('2'));
+      const pending = deferred<ProjectElementComponent>();
+      host.setAdmittedElementScope('project', [good.ref, slow.ref]);
+      const loading = host.refreshAdmittedElements(async () => list('project', digestOf('a'), [good, slow]),
+        item => item === good ? Promise.resolve(Blocks) : pending.promise);
+      await vi.advanceTimersByTimeAsync(host.ADMITTED_ELEMENT_LOAD_TIMEOUT_MS);
+      await loading;
+      expect(host.admittedComponent(good.ref)).toBe(Blocks);
+      expect(host.admittedComponent(slow.ref)).toBeUndefined();
+      expect(host.admittedElementFailure(slow.ref)).toContain('timed out');
+      expect(host.admittedElementFailure(good.ref)).toBeUndefined();
+      pending.resolve(Blocks);
+      await Promise.resolve();
+      expect(host.admittedComponent(slow.ref)).toBeUndefined();
+    } finally { vi.useRealTimers(); }
+  });
+
   it('fences a late project A completion after switching to project B and never leaks the old exact map', async () => {
     host.setAdmittedElementScope('project-a', [ref('old')]);
     const pending = deferred<ProjectElementList>();

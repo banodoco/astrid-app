@@ -21,10 +21,6 @@ import type { TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import { createCommitOutbox } from '@/tools/video-editor/commands/commitOutbox.ts';
 import { TrackLabelContent } from '@/tools/video-editor/components/TimelineEditor/TrackLabel.tsx';
 
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
 vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({
   invalidateReferencedTimelineCache: vi.fn(),
 }));
@@ -321,9 +317,9 @@ describe('mounted track reorder persistence through A2', () => {
       expect(mounted.hook.result.current.save.dataRef.current?.config.clips?.[0]?.app)
         .toEqual({ opaque: { keep: null, false: false, zero: 0 } });
       expect(mounted.hook.result.current.save.dataRef.current?.config.tracks?.find((track) => track.id === 'audio')?.app)
-        .toEqual({ nullValue: null, falseValue: false, zeroValue: 0, scaleAppliesToPositionedClips: true });
+        .toEqual({ nullValue: null, falseValue: false, zeroValue: 0, scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
       expect(mounted.hook.result.current.save.dataRef.current?.config.tracks?.find((track) => track.id === 'overlay')?.app)
-        .toEqual({ opaque: [null, false, 0], scaleAppliesToPositionedClips: true });
+        .toEqual({ opaque: [null, false, 0], scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 });
       expect(request.steps?.[0]).not.toHaveProperty('reads');
 
       const [stored] = await createCommitOutbox().list(scope);

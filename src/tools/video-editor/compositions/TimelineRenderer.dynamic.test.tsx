@@ -13,6 +13,7 @@
 // real Sucrase compile — the spy returns a fake FC rendering a marker div.
 
 import type { FC, PropsWithChildren } from 'react';
+import * as composition from '@banodoco/timeline-composition';
 import { render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -146,4 +147,29 @@ describe('TimelineRenderer — dynamic registry dispatch (FLAG-001/002)', () => 
     expect(descriptor?.capabilities.browserRender).toBe(true);
     expect(descriptor?.source).toBe('db-sequence-component');
   });
+});
+
+describe('visual track group placement', () => {
+  it('applies the shared track transform and group opacity once', () => {
+    const config = buildConfig('custom:my-seq');
+    config.tracks[0] = {...config.tracks[0], scale: 0.5, opacity: 0.6, blendMode: 'multiply'};
+    const {container} = render(<TimelineRenderer astridElementHost={INSTALLED_ASTRID_ELEMENT_HOST} config={config} />);
+    const group = [...container.querySelectorAll<HTMLElement>('[data-testid="absolute-fill"]')].find(node => node.style.transform === 'translate(480px, 270px) scale(0.5)');
+    expect(group).toBeDefined();
+    expect(group!.style.transformOrigin).toBe('0 0');
+    expect(group!.style.opacity).toBe('0.6');
+    expect(group!.style.mixBlendMode).toBe('multiply');
+    expect(group!.style.overflow).toBe('hidden');
+  });
+});
+
+
+it('draws the exact group transform supplied by shared placement', () => {
+  const spy = vi.spyOn(composition, 'resolveTrackTransform').mockReturnValue({forward: {scale: 0.75, tx: 123, ty: 45}, inverse: {scale: 4 / 3, tx: -164, ty: -60}});
+  const config = buildConfig('custom:my-seq');
+  const {container} = render(<TimelineRenderer astridElementHost={INSTALLED_ASTRID_ELEMENT_HOST} config={config} />);
+  const group = [...container.querySelectorAll<HTMLElement>('[data-testid="absolute-fill"]')].find(node => node.style.transform === 'translate(123px, 45px) scale(0.75)');
+  expect(group).toBeDefined();
+  expect(group!.style.transformOrigin).toBe('0 0');
+  spy.mockRestore();
 });

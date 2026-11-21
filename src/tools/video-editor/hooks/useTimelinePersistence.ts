@@ -240,6 +240,8 @@ export interface UseTimelinePersistenceResult {
   flushSaveTarget: (target: TimelineSaveTarget) => Promise<number>;
   discardUncommittedSaveTarget: (target: TimelineSaveTarget, error: unknown) => boolean;
   saveStatus: SaveStatus;
+  /** The reason behind a 'error' status, until the status changes. */
+  saveError: string | null;
   isConflictExhausted: boolean;
   /** Reopen resolution for a native refusal already retained in the recovered outbox. */
   restoreRetainedConflict: () => void;
@@ -264,6 +266,8 @@ export interface UseTimelinePersistenceResult {
    * edit or a click. Does nothing when no save is waiting or a conflict, reload or recovery choice owns the timeline.
    */
   retryPendingSave: () => void;
+  clearSaveFailure: () => void;
+  noteSaveProgress: () => void;
   /** Synchronous guard for recovery actions that must not race canonical reload. */
   canonicalReloadInProgressRef: MutableRefObject<boolean>;
   /**
@@ -398,7 +402,13 @@ export function useTimelinePersistence({
     reject: (error: Error) => void;
   }>>([]);
 
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  // Status and reason are one value: the badge cannot say 'error' without a reason, and the reason (a toast is
+  // gone in seconds) stays until the status moves on.
+  const [saveState, setSaveState] = useState<{ status: Exclude<SaveStatus, 'error'> } | { status: 'error'; reason: string }>({ status: 'saved' });
+  const saveStatus: SaveStatus = saveState.status;
+  const saveError = saveState.status === 'error' ? saveState.reason : null;
+  const setSaveStatus = useCallback((status: Exclude<SaveStatus, 'error'>) => setSaveState({ status }), []);
+  const failSave = useCallback((reason: string) => setSaveState({ status: 'error', reason }), []);
   saveStatusRef.current = saveStatus;
   const [isConflictExhausted, setIsConflictExhausted] = useState(false);
   const [schemaIncompatible, setSchemaIncompatible] = useState<ReadonlyArray<TimelineSchemaIssue> | null>(null);
@@ -442,7 +452,7 @@ export function useTimelinePersistence({
     setIsConflictExhausted(true);
     // Keep the synchronous poll/write gate ahead of React's next render.
     isConflictExhaustedRef.current = true;
-    setSaveStatus('error');
+    failSave('The timeline was changed somewhere else and these edits could not be merged into it.');
   }, []);
 
   const restoreRetainedConflict = useCallback(() => {
@@ -570,6 +580,20 @@ export function useTimelinePersistence({
     if (watchdogTimer.current) {
       return;
     }
+    watchdogTimer.current = setTimeout(() => {
+      watchdogTimer.current = null;
+      setWatchdogTripped(true);
+    }, WATCHDOG_GRACE_MS);
+  }, []);
+
+  /**
+   * An intent was accepted: the save is making progress. The watchdog measures time without progress, so a long
+   * burst of edits that keep landing never shows "not confirmed"; only a save with no accept for the grace
+   * period does.
+   */
+  const noteSaveProgress = useCallback(() => {
+    if (!watchdogTimer.current) return;
+    clearTimeout(watchdogTimer.current);
     watchdogTimer.current = setTimeout(() => {
       watchdogTimer.current = null;
       setWatchdogTripped(true);
@@ -881,7 +905,7 @@ export function useTimelinePersistence({
         }
         cancelErrorRetryTimer();
         disarmWatchdog();
-        setSaveStatus('error');
+        failSave(persistenceError instanceof Error ? persistenceError.message : String(persistenceError));
         toast.error(persistenceError instanceof Error ? persistenceError.message : String(persistenceError));
         rejectFlushWaiters(persistenceError, attempt, true);
         return;
@@ -893,7 +917,7 @@ export function useTimelinePersistence({
         // for an explicit Runtime reconnect instead of flooding the Runtime.
         cancelErrorRetryTimer();
         disarmWatchdog();
-        setSaveStatus('error');
+        failSave('Astrid is not reachable right now. Your edits are kept here and will save when it is back.');
         stalledAttemptRef.current = attempt;
         rejectFlushWaiters(persistenceError);
         return;
@@ -905,8 +929,7 @@ export function useTimelinePersistence({
         // divergence has been established, so the conflict flow is misleading.
         cancelErrorRetryTimer();
         disarmWatchdog();
-        setSaveStatus('error');
-        toast.error(persistenceError.message);
+        failSave(persistenceError.message);
         rejectFlushWaiters(persistenceError, attempt, true);
         return;
       }
@@ -960,7 +983,7 @@ export function useTimelinePersistence({
       if (isTimelineSchemaIncompatibleError(error)) {
         isSchemaIncompatibleRef.current = true;
         setSchemaIncompatible(error.issues);
-        setSaveStatus('error');
+        failSave('This timeline was saved by a newer version of Astrid, so it cannot be changed here.');
         cancelErrorRetryTimer();
         disarmWatchdog();
         rejectFlushWaiters(error, attempt, true);
@@ -976,10 +999,13 @@ export function useTimelinePersistence({
         // error — the user sees a neutral `retrying` badge while the backend
         // recovers. `error` is reserved for 404/409/lost-edit/unrecoverable.
         setSaveStatus('retrying');
-        retryScheduled = true;
-        scheduleErrorRetry(attempt);
+        // The local save session owns the retry of its own unavailable save; a second scheduler would only race it.
+        if (session.localDocumentSave?.status?.() !== 'retry') {
+          retryScheduled = true;
+          scheduleErrorRetry(attempt);
+        }
       } else {
-        setSaveStatus('error');
+        failSave(error instanceof Error ? error.message : String(error));
       }
     } finally {
       attempt.session.activeAttempts.delete(attempt);
@@ -1560,6 +1586,13 @@ export function useTimelinePersistence({
     }
   }, [clearWatchdog, dataRef, getDataRef, scheduleSave, watchdogReason]);
 
+  /** Forget the failure a declined edit or an earlier refusal left, so the next save is attempted. */
+  const clearSaveFailure = useCallback(() => {
+    session.captureFailure = undefined;
+    session.editFailure = false;
+    setSaveState((current) => current.status === 'error' ? { status: 'saved' } : current);
+  }, [session]);
+
   const retryPendingSave = useCallback(() => {
     if (!isMountedRef.current || reloadInProgressRef.current || isSavingRef.current) return;
     if (isConflictExhaustedRef.current || isSchemaIncompatibleRef.current) return;
@@ -1731,7 +1764,7 @@ export function useTimelinePersistence({
         });
         setSaveStatus('saved');
       } catch (error) {
-        if (!reloadCancelledRef.current) setSaveStatus('error');
+        if (!reloadCancelledRef.current) failSave(error instanceof Error ? error.message : 'The timeline could not be reloaded.');
         throw error;
       } finally {
         const wasCancelled = reloadCancelledRef.current;
@@ -1900,6 +1933,7 @@ export function useTimelinePersistence({
     flushSaveTarget,
     discardUncommittedSaveTarget,
     saveStatus,
+    saveError,
     isConflictExhausted,
     restoreRetainedConflict,
     schemaIncompatible,
@@ -1911,6 +1945,8 @@ export function useTimelinePersistence({
     watchdogReason,
     retryWatchdog,
     retryPendingSave,
+    clearSaveFailure,
+    noteSaveProgress,
     canonicalReloadInProgressRef: reloadInProgressRef,
     /** Bundle from the last server reload; consumed downstream ([V2-B4]). */
     loadedBundleRef,

@@ -45,7 +45,14 @@ function acceptedResult(document: ReturnType<typeof documentPair>['after'], head
 export function environment() {
   const pair = documentPair();
   const initial: TimelineCommandBasis = { head: h0, canonicalDocument: pair.document };
-  const outboxes = createCommitOutbox({ indexedDB: createFakeIndexedDB(), exclusiveLock: async (_key, work) => work() });
+  // Like the browser's exclusive lock: a name held by a live claim is refused, so prune never removes a live owner.
+  const held = new Set<string>();
+  const idb = createFakeIndexedDB();
+  const outboxes = createCommitOutbox({ indexedDB: idb, exclusiveLock: async (key, work) => {
+    if (held.has(key)) throw new Error('Outbox is already claimed');
+    held.add(key);
+    try { return await work(); } finally { held.delete(key); }
+  } });
   const send = vi.fn<(request: import('@/integrations/runtime/timeline-commit-types.ts').CommitRequest, key: string) => Promise<TimelineCommitResult>>();
   let visible: OutboxJson = toOutboxJson(pair.document);
   const sourceHead: TimelineHeadRevision = { projectId: scope.projectId, timelineId: scope.timelineId,
@@ -74,6 +81,20 @@ export function environment() {
         headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId } }, source: guardedSource }) });
     return handoff.capture(guardedSource);
   };
-  return { pair, initial, outboxes, send, prepareDisplay, mount, append, sourceGuard, visible: () => visible,
+  /** Writes an owner row directly, as an older build left it (a row no claim of this build would leave empty). */
+  const putRow = (row: { scope: typeof scope; ownerId: string; generation?: number; intents?: unknown[]; accepted?: unknown }) =>
+    new Promise<void>((resolve, reject) => {
+      const open = (idb as unknown as IDBFactory).open('astrid.command-outbox', 1);
+      open.addEventListener('upgradeneeded', () => { if (!open.result.objectStoreNames.contains('owners')) open.result.createObjectStore('owners'); });
+      open.addEventListener('error', () => reject(open.error));
+      open.addEventListener('success', () => {
+        const tx = open.result.transaction('owners', 'readwrite');
+        tx.objectStore('owners').put({ generation: 1, intents: [], ...row },
+          JSON.stringify([row.scope.realmId, row.scope.actorId, row.scope.projectId, row.scope.timelineId, row.ownerId]));
+        tx.addEventListener('complete', () => { open.result.close(); resolve(); });
+        tx.addEventListener('error', () => reject(tx.error));
+      });
+    });
+  return { pair, initial, outboxes, putRow, send, prepareDisplay, mount, append, sourceGuard, visible: () => visible,
     accepted: acceptedResult };
 }

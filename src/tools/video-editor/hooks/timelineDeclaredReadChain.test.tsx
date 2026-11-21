@@ -18,10 +18,6 @@ import { useTimelineSave } from './useTimelineSave.ts';
 import { createTimelineStore } from './timelineStore.ts';
 
 vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({ invalidateReferencedTimelineCache: vi.fn() }));
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
 
 beforeEach(() => {
   vi.useFakeTimers();
@@ -114,8 +110,8 @@ describe('mounted split and inspector trim authoring reads', () => {
         const reads = (trimIntent.documentIntent as Record<string, unknown>).reads as unknown[];
         expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'clips', `id:${rightId}`, 'to'],
           state: { state: 'present', value: 8 } });
-        expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media'],
-          state: { state: 'present', value: registry.assets.media } });
+        expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media', 'duration'],
+          state: { state: 'present', value: 8 } });
         expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'output', 'fps'],
           state: { state: 'present', value: 30 } });
         // A named trim reads what resolveOverlaps consults: the collection order and every sibling's track,

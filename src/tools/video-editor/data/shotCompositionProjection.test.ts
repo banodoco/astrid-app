@@ -270,8 +270,8 @@ describe('canonical shot-composition downstream projection', () => {
       tracks: [{ id: 'video', kind: 'visual', label: 'Parent' }], clips: [], registry: {},
     });
     expect(projection.config.tracks).toEqual([
-      { id: 'video', kind: 'visual', label: 'Parent' },
-      { id: 'occ-1~video', kind: 'audio', label: 'Child audio' },
+      { id: 'video', kind: 'visual', label: 'Parent', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1} },
+      { id: 'occ-1~video', kind: 'audio', label: 'Child audio', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1} },
     ]);
     const clip = projection.config.clips[0];
     expect(clip).toMatchObject({
@@ -1137,4 +1137,66 @@ describe('canonical shot-composition downstream projection', () => {
     expect(managedOutputMatchesOccurrence({ provenance: { occurrence_id: 'occ-2' } }, occurrence)).toBe(false);
     expect(managedOutputMatchesOccurrence({ shot_id: occurrence.shotId }, occurrence)).toBe(false);
   });
+});
+
+describe('child placement normalization before projection', () => {
+  const base: ResolvedTimelineConfig = {output: {resolution: '1280x720', fps: 30, file: 'parent.mp4'}, tracks: [{id: 'picture', kind: 'visual', label: 'Picture', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}}], clips: [], registry: {}};
+  it('uses each child canvas once and retains literal geometry for repeated occurrences', () => {
+    const child = withOccurrenceRevision(prepared, 0, timeline => ({...timeline,
+      output: {resolution: '1920x1080', fps: 30, file: 'child.mp4'},
+      tracks: [{id: 'video', kind: 'visual', scale: 2}, {id: 'already', kind: 'visual', scale: 2, app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}}],
+      clips: [{id: 'legacy', clipType: 'media', asset: 'alpha-image', track: 'video', at: 0, hold: 2, x: 0, y: 0, width: 1920, height: 1080},
+        {id: 'stamped', clipType: 'media', asset: 'alpha-image', track: 'already', at: 0, hold: 2, x: 10, y: 20, width: 600, height: 300, fit: 'contain'}],
+    }));
+    const first = {...child.occurrences[0], trackId: 'picture'};
+    const second = {...first, occurrenceId: 'repeated', atMs: 3000};
+    const graph = {...child, occurrences: [first, second]};
+    const before = structuredClone(graph);
+    const projected = projectCanonicalComposition(graph, base);
+    for (const id of ['occ-1', 'repeated']) {
+      expect(projected.config.clips.find(clip => clip.id === `${id}:legacy`)).toMatchObject({x: 480, y: 270, width: 960, height: 540, fit: 'cover'});
+      expect(projected.config.clips.find(clip => clip.id === `${id}:stamped`)).toMatchObject({x: 10, y: 20, width: 600, height: 300, fit: 'contain'});
+      expect(projected.config.tracks.find(track => track.id === `${id}~video`)?.app).toMatchObject({scaleAppliesToPositionedClips: true, clipPlacementVersion: 1});
+      expect(projected.placementFindings).toEqual(expect.arrayContaining([expect.objectContaining({scope: 'child', occurrenceId: id, shotId: first.shotId, kind: 'scale-bake', clipId: 'legacy'})]));
+    }
+    expect(projected.config.output.resolution).toBe('1280x720');
+    expect(graph).toEqual(before);
+  });
+  it('refuses missing child canvas with the occurrence named', () => {
+    const source = withOccurrenceRevision(prepared, 0, timeline => {
+      const {output: _output, ...rest} = timeline;
+      return {...rest, tracks: [{id: 'video', kind: 'visual', scale: 2}], clips: [{id: 'legacy', track: 'video', clipType: 'media', asset: 'alpha-image', at: 0, hold: 1, x: 0}]};
+    });
+    expect(() => projectCanonicalComposition({...source, occurrences: source.occurrences.slice(0, 1)}, base)).toThrow(/Occurrence 'occ-1'.*output\.resolution/);
+  });
+  it('refuses a missing parent canvas for projected media', () => {
+    const parent = {...base, output: undefined} as unknown as ResolvedTimelineConfig;
+    expect(() => projectCanonicalComposition({...prepared, occurrences: prepared.occurrences.slice(0, 1)}, parent)).toThrow(/Parent timeline property output\.resolution/);
+  });
+});
+
+it('projects four positionless opening images without inventing a child canvas', () => {
+  const source = withOccurrenceRevision(prepared, 0, timeline => {
+    const {output: _output, ...rest} = timeline;
+    return {...rest,
+      tracks: [{id: 'video', kind: 'visual', fit: 'contain', scale: 1, app: {scaleAppliesToPositionedClips: true}}],
+      clips: Array.from({length: 4}, (_, index) => ({id: `opening-${index}`, clipType: 'image', asset: 'alpha-image', track: 'video', at: index, hold: 1})),
+    };
+  });
+  const graph = {...source, occurrences: source.occurrences.slice(0, 1)};
+  const original = structuredClone(graph);
+  const parent = {theme_overrides: {visual: {canvas: {width: 1280, height: 720, fps: 24}}}, tracks: [{id: 'picture', kind: 'visual', label: 'Picture', app: {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1}}], clips: [], registry: {}} as unknown as ResolvedTimelineConfig;
+  const projection = projectCanonicalComposition(graph, parent);
+  expect(projection.config.output).toMatchObject({resolution: '1280x720', fps: 24});
+  expect(projection.config.clips.filter(clip => clip.id.startsWith('occ-1:opening-'))).toHaveLength(4);
+  for (const clip of projection.config.clips.filter(clip => clip.id.startsWith('occ-1:opening-'))) {
+    expect(clip).not.toHaveProperty('x');
+    expect(clip).not.toHaveProperty('width');
+    expect(clip).not.toHaveProperty('fit');
+  }
+  expect(graph).toEqual(original);
+  const timeline = (graph.occurrences[0].revision.internal_timeline_revision as {timeline: Record<string, unknown>}).timeline;
+  expect(timeline).not.toHaveProperty('output');
+  expect(projection.placementFindings.filter(finding => finding.scope === 'child' && finding.kind === 'canvas')).toEqual([]);
+  expect(projection.placementFindings).toEqual(expect.arrayContaining([expect.objectContaining({scope: 'child', occurrenceId: 'occ-1', kind: 'canvas-not-required', source: 'no-canvas-dependent-scale-bake'})]));
 });

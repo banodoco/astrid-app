@@ -9,7 +9,12 @@
 
 from __future__ import annotations
 
-from typing import Any, NotRequired, TypedDict
+from typing import Any, Literal, NotRequired, TypedDict
+
+MetaNamespaceKey = str
+MetaValue = dict[str, "MetaValue"] | list["MetaValue"] | str | float | bool | None
+MetaNamespaceValue = dict[str, MetaValue]
+Meta = dict[MetaNamespaceKey, MetaNamespaceValue]
 
 
 class TimelineClip(TypedDict, total=False):
@@ -27,6 +32,8 @@ class TimelineClip(TypedDict, total=False):
     y: float
     width: float
     height: float
+    fit: Literal["contain", "cover"]
+    meta: Meta
     cropTop: float
     cropBottom: float
     cropLeft: float
@@ -75,6 +82,7 @@ class TimelineOutput(TypedDict, total=False):
 
 
 class AssetEntry(TypedDict, total=False):
+    meta: Meta
     file: str
     url: str
     etag: str

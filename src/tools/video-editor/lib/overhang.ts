@@ -189,6 +189,7 @@ export function convertOverhangToHold({
     y: clipMeta.y,
     width: clipMeta.width,
     height: clipMeta.height,
+    fit: clipMeta.fit,
     cropTop: clipMeta.cropTop,
     cropBottom: clipMeta.cropBottom,
     cropLeft: clipMeta.cropLeft,

@@ -1,3 +1,4 @@
+import { saveBarInput } from './saveBar.ts';
 import { withTimelineBasisDiagnostics } from '../lib/timeline-basis-diagnostics.ts';
 import { invalidateDraftReload, recordDraftReloadFailure, registerDraftSafeReloadGuard } from '@/shared/lib/updates/draftSafeReload.ts';
 import { type AstridElementOperationAdapter, type ElementTimelineRoutes, type ElementTimelineDocument } from '../runtime/element-adapter.ts';
@@ -19,7 +20,6 @@ import { useTimelinePersistence } from '@/tools/video-editor/hooks/useTimelinePe
 import { clearTimelineDraft, loadTimelineDraft } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { buildTimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { getStableConfigSignature } from '@/tools/video-editor/lib/config-utils.ts';
-import { withDefaultTimelineOutput } from '@/tools/video-editor/lib/defaults.ts';
 import type { AssetRegistry, TimelineConfig } from '@/tools/video-editor/types/index.ts';
 import { usePollSync, type UsePollSyncQueries } from '@/tools/video-editor/hooks/usePollSync.ts';
 import type { TimelineStoreApi } from '@/tools/video-editor/hooks/timelineStore.ts';
@@ -29,6 +29,7 @@ import type { TimelineDraftRecord } from '@/tools/video-editor/data/timelineDraf
 import { canonicalJsonStringify, parseTimelineBundle, type TimelineBundleEnvelope } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { createTimelineLocalSaveHandoff, readTimelineOriginalSaveBasis, type TimelineLocalSaveHandoff, type TimelineOriginalSaveBasis, type TimelineSaveSource, type TimelineGestureReadBasis } from './timelineLocalSaveHandoff.ts';
+import { createCommitOutbox } from '../commands/commitOutbox.ts';
 import { createLocalSaveSession, type LocalSaveSession, type LocalSaveState } from '../commands/localSaveSession.ts';
 import { toOutboxJson } from '../commands/commitOutbox.ts';
 import { emitTimelineSaveDiagnostic, markTimelineSaveRejection } from '../lib/timeline-diagnostics.ts';
@@ -140,6 +141,8 @@ export function useTimelineSave(
     { status: 'ready'; value: TimelineOriginalSaveBasis } | { status: 'unavailable'; reason: string } | { status: 'loading' } | null
   >(null);
   const [localSaveState, setLocalSaveState] = useState<LocalSaveState | null>(null);
+  // Set once the persistence layer exists; the save session reports each accepted intent through it.
+  const saveProgressRef = useRef<() => void>(() => {});
   const localOwner = useMemo(() => ({ provider, timelineId, closed: false, started: false, generation: 0,
     initialization: 'pending' as 'pending' | 'ready' | 'error', operations: 0, operationError: false, failedOutbox: false,
     headKey: '', recovered: false,
@@ -154,6 +157,22 @@ export function useTimelineSave(
     !localOwner.closed && localOwner.initialization === 'ready' && Boolean(localOwner.handoff)
   ), [localOwner, usesLocalDocumentSave]);
   const timelineEditingReady = isTimelineEditingReady();
+  // Bumped to run the save-session bootstrap again after it failed.
+  const [bootstrapEpoch, setBootstrapEpoch] = useState(0);
+  const restartLocalSession = useCallback(() => {
+    const old = localOwner.session;
+    if (old) {
+      // A session that started but could not settle its owners is retired; the next bootstrap recovers them again.
+      localOwner.generation++;
+      localOwner.session = undefined;
+      localOwner.handoff = undefined;
+      localOwner.ready = undefined;
+      localOwner.started = false;
+      localOwner.retirement = old.dispose().catch(() => {});
+    }
+    setLocalSaveState(null);
+    setBootstrapEpoch((epoch) => epoch + 1);
+  }, [localOwner]);
   const localOperationBoundaryRef = useRef(invalidateDraftReload);
   // Stable from the first render: a gesture during assembly cannot fall through
   // to the old snapshot writer while the verified original is being loaded.
@@ -191,7 +210,17 @@ export function useTimelineSave(
     async discharge(mode) {
       // A failed bootstrap has no session and nothing queued to leave.
       const handoff = await localOwner.ready?.catch(() => undefined);
-      if (localOwner.closed || !handoff) return;
+      if (localOwner.closed) return;
+      if (!handoff) {
+        // The session never started: its owner rows may still be in the outbox. Discard removes them and starts again.
+        if (mode === 'latest' && localOwner.initialization === 'error') {
+          const identity = await provider.getRecoverableIdentity?.();
+          const projectId = localDataRef.current?.head?.projectId;
+          if (identity && projectId) await createCommitOutbox().discardScope({ ...identity, projectId, timelineId });
+          restartLocalSession();
+        }
+        return;
+      }
       await handoff.discharge?.(mode);
     },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
@@ -219,7 +248,7 @@ export function useTimelineSave(
       } catch (error) { localOwner.operationError = true; recordDraftReloadFailure(); throw error; }
       finally { localOwner.operations--; if (!localOwner.closed) setLocalSaveState((current) => current ? { ...current } : current); }
     },
-  } : undefined, [localOwner, usesLocalDocumentSave]);
+  } : undefined, [localOwner, usesLocalDocumentSave, restartLocalSession, provider, timelineId]);
   useEffect(() => {
     localOwner.closed = false;
     emitTimelineSaveDiagnostic('owner-init', () => ({ owner: localOwner, timelineId: localOwner.timelineId, closed: localOwner.closed,
@@ -364,6 +393,7 @@ export function useTimelineSave(
           initial: verified.initial, document: toOutboxJson(verified.initial.canonicalDocument),
           send: (request, key) => provider.commitTimeline!(request, key),
           loadLatest: () => provider.loadTimelineCommandBasis!(timelineId),
+          progress: () => { if (isCurrent()) saveProgressRef.current(); },
           changed: (state) => {
             if (isCurrent() && ['retry', 'blocked', 'conflict', 'error'].includes(state.status)) recordDraftReloadFailure();
             emitTimelineSaveDiagnostic('session-changed', () => ({ owner: localOwner, timelineId,
@@ -380,7 +410,7 @@ export function useTimelineSave(
             const head: TimelineHeadRevision = { projectId: document.project_id, timelineId: document.timeline_id,
               headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId };
             // The numeric UI counter is local; it is never used as a physical pin.
-            const next = await buildTimelineData({ ...config, ...withDefaultTimelineOutput(config) }, registry, resolveAssetUrl,
+            const next = await buildTimelineData(config, registry, resolveAssetUrl,
               configVersionRef.current, bundle?.itemsBySchemaRef, head, bundle?.transcriptReferences);
             const source: TimelineSaveSource = { config: next.config, registry: next.registry, head,
               ...(bundle === undefined ? {} : { bundle }) };
@@ -408,7 +438,9 @@ export function useTimelineSave(
         // not settle stops the rest, which stay retained until the next load.
         for (const owner of owners) {
           localOwner.recovered = true;
-          await session.recover(owner);
+          // A recover that throws (an owner held by another tab, a row that cannot be verified) must not fail the
+          // whole bootstrap: the handoff is still built, and Discard (or Try again) reaches the session.
+          try { await session.recover(owner); } catch { break; }
           emitTimelineSaveDiagnostic('session-recovered', () => ({ owner: localOwner, timelineId,
             current: isCurrent(), generation, sessionPresent: true }));
           if (session.getState().status !== 'saved') break;
@@ -459,7 +491,7 @@ export function useTimelineSave(
       emitTimelineSaveDiagnostic('lifecycle-cancel', () => ({ owner: localOwner, timelineId,
         closed: localOwner.closed, generation: readGeneration, basisReadOrdinal: readOrdinal, sessionPresent: Boolean(localOwner.session) }));
     };
-  }, [provider, timelineId, originalHeadKey, localDataRef, localEditSeqRef, adoptCanonicalData, localOwner, resolveAssetUrl, usesLocalDocumentSave]);
+  }, [provider, timelineId, originalHeadKey, localDataRef, localEditSeqRef, adoptCanonicalData, localOwner, resolveAssetUrl, usesLocalDocumentSave, bootstrapEpoch]);
   const persistence = useTimelinePersistence({
     store,
     provider,
@@ -564,6 +596,8 @@ export function useTimelineSave(
     updatedAt: string;
     baseVersion: number;
     retryAllowed: boolean;
+    /** The draft was made on a head that is not the one the editor now has; it cannot be re-applied. */
+    baseGone: boolean;
   } | null>(null);
   const [recoveredAsDirty, setRecoveredAsDirty] = useState(false);
   const recoveryCheckedScopeRef = useRef<string | null>(null);
@@ -596,9 +630,15 @@ export function useTimelineSave(
   const offerRecovery = useCallback((record: TimelineDraftRecord) => {
     recoveryPendingRef.current = true;
     recoveryActiveRef.current = true;
-    setRecoveryDraft({ updatedAt: record.updatedAt, baseVersion: record.baseVersion,
-      retryAllowed: !provider.saveTimelineAtHead || Boolean(trustedRecoveryHead(record)) });
-  }, [provider, trustedRecoveryHead]);
+    // A whole-document draft can only be sent on the head it was authored on. When that head is gone (a rebuilt
+    // Runtime, or the timeline moved on), nothing can re-apply it: say so, and do not offer Try again.
+    const current = headRevisionRef.current ?? commit.dataRef.current?.head;
+    // (The local document save path refuses any other base at its head check; head-addressed providers send it as is.)
+    const baseGone = Boolean(usesLocalDocumentSave && typeof record.baseHeadRevisionId === 'string'
+      && current && record.baseHeadRevisionId !== current.headRevisionId);
+    setRecoveryDraft({ updatedAt: record.updatedAt, baseVersion: record.baseVersion, baseGone,
+      retryAllowed: !baseGone && (!provider.saveTimelineAtHead || Boolean(trustedRecoveryHead(record))) });
+  }, [commit.dataRef, headRevisionRef, provider, trustedRecoveryHead, usesLocalDocumentSave]);
   useEffect(() => {
     // No durable persistence (a read-only example, the editor tour) means no draft was ever written to offer.
     if (!isDataProviderPersistenceEnabled(provider)) return;
@@ -791,13 +831,55 @@ export function useTimelineSave(
       // Reload first. The persistence path clears the slot only after it has
       // built and committed fresh canonical data, so discarded content cannot
       // remain visible while the editor reports saved.
-      await reloadFromServer({ clearDraft: true });
+      await reloadFromServer({ clearDraft: true, discardRefusedSave: true });
     } catch {
       return;
     }
     setRecoveryDraft(null);
     setRecoveredAsDirty(false);
   }, [reloadFromServer]);
+
+  // One bar for every unsaved state, and the two ways out of it. Discard removes everything retained for this
+  // timeline (every owner, the draft, the session copy) and adopts the accepted head; Try again resends it.
+  const saveBar = saveBarInput({
+    local: localSaveState,
+    bootstrapFailed: localOwner.initialization === 'error',
+    recoveryDraft: persistence.isConflictExhausted ? null : recoveryDraft,
+    conflictExhausted: persistence.isConflictExhausted,
+    schemaIncompatible: persistence.schemaIncompatible != null,
+    watchdogTripped: persistence.watchdogTripped,
+    saveError: persistence.saveError,
+  });
+  saveProgressRef.current = persistence.noteSaveProgress;
+  const retrySaveAfterConflict = persistence.retrySaveAfterConflict;
+  const retryWatchdog = persistence.retryWatchdog;
+  const retryPendingSave = persistence.retryPendingSave;
+  const clearSaveFailure = persistence.clearSaveFailure;
+  const saveBarAction = saveBar?.action;
+  const tryAgain = useCallback(async () => {
+    // A declined edit leaves a failure that would refuse every later save; resending starts from a clean slate.
+    clearSaveFailure();
+    try {
+      switch (saveBarAction) {
+        case 'conflict': await retrySaveAfterConflict(); break;
+        case 'watchdog': retryWatchdog(); break;
+        case 'local': await localDocumentSave?.discharge?.('keep'); break;
+        case 'restart': restartLocalSession(); break;
+        case 'draft': await retryRecoveredDraft(); break;
+        case 'pending': retryPendingSave(); break;
+        default: break;
+      }
+    } catch {
+      // Still unsaved: the bar stays and names the reason.
+    }
+  }, [clearSaveFailure, localDocumentSave, restartLocalSession, retryPendingSave, retryRecoveredDraft,
+    retrySaveAfterConflict, retryWatchdog, saveBarAction]);
+  const discardUnsaved = useCallback(async () => {
+    // A waiting automatic retry must not race the Discard.
+    localOwner.session?.cancelRetry();
+    try { await reloadFromServer({ clearDraft: true, discardRefusedSave: true }); }
+    catch { /* the bar stays; the reload failure is its own error */ }
+  }, [localOwner, reloadFromServer]);
 
   const registrationTargetsRef = useRef(new WeakMap<OwnedRegistryMutation, { session: object; generation: number }>());
   // commit and persistence are fresh object literals on every render; their
@@ -943,11 +1025,13 @@ export function useTimelineSave(
     data: commit.data,
     dataRef: commit.dataRef,
     isConflictExhausted: persistence.isConflictExhausted,
-    saveNotice: localSaveNotice(localSaveState),
+    saveNotice: localSaveNotice(localSaveState)
+      ?? (persistence.saveError ? `This change was not saved. ${persistence.saveError}` : null),
     selectedClipId: commit.selectedClipId,
     selectedTrackId: commit.selectedTrackId,
     saveStatus: localSaveState && (['blocked', 'conflict', 'error', 'recovery', 'retry'].includes(localSaveState.status) || localSaveState.notice)
-      ? 'error' : !timelineEditingReady ? 'loading' : localSaveState?.status === 'saving' ? 'saving' : localSaveState?.status === 'dirty' ? 'dirty' : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty' : persistence.saveStatus,
+      ? 'error' : !timelineEditingReady ? 'loading' : localSaveState?.status === 'saving' ? 'saving' : localSaveState?.status === 'dirty' ? 'dirty' : recoveredAsDirty && persistence.saveStatus === 'saved' ? 'dirty'
+      : localSaveState?.status === 'saved' && persistence.saveStatus === 'retrying' ? 'saved' : persistence.saveStatus,
     schemaIncompatible: persistence.schemaIncompatible,
     flushPendingSave: persistence.flushPendingSave,
     preserveTimelineDraftForReload: persistence.preserveTimelineDraftForReload,
@@ -977,5 +1061,8 @@ export function useTimelineSave(
     recoveryDraft: persistence.isConflictExhausted ? null : recoveryDraft,
     retryRecoveredDraft,
     discardRecoveredDraft,
+    saveBar,
+    tryAgain,
+    discardUnsaved,
   };
 }

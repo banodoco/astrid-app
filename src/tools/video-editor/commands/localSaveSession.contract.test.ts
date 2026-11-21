@@ -19,7 +19,7 @@ afterEach(() => { fixture.overrides = {}; });
 describe('qualified full-v2 generated contracts at the local save boundary', () => {
   it.each([
     ['actual D39', {}],
-    ['published round-1b full-v2', { SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c' }],
+    // The round-1b digest is no longer accepted by supportsFullV2Commit; only the current generated contract is.
   ])('sends document and semantic saves with complete v2 metadata using %s', async (_name, overrides) => {
     fixture.overrides = overrides;
     expect(supportsFullV2Commit()).toBe(true);

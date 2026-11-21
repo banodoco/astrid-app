@@ -5,6 +5,7 @@ import type { SaveStatus } from '@/tools/video-editor/hooks/useTimelinePersisten
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
 import { AlertCircle, Film } from 'lucide-react';
 import { Button } from '@/shared/components/ui/button.tsx';
+import { SaveBar } from '@/tools/video-editor/components/SaveBar.tsx';
 import { VideoEditorProvider } from '@/tools/video-editor/contexts/VideoEditorProvider.tsx';
 import { TimelineEditorCore } from '@/tools/video-editor/components/TimelineEditor/TimelineEditorCore.tsx';
 import { RemotionPreview } from '@/tools/video-editor/components/PreviewPanel/RemotionPreview.tsx';
@@ -233,9 +234,9 @@ function ShotTimelineEditorSurface({
     return getTimelineDurationInFrames(activeConfig, activeConfig.output.fps) / activeConfig.output.fps;
   }, [activeConfig]);
 
-  const saveStatus = chrome.isConflictExhausted
+  const saveStatus = chrome.isConflictExhausted || chrome.saveBar?.kind === 'refused'
     ? 'conflict'
-    : chrome.watchdogTripped
+    : chrome.watchdogTripped || chrome.saveBar
       ? 'error'
       : chrome.saveStatus;
   const saveStatusLabel = saveStatus === 'loading' ? 'Loading canonical timeline…'
@@ -339,54 +340,9 @@ function ShotTimelineEditorSurface({
 }
 export function ShotTimelineRecoveryControls() {
   const chrome = useTimelineChromeContext();
-  const recovery = chrome.recoveryDraft;
-  if (!recovery && !chrome.isConflictExhausted) {
-    return null;
-  }
-
-  return (
-    <div className="space-y-2" data-shot-timeline-recovery="true">
-      {recovery ? (
-        <div
-          role="alert"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm"
-        >
-          <span>
-            Recovered unsaved changes from {new Date(recovery.updatedAt).toLocaleString()}.
-          </span>
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => void chrome.retryRecoveredDraft()}>
-              Retry
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => void chrome.discardRecoveredDraft()}>
-              Discard
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer().catch(() => undefined)}>
-              Reload
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {chrome.isConflictExhausted ? (
-        <div
-          role="alert"
-          className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
-        >
-          <span>This timeline changed elsewhere. Reload or save your work as a copy.</span>
-          <div className="flex items-center gap-2">
-            <Button type="button" size="sm" variant="outline" onClick={() => void chrome.reloadFromServer().catch(() => undefined)}>
-              Reload
-            </Button>
-            <Button type="button" size="sm" variant="outline" onClick={() => void chrome.retrySaveAfterConflict()}>
-              Save as copy
-            </Button>
-          </div>
-        </div>
-      ) : null}
-    </div>
-  );
+  if (!chrome.saveBar) return null;
+  return <SaveBar bar={chrome.saveBar} onTryAgain={chrome.tryAgain} onDiscard={chrome.discardUnsaved} />;
 }
-
 
 export function ShotTimelinePreview({
   composition,

@@ -136,27 +136,13 @@ export const stampScale = (frame: number, startAt: number): number => {
 
 // ---- Camera (stepped push-ins) ---------------------------------------------
 
-export type CameraStep = {at: number; zoom: number; fx: number; fy: number; ease?: 'linear'};
+export type CameraStep = {at: number; zoom: number; fx: number; fy: number};
 
 // The last camera step that has started by `frame`. Steps snap; nothing eases.
 export const cameraAt = (steps: CameraStep[], frame: number): CameraStep | null => {
   let active: CameraStep | null = null;
-  let index = -1;
-  steps.forEach((step, i) => {
-    if (step.at <= frame) {
-      active = step;
-      index = i;
-    }
-  });
-  // A step marked ease:'linear' is reached by a straight tween that starts on the
-  // previous step's frame; the tween is over once its own frame is reached (steps without
-  // ease still snap, so existing timelines are unchanged).
-  const next = steps[index + 1];
-  if (next && next.ease === 'linear' && next.at > frame) {
-    const from = active ?? steps[0];
-    const t = (frame - (active ? from.at : 0)) / Math.max(1, next.at - (active ? from.at : 0));
-    const mix = (a: number, b: number): number => (Number.isFinite(a) && Number.isFinite(b) ? a + (b - a) * t : b);
-    return {at: from.at, zoom: from.zoom + (next.zoom - from.zoom) * t, fx: mix(from.fx, next.fx), fy: mix(from.fy, next.fy)};
+  for (const step of steps) {
+    if (step.at <= frame) active = step;
   }
   return active;
 };

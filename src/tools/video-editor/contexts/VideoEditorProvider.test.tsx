@@ -931,8 +931,7 @@ describe('VideoEditorProvider', () => {
     const admissionHost=await import('../runtime/admitted-elements');
     const digest='e'.repeat(64);
     await act(async()=>{await admissionHost.refreshAdmittedElements(
-      async()=>({digest,moduleUrl:'/@id/__x00__virtual:astrid-element-admissions?v='+digest}),
-      async()=>({configured:true,projectId:'same-project',selectionDigest:digest,realmId:null,projects:[],elements:[],components:{}}),
+      async()=>({version:1,projectId:'same-project',realmId:'realm',selectionDigest:digest,projects:[],elements:[]}),
     );});
     expect(chat.editorContext?.elementOperationAdapter).toBe(capturedAdapter);
     expect(runtimes.get('full')!.agentSelectionOwner).toBe(oldFull.agentSelectionOwner);

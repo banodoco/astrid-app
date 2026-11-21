@@ -79,9 +79,8 @@ it('renders a real M1-installed effect in the open editor and retains the workin
     await writeFile(buildScript, `
       import {build} from ${JSON.stringify(path.join(app, 'node_modules/vite/dist/node/index.js'))};
       import {createExtensionImportMapPlugin} from ${JSON.stringify(path.join(app, 'config/vite/extensionImportMap.ts'))};
-      import {createElementAdmissionsPlugin} from ${JSON.stringify(path.join(app, 'config/vite/astridElementAdmissions.ts'))};
       await build({configFile:false,root:${JSON.stringify(root)},publicDir:false,logLevel:'error',
-        plugins:[createElementAdmissionsPlugin(),createExtensionImportMapPlugin()],esbuild:{jsx:'automatic'},resolve:{alias:${JSON.stringify({
+        plugins:[createExtensionImportMapPlugin()],esbuild:{jsx:'automatic'},resolve:{alias:${JSON.stringify({
           '@': path.join(app, 'src'), '@astrid/editor-sdk': path.join(app, 'src/sdk/index.ts'),
           '@astrid': path.join(process.env.M4_TEST_AGENT_ROOT!, 'astrid'),
           react: path.join(app, 'node_modules/react'), 'react-dom': path.join(app, 'node_modules/react-dom'),

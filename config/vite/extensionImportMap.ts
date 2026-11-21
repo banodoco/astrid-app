@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { OutputBundle, OutputChunk } from 'rollup';
-import type { Plugin } from 'vite';
+import type { Plugin, ViteDevServer } from 'vite';
 
 export const EXTENSION_IMPORT_MAP_ID = 'astrid-extension-importmap';
 export const EXTENSION_SHARED_MODULES_ID = 'astrid-extension-shared-modules';
@@ -51,9 +51,27 @@ const COMMONJS_EXPORTS: Partial<Record<SharedModuleSpecifier, readonly string[]>
   'react-dom/client': Object.freeze(['createRoot', 'hydrateRoot']),
 });
 const PREFIX = '\0astrid-extension-shared:';
+/**
+ * Dev-server URL for the same wrappers, under /assets/ like the build's, so the loader's one lock check (url shape,
+ * digest, version, map-equals-lock) passes unrelaxed in dev. Each file is `astrid-extension-shared-<sanitized specifier>.js`.
+ */
+const DEV_DIRECTORY = '/assets/astrid-extension-shared-';
 
 function virtualId(specifier: SharedModuleSpecifier): string {
   return `${PREFIX}${specifier}`;
+}
+
+function sanitizedName(specifier: SharedModuleSpecifier): string {
+  return specifier.replace(/[^a-zA-Z0-9]+/g, '-');
+}
+
+function devUrl(specifier: SharedModuleSpecifier): string {
+  return `${DEV_DIRECTORY}${sanitizedName(specifier).replace(/^-+|-+$/g, '')}.js`;
+}
+
+function devSpecifierFor(requestUrl: string): SharedModuleSpecifier | undefined {
+  const pathname = requestUrl.split('?')[0];
+  return (Object.keys(MODULE_VERSIONS) as SharedModuleSpecifier[]).find((specifier) => devUrl(specifier) === pathname);
 }
 
 function wrapperSource(specifier: SharedModuleSpecifier): string {
@@ -105,6 +123,16 @@ function findChunk(bundle: OutputBundle, fileName: string): OutputChunk | undefi
   return output?.type === 'chunk' ? output : undefined;
 }
 
+/** The lock and the import map the page carries, built from one set of bindings in dev and build alike. */
+function sharedModuleScripts(sharedModules: Record<SharedModuleSpecifier, SharedModuleBinding>): { lock: ExtensionSharedModuleLock; html: string } {
+  const lock: ExtensionSharedModuleLock = Object.freeze({ version: 1 as const, shared_modules: Object.freeze(sharedModules) });
+  const imports = Object.fromEntries(Object.entries(sharedModules).map(([specifier, binding]) => [specifier, binding.url]));
+  return { lock, html: [
+    `<script type="application/json" id="${EXTENSION_SHARED_MODULES_ID}">${JSON.stringify(lock)}</script>`,
+    `<script type="importmap" id="${EXTENSION_IMPORT_MAP_ID}">${JSON.stringify({ imports })}</script>`,
+  ].join('\n') };
+}
+
 function injectIntoHead(html: string, scripts: string): string {
   const openingHead = /<head(?:\s[^>]*)?>/i;
   if (!openingHead.test(html)) throw new Error('Built index.html has no <head> element for the extension import map.');
@@ -112,16 +140,18 @@ function injectIntoHead(html: string, scripts: string): string {
 }
 
 /**
- * Emit six public singleton entry points in the host Rollup graph. The wrappers
- * re-export the same resolved modules as the host, so imports through the
- * generated browser import map retain React/SDK identity.
+ * The same six singleton wrappers serve both modes, so one loader and one import map contract work everywhere.
+ * Build emits them as entry chunks of the host Rollup graph and records their digests in the lock. Dev serves each
+ * wrapper through Vite's own transform pipeline at a stable URL, so bare imports inside the wrapper resolve to the
+ * same optimized dependency URLs as the host app: React/SDK identity holds in both modes.
  */
 export function createExtensionImportMapPlugin(): Plugin {
   const references = new Map<SharedModuleSpecifier, string>();
+  let isBuild = false;
+  let devServer: ViteDevServer | undefined;
 
   return {
     name: 'astrid-extension-import-map',
-    apply: 'build',
     configResolved(resolved) {
       if (resolved.base !== '/') {
         throw new Error('The extension import map requires a root-relative Vite base.');
@@ -130,17 +160,38 @@ export function createExtensionImportMapPlugin(): Plugin {
         throw new Error('The extension import map requires build.assetsDir to be "assets".');
       }
       verifyPackageLock(resolved.root);
+      isBuild = resolved.command === 'build';
     },
-    buildStart() {
-      references.clear();
+    configureServer(server) {
+      devServer = server;
+      // Registered before Vite's internal middlewares so a wrapper URL is never answered by the file-system fallback.
+      server.middlewares.use(async (request, response, next) => {
+        const specifier = devSpecifierFor(request.url ?? '');
+        if (!specifier) {
+          next();
+          return;
+        }
+        try {
+          const result = await server.transformRequest(virtualId(specifier));
+          if (!result) throw new Error(`Shared module ${specifier} produced no dev module.`);
+          response.setHeader('Content-Type', 'text/javascript; charset=utf-8');
+          response.setHeader('Cache-Control', 'no-cache');
+          response.end(result.code);
+        } catch (error) {
+          next(error);
+        }
+      });
+    },
+    async transformIndexHtml(html) {
+      if (isBuild) return html;
+      // The digest is of the exact wrapper bytes the dev server answers with, as in the build's lock.
+      const sharedModules = {} as Record<SharedModuleSpecifier, SharedModuleBinding>;
       for (const specifier of Object.keys(MODULE_VERSIONS) as SharedModuleSpecifier[]) {
-        references.set(specifier, this.emitFile({
-          type: 'chunk',
-          id: virtualId(specifier),
-          name: `astrid-extension-shared-${specifier.replace(/[^a-zA-Z0-9]+/g, '-')}`,
-          preserveSignature: 'strict',
-        }));
+        const result = await devServer?.transformRequest(virtualId(specifier));
+        if (!result) throw new Error(`Shared module ${specifier} produced no dev module.`);
+        sharedModules[specifier] = Object.freeze({ url: devUrl(specifier), sha256: sha256(result.code), version: MODULE_VERSIONS[specifier] });
       }
+      return injectIntoHead(html, sharedModuleScripts(sharedModules).html);
     },
     resolveId(source) {
       return source.startsWith(PREFIX) ? source : null;
@@ -150,6 +201,18 @@ export function createExtensionImportMapPlugin(): Plugin {
       const specifier = id.slice(PREFIX.length) as SharedModuleSpecifier;
       if (!(specifier in MODULE_VERSIONS)) return null;
       return wrapperSource(specifier);
+    },
+    buildStart() {
+      if (!isBuild) return;
+      references.clear();
+      for (const specifier of Object.keys(MODULE_VERSIONS) as SharedModuleSpecifier[]) {
+        references.set(specifier, this.emitFile({
+          type: 'chunk',
+          id: virtualId(specifier),
+          name: `astrid-extension-shared-${specifier.replace(/[^a-zA-Z0-9]+/g, '-')}`,
+          preserveSignature: 'strict',
+        }));
+      }
     },
     generateBundle: {
       order: 'post',
@@ -168,17 +231,9 @@ export function createExtensionImportMapPlugin(): Plugin {
             version: MODULE_VERSIONS[specifier],
           });
         }
-        const lock: ExtensionSharedModuleLock = Object.freeze({ version: 1 as const, shared_modules: Object.freeze(sharedModules) });
+        const { lock, html: scripts } = sharedModuleScripts(sharedModules);
         const lockJson = `${JSON.stringify(lock, null, 2)}\n`;
         this.emitFile({ type: 'asset', fileName: EXTENSION_SHARED_MODULES_FILE, source: lockJson });
-
-        const imports = Object.fromEntries(
-          Object.entries(sharedModules).map(([specifier, binding]) => [specifier, binding.url]),
-        );
-        const scripts = [
-          `<script type="application/json" id="${EXTENSION_SHARED_MODULES_ID}">${JSON.stringify(lock)}</script>`,
-          `<script type="importmap" id="${EXTENSION_IMPORT_MAP_ID}">${JSON.stringify({ imports })}</script>`,
-        ].join('\n');
         const html = bundle['index.html'];
         if (!html || html.type !== 'asset' || typeof html.source !== 'string') {
           this.error('The extension import map requires an emitted index.html asset.');

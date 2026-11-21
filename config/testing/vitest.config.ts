@@ -1,7 +1,6 @@
 import { defineConfig } from 'vitest/config';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
-import { createElementAdmissionsPlugin } from '../vite/astridElementAdmissions';
 import { resolveAstridSource, validateAstridToolCatalog } from '../vite/astridSource';
 import { CHECKOUT_LANE, assertCheckoutLaneFilesExist } from './lanes';
 import SkipGuardReporter from './skipGuardReporter';
@@ -17,7 +16,6 @@ const astridPublicSource = resolveAstridSource(
 );
 export default defineConfig({
   root: projectRoot,
-  plugins: [createElementAdmissionsPlugin()],
   resolve: {
     alias: {
       '@': path.resolve(projectRoot, 'src'),

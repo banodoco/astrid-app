@@ -127,6 +127,7 @@ describe('prepared image request producer fixture', () => {
     try {
       const accepted = createTimelineLocalSaveHandoff({ initial, source, session: good, adopted: () => {} });
       await accepted.capture(next, gesture);
+      expect((good.getDocument() as unknown as typeof canonical).parent_revision.content_digest).toBe(digest);
       const changed = structuredClone(source);
       changed.config.clips[0].at = 99;
       expect(changed.config.output).toEqual(source.config.output);

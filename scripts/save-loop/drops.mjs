@@ -128,7 +128,7 @@ async function retainedDropPlaceholders(page) {
     .filter(Boolean))]);
 }
 
-function dropVerifier({ page, name, expectedPlacements, gestureEvidence }) {
+function dropVerifier({ page, name, expectedPlacements, gestureEvidence, expectedObjects }) {
   return async ({ before, after, result }) => {
     const beforeIds = new Set(identities(before));
     const afterIds = identities(after);
@@ -169,6 +169,17 @@ function dropVerifier({ page, name, expectedPlacements, gestureEvidence }) {
       || !observations.headRevisionChanged || !observations.publicationChanged) {
       throw new Error(`${name}: placements did not advance the public timeline head; ${JSON.stringify(observations)}`);
     }
+    if (expectedObjects) {
+      const actual = placements.map(id => after.clipMedia?.[id] ?? []);
+      const remaining = [...expectedObjects];
+      for (const refs of actual) {
+        const index = remaining.findIndex(id => refs.includes(id));
+        if (index < 0) throw new Error(`${name}: new clip does not resolve an expected file digest; ${JSON.stringify({placements, actual, expectedObjects})}`);
+        remaining.splice(index, 1);
+      }
+      if (remaining.length) throw new Error(`${name}: missing expected dropped file digests: ${remaining.join(', ')}`);
+      observations.clipMedia = Object.fromEntries(placements.map((id, index) => [id, actual[index]]));
+    }
     if (newPlaceholders.length) {
       throw new Error(`${name}: saved drop left an unexpected placeholder; ${JSON.stringify(observations)}`);
     }
@@ -176,12 +187,12 @@ function dropVerifier({ page, name, expectedPlacements, gestureEvidence }) {
   };
 }
 
-function scenario({ page, helpers, name, expectedPlacements, gesture, gestureEvidence }) {
+function scenario({ page, helpers, name, expectedPlacements, gesture, gestureEvidence, expectedObjects }) {
   return {
     name,
     expected: 'saved',
     gesture,
-    verify: dropVerifier({ page, name, expectedPlacements, gestureEvidence }),
+    verify: dropVerifier({ page, name, expectedPlacements, gestureEvidence, expectedObjects }),
     cleanup: (context) => helpers.restoreScenario(context),
   };
 }
@@ -189,6 +200,9 @@ function scenario({ page, helpers, name, expectedPlacements, gesture, gestureEvi
 export async function dropScenarios({ page, fixture, helpers }) {
   const files = fixtureDropFiles(fixture);
   if (files.length < 2) throw new Error('fixture.media.drop_files needs at least two generated files for drop scenarios');
+  const dropIds = fixture.media?.drop_object_ids;
+  if (!Array.isArray(dropIds) || dropIds.length !== files.length || dropIds.some(id => !/^sha256:[0-9a-f]{64}$/.test(id)))
+    throw new Error('fixture.media.drop_object_ids must pair SHA-256 object IDs with drop_files');
   const track = visualTrack(fixture);
   const trackSelector = `[data-row-id="${selectorValue(track.id)}"]`;
 
@@ -228,6 +242,7 @@ export async function dropScenarios({ page, fixture, helpers }) {
 
   const fileScenario = (name, paths, expectedPlacements, evidence) => scenario({
     page, helpers, name, expectedPlacements, gestureEvidence: evidence,
+    expectedObjects: paths.map(file => dropIds[files.indexOf(file)]),
     gesture: async ({ iteration }) => {
       const point = await trackPoint(page, track.id, iteration - 1);
       await dispatchFileDrop(page, point, paths);
@@ -242,6 +257,7 @@ export async function dropScenarios({ page, fixture, helpers }) {
   const repeatedEvidence = { current: null };
   const repeatedSameFile = scenario({
     page, helpers, name: 'same generated file dropped twice', expectedPlacements: 2,
+    expectedObjects: [dropIds[0], dropIds[0]],
     gestureEvidence: repeatedEvidence,
     gesture: async ({ iteration }) => {
       const points = [];

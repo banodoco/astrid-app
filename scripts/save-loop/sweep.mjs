@@ -23,12 +23,13 @@ function flag(name) {
   if (index < 0 || !value || value.startsWith('--')) throw new Error(`${name} is required. ${usage}`);
   return value;
 }
+const probeOnly = args.includes('--broken-probe-only');
 const manifestPath = flag('--manifest');
 const resultsPath = flag('--results');
 const versionsPath = flag('--versions');
 const fixture = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
 const versions = JSON.parse(fs.readFileSync(versionsPath, 'utf8'));
-if (!fixture.project_id || !fixture.timeline_id || !fixture.tracks || !fixture.clips || !fixture.media)
+if (!fixture.project_id || !fixture.timeline_id || (!probeOnly && (!fixture.tracks || !fixture.clips || !fixture.media)))
   throw new Error('fixture manifest lacks project, timeline, tracks, clips or media');
 if (!versions.app || !versions.agent || !versions.runtime)
   throw new Error('versions JSON must identify app, agent and runtime');
@@ -42,18 +43,13 @@ const origin = new URL(baseUrl);
 if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Error('save-loop requires a local isolated stack');
 const helpers = await import('./lib.mjs');
 const {createRecorder} = await import('./assert.mjs');
-const {editScenarios, repeatScenarios} = await import('./edits.mjs');
-const {dropScenarios} = await import('./drops.mjs');
-const {clashScenario} = await import('./clash.mjs');
 let browser;
 let failed = false;
 const rows = [];
 try {
   const {b, p: page, context} = await helpers.open();
   browser = b;
-  const secondPage = await context.newPage();
-  await secondPage.setViewportSize({width:1700, height:1500});
-  await secondPage.goto(helpers.URL_);
+  let secondPage;
   const project = await page.evaluate(async projectId => {
     const response = await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`, {credentials:'same-origin', cache:'no-store'});
     if (!response.ok) throw new Error(`sandbox project read failed (${response.status})`);
@@ -62,21 +58,27 @@ try {
   if (project.project_id !== fixture.project_id || project.metadata?.purpose !== 'synthetic Plan 77 save-loop fixture')
     throw new Error('project is not the synthetic Plan 77 sandbox fixture');
   fs.appendFileSync(resultsPath, JSON.stringify({type:'run', date:new Date().toISOString(), versions, project_id:fixture.project_id, timeline_id:fixture.timeline_id, manifest:manifestPath}) + '\n');
-  const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath});
-  const contextArgs = {page, fixture, helpers};
-  let descriptors = [
-    ...await editScenarios(contextArgs),
-    ...await repeatScenarios(contextArgs),
-    ...await dropScenarios(contextArgs),
-    await clashScenario({...contextArgs, secondPage}),
-  ];
-  if (args.includes('--broken-probe') || args.includes('--broken-probe-only')) {
-    if (args.includes('--broken-probe-only')) descriptors = [];
-    descriptors.push({
+  const recorder = await createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty:probeOnly});
+  let descriptors = [];
+  if (!probeOnly) {
+    secondPage = await context.newPage();
+    await secondPage.setViewportSize({width:1700, height:1500});
+    await secondPage.goto(helpers.URL_);
+    const {editScenarios, repeatScenarios} = await import('./edits.mjs');
+    const {dropScenarios} = await import('./drops.mjs');
+    const {clashScenario} = await import('./clash.mjs');
+    const contextArgs = {page, fixture, helpers};
+    descriptors = [
+      ...await editScenarios(contextArgs),
+      ...await repeatScenarios(contextArgs),
+      ...await dropScenarios(contextArgs),
+      await clashScenario({...contextArgs, secondPage}),
+    ];
+  }
+  if (args.includes('--broken-probe') || probeOnly) descriptors.push({
     name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
     gesture:async()=>{}, cleanup:context=>context.helpers.restoreScenario(context),
-    });
-  }
+  });
   for (const descriptor of descriptors) {
     if (!descriptor || typeof descriptor.name !== 'string' || typeof descriptor.gesture !== 'function' ||
         !['saved','clash'].includes(descriptor.expected) || typeof descriptor.cleanup !== 'function') {

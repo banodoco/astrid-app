@@ -106,25 +106,63 @@ function idsInPayload(payload) {
   return {clipIds: [...clips].sort(), occurrenceIds: [...occurrences].sort()};
 }
 
-function fixtureMediaTokens(media) {
-  const tokens = new Set();
-  const visit = (value) => {
-    if (typeof value === 'string') {
-      tokens.add(value);
-      return;
-    }
-    if (!value || typeof value !== 'object') return;
-    if (Array.isArray(value)) {
-      for (const item of value) visit(item);
-      return;
-    }
-    for (const child of Object.values(value)) visit(child);
-  };
-  visit(media);
-  return [...tokens].filter(Boolean);
+const OBJECT_ID = /^sha256:[0-9a-f]{64}$/;
+function objectId(value) {
+  if (typeof value !== 'string') return null;
+  const normalized = /^[0-9a-f]{64}$/.test(value) ? `sha256:${value}` : value;
+  return OBJECT_ID.test(normalized) ? normalized : null;
 }
 
-async function publicSnapshot(page, baseUrl, fixture) {
+// The public payload may point directly to a digest or through a registry alias.
+function mediaInventory(payload) {
+  const media = new Set(), aliases = new Map(), clips = new Map(), unresolvedClips = new Set();
+  function collect(value, key = '', parentKey = '') {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) { value.forEach(v => collect(v, key, parentKey)); return; }
+    for (const [k, v] of Object.entries(value)) {
+      if (['media_id', 'object_id', 'content_sha256'].includes(k)) {
+        const id = objectId(v); if (id) media.add(id);
+      }
+      if (k === 'registry' && v && typeof v === 'object') {
+        for (const [alias, entry] of Object.entries(v.assets ?? v)) {
+          if (entry && typeof entry === 'object') {
+            const id = objectId(entry.content_sha256) || objectId(entry.media_id) || objectId(entry.object_id);
+            if (id) { if (aliases.has(alias) && aliases.get(alias) !== id) aliases.set(alias, null); else if (!aliases.has(alias)) aliases.set(alias, id); }
+          }
+        }
+      }
+      collect(v, k, key);
+    }
+  }
+  collect(payload);
+  function visit(value, key = '') {
+    if (!value || typeof value !== 'object') return;
+    if (Array.isArray(value)) {
+      if (key === 'clips') for (const clip of value) {
+        if (!clip || typeof clip.id !== 'string') continue;
+        const ids = new Set();
+        function pointers(node) {
+          if (!node || typeof node !== 'object') return;
+          if (Array.isArray(node)) { node.forEach(pointers); return; }
+          for (const [k,v] of Object.entries(node)) {
+            const id = ['media_id','object_id','content_sha256'].includes(k) ? objectId(v)
+              : ['asset','asset_id','assetId'].includes(k) ? aliases.get(v) : null;
+            if (id) ids.add(id);
+            else if (['asset','asset_id','assetId'].includes(k) && typeof v === 'string' && v) unresolvedClips.add(clip.id);
+            pointers(v);
+          }
+        }
+        pointers(clip); clips.set(clip.id, [...ids].sort());
+      }
+      value.forEach(v => visit(v, key)); return;
+    }
+    for (const [k,v] of Object.entries(value)) visit(v,k);
+  }
+  visit(payload);
+  return {mediaRefs:[...media].sort(), clipMedia:Object.fromEntries(clips), unresolvedClips:[...unresolvedClips].sort()};
+}
+
+async function publicSnapshot(page, baseUrl, fixture, {allowEmpty = false} = {}) {
   const encodedProject = encodeURIComponent(fixture.project_id);
   const encodedTimeline = encodeURIComponent(fixture.timeline_id);
   const timelineUrl = new URL(
@@ -201,10 +239,11 @@ async function publicSnapshot(page, baseUrl, fixture) {
   if (headCount !== 1 || !listed.some((item) => item?.revision_id === headId && item?.is_current_head === true)) {
     throw new Error(`public revision index reports ${headCount} active heads (expected exactly one)`);
   }
-  const publicationId = timeline?.head_publication_id ?? timeline?.headPublicationId ?? null;
+  const publicationId = timeline?.head_publication_id ?? timeline?.headPublicationId;
+  if (typeof publicationId !== 'string' || !publicationId) throw new Error('public timeline metadata omitted head_publication_id');
   const entities = idsInPayload(payload);
-  if (!entities.clipIds.length) throw new Error('public revision exposes no clip IDs; cannot verify disappeared work');
-  const mediaRefs = fixtureMediaTokens(fixture.media).filter((token) => payloadText.includes(token)).sort();
+  if (!allowEmpty && !entities.clipIds.length) throw new Error('public revision exposes no clip IDs; cannot verify disappeared work');
+  const {mediaRefs, clipMedia, unresolvedClips} = mediaInventory(payload);
   return {
     project_id: fixture.project_id,
     timeline_id: fixture.timeline_id,
@@ -213,6 +252,8 @@ async function publicSnapshot(page, baseUrl, fixture) {
     revision,
     clipIds: entities.clipIds,
     mediaRefs,
+    clipMedia,
+    unresolvedClips,
     headCount,
     // Compatibility names used internally by the recorder.
     head_revision_id: headId,
@@ -252,6 +293,7 @@ function toRecordTimes(events) {
 function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
   const commit = result.commit_requests;
   const changedHead = before.head_revision_id !== after.head_revision_id;
+  const changedPublication = before.publicationId !== after.publicationId;
   const changedContent = before.content_digest !== after.content_digest || before.payload_digest !== after.payload_digest;
   const disappearedClips = idsRemoved(before.entities.clipIds, after.entities.clipIds);
   const disappearedOccurrences = idsRemoved(before.entities.occurrenceIds, after.entities.occurrenceIds);
@@ -263,10 +305,11 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
     after: after.head_revision_id,
     changed: changedHead,
     content_changed: changedContent,
+    before_publication: before.publicationId, after_publication: after.publicationId, publication_changed: changedPublication,
   };
   result.entity_delta = {added_clips: addedClips, removed_clips: disappearedClips,
     added_occurrences: addedOccurrences, removed_occurrences: disappearedOccurrences,
-    removed_media_refs: removedMediaRefs};
+    removed_media_refs: removedMediaRefs, added_media_refs:setDifference(after.mediaRefs, before.mediaRefs)};
 
   if (expected === 'saved') {
     const acceptedCommit = commit.some((entry) => entry.status >= 200 && entry.status < 300);
@@ -278,12 +321,18 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
     result.saved_at = Number.isFinite(savedAt) ? savedAt : null;
     result.ms = Number.isFinite(savedAt) ? Math.max(0, savedAt - result.gesture_ended_at) : null;
     if (!acceptedCommit) return {pass: false, reason: 'no successful public timeline commit response was observed'};
-    if (!changedHead || !changedContent) return {pass: false, reason: 'public head and immutable content did not both change'};
+    if (!changedHead || !changedContent || !changedPublication) return {pass: false, reason: 'public head, publication and immutable content did not all change'};
     if (!Number.isFinite(result.ms)) return {pass: false, reason: 'no post-gesture Saved badge transition was observed'};
     if (!observedIntermediate && savedAt < result.gesture_ended_at) {
       return {pass: false, reason: 'Saved was already present without a row-specific save-state transition'};
     }
-    if ((disappearedClips.length || disappearedOccurrences.length || removedMediaRefs.length) && !result.allow_removals) {
+    const allowedMedia = result.allow_removals ? removedMediaRefs.filter(id =>
+      before.unresolvedClips.length === 0 && disappearedClips.some(clip => before.clipMedia[clip]?.includes(id)) &&
+      !before.entities.clipIds.some(clip => !disappearedClips.includes(clip) && before.clipMedia[clip]?.includes(id))) : [];
+    const unexpectedMedia = removedMediaRefs.filter(id => !allowedMedia.includes(id));
+    result.entity_delta.allowed_removed_media = allowedMedia;
+    if (unexpectedMedia.length) return {pass:false, reason:`unintended media disappeared: ${unexpectedMedia.join(', ')}`};
+    if ((disappearedClips.length || disappearedOccurrences.length) && !result.allow_removals) {
       return {pass: false, reason: 'clip, occurrence or fixture media references disappeared; scenario verify must account for intended split/delete deltas'};
     }
     return {pass: true, reason: disappearedClips.length || disappearedOccurrences.length || removedMediaRefs.length
@@ -291,11 +340,13 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
       : 'commit accepted, public head/content changed, and Saved was observed'};
   }
 
+  if (disappearedClips.length || disappearedOccurrences.length || removedMediaRefs.length)
+    return {pass:false, reason:'work or media disappeared during a refused clash'};
   const refusedBar = result.final_badge?.state === 'not saved' && result.final_badge.barCount > 0;
   const hasActions = result.try_again_visible && result.discard_visible;
   const reason = reasonText(result.final_badge);
   const conflictResponse = commit.some((entry) => entry.status === 409);
-  if ((changedHead || changedContent) && !hasScenarioVerify) {
+  if ((changedHead || changedContent || changedPublication) && !hasScenarioVerify) {
     return {pass: false, reason: 'head/content changed during refusal without a scenario witness'};
   }
   if (!conflictResponse) return {pass: false, reason: 'no HTTP 409 commit response proved a real clash'};
@@ -304,7 +355,7 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
 }
 
 /** Create an observable row recorder for the current fixture page. */
-export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {}) {
+export async function createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty = false} = {}) {
   if (!page || typeof page.evaluate !== 'function') throw new TypeError('createRecorder requires a Playwright page');
   if (!fixture?.project_id || !fixture?.timeline_id) throw new Error('fixture must include project_id and timeline_id');
   if (typeof baseUrl !== 'string' || !baseUrl) throw new Error('baseUrl is required');
@@ -341,6 +392,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
   page.on('response', onResponse);
   page.on('requestfailed', onRequestFailed);
 
+  let checkedFixture = false;
   async function runRow(descriptor) {
     await installBadgeObserver(page);
     const rowStartedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
@@ -364,7 +416,15 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
       if (!descriptor || typeof descriptor.gesture !== 'function' || !['saved', 'clash'].includes(descriptor.expected)) {
         throw new TypeError('descriptor requires name, gesture, and expected saved|clash');
       }
-      before = await publicSnapshot(page, baseUrl, fixture);
+      before = await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
+      if (!checkedFixture && !allowEmpty) {
+        const expected = fixture.media?.retained_object_ids;
+        if (!Array.isArray(expected) || !expected.length || expected.some(id => !OBJECT_ID.test(id)))
+          throw new Error('fixture must provide nonempty media.retained_object_ids as SHA-256 object IDs');
+        const missing = expected.filter(id => !before.mediaRefs.includes(id));
+        if (missing.length) throw new Error(`fixture media missing from public revision: ${missing.join(', ')}`);
+        checkedFixture = true;
+      }
       result.before_head = before.headRevision;
       result.before = {headRevision: before.headRevision, publicationId: before.publicationId,
         clipIds: before.clipIds, mediaRefs: before.mediaRefs, headCount: before.headCount};
@@ -405,7 +465,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
         while (Date.now() < graceDeadline && scopedEvents.some((entry) => entry.status === null)) await page.waitForTimeout(20);
       }
       result.commit_requests = toRecordTimes(scopedEvents);
-      after = await publicSnapshot(page, baseUrl, fixture);
+      after = await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
       result.after_head = after.headRevision;
       result.public_snapshot = {
         before: {head_revision_id: before.head_revision_id, content_digest: before.content_digest, payload_digest: before.payload_digest},
@@ -434,7 +494,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath} = {})
       // Preserve an independently read after-head for guarded cleanup even on gesture errors.
       if (before && !after) {
         try {
-          after = await publicSnapshot(page, baseUrl, fixture);
+          after = await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
           result.after = {headRevision:after.headRevision, publicationId:after.publicationId, clipIds:after.clipIds, mediaRefs:after.mediaRefs, headCount:after.headCount};
         } catch (snapshotError) { result.after_snapshot_error = reasonOf(snapshotError); }
       }

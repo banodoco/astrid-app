@@ -1,3 +1,4 @@
+import {expectedFixtureIds, sameIds} from './readiness.mjs';
 /*
  * Public, browser-observable assertions for the Plan 77 save loop.
  * This deliberately observes only the sandbox editor page and Runtime public
@@ -162,7 +163,7 @@ function mediaInventory(payload) {
   return {mediaRefs:[...media].sort(), clipMedia:Object.fromEntries(clips), unresolvedClips:[...unresolvedClips].sort()};
 }
 
-async function publicSnapshot(page, baseUrl, fixture, {allowEmpty = false} = {}) {
+export async function publicSnapshot(page, baseUrl, fixture, {allowEmpty = false} = {}) {
   const encodedProject = encodeURIComponent(fixture.project_id);
   const encodedTimeline = encodeURIComponent(fixture.timeline_id);
   const timelineUrl = new URL(
@@ -423,6 +424,8 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
           throw new Error('fixture must provide nonempty media.retained_object_ids as SHA-256 object IDs');
         const missing = expected.filter(id => !before.mediaRefs.includes(id));
         if (missing.length) throw new Error(`fixture media missing from public revision: ${missing.join(', ')}`);
+        const expectedIds = expectedFixtureIds(fixture);
+        if (!sameIds(before.clipIds, expectedIds)) throw new Error('public head clip IDs do not match expected fixture');
         checkedFixture = true;
       }
       result.before_head = before.headRevision;

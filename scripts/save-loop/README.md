@@ -46,6 +46,10 @@ selected run. The extra measurement records child counts, accepted commit
 timing, generated media bytes, build time and disk before/after. A successful
 fixture must verify accepted child tracks, clips and media identities. The
 standard measurement and sweep requirements remain in force for both variants.
+`measurement.accepted_prefix_asset_counts` identifies the 616 parent clip IDs
+for the opening and sweep oracles; `media.retained_object_ids` covers those
+parent clips. The two nested-only object IDs are listed separately in
+`measurement.large_shots.child_object_ids`.
 `status.json` reports a completed fixture or sweep failure; an interrupted run
 may remain `running` and is not a pass.
 
@@ -55,3 +59,53 @@ and 15 GiB stop floor apply; generated source media is capped at 1 GiB and the
 builder checks space for an additional copy before importing it. Actual Runtime
 and installation overhead can require more. The default command remains the
 standard run; a pass of either variant does not establish a pass for the other.
+
+Opening and CPU evidence is recorded for the standard fixture. The opening
+clock starts immediately before navigation. The harness derives the IDs that
+start in the first 15 seconds from the standard builder's image/video/audio
+placement rules and checks that each control intersects the visible viewport
+and clipping ancestors. A real Enter selection also records the manifest
+selection target's response. First usable is a no-write affordance milestone:
+in one observation the first-15 clip IDs intersect the viewport, the target
+clip is selected by the real selection probe, and that fixture track's normal
+`Track name` input is enabled and non-read-only. The input shares the editor's
+timeline editability policy, including the save-readiness hold. The harness
+records elapsed time and the 5-second target comparison; the timestamp is an
+observation upper bound. The track-name field normally appears on hover, so
+its enabled state is checked without typing, changing focus or making an extra
+write. This evidence does not prove the whole 15-second range is visible, that
+every clip can be edited, or that any write has been accepted. When an ordinary
+matrix row first passes its existing save assertions and guarded content restore,
+a separate `first_accepted_scenario` record corroborates an accepted edit; its
+CPU and elapsed time remain in that row, outside the cold-open measurement.
+
+The corroborated full-open milestone requires the exact standard clip IDs,
+exact nine track IDs, project/timeline URL and Saved to agree in UI samples for
+at least 800 ms, plus the same exact public-head IDs and head/publication on
+both sides. The result includes an explicit 15-second target comparison and the
+lack of an independently exposed rendered head identity. The UI timestamp is
+an observation upper bound: public-head verification precedes UI polling and
+may take time. If clipping, virtualization or another condition prevents this
+oracle, full open is unavailable rather than inferred. The probe waits up to
+five minutes for UI observations and retains the existing 15-second stability
+wait. Unsupported fixture shapes need their own exact inventory and placement
+contract.
+
+CPU collection requires `SAVE_LOOP_ROOT` (set by the on-demand runner), Linux
+`/proc` and `getconf CLK_TCK`, or macOS `ps`. The Runtime discovery PID, birth
+identity and instance must match the isolated sandbox; a missing or mismatched
+identity stops the run. Runtime CPU is the exact owned Runtime daemon process,
+not a claim about all Runtime descendants. Browser CPU includes the launched
+Chrome root and its observed descendants. Linux uses user plus system ticks;
+macOS uses the cumulative `ps` CPU time, with coarse, conservatively reported
+one-second resolution and second-resolution start identities. Short intervals
+can quantize to zero and same-PID reuse within a second cannot be distinguished
+on macOS. CPU may exceed wall time on multiple cores. Counters are sampled at
+250 ms with monotonic interval duration and UTC timestamps. Processes that start
+and exit between polls, exit before a final sample, or are reparented can lose
+CPU. An observed identity gap or exit makes that interval unqualified and its
+CPU values null. A lack of observed gaps does not eliminate missed short-lived
+processes. No process arguments or environment are inspected. Opening, each
+complete recorder row (including its read-only checks), and guarded cleanup are
+separate CPU intervals; scenario CPU is not gesture-to-Saved CPU. Compare CPU
+and wall time together on the same stack and host.

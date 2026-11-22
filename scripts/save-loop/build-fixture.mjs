@@ -607,6 +607,7 @@ if large_shots:
                          'child_commit_elapsed_ms': sum(row['elapsed_ms'] for row in receipts if 'child' in row['label'].lower())}
 measurement = {
     'large_shots': large_measurement,
+    'accepted_prefix_asset_counts': {'image': image_n, 'video': video_n, 'audio': audio_n},
     'clip_count': len(root_clips(heavy_doc)), 'document_bytes': doc_bytes,
     'document_bytes_source': 'accepted Runtime response data.canonical_document, canonical JSON',
     'registry_asset_count': len(assets),
@@ -827,13 +828,18 @@ async function main() {
     },
     shots,
     media: {synthetic: true, asset_counts: {image: images.length, video: videos.length, audio: audios.length},
-      retained_object_ids: expectedObjectIds, drop_files: dropFiles,
+      retained_object_ids: parentObjectIds, drop_files: dropFiles,
       drop_object_ids: dropObjectIds},
     measurement: {...measuredValues, targets: {clip_count: clipTarget, document_bytes: byteTarget,
       warm_move_median_ratio: ratioTarget}, status: passed ? 'pass' : 'fail'},
     live_proof: {stack_url: baseUrl, generated_at: new Date().toISOString(), second_machine: 'pending'},
   };
-  if (largeShots) Object.assign(manifest.measurement.large_shots, {generated_media_bytes: [...images, ...videos, ...audios].reduce((n, file) => n + fs.statSync(file).size, 0), unique_imported_object_count: expectedObjectIds.length, disk_before_bytes: diskBefore, disk_after_bytes: freeBytes(), build_wall_ms: Date.now() - startedAt});
+  if (largeShots) Object.assign(manifest.measurement.large_shots, {
+    child_object_ids: [objectIdsByKind.video.at(-1), objectIdsByKind.audio.at(-1)],
+    generated_media_bytes: [...images, ...videos, ...audios].reduce((n, file) => n + fs.statSync(file).size, 0),
+    unique_imported_object_count: expectedObjectIds.length, disk_before_bytes: diskBefore,
+    disk_after_bytes: freeBytes(), build_wall_ms: Date.now() - startedAt,
+  });
   const manifestPath = path.join(scratch, `manifest-${projectId}.json`);
   fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, 2) + '\n');
   console.log(`Manifest: ${manifestPath}`);

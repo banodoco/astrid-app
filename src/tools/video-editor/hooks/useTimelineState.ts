@@ -943,6 +943,7 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     coordinator: dragCoordinator.coordinator,
     registerGenerationAsset: assetManagement.registerGenerationAsset,
     prepareGenerationAsset: assetManagement.prepareGenerationAsset,
+    markGenerationAssetInFlight: assetManagement.markGenerationAssetInFlight,
     uploadImageGeneration: assetManagement.uploadImageGeneration,
     uploadVideoGeneration: assetManagement.uploadVideoGeneration,
     handleAssetDrop: assetManagement.handleAssetDrop,

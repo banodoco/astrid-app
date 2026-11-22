@@ -380,7 +380,8 @@ export function createCommitOutbox(options: {
       }
 
       const outbox: ClaimedOutbox = {
-        read: () => access('readonly', detached),
+        // access already returns a private, validated snapshot of this transaction's row.
+        read: () => access('readonly', (record) => record),
         assertActive,
         async reserveCreate(payload, request) {
           const intent = newIntent(payload, { create: true });

@@ -34,6 +34,33 @@ function setup() {
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe('a dropped file whose upload finishes after a save landed', () => {
+  it('marks a registered generation only when it is transferred into a prepared drop', async () => {
+    const dataRef: MutableRefObject<TimelineData | null> = { current: timeline('r0') };
+    const entry = { file: 'https://media.test/frame.png', type: 'image/png' };
+    const registerGenerationAsset = vi.fn(() => {
+      dataRef.current = { ...dataRef.current!, registry: { assets: { 'asset-2': entry } } } as never;
+      return 'asset-2';
+    });
+    const markGenerationAssetInFlight = vi.fn();
+    const dropAsset = vi.fn(() => true);
+    await handleFileDrop({
+      files: [new File(['x'], 'frame.png', { type: 'image/png' })], dataRef, pendingOpsRef: { current: 0 },
+      dropPosition: { time: 2, trackId: 'V1', isNewTrack: false } as never, insertAtTop: false, selectedTrackId: null,
+      applyEdit: vi.fn(), invalidateAssetRegistry: vi.fn(async () => undefined), resolveAssetUrl: vi.fn(async file => file),
+      registerGenerationAsset: registerGenerationAsset as never, prepareGenerationAsset: vi.fn(() => null) as never,
+      markGenerationAssetInFlight,
+      uploadImageGeneration: vi.fn(async () => ({ generationId: 'g', variantId: 'v', variantType: 'image',
+        assetId: 'asset-2', imageUrl: entry.file, metadata: { content_type: 'image/png' } })) as never,
+      uploadVideoGeneration: vi.fn() as never, dropAsset: dropAsset as never,
+    });
+    await settle();
+    expect(registerGenerationAsset).toHaveBeenCalledOnce();
+    expect(markGenerationAssetInFlight).toHaveBeenCalledWith(expect.objectContaining({
+      assetKey: 'asset-2', entry, mediaType: 'image',
+    }));
+    expect(dropAsset).toHaveBeenCalledOnce();
+  });
+
   it('is placed on the current document: the head moving is not a reason to drop it', async () => {
     const s = setup();
     await s.drop();

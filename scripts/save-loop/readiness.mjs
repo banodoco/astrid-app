@@ -1,8 +1,14 @@
 // The standard fixture generator assigns global indices in image/video/audio order.
+export function generatedAssetCounts(count) {
+  if (!Number.isInteger(count) || count < 0) throw new Error('fixture clip count must be a nonnegative integer');
+  const image=Math.round(count*0.25), video=Math.round(count*0.06);
+  return {image,video,audio:count-image-video};
+}
+
 export function expectedFixtureIds(fixture) {
   const counts = fixture.measurement?.accepted_prefix_asset_counts ?? fixture.media?.asset_counts;
   const count = fixture.measurement?.clip_count;
-  if (!Number.isInteger(count) || count <= 0 || !counts || !['image','video','audio'].every(k=>Number.isInteger(counts[k]) && counts[k]>=0)) throw new Error('fixture lacks exact standard clip inventory');
+  if (!Number.isInteger(count) || count < 0 || !counts || !['image','video','audio'].every(k=>Number.isInteger(counts[k]) && counts[k]>=0)) throw new Error('fixture lacks exact standard clip inventory');
   const ids=[];
   for (const kind of ['image','video','audio']) for (let i=0;i<counts[kind] && ids.length<count;i++) ids.push(`fixture-${kind}-${String(ids.length).padStart(4,'0')}`);
   if (ids.length!==count) throw new Error('fixture clip inventory does not cover expected count');
@@ -29,6 +35,14 @@ export function first15FixtureIds(fixture) {
 export function first15WritableCondition({expectedIds, project, timeline, targetClipId, targetTrackId}) {
   const url=new URL(location.href);
   if (url.searchParams.get('project')!==project || url.searchParams.get('timeline')!==timeline) return false;
+  if (expectedIds.length===0) {
+    const labels=[...document.querySelectorAll('[data-track-label][data-track-id]')];
+    const visible=labels.some(e=>{
+      const r=e.getBoundingClientRect();
+      return r.width>0 && r.height>0 && getComputedStyle(e).visibility!=='hidden' && getComputedStyle(e).display!=='none';
+    });
+    return visible ? {track_count:labels.length, clip_count:0, empty_timeline:true} : false;
+  }
   const visible=e=>{
     if (!e) return false;
     let r=e.getBoundingClientRect();

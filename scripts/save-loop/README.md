@@ -1,10 +1,171 @@
 # Synthetic save-loop sweep
 
-On Linux or macOS, use a clean committed App checkout containing the SL-0
-fixture builder and the pinned install manifest and Runtime lock. Install Node
-20 or newer, npm, git, curl, Python 3, ffmpeg with libx264, and Chrome or
-Chromium. The App's `npm ci` installs Playwright; set `SAVE_LOOP_PLAYWRIGHT` to
-an installed Playwright module if needed. Allow at least 25 GiB free on the
+## Plan 77 quick indicator
+
+For one synthetic fixture, use the owned `quick-backup-cycle.sh restore-run`
+entrypoint, which invokes `sweep.mjs --quick` under its shared lock. It writes a JSONL `quick_indicator` row to the
+results file and prints a compact table. The current guarded route measures
+same-track move (or exact V1 track rename for the empty V1/A1 fixture) once
+from a captured pre-open public baseline and again only after the post-open
+read returns in under a second. It verifies Undo against the public snapshot
+between arms. If the read gate or Undo cannot be verified, the quiet arm is
+skipped and reported as unobserved.
+
+Each arm also records two independent durations using the recorder's page
+monotonic clock: gesture end to the first scoped timeline commit POST, and
+that POST to its own response. The raw arm row stores them as
+`quick_save_timing.gesture_to_post_ms` and `quick_save_timing.post_to_response_ms`;
+the `quick_indicator` JSON summary and table also print the same fields per
+arm. A missing POST, a response not
+confirmed, or a request that precedes the measured gesture end has a null
+duration and an explicit reason. Setup/verification failures stay unobserved.
+An observed save refusal is broken; a genuinely elapsed 60-second wait with
+no Saved is broken as well.
+
+```sh
+SAVE_LOOP_CHROME=/absolute/path/to/chrome \
+scripts/save-loop/quick-backup-cycle.sh restore-run empty \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty/versions.json \
+  /absolute/tooling-checkout.env/quick-indicator/stack /absolute/tooling-checkout.env/quick-indicator/stack/source-manifest.json \
+  /absolute/clean/product-app /absolute/tooling-checkout.env/quick-indicator/stack/results-empty \
+  /absolute/tooling-checkout.env/quick-indicator/stack/startup-empty.json
+```
+
+The verified restore entry creates a new realm and profile for each invocation.
+Use the separately reviewed fixture preparation workflow to supply the exact
+manifest and source manifest for each size. Do not reuse result paths.
+
+Usable is works through 5 s, slow through 15 s, then broken. Save is works
+through 2 s, slow through 10 s, then broken; a refusal is broken and no Saved
+within 60 s is broken. The marker-to-observed-read time is an upper bound that includes unprobed
+scheduling time, not proof of continuous service blockage. Its light is works
+through 2 s, slow through 30 s,
+then broken. Missing evidence is `unobserved`, never a pass. Read the rough
+lights rather than decimals: this runs on a shared 4-CPU Linux dev stack, one
+stack at a time, and is an indicator rather than a product qualification.
+
+The result categories help distinguish a general problem (red even when
+empty), a size/history problem (small green and large red), a save-path problem
+(open green and save red), and Runtime startup work (first save red, later
+save green). A red large v30 row alone does not show whether the seed history
+or clip count caused the result; its label is `heavy seed history, worst case`.
+
+### Four-row offline backup/restore workflow
+
+`quick-backup-cycle.sh` operates on a prepared local stack and does not install
+or change product pins. It requires the exact App/Agent/Runtime tuple from the
+Round 5 receipts, a matching `.sl1-stack-owned` marker, canonical new output
+paths below the sibling `<tooling-checkout>.env/quick-indicator` directory, 25 GiB
+free, and an exclusive lock. It refuses a live editor. Runtime backup and
+restore commands perform their built-in verification. Each measured run uses
+a new restore target, adopted data root, and results directory; the active
+workspace is not replaced. The fixture manifest and source version tuple are
+copied into each bundle. Each restore-run requires an explicit expected
+versions JSON; it must match the owned stack's App/Agent/Runtime tuple and the
+clean product App checkout's exact commit. This supports a separately prepared
+candidate tuple without inheriting the baseline pins.
+
+Prepare the baseline stack using the separately reviewed fixture preparation
+workflow. With the owned stack running and its local editor URL, use this builder
+from the tooling checkout for each size, with a fresh scratch directory:
+
+```sh
+SAVE_LOOP_ROOT=/absolute/tooling-checkout.env/quick-indicator/stack \
+SAVE_LOOP_BASE_URL=http://127.0.0.1:EDITOR_PORT \
+SAVE_LOOP_PRODUCT_APP=/absolute/clean/product-app \
+SAVE_LOOP_VERSIONS=/absolute/tooling-checkout.env/quick-indicator/versions.json \
+SAVE_LOOP_SCRATCH=/absolute/tooling-checkout.env/quick-indicator/fixture-empty \
+SAVE_LOOP_QUICK_FIXTURE=1 SAVE_LOOP_CLIPS=0 node scripts/save-loop/build-fixture.mjs
+```
+
+Use sizes 0, 10 and 100 and a distinct scratch for each. The versions file
+must match the clean product App and owned stack's exact tuple. This creates
+synthetic 0, 10 and 100 clip manifests on the owned stack. The empty manifest
+has exactly V1/A1 and no clips. Save each manifest and stop its stack through
+the owner before making offline backups:
+
+```sh
+scripts/save-loop/quick-backup-cycle.sh backup empty \
+  /absolute/tooling-checkout.env/quick-indicator/stack \
+  /absolute/tooling-checkout.env/quick-indicator/stack/data/realm \
+  /absolute/tooling-checkout.env/quick-indicator/support/empty \
+  /absolute/tooling-checkout.env/quick-indicator/fixture-empty/manifest-PROJECT.json \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty
+```
+
+Repeat with `10` and `100` and distinct realm, manifest and bundle paths.
+For the heavy row, pass the exact approved restored source
+`/home/user/codex-run/run/evidence/plan-77/growth-profile/v30-owned-synthetic-restored-realm`
+as the realm argument, and a fresh support-root path under the dedicated
+`<tooling-checkout>.env/quick-indicator/support` parent. Keep that marker-owned
+support directory at the same path across stack cleanup and both restores;
+Runtime manages its authentication material. The
+command verifies its receipt and database SHA-256, refuses WAL/SHM sidecars,
+copies it into marker-owned staging, then uses the installed Runtime's normal
+backup command. It never reads the missing old authentication key or changes
+the source. Runtime's normal restore verifies each per-run copy. Supply the
+verified v30 fixture manifest.
+
+For each bundle, call `restore-run` with a new owned stack root and result
+paths. The Runtime restore destination and adopted data root are generated
+under that stack. Ports must be unused and owned by this run; Chrome must be
+provided through `SAVE_LOOP_CHROME`.
+
+```sh
+SAVE_LOOP_CHROME=/absolute/path/to/chrome \
+scripts/save-loop/quick-backup-cycle.sh restore-run empty \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty \
+  /absolute/tooling-checkout.env/quick-indicator/bundles/empty/versions.json \
+  /absolute/tooling-checkout.env/quick-indicator/new-stack \
+  /absolute/tooling-checkout.env/quick-indicator/new-stack/source-manifest.json \
+  /home/user/codex-run/wt/astrid-app-p77-quick-baseline-product \
+  /absolute/tooling-checkout.env/quick-indicator/new-stack/results-empty /absolute/tooling-checkout.env/quick-indicator/new-stack/startup-empty.json
+```
+
+The restore workflow takes ports from the owned `stack-info.txt`; do not supply
+ports or a project UUID as the realm ID. It reads the verified realm ID from
+the backup receipt, uses the offline sibling `astrid-runtime-protocol` for
+backup/restore, and uses the installed `astrid-runtime` only for lifecycle and
+workspace adoption. The quick sweep also requires the exact clean product App
+checkout, active editor PID/data root, matching Runtime instance and all three
+owned ports. It disables hosted App and Runtime origins. A new result directory
+and startup file are required for every run.
+
+Run once for each size with distinct bundle, stack and outputs. For the heavy
+row only, set `SAVE_LOOP_QUICK_WARM_RELOAD=1` to record an additional same-
+profile reload after the immediate and quiet arms have completed and guarded
+Undo has verified a clean public head. It does not delay those arms. The startup
+probe runs concurrently with the quick sweep from the owned `astrid-runtime
+up` process launch. It checks exact project, timeline, head revision and
+publication fields through the local App Runtime discovery proxy; that proxy
+injects the current Runtime bearer token from its owned discovery record. The
+startup duration is a separate `runtime_startup` JSONL record, not the UI
+`post_open_blocked_s` value. If the qualifying read arrives before UI
+navigation, the aggregate marks the blocked value censored because readiness
+may have warmed the cache. A failed or missing metadata answer has a null
+duration and an explicit outcome; it is never a pass.
+
+Print a combined, minute-readable four-row summary from the four JSONL files:
+
+```sh
+node scripts/save-loop/aggregate-quick.mjs \
+  /absolute/tooling-checkout.env/quick-indicator/new-stack/results-empty/results.jsonl \
+  /absolute/tooling-checkout.env/quick-indicator/new-stack/results-10/results.jsonl \
+  /absolute/tooling-checkout.env/quick-indicator/new-stack/results-100/results.jsonl \
+  /absolute/tooling-checkout.env/quick-indicator/new-stack/results-large/results.jsonl
+```
+
+This workflow has only harness/static proof in this change; it has not been
+run against a Runtime stack or browser. Product/runtime execution remains
+unmeasured until an explicitly scheduled local run.
+
+Use a clean committed App checkout on Linux containing the fixture builder and
+the pinned install manifest and Runtime lock. The tooling has only been
+qualified on Linux; Darwin code paths are not a macOS qualification. Install
+Node 20.19.0 or newer, npm, git, curl, Python 3, ffmpeg with libx264, and Chrome
+or Chromium. The App's `npm ci` installs Playwright; set `SAVE_LOOP_PLAYWRIGHT`
+to an installed Playwright module if needed. Allow at least 25 GiB free on the
 run filesystem, plus space for App dependencies. Internet access is needed for
 installation from the committed pins.
 

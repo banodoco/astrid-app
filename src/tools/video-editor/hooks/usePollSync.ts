@@ -234,6 +234,19 @@ export function usePollSync({
       if (!polledData.head) return 'unknown head';
       const currentHead = headRevisionRef?.current;
       if (currentHead && (currentHead.projectId !== polledData.head.projectId || currentHead.timelineId !== polledData.head.timelineId)) return 'different scope';
+      const mountedHead = getDataRef().current?.head;
+      if (
+        mountedHead?.headRevisionId
+        && mountedHead.headPublicationId
+        && mountedHead.projectId === polledData.head.projectId
+        && mountedHead.timelineId === polledData.head.timelineId
+        && mountedHead.headRevisionId === polledData.head.headRevisionId
+        && mountedHead.headPublicationId === polledData.head.headPublicationId
+      ) {
+        // A refetch can fill display defaults for the same immutable publication.
+        // Keep the mounted snapshot aligned with the save handoff's source.
+        return 'own echo';
+      }
       // A same-payload remote publication still changes the CAS base. Local
       // counters have no ordering meaning across provider instances.
       if (!currentHead || currentHead.headRevisionId !== polledData.head.headRevisionId) {

@@ -1405,10 +1405,11 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
       { id: imageClipId, at: 0, track: 'V1', clipType: 'media', asset: imageKey, from: 0, to: 5, speed: 1 },
       { id: videoClipId, at: 5, track: 'V1', clipType: 'media', asset: videoKey, from: 0, to: 5, speed: 1 },
     ];
+    // REVIEW: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; object IDs remain tagged.
     const registry = {
       assets: {
-        [imageKey]: { file: 'journey-image.png', type: 'image/png', media_id: image.objectId, content_sha256: image.digest },
-        [videoKey]: { file: `journey-video.${video.mediaType === 'video/webm' ? 'webm' : 'mp4'}`, type: video.mediaType, duration: 12, media_id: video.objectId, content_sha256: video.digest },
+        [imageKey]: { file: 'journey-image.png', type: 'image/png', media_id: image.objectId, content_sha256: image.digest.replace(/^sha256:/, '') },
+        [videoKey]: { file: `journey-video.${video.mediaType === 'video/webm' ? 'webm' : 'mp4'}`, type: video.mediaType, duration: 12, media_id: video.objectId, content_sha256: video.digest.replace(/^sha256:/, '') },
       },
     };
     const timelineId = randomUUID();
@@ -1535,7 +1536,8 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     const patternObject = await ingest(pattern, 'video/webm', 'f2-render-pattern.webm');
     const placeholder = await ingest(grey, 'video/webm', 'f2-render-placeholder.webm');
     const toneObject = await ingest(tone, 'audio/webm', 'f2-render-tone.webm');
-    const entry = (object: SeededObject, duration: number) => ({ ...this.registryLocator(object), media_id: object.objectId, content_sha256: object.digest, type: object.mediaType, duration });
+    // REVIEW: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; object IDs remain tagged.
+    const entry = (object: SeededObject, duration: number) => ({ ...this.registryLocator(object), media_id: object.objectId, content_sha256: object.digest.replace(/^sha256:/, ''), type: object.mediaType, duration });
 
     const ids = { shotId: 'f2-render-shot', occurrenceId: 'f2-render-occurrence', slotClipId: 'f2-render-slot', markerAssetKey: 'f2-render-marker', placeholderAssetKey: 'f2-render-placeholder' };
     const timelineId = randomUUID();

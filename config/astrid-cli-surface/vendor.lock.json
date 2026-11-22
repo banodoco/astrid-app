@@ -31,6 +31,6 @@
   },
   "manifest": "artifacts.json",
   "producer": "astrid-agent",
-  "producer_version": "sha256:013f43ab4d7ed34f58f03a2be445f8c1374a620cb24c97c4400977e552a94efc",
-  "source_commit": "f6e629b31e0f7fe74c0cb809061c10b74a79a765"
+  "producer_version": "sha256:cc4a6a1e91a7d616ec8f3d32f08cc0da5682db3c676f4d6bb4fe85cce28a9ff5",
+  "source_commit": "caafac7841496c7baed61f309d0ba55d55ca9af7"
 }

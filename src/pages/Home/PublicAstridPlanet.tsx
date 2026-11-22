@@ -1,11 +1,15 @@
 import { useEffect, useRef } from 'react';
+import planetStill from './planet/planet-still.png';
 
 /**
  * Owns the planet renderer's canvas and keeps the engine outside the route's
  * initial module graph. A still presentation can keep the same stage without
  * requesting Three or the engine chunk.
  */
-export function PublicAstridPlanet({ live, fixedPose = false }: { live: boolean; fixedPose?: boolean }) {
+type EngineModule = typeof import('./planet/planetEngine');
+const loadPlanetEngine = () => import('./planet/planetEngine');
+
+export function PublicAstridPlanet({ live, fixedPose = false, loadEngine = loadPlanetEngine }: { live: boolean; fixedPose?: boolean; loadEngine?: () => Promise<EngineModule> }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const eligible = live;
 
@@ -17,7 +21,7 @@ export function PublicAstridPlanet({ live, fixedPose = false }: { live: boolean;
     let active = true;
     let dispose: (() => void) | undefined;
 
-    void import('./planet/planetEngine').then(({ initPlanetEngine }) => {
+    void loadEngine().then(({ initPlanetEngine }) => {
       // StrictMode and route visibility can clean up while the chunk is loading.
       if (!active) return;
       const engine = initPlanetEngine(canvas, { onReady: () => {} }, { fixedPose });
@@ -32,11 +36,11 @@ export function PublicAstridPlanet({ live, fixedPose = false }: { live: boolean;
       dispose?.();
       dispose = undefined;
     };
-  }, [eligible, fixedPose]);
+  }, [eligible, fixedPose, loadEngine]);
 
   return (
     <div className="astrid-vision-juggler astrid-vision-planet" aria-hidden="true" data-live={eligible || undefined}>
-      {eligible && <canvas ref={canvasRef} className="astrid-vision-planet-canvas" />}
+      {eligible ? <canvas ref={canvasRef} className="astrid-vision-planet-canvas" /> : <img className="astrid-vision-planet-canvas" src={planetStill} alt="" />}
     </div>
   );
 }

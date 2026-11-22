@@ -1,6 +1,7 @@
 import type { ComponentType } from 'react';
 import { runtimeApiBase, runtimeOrigin } from '@/integrations/runtime/connection';
 import { assertHostSharedModules, fetchVerifiedBytes, importRuntimeModule, isRecord as record, SHA256, SharedModulesError } from './runtimeModuleImport';
+import { computeSha256 } from './extensionIntegrity';
 import type { AdmittedDescriptor, AdmittedElement, ProjectElementAuthoring } from './admitted-elements';
 import type { AstridElementComponentProps } from './astrid-element-host';
 
@@ -53,6 +54,20 @@ const runtimeOriginPath = (projectId: string, digest: string) => (
 );
 
 export const elementKey = (ref: ElementRef) => JSON.stringify([ref.packId, ref.kind, ref.id, ref.revision]);
+
+/** Add an exact-ref selector only after confirming the catalog supplied a local, bare digest asset URL. */
+async function scopedElementAssetUrl(entry: ProjectElementEntry): Promise<string> {
+  const configuredOrigin = runtimeOrigin();
+  const url = new URL(`${configuredOrigin}${entry.url}`, window.location.origin);
+  const expectedOrigin = configuredOrigin || window.location.origin;
+  if (url.origin !== new URL(expectedOrigin).origin || url.search || url.hash
+    || !/^\/api\/runtime\/packs\/project-elements\/[^/]+\/[a-f0-9]{64}\.js$/.test(url.pathname)
+    || !url.pathname.endsWith(`/${entry.digest}.js`)) {
+    throw new Error('Runtime returned an invalid project element asset URL.');
+  }
+  const refDigest = await computeSha256(new TextEncoder().encode(elementKey(entry.ref)));
+  return `${configuredOrigin ? url.origin : ''}${url.pathname}?ref=${refDigest}`;
+}
 
 /**
  * Validates the Runtime's list shape for the project the editor asked about. The list must name that same project;
@@ -120,7 +135,8 @@ export async function importProjectElement(
     if (error instanceof SharedModulesError) throw new Error(`${error.message} Rebuild the editor or reload it.`);
     throw error;
   }
-  const bytes = await fetchVerifiedBytes(`${runtimeOrigin()}${entry.url}`, entry.digest, signal, `Project element ${entry.ref.id}`, async response => {
+  const assetUrl = await scopedElementAssetUrl(entry);
+  const bytes = await fetchVerifiedBytes(assetUrl, entry.digest, signal, `Project element ${entry.ref.id}`, async response => {
     if (response.status !== 409) return;
     let body: unknown;
     try { body = await response.json(); } catch { return; }

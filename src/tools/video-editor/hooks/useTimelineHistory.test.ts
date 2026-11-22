@@ -236,6 +236,23 @@ afterEach(() => {
 });
 
 describe('useTimelineHistory', () => {
+  it.each(['undo', 'redo'] as const)('requests unloaded durable history on the first ordinary %s', async action => {
+    let loaded = false;
+    const remoteHistory = {
+      remoteHistoryAvailable: () => loaded,
+      canRequestHistory: () => !loaded,
+      refreshHistory: vi.fn(async () => { loaded = true; }),
+      canUndo: () => loaded,
+      canRedo: () => loaded,
+      undo: vi.fn(async () => {}), redo: vi.fn(async () => {}),
+    };
+    const harness = setup({ remoteHistory });
+    expect(harness.result.current[action === 'undo' ? 'canUndo' : 'canRedo']).toBe(true);
+    await act(async () => { harness.result.current[action](); await Promise.resolve(); });
+    expect(remoteHistory.refreshHistory).toHaveBeenCalledTimes(1);
+    expect(remoteHistory[action]).toHaveBeenCalledTimes(1);
+  });
+
   it('does not expose unloaded or late history to restore after the draft changes', async () => {
     let release!: (entries: never[]) => void;
     const listHistory = vi.fn(() => new Promise<never[]>(resolve => { release = resolve; }));

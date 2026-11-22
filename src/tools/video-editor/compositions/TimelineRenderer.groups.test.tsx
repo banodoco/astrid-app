@@ -87,7 +87,14 @@ describe('TimelineRenderer shot isolation', () => {
     expect(within(second).getByTestId('second-fx')).toContainElement(screen.getByTestId('second-plate'));
     expect(second).not.toContainElement(screen.getByTestId('below-clip'));
     expect(second).not.toContainElement(first);
-    expect(screen.getByTestId('first-blend').parentElement).toHaveStyle({ mixBlendMode: 'screen', opacity: '0.4', transform: 'scale(1.2)' });
+    const blendLayer = screen.getByTestId('first-blend').parentElement!;
+    expect(blendLayer).toHaveStyle({ mixBlendMode: 'screen', opacity: '0.4' });
+    // Expanding a 1920x1080 canvas by 20% around its center shifts its top-left by (-192, -108).
+    const centerCompensation = blendLayer.style.transform.match(/^translate\((-?[\d.eE+-]+)px, (-?[\d.eE+-]+)px\) scale\(([\d.eE+-]+)\)$/);
+    expect(centerCompensation).not.toBeNull();
+    expect(Number(centerCompensation![1])).toBeCloseTo(-192, 10);
+    expect(Number(centerCompensation![2])).toBeCloseTo(-108, 10);
+    expect(Number(centerCompensation![3])).toBe(1.2);
     const markers = Array.from(container.querySelectorAll('[data-testid]')).map((element) => element.getAttribute('data-testid'));
     expect(markers).toEqual(['below-clip', 'second-fx', 'second-plate', 'same-clip', 'first-fx', 'first-plate', 'first-blend', 'above-clip', 'audio']);
     expect(screen.getByTestId('audio').closest('[data-shot-group]')).toBeNull();

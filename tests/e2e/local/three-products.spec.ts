@@ -561,13 +561,14 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await openSeededTimeline(page, harness);
   const recovered = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
   await expect(recovered).toBeVisible(CEILING);
-  await expect(recovered.getByRole('button', { name: 'Save them' })).toBeEnabled();
+  // REVIEW (#334, #345): R13 showed 'Save them' for this refused save; R14 uses 'Try again'.
+  await expect(recovered.getByRole('button', { name: 'Try again' })).toBeEnabled();
   expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   const postsBeforeRecoveryRetry = posts.length;
-  await recovered.getByRole('button', { name: 'Save them' }).click();
+  await recovered.getByRole('button', { name: 'Try again' }).click();
   await expect(conflict).toBeVisible(CEILING);
   await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(kept);
@@ -1471,6 +1472,7 @@ async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHa
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed);
+  await expect(page.locator('[data-save-bar]')).toHaveCount(0, CEILING);
   const before = await history(harness, seed);
   await dragTimelineClip(page, seed.appClipId, seed.transitionClipId, 0, 5, THREE_PRODUCTS_REFERENCE_AT, () => {
     expect(wire.attempts, 'pointer movement previews; the actual drop commits').toBe(0);
@@ -1775,6 +1777,8 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   const reset = await resetResponse;
   expect(reset.status(), await reset.text()).toBe(200);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
+  // REVIEW: the outbox settles before the editor's asynchronous ACK cleanup clears the recovery slot.
+  await expect.poll(() => timelineDraft(page, seed3.timelineId), { ...CEILING, message: 'the reset must clear its mounted recovery draft before reopening' }).toBeNull();
   const { wire, before, a, owner } = await prepareAfterAckLossMountedDocuments(page, harness, seed3, async (acceptedA, commandWire) => {
     c = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(acceptedA),
       { kind: 'track', id: 'f2-gate5-independent-C' }, 'f2-gate5-independent-C');
@@ -2778,12 +2782,22 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
   await expect(page.getByText('conflict: an intervening publication wrote a guarded address')).toBeVisible();
   await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
+  // REVIEW (#345): R13 showed the undo refusal inline only. R14 also opens the conflict dialog.
+  const conflict = page.getByRole('alertdialog', { name: CONFLICT_TITLE });
+  const useLatest = conflict.getByRole('button', { name: 'Use latest version' });
+  await expect(conflict).toBeVisible();
+  await expect(useLatest).toBeVisible();
+  await expect(conflict.getByRole('button', { name: 'Keep my changes' })).toBeVisible();
+  await useLatest.click();
+  await expect(conflict).toHaveCount(0, CEILING);
   await expect(firstTrackName(page)).toHaveValue(trackLabel);
+  await expect(page.locator('[data-track-id="f2-mixed-independent"]')).toBeVisible();
   await expectOpaqueDataKept(harness, seed3);
   expect(wire.legacy).toEqual([]);
   journey.facts = { ...journey.facts, acceptedMove: pinOf(move), acceptedRename: pinOf(rename),
     retainedOwner: kept.ownerId, retryKey: wire.posts[0].key, refusedUndo: { status: 409, reason: 'intervening_write' }, renderer: 'not started' };
   await sniff.expectClean(page, seed3.timelineId);
+  expect(wire.observed, 'Use latest version sends no commit POST').toHaveLength(observedBeforeUndo + 1);
 });
 
 // Separate worker seed: the original seven cases retain their ordinary fixture and bodies.
@@ -3109,7 +3123,8 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect(reloaded.pending).toEqual(retained.pending);
   expect(reloaded.intents).toEqual(retained.intents);
   // The single native owner is recovered automatically. Its rejected draft remains durable;
-  // rollback shows the Agent's canonical partial clear, and Save them reopens the refusal.
+  // rollback shows the Agent's canonical partial clear.
+  // REVIEW (#334, #345): R13 showed 'Save them' for this refused save. R14 reopens it with 'Try again'.
   const recovery = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
   await expect(recovery).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
@@ -3118,7 +3133,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
     await page.getByRole('tab', { name: 'Effects', exact: true }).click();
     await expect(transitionSelect(page)).toContainText(id === seed3.appClipId ? 'None' : /cross[\s-]?fade/i);
   }
-  await recovery.getByRole('button', { name: 'Save them' }).click();
+  await recovery.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByRole('alertdialog', { name: CONFLICT_TITLE })).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
   const recoveredConflict = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;
@@ -3777,8 +3792,10 @@ test('empty bootstrap: creating the first timeline in a fresh project then dropp
   expect(tracks).toEqual([
     { id: 'V1', kind: 'visual', label: 'V1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
     { id: 'A1', kind: 'audio', label: 'A1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
-    { id: 'V2', kind: 'visual', label: 'V2', app: { scaleAppliesToPositionedClips: true } },
+    { id: 'V2', kind: 'visual', label: 'V2', app: { scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 } },
   ]);
+  expect(tracks[0]).not.toHaveProperty('app.clipPlacementVersion');
+  expect(tracks[1]).not.toHaveProperty('app.clipPlacementVersion');
 
   const assets = payload.registry?.assets ?? payload.config?.registry?.assets;
   const asset = assets?.[clip.asset];

@@ -535,6 +535,13 @@ export async function createLocalSaveSession(options: Options) {
           throw new Error('This save was permanently rejected. Copy my change out, or explicitly discard and reload.');
         }
         if (record.pending?.outcome?.kind === 'rejected') {
+          const error = record.pending.outcome.error;
+          const details = error && typeof error === 'object' && !Array.isArray(error) ? error.details : undefined;
+          // A value conflict already identifies an incompatible original operand. Keep its rejected request and
+          // canonical display intact; rebasing that same operand would turn it into a permanent validation refusal.
+          if (error && typeof error === 'object' && !Array.isArray(error) && error.kind === 'conflict'
+            && details && typeof details === 'object' && !Array.isArray(details)
+            && details.status === 'conflict' && details.reason === 'value_conflict') return;
           await rebaseOntoLatest();
           publish('dirty');
         }

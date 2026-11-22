@@ -22,7 +22,7 @@ export async function postOpenProbe({page, fixture, startup, marker, record}) {
           let body;
           try { body=await response.json(); }
           catch (error) { if (error instanceof SyntaxError) return {status:response.status, invalid:true}; throw error; }
-          const data=body?.data;
+          const data=body?.data ?? body;
           const valid=data && typeof data==='object' && !Array.isArray(data) && data.project_id===project && data.timeline_id===timeline && typeof data.head_revision_id==='string' && data.head_revision_id.length>0 && typeof data.head_publication_id==='string' && data.head_publication_id.length>0;
           return {status:response.status, valid:Boolean(valid)};
         } catch (error) {

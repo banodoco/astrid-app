@@ -1,0 +1,42 @@
+import { useEffect, useRef } from 'react';
+
+/**
+ * Owns the planet renderer's canvas and keeps the engine outside the route's
+ * initial module graph. A still presentation can keep the same stage without
+ * requesting Three or the engine chunk.
+ */
+export function PublicAstridPlanet({ live, fixedPose = false }: { live: boolean; fixedPose?: boolean }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const eligible = live;
+
+  useEffect(() => {
+    if (!eligible) return;
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    let active = true;
+    let dispose: (() => void) | undefined;
+
+    void import('./planet/planetEngine').then(({ initPlanetEngine }) => {
+      // StrictMode and route visibility can clean up while the chunk is loading.
+      if (!active) return;
+      const engine = initPlanetEngine(canvas, { onReady: () => {} }, { fixedPose });
+      if (engine) dispose = () => engine.dispose();
+    }).catch((error: unknown) => {
+      // Keep the page usable if WebGL or the lazy chunk is unavailable.
+      if (active) console.error('Unable to start the Astrid planet.', error);
+    });
+
+    return () => {
+      active = false;
+      dispose?.();
+      dispose = undefined;
+    };
+  }, [eligible, fixedPose]);
+
+  return (
+    <div className="astrid-vision-juggler astrid-vision-planet" aria-hidden="true" data-live={eligible || undefined}>
+      {eligible && <canvas ref={canvasRef} className="astrid-vision-planet-canvas" />}
+    </div>
+  );
+}

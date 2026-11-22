@@ -70,6 +70,11 @@
   width: calc(65 * var(--px));
   height: calc(100 * var(--px));
 }
+.astrid-vision-planet-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
 .astrid-vision-juggler img { position: absolute; image-rendering: pixelated; }
 .astrid-vision-juggler-mink {
   position: absolute;
@@ -412,8 +417,8 @@
   .astrid-vision-bar { padding-block: 16px; }
   .astrid-vision-hero-copy > .astrid-vision-eyebrow { margin-bottom: 14px; }
   .astrid-vision-lead { margin-top: 16px; }
-  /* On a phone the headline leads; the minks further down carry the character. */
-  .astrid-vision-juggler { display: none; }
+  /* Keep the planet below the copy on phones so the existing title geometry stays fixed. */
+  .astrid-vision-planet { --px: clamp(2px, .75vw, 3px); margin-top: 8px; }
   .astrid-vision-tinkerer { --px: 2px; }
 }
 @media (max-width: 560px) {

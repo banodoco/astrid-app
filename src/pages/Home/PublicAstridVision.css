@@ -2238,7 +2238,7 @@
   position: absolute;
   z-index: -1;
   inset: -110px -210px;
-  background: radial-gradient(ellipse 95% 95% at 50% 50%, color-mix(in srgb, var(--astrid-paper) 96%, transparent) 0%, color-mix(in srgb, var(--astrid-paper) 90%, transparent) 72%, transparent 100%);
+  background: radial-gradient(ellipse 47% 47% at 50% 50%, color-mix(in srgb, var(--astrid-paper) 96%, transparent) 0%, color-mix(in srgb, var(--astrid-paper) 90%, transparent) 72%, transparent 100%);
   pointer-events: none;
 }
 .astrid-vision-hero-copy > .astrid-vision-hero-text { animation: none; }

@@ -412,7 +412,7 @@ export async function createLocalSaveSession(options: Options) {
   if (owners.length) publish('recovery');
   else await claim();
 
-  function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
+  function assertCanAppend() {
     assertOpen();
     // Stopgap: the save bar declines the edit and shows its own headline; these throws are assertions only.
     // Plan 18 CC-5 deletes them, so a new edit queues behind the retained ones.
@@ -420,10 +420,15 @@ export async function createLocalSaveSession(options: Options) {
     // The visible closure is now canonical, while the retained suffix still
     // describes its original local chain. Do not author a new edit between them.
     if (replaying) throw new LocalSaveDeclined('Wait for retained dependent saves to finish revalidation before editing again');
-    const save = toOutboxJson({ ...input, kind: 'local-save', displayBasis,
-      ...(documentIntent ? { documentIntent } : {}) }) as unknown as StoredSave;
+  }
+
+  function enqueue(payload: OutboxJson, checkedDocument?: OutboxJson): Promise<void> {
+    const save = payload as unknown as StoredSave;
     if (!save.label.trim() || (save.commands && !save.commands.length)) throw new Error('Local save requires a label and nonempty commands');
-    if (!same(save.before, document)) throw new Error('Local save must follow the actual authored local document');
+    // The document is private and replaced on every edit. Recheck if capture re-entered the session.
+    if ((checkedDocument === undefined || document !== checkedDocument) && !same(save.before, document)) {
+      throw new Error('Local save must follow the actual authored local document');
+    }
     document = clone(save.after);
     generation++;
     publish('dirty');
@@ -433,11 +438,12 @@ export async function createLocalSaveSession(options: Options) {
       const predecessor = record.intents[record.intents.length - 1]?.id ?? record.accepted?.intentId;
       const authoredBasis = predecessor ? { after: predecessor } : { head: basis.head };
       if (save.documentIntent) {
-        save.documentIntent = toOutboxJson({ ...save.documentIntent as Record<string, OutboxJson>, basis: authoredBasis });
+        save.documentIntent = { ...save.documentIntent as Record<string, OutboxJson>, basis: toOutboxJson(authoredBasis) };
       }
+      // The outbox snapshots the payload before opening its write transaction.
       // No read-back here: it re-transfers the whole record (every queued document) once per edit, and pump reads
       // the record itself before anything is sent.
-      await box!.append(toOutboxJson(save), authoredBasis);
+      await box!.append(payload, authoredBasis);
     });
     writes = write.catch((error) => {
       writeError = error;
@@ -457,12 +463,22 @@ export async function createLocalSaveSession(options: Options) {
       // Validate before changing the local chain. The durable predecessor is
       // filled by append's serialized write, never by a refreshed head read.
       const intent = documentPatchIntent({ ...input, basis: { head: displayBasis.head } });
-      if (!same(toOutboxJson(input.before), document)) throw new Error('Local save must follow the actual authored local document');
+      const before = toOutboxJson(input.before);
+      const checkedDocument = document;
+      if (!same(before, checkedDocument)) throw new Error('Local save must follow the actual authored local document');
       if (!intent) return Promise.resolve();
-      return append({ before: toOutboxJson(input.before), after: toOutboxJson(input.after), label: input.label }, intent);
+      const after = toOutboxJson(input.after);
+      const label = input.label;
+      assertCanAppend();
+      const fields = toOutboxJson({ label, kind: 'local-save', displayBasis }) as Record<string, OutboxJson>;
+      // The document snapshots and generated intent already belong to this capture.
+      return enqueue({ before, after, ...fields, documentIntent: intent }, checkedDocument);
     },
     /** Capture synchronously before another local edit; persist every intent before submitting. */
-    append: (input: LocalSave) => append(input),
+    append(input: LocalSave) {
+      assertCanAppend();
+      return enqueue(toOutboxJson({ ...input, kind: 'local-save', displayBasis }));
+    },
     async flush() {
       assertOpen();
       await pump();

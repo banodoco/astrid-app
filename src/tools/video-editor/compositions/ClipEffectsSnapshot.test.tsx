@@ -148,6 +148,8 @@ function visualClip(effectType: string): ResolvedTimelineClip {
       id: 'asset-1',
       type: 'image/png',
       src: 'https://example.test/image.png',
+      // The source dimensions are already known for this effect test.
+      resolution: '640x360',
     },
     continuous: {
       type: effectType,

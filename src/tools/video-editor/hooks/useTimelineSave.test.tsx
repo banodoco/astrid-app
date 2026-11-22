@@ -36,11 +36,6 @@ import { compileFunction } from 'node:vm';
 import ts from 'typescript';
 import p2TourSource from '../../../../tests/e2e/local/three-products.p2-tour.spec.ts?raw';
 
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
-
 vi.stubGlobal('indexedDB', createFakeIndexedDB());
 vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({
   invalidateReferencedTimelineCache: vi.fn(),
@@ -320,6 +315,49 @@ async function setupRefusedSave(status: number) {
 }
 
 describe('useTimelineSave — recovered draft durability', () => {
+  it('clears a bootstrap error to loading while a restarted local owner becomes ready', async () => {
+    const lockDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+    const head = { projectId: scope.projectId, timelineId: scope.timelineId, headRevisionId: 'r0', headPublicationId: 'p0' };
+    const config = createDefaultTimelineConfig();
+    const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
+      { timelineId: scope.timelineId }).data.canonical_document;
+    document.parent_revision.payload = { config, clips: [], registry: { assets: {} }, occurrences: [] };
+    document.parent_revision.content_digest = fixtureDigest(document.parent_revision.payload);
+    const initial = { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document };
+    const data = await buildTimelineData(config, { assets: {} }, undefined, 1, undefined, head);
+    let finishRetry!: (value: typeof initial) => void;
+    const loadBasis = vi.fn()
+      .mockRejectedValueOnce(new Error('Initial history unavailable'))
+      .mockImplementationOnce(() => new Promise<typeof initial>(resolve => { finishRetry = resolve; }));
+    const harness = setup(async () => { throw new Error('No legacy save'); }, undefined, { data, loadBasis,
+      capabilities: { getRecoverableIdentity: async () => ({ realmId: scope.realmId, actorId: scope.actorId }), commitTimeline: vi.fn() } });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.saveStatus).toBe('error'));
+      expect(harness.hook.result.current.localSaveState).toMatchObject({ status: 'error' });
+      expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'refused', action: 'restart' });
+
+      let retry!: Promise<void>;
+      act(() => { retry = harness.hook.result.current.tryAgain(); });
+      await vi.waitFor(() => expect(loadBasis).toHaveBeenCalledTimes(2));
+      expect(harness.hook.result.current.saveStatus).toBe('loading');
+      expect(harness.hook.result.current.localSaveState).toBeNull();
+      expect(harness.hook.result.current.saveBar).toBeNull();
+
+      await act(async () => { finishRetry(initial); await retry; });
+      await vi.waitFor(() => expect(harness.hook.result.current.timelineEditingReady).toBe(true));
+      expect(harness.hook.result.current.saveStatus).toBe('saved');
+      expect(harness.hook.result.current.saveBar).toBeNull();
+    } finally {
+      harness.hook.unmount();
+      if (lockDescriptor) Object.defineProperty(navigator, 'locks', lockDescriptor);
+      else Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     resetFakeIndexedDB();
@@ -1127,8 +1165,9 @@ describe('useTimelineSave — recovered draft durability', () => {
       await act(async () => { await vi.advanceTimersByTimeAsync(500); });
       await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
       expect(send).toHaveBeenCalledTimes(2);
-      expect(adopted!.head?.headRevisionId).toBe('r1');
-      expect(adopted!.config.clips).toEqual(splitConfig.clips);
+      // The queue was not empty when split was accepted: the screen kept the person's own split-and-trim.
+      expect(adopted!.head?.headRevisionId).toBe('r0');
+      expect(adopted!.config.clips).toEqual(trimmedConfig.clips);
       const request = send.mock.calls[1][0];
       expect(request).toMatchObject({ api_version: 1, project_id: head.projectId, timeline_id: head.timelineId,
         base_revision_id: 'r1', base_publication_id: 'p1', merge: 'fields', dry_run: false,
@@ -1610,6 +1649,104 @@ describe('useTimelineSave — recovered draft durability', () => {
     }
   });
 
+  it('restores top-level parent clips from a same-head Runtime poll after the move ACK', async () => {
+    const descriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
+    Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+      request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}),
+    } });
+    const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
+    const config = createDefaultTimelineConfig();
+    config.output = { resolution: '1280x720', fps: 30, file: 'out.mp4' };
+    config.clips = [{ id: 'source', at: 0, track: 'V1', clipType: 'hold', hold: 2 }];
+    const moved = { ...config, clips: [{ ...config.clips[0], at: 5 }] };
+    const parent = ({ clips, output, ...authored }: typeof config) => ({
+      config: { ...authored, output: { fps: output.fps, file: output.file } },
+      clips, registry: { assets: {} }, occurrences: [],
+    });
+    const bootstrap = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' }, scope);
+    bootstrap.data.canonical_document.parent_revision.payload = parent(config);
+    bootstrap.data.canonical_document.parent_revision.content_digest = fixtureDigest(parent(config));
+    const fixture = runtimeFixture({ ...scope, headRevisionId: 'r0', parentComposition: parent(config) });
+    const timelinePath = `/v1/projects/${scope.projectId}/timelines/${scope.timelineId}`;
+    const posts: CommitRequest[] = [];
+    const runtime = new RuntimeDataProvider({ projectId: scope.projectId, transport: async (method, path, headers, body) => {
+      if (method === 'POST' && path === `${timelinePath}/commit`) {
+        const request = JSON.parse(new TextDecoder().decode(body)) as CommitRequest;
+        const payload = parent(moved);
+        posts.push(request);
+        const revisionId = `r${posts.length}`;
+        const reply = acceptedCommit({ revision_id: revisionId, publication_id: `p${posts.length}` },
+          { revision_id: request.base_revision_id, publication_id: request.base_publication_id }, { ...scope, commands: request.commands });
+        reply.data.canonical_document.parent_revision.payload = payload;
+        reply.data.canonical_document.parent_revision.content_digest = fixtureDigest(payload);
+        reply.data.document_digest = fixtureDigest(reply.data.canonical_document);
+        Object.assign(reply.data, { label: request.label, steps: request.steps, merge_mode: request.merge });
+        reply.receipt.idempotency_key = headers['Idempotency-Key'];
+        fixture.setHead(revisionId, payload);
+        return { status: 200, headers: {}, body: json(reply) };
+      }
+      const response = await fixture.transport(method, path, headers, body);
+      if (method === 'GET' && path === timelinePath) {
+        const record = JSON.parse(new TextDecoder().decode(response.body as Uint8Array));
+        return { ...response, body: json({ ...record, head_publication_id: `p${posts.length}` }) };
+      }
+      return response;
+    } });
+    const readDisplay = async (poll = false) => {
+      const { timeline, registry } = await runtime.loadReferencedTimeline(scope.timelineId, { poll });
+      return buildTimelineData(timeline.config, registry, undefined, timeline.configVersion, undefined, timeline.head);
+    };
+    const data = await readDisplay();
+    const harness = setup(async () => { throw new Error('No legacy save'); }, undefined, {
+      data,
+      loadBasis: async () => ({ head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: bootstrap.data.canonical_document }),
+      capabilities: {
+        getRecoverableIdentity: async () => ({ realmId: scope.realmId, actorId: scope.actorId }),
+        commitTimeline: (request, key) => runtime.commitTimeline(request, key),
+        saveTimelineAtHead: runtime.saveTimelineAtHead.bind(runtime),
+      },
+    });
+    try {
+      const editor = () => harness.hook.result.current;
+      await vi.waitFor(() => expect(editor().isTimelineEditingReady()).toBe(true));
+      await settleInitialRecoveryCheck();
+      const movedDisplay = await buildTimelineData({ ...data.config, clips: moved.clips }, data.registry, undefined, data.configVersion, undefined, data.head);
+      await act(async () => {
+        editor().commitData(movedDisplay, { save: true, gestureBasis: {
+          kind: 'move', clipId: 'source', trackId: 'V1', config: data.config, registry: data.registry,
+        } });
+        await editor().flushPendingSave();
+      });
+      expect(posts).toHaveLength(1);
+      expect(posts[0].commands[0].args.changes).toEqual([
+        { op: 'set', ref: 'parent', path: ['clips', 'id:source', 'at'], before: { state: 'present', value: 0 }, value: 5 },
+      ]);
+      const accepted = editor().dataRef.current!;
+      expect(accepted.head).toMatchObject({ headRevisionId: 'r1', headPublicationId: 'p1' });
+      expect(accepted.config.clips).toEqual([]);
+      const [settledMove] = await createCommitOutbox().list(scope);
+      expect(settledMove.accepted?.value).toMatchObject({ canonicalDocument: { parent_revision: { payload: parent(moved) } } });
+      expect((settledMove.accepted!.value as { canonicalDocument: typeof bootstrap.data.canonical_document })
+        .canonicalDocument.parent_revision.payload.config.output).toEqual(parent(config).config.output);
+
+      const poll = await readDisplay(true);
+      expect(poll.head).toEqual(accepted.head);
+      expect(poll.config.output).toEqual({ ...config.output, background: null, background_scale: null });
+      act(() => harness.poll(poll));
+      await act(async () => { await vi.advanceTimersByTimeAsync(0); });
+      const afterPoll = editor().dataRef.current!;
+      expect(afterPoll.head).toEqual(poll.head);
+      expect(poll.config.clips).toMatchObject([{ id: 'source', at: 5 }]);
+      expect(afterPoll.config.clips).toEqual(poll.config.clips);
+      expect(harness.toast.error).not.toHaveBeenCalled();
+      expect(harness.saveTimeline).not.toHaveBeenCalled();
+    } finally {
+      harness.hook.unmount();
+      if (descriptor) Object.defineProperty(navigator, 'locks', descriptor);
+      else Reflect.deleteProperty(navigator, 'locks');
+    }
+  });
+
   it.each([400, 404, 405, 413, 422])('FIX16-R2-COPY-%s exports later edits and keeps edits added after Copy', async status => {
     const { mount, edit, locks, restoreLocks, send, scope } = await setupRefusedSave(status);
     const first = mount();
@@ -1811,9 +1948,10 @@ describe('useTimelineSave — recovered draft durability', () => {
           next.canonicalDocument.parent_revision.revision_id = 'r2';
           next.canonicalDocument.parent_revision.payload.config = JSON.parse(JSON.stringify(second.config));
           send.mockImplementationOnce(async (request) => {
-            // Observe the mounted assembly at transmission, before B can ACK.
-            expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r1');
-            expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('authored.mp4');
+            // Observe the mounted assembly at transmission, before B can ACK: while B is queued the screen still shows
+            // the person's own latest document; the accepted one is taken when the queue drains.
+            expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r0');
+            expect(harness.hook.result.current.dataRef.current?.config.output.file).toBe('dependent.mp4');
             expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1',
               commands: [{ args: { changes: [{ before: { state: 'present', value: 'authored.mp4' }, value: 'dependent.mp4' }] } }] });
             return next;
@@ -1977,7 +2115,8 @@ describe('useTimelineSave — recovered draft durability', () => {
       expect(await createCommitOutbox().list({ ...scope, realmId: 'stale-realm', actorId: 'stale-actor' })).toEqual([]);
       expect(harness.hook.result.current.originalLocalSaveBasis).toMatchObject({ status: 'ready', value: { initial } });
       const owners = await createCommitOutbox().list(scope);
-      expect(owners).toHaveLength(boundary === 'claim' ? 2 : 1);
+      // The cancelled claim's empty owner is removed when the next session starts, so one owner remains.
+      expect(owners).toHaveLength(1);
       const currentOwner = owners.find(owner => owner.ownerId === harness.hook.result.current.localSaveState?.ownerId)!;
       expect(currentOwner).toBeDefined();
       expect(owners.every(owner => owner.intents.length === 0)).toBe(true);

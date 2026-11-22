@@ -148,8 +148,10 @@ export function TimelineEditorShellToolbar({
   const recoveryCardShowing = useRecoveryCardShowing();
   // On the hosted build a failed save is Astrid not answering (the card says so, and the save is retried when it is back),
   // so the red "Error" never shows there, not even in the moment after the card clears: schema rejections have their own banner.
+  // The badge reads the same input as the save bar: anything the bar shows is "Not saved".
   const hostedSaveWaiting = runtimeOrigin() !== '' && chrome.saveStatus === 'error' && !chrome.schemaIncompatible;
-  const notSaved = (recoveryCardShowing || chrome.isConflictExhausted || hostedSaveWaiting) && chrome.saveStatus !== 'saved';
+  // Whatever the bar shows is unsaved work, so the badge never says "Saved" beside it.
+  const notSaved = Boolean(chrome.saveBar) || ((recoveryCardShowing || hostedSaveWaiting) && chrome.saveStatus !== 'saved');
   const saveBadge = (
     <Badge
       variant={notSaved ? 'outline' : STATUS_VARIANT[chrome.saveStatus]}

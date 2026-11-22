@@ -406,6 +406,10 @@ function useTimelineChromeContextValue({
   recoveryRestoreAllowed,
   retryRecoveredDraft,
   discardRecoveredDraft,
+  saveBar,
+  tryAgain,
+  discardUnsaved,
+  parkedDrops,
 }: {
   timelineName: string | null;
   saveStatus: ReturnType<typeof useTimelineSave>['saveStatus'];
@@ -438,6 +442,10 @@ function useTimelineChromeContextValue({
   recoveryRestoreAllowed: boolean;
   retryRecoveredDraft: ReturnType<typeof useTimelineSave>['retryRecoveredDraft'];
   discardRecoveredDraft: ReturnType<typeof useTimelineSave>['discardRecoveredDraft'];
+  saveBar: ReturnType<typeof useTimelineSave>['saveBar'];
+  tryAgain: ReturnType<typeof useTimelineSave>['tryAgain'];
+  discardUnsaved: ReturnType<typeof useTimelineSave>['discardUnsaved'];
+  parkedDrops: ExternalDropHook['parkedDrops'];
 }): TimelineChromeContextValue {
   return useMemo<TimelineChromeContextValue>(() => ({
     timelineName,
@@ -498,6 +506,10 @@ function useTimelineChromeContextValue({
     recoveryRestoreAllowed,
     retryRecoveredDraft,
     discardRecoveredDraft,
+    saveBar,
+    tryAgain,
+    discardUnsaved,
+    parkedDrops,
     startRender,
     loadError,
     retryLoad,
@@ -563,6 +575,10 @@ function useTimelineChromeContextValue({
     recoveryRestoreAllowed,
     retryRecoveredDraft,
     discardRecoveredDraft,
+    saveBar,
+    tryAgain,
+    discardUnsaved,
+    parkedDrops,
   ]);
 }
 
@@ -1275,6 +1291,10 @@ export function useTimelineState(services: TimelineHostServiceHooks, initialTime
     recoveryRestoreAllowed: save.recoveryRestoreAllowed,
     retryRecoveredDraft: save.retryRecoveredDraft,
     discardRecoveredDraft: save.discardRecoveredDraft,
+    saveBar: save.saveBar,
+    tryAgain: save.tryAgain,
+    discardUnsaved: save.discardUnsaved,
+    parkedDrops: externalDrop.parkedDrops,
     startRender,
     loadError: timelineLoadError,
     retryLoad,

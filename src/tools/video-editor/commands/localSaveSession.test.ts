@@ -157,7 +157,8 @@ describe('local editor saves through the durable outbox', () => {
     await expect(flushing).resolves.toMatchObject({ head: h2 });
     expect(env.send).toHaveBeenCalledTimes(2);
     expect(env.send.mock.calls[0][1]).not.toBe(env.send.mock.calls[1][1]);
-    expect(env.adopted).toEqual([split, trimmed]);
+    // The accepted document is taken once, when the queue is empty, not at each accept.
+    expect(env.adopted).toEqual([trimmed]);
     await session.dispose();
   });
 
@@ -187,7 +188,7 @@ describe('local editor saves through the durable outbox', () => {
     await session.dispose();
   });
 
-  it('applies the Runtime canonical disjoint edit before replaying the original local suffix', async () => {
+  it('keeps the local chain on screen between accepts and takes the Runtime canonical document when the queue drains', async () => {
     const env = environment();
     const session = await env.mount();
     await env.append(session, splitSave());
@@ -195,13 +196,15 @@ describe('local editor saves through the durable outbox', () => {
     const mergedSplit = { ...split, meta: { opaque: null, agent: 'preserved' } };
     const mergedTrim = { ...trimmed, meta: mergedSplit.meta };
     env.send.mockResolvedValueOnce(result(mergedSplit, h1, h0, true)).mockImplementationOnce(async (request) => {
-      expect(env.visible()).toEqual(mergedSplit);
-      expect(session.getDocument()).toEqual(mergedSplit);
+      // Still the person's own latest document: an accept only advances the base the next send is on.
+      expect(env.visible()).toEqual(trimmed);
+      expect(session.getDocument()).toEqual(trimmed);
       expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1', commands: trimCommands });
       return result(mergedTrim, h2, h1);
     });
     await session.flush();
     expect(env.visible()).toEqual(mergedTrim);
+    expect(env.visible()).toEqual({ ...trimmed, meta: { opaque: null, agent: 'preserved' } });
     const next = { ...mergedTrim, meta: { ...mergedTrim.meta, note: null } };
     await session.append({ before: mergedTrim, after: next, label: 'Note' });
     expect((await env.outboxes.list(scope))[0].intents[0].payload).toMatchObject({ before: mergedTrim, after: next });
@@ -257,8 +260,7 @@ describe('local editor saves through the durable outbox', () => {
     env.send.mockImplementationOnce(async (request, key) => {
       expect([request, key]).toEqual(exactTrim);
       expect(request.commands).toEqual(trimCommands);
-      expect(env.prepareDisplay.mock.lastCall?.[0].head).toEqual(h1);
-      expect(env.visible()).toEqual(mergedSplit);
+      expect(request.base_revision_id).toBe('r1');
       return result({ ...trimmed, agent: mergedSplit.agent }, h2, h1);
     });
     await recovered.recover(stored.ownerId);
@@ -342,7 +344,7 @@ describe('local editor saves through the durable outbox', () => {
     const session = await env.mount();
     await env.append(session, splitSave());
     env.send.mockResolvedValueOnce(result(split)).mockImplementationOnce(async (request) => {
-      expect(env.visible()).toEqual(split);
+      expect(env.visible()).toEqual(trimmed);
       expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1', commands: trimCommands });
       return result(trimmed, h2, h1);
     });
@@ -384,23 +386,23 @@ describe('local editor saves through the durable outbox', () => {
     await session.dispose();
   });
 
-  it('holds the original suffix through a failed canonical projection before dispatching it', async () => {
+  it('sends the whole queue before a failed canonical projection, then retries the adoption without resubmitting', async () => {
     const env = environment();
     const session = await env.mount();
     await env.append(session, splitSave());
     await env.append(session, trimSave());
-    const [originalRecord] = await env.outboxes.list(scope);
     const mergedSplit = { ...split, agent: true };
     env.send.mockResolvedValueOnce(result(mergedSplit)).mockImplementationOnce(async (request) => {
-      expect(env.visible()).toEqual(mergedSplit);
+      expect(env.visible()).toEqual(trimmed);
       expect(request.commands).toEqual(trimCommands);
       return result({ ...trimmed, agent: true }, h2, h1);
     });
     env.prepareDisplay.mockRejectedValueOnce(new Error('Canonical projection failed'));
+    // The projection is built once, when the queue is empty: both saves are already sent and durable.
     await expect(session.flush()).rejects.toThrow('Canonical projection failed');
-    expect(env.send).toHaveBeenCalledTimes(1);
+    expect(env.send).toHaveBeenCalledTimes(2);
     const [stored] = await env.outboxes.list(scope);
-    expect(stored.intents[0].payload).toEqual(originalRecord.intents[1].payload);
+    expect(stored.intents).toEqual([]);
     expect(stored.pending).toBeUndefined();
     await session.flush();
     expect(env.send).toHaveBeenCalledTimes(2);
@@ -419,7 +421,6 @@ describe('local editor saves through the durable outbox', () => {
     const details = { status: status === 409 ? 'conflict' : 'invalid',
       path: ['clips', 'id:right'], hint: 'Read the current canonical head' };
     env.send.mockResolvedValueOnce(canonical).mockImplementationOnce(async (request) => {
-      expect(env.visible()).toEqual(canonical.canonicalDocument.parent_revision.payload);
       expect(request).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1', commands: trimCommands });
       throw new ApiError(status, 'binding_changed', 'Original dependent clip no longer exists', '', details);
     });
@@ -441,13 +442,11 @@ describe('local editor saves through the durable outbox', () => {
     await recovered.dispose();
   });
 
-  it('fences a canonical projection on unmount and adopts the durable prefix before recovered suffix dispatch', async () => {
+  it('fences a canonical projection on unmount: a build that finishes late adopts nothing', async () => {
     const env = environment();
     const session = await env.mount();
     await env.append(session, splitSave());
-    await env.append(session, trimSave());
-    const mergedSplit = { ...split, agent: true };
-    env.send.mockResolvedValueOnce(result(mergedSplit));
+    env.send.mockResolvedValueOnce(result({ ...split, agent: true }));
     const building = deferred<void>();
     const ready = deferred<void>();
     const prepare = env.prepareDisplay.getMockImplementation()!;
@@ -459,24 +458,13 @@ describe('local editor saves through the durable outbox', () => {
     const flushing = session.flush();
     await ready.promise;
     await session.dispose();
-    const [stored] = await env.outboxes.list(scope);
-    const recovered = await env.mount();
-    env.send.mockImplementationOnce(async (request) => {
-      expect(env.visible()).toEqual(mergedSplit);
-      expect(request.commands).toEqual(trimCommands);
-      expect(() => recovered.append({ before: mergedSplit, after: { ...mergedSplit, note: true }, label: 'Note' }))
-        .toThrow('dependent saves');
-      return result({ ...trimmed, agent: true }, h2, h1);
-    });
-    await recovered.recover(stored.ownerId);
     const visible = env.visible();
     const adoptions = structuredClone(env.adopted);
     building.resolve();
-    await expect(flushing).rejects.toThrow('unacknowledged');
+    await expect(flushing).rejects.toThrow();
     expect(env.visible()).toEqual(visible);
     expect(env.adopted).toEqual(adoptions);
-    expect(env.send).toHaveBeenCalledTimes(2);
-    await recovered.dispose();
+    expect(env.send).toHaveBeenCalledTimes(1);
   });
 
   it('drains a local append on disposal and fences a late acknowledgement after the owner is reclaimed', async () => {

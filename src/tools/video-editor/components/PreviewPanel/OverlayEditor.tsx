@@ -1,3 +1,4 @@
+import { intrinsicMediaSize, resolveClipPlacement, resolveTrackTransform, transformPlacementRect } from '@banodoco/timeline-composition';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import type { PointerEvent as ReactPointerEvent, RefObject } from 'react';
 import { Maximize2, RotateCcw } from 'lucide-react';
@@ -22,7 +23,7 @@ import {
 } from '@/tools/video-editor/lib/mobile-interaction-model.ts';
 import type { ClipMeta } from '@/tools/video-editor/lib/timeline-data.ts';
 import type { TimelineRow } from '@/tools/video-editor/types/timeline-canvas.ts';
-import type { ResolvedTimelineConfig } from '@/tools/video-editor/types/index.ts';
+import type { ResolvedTimelineConfig, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import {
   clamp,
   getFullBoundsFromVisibleBounds,
@@ -31,7 +32,6 @@ import {
   MAX_CROP_FRACTION,
   MIN_CLIP_SIZE,
   normalizeCropValues,
-  scaleBoundsAboutCenter,
   toOverlayStyle,
   type CropValues,
   type OverlayBounds,
@@ -46,6 +46,7 @@ interface OverlayEditorProps {
   currentTime: number;
   playerContainerRef: RefObject<HTMLDivElement>;
   trackScaleMap: Record<string, number>;
+  tracks?: TrackDefinition[];
   compositionWidth: number;
   compositionHeight: number;
   selectedClipId: string | null;
@@ -85,10 +86,11 @@ type OverlayViewModel = {
 function OverlayEditorComponent({
   rows,
   meta,
-  registry: _registry,
+  registry,
   currentTime,
   playerContainerRef,
   trackScaleMap,
+  tracks,
   compositionWidth,
   compositionHeight,
   selectedClipId,
@@ -140,50 +142,31 @@ function OverlayEditorComponent({
   const allowsDirectManipulationControls = !(deviceClass !== 'desktop' && inputModality === 'touch');
   const previewTouchAction = deviceClass === 'desktop' ? 'none' : 'manipulation';
 
-  const getTrackScale = useCallback((trackId: string): number => (
-    Math.max(trackScaleMap[trackId] ?? 1, 0.01)
-  ), [trackScaleMap]);
-
-  // The composition applies `scale(track.scale)` (center-origin) to the whole
-  // track subtree, so stored x/y/width/height are track-local. The gizmo works
-  // in rendered (composition) space: read = forward scale, write = inverse.
-  // Keeping both conversions here — and nowhere else — is what keeps gizmo and
-  // render agreeing at every track scale.
-  const toRenderedBounds = useCallback((bounds: OverlayBounds, trackId: string): OverlayBounds => (
-    scaleBoundsAboutCenter(bounds, getTrackScale(trackId), compositionWidth, compositionHeight)
-  ), [compositionHeight, compositionWidth, getTrackScale]);
-
+  const [naturalSizes, setNaturalSizes] = useState<Record<string, {width: number; height: number}>>({});
+  useEffect(() => {
+    const cleanups: Array<() => void> = [];
+    for (const [id, asset] of Object.entries(registry)) {
+      const size = intrinsicMediaSize(asset);
+      if (Number.isFinite(size.width) && Number.isFinite(size.height)) continue;
+      if (!asset.src || typeof document === 'undefined') continue;
+      const isImage = asset.type?.startsWith('image');
+      const media = document.createElement(isImage ? 'img' : 'video');
+      const loaded = () => {
+        const width = media instanceof HTMLImageElement ? media.naturalWidth : media.videoWidth;
+        const height = media instanceof HTMLImageElement ? media.naturalHeight : media.videoHeight;
+        if (width > 0 && height > 0) setNaturalSizes(previous => ({...previous, [id]: {width, height}}));
+      };
+      const event = isImage ? 'load' : 'loadedmetadata';
+      media.addEventListener(event, loaded);
+      media.src = asset.src;
+      cleanups.push(() => {media.removeEventListener(event, loaded); media.removeAttribute('src');});
+    }
+    return () => cleanups.forEach(cleanup => cleanup());
+  }, [registry]);
+  const canvas = useMemo(() => ({width: compositionWidth, height: compositionHeight}), [compositionWidth, compositionHeight]);
   const toStoredBounds = useCallback((bounds: OverlayBounds, trackId: string): OverlayBounds => (
-    scaleBoundsAboutCenter(bounds, 1 / getTrackScale(trackId), compositionWidth, compositionHeight)
-  ), [compositionHeight, compositionWidth, getTrackScale]);
-
-  const getClipBounds = useCallback((clipMeta: ClipMeta, trackId: string): OverlayBounds => {
-    // Must match VisualClip's hasPositionOverride check (includes crop fields).
-    // When any of these are set, Remotion renders with absolute positioning at
-    // clip.x/y/width/height; without them, every surface asks the clip-type
-    // descriptor for the canonical default box (`getDefaultBoxForClipType`).
-    const hasPositionOverride = (
-      clipMeta.x !== undefined
-      || clipMeta.y !== undefined
-      || clipMeta.width !== undefined
-      || clipMeta.height !== undefined
-      || clipMeta.cropTop !== undefined
-      || clipMeta.cropBottom !== undefined
-      || clipMeta.cropLeft !== undefined
-      || clipMeta.cropRight !== undefined
-    );
-
-    const storedBounds = hasPositionOverride
-      ? {
-          x: clipMeta.x ?? 0,
-          y: clipMeta.y ?? 0,
-          width: clipMeta.width ?? compositionWidth,
-          height: clipMeta.height ?? compositionHeight,
-        }
-      : getDefaultBoxForClipType(clipMeta.clipType, compositionWidth, compositionHeight);
-
-    return toRenderedBounds(storedBounds, trackId);
-  }, [compositionHeight, compositionWidth, toRenderedBounds]);
+    transformPlacementRect(bounds, resolveTrackTransform({id: trackId, scale: trackScaleMap[trackId] ?? 1}, canvas).inverse)
+  ), [canvas, trackScaleMap]);
 
   // Compute which clip IDs are visible at currentTime — this string only changes when clips enter/exit
   const visibleClipKey = useMemo(() => {
@@ -234,14 +217,16 @@ function OverlayEditorComponent({
           continue;
         }
 
-        const fullBounds = getClipBounds(clipMeta, row.id);
-        const cropValues = normalizeCropValues({
-          cropTop: clipMeta.cropTop,
-          cropBottom: clipMeta.cropBottom,
-          cropLeft: clipMeta.cropLeft,
-          cropRight: clipMeta.cropRight,
-        });
-        const visibleBounds = getVisibleBoundsFromCrop(fullBounds, cropValues);
+        const defaultBox = getDefaultBoxForClipType(clipMeta.clipType, compositionWidth, compositionHeight);
+        const asset = clipMeta.asset ? registry[clipMeta.asset] : undefined;
+        const parsedSize = asset ? intrinsicMediaSize(asset) : null;
+        const intrinsic = clipMeta.asset ? (parsedSize && Number.isFinite(parsedSize.width) && Number.isFinite(parsedSize.height) ? parsedSize : naturalSizes[clipMeta.asset]) : {width: compositionWidth, height: compositionHeight};
+        if (!intrinsic) continue;
+        const defaults = !clipMeta.asset && clipMeta.x === undefined && clipMeta.y === undefined && clipMeta.width === undefined && clipMeta.height === undefined && clipMeta.cropTop === undefined && clipMeta.cropBottom === undefined && clipMeta.cropLeft === undefined && clipMeta.cropRight === undefined ? defaultBox : {};
+        const placement = resolveClipPlacement({clip: {...clipMeta, ...defaults, id: action.id}, track: tracks?.find(track => track.id === row.id) ?? {id: row.id, scale: trackScaleMap[row.id] ?? 1}, canvas, intrinsic});
+        const fullBounds = placement.output.full;
+        const cropValues = placement.crop;
+        const visibleBounds = placement.output.visible;
         overlays.push({
           actionId: action.id,
           track: row.id,
@@ -256,7 +241,7 @@ function OverlayEditorComponent({
 
     return overlays;
     // eslint-disable-next-line react-hooks/exhaustive-deps -- visibleClipKey is a stable proxy for currentTime
-  }, [visibleClipKey, getClipBounds, meta, rows, selectedClipId]);
+  }, [visibleClipKey, canvas, compositionWidth, compositionHeight, meta, naturalSizes, registry, rows, selectedClipId, trackScaleMap, tracks]);
 
   const effectiveOverlays = useMemo(() => {
     if (!dragOverride) {
@@ -616,6 +601,8 @@ function OverlayEditorComponent({
       className="pointer-events-none absolute"
       style={{ ...VIDEO_EDITOR_THEME_VARS, left: layout.left, top: layout.top, width: layout.width, height: layout.height, touchAction: previewTouchAction }}
     >
+      {selectedClipId && visibleClipKey.split(',').includes(selectedClipId) && meta[selectedClipId]?.asset && !effectiveOverlays.some(overlay => overlay.actionId === selectedClipId) &&
+        <span role="status">Handles unavailable until media dimensions are known</span>}
       {/* Dim entire composition during crop drag, with a hole for the visible crop area */}
       {isCropDrag && (() => {
         const cropOverlay = effectiveOverlays.find((o) => o.actionId === draggingId);
@@ -719,7 +706,8 @@ function OverlayEditorComponent({
                 style={{ touchAction: previewTouchAction }}
                 aria-label={isSelected ? `Selected overlay ${overlay.label}` : `Select overlay ${overlay.label}`}
                 aria-pressed={isSelected}
-                onPointerDown={(event) => startDrag(event, overlay, 'move')}
+                title={clipMeta?.entrance || clipMeta?.exit || clipMeta?.continuous || clipMeta?.keyframes ? 'Handles unavailable for animated clips' : undefined}
+                onPointerDown={(event) => { if (!clipMeta?.entrance && !clipMeta?.exit && !clipMeta?.continuous && !clipMeta?.keyframes) startDrag(event, overlay, 'move'); }}
                 onDoubleClick={() => {
                   if (overlay.behavior.doubleClickAction === 'inline-text-edit') {
                     beginTextEdit(overlay.actionId);
@@ -740,7 +728,7 @@ function OverlayEditorComponent({
                   onSelectClip(overlay.actionId);
                 }}
               >
-                {isSelected && allowsDirectManipulationControls && overlay.behavior.allowsBoundsEditing && (['resize-nw', 'resize-ne', 'resize-sw', 'resize-se'] as const).map((mode) => {
+                {isSelected && !clipMeta?.entrance && !clipMeta?.exit && !clipMeta?.continuous && !clipMeta?.keyframes && allowsDirectManipulationControls && overlay.behavior.allowsBoundsEditing && (['resize-nw', 'resize-ne', 'resize-sw', 'resize-se'] as const).map((mode) => {
                   const pos = {
                     'resize-nw': 'left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize',
                     'resize-ne': 'right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize',
@@ -757,7 +745,7 @@ function OverlayEditorComponent({
                     />
                   );
                 })}
-                {isSelected && allowsDirectManipulationControls && overlay.behavior.allowsCrop && ([
+                {isSelected && !clipMeta?.entrance && !clipMeta?.exit && !clipMeta?.continuous && !clipMeta?.keyframes && allowsDirectManipulationControls && overlay.behavior.allowsCrop && ([
                   {
                     mode: 'crop-n',
                     hitClassName: 'left-1.5 right-1.5 top-0 h-3 -translate-y-1/2 cursor-ns-resize',

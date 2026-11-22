@@ -23,10 +23,6 @@ import { PropertiesPanel } from './PropertiesPanel';
 vi.mock('../../hooks/useEffects.ts', () => ({ useEffects: () => ({ data: [] }) }));
 vi.mock('../../hooks/useFinalVideoAvailable.ts', () => ({ useFinalVideoAvailable: () => ({ finalVideoMap: new Map() }) }));
 vi.mock('../../compositions/TimelineRenderer.tsx', () => ({ invalidateReferencedTimelineCache: vi.fn() }));
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async original => ({
-  ...await original<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
 
 const scope = { projectId: 'project-commit', timelineId: 'timeline-commit', actorId: 'actor', realmId: 'realm' };
 const locksDescriptor = Object.getOwnPropertyDescriptor(navigator, 'locks');
@@ -209,9 +205,13 @@ it.each(['valid', 'dependent', 'conflict', 'missing', 'copied', 'forged', 'wrong
             ? 'The captured editor was closed or replaced. Reopen the current timeline and recover the draft before applying it.'
             : 'Element parameter editor owner changed or is unavailable; draft retained'));
         expect(send).not.toHaveBeenCalled();
-        const [stored] = await createCommitOutbox().list(scope);
-        expect(stored.intents).toEqual([]);
-        expect(stored.pending).toBeUndefined();
+        const rows = await createCommitOutbox().list(scope);
+        if (control === 'closed') expect(rows).toHaveLength(0);
+        else {
+          const [stored] = rows;
+          expect(stored.intents).toEqual([]);
+          expect(stored.pending).toBeUndefined();
+        }
         expect(editor.data?.config.clips[0].params?.content).toBe('Before');
       }
       expect(legacy).not.toHaveBeenCalled();

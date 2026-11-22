@@ -1021,8 +1021,11 @@ export class RuntimeDataProvider implements DataProvider {
     const bundle = configRecord.bundle;
     if (bundle !== undefined && bundle !== null) parseTimelineBundle(bundle);
     const { bundle: _storedBundle, ...configWithoutBundle } = configRecord;
+    const placementFindings: import('@banodoco/timeline-composition').PlacementMigrationFinding[] = [];
+    const defaulted = withDefaultTimelineOutput(configWithoutBundle as Partial<TimelineConfig>, findings => placementFindings.push(...findings));
     return {
-      config: { ...configWithoutBundle, ...withDefaultTimelineOutput(configWithoutBundle as Partial<TimelineConfig>) },
+      config: { ...configWithoutBundle, ...defaulted },
+      ...(placementFindings.length ? {placementFindings} : {}),
       configVersion: runtimeVersion(record),
       head: this.timelineHead(timelineId, record.head_revision_id as string | null, optionalNullableString(record.head_publication_id, 'timeline.head_publication_id')),
       ...(bundle === null ? { bundle: null } : bundle === undefined ? {} : { bundle: bundle as TimelineBundleEnvelope }),
@@ -1044,9 +1047,12 @@ export class RuntimeDataProvider implements DataProvider {
     const bundle = configRecord.bundle;
     if (bundle !== undefined && bundle !== null) parseTimelineBundle(bundle);
     const { bundle: _storedBundle, ...configWithoutBundle } = configRecord;
+    const placementFindings: import('@banodoco/timeline-composition').PlacementMigrationFinding[] = [];
+    const defaulted = withDefaultTimelineOutput(configWithoutBundle as Partial<TimelineConfig>, findings => placementFindings.push(...findings));
     return {
       timeline: {
-        config: { ...configWithoutBundle, ...withDefaultTimelineOutput(configWithoutBundle as Partial<TimelineConfig>) },
+        config: { ...configWithoutBundle, ...defaulted },
+        ...(placementFindings.length ? {placementFindings} : {}),
         configVersion: runtimeVersion(record),
         head: this.timelineHead(timelineId, record.head_revision_id as string | null, optionalNullableString(record.head_publication_id, 'timeline.head_publication_id')),
         ...(bundle === null ? { bundle: null } : bundle === undefined ? {} : { bundle: bundle as TimelineBundleEnvelope }),

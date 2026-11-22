@@ -1,3 +1,4 @@
+import {newTrackPlacementMarkers} from '@/tools/video-editor/lib/placement-markers.ts';
 import { getEffectiveClipVolume } from '@/tools/video-editor/lib/clip-volume.ts';
 import { getClipTimelineDuration } from './config-utils.ts';
 import type {
@@ -84,6 +85,7 @@ export const addTrack = (
     fit: kind === 'visual' ? 'manual' : 'contain',
     opacity: 1,
     blendMode: 'normal',
+    app: newTrackPlacementMarkers(),
   };
 
   const nextTracks = [...config.tracks];

@@ -147,6 +147,24 @@ function PreviewPanelComponent({
               {' '}
               Mode {interactionMode}.
             </div>
+            <div className="pointer-events-none absolute inset-x-2 top-2 z-10 flex flex-col gap-1" data-testid="preview-status-strip">
+            {data.migrationIssues?.some(issue => issue.details?.kind === 'canvas' || issue.details?.kind === 'explicit-fit' || issue.details?.kind === 'scale-bake') && (() => {
+              const findings = data.migrationIssues!.filter(issue => issue.details?.kind === 'canvas' || issue.details?.kind === 'explicit-fit' || issue.details?.kind === 'scale-bake');
+              const clips = new Set(findings.map(issue => issue.clipId).filter(Boolean)).size;
+              const canvas = findings.find(issue => issue.details?.kind === 'canvas');
+              return <div className="rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground" role="status" title={JSON.stringify(findings)}>
+                {clips > 0 ? `Preview uses legacy framing for ${clips} ${clips === 1 ? 'clip' : 'clips'}. ` : ''}
+                {canvas ? (canvas.details?.source === 'app-resolved'
+                  ? `Canvas is not stated on this timeline; using ${data.output.resolution.replace('x', ' × ')} from the ${data.config?.theme !== undefined || data.config?.theme_overrides !== undefined ? 'editor theme' : 'editor default'}. It has not been written.`
+                  : `Canvas is not stated in timeline output; using ${data.output.resolution.replace('x', ' × ')} from timeline settings. It has not been written to output.`) : ''}
+              </div>;
+            })()}
+            {surface.placementFindings?.some(finding => finding.scope === 'child' && (finding.kind === 'canvas' || finding.kind === 'explicit-fit' || finding.kind === 'scale-bake')) && (() => {
+              const findings = surface.placementFindings!.filter(finding => finding.scope === 'child' && (finding.kind === 'canvas' || finding.kind === 'explicit-fit' || finding.kind === 'scale-bake'));
+              const occurrences = new Set(findings.map(finding => finding.occurrenceId)).size;
+              return <div className="rounded-md bg-background/80 px-2 py-1 text-xs text-muted-foreground" role="status" title={JSON.stringify(findings)}>{`Preview uses legacy framing in ${occurrences} ${occurrences === 1 ? 'shot' : 'shots'}.`}</div>;
+            })()}
+            </div>
             {overlay}
             <div
               ref={surface.slotRef}
@@ -162,6 +180,7 @@ function PreviewPanelComponent({
                 currentTime={currentTime}
                 playerContainerRef={playerContainerRef}
                 trackScaleMap={trackScaleMap}
+                tracks={resolvedConfig.tracks}
                 compositionWidth={compositionSize.width}
                 compositionHeight={compositionSize.height}
                 selectedClipId={selectedClipId}

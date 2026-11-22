@@ -184,6 +184,9 @@ interface ScheduledSave {
   baseHead?: TimelineHeadRevision;
   /** Complete document value used for recovery/draft comparison. */
   effectiveBundle: TimelineBundleEnvelope | null;
+  /** Exact recovery draft value/version written for this scheduled edit. */
+  draft: { config: TimelineConfig; registry: AssetRegistry; bundle: TimelineBundleEnvelope | null };
+  draftBaseVersion: number;
   /** Provider wire semantics: undefined preserves an already stored bundle. */
   wireBundle: TimelineBundleEnvelope | null | undefined;
   /** Waits for a queued descendant's draft base to advance before sending it. */
@@ -258,6 +261,8 @@ export interface UseTimelinePersistenceResult {
   flushSaveTarget: (target: TimelineSaveTarget) => Promise<number>;
   discardUncommittedSaveTarget: (target: TimelineSaveTarget, error: unknown) => boolean;
   saveStatus: SaveStatus;
+  /** The reason behind a 'error' status, until the status changes. */
+  saveError: string | null;
   isConflictExhausted: boolean;
   /** Reopen resolution for a native refusal already retained in the recovered outbox. */
   restoreRetainedConflict: () => void;
@@ -283,6 +288,8 @@ export interface UseTimelinePersistenceResult {
    * edit or a click. Does nothing when no save is waiting or a conflict, reload or recovery choice owns the timeline.
    */
   retryPendingSave: () => void;
+  clearSaveFailure: () => void;
+  noteSaveProgress: () => void;
   /** Synchronous guard for recovery actions that must not race canonical reload. */
   canonicalReloadInProgressRef: MutableRefObject<boolean>;
   /**
@@ -417,7 +424,13 @@ export function useTimelinePersistence({
     reject: (error: Error) => void;
   }>>([]);
 
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
+  // Status and reason are one value: the badge cannot say 'error' without a reason, and the reason (a toast is
+  // gone in seconds) stays until the status moves on.
+  const [saveState, setSaveState] = useState<{ status: Exclude<SaveStatus, 'error'> } | { status: 'error'; reason: string }>({ status: 'saved' });
+  const saveStatus: SaveStatus = saveState.status;
+  const saveError = saveState.status === 'error' ? saveState.reason : null;
+  const setSaveStatus = useCallback((status: Exclude<SaveStatus, 'error'>) => setSaveState({ status }), []);
+  const failSave = useCallback((reason: string) => setSaveState({ status: 'error', reason }), []);
   saveStatusRef.current = saveStatus;
   const [isConflictExhausted, setIsConflictExhausted] = useState(false);
   const [schemaIncompatible, setSchemaIncompatible] = useState<ReadonlyArray<TimelineSchemaIssue> | null>(null);
@@ -461,7 +474,7 @@ export function useTimelinePersistence({
     setIsConflictExhausted(true);
     // Keep the synchronous poll/write gate ahead of React's next render.
     isConflictExhaustedRef.current = true;
-    setSaveStatus('error');
+    failSave('The timeline was changed somewhere else and these edits could not be merged into it.');
   }, []);
 
   const restoreRetainedConflict = useCallback(() => {
@@ -589,6 +602,20 @@ export function useTimelinePersistence({
     if (watchdogTimer.current) {
       return;
     }
+    watchdogTimer.current = setTimeout(() => {
+      watchdogTimer.current = null;
+      setWatchdogTripped(true);
+    }, WATCHDOG_GRACE_MS);
+  }, []);
+
+  /**
+   * An intent was accepted: the save is making progress. The watchdog measures time without progress, so a long
+   * burst of edits that keep landing never shows "not confirmed"; only a save with no accept for the grace
+   * period does.
+   */
+  const noteSaveProgress = useCallback(() => {
+    if (!watchdogTimer.current) return;
+    clearTimeout(watchdogTimer.current);
     watchdogTimer.current = setTimeout(() => {
       watchdogTimer.current = null;
       setWatchdogTripped(true);
@@ -900,7 +927,7 @@ export function useTimelinePersistence({
         }
         cancelErrorRetryTimer();
         disarmWatchdog();
-        setSaveStatus('error');
+        failSave(persistenceError instanceof Error ? persistenceError.message : String(persistenceError));
         toast.error(persistenceError instanceof Error ? persistenceError.message : String(persistenceError));
         rejectFlushWaiters(persistenceError, attempt, true);
         return;
@@ -912,7 +939,7 @@ export function useTimelinePersistence({
         // for an explicit Runtime reconnect instead of flooding the Runtime.
         cancelErrorRetryTimer();
         disarmWatchdog();
-        setSaveStatus('error');
+        failSave('Astrid is not reachable right now. Your edits are kept here and will save when it is back.');
         stalledAttemptRef.current = attempt;
         rejectFlushWaiters(persistenceError);
         return;
@@ -924,8 +951,7 @@ export function useTimelinePersistence({
         // divergence has been established, so the conflict flow is misleading.
         cancelErrorRetryTimer();
         disarmWatchdog();
-        setSaveStatus('error');
-        toast.error(persistenceError.message);
+        failSave(persistenceError.message);
         rejectFlushWaiters(persistenceError, attempt, true);
         return;
       }
@@ -979,7 +1005,7 @@ export function useTimelinePersistence({
       if (isTimelineSchemaIncompatibleError(error)) {
         isSchemaIncompatibleRef.current = true;
         setSchemaIncompatible(error.issues);
-        setSaveStatus('error');
+        failSave('This timeline was saved by a newer version of Astrid, so it cannot be changed here.');
         cancelErrorRetryTimer();
         disarmWatchdog();
         rejectFlushWaiters(error, attempt, true);
@@ -995,10 +1021,13 @@ export function useTimelinePersistence({
         // error — the user sees a neutral `retrying` badge while the backend
         // recovers. `error` is reserved for 404/409/lost-edit/unrecoverable.
         setSaveStatus('retrying');
-        retryScheduled = true;
-        scheduleErrorRetry(attempt);
+        // The local save session owns the retry of its own unavailable save; a second scheduler would only race it.
+        if (session.localDocumentSave?.status?.() !== 'retry') {
+          retryScheduled = true;
+          scheduleErrorRetry(attempt);
+        }
       } else {
-        setSaveStatus('error');
+        failSave(error instanceof Error ? error.message : String(error));
       }
     } finally {
       attempt.session.activeAttempts.delete(attempt);
@@ -1103,11 +1132,7 @@ export function useTimelinePersistence({
         .catch(() => {})
         .then(() => {
           if (typeof indexedDB === 'undefined') throw new Error('Durable timeline storage is unavailable.');
-          return saveTimelineDraft(
-          timelineId,
-          draft,
-          draftBaseVersion,
-          {
+          const write = (outboxOwnerId?: string) => saveTimelineDraft(timelineId, draft, draftBaseVersion, {
             ...recoveryMetadata,
             ...(provider.saveTimelineAtHead ? {
               baseHeadRevisionId: head?.headRevisionId,
@@ -1115,10 +1140,11 @@ export function useTimelinePersistence({
               baseHeadTimelineId: head?.timelineId,
             } : {}),
             ownerId: draftOwnerId,
-            outboxOwnerId: snapshot.session.localDocumentSave?.ownerId?.(),
+            outboxOwnerId,
             draftIdentity,
-          },
-        ); })
+          });
+          return snapshot.session.localDocumentSave?.writeRecoveryDraft?.(write) ?? write();
+        })
       : Promise.resolve()).then(() => { snapshot.session.storageFailure = undefined; }, (error: unknown) => {
         snapshot.session.storageFailure = error;
         recordDraftReloadFailure();
@@ -1180,7 +1206,9 @@ export function useTimelinePersistence({
     reloadPreservedSeqRef.current = null;
     emitTimelineSaveDiagnostic('schedule', () => ({ timelineId, owner: diagnosticOwner ?? session.identity,
       mounted: getDataRef().current, source: nextData, gesture: options?.gestureBasis,
-      clipId: options?.gestureBasis?.clipId ?? selectedClipIdRef.current,
+      clipId: options?.gestureBasis && 'clipId' in options.gestureBasis
+        ? options.gestureBasis.clipId
+        : selectedClipIdRef.current,
       generation: diagnosticOwner?.generation ?? session.generation, closed: diagnosticOwner?.closed,
       sessionPresent: diagnosticOwner ? Boolean(diagnosticOwner.session) : undefined }));
     // Recovery is an explicit CAS decision. Preserve the latest visible edit
@@ -1582,6 +1610,13 @@ export function useTimelinePersistence({
     }
   }, [clearWatchdog, dataRef, getDataRef, scheduleSave, watchdogReason]);
 
+  /** Forget the failure a declined edit or an earlier refusal left, so the next save is attempted. */
+  const clearSaveFailure = useCallback(() => {
+    session.captureFailure = undefined;
+    session.editFailure = false;
+    setSaveState((current) => current.status === 'error' ? { status: 'saved' } : current);
+  }, [session]);
+
   const retryPendingSave = useCallback(() => {
     if (!isMountedRef.current || reloadInProgressRef.current || isSavingRef.current) return;
     if (isConflictExhaustedRef.current || isSchemaIncompatibleRef.current) return;
@@ -1668,7 +1703,15 @@ export function useTimelinePersistence({
         if (reloadCancelledRef.current) {
           throw new Error('Canonical reload was superseded by a new timeline edit.');
         }
-        const ownedSnapshot = options?.discardRefusedSave ? await readOwnedRecoverySnapshot() : null;
+        const shouldClearDraft = (options?.clearDraft ?? !options?.preserveDraft) && isDataProviderPersistenceEnabled(provider);
+        const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
+        const ownedSnapshot = shouldClearDraft || exported ? await readOwnedRecoverySnapshot() : null;
+        // An older scoped provider can expose an unowned recovery slot. Capture
+        // that slot before the canonical read so a later writer cannot become
+        // the target of this reload.
+        const legacySnapshot = shouldClearDraft && !options?.discardRefusedSave
+          && options?.recoverySnapshot === undefined && !ownedSnapshot && recoveryKey !== timelineId
+          ? await loadTimelineDraft(recoveryKey) : null;
         if (exported
           && canonicalJsonStringify(ownedSnapshot) !== canonicalJsonStringify(exported.snapshot)) {
           throw new Error('Your unsaved edits changed. Copy them again before reloading.');
@@ -1710,11 +1753,9 @@ export function useTimelinePersistence({
 
         // Compare-and-delete the chosen snapshot. A different tab can write
         // a new one even while the current tab is reloading.
-        const shouldClearDraft = (options?.clearDraft ?? !options?.preserveDraft) && isDataProviderPersistenceEnabled(provider);
-        const recoveryKey = provider.getTimelineDraftRecoveryMetadata?.().recoveryKey ?? timelineId;
         let recoverySnapshot = !shouldClearDraft ? null
           : options?.recoverySnapshot !== undefined ? options.recoverySnapshot
-            : options?.discardRefusedSave ? ownedSnapshot : await loadTimelineDraft(recoveryKey);
+            : ownedSnapshot ?? (legacySnapshot && !legacySnapshot.ownerId && !legacySnapshot.outboxOwnerId ? legacySnapshot : null);
         if (shouldClearDraft && options?.recoverySnapshot) {
           // Discard starts from the exact record the user was offered. Retry
           // may meanwhile have replaced it with a session-owned copy. An ACK
@@ -1743,9 +1784,14 @@ export function useTimelinePersistence({
         const canReload = () => !reloadCancelledRef.current && activeTargetRef.current === session;
         if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
 
+        const beforeDischarge = dataRef.current;
+        let nativeReceipt: TimelineSaveReceipt | void = undefined;
         if (options?.discardRefusedSave) {
-          if (exported) await session.localDocumentSave?.discharge?.('latest', exported.outbox, canReload);
-          else await session.localDocumentSave?.discharge?.('latest');
+          if (exported?.outbox || session.localDocumentSave?.ownerId) {
+            nativeReceipt = await session.localDocumentSave?.discharge?.('latest', exported?.outbox, canReload);
+          } else {
+            nativeReceipt = await session.localDocumentSave?.discharge?.('latest');
+          }
         }
         if (!canReload()) throw new Error('Canonical reload was superseded by a new timeline edit.');
         if (recoverySnapshot && !await clearTimelineDraftIfSnapshotMatches(recoveryKey, recoverySnapshot)) {
@@ -1776,14 +1822,24 @@ export function useTimelinePersistence({
         latestScheduledSaveRef.current = null;
         editSeqRef.current = savedSeqRef.current;
         session.acknowledgedSeq = savedSeqRef.current;
-        logConfigVersionUpdate('reload', loadedTimeline.configVersion);
-        configVersionRef.current = loadedTimeline.configVersion;
-        headRevisionRef.current = loadedTimeline.head;
-        store?.getState().setConfigVersion(loadedTimeline.configVersion);
+        // The durable owner can adopt a verified display while it discharges.
+        // A preliminary provider reload may have returned no physical head,
+        // or a head from before the owner's in-flight request finished.
+        const displayed = dataRef.current;
+        const adoptedNative = nativeReceipt && displayed && displayed.editProjection?.kind !== 'local'
+          && (displayed !== beforeDischarge || !loadedTimeline.head)
+          && canonicalJsonStringify(displayed.head) === canonicalJsonStringify(nativeReceipt.head)
+          ? { data: displayed, version: nativeReceipt.configVersion } : null;
+        const canonicalData = adoptedNative?.data ?? reloadedData;
+        const version = adoptedNative?.version ?? loadedTimeline.configVersion;
+        logConfigVersionUpdate('reload', version);
+        configVersionRef.current = version;
+        headRevisionRef.current = canonicalData.head;
+        store?.getState().setConfigVersion(version);
         // Keep a reloaded assembly bundle reachable downstream so the next
         // save cannot silently drop the server-owned source items.
         loadedBundleRef.current = bundle;
-        commitData(reloadedData, {
+        commitData(canonicalData, {
           save: false,
           skipHistory: true,
           updateLastSavedSignature: true,
@@ -1792,7 +1848,7 @@ export function useTimelinePersistence({
         });
         setSaveStatus('saved');
       } catch (error) {
-        if (!reloadCancelledRef.current) setSaveStatus('error');
+        if (!reloadCancelledRef.current) failSave(error instanceof Error ? error.message : 'The timeline could not be reloaded.');
         throw error;
       } finally {
         const wasCancelled = reloadCancelledRef.current;
@@ -1962,6 +2018,7 @@ export function useTimelinePersistence({
     flushSaveTarget,
     discardUncommittedSaveTarget,
     saveStatus,
+    saveError,
     isConflictExhausted,
     restoreRetainedConflict,
     schemaIncompatible,
@@ -1974,6 +2031,8 @@ export function useTimelinePersistence({
     watchdogReason,
     retryWatchdog,
     retryPendingSave,
+    clearSaveFailure,
+    noteSaveProgress,
     canonicalReloadInProgressRef: reloadInProgressRef,
     /** Bundle from the last server reload; consumed downstream ([V2-B4]). */
     loadedBundleRef,

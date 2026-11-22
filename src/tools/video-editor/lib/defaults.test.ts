@@ -94,6 +94,20 @@ describe('withDefaultTimelineOutput', () => {
     expect(result.output.background_scale).toBe(1.5);
   });
 
+  it('projects an authored rational frame rate without changing the source output', () => {
+    const authored = {
+      output: { fps: { numerator: 30_000, denominator: 1_001 } },
+      tracks: [{ id: 'V1', kind: 'visual' as const }],
+      clips: [{ id: 'opening', track: 'V1', at: 0, asset: 'image' }],
+    };
+    const before = structuredClone(authored);
+
+    const display = withDefaultTimelineOutput(authored as unknown as Parameters<typeof withDefaultTimelineOutput>[0]);
+
+    expect(display.output).toMatchObject({ resolution: '1280x720', fps: 30_000 / 1_001 });
+    expect(authored).toEqual(before);
+  });
+
   it('preserves zero fps as explicit value', () => {
     const result = withDefaultTimelineOutput({
       output: { fps: 0 },
@@ -235,4 +249,12 @@ describe('withDefaultTimelineOutput', () => {
     expect(result).not.toBe(input);
     expect(result.output).not.toBe(input.output);
   });
+});
+
+it('stamps newly created tracks without treating later placement as legacy', () => {
+  const config = createDefaultTimelineConfig();
+  expect(config.tracks?.map(track => track.app)).toEqual([
+    {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1},
+    {scaleAppliesToPositionedClips: true, clipPlacementVersion: 1},
+  ]);
 });

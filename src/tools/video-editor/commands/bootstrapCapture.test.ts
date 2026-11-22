@@ -2,7 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_OUTPUT, DEFAULT_VIDEO_TRACKS } from '../lib/defaults.ts';
 import { captureBootstrap } from './bootstrapCapture.ts';
 import { copy, freezeJson, type AuthoredBundle } from './clipMovePrimitives.ts';
-import fixture from './fixtures/recipe_m2_app_bootstrap.json';
+import fixture from './fixtures/recipe_m2_app_bootstrap_current.json';
+import historical from './fixtures/recipe_m2_app_bootstrap.json';
+import {readFileSync} from 'node:fs';
+import {createHash} from 'node:crypto';
 
 const defaults = { name: 'Main', slug: 'main', output: DEFAULT_OUTPUT, tracks: DEFAULT_VIDEO_TRACKS };
 const original = fixture.bundle as AuthoredBundle;
@@ -77,4 +80,12 @@ describe('native App bootstrap capture', () => {
     expect(() => captureBootstrap(input, defaults)).toThrow('pristine');
     expect(() => captureBootstrap(original, { ...defaults, output: Infinity })).toThrow('finite JSON');
   });
+});
+
+
+it('retains the historical recipe while refusing unmarked defaults for a new bootstrap', () => {
+  const bytes = readFileSync('src/tools/video-editor/commands/fixtures/recipe_m2_app_bootstrap.json');
+  expect(createHash('sha256').update(bytes).digest('hex')).toBe('930cfd026115229e3fb3a59f36cc1e09334ee2ed0f42068081684b6df6dbb6c9');
+  const tracks = historical.after_bundle.parent.config.tracks;
+  expect(() => captureBootstrap(historical.bundle as AuthoredBundle, {...defaults, tracks})).toThrow('supported authored App defaults');
 });

@@ -2328,6 +2328,86 @@ describe('TimelineEditorShellCore — recovery draft banner', () => {
     expect(retry).not.toHaveBeenCalled();
   });
 });
+describe('TimelineEditorShellCore — the save bar', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    __clearSlotRenderers();
+    __clearRuntimeContext();
+    __deviceClass = 'desktop';
+    __chromeOverrides = {};
+  });
+
+  afterEach(() => {
+    __chromeOverrides = {};
+  });
+
+  it.each([
+    ['refused', 'The Runtime did not accept this change.'],
+    ['waiting', 'The Runtime is not answering. Your changes are kept.'],
+    ['recovered', 'You have unsaved changes.'],
+  ] as const)('shows a %s save with Try again and Discard, wired to the one pair of actions', async (kind, headline) => {
+    const tryAgain = vi.fn();
+    const discardUnsaved = vi.fn();
+    __chromeOverrides = { saveBar: { kind, headline }, tryAgain, discardUnsaved };
+
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+
+    const bar = screen.getByText(headline).closest('[role="alert"]') as HTMLElement;
+    expect(bar.getAttribute('data-save-bar')).toBe(kind);
+    expect(within(bar).getAllByRole('button').map((button) => button.textContent)).toEqual(['Try again', 'Discard']);
+    fireEvent.click(within(bar).getByRole('button', { name: 'Try again' }));
+    expect(tryAgain).toHaveBeenCalledOnce();
+    expect(discardUnsaved).not.toHaveBeenCalled();
+    // Both buttons wait while an action runs, then are usable again.
+    await waitFor(() => expect(within(bar).getByRole('button', { name: 'Discard' })).not.toBeDisabled());
+    fireEvent.click(within(bar).getByRole('button', { name: 'Discard' }));
+    expect(discardUnsaved).toHaveBeenCalledOnce();
+  });
+
+  it('names only the time of day for a recovered draft', () => {
+    const since = '2026-08-11T21:00:00.000Z';
+    __chromeOverrides = { saveBar: { kind: 'recovered', headline: 'You have unsaved changes.', since } };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    const time = new Date(since).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+    expect(screen.getByText(`You have unsaved changes. Since ${time}.`)).toBeTruthy();
+  });
+
+  it('keeps rejection export confirmation and eligible Restore beside an actual save bar', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    __chromeOverrides = {
+      saveBar: { kind: 'refused', headline: 'Rejected by server', action: 'pending' },
+      saveNotice: 'Not saved: invalid request.', permanentSaveRejection: true,
+      copyRejectedSave, reloadFromServer,
+    };
+    const view = render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    await waitFor(() => expect(screen.getByText('Keep a copy of your unsaved change')).toBeInTheDocument());
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    view.unmount();
+
+    const restore = vi.fn();
+    const discard = vi.fn();
+    __chromeOverrides = {
+      saveBar: { kind: 'waiting', headline: 'Save awaiting confirmation', action: 'watchdog' },
+      recoveryDraft: { updatedAt: '2026-11-20T12:00:00.000Z', baseVersion: 5 },
+      recoveryRestoreAllowed: true, retryRecoveredDraft: restore, discardRecoveredDraft: discard,
+    };
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(screen.getByRole('alert')).toHaveTextContent('We kept your unsaved edit.');
+    fireEvent.click(screen.getByRole('button', { name: 'Restore' }));
+    expect(restore).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument();
+  });
+
+  it('shows nothing, and no dialog, when nothing is unsaved', () => {
+    render(<TimelineEditorShellCore timelineId="test-timeline" />);
+    expect(document.querySelector('[data-save-bar]')).toBeNull();
+    expect(screen.queryByRole('alertdialog')).toBeNull();
+  });
+});
+
+
   it('does not snap a live dataItem target back to the timeline placeholder (groken LIVE-1)', () => {
     __liveInspectorTarget.value = {
       kind: 'dataItem' as const,

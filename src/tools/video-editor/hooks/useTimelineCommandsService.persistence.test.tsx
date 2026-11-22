@@ -25,10 +25,6 @@ import { useTimelineSave } from './useTimelineSave.ts';
 
 vi.stubGlobal('indexedDB', createFakeIndexedDB());
 vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({ invalidateReferencedTimelineCache: vi.fn() }));
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
 
 const scope = { realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-1' };
 const head = { revisionId: 'r0', publicationId: 'p0' };

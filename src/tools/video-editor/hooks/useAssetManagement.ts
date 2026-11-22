@@ -9,6 +9,7 @@ import { useVideoEditorRuntime } from '@/tools/video-editor/contexts/VideoEditor
 import {
   previewPreparedMediaCommand,
   type PlacePreparedMediaCommand,
+  type PreparedMediaDiagnostic,
 } from '@/tools/video-editor/commands/media.ts';
 import {
   assertRuntimeMediaImportSize,
@@ -82,6 +83,8 @@ export interface UseAssetManagementResult {
     insertAtTop?: boolean,
     preparedAsset?: TimelineProvisionedAsset,
     removeClipId?: string,
+    /** Told the plain reason when a prepared drop is declined, so the caller can park it instead of losing it. */
+    onDecline?: (message: string) => void,
   ) => boolean;
 }
 
@@ -165,6 +168,19 @@ export function resolveAssetDropTarget({
     ...(plan.snappedTime !== undefined ? { snappedTime: plan.snappedTime } : {}),
   };
 }
+
+/** The plain reason a dropped file was not placed. The headline says what happened; this says why. */
+const DECLINED_DETAIL: Record<string, string> = {
+  'command-schema': 'The drop was not understood.',
+  'provisioned-asset': 'The uploaded file could not be read.',
+  placement: 'It does not fit on that track at that time.',
+  'final-config': 'Adding it would leave the timeline invalid.',
+  missing_timeline: 'The timeline is not loaded yet.',
+  preserved_track_unavailable: 'That track is no longer available.',
+  missing_media_url: 'The file has no address to play from.',
+};
+export const fileNotAddedMessage = (reason: string): string =>
+  `The file was not added to the timeline. ${DECLINED_DETAIL[reason] ?? reason}`;
 
 export function useAssetManagement({
   store,
@@ -266,17 +282,30 @@ export function useAssetManagement({
   }, [getPatchRegistry, prepareGenerationAsset]);
 
   const placePreparedAsset = useCallback((
-    prepared: TimelineProvisionedAsset,
+    preparedInput: TimelineProvisionedAsset,
     trackId: string | undefined,
     time: number,
     forceNewTrack: boolean,
     insertAtTop: boolean,
     removeClipId?: string,
+    onDecline?: (message: string) => void,
   ) => {
+    let prepared = preparedInput;
+    // A drop that cannot be placed must say so: the upload already finished, so a silent `false` leaves
+    // the user with neither a clip nor a reason.
+    // `reason` is the machine-readable cause (logged and sent to telemetry); `message` is the plain text.
+    const decline = (reason: string, message: string = reason) => {
+      console.warn('[video-editor] Dropped file was not added to the timeline', { reason, trackId, time });
+      runtime.telemetry?.warn?.('[video-editor] drop declined', { reason, trackId, time });
+      runtime.toast.error(fileNotAddedMessage(message));
+      onDecline?.(DECLINED_DETAIL[message] ?? message);
+      return false;
+    };
+    const declined = (reason: string) => decline(reason);
     const latestDataRef = getDataRef();
     const current = latestDataRef.current;
     if (!current) {
-      return false;
+      return declined('missing_timeline');
     }
 
     const command = buildPlacePreparedMediaCommand({
@@ -289,8 +318,8 @@ export function useAssetManagement({
       removeClipId,
     });
     if (removeClipId !== undefined && prepared.mediaType === 'image' && prepared.mediaSelection) {
-      const media = prepared.mediaSelection;
-      const existing = current.registry.assets[prepared.assetKey];
+      let media = prepared.mediaSelection;
+      let existing = current.registry.assets[prepared.assetKey];
       const composition = current.config.app?.canonicalComposition as {
         projectId?: string; parentDocumentId?: string; headRevisionId?: string; occurrenceIds?: string[];
       } | undefined;
@@ -302,47 +331,82 @@ export function useAssetManagement({
         || identities.some(identity => identity.projectId !== composition.projectId
           || identity.parentDocumentId !== composition.parentDocumentId || identity.occurrenceId !== composition.occurrenceIds![0])
         || (current.head && (current.head.projectId !== composition.projectId
-          || current.head.timelineId !== composition.parentDocumentId || current.head.headRevisionId !== composition.headRevisionId)))) return false;
+          || current.head.timelineId !== composition.parentDocumentId || current.head.headRevisionId !== composition.headRevisionId)))) return decline('shot-changed', 'The shot changed while the file was uploading.');
+      // Judge only what this edit needs: a usable target track, a valid time, and a well-formed media
+      // selection. Whole-state equality (registry, head, placeholder) is not the edit's business; the
+      // Agent's clip.add-media is the authority on the document itself.
       const tracks = current.tracks.filter(track => track.id === trackId);
-      if (forceNewTrack || insertAtTop || tracks.length !== 1 || tracks[0].kind !== 'visual'
-        || tracks[0].role === 'source' || current.rows.filter(row => row.id === trackId).length !== 1
-        || ['active', 'enabled'].some(key => Reflect.get(tracks[0], key) === false)
-        || ['disabled', 'hidden', 'deleted'].some(key => Reflect.get(tracks[0], key) === true)
-        || (current.head && current.head.projectId !== selectedProjectId)
-        || !Number.isFinite(time) || time < 0 || media.asset !== prepared.assetKey
-        || Object.keys(media).sort().join() !== 'asset,catalog_digest,generation_id,object_id,variant_id'
-        || !media.generation_id || !media.variant_id || !/^sha256:[0-9a-f]{64}$/.test(media.object_id)
-        || !/^sha256:[0-9a-f]{64}$/.test(media.catalog_digest)
-        || prepared.entry.media_id !== media.object_id || prepared.entry.generationId !== media.generation_id
-        || prepared.entry.variantId !== media.variant_id
-        || (existing && canonicalJsonStringify(existing) !== canonicalJsonStringify(prepared.entry))) return false;
-      if (!removeClipId.startsWith('uploading-')
+      if (tracks.length !== 1 || current.rows.filter(row => row.id === trackId).length !== 1) return decline('track-missing', 'preserved_track_unavailable');
+      if (tracks[0].kind !== 'visual' || tracks[0].role === 'source') return decline('track-unsuitable', 'preserved_track_unavailable');
+      if (['active', 'enabled'].some(key => Reflect.get(tracks[0], key) === false)
+        || ['disabled', 'hidden', 'deleted'].some(key => Reflect.get(tracks[0], key) === true)) return decline('track-hidden-or-disabled', 'preserved_track_unavailable');
+      if (!Number.isFinite(time) || time < 0) return decline('time-invalid', 'The drop position is not valid.');
+      // Generation and variant travel together: both ids or neither, and the entry must carry the same pair.
+      if (media.asset !== prepared.assetKey
+        || !/^sha256:[0-9a-f]{64}$/.test(media.object_id) || !/^sha256:[0-9a-f]{64}$/.test(media.catalog_digest)) return decline('media-selection-invalid', 'provisioned-asset');
+      if (Boolean(media.generation_id) !== Boolean(media.variant_id)) return decline('generation-variant-incomplete', 'provisioned-asset');
+      if (prepared.entry.media_id !== media.object_id || prepared.entry.generationId !== (media.generation_id || undefined)
+        || prepared.entry.variantId !== (media.variant_id || undefined)) return decline('media-entry-mismatch', 'provisioned-asset');
+      // The registry key is a name, not an identity. An existing key is reused only when its entry is exactly
+      // what the Agent's clip.add-media writes for this object (media_id, type, and both ids or neither, with
+      // no other fields); the Agent refuses any other binding as dependency_changed. Otherwise take a new key.
+      const exactBinding = (entry: typeof existing) => {
+        if (!entry) return false;
+        const expected: Record<string, unknown> = { media_id: media.object_id, type: 'image' };
+        if (media.generation_id) expected.generationId = media.generation_id;
+        if (media.variant_id) expected.variantId = media.variant_id;
+        // The upload's own entry already in the local registry is this session's earlier drop of the same
+        // file, still queued: its commit writes the exact binding, so the next drop chains onto it.
+        return canonicalJsonStringify(entry) === canonicalJsonStringify(expected)
+          || canonicalJsonStringify(entry) === canonicalJsonStringify(prepared.entry);
+      };
+      if (existing && !exactBinding(existing)) {
+        const suffix = media.object_id.slice('sha256:'.length, 'sha256:'.length + 12);
+        let key = `${prepared.assetKey}-${suffix}`;
+        for (let n = 2; current.registry.assets[key] && !exactBinding(current.registry.assets[key]); n++) key = `${prepared.assetKey}-${suffix}-${n}`;
+        prepared = { ...prepared, assetKey: key, mediaSelection: { ...media, asset: key } };
+        media = prepared.mediaSelection!;
+        existing = current.registry.assets[key];
+      }
+      // Reusing means placing with the entry the registry already holds, so the document write is the identity.
+      const playableEntry = prepared.entry;
+      if (existing) prepared = { ...prepared, entry: existing };
+      // A placeholder that is gone is not a reason to refuse while the track exists: place at the drop time.
+      const row = current.rows.find(candidate => candidate.id === trackId);
+      const placeholderActions = current.rows.flatMap(r => r.actions).filter(action => action.id === removeClipId);
+      const placeholderPresent = placeholderActions.length > 0 || current.meta[removeClipId] !== undefined;
+      if (placeholderPresent && (!removeClipId.startsWith('uploading-')
         || current.config.clips.some(clip => clip.id === removeClipId)
         || !current.meta[removeClipId]?.asset?.startsWith('uploading:')
         || current.meta[removeClipId]?.track !== trackId
-        || current.rows.flatMap(row => row.actions).filter(action => action.id === removeClipId).length !== 1) return false;
+        || placeholderActions.length !== 1
+        || !row?.actions.some(action => action.id === removeClipId))) return decline('placeholder-inconsistent', 'The upload was removed from the timeline while it finished.');
+      const effectiveRemoveClipId = placeholderPresent ? removeClipId : undefined;
+      const command = buildPlacePreparedMediaCommand({ prepared, trackId, selectedTrackId: getSelectedTrackId(), time,
+        forceNewTrack: false, insertAtTop: false, removeClipId: effectiveRemoveClipId });
       // Use the mounted editor's row preview. Whole-config prepared-media
       // validation cannot validate retained opaque or projected child fields.
       // A2 still owns the semantic command, original basis and durable save.
       const local = { ...current,
-        rows: current.rows.map(row => ({ ...row, actions: row.actions.filter(action => action.id !== removeClipId) })) };
+        rows: current.rows.map(row => ({ ...row, actions: row.actions.filter(action => action.id !== effectiveRemoveClipId) })) };
       const target = planAssetDropTarget({ current: local, assetKind: 'visual', trackId,
         selectedTrackId: getSelectedTrackId(), time, duration: 5 });
-      if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) return false;
-      const edit = buildAssetDropEdit({ current: local, assetKey: prepared.assetKey, assetEntry: prepared.entry,
+      if (!target.ok || target.trackId !== trackId || target.preparedCurrent !== local) return declined('placement');
+      const edit = buildAssetDropEdit({ current: local, assetKey: prepared.assetKey, assetEntry: playableEntry,
         trackId: target.trackId, time: target.snappedTime ?? time });
-      if (!edit) return false;
+      if (!edit) return declined('placement');
       getApplyEdit()({ type: 'rows', rows: edit.rows, metaUpdates: edit.metaUpdates,
-        metaDeletes: [removeClipId],
+        metaDeletes: effectiveRemoveClipId ? [effectiveRemoveClipId] : [],
         clipOrderOverride: edit.clipOrderOverride,
         registryOverride: { ...current.registry, assets: { ...current.registry.assets, [prepared.assetKey]: prepared.entry } },
       }, { selectedClipId: edit.clipId, selectedTrackId: target.trackId, semantic: true,
         gestureBasis: { kind: 'prepared-media', config: current.config, registry: current.registry, clipId: edit.clipId, command } });
       return true;
     }
-    const preview = previewPreparedMediaCommand(current, command);
+    let diagnostic: PreparedMediaDiagnostic | undefined;
+    const preview = previewPreparedMediaCommand(current, command, { onFailure: failure => { diagnostic = failure; } });
     if (!preview?.commandResult?.detail) {
-      return false;
+      return declined(diagnostic?.stage ?? 'placement');
     }
     const clipId = typeof preview.commandResult.detail.clipId === 'string'
       ? preview.commandResult.detail.clipId
@@ -351,7 +415,7 @@ export function useAssetManagement({
       ? preview.commandResult.detail.trackId
       : trackId ?? null;
     if (!clipId || !resolvedTrackId) {
-      return false;
+      return declined('placement');
     }
 
     getApplyEdit()({ type: 'prepared-media', command }, {
@@ -360,11 +424,11 @@ export function useAssetManagement({
       semantic: true,
     });
     return true;
-  }, [getApplyEdit, getDataRef, getSelectedTrackId, selectedProjectId]);
+  }, [getApplyEdit, getDataRef, getSelectedTrackId, runtime.toast, selectedProjectId]);
 
-  const handleAssetDrop = useCallback((assetKey: string, trackId: string | undefined, time: number, forceNewTrack = false, insertAtTop = false, preparedAsset?: TimelineProvisionedAsset, removeClipId?: string) => {
+  const handleAssetDrop = useCallback((assetKey: string, trackId: string | undefined, time: number, forceNewTrack = false, insertAtTop = false, preparedAsset?: TimelineProvisionedAsset, removeClipId?: string, onDecline?: (message: string) => void) => {
     if (preparedAsset) {
-      return placePreparedAsset(preparedAsset, trackId, time, forceNewTrack, insertAtTop, removeClipId);
+      return placePreparedAsset(preparedAsset, trackId, time, forceNewTrack, insertAtTop, removeClipId, onDecline);
     }
 
     const latestDataRef = getDataRef();
@@ -388,6 +452,7 @@ export function useAssetManagement({
       duration,
     });
     if (!targetPlan.ok) {
+      runtime.toast.error(fileNotAddedMessage(targetPlan.error));
       return false;
     }
     const resolvedTarget = {
@@ -402,6 +467,7 @@ export function useAssetManagement({
       time: resolvedTarget.snappedTime ?? time,
     });
     if (!nextEdit) {
+      runtime.toast.error(fileNotAddedMessage('placement'));
       return false;
     }
     latestDataRef.current = resolvedTarget.current;

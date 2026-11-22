@@ -1,3 +1,5 @@
+import {newTrackPlacementMarkers} from '@/tools/video-editor/lib/placement-markers.ts';
+import { normalizeClipPlacementWithFindings, type PlacementMigrationFinding } from '@banodoco/timeline-composition';
 import type { TimelineConfig, TrackDefinition } from '@/tools/video-editor/types/index.ts';
 import { resolveTimelineRenderTheme } from '@/tools/video-editor/compositions/installed-themes.ts';
 
@@ -10,6 +12,7 @@ export const DEFAULT_VIDEO_TRACKS: TrackDefinition[] = [
     fit: 'contain',
     opacity: 1,
     blendMode: 'normal',
+    app: newTrackPlacementMarkers(),
   },
   {
     id: 'A1',
@@ -19,6 +22,7 @@ export const DEFAULT_VIDEO_TRACKS: TrackDefinition[] = [
     fit: 'contain',
     opacity: 1,
     blendMode: 'normal',
+    app: newTrackPlacementMarkers(),
   },
 ];
 
@@ -39,8 +43,20 @@ export function createDefaultTimelineConfig(): TimelineConfig {
   return {
     output: { ...DEFAULT_OUTPUT },
     clips: [],
-    tracks: DEFAULT_VIDEO_TRACKS.map((track) => ({ ...track })),
+    tracks: DEFAULT_VIDEO_TRACKS.map((track) => ({ ...track, app: newTrackPlacementMarkers() })),
   };
+}
+
+/** Materialize legacy rational FPS for the editor without changing the authored document. */
+export function withNumericTimelineFps<T extends { output?: Partial<TimelineConfig['output']> }>(config: T): T {
+  const fps: unknown = config.output?.fps;
+  if (fps == null || typeof fps !== 'object') return config;
+  const { numerator, denominator } = fps as { numerator?: unknown; denominator?: unknown };
+  if (typeof numerator !== 'number' || !Number.isSafeInteger(numerator) || numerator <= 0
+    || typeof denominator !== 'number' || !Number.isSafeInteger(denominator) || denominator <= 0) {
+    throw new Error('Timeline property output.fps requires positive integer numerator and denominator');
+  }
+  return { ...config, output: { ...config.output, fps: numerator / denominator } };
 }
 
 /**
@@ -50,7 +66,7 @@ export function createDefaultTimelineConfig(): TimelineConfig {
  *
  * Only absent or null-ish output fields are filled. Existing output values —
  * even empty strings or zero — are left untouched because they represent
- * explicit user choices.
+ * explicit user choices. Legacy rational FPS is projected as a number.
  *
  * Geometry precedence (mirrors Astrid's render contract — Remotion
  * `getCanvas` in Root.tsx and the ffmpeg `_timeline_canvas` both prefer
@@ -65,8 +81,10 @@ export function createDefaultTimelineConfig(): TimelineConfig {
  * (slug or overrides); otherwise nothing changes.
  */
 export function withDefaultTimelineOutput(
-  config: Partial<TimelineConfig> & { output?: Partial<TimelineConfig['output']> },
+  input: Partial<TimelineConfig> & { output?: Partial<TimelineConfig['output']> },
+  onMigration?: (findings: PlacementMigrationFinding[]) => void,
 ): TimelineConfig {
+  let config = withNumericTimelineFps(input);
   const existingOutput = config.output ?? ({} as Partial<TimelineConfig['output']>);
 
   const themeBound = config.theme !== undefined || config.theme_overrides !== undefined;
@@ -81,7 +99,7 @@ export function withDefaultTimelineOutput(
     && typeof themeCanvas.fps === 'number'
   ) ? themeCanvas.fps : undefined;
 
-  const output: TimelineConfig['output'] = {
+  let output: TimelineConfig['output'] = {
     resolution: existingOutput.resolution ?? canvasResolution ?? DEFAULT_OUTPUT.resolution,
     fps: existingOutput.fps ?? canvasFps ?? DEFAULT_OUTPUT.fps,
     file: existingOutput.file ?? DEFAULT_OUTPUT.file,
@@ -90,10 +108,33 @@ export function withDefaultTimelineOutput(
       existingOutput.background_scale !== undefined ? existingOutput.background_scale : DEFAULT_OUTPUT.background_scale,
   };
 
+  // The package materializes an authored canvas, or the exact canvas this
+  // editor historically resolved for a standalone media timeline.
+  if (config.output?.resolution == null) {
+    const tracks = new Map((config.tracks ?? []).map(track => [track.id, track]));
+    const hasVisualMedia = (config.clips ?? []).some(clip => clip.asset
+      && tracks.get(clip.track)?.kind !== 'audio'
+      && (!clip.clipType || ['media', 'image', 'video', 'hold'].includes(clip.clipType)));
+    if (hasVisualMedia || config.theme_overrides?.visual?.canvas !== undefined) {
+      const [width, height] = output.resolution.toLowerCase().split('x').map(Number);
+      const { resolution: _resolution, fps: authoredFps, ...outputFields } = existingOutput;
+      const authoredOutput = config.output == null ? undefined
+        : { ...outputFields, ...(authoredFps == null ? {} : { fps: authoredFps }) };
+      const result = normalizeClipPlacementWithFindings(
+        {...config, output: authoredOutput, clips: config.clips ?? [], tracks: config.tracks ?? []} as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0],
+        hasVisualMedia ? {legacyCanvas: {width, height, fps: output.fps, source: 'app-resolved'}} : undefined,
+      );
+      config = result.config as unknown as typeof config;
+      if (input.tracks === undefined) config = {...config, tracks: undefined};
+      output = {...output, ...config.output};
+      onMigration?.(result.findings);
+    }
+  }
+
   return {
     output,
     clips: config.clips ?? [],
-    tracks: config.tracks ?? DEFAULT_VIDEO_TRACKS.map((track) => ({ ...track })),
+    tracks: config.tracks ?? DEFAULT_VIDEO_TRACKS.map(({app: _newTrackMarkers, ...track}) => ({...track})),
     ...('theme' in config ? { theme: config.theme } : {}),
     ...('theme_overrides' in config ? { theme_overrides: config.theme_overrides } : {}),
     ...('generation_defaults' in config ? { generation_defaults: config.generation_defaults } : {}),

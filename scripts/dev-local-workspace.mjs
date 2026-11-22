@@ -812,6 +812,9 @@ const runtimeProxy = spawnService(process.execPath, ['scripts/runtime-discovery-
   stdio: piped,
   env: serviceEnvironment({ ASTRID_RUNTIME_PROXY_PORT: runtimeProxyPort ?? '0', ASTRID_WORKSPACE_DISCOVERY: discoveryPath }),
 });
+// The launcher points this process's stderr at logs/editor.log; the proxy's errors go there too.
+// Its stdout carries only the port announcement, which `watch` reads.
+runtimeProxy.stderr.pipe(process.stderr, { end: false });
 let announceProxyPort;
 const proxyPortAnnouncement = runtimeProxyPort ? null : new Promise((resolvePort) => { announceProxyPort = resolvePort; });
 const proxyOutput = watch(runtimeProxy, (line) => {

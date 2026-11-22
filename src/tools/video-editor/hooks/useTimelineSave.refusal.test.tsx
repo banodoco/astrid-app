@@ -17,10 +17,6 @@ import { loadTimelineDraft, saveTimelineDraft } from '../data/timelineDraftIndex
 import type { DataProvider } from '../data/DataProvider';
 import type { TimelineConfig } from '../types/index.ts';
 
-vi.mock('@/integrations/runtime/generated-contract-metadata.ts', async (importOriginal) => ({
-  ...await importOriginal<typeof import('@/integrations/runtime/generated-contract-metadata.ts')>(),
-  SCHEMA_DIGEST: 'sha256:9628bb5fd6e1dbbec392dd39f2e01031622dcf52d7ccff7cd1f0ad10743dcb1c',
-}));
 vi.stubGlobal('indexedDB', createFakeIndexedDB());
 vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({
   invalidateReferencedTimelineCache: vi.fn(),
@@ -28,6 +24,15 @@ vi.mock('@/tools/video-editor/compositions/TimelineRenderer.tsx', () => ({
 vi.mock('@/shared/lib/media/videoMetadata.ts', () => ({
   extractVideoMetadata: vi.fn(async () => ({ duration_seconds: 8 })),
 }));
+
+const persistenceOverride = vi.hoisted(() => ({ status: null as null | 'retrying' }));
+vi.mock('./useTimelinePersistence', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./useTimelinePersistence')>();
+  return { ...actual, useTimelinePersistence: (...args: Parameters<typeof actual.useTimelinePersistence>) => {
+    const result = actual.useTimelinePersistence(...args);
+    return persistenceOverride.status ? { ...result, saveStatus: persistenceOverride.status } : result;
+  } };
+});
 
 const TIMELINE = 'timeline-1';
 const head = { projectId: 'project-commit', timelineId: TIMELINE, headRevisionId: 'r0', headPublicationId: 'p0' };
@@ -54,7 +59,7 @@ function applyChanges(payload: Json, changes: Array<{ op: string; path: string[]
   return next;
 }
 
-async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> } = {}) {
+async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void>; failSends?: boolean; gates?: Array<Promise<void>>; waitForOwner?: boolean; canonicalReload?: boolean; basisGate?: Promise<void>; failFirstBasis?: boolean } = {}) {
   const config = createDefaultTimelineConfig();
   const document = acceptedCommit({ revision_id: 'r0', publication_id: 'p0' }, { revision_id: 'r0', publication_id: 'p0' },
     { timelineId: TIMELINE, projectId: 'project-commit' }).data.canonical_document;
@@ -68,6 +73,9 @@ async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> 
   let rejectNext = options.rejectFirstSend;
   const send = vi.fn<NonNullable<DataProvider['commitTimeline']>>(async (request) => {
     if (options.gate) await options.gate;
+    if (options.failSends) throw new TypeError('Failed to fetch');
+    const gateForThisSend = options.gates?.[requests.length];
+    if (gateForThisSend) await gateForThisSend;
     const changes = (request.commands as Array<{ args: { changes: never[] } }>).flatMap((command) => command.args.changes);
     requests.push({ changes });
     if (rejectNext) {
@@ -85,13 +93,15 @@ async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> 
     current = next;
     return { response, accepted: { revisionId, publicationId: `p${counter}` }, canonicalDocument: next, graph: {}, receipt: response.receipt };
   });
+  let failBasis = options.failFirstBasis;
   const provider = {
     persistenceEnabled: true,
-    loadTimeline: vi.fn(async () => ({ config: createDefaultTimelineConfig(), configVersion: 1 })),
+    loadTimeline: vi.fn(async () => options.canonicalReload
+      ? ({ config: data.config, configVersion: 1, head }) : ({ config: createDefaultTimelineConfig(), configVersion: 1 })),
     loadAssetRegistry: vi.fn(async () => ({ assets: {} })),
     saveTimeline: vi.fn(async () => { throw new Error('Legacy save must not be called'); }),
     resolveAssetUrl: vi.fn(async (file: string) => file),
-    loadTimelineCommandBasis: vi.fn(async () => ({ head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document })),
+    loadTimelineCommandBasis: vi.fn(async () => { if (failBasis) { failBasis = false; throw new Error('bootstrap failed'); } await options.basisGate; return { head: { revisionId: 'r0', publicationId: 'p0' }, canonicalDocument: document }; }),
     commitTimeline: send,
     getRecoverableIdentity: vi.fn(async () => ({ actorId: 'actor', realmId: 'realm' })),
   } as unknown as DataProvider;
@@ -107,7 +117,7 @@ async function mount(options: { rejectFirstSend?: boolean; gate?: Promise<void> 
   );
   const hook = renderHook(() => useTimelineSave({ timelineQuery: { data: undefined, isLoading: false }, assetRegistryQuery: { data: undefined } },
     provider, { current: createInteractionState() }, store, data), { wrapper });
-  await vi.waitFor(() => expect(hook.result.current.localSaveState?.ownerId).toBeTruthy());
+  if (options.waitForOwner !== false) await vi.waitFor(() => expect(hook.result.current.localSaveState?.ownerId).toBeTruthy());
   return { hook, send, requests, data, provider };
 }
 
@@ -135,9 +145,37 @@ describe('useTimelineSave refused authoring edits', () => {
     } });
   });
   afterEach(() => {
+    persistenceOverride.status = null;
     vi.restoreAllMocks();
     if (descriptor) Object.defineProperty(navigator, 'locks', descriptor);
     else Reflect.deleteProperty(navigator, 'locks');
+  });
+
+  it('keeps loading during deferred recovery and shows saved over persistence retrying when ready', async () => {
+    let release!: () => void;
+    const basisGate = new Promise<void>((resolve) => { release = resolve; });
+    persistenceOverride.status = 'retrying';
+    const harness = await mount({ waitForOwner: false, basisGate });
+    try {
+      expect(harness.hook.result.current.saveStatus).toBe('loading');
+      await act(async () => { release(); });
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      await vi.waitFor(() => expect(harness.hook.result.current.saveStatus).toBe('saved'));
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('shows error, loading, then ready when bootstrap is restarted', async () => {
+    let release!: () => void;
+    const basisGate = new Promise<void>((resolve) => { release = resolve; });
+    const harness = await mount({ waitForOwner: false, failFirstBasis: true, basisGate });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.saveBar?.action).toBe('restart'));
+      expect(harness.hook.result.current.saveStatus).toBe('error');
+      await act(async () => { await harness.hook.result.current.tryAgain(); });
+      expect(harness.hook.result.current.saveStatus).toBe('loading');
+      await act(async () => { release(); });
+      await vi.waitFor(() => expect(harness.hook.result.current.saveStatus).toBe('saved'));
+    } finally { harness.hook.unmount(); }
   });
 
   it('reverts only the refused edit between two good edits and keeps the refused change out of the recovery slot', async () => {
@@ -449,4 +487,181 @@ describe('useTimelineSave refused authoring edits', () => {
       expect(harness.hook.result.current.localSaveState?.status).toBe('saved');
     } finally { harness.hook.unmount(); }
   });
+  it('a save session that cannot recover an owner held by another tab still offers Discard, and the next edit saves', async () => {
+    // Tab A holds an unsaved, retried save; its owner stays claimed.
+    const tabA = await mount({ failSends: true });
+    try {
+      await author(tabA, (config) => ({ ...config, output: { ...config.output, file: 'held.mp4' } }));
+      await vi.waitFor(() => expect(tabA.hook.result.current.localSaveState?.status).toBe('retry'));
+      // Tab B lists A's owner, cannot claim it, and used to end with a dead bar and a rejected `ready`.
+      const tabB = await mount({ waitForOwner: false, canonicalReload: true });
+      try {
+        await vi.waitFor(() => expect(tabB.hook.result.current.saveBar?.headline)
+          .toBe('This timeline has unsaved changes open in another tab.'));
+        await act(async () => { await tabB.hook.result.current.discardUnsaved(); });
+        await vi.waitFor(() => expect(tabB.hook.result.current.saveBar).toBeNull());
+        expect(tabB.hook.result.current.localSaveState?.status).toBe('saved');
+        await author(tabB, (config) => ({ ...config, output: { ...config.output, file: 'after-discard.mp4' } }));
+        await act(async () => { await tabB.hook.result.current.flushPendingSave(); });
+        expect(tabB.requests.flatMap((request) => request.changes)).toEqual(expect.arrayContaining([
+          expect.objectContaining({ path: ['config', 'output', 'file'], value: 'after-discard.mp4' })]));
+        expect(tabB.hook.result.current.saveBar).toBeNull();
+      } finally { tabB.hook.unmount(); }
+    } finally { tabA.hook.unmount(); }
+  });
+
+  it('two drops, the second made while the first saves, are both saved, and the bar is clear afterwards', async () => {
+    let release1!: () => void;
+    const gate1 = new Promise<void>((resolve) => { release1 = resolve; });
+    const harness = await mount({ gates: [gate1] });
+    try {
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'drop-1.mp4' } }));
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(1));
+      await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 24 } }));
+      act(() => release1());
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'drop-3.mp4' } }));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      expect(harness.requests.flatMap((request) => request.changes)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: ['config', 'output', 'file'], value: 'drop-1.mp4' }),
+        expect.objectContaining({ path: ['config', 'output', 'fps'], value: 24 }),
+        expect.objectContaining({ path: ['config', 'output', 'file'], value: 'drop-3.mp4' }),
+      ]));
+      expect(harness.hook.result.current.saveBar).toBeNull();
+    } finally { harness.hook.unmount(); }
+  });
+
+  const outputOf = (harness: Harness) => harness.hook.result.current.dataRef.current!.config.output as Record<string, unknown>;
+
+  it('an edit made while a later save is sending is kept and saved, and the screen never loses an edit', async () => {
+    let release1!: () => void;
+    let release2!: () => void;
+    const gate1 = new Promise<void>((resolve) => { release1 = resolve; });
+    const gate2 = new Promise<void>((resolve) => { release2 = resolve; });
+    const harness = await mount({ gates: [gate1, gate2] });
+    const toastError = vi.spyOn(sonnerToast, 'error');
+    try {
+      await author(harness, (config) => ({ ...config, output: { ...config.output, file: 'drop-1.mp4' } }));
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(1));
+      await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 24 } }));
+      act(() => release1());
+      // Save 1 is accepted while save 2 is queued, then sends: the screen still shows both edits.
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(2));
+      expect(outputOf(harness)).toMatchObject({ file: 'drop-1.mp4', fps: 24 });
+      await author(harness, (config) => ({ ...config, output: { ...config.output, width: 640 } }));
+      expect(outputOf(harness)).toMatchObject({ file: 'drop-1.mp4', fps: 24, width: 640 });
+      expect(harness.hook.result.current.saveBar).toBeNull();
+      act(() => release2());
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(3));
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      const changes = harness.requests.flatMap((request) => request.changes);
+      expect(changes.map((change) => `${change.path.join('/')}=${String(change.value)}`)).toEqual(expect.arrayContaining([
+        'config/output/file=drop-1.mp4', 'config/output/fps=24', 'config/output/width=640']));
+      expect(harness.hook.result.current.saveBar).toBeNull();
+      expect(toastError).not.toHaveBeenCalled();
+      // After the drain the screen is the server's head, with all three edits in it.
+      expect(outputOf(harness)).toMatchObject({ file: 'drop-1.mp4', fps: 24, width: 640 });
+      expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r3');
+    } finally { harness.hook.unmount(); }
+  });
+
+  it('a burst of ten quick edits across two accepts is saved in order, with nothing undone', async () => {
+    let release1!: () => void;
+    let release2!: () => void;
+    const gate1 = new Promise<void>((resolve) => { release1 = resolve; });
+    const gate2 = new Promise<void>((resolve) => { release2 = resolve; });
+    const harness = await mount({ gates: [gate1, gate2] });
+    const toastError = vi.spyOn(sonnerToast, 'error');
+    const edit = (value: number) => author(harness, (config) => ({ ...config, output: { ...config.output, fps: value } }));
+    try {
+      await edit(21);
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(1));
+      for (const value of [22, 23, 24, 25]) await edit(value);
+      act(() => release1());
+      await vi.waitFor(() => expect(harness.send).toHaveBeenCalledTimes(2));
+      expect(outputOf(harness).fps).toBe(25);
+      for (const value of [26, 27, 28]) await edit(value);
+      act(() => release2());
+      await vi.waitFor(() => expect(harness.send.mock.calls.length).toBeGreaterThanOrEqual(3));
+      for (const value of [29, 30]) await edit(value);
+      expect(outputOf(harness).fps).toBe(30);
+      await vi.waitFor(() => expect(harness.hook.result.current.localSaveState?.status).toBe('saved'));
+      await act(async () => { await harness.hook.result.current.flushPendingSave(); });
+      const fps = harness.requests.flatMap((request) => request.changes)
+        .filter((change) => change.path.join('/') === 'config/output/fps').map((change) => change.value);
+      expect(fps).toEqual([21, 22, 23, 24, 25, 26, 27, 28, 29, 30]);
+      expect(harness.hook.result.current.saveBar).toBeNull();
+      expect(toastError).not.toHaveBeenCalled();
+      expect(outputOf(harness).fps).toBe(30);
+      expect(harness.hook.result.current.dataRef.current?.head?.headRevisionId).toBe('r10');
+    } finally { harness.hook.unmount(); }
+  });
+
+  describe('the save watchdog measures time without progress', () => {
+    afterEach(() => { vi.useRealTimers(); });
+    const deferredGate = () => { let open!: () => void; const gate = new Promise<void>((resolve) => { open = resolve; }); return { gate, open }; };
+    const tick = (ms: number) => act(async () => { await vi.advanceTimersByTimeAsync(ms); });
+
+    it('does not show "not confirmed" for twelve edits accepted three seconds apart (36 s in all)', async () => {
+      const gates = Array.from({ length: 12 }, deferredGate);
+      const harness = await mount({ gates: gates.map((entry) => entry.gate) });
+      vi.useFakeTimers();
+      try {
+        for (let value = 21; value <= 32; value += 1) {
+          await author(harness, (config) => ({ ...config, output: { ...config.output, fps: value } }));
+        }
+        await tick(500);
+        for (const entry of gates) {
+          await tick(3000);
+          expect(harness.hook.result.current.watchdogTripped).toBe(false);
+          await act(async () => { entry.open(); await vi.advanceTimersByTimeAsync(0); });
+        }
+        await tick(100);
+        expect(harness.send.mock.calls.length).toBe(12);
+        expect(harness.hook.result.current.watchdogTripped).toBe(false);
+        expect(harness.hook.result.current.saveBar).toBeNull();
+      } finally { harness.hook.unmount(); }
+    });
+
+    it('still shows it when a save is not accepted for longer than the grace period', async () => {
+      const stuck = deferredGate();
+      const harness = await mount({ gates: [stuck.gate] });
+      vi.useFakeTimers();
+      try {
+        await author(harness, (config) => ({ ...config, output: { ...config.output, fps: 21 } }));
+        await tick(500);
+        await tick(30_000);
+        expect(harness.hook.result.current.watchdogTripped).toBe(false);
+        await tick(2000);
+        expect(harness.hook.result.current.watchdogTripped).toBe(true);
+        expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'waiting', action: 'watchdog' });
+        stuck.open();
+      } finally { harness.hook.unmount(); }
+    });
+  });
+
+  it('says plainly that a recovered draft whose base no longer exists cannot be re-applied, offers only Discard, and Discard clears it', async () => {
+    const seed = await mount();
+    const base = seed.hook.result.current.dataRef.current!;
+    seed.hook.unmount();
+    await saveTimelineDraft(TIMELINE, { config: { ...base.config, output: { ...base.config.output, file: 'recovered.mp4' } },
+      registry: base.registry, bundle: null }, 1, { ownerId: 'old-owner', draftIdentity: 'old-identity',
+      baseHeadRevisionId: 'gone-revision', baseHeadProjectId: 'project-commit', baseHeadTimelineId: TIMELINE });
+    const harness = await mount({ canonicalReload: true });
+    try {
+      await vi.waitFor(() => expect(harness.hook.result.current.saveBar).not.toBeNull());
+      expect(harness.hook.result.current.saveBar).toMatchObject({ kind: 'refused', action: 'none',
+        headline: 'These changes were made on a version that no longer exists.' });
+      // Nothing is sent, and nothing re-applies the draft behind the person's back.
+      await act(async () => { await harness.hook.result.current.tryAgain(); });
+      expect(harness.send).not.toHaveBeenCalled();
+      expect(harness.hook.result.current.saveStatus).not.toBe('error');
+      await act(async () => { await harness.hook.result.current.discardUnsaved(); });
+      await vi.waitFor(() => expect(harness.hook.result.current.saveBar).toBeNull());
+      expect(await loadTimelineDraft(TIMELINE)).toBeNull();
+    } finally { harness.hook.unmount(); }
+  });
+
 });

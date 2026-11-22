@@ -1534,6 +1534,10 @@ export function createShotTimelineDataProvider(
     },
     status: () => localSaveState?.status,
     ownerId: () => localSaveState?.ownerId,
+    async writeRecoveryDraft(write) {
+      const session = await localSaveSessionPromise!.catch(() => undefined);
+      return session ? session.writeRecoveryDraft(write) : write();
+    },
     subscribeState(listener) {
       localSaveListeners.add(listener);
       if (localSaveState) listener(localSaveState);

@@ -26,7 +26,7 @@
  * output) and never judged (R-10). Waits are hang ceilings, not budgets. The ordering of events is made by awaited CLI calls and
  * route holds, never by sleeping.
  */
-import { expect, type Locator, type Page, type Request, type Route } from '@playwright/test';
+import { expect, type BrowserContext, type Locator, type Page, type Request, type Route } from '@playwright/test';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { cpus, loadavg } from 'node:os';
@@ -43,6 +43,7 @@ import { centreCell, gridDifference, letterbox, matches, pictureGrid, MATCH, typ
 import { TokenSniff } from './support/tokenSniff.ts';
 import { assertGate5ResetPrecondition } from './support/gate5-reset-precondition.ts';
 import { classifyGate5FaultOrder, sameGate5CommitIdentity, type Gate5CommitIdentity } from './support/gate5-fault-order.ts';
+import { captureGate5RecoveryMetadata } from './support/gate5-recovery-diagnostic.ts';
 
 /** A hang ceiling for one wait (R-10): many times the usual time, never a budget. */
 const CEILING = { timeout: 90_000 };
@@ -131,6 +132,19 @@ interface BoundedBrowserEvidence {
 }
 
 const browserEvidence = new Map<Page, BoundedBrowserEvidence>();
+const recoveryProbeContexts = new WeakMap<BrowserContext, number>();
+let nextRecoveryProbeContext = 1;
+let recoveryProbePhases: Record<string, unknown> = {};
+
+async function recordGate5Recovery(page: Page, seed: ThreeProductsSeed, phase: string, currentHeadRevisionId?: string) {
+  const { testId, retry, workerIndex } = test.info();
+  const context = page.context();
+  const contextNumber = recoveryProbeContexts.get(context) ?? nextRecoveryProbeContext++;
+  recoveryProbeContexts.set(context, contextNumber);
+  const observedAt = new Date().toISOString();
+  const metadata = await captureGate5RecoveryMetadata(page, { timelineId: seed.timelineId, currentHeadRevisionId });
+  recoveryProbePhases[phase] = { testId, retry, workerIndex, contextNumber, observedAt, metadata };
+}
 
 function captureBoundedBrowserEvidence(page: Page): void {
   const evidence: BoundedBrowserEvidence = { requests: [], responses: [] };
@@ -152,11 +166,19 @@ function captureBoundedBrowserEvidence(page: Page): void {
 
 test.beforeEach(async ({ astrid }) => {
   journey.facts = {};
+  recoveryProbePhases = {};
   browserEvidence.clear();
   journey.caseStart = { at: Date.now(), load: loadavg()[0], calls: astrid.calls.length };
 });
 
 test.afterEach(async ({ astrid, page }, testInfo) => {
+  if (Object.keys(recoveryProbePhases).length) {
+    journey.facts.gate5Recovery = recoveryProbePhases;
+    // Keep the data in the Playwright report even if a later worker replaces the run summary.
+    await testInfo.attach('gate5-recovery-metadata', {
+      body: Buffer.from(JSON.stringify(recoveryProbePhases)), contentType: 'application/json',
+    }).catch(() => {});
+  }
   const evidence = [...browserEvidence.values()];
   if (evidence.length) {
     journey.facts = {
@@ -1410,13 +1432,15 @@ async function ownerWithTwoMountedDocuments(page: Page, seed: ThreeProductsSeed)
   return owner;
 }
 
-async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed, sniff = TokenSniff.attachedTo(page)) {
+async function openCommandTimeline(page: Page, harness: DirectHarness, seed: ThreeProductsSeed,
+  sniff = TokenSniff.attachedTo(page), beforeEditorMount?: () => Promise<void>) {
   // A case selected alone must establish its own verified authoring baseline.
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   // The hosted blank page establishes the storage origin without mounting an
   // editor or claiming an owner, including on an ordinary fresh Playwright page.
   if (sniff) await sniff.navigate(page, () => page.goto(`${harness.origin}/__blank.html`, { waitUntil: 'commit' }));
   else await page.goto(`${harness.origin}/__blank.html`);
+  if (beforeEditorMount) await beforeEditorMount();
   const previous = await commandOutboxes(page, seed.timelineId);
   await openApp(page, harness);
   await expectConnected(page);
@@ -1468,11 +1492,13 @@ async function prepareDependentMountedDocuments(page: Page, harness: DirectHarne
 type CommandWire = Awaited<ReturnType<typeof faultFirstCommit>>;
 
 async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHarness, seed: ThreeProductsSeed,
-  ackLostFirst?: (a: CommitAcceptedMutation, wire: CommandWire) => Promise<void>) {
+  ackLostFirst?: (a: CommitAcceptedMutation, wire: CommandWire) => Promise<void>,
+  beforeFirstDrop?: (revisionId: string) => Promise<void>) {
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed);
   const before = await history(harness, seed);
+  if (beforeFirstDrop) await beforeFirstDrop(before.head.revision_id);
   await dragTimelineClip(page, seed.appClipId, seed.transitionClipId, 0, 5, THREE_PRODUCTS_REFERENCE_AT, () => {
     expect(wire.attempts, 'pointer movement previews; the actual drop commits').toBe(0);
   });
@@ -1688,17 +1714,20 @@ test('M1 real gesture: lost durable ACK, dependent B, reopen, Runtime restart, e
     headA: pinOf(a), headB: pinOf(b), independentC: pinOf(c), originalB: mountedB.changes,
     exactRetry: { method: wire.posts[1].method, path: wire.posts[1].path, key: wire.posts[1].key }, legacySaveCount: wire.legacy.length };
   await sniff.expectClean(reopened, seed3.timelineId);
+  await recordGate5Recovery(reopened, seed3, 'm1-end', finalHistory.head.revision_id);
 });
 
 test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local gesture, exact retry, restart and undo preserve intent', async ({ page, context, harness, astrid, seed3 }) => {
   const sniff = new TokenSniff(secretsOf(harness, astrid));
   await sniff.attach(page);
   let c!: CommitAcceptedMutation;
-  const preconditionOwner = await openCommandTimeline(page, harness, seed3);
+  const preconditionOwner = await openCommandTimeline(page, harness, seed3, sniff,
+    () => recordGate5Recovery(page, seed3, 'gate5-start-before-mount'));
   // The serial M1 case leaves the worker-scoped seed at 5 after its undo and
   // same-value Agent publications. Restore the 0 position needed by the
   // asserted 0→5 precondition gesture through the mounted App when necessary.
   const startingHead = (await history(harness, seed3)).head;
+  await recordGate5Recovery(page, seed3, 'gate5-before-precondition-moves', startingHead.revision_id);
   const startingPosition = ((await revisionBody(harness, startingHead.revision_id)).payload.clips as Array<{ id: string; at: number }>)
     .find((clip) => clip.id === seed3.appClipId)!.at;
   if (startingPosition !== 0) {
@@ -1774,8 +1803,13 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   const resetResponse = page.waitForResponse((response) => response.request().method() === 'POST' && COMMITS.test(new URL(response.url()).pathname), CEILING);
   await dragTimelineClip(page, seed3.appClipId, seed3.transitionClipId, 5, 0, THREE_PRODUCTS_REFERENCE_AT);
   const reset = await resetResponse;
-  expect(reset.status(), await reset.text()).toBe(200);
+  const resetText = await reset.text();
+  expect(reset.status(), resetText).toBe(200);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
+  let resetRevisionId: string | undefined;
+  try { resetRevisionId = (JSON.parse(resetText) as CommitAcceptedMutation).data?.accepted_revision_id; }
+  catch { /* The status assertion already covers the reset result. */ }
+  await recordGate5Recovery(page, seed3, 'gate5-after-precondition-reset', resetRevisionId);
   const { wire, before, a, owner } = await prepareAfterAckLossMountedDocuments(page, harness, seed3, async (acceptedA, commandWire) => {
     c = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(acceptedA),
       { kind: 'track', id: 'f2-gate5-independent-C' }, 'f2-gate5-independent-C');
@@ -1786,7 +1820,7 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
     expect(retryOwnerId).toBeTruthy();
     await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId))
       .find((candidate) => candidate.ownerId === retryOwnerId)?.pending?.outcome?.kind, CEILING).toBe('retry');
-  });
+  }, (revisionId) => recordGate5Recovery(page, seed3, 'gate5-remounted-before-first-drop', revisionId));
   const recordedA = await expectV2History(harness, seed3, wire.posts[0], 'accepted');
   const seedState = await revisionState(harness, seed3, startingHead.revision_id);
   const seededTransition = seedState.parentClips[seed3.transitionClipId].transition;

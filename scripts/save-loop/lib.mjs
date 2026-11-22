@@ -129,7 +129,8 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
       quickBaseline = null; quickMarker = null;
       const measureQuickOpening = async () => {
         const {publicSnapshot} = await import('./assert.mjs');
-        await p.goto(process.env.SAVE_LOOP_BASE_URL, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
+        const projectEndpoint=new URL(`/api/runtime/v1/projects/${encodeURIComponent(fixture.project_id)}`,process.env.SAVE_LOOP_BASE_URL).href;
+        await p.goto(projectEndpoint, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
         quickProject=await startup.read('quick_project',()=>p.evaluate(async projectId=>{
           const response=await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`,{credentials:'same-origin',cache:'no-store'});
           if(!response.ok) throw new Error(`sandbox project read failed (${response.status})`);

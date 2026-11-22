@@ -14,7 +14,7 @@
  */
 import fs from 'fs';
 
-const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE [--broken-probe|--broken-probe-only] [--reduced-opening]';
+const usage = 'Usage: node scripts/save-loop/sweep.mjs --manifest FILE --results FILE --versions FILE [--broken-probe|--broken-probe-only] [--reduced-opening] [--quick]';
 const args = process.argv.slice(2);
 if (args.includes('--help') || args.includes('-h')) { console.log(usage); process.exit(0); }
 function flag(name) {
@@ -25,6 +25,8 @@ function flag(name) {
 }
 const probeOnly = args.includes('--broken-probe-only');
 const reducedOpening = args.includes('--reduced-opening');
+const quick = args.includes('--quick');
+if (quick && !reducedOpening) throw new Error('--quick requires --reduced-opening');
 if (reducedOpening && (probeOnly || args.includes('--broken-probe'))) throw new Error('--reduced-opening cannot be combined with broken probes');
 const manifestPath = flag('--manifest');
 const resultsPath = flag('--results');
@@ -46,9 +48,13 @@ if (!['localhost','127.0.0.1','[::1]'].includes(origin.hostname)) throw new Erro
 const helpers = await import('./lib.mjs');
 const {createRecorder, publicSnapshot} = await import('./assert.mjs');
 const {expectedFixtureIds, sameIds} = await import('./readiness.mjs');
+const quickTools = quick ? await import('./quick.mjs') : null;
 let browser;
-let provisionalSeen=false, probePromise;
-const record = value => fs.appendFileSync(resultsPath, JSON.stringify(value)+'\n');
+let provisionalSeen=false, probePromise, postOpenObservation;
+const record = value => {
+  if (value?.type === 'post_open_blocked') postOpenObservation = value;
+  fs.appendFileSync(resultsPath, JSON.stringify(value)+'\n');
+};
 const round4 = reducedOpening ? await import('./round4.mjs') : null;
 for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
   process.once(signal, async () => {
@@ -133,6 +139,13 @@ try {
       if (names.length!==3 || new Set(names).size!==3) throw new Error('reduced descriptor inventory is incomplete');
       record({type:'reduced_matrix', names, repetitions:3, limitation:'Reduced opening sample; the full 85-scenario matrix remains unfinished.'});
     }
+    if (quick) {
+      descriptors = descriptors.filter(d => d.name === 'video-move-same-track').slice(0, 1);
+      if (descriptors.length !== 1) throw new Error('quick mode needs the fixture video same-track move; empty fixtures require a track-rename descriptor');
+      descriptors[0] = {...descriptors[0], timeoutMs:60000};
+      record({type:'quick_matrix', names:descriptors.map(d => d.name), repetitions:1, limitation:'One measured quiet-phase move. The immediate arm is recorded as unobserved because the safeguarded public-head/read gate precedes gestures.'});
+      record({type:'quick_arm_limit', immediate_save:{observed:false, reason:'The safeguarded reduced-opening flow requires public-head corroboration and a warm reload before gestures; this run does not label its later gesture as immediate.'}, quiet_save:{planned:true, limitation:'The gesture runs only after the existing read gate and warm opening.'}});
+    }
   }
   if (args.includes('--broken-probe') || probeOnly) descriptors.push({
     name:'deliberately broken no-op probe', expected:'saved', timeoutMs:1000,
@@ -145,7 +158,7 @@ try {
       throw new Error(`invalid scenario descriptor or missing cleanup: ${descriptor?.name || '<unnamed>'}`);
     }
     const measurements = [];
-    for (let iteration=1; iteration<=3; iteration++) {
+    for (let iteration=1; iteration<=(quick ? 1 : 3); iteration++) {
       let row;
       const scenarioStart=cpu?.mark();
       try {
@@ -178,15 +191,30 @@ try {
     }
     if (descriptor.expected === 'saved') {
       const durations = measurements.map(row => row.ms);
-      const valid = durations.length === 3 && durations.every(Number.isFinite);
+      const valid = durations.length === (quick ? 1 : 3) && durations.every(Number.isFinite);
       const sorted = [...durations].sort((a,b)=>a-b);
-      const timingPass = valid && sorted[1] <= 2000 && sorted[2] <= 4000;
-      const summary = {type:'scenario_summary', name:descriptor.name, durations_ms:durations, median_ms:valid ? sorted[1] : null, timing_pass:timingPass};
+      const timingPass = quick ? valid && durations[0] <= 10000
+        : valid && sorted[1] <= 2000 && sorted[2] <= 4000;
+      const summary = {type:'scenario_summary', name:descriptor.name, durations_ms:durations, median_ms:valid ? (quick ? sorted[0] : sorted[1]) : null, timing_pass:timingPass};
       fs.appendFileSync(resultsPath, JSON.stringify(summary) + '\n');
       if (!timingPass) failed = true;
     }
   }
   if (typeof recorder.finish === 'function') await recorder.finish();
+  if (quick && opening) {
+    const usable = opening.first_usable_ms == null ? null : opening.first_usable_ms / 1000;
+    const move = rows.find(row => row.name === 'video-move-same-track');
+    const size = fixture.measurement?.clip_count ?? fixture.clips?.count ?? null;
+    const row = quickTools.quickIndicatorRow({
+      size, label:fixture.variant === 'v30' || fixture.measurement?.label === 'heavy seed history, worst case' ? 'heavy seed history, worst case' : `${size ?? 'unknown'} clips`,
+      usableSeconds:usable,
+      blockedSeconds:postOpenObservation?.post_open_blocked_s ?? null,
+      immediateSave:{reason:'Not attempted: safe pre-open baseline unavailable under the read-gated procedure.'},
+      quietSave:move?.pass === true && Number.isFinite(move.ms) ? move.ms / 1000 : move?.reason ? {refused:/refus|not saved|error/i.test(move.reason), reason:move.reason} : null,
+    });
+    record(row);
+    console.log('\nPlan 77 quick indicator (single fixture invocation)\n' + quickTools.formatQuickTable([row]));
+  }
 } catch (error) {
   failed = true;
   console.error(`save-loop: ${error.message}`);

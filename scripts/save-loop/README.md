@@ -1,5 +1,28 @@
 # Synthetic save-loop sweep
 
+## Plan 77 quick indicator
+
+For one nonempty synthetic fixture, add `--reduced-opening --quick` to the
+direct `sweep.mjs` invocation. It writes a JSONL `quick_indicator` row to the
+results file and prints a compact table. The current guarded route measures
+the same-track move only after public-head corroboration, a warm reload and
+the cheap-read gate; it records the post-open immediate-save arm as
+`unobserved` instead of treating that delayed move as immediate. Empty fixture
+track-rename gestures are not yet supported by this quick mode.
+
+Usable is works through 5 s, slow through 15 s, then broken. Save is works
+through 2 s, slow through 10 s, then broken; a refusal is broken and no Saved
+within 60 s is broken. Blocked time is works through 2 s, slow through 30 s,
+then broken. Missing evidence is `unobserved`, never a pass. Read the rough
+lights rather than decimals: this runs on a shared 4-CPU Linux dev stack, one
+stack at a time, and is an indicator rather than a product qualification.
+
+The result categories help distinguish a general problem (red even when
+empty), a size/history problem (small green and large red), a save-path problem
+(open green and save red), and Runtime startup work (first save red, later
+save green). A red large v30 row alone does not show whether the seed history
+or clip count caused the result; its label is `heavy seed history, worst case`.
+
 Use a clean committed App checkout on Linux containing the fixture builder and
 the pinned install manifest and Runtime lock. The tooling has only been
 qualified on Linux; Darwin code paths are not a macOS qualification. Install

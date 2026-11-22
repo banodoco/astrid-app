@@ -561,13 +561,14 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await openSeededTimeline(page, harness);
   const recovered = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
   await expect(recovered).toBeVisible(CEILING);
-  await expect(recovered.getByRole('button', { name: 'Save them' })).toBeEnabled();
+  // REVIEW (#334, #345): R13 showed 'Save them' for this refused save; R14 uses 'Try again'.
+  await expect(recovered.getByRole('button', { name: 'Try again' })).toBeEnabled();
   expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   const postsBeforeRecoveryRetry = posts.length;
-  await recovered.getByRole('button', { name: 'Save them' }).click();
+  await recovered.getByRole('button', { name: 'Try again' }).click();
   await expect(conflict).toBeVisible(CEILING);
   await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(kept);

@@ -72,7 +72,7 @@ export function assertHostSharedModules(
 }
 
 /** Reads one Runtime-served file and returns its bytes only when they hash to the digest the Runtime named. */
-export async function fetchVerifiedBytes(url: string, digest: string, signal: AbortSignal, label: string): Promise<Uint8Array> {
+export async function fetchVerifiedBytes(url: string, digest: string, signal: AbortSignal, label: string): Promise<Uint8Array<ArrayBuffer>> {
   const response = await fetch(url, { cache: 'no-store', credentials: 'same-origin', signal });
   if (!response.ok || response.redirected) throw new Error(`${label} could not be read from the Runtime.`);
   const bytes = new Uint8Array(await response.arrayBuffer());

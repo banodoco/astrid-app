@@ -1,5 +1,6 @@
 import { toast } from '@/shared/components/ui/runtime/sonner.tsx';
 import { invalidateDraftReload, recordDraftReloadFailure } from '@/shared/lib/updates/draftSafeReload.ts';
+import type { OutboxScope } from '../commands/commitOutbox.ts';
 import { persistedTranscriptItems } from '../data/typed/projectTranscript.ts';
 import { useCallback, useContext, useEffect, useRef, useState, type MutableRefObject } from 'react';
 import { useMutation } from '@tanstack/react-query';
@@ -1127,24 +1128,27 @@ export function useTimelinePersistence({
   const writeRecoverySnapshot = useCallback((snapshot: ReturnType<typeof buildRecoverySnapshot>) => {
     const { draft, draftBaseVersion, recoveryMetadata, draftOwnerId, draftIdentity, baseHead: head } = snapshot;
     snapshot.session.recoveryWrites = (snapshot.session.recoveryWrites ?? 0) + 1;
+    const previousWrite = draftWriteChainRef.current;
+    const write = async (outboxOwnerId?: string, outboxScope?: OutboxScope) => {
+      await previousWrite.catch(() => {});
+      if (typeof indexedDB === 'undefined') throw new Error('Durable timeline storage is unavailable.');
+      await saveTimelineDraft(timelineId, draft, draftBaseVersion, {
+        ...recoveryMetadata,
+        ...(provider.saveTimelineAtHead ? {
+          baseHeadRevisionId: head?.headRevisionId,
+          baseHeadProjectId: head?.projectId,
+          baseHeadTimelineId: head?.timelineId,
+        } : {}),
+        ownerId: draftOwnerId,
+        outboxOwnerId,
+        outboxScope,
+        draftIdentity,
+      });
+    };
+    // Hold the outbox owner even if this write is still waiting for an older
+    // snapshot when the editor closes.
     const draftWrite = (persistenceEnabled
-      ? draftWriteChainRef.current
-        .catch(() => {})
-        .then(() => {
-          if (typeof indexedDB === 'undefined') throw new Error('Durable timeline storage is unavailable.');
-          const write = (outboxOwnerId?: string) => saveTimelineDraft(timelineId, draft, draftBaseVersion, {
-            ...recoveryMetadata,
-            ...(provider.saveTimelineAtHead ? {
-              baseHeadRevisionId: head?.headRevisionId,
-              baseHeadProjectId: head?.projectId,
-              baseHeadTimelineId: head?.timelineId,
-            } : {}),
-            ownerId: draftOwnerId,
-            outboxOwnerId,
-            draftIdentity,
-          });
-          return snapshot.session.localDocumentSave?.writeRecoveryDraft?.(write) ?? write();
-        })
+      ? snapshot.session.localDocumentSave?.writeRecoveryDraft?.(write) ?? write()
       : Promise.resolve()).then(() => { snapshot.session.storageFailure = undefined; }, (error: unknown) => {
         snapshot.session.storageFailure = error;
         recordDraftReloadFailure();
@@ -1170,7 +1174,7 @@ export function useTimelinePersistence({
       try {
         localCapture = session.localDocumentSave.capture({
           ...snapshot.draft, bundle: snapshot.wireBundle, head: snapshot.baseHead,
-        }, gestureBasis);
+        }, gestureBasis, snapshot.draftOwnerId);
       } catch (error) { localCapture = Promise.reject(error); }
       // An edit can be reverted only to the screen state it was authored on;
       // consume that state so a later unrelated schedule cannot reuse it. The

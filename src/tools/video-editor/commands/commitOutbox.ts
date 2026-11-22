@@ -22,6 +22,8 @@ export interface OutboxIntent {
   payload: OutboxJson;
   readyBase?: OutboxHead;
   conflict?: OutboxJson;
+  /** Identity of the browser recovery snapshot for this edit, kept off the wire. */
+  draftOwnerId?: string;
 }
 
 export interface OutboxRequest {
@@ -80,6 +82,8 @@ export interface OutboxRecord {
   // Only the last acknowledged prefix, also usable by a late dependent append.
   accepted?: OutboxAcceptance & { creation?: { payload: OutboxJson; request: OutboxRequest };
   };
+  /** Tombstones for exact recovery snapshots, retained with this owner row. */
+  acknowledgedDraftOwnerIds?: string[];
   placementContinuations?: OutboxPlacementContinuation[];
   // Keep the original init link when later acknowledgements replace accepted.
   initialization?: { intent: OutboxIntent; request: OutboxRequest; head: OutboxHead; value: OutboxJson };
@@ -98,7 +102,7 @@ export interface ClaimedOutbox {
   /** Remove only this exact claimed snapshot; stale claims or changed bytes are retained. */
   discard(snapshot: OutboxRecord, isCurrent?: () => boolean): Promise<void>;
   reserveCreate(payload: OutboxJson, request: OutboxRequest): Promise<string>;
-  append(payload: OutboxJson, basis: OutboxBasis): Promise<string>;
+  append(payload: OutboxJson, basis: OutboxBasis, draftOwnerId?: string): Promise<string>;
   cancel(intentId: string): Promise<void>;
   resolveRejected(intentIds: string[], replacement?: { payload: OutboxJson; head: OutboxHead }, isCurrent?: () => boolean): Promise<OutboxRecord>;
   /** Re-queue a rejected prefix and its dependants unchanged, to be resent on `head` with a fresh request identity. */
@@ -147,9 +151,10 @@ export function toOutboxJson(value: unknown): OutboxJson {
   return detached(value) as OutboxJson;
 }
 
-function newIntent(payload: OutboxJson, basis: OutboxBasis): OutboxIntent {
+function newIntent(payload: OutboxJson, basis: OutboxBasis, draftOwnerId?: string): OutboxIntent {
   return detached({ id: crypto.randomUUID(), payload, basis,
-    ...('head' in basis ? { readyBase: basis.head } : {}) });
+    ...('head' in basis ? { readyBase: basis.head } : {}),
+    ...(draftOwnerId === undefined ? {} : { draftOwnerId }) });
 }
 
 function scopeKey(scope: OutboxScope, ownerId: string): string {
@@ -381,9 +386,9 @@ export function createCommitOutbox(options: {
             return intent.id;
           });
         },
-        async append(payload, basis) {
+        async append(payload, basis, draftOwnerId) {
           if ('create' in basis) throw new Error('Creation requires an exact reserved request');
-          const intent = newIntent(payload, basis);
+          const intent = newIntent(payload, basis, draftOwnerId);
           return access('readwrite', (record) => {
             const predecessor = record.intents[record.intents.length - 1];
             let readyBase = 'head' in intent.basis ? intent.basis.head : undefined;
@@ -584,6 +589,9 @@ export function createCommitOutbox(options: {
                 const intent = record.intents[0];
                 record.accepted = { intentId: pending.intentId, head: outcome.head, value: outcome.value,
                   ...('create' in intent.basis ? { creation: { payload: intent.payload, request: pending.request } } : {}) };
+                if (intent.draftOwnerId !== undefined) {
+                  (record.acknowledgedDraftOwnerIds ??= []).push(intent.draftOwnerId);
+                }
                 for (const continuation of record.placementContinuations ?? []) {
                   if (continuation.placement?.intentId === pending.intentId) continuation.placement.accepted = record.accepted;
                 }
@@ -629,6 +637,19 @@ export function createCommitOutbox(options: {
   return {
     list,
     prune,
+    async hasAcknowledgedDraft(scope: OutboxScope, outboxOwnerId: string, draftOwnerId: string) {
+      const key = scopeKey(scope, outboxOwnerId);
+      return transaction<boolean>('readonly', (store, finish) => {
+        const request = store.get(key);
+        request.addEventListener('success', () => {
+          const record = request.result as OutboxRecord | undefined;
+          finish(record?.scope?.realmId === scope.realmId && record.scope.actorId === scope.actorId
+            && record.scope.projectId === scope.projectId && record.scope.timelineId === scope.timelineId
+            && Array.isArray(record.acknowledgedDraftOwnerIds)
+            && record.acknowledgedDraftOwnerIds.includes(draftOwnerId));
+        });
+      });
+    },
     create: <T>(scope: OutboxScope, work: (outbox: ClaimedOutbox, ownerId: string) => Promise<T>) =>
       own(scope, crypto.randomUUID(), true, work),
     recover: <T>(scope: OutboxScope, ownerId: string, work: (outbox: ClaimedOutbox) => Promise<T>) =>

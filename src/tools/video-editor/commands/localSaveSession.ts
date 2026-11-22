@@ -444,7 +444,7 @@ export async function createLocalSaveSession(options: Options) {
   if (owners.length && !options.skipRetainedOwners) publish('recovery');
   else await claim();
 
-  function append(input: LocalSave, documentIntent?: OutboxJson): Promise<void> {
+  function append(input: LocalSave, documentIntent?: OutboxJson, draftOwnerId?: string): Promise<void> {
     assertOpen();
     if (discarding || changingOwner) throw new LocalSaveDeclined('Wait for the saved timeline to reload before editing again');
     // A displayed permanently refused chain can accept dependent edits without retrying it.
@@ -470,7 +470,7 @@ export async function createLocalSaveSession(options: Options) {
       }
       // No read-back here: it re-transfers the whole record (every queued document) once per edit, and pump reads
       // the record itself before anything is sent.
-      await box!.append(toOutboxJson(save), authoredBasis);
+      await box!.append(toOutboxJson(save), authoredBasis, draftOwnerId);
     });
     writes = write.catch((error) => {
       writeError = error;
@@ -494,26 +494,26 @@ export async function createLocalSaveSession(options: Options) {
       && same(document, saveOf(record.intents[0].payload).after),
     ),
     /** Hold the owner's claim through any draft write that records its ID. */
-    async writeRecoveryDraft(write: (ownerId?: string) => Promise<void>) {
+    async writeRecoveryDraft(write: (ownerId?: string, scope?: OutboxScope) => Promise<void>) {
       const ownerId = !closed && !discarding && !changingOwner && box ? state.ownerId : undefined;
       if (!ownerId) return write();
-      const task = write(ownerId);
+      const task = write(ownerId, options.scope);
       recoveryWrites.add(task);
       try { await task; }
       finally { recoveryWrites.delete(task); }
     },
     /** Verified physical images with locally authored payloads; still an unsent intent. */
-    appendDocument(input: Omit<Parameters<typeof documentPatchIntent>[0], 'basis'>): Promise<void> {
+    appendDocument(input: Omit<Parameters<typeof documentPatchIntent>[0], 'basis'>, draftOwnerId?: string): Promise<void> {
       assertOpen();
       // Validate before changing the local chain. The durable predecessor is
       // filled by append's serialized write, never by a refreshed head read.
       const intent = documentPatchIntent({ ...input, basis: { head: displayBasis.head } });
       if (!same(toOutboxJson(input.before), document)) throw new Error('Local save must follow the actual authored local document');
       if (!intent) return Promise.resolve();
-      return append({ before: toOutboxJson(input.before), after: toOutboxJson(input.after), label: input.label }, intent);
+      return append({ before: toOutboxJson(input.before), after: toOutboxJson(input.after), label: input.label }, intent, draftOwnerId);
     },
     /** Capture synchronously before another local edit; persist every intent before submitting. */
-    append: (input: LocalSave) => append(input),
+    append: (input: LocalSave, draftOwnerId?: string) => append(input, undefined, draftOwnerId),
     async flush() {
       assertOpen();
       await pump();

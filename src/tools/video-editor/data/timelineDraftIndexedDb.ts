@@ -9,6 +9,7 @@
  */
 
 import type { TimelineHeadRevision } from '@/tools/video-editor/data/DataProvider.ts';
+import { createCommitOutbox, type OutboxScope } from '../commands/commitOutbox.ts';
 
 const DATABASE_NAME = 'astrid.timeline-drafts';
 const DATABASE_VERSION = 1;
@@ -28,6 +29,7 @@ export interface TimelineDraftRecord {
   ownerId?: string;
   /** Durable local save owner, when the draft mirrors an outbox. */
   outboxOwnerId?: string;
+  outboxScope?: OutboxScope;
   updatedAt: string;
   baseHeadRevisionId?: string | null;
   /** Scope evidence for immutable-head recovery; legacy unscoped heads are untrusted. */
@@ -44,6 +46,7 @@ export interface TimelineDraftRecoveryMetadata {
   ownerId?: string;
   /** Durable local save owner, when the draft mirrors an outbox. */
   outboxOwnerId?: string;
+  outboxScope?: OutboxScope;
   baseHeadRevisionId?: string | null;
   baseHeadProjectId?: string;
   baseHeadTimelineId?: string;
@@ -137,6 +140,7 @@ function createDraftRecord(
     updatedAt: new Date().toISOString(),
     ...(recoveryMetadata.ownerId === undefined ? {} : { ownerId: recoveryMetadata.ownerId }),
     ...(recoveryMetadata.outboxOwnerId === undefined ? {} : { outboxOwnerId: recoveryMetadata.outboxOwnerId }),
+    ...(recoveryMetadata.outboxScope === undefined ? {} : { outboxScope: recoveryMetadata.outboxScope }),
     ...(recoveryMetadata.baseHeadRevisionId !== undefined
       ? { baseHeadRevisionId: recoveryMetadata.baseHeadRevisionId }
       : {}),
@@ -220,7 +224,7 @@ export async function saveTimelineDraft(
   database.close();
 }
 
-export async function loadTimelineDraft(
+async function readTimelineDraft(
   timelineId: string,
 ): Promise<TimelineDraftRecord | null> {
   if (typeof indexedDB === 'undefined') {
@@ -235,6 +239,20 @@ export async function loadTimelineDraft(
   });
   database.close();
   return record ?? null;
+}
+
+export async function loadTimelineDraft(recoveryKey: string): Promise<TimelineDraftRecord | null> {
+  let record = await readTimelineDraft(recoveryKey);
+  while (record?.ownerId && record.outboxOwnerId && record.outboxScope
+    && await createCommitOutbox()
+      .hasAcknowledgedDraft(record.outboxScope, record.outboxOwnerId, record.ownerId)
+      .catch(() => false)) {
+    // The outbox acknowledged this exact edit. A concurrent writer can
+    // replace the slot, so offer its snapshot if the comparison fails.
+    if (await clearTimelineDraftIfSnapshotMatches(recoveryKey, record)) return null;
+    record = await readTimelineDraft(recoveryKey);
+  }
+  return record;
 }
 
 /** An outbox owner may be referenced by either an editor or an occurrence's recovery key. */

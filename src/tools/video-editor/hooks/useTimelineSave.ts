@@ -181,7 +181,7 @@ export function useTimelineSave(
   // Stable from the first render: a gesture during assembly cannot fall through
   // to the old snapshot writer while the verified original is being loaded.
   const localDocumentSave = useMemo<TimelineLocalSaveHandoff | undefined>(() => usesLocalDocumentSave ? {
-    async capture(source, gestureBasis) {
+    async capture(source, gestureBasis, draftOwnerId) {
       emitTimelineSaveDiagnostic('capture-called', () => ({ owner: localOwner, timelineId: localOwner.timelineId,
         source, gesture: gestureBasis,
         clipId: gestureBasis && 'clipId' in gestureBasis ? gestureBasis.clipId : undefined,
@@ -192,7 +192,7 @@ export function useTimelineSave(
         if (localOwner.closed || !localOwner.ready) throw markTimelineSaveRejection(new TimelineSaveError('Original local save session is unavailable; draft retained'), 'capture-owner-unavailable', 'TimelineSaveError');
         const handoff = await localOwner.ready;
         if (localOwner.closed) throw markTimelineSaveRejection(new TimelineSaveError('Local save session was replaced; draft retained'), 'capture-owner-replaced', 'TimelineSaveError');
-        await handoff.capture(original, originalReads);
+        await handoff.capture(original, originalReads, draftOwnerId);
         emitTimelineSaveDiagnostic('capture-resolved', () => ({ owner: localOwner, timelineId: localOwner.timelineId,
           source: original, gesture: originalReads,
           generation: localOwner.generation, closed: localOwner.closed, sessionPresent: Boolean(localOwner.session) }));

@@ -659,4 +659,39 @@ describe('useTimelineSave recovered Retry/Discard with real persistence', () => 
     expect(await loadTimelineDraft(recoveryKey)).toEqual(newerSnapshot);
     hook.unmount();
   });
+
+  it('continues to offer an unsaved draft after reload', async () => {
+    const { hook } = await mountRecoveryEditor();
+    await waitFor(() => expect(hook.result.current.recoveryDraft).not.toBeNull());
+    await act(async () => { await hook.result.current.reloadFromServer({ preserveDraft: true }); });
+    hook.unmount();
+
+    const reopened = await mountRecoveryEditor({ seedRecovery: false });
+    await waitFor(() => expect(reopened.hook.result.current.recoveryDraft).toMatchObject({ baseVersion: 5 }));
+    expect(reopened.hook.result.current.saveBar).toMatchObject({ kind: 'recovered', action: 'draft' });
+    expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
+    reopened.hook.unmount();
+  });
+
+  it('continues to offer a retryable refused save after reload with Retry available', async () => {
+    const saveTimeline = vi.fn().mockRejectedValue(new Error('bridge temporarily unavailable'));
+    const { hook, provider } = await mountRecoveryEditor({ seedRecovery: false, saveTimeline });
+    const draft = await buildTimelineData(timelineConfig('refused-retryable-save'), registry, provider.resolveAssetUrl, 12);
+    await act(async () => { hook.result.current.commitData(draft, { save: true }); });
+    await expect(act(async () => { await hook.result.current.flushPendingSave(); })).rejects.toThrow();
+    expect(saveTimeline).toHaveBeenCalledTimes(1);
+    expect(await loadTimelineDraft(recoveryKey)).not.toBeNull();
+
+    await act(async () => { await hook.result.current.reloadFromServer({ preserveDraft: true }); });
+    hook.unmount();
+    const reopened = await mountRecoveryEditor({ seedRecovery: false });
+    await waitFor(() => expect(reopened.hook.result.current.recoveryDraft).not.toBeNull());
+    expect(reopened.hook.result.current.recoveryDraft?.retryAllowed).toBe(true);
+    expect(reopened.hook.result.current.saveBar).toMatchObject({ kind: 'recovered', action: 'draft' });
+    vi.useFakeTimers();
+    await act(async () => { await reopened.hook.result.current.tryAgain(); });
+    await advance(600);
+    expect(reopened.provider.saveTimeline).toHaveBeenCalledTimes(1);
+    reopened.hook.unmount();
+  });
 });

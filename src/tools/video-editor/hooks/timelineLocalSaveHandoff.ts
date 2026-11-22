@@ -34,7 +34,7 @@ export type TimelineGestureReadBasis = {
 
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
-  capture(source: TimelineSaveSource, gestureBasis?: TimelineGestureReadBasis): Promise<void>;
+  capture(source: TimelineSaveSource, gestureBasis?: TimelineGestureReadBasis, draftOwnerId?: string): Promise<void>;
   flush(): Promise<TimelineSaveReceipt>;
   /** The durable local save session's state, when the owner has one. */
   status?(): string | undefined;
@@ -496,7 +496,7 @@ export function createTimelineLocalSaveHandoff(options: {
     return baseline;
   }
   const handoff: TimelineLocalSaveHandoff = {
-    capture(input, gestureBasis) {
+    capture(input, gestureBasis, draftOwnerId) {
       try {
         const next = structuredClone(input);
         checkHead(initial, source, 'capture-source-head-unavailable');
@@ -974,7 +974,7 @@ export function createTimelineLocalSaveHandoff(options: {
         const pending = commands && firstCommand ? options.session.append({ before: toOutboxJson(before), after: toOutboxJson(after),
           label: mediaLabel, commands: [firstCommand, ...commands.slice(1)],
           ...(mediaReads && mediaSteps ? { reads: mediaReads, steps: mediaSteps,
-            rationale: mediaSteps[0].intent, group_id: mediaSteps[0].id } : {}) }) : options.session.appendDocument({ before, after,
+            rationale: mediaSteps[0].intent, group_id: mediaSteps[0].id } : {}) }, draftOwnerId) : options.session.appendDocument({ before, after,
           roots: [{ ref: 'parent', revisionId: before.parent_revision.revision_id, contentDigest: before.parent_revision.content_digest }],
           ...(reads === undefined ? (appearanceChanged ? { merge: 'atomic' as const } : {}) : { reads, merge: gestureBasis?.kind === 'element' ? 'atomic' as const : 'fields' as const }),
           label: 'Edit timeline', step: { id: crypto.randomUUID(), label: 'Edit timeline', intent: gestureBasis ? (gestureBasis.kind === 'split'
@@ -982,7 +982,7 @@ export function createTimelineLocalSaveHandoff(options: {
             : gestureBasis.kind === 'move' ? `Move ${gestureBasis.clipId} on ${gestureBasis.trackId}`
               : gestureBasis.kind === 'transition-clear' ? `Clear transitions: ${gestureBasis.clipIds.join(', ')}`
               : gestureBasis.kind === 'trim' ? `Trim ${gestureBasis.clipId}: ${canonicalJsonStringify(gestureBasis.patch)}`
-                : gestureBasis.kind === 'element' ? gestureBasis.operation.name : 'Add media') : 'Save local editor changes', tags: [], ...(gestureBasis?.kind === 'element' || parentGesture ? { reads } : {}) } });
+                : gestureBasis.kind === 'element' ? gestureBasis.operation.name : 'Add media') : 'Save local editor changes', tags: [], ...(gestureBasis?.kind === 'element' || parentGesture ? { reads } : {}) } }, draftOwnerId);
         source = { ...next,
           config: changes(source.config, source.config, next.config, ['config'], gestureBasis?.kind === 'element') as TimelineConfig,
           registry: changes(source.registry, source.registry, next.registry, ['registry']) as AssetRegistry,

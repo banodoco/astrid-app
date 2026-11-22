@@ -3792,8 +3792,10 @@ test('empty bootstrap: creating the first timeline in a fresh project then dropp
   expect(tracks).toEqual([
     { id: 'V1', kind: 'visual', label: 'V1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
     { id: 'A1', kind: 'audio', label: 'A1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
-    { id: 'V2', kind: 'visual', label: 'V2', app: { scaleAppliesToPositionedClips: true } },
+    { id: 'V2', kind: 'visual', label: 'V2', app: { scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 } },
   ]);
+  expect(tracks[0]).not.toHaveProperty('app.clipPlacementVersion');
+  expect(tracks[1]).not.toHaveProperty('app.clipPlacementVersion');
 
   const assets = payload.registry?.assets ?? payload.config?.registry?.assets;
   const asset = assets?.[clip.asset];

@@ -1,46 +1,63 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { hasPendingPublicAstridPageTransition, waitForPublicAstridPageTransitions } from '../publicAstridNavigation';
 import planetStill from './planet-still.png';
 
-/**
- * Owns the planet renderer's canvas and keeps the engine outside the route's
- * initial module graph. A still presentation can keep the same stage without
- * requesting Three or the engine chunk.
- */
 type EngineModule = typeof import('./planetEngine');
 const loadPlanetEngine = () => import('./planetEngine');
 
-export function PublicAstridPlanet({ live, fixedPose = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('planet-test-pose') === 'fixed', loadEngine = loadPlanetEngine }: { live: boolean; fixedPose?: boolean; loadEngine?: () => Promise<EngineModule> }) {
+/** Own a separate canvas and defer the live scene until the page can paint. */
+export function PublicAstridPlanet({ live, contentReady = true, fixedPose = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('planet-test-pose') === 'fixed', loadEngine = loadPlanetEngine }: { live: boolean; contentReady?: boolean; fixedPose?: boolean; loadEngine?: () => Promise<EngineModule> }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const eligible = live;
+  const [rendered, setRendered] = useState(false);
 
   useEffect(() => {
-    if (!eligible) return;
+    setRendered(false);
+    // The native engine uses WebGL2; injected loaders define their own capabilities.
+    if (!live || !contentReady || (loadEngine === loadPlanetEngine && typeof WebGL2RenderingContext === 'undefined')) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
     let active = true;
+    let frame = 0;
+    let resolveFrame: ((active: boolean) => void) | undefined;
     let dispose: (() => void) | undefined;
-
-    void loadEngine().then(({ initPlanetEngine }) => {
-      // StrictMode and route visibility can clean up while the chunk is loading.
-      if (!active) return;
-      const engine = initPlanetEngine(canvas, { onReady: () => {} }, { fixedPose });
+    let cancelWait!: () => void;
+    const cancelled = new Promise<void>((resolve) => { cancelWait = resolve; });
+    const nextFrame = () => new Promise<boolean>((resolve) => {
+      resolveFrame = resolve;
+      frame = requestAnimationFrame(() => { resolveFrame = undefined; resolve(active); });
+    });
+    const waitForPaint = async () => {
+      do {
+        await Promise.race([waitForPublicAstridPageTransitions(), cancelled]);
+        if (!active || !await nextFrame() || !await nextFrame()) return false;
+      } while (hasPendingPublicAstridPageTransition());
+      return active;
+    };
+    void (async () => {
+      if (!await waitForPaint()) return;
+      const { initPlanetEngine } = await loadEngine();
+      // Import can finish after unmount or while a newer transition is active.
+      if (!active || !await waitForPaint()) return;
+      const engine = initPlanetEngine(canvas, { onReady: () => { if (active) setRendered(true); } }, { fixedPose });
       if (engine) dispose = () => engine.dispose();
-    }).catch((error: unknown) => {
-      // Keep the page usable if WebGL or the lazy chunk is unavailable.
+    })().catch((error: unknown) => {
       if (active) console.error('Unable to start the Astrid planet.', error);
     });
 
     return () => {
       active = false;
+      cancelWait();
+      cancelAnimationFrame(frame);
+      resolveFrame?.(false);
       dispose?.();
-      dispose = undefined;
     };
-  }, [eligible, fixedPose, loadEngine]);
+  }, [live, contentReady, fixedPose, loadEngine]);
 
   return (
-    <div className="astrid-vision-juggler astrid-vision-planet" aria-hidden="true" data-live={eligible || undefined}>
-      {eligible ? <canvas ref={canvasRef} className="astrid-vision-planet-canvas" /> : <img className="astrid-vision-planet-canvas" src={planetStill} alt="" />}
+    <div className="astrid-vision-juggler astrid-vision-planet" aria-hidden="true" data-live={live || undefined}>
+      {(!rendered || !live || !contentReady) && <img className="astrid-vision-planet-canvas" src={planetStill} alt="" />}
+      {live && <canvas ref={canvasRef} className="astrid-vision-planet-canvas" />}
     </div>
   );
 }

@@ -23,6 +23,23 @@ interface PublicViewTransition {
 }
 type TransitionDocument = Document & { startViewTransition?: (update: () => void) => PublicViewTransition };
 
+// A page's expensive visual work can wait until the navigation that mounted it
+// has settled. Invalidation also releases the waiter; the loop follows a newer
+// transition if one starts before that waiter resumes.
+const pendingPageTransitions = new Set<Promise<void>>();
+export function hasPendingPublicAstridPageTransition() {
+  return pendingPageTransitions.size > 0;
+}
+export async function waitForPublicAstridPageTransitions() {
+  while (pendingPageTransitions.size) await Promise.all([...pendingPageTransitions]);
+}
+function holdPageTransition() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((done) => { resolve = done; });
+  pendingPageTransitions.add(promise);
+  return () => { pendingPageTransitions.delete(promise); resolve(); };
+}
+
 /** The badge has no counterpart in the scrolled header. Map its destination
  * offset through the wordmark's captured box so both travel as one lockup,
  * without inserting a duplicate badge or changing either page's layout. */
@@ -67,7 +84,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
   environmentRef.current = environment;
   const operationRef = useRef(0);
   const mountedRef = useRef(true);
-  const pendingRef = useRef<{ id: number; commit: () => void; transition?: PublicViewTransition; committed: boolean } | null>(null);
+  const pendingRef = useRef<{ id: number; commit: () => void; transition?: PublicViewTransition; release?: () => void; committed: boolean } | null>(null);
   const markerOwnerRef = useRef<number | null>(null);
 
   const clearMarker = useCallback((id: number) => {
@@ -92,6 +109,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     pendingRef.current = null;
     if (pending) {
       clearMarker(pending.id);
+      pending.release?.();
       pending.transition?.skipTransition?.();
     }
   }, [clearMarker]);
@@ -101,7 +119,7 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     const id = operationRef.current;
     let wordmarkOrigin: DOMRect | null = null;
     let minkOrigin: DOMRect | null = null;
-    const pending = { id, commit, committed: false, transition: undefined as PublicViewTransition | undefined };
+    const pending = { id, commit, committed: false, transition: undefined as PublicViewTransition | undefined, release: undefined as (() => void) | undefined };
     pendingRef.current = pending;
     const apply = () => {
       if (!mountedRef.current || operationRef.current !== id || pending.committed) return;
@@ -128,11 +146,16 @@ export function usePublicAstridNavigation(environment: PublicAstridEnvironment) 
     }
     const finish = () => {
       // A rejected/skipped transition must still apply the current navigation exactly once.
-      apply();
-      clearMarker(id);
-      if (pendingRef.current?.id === id) pendingRef.current = null;
+      try {
+        apply();
+      } finally {
+        clearMarker(id);
+        pending.release?.();
+        if (pendingRef.current?.id === id) pendingRef.current = null;
+      }
     };
     try {
+      if (page) pending.release = holdPageTransition();
       pending.transition = doc.startViewTransition(apply);
       void pending.transition.finished.then(finish, finish);
     } catch {

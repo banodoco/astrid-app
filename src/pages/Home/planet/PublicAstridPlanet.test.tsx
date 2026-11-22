@@ -18,6 +18,14 @@ describe('PublicAstridPlanet engine boundary', () => {
     expect(engine.init).not.toHaveBeenCalled();
     still.unmount();
 
+    let resolveLate: ((module: Awaited<ReturnType<typeof loadEngine>>) => void) | undefined;
+    const lateLoader = () => new Promise<Awaited<ReturnType<typeof loadEngine>>>((resolve) => { resolveLate = resolve; });
+    const late = render(<PublicAstridPlanet live loadEngine={lateLoader} />);
+    late.unmount();
+    resolveLate?.({ initPlanetEngine: engine.init });
+    await Promise.resolve();
+    expect(engine.init).not.toHaveBeenCalled();
+
     const live = render(<StrictMode><PublicAstridPlanet live loadEngine={loadEngine} /></StrictMode>);
     await waitFor(() => expect(engine.init).toHaveBeenCalledTimes(1));
     expect(engine.init.mock.calls[0]?.[0]).toBe(live.container.querySelector('canvas'));

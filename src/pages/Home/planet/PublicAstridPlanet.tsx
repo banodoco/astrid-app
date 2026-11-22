@@ -9,7 +9,7 @@ import planetStill from './planet-still.png';
 type EngineModule = typeof import('./planetEngine');
 const loadPlanetEngine = () => import('./planetEngine');
 
-export function PublicAstridPlanet({ live, fixedPose = false, loadEngine = loadPlanetEngine }: { live: boolean; fixedPose?: boolean; loadEngine?: () => Promise<EngineModule> }) {
+export function PublicAstridPlanet({ live, fixedPose = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('planet-test-pose') === 'fixed', loadEngine = loadPlanetEngine }: { live: boolean; fixedPose?: boolean; loadEngine?: () => Promise<EngineModule> }) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const eligible = live;
 

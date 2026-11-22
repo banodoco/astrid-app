@@ -487,7 +487,12 @@ export async function createLocalSaveSession(options: Options) {
     /** The original verified read basis used to restore an unsaved rejected change. */
     getDisplayBasis: () => clone(displayBasis),
     getDocument: () => clone(document),
-    hasRejectedDisplay: () => rejectedDisplayReady,
+    // A guarded track rename can keep its authored display after recovery.
+    // Tell the handoff when that display belongs to the retained draft.
+    hasRejectedDisplay: () => rejectedDisplayReady || Boolean(
+      state.status === 'conflict' && record && isSingleTrackLabelDraft(record)
+      && same(document, saveOf(record.intents[0].payload).after),
+    ),
     /** Hold the owner's claim through any draft write that records its ID. */
     async writeRecoveryDraft(write: (ownerId?: string) => Promise<void>) {
       const ownerId = !closed && !discarding && !changingOwner && box ? state.ownerId : undefined;

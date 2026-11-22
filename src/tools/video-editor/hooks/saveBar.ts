@@ -24,13 +24,15 @@ export interface SaveBarInput {
   headline: string;
   since?: string;
   action: SaveBarAction;
+  /** A durable edit whose guarded address changed after its authoring read. */
+  guardedConflict?: true;
 }
 
 export interface SaveBarSources {
   local: LocalSaveState | null;
   /** The save session failed to start (its owner could not be claimed or recovered). */
   bootstrapFailed: boolean;
-  recoveryDraft: { updatedAt: string; baseGone?: boolean } | null;
+  recoveryDraft: { updatedAt: string; baseGone?: boolean; retainedConflict?: boolean } | null;
   conflictExhausted: boolean;
   schemaIncompatible: boolean;
   watchdogTripped: boolean;
@@ -51,6 +53,14 @@ export function saveBarInput(source: SaveBarSources): SaveBarInput | null {
     return { kind: 'refused', headline: /already claimed/i.test(reason) ? HELD_ELSEWHERE : reason, action: 'restart' };
   }
   if (local?.notice) return { kind: 'refused', headline: local.notice, action: 'local' };
+  if (source.recoveryDraft?.retainedConflict) {
+    return { kind: 'recovered', headline: 'You have unsaved changes.', since: source.recoveryDraft.updatedAt, action: 'draft' };
+  }
+  const error = local?.error;
+  if (local?.status === 'conflict' && error && typeof error === 'object' && !Array.isArray(error)
+    && error.kind === 'conflict' && error.code === 'conflict') {
+    return { kind: 'refused', headline: 'This timeline changed somewhere else.', action: 'local', guardedConflict: true };
+  }
   if (local && ['conflict', 'error', 'blocked'].includes(local.status)) {
     const reason = reasonOf(local.error) ?? 'The Runtime did not accept this change.';
     return { kind: 'refused', headline: /already claimed/i.test(reason) ? HELD_ELSEWHERE : reason, action: 'local' };

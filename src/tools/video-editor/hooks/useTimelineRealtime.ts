@@ -7,8 +7,8 @@ import { timelineListQueryKey } from '@/tools/video-editor/hooks/useTimelinesLis
 interface UseTimelineRealtimeOptions {
   timelineId: string;
   conflictExhausted: boolean;
-  onKeepLocalChanges: () => Promise<void>;
-  onDiscardRemoteChanges: () => Promise<void>;
+  onKeepLocalChanges: () => void | Promise<void>;
+  onDiscardRemoteChanges: () => void | Promise<void>;
 }
 
 export function useTimelineRealtime({
@@ -22,10 +22,8 @@ export function useTimelineRealtime({
 
   // Before paint, so the inline bar (which yields to the open dialog) is never drawn for a frame beside it.
   useLayoutEffect(() => {
-    if (conflictExhausted) {
-      setIsOpen(true);
-    }
-  }, [conflictExhausted]);
+    setIsOpen(conflictExhausted);
+  }, [conflictExhausted, timelineId]);
 
   useEffect(() => {
     return realtimeEventProcessor.onEvent((event) => {

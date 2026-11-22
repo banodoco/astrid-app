@@ -51,10 +51,10 @@ export async function postOpenProbe({page, fixture, startup, marker, record}) {
   }
 }
 
-export async function undoCleanup({page, fixture, baseUrl, result}) {
+export async function undoCleanup({page, fixture, baseUrl, result, allowEmpty = false}) {
   if (result?.pass !== true || !result.before?.headRevision || !result.after?.headRevision || !result.after?.publicationId || !result.public_snapshot?.before?.content_digest || !result.public_snapshot?.before?.payload_digest)
     throw new Error('undo refused: row lacks a successful and complete before/after witness');
-  const before=await publicSnapshot(page, baseUrl, fixture);
+  const before=await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
   if (before.headRevision!==result.after.headRevision || before.publicationId!==result.after.publicationId || before.headRevision===result.before.headRevision || before.publicationId===result.before.publicationId)
     throw new Error('undo refused: public head or publication changed or did not advance');
   const timelineKey=`/v1/projects/${encodeURIComponent(fixture.project_id)}/timelines/${encodeURIComponent(fixture.timeline_id)}/commit`;
@@ -86,7 +86,7 @@ export async function undoCleanup({page, fixture, baseUrl, result}) {
     const response=completed[0], data=response?.body?.data, receipt=response?.body?.receipt;
     const accepted=requests.length===1 && completed.length===1 && response.request===requests[0] && response.status>=200 && response.status<300 && ['accepted','rebased','merged'].includes(data?.status) && typeof data.accepted_revision_id==='string' && data.accepted_revision_id.length>0 && receipt?.command_kind==='timeline.commit' && receipt.project_id===fixture.project_id && typeof receipt.receipt_id==='string' && receipt.receipt_id.length>0 && isDeepStrictEqual(receipt.result,data);
     if (!accepted) throw new Error('undo did not produce a valid, unambiguous accepted commit receipt');
-    const restored=await publicSnapshot(page, baseUrl, fixture);
+    const restored=await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
     if (requests.length!==1 || responses.length!==1 || restored.headRevision!==data.accepted_revision_id || restored.publicationId!==receipt.receipt_id || restored.headCount!==1 || restored.headRevision===before.headRevision || restored.publicationId===before.publicationId || restored.content_digest!==result.public_snapshot.before.content_digest || restored.payload_digest!==result.public_snapshot.before.payload_digest || !sameIds(restored.clipIds,result.before.clipIds) || !sameIds(restored.mediaRefs,result.before.mediaRefs))
       throw new Error('undo did not reproduce the original public content and inventory in a distinct publication');
     return {changed:true, headRevision:restored.headRevision, publicationId:restored.publicationId, accepted_receipt:true};

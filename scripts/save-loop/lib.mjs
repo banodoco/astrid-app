@@ -12,7 +12,7 @@ import {fileURLToPath} from 'url';
 import {spawn, execFileSync} from 'child_process';
 import {once} from 'events';
 import {performance} from 'node:perf_hooks';
-import {createCpuSampler, runtimeRoot, processRoot} from './cpu.mjs';
+import {createCpuSampler, runtimeRoot, runtimeRootForData, processRoot} from './cpu.mjs';
 import {expectedFixtureIds, first15FixtureIds, first15WritableCondition, sameIds} from './readiness.mjs';
 const {chromium}=await import(process.env.SAVE_LOOP_PLAYWRIGHT||'playwright');
 function need(name){ const v=process.env[name]; if(!v){ throw new Error(`missing env ${name} (see scripts/save-loop/lib.mjs header or run sweep.mjs --help)`); } return v; }
@@ -24,8 +24,9 @@ export function checkDisk() {
   const diskPath = process.env.SAVE_LOOP_ROOT || os.homedir();
   const output = execFileSync('df', ['-Pk', diskPath], {encoding:'utf8'}).trim().split('\n');
   const available = Number(output.at(-1).trim().split(/\s+/)[3]);
-  if (!Number.isFinite(available) || available < 15 * 1024 * 1024) {
-    throw new Error(`save-loop requires at least 15 GiB free at ${diskPath} (available KiB: ${available})`);
+  const minimum=process.env.SAVE_LOOP_QUICK==='1'?25:15;
+  if (!Number.isFinite(available) || available < minimum * 1024 * 1024) {
+    throw new Error(`save-loop requires at least ${minimum} GiB free at ${diskPath} (available KiB: ${available})`);
   }
 }
 function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
@@ -69,11 +70,11 @@ export function startupBudget(onEvent = event => console.log(JSON.stringify(even
   };
   return {start, deadline, remaining, bounded, read};
 }
-export async function open({onCleanup, fixture, onOpening, reducedOpening = false, onProvisional} = {}){
+export async function open({onCleanup, fixture, onOpening, reducedOpening = false, quickOpening = false, onProvisional} = {}){
   checkDisk();
   const browserScratch=fs.mkdtempSync(path.join('/tmp','sl-'));
   const profile=browserScratch;
-  let proc, browser, cpu;
+  let proc, browser, cpu, opening, startup, quickBaseline, quickMarker, quickProject, quickFirstUsable;
   async function close(){
     cpu?.close();
     try {
@@ -113,16 +114,91 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
     const ev=[]; p.__ev=ev;
     p.on('request',r=>{ if(r.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())) r.__t=Date.now(); });
     p.on('response',async r=>{ const q=r.request(); if(q.method()==='POST'&&!/handshake|local-update|inspect|acp|chat/.test(r.url())){ let body=''; if(/commit/.test(r.url())){try{body=(await r.text()).slice(0,400)}catch{}} ev.push({t:Date.now(),requestTime:q.__t,url:r.url().replace(/.*\/api\//,''),status:r.status(),body}); }});
-    let opening, startup;
     if (fixture) {
       const expected = expectedFixtureIds(fixture);
       const tracks = [...(fixture.tracks?.visual ?? []), ...(fixture.tracks?.audio ?? [])].map(t=>t.id);
-      if (tracks.length !== 9 || new Set(tracks).size !== 9) throw new Error('fixture must have nine distinct tracks');
-      const target = fixture.clips?.audio?.primary || fixture.clips?.video?.primary;
-      if (!target?.clip_id || !target?.track_id) throw new Error('fixture lacks a selection target');
+      const clipCount = fixture.measurement?.clip_count ?? expected.length;
+      const requiredTrackCount = quickOpening && clipCount === 0 ? 2 : 9;
+      if (tracks.length !== requiredTrackCount || new Set(tracks).size !== requiredTrackCount) throw new Error(`fixture must have ${requiredTrackCount} distinct tracks`);
+      if (quickOpening && clipCount === 0 && tracks.slice().sort().join(',') !== 'A1,V1') throw new Error('quick empty fixture must contain exactly tracks V1 and A1');
+      const target = quickOpening ? (fixture.clips?.video?.primary || fixture.clips?.audio?.primary) : (fixture.clips?.audio?.primary || fixture.clips?.video?.primary);
+      if (!quickOpening && (!target?.clip_id || !target?.track_id)) throw new Error('fixture lacks a selection target');
+      if (quickOpening && clipCount > 0 && (!target?.clip_id || !target?.track_id)) throw new Error('quick fixture lacks an exact clip selection target');
       if (!process.env.SAVE_LOOP_ROOT) throw new Error('SAVE_LOOP_ROOT required for owned Runtime CPU identity');
-      cpu = createCpuSampler(runtimeRoot(process.env.SAVE_LOOP_ROOT), processRoot(proc.pid));
-      startup=startupBudget(undefined, reducedOpening ? 900000 : 480000);
+      const runtimeDataRoot=process.env.SAVE_LOOP_RUNTIME_DATA_ROOT;
+      const runtime=runtimeDataRoot
+        ? await runtimeRootForData(process.env.SAVE_LOOP_ROOT,runtimeDataRoot,`${process.env.SAVE_LOOP_BASE_URL}/api/runtime/v1/health`)
+        : runtimeRoot(process.env.SAVE_LOOP_ROOT);
+      cpu = createCpuSampler(runtime, processRoot(proc.pid));
+      startup=startupBudget(undefined, reducedOpening || quickOpening ? 900000 : 480000);
+      quickBaseline = null; quickMarker = null;
+      const measureQuickOpening = async () => {
+        const {publicSnapshot} = await import('./assert.mjs');
+        const preNavigationStartedAt=new Date().toISOString(), preNavigationStart=performance.now();
+        const projectEndpoint=new URL(`/api/runtime/v1/projects/${encodeURIComponent(fixture.project_id)}`,process.env.SAVE_LOOP_BASE_URL).href;
+        await p.goto(projectEndpoint, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
+        quickProject=await startup.read('quick_project',()=>p.evaluate(async projectId=>{
+          const response=await fetch(`/api/runtime/v1/projects/${encodeURIComponent(projectId)}`,{credentials:'same-origin',cache:'no-store'});
+          if(!response.ok) throw new Error(`sandbox project read failed (${response.status})`);
+          const body=await response.json(); return body?.data??body;
+        },fixture.project_id));
+        if(quickProject.project_id!==fixture.project_id || quickProject.metadata?.purpose!=='synthetic Plan 77 save-loop fixture') throw new Error('quick project is not the synthetic Plan 77 sandbox fixture');
+        quickBaseline = await startup.read('quick_before_open', () => publicSnapshot(p, process.env.SAVE_LOOP_BASE_URL, fixture, {allowEmpty:clipCount===0}));
+        if (!sameIds(quickBaseline.clipIds, expected)) throw new Error('quick pre-open public head does not match exact fixture clip IDs');
+        const started=performance.now(), navigationStartedAt=new Date().toISOString(), cpuStart=cpu.mark();
+        await p.goto(URL_, {waitUntil:'domcontentloaded', timeout:startup.remaining()});
+        const target=fixture.clips?.video?.primary??fixture.clips?.audio?.primary;
+        const firstUsablePromise=(async()=>{
+          if(clipCount===0) {
+            const emptyStarted=performance.now();
+            await p.waitForFunction(({project,timeline})=>{
+              const u=new URL(location.href);if(u.searchParams.get('project')!==project||u.searchParams.get('timeline')!==timeline)return false;
+              const rows=[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))].sort();
+              const input=document.querySelector('[data-track-label][data-track-id="V1"] input[aria-label="Track name"]');
+              return rows.join(',')==='A1,V1'&&!!input&&!input.disabled&&!input.readOnly&&input.getBoundingClientRect().width>0;
+            },{project:fixture.project_id,timeline:fixture.timeline_id},{timeout:startup.remaining()});
+            return {ms:performance.now()-started,evidence:'exact V1/A1 empty timeline with visible writable V1 track-name control',limitation:'zero-clip affordance; no clip selection is applicable'};
+          }
+          const selector=`.clip-action[data-clip-id="${target.clip_id}"][data-row-id="${target.track_id}"]`;
+          const control=p.locator(selector).first();await control.waitFor({state:'visible',timeout:startup.remaining()});
+          const before=await control.getAttribute('data-selected');let posts=0;const observe=r=>{if(r.method()==='POST'&&r.url().includes('/api/runtime/'))posts++;};p.on('request',observe);
+          try {await control.press('Enter',{timeout:startup.remaining()});await p.waitForFunction(sel=>document.querySelector(sel)?.getAttribute('data-selected')==='true',selector,{timeout:10000});
+            if(before==='true'||posts!==0)throw new Error('selection transition without Runtime POST was not established');
+            const handle=await p.waitForFunction(first15WritableCondition,{expectedIds:first15FixtureIds(fixture),project:fixture.project_id,timeline:fixture.timeline_id,targetClipId:target.clip_id,targetTrackId:target.track_id},{timeout:startup.remaining()});
+            const evidence=await handle.jsonValue();await handle.dispose();return {ms:performance.now()-started,evidence,label:'first-15 visibility, no-write selection transition, and existing writable-condition policy'};
+          } finally {p.off('request',observe);}
+        })();
+        firstUsablePromise.catch(()=>{});
+        let stableSince=null;
+        while (performance.now()<startup.deadline) {
+          const state=await startup.bounded('quick_first_usable',()=>p.evaluate(({project,timeline,expectedIds,expectedTracks,trackId})=>{
+            const url=new URL(location.href);
+            if (url.searchParams.get('project')!==project || url.searchParams.get('timeline')!==timeline) return null;
+            const ids=[...new Set([...document.querySelectorAll('.clip-action[data-clip-id][data-row-id]')].map(e=>e.getAttribute('data-clip-id')))].sort();
+            const tracks=[...new Set([...document.querySelectorAll('[data-row-id]')].map(e=>e.getAttribute('data-row-id')))].sort();
+            const same=(a,b)=>a.length===b.length&&a.every((v,i)=>v===b[i]);
+            const saved=[...document.querySelectorAll('div,span,button')].some(e=>e.children.length===0&&/^saved$/i.test((e.textContent||'').trim()));
+            const input=document.querySelector(`[data-track-label][data-track-id="${CSS.escape(trackId)}"] input[aria-label="Track name"]`);
+            const rect=input?.getBoundingClientRect();
+            return {ready:same(ids,[...expectedIds].sort())&&same(tracks,[...expectedTracks].sort())&&saved&&Boolean(input&&!input.disabled&&!input.readOnly&&rect?.width>0&&rect?.height>0)};
+          },{project:fixture.project_id,timeline:fixture.timeline_id,expectedIds:expected,expectedTracks:tracks,trackId:fixture.tracks.visual[0].id}));
+          if (state?.ready) {
+            stableSince??=performance.now();
+            if (performance.now()-stableSince>=800) {
+              quickMarker=performance.now();
+              quickFirstUsable=firstUsablePromise.catch(error=>({ms:null,reason:String(error?.message||error)}));
+              const value={type:'quick_opening',pre_navigation_setup_started_at:preNavigationStartedAt,pre_navigation_setup_ms:started-preNavigationStart,
+                navigation_started_at:navigationStartedAt,full_ui_marker_ms:quickMarker-started,first_usable_ms:null,target_pass:null,first_usable:{ms:null,reason:'independent observer pending'},stable_ms:quickMarker-stableSince,
+                baseline:{headRevision:quickBaseline.headRevision,publicationId:quickBaseline.publicationId},cpu:cpu.delta(cpuStart,'quick_cold_open'),
+                limitation:'Pre-open project and exact public-snapshot verification is reported separately and excluded from navigation duration. Exact fixture IDs and tracks with a visible writable track-name control and Saved are stable; rendered head identity is not exposed.'};
+              if (onProvisional) onProvisional({warm:false,value,page:p,startup,marker:quickMarker});
+              return value;
+            }
+          } else stableSince=null;
+          await startup.bounded('quick_first_usable',()=>p.waitForTimeout(Math.min(100,startup.remaining())));
+        }
+        throw new Error('quick cold opening did not reach exact usable UI before its deadline');
+      };
       const measureOpening = async (warm = false) => {
       const cpuStart=cpu.mark(), start=warm ? performance.now() : startup.start;
       const posts=[];
@@ -227,16 +303,19 @@ export async function open({onCleanup, fixture, onOpening, reducedOpening = fals
       p.off('request',observe);
       return {type:warm ? 'warm_opening' : 'opening', early_full_ui_saved:await earlyFull, selection:selected, first_15_seconds_visibility:first15Visible, first_usable:usable, first_usable_ms:usable.ms, first_usable_target_pass:usable.target_pass, full_ui_saved:full, head_before_ui:{revision:headBefore.headRevision,publication:headBefore.publicationId}, timeout_cpu:opening?.cpu ?? null, limitation:full ? 'Public head identity and exact IDs must be confirmed before this is a full-open claim.' : 'Full UI was not proven; the timeline may virtualize offscreen controls.', target_first_usable_ms:5000,target_full_open_ms:15000};
       };
-      opening=await measureOpening();
+      if (quickOpening) opening=await measureQuickOpening();
+      else opening=await measureOpening();
       p.__measureWarmOpening=measureOpening;
     } else {
       await p.goto(URL_);
       await p.waitForFunction(()=>[...document.querySelectorAll('div')].some(e=>e.children.length===0&&/^saved$/i.test(e.textContent||'')),null,{timeout:60000});
     }
-    if (reducedOpening && startup) await startup.bounded('stability_delay', () => p.waitForTimeout(15000));
+    if (quickOpening) { /* Begin the immediate arm from the cold UI marker. */ }
+    else if (reducedOpening && startup) await startup.bounded('stability_delay', () => p.waitForTimeout(15000));
     else await p.waitForTimeout(15000);
-    if (opening) { opening.stability_delay_ms=15000; if (onOpening) onOpening(opening); }
-    return {b:{close},p,ev,context:ctx,cpu,opening,startup:fixture ? startup : undefined, measureWarmOpening:p.__measureWarmOpening};
+    if (opening && !quickOpening) opening.stability_delay_ms=15000;
+    if (opening && onOpening) onOpening(opening);
+    return {b:{close},p,ev,context:ctx,cpu,opening,startup:fixture ? startup : undefined, measureWarmOpening:p.__measureWarmOpening, quickBaseline, quickMarker, quickProject, quickFirstUsable};
   } catch(error) {
     try { await close(); }
     catch(cleanupError) {

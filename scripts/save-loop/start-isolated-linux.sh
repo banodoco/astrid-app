@@ -11,6 +11,7 @@ ROOT="$SCRATCH/stack"
 OMP_REPO="$SCRATCH/omp-source-cache"
 OWNERSHIP_MARKER="$ROOT/.sl1-stack-owned"
 fail() { echo "STOP: $*" >&2; exit 1; }
+[[ "${SAVE_LOOP_QUICK_FIXTURE:-0}" != 1 ]] || fail 'Quick fixtures require the separately prepared product-checkout builder workflow.'
 if [[ "$(uname -s)" == Darwin ]]; then
   command -v lsof >/dev/null || fail 'lsof is required on macOS to verify owned editor identity.'
 fi

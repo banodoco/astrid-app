@@ -1,4 +1,6 @@
 import {expectedFixtureIds, sameIds} from './readiness.mjs';
+import {quickSaveTiming} from './quick.mjs';
+import {performance} from 'node:perf_hooks';
 /*
  * Public, browser-observable assertions for the Plan 77 save loop.
  * This deliberately observes only the sandbox editor page and Runtime public
@@ -59,6 +61,28 @@ async function installBadgeObserver(page) {
       attributeFilter: ['data-save-bar', 'aria-label', 'aria-live'],
     });
   }, SAVE_BADGE_SELECTOR);
+}
+
+async function installQuickFetchObserver(page, timelineKey) {
+  await page.evaluate((key) => {
+    const state=window.__saveLoopState??={transitions:[]};
+    state.quickCommitEvents=[];
+    if(state.quickFetchObserverInstalled) return;
+    const original=window.fetch;
+    window.fetch=function(input,init) {
+      let url,method;
+      try { url=new URL(typeof input==='string'?input:input.url,location.href); method=(init?.method??input?.method??'GET').toUpperCase(); } catch {}
+      const event=method==='POST'&&url?.pathname.endsWith(`${key}/commit`)
+        ? {url:url.href,method,requestAt:performance.timeOrigin+performance.now(),responseAt:null,status:null,error:null}:null;
+      if(event) state.quickCommitEvents.push(event);
+      let promise;
+      try { promise=original.call(this,input,init); }
+      catch(error) { if(event)event.error=String(error?.message||error); throw error; }
+      if(!event) return promise;
+      return promise.then(response=>{event.responseAt=performance.timeOrigin+performance.now();event.status=response.status;return response;},error=>{event.responseAt=performance.timeOrigin+performance.now();event.error=String(error?.message||error);throw error;});
+    };
+    state.quickFetchObserverInstalled=true;
+  },timelineKey);
 }
 
 async function readObserverState(page) {
@@ -314,15 +338,16 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
 
   if (expected === 'saved') {
     const acceptedCommit = commit.some((entry) => entry.status >= 200 && entry.status < 300);
-    const savedAt = result.badge_transitions
+    const savedAt = Number.isFinite(result.gesture_ended_at) ? result.badge_transitions
       .filter((entry) => entry.state === 'saved' && entry.at >= result.gesture_ended_at)
-      .at(-1)?.at;
+      .at(-1)?.at : null;
     const observedIntermediate = result.badge_transitions.some((entry) =>
       entry.state === 'saving' || entry.state === 'not saved' || entry.state === 'error');
     result.saved_at = Number.isFinite(savedAt) ? savedAt : null;
     result.ms = Number.isFinite(savedAt) ? Math.max(0, savedAt - result.gesture_ended_at) : null;
     if (!acceptedCommit) return {pass: false, reason: 'no successful public timeline commit response was observed'};
     if (!changedHead || !changedContent || !changedPublication) return {pass: false, reason: 'public head, publication and immutable content did not all change'};
+    if (!Number.isFinite(result.gesture_ended_at)) return {pass:false,reason:'trusted gesture-end event timestamp was not observed'};
     if (!Number.isFinite(result.ms)) return {pass: false, reason: 'no post-gesture Saved badge transition was observed'};
     if (!observedIntermediate && savedAt < result.gesture_ended_at) {
       return {pass: false, reason: 'Saved was already present without a row-specific save-state transition'};
@@ -356,7 +381,7 @@ function defaultAssertion(expected, before, after, result, hasScenarioVerify) {
 }
 
 /** Create an observable row recorder for the current fixture page. */
-export async function createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty = false} = {}) {
+export async function createRecorder(page, {fixture, baseUrl, resultsPath, allowEmpty = false, initialSnapshot = null} = {}) {
   if (!page || typeof page.evaluate !== 'function') throw new TypeError('createRecorder requires a Playwright page');
   if (!fixture?.project_id || !fixture?.timeline_id) throw new Error('fixture must include project_id and timeline_id');
   if (typeof baseUrl !== 'string' || !baseUrl) throw new Error('baseUrl is required');
@@ -394,10 +419,12 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
   page.on('requestfailed', onRequestFailed);
 
   let checkedFixture = false;
+  let nextInitialSnapshot = initialSnapshot;
   async function runRow(descriptor) {
     await installBadgeObserver(page);
+    if (descriptor.measureSaveTimings === true) await installQuickFetchObserver(page,timelineKey);
     const rowStartedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
-    const eventStart = networkEvents.length;
+    let eventStart = networkEvents.length;
     let before;
     let after;
     let gestureOutput;
@@ -417,7 +444,8 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
       if (!descriptor || typeof descriptor.gesture !== 'function' || !['saved', 'clash'].includes(descriptor.expected)) {
         throw new TypeError('descriptor requires name, gesture, and expected saved|clash');
       }
-      before = await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
+      before = nextInitialSnapshot ?? await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
+      nextInitialSnapshot = null;
       if (!checkedFixture && !allowEmpty) {
         const expected = fixture.media?.retained_object_ids;
         if (!Array.isArray(expected) || !expected.length || expected.some(id => !OBJECT_ID.test(id)))
@@ -434,29 +462,54 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
       const observerStart = await readObserverState(page);
       result.badge_before = observerStart.badge;
       const transitionCount = observerStart.transitions.length;
+      if (descriptor.measureSaveTimings === true) eventStart = networkEvents.length;
+      const quickEventStart=descriptor.measureSaveTimings===true?await page.evaluate(()=>window.__saveLoopState.quickCommitEvents.length):null;
+      if(descriptor.measureSaveTimings===true&&descriptor.quickGestureEvent==='pointerup') await page.evaluate(()=>{
+        const state=window.__saveLoopState;state.quickGestureEnd=null;state.quickGestureEvent=null;
+        document.addEventListener('pointerup',()=>{
+          if(state.quickGestureEnd===null){state.quickGestureEnd=performance.timeOrigin+performance.now();state.quickGestureEvent={type:'pointerup',at:state.quickGestureEnd};}
+        },{capture:true,once:true});
+      });
 
       gestureOutput = await descriptor.gesture({page, fixture, before, helpers: await import('./lib.mjs'), iteration: descriptor.iteration, mark: () => {}});
-      const gestureClock = await page.evaluate(() => ({at: performance.timeOrigin + performance.now()}));
-      gestureEndedAt = Number.isFinite(gestureOutput?.gesture_ended_at)
-        ? gestureOutput.gesture_ended_at
-        : gestureClock.at;
+      const gestureClock = descriptor.measureSaveTimings===true
+        ? await page.evaluate(index=>({at:window.__saveLoopState.quickGestureEnd,event:window.__saveLoopState.quickGestureEvent,
+          requests:window.__saveLoopState.quickCommitEvents.slice(index)}),quickEventStart)
+        : await page.evaluate(() => ({at: performance.timeOrigin + performance.now()}));
+      gestureEndedAt = Number.isFinite(gestureOutput?.gesture_ended_at) ? gestureOutput.gesture_ended_at
+        : descriptor.measureSaveTimings===true ? (Number.isFinite(gestureClock.at)?gestureClock.at:null) : gestureClock.at;
       result.gesture_ended_at = gestureEndedAt;
+      if(descriptor.measureSaveTimings===true) result.quick_gesture_event=gestureClock.event??null;
       result.gesture_result = gestureOutput && typeof gestureOutput === 'object'
         ? (gestureOutput.actualInput ?? gestureOutput.input ?? null)
         : null;
 
-      const deadline = Date.now() + (Number.isFinite(descriptor.timeoutMs) ? descriptor.timeoutMs : DEFAULT_TIMEOUT_MS);
+      const settlementTimeoutMs = Number.isFinite(descriptor.timeoutMs) ? descriptor.timeoutMs : DEFAULT_TIMEOUT_MS;
+      const deadline = Date.now() + settlementTimeoutMs;
+      const settlementStartedAt = performance.now();
       let finalState;
-      while (Date.now() < deadline) {
+      let settlementOutcome='deadline';
+      while (Date.now() < deadline && !(descriptor.measureSaveTimings===true&&!Number.isFinite(gestureEndedAt))) {
         finalState = await readObserverState(page);
         const changedTransitions = finalState.transitions.slice(transitionCount);
         const hasSavedTransition = changedTransitions.some((entry) => entry.state === 'saved' && entry.at >= gestureEndedAt) && finalState.badge.state === 'saved';
         const hasRefusal = finalState.badge.state === 'not saved' && finalState.badge.barCount > 0;
-        if (hasRefusal || (descriptor.expected === 'saved' && hasSavedTransition && !networkEvents.slice(eventStart).some(entry => entry.status === null))) break;
+        if (hasRefusal) {
+          const refusalTransition=changedTransitions.some(entry=>entry.state==='not saved'&&entry.at>=gestureEndedAt);
+          settlementOutcome=observerStart.badge.state!=='not saved'||refusalTransition?'refusal':'dirty_before_gesture';
+          break;
+        }
+        if (descriptor.expected === 'saved' && hasSavedTransition && !networkEvents.slice(eventStart).some(entry => entry.status === null)) { settlementOutcome='saved'; break; }
         await page.waitForTimeout(50);
       }
       finalState ??= await readObserverState(page);
       result.final_badge = finalState.badge;
+      if (descriptor.measureSaveTimings === true) {
+        if(!Number.isFinite(gestureEndedAt)) settlementOutcome='gesture_unobserved';
+        result.settlement_outcome=settlementOutcome;
+        result.settlement_timeout_ms=settlementTimeoutMs;
+        result.settlement_elapsed_ms=performance.now()-settlementStartedAt;
+      }
       result.badge_transitions = finalState.transitions.slice(transitionCount);
       result.try_again_visible = await page.getByRole('button', {name: 'Try again', exact: true}).isVisible().catch(() => false);
       result.discard_visible = await page.getByRole('button', {name: 'Discard', exact: true}).isVisible().catch(() => false);
@@ -468,6 +521,10 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
         while (Date.now() < graceDeadline && scopedEvents.some((entry) => entry.status === null)) await page.waitForTimeout(20);
       }
       result.commit_requests = toRecordTimes(scopedEvents);
+      if (descriptor.measureSaveTimings === true) {
+        const quickEvents=await page.evaluate(index=>window.__saveLoopState.quickCommitEvents.slice(index),quickEventStart);
+        result.quick_save_timing=quickSaveTiming(quickEvents,gestureEndedAt);
+      }
       after = await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
       result.after_head = after.headRevision;
       result.public_snapshot = {

@@ -66,6 +66,30 @@ export function runtimeRoot(root, platform=process.platform) {
   if (birth !== expected) throw new Error('Runtime discovery process identity changed or is unavailable');
   return observed;
 }
+export async function runtimeRootForData(root, dataRoot, healthUrl, platform=process.platform) {
+  const resolvedRoot=fs.realpathSync(root), resolvedData=fs.realpathSync(dataRoot);
+  if(resolvedRoot!==path.resolve(root)||!resolvedData.startsWith(`${resolvedRoot}${path.sep}`))
+    throw new Error('quick Runtime data root is not canonical and contained by its owned stack');
+  if(fs.readFileSync(path.join(resolvedRoot,'.sl1-stack-owned'),'utf8')!==`astrid-app-sl1-stack-v1 ${resolvedRoot}`)
+    throw new Error('quick Runtime stack ownership marker does not match');
+  const ready=JSON.parse(fs.readFileSync(path.join(resolvedData,'runtime/discovery.json'),'utf8'));
+  const {pid,process_birth_id:birth,runtime_instance_id:instance}=ready;
+  if(!Number.isSafeInteger(pid)||pid<=0||!instance||typeof birth!=='string') throw new Error('quick Runtime discovery identity is incomplete');
+  const healthResponse=await fetch(healthUrl,{headers:{accept:'application/json'},cache:'no-store',redirect:'manual',signal:AbortSignal.timeout(3000)});
+  if(!healthResponse.ok||healthResponse.redirected) throw new Error(`quick Runtime proxy health did not respond (${healthResponse.status})`);
+  const health=await healthResponse.json();
+  if(health.status!=='ok'||health.protocol!=='workspace.v1'||health.runtime_instance_id!==instance)
+    throw new Error('quick Runtime discovery instance does not match active loopback proxy health');
+  const observed=processRoot(pid,platform);
+  let expected=observed.start;
+  if(platform==='linux') {
+    expected=`proc-start-ticks:${observed.start}`;
+    try{expected+=`;boot:${fs.readFileSync('/proc/sys/kernel/random/boot_id','utf8').trim()}`;}catch{}
+    try{expected+=`;pidns:${fs.statSync(`/proc/${pid}/ns/pid`).ino}`;}catch{}
+  }
+  if(birth!==expected) throw new Error('quick Runtime process birth identity changed or is unavailable');
+  return observed;
+}
 export function createCpuSampler(runtime, browser, cadence = 250, options = {}) {
   const platform=options.platform ?? process.platform;
   const read=options.readSnapshot ?? (()=>snapshot(platform));

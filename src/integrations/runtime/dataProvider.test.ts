@@ -923,6 +923,36 @@ it('returns a playable locator for a freshly prepared object before registry rea
   });
 
 describe('verified basis loader diagnostics', () => {
+  it('loads an advertised verified head without requesting history or immutable revisions', async () => {
+    const fixture = runtimeFixture();
+    const head = { revision_id: 'r0', publication_id: 'p0' };
+    const document = acceptedCommit(head, head,
+      { projectId: PROJECT_ID, timelineId: TIMELINE_ID, children: true }).data.canonical_document;
+    const calls: string[] = [];
+    const provider = new RuntimeDataProvider({ projectId: PROJECT_ID, transport: async (...args) => {
+      const [, path] = args;
+      calls.push(path);
+      if (path === '/v1/handshake') {
+        const response = await fixture.transport(...args);
+        const handshake = JSON.parse(new TextDecoder().decode(response.body));
+        handshake.capabilities.push('timeline.verified_head.v1');
+        return { ...response, body: json(handshake) };
+      }
+      if (path === `/v1/projects/${PROJECT_ID}/timelines/${TIMELINE_ID}/verified-head`) {
+        return { status: 200, headers: {}, body: json({ project_id: PROJECT_ID, timeline_id: TIMELINE_ID, head, canonical_document: document }) };
+      }
+      if (path.includes('/commits?') || path.includes('/composition-revisions/')
+        || path.includes('/shots/') || path.includes('/revisions/')) throw new Error('unexpected history or revision read');
+      return fixture.transport(...args);
+    } });
+    const basis = await provider.loadTimelineCommandBasis(TIMELINE_ID);
+    expect(basis.head).toEqual({ revisionId: 'r0', publicationId: 'p0' });
+    expect(basis.canonicalDocument).toEqual(document);
+    expect(basis.history).toBeUndefined();
+    expect(calls.filter(path => path.includes('/verified-head'))).toHaveLength(1);
+    expect(calls.some(path => path.includes('/commits?'))).toBe(false);
+  });
+
   it.each([
     ['history-head', 'history', /malformed timeline history head/],
     ['next-history-head', 'history', /malformed timeline history head/],

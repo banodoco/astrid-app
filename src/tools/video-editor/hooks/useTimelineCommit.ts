@@ -128,6 +128,8 @@ export type TimelineEditMutation =
   | {
       type: 'prepared-media';
       command: PlacePreparedMediaCommand;
+      /** Other drops in flight, by address and declared entry (see the prepared-media gesture basis). */
+      inFlight?: Readonly<Record<string, unknown>>;
     };
 
 export type ApplyEditOptions = {
@@ -466,7 +468,8 @@ export function useTimelineCommit({
         ...(!current.registry.assets[mutation.command.payload.asset.assetKey]
           || (mutation.command.payload.afterClipId && mutation.command.payload.asset.mediaType === 'video') ? {
           gestureBasis: { kind: 'prepared-media' as const, config: current.config, registry: current.registry,
-            clipId: prepared.commandResult!.detail!.clipId as string, command: mutation.command },
+            clipId: prepared.commandResult!.detail!.clipId as string, command: mutation.command,
+            ...(mutation.inFlight ? { inFlight: mutation.inFlight } : {}) },
         } : {}),
         save: options?.save,
         selectedClipId: options?.selectedClipId,

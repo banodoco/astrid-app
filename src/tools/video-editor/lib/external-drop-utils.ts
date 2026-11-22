@@ -58,6 +58,7 @@ function prepareGenerationForDrop(
   dataRef: MutableRefObject<TimelineData | null>,
   registerGenerationAsset: UseAssetManagementResult['registerGenerationAsset'],
   prepareGenerationAsset?: UseAssetManagementResult['prepareGenerationAsset'],
+  markGenerationAssetInFlight?: UseAssetManagementResult['markGenerationAssetInFlight'],
 ): TimelineProvisionedAsset | null {
   const prepared = prepareGenerationAsset?.(generationData);
   if (prepared) {
@@ -69,13 +70,15 @@ function prepareGenerationForDrop(
   if (!assetKey || !entry || !mediaType) {
     return null;
   }
-  return {
+  const registered: TimelineProvisionedAsset = {
     assetKey,
     mediaType,
     durationSeconds: entry.duration ?? null,
     entry,
     source: 'registered',
   };
+  markGenerationAssetInFlight?.(registered);
+  return registered;
 }
 
 export function isGenerationDragType(dragType: ReturnType<typeof getDragType>) {
@@ -268,6 +271,7 @@ export async function handleFileDrop({
   resolveAssetUrl,
   registerGenerationAsset,
   prepareGenerationAsset,
+  markGenerationAssetInFlight,
   uploadImageGeneration,
   uploadVideoGeneration,
   dropAsset,
@@ -289,6 +293,7 @@ export async function handleFileDrop({
   resolveAssetUrl: (file: string) => Promise<string>;
   registerGenerationAsset: UseAssetManagementResult['registerGenerationAsset'];
   prepareGenerationAsset?: UseAssetManagementResult['prepareGenerationAsset'];
+  markGenerationAssetInFlight?: UseAssetManagementResult['markGenerationAssetInFlight'];
   uploadImageGeneration: UseAssetManagementResult['uploadImageGeneration'];
   uploadVideoGeneration: UseAssetManagementResult['uploadVideoGeneration'];
   dropAsset: UseAssetManagementResult['handleAssetDrop'];
@@ -495,7 +500,7 @@ export async function handleFileDrop({
           abandonDrop();
           return undefined;
         }
-        const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset);
+        const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset, markGenerationAssetInFlight);
         if (!preparedAsset) return NOT_PREPARED_REASON;
         const preparedManagedImageTrackId = files.length === 1 && preparedAsset.mediaSelection
           ? dropPosition.pointerTrackId
@@ -509,7 +514,7 @@ export async function handleFileDrop({
           abandonDrop();
           return undefined;
         }
-        const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset);
+        const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset, markGenerationAssetInFlight);
         if (!preparedAsset) return NOT_PREPARED_REASON;
         return place(preparedAsset, compatibleTrackId ?? undefined);
       }
@@ -581,6 +586,7 @@ export function handleMultiGenerationDrop({
   insertAtTop,
   registerGenerationAsset,
   prepareGenerationAsset,
+  markGenerationAssetInFlight,
   selectedTrackId,
   dropAsset,
 }: {
@@ -590,6 +596,7 @@ export function handleMultiGenerationDrop({
   insertAtTop: boolean;
   registerGenerationAsset: UseAssetManagementResult['registerGenerationAsset'];
   prepareGenerationAsset?: UseAssetManagementResult['prepareGenerationAsset'];
+  markGenerationAssetInFlight?: UseAssetManagementResult['markGenerationAssetInFlight'];
   selectedTrackId: string | null;
   dropAsset: UseAssetManagementResult['handleAssetDrop'];
 }): boolean {
@@ -654,7 +661,7 @@ export function handleMultiGenerationDrop({
       ...generationData,
       assetId: registrationPlan.assetId,
       ...(assetDurationSeconds !== null ? { durationSeconds: assetDurationSeconds } : {}),
-    }, dataRef, registerGenerationAsset, prepareGenerationAsset);
+    }, dataRef, registerGenerationAsset, prepareGenerationAsset, markGenerationAssetInFlight);
 
     if (!preparedAsset) {
       continue;
@@ -693,6 +700,7 @@ export function handleSingleGenerationDrop({
   insertAtTop,
   registerGenerationAsset,
   prepareGenerationAsset,
+  markGenerationAssetInFlight,
   selectedTrackId,
   dropAsset,
 }: {
@@ -702,6 +710,7 @@ export function handleSingleGenerationDrop({
   insertAtTop: boolean;
   registerGenerationAsset: UseAssetManagementResult['registerGenerationAsset'];
   prepareGenerationAsset?: UseAssetManagementResult['prepareGenerationAsset'];
+  markGenerationAssetInFlight?: UseAssetManagementResult['markGenerationAssetInFlight'];
   selectedTrackId: string | null;
   dropAsset: UseAssetManagementResult['handleAssetDrop'];
 }): boolean {
@@ -759,7 +768,7 @@ export function handleSingleGenerationDrop({
     ...generationData,
     assetId: registrationPlan.assetId,
     ...(assetDurationSeconds !== null ? { durationSeconds: assetDurationSeconds } : {}),
-  }, dataRef, registerGenerationAsset, prepareGenerationAsset);
+  }, dataRef, registerGenerationAsset, prepareGenerationAsset, markGenerationAssetInFlight);
   if (!preparedAsset) {
     return true;
   }

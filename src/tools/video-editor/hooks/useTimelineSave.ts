@@ -240,6 +240,7 @@ export function useTimelineSave(
       return receipt;
     },
     remoteHistoryAvailable: () => localOwner.handoff?.remoteHistoryAvailable() ?? false,
+    canRequestHistory: (head) => localOwner.handoff?.canRequestHistory?.(head) ?? false,
     refreshHistory: async () => {
       const handoff = await localOwner.ready;
       if (localOwner.closed || !handoff) return;

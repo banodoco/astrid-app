@@ -48,7 +48,7 @@ export interface UseTimelineHistoryArgs {
    */
   pendingOpsRef: MutableRefObject<number>;
   editability?: TimelineEditability;
-  remoteHistory?: Pick<TimelineLocalSaveHandoff, 'remoteHistoryAvailable' | 'refreshHistory' | 'canUndo' | 'canRedo' | 'undo' | 'redo'>;
+  remoteHistory?: Pick<TimelineLocalSaveHandoff, 'remoteHistoryAvailable' | 'canRequestHistory' | 'refreshHistory' | 'canUndo' | 'canRedo' | 'undo' | 'redo'>;
 }
 
 export interface UseTimelineHistoryResult {
@@ -138,6 +138,7 @@ export function useTimelineHistory({
   const [canonicalHistoryError, setCanonicalHistoryError] = useState<string | null>(remoteHistory ? 'History has not been loaded.' : null);
   const [restoringCanonicalRevisionId, setRestoringCanonicalRevisionId] = useState<string | null>(null);
   const canonicalHistoryRequestRef = useRef(0);
+  const historyActionPendingRef = useRef(false);
   const canonicalHistoryBasisRef = useRef<TimelineData | null>(null);
   const canonicalHistoryFingerprintRef = useRef<string | null>(null);
   const canonicalHistorySupported = Boolean(provider.shotComposition?.listHistory && provider.shotComposition?.restoreHistory);
@@ -330,9 +331,26 @@ export function useTimelineHistory({
 
   const undo = useCallback(() => {
     if (remoteHistory) {
-      if (!remoteHistory.remoteHistoryAvailable() || !remoteHistory.canUndo()
-        || pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
-        || (editability?.checkTimeline && !editability.checkTimeline().allowed)) return;
+      if (pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
+        || (editability?.checkTimeline && !editability.checkTimeline().allowed) || historyActionPendingRef.current) return;
+      if (!remoteHistory.remoteHistoryAvailable()) {
+        const basis = dataRef.current;
+        if (!basis?.head?.headRevisionId || !basis.head.headPublicationId) return;
+        if (!remoteHistory.canRequestHistory?.(basis.head) || !remoteHistory.refreshHistory) return;
+        const fingerprint = historyBasis(basis);
+        historyActionPendingRef.current = true;
+        void remoteHistory.refreshHistory().then(async () => {
+          if (dataRef.current !== basis || historyBasis(dataRef.current) !== fingerprint || pendingOpsRef.current > 0
+            || isInteractionActive(interactionStateRef) || (editability?.checkTimeline && !editability.checkTimeline().allowed)
+            || !remoteHistory.remoteHistoryAvailable()) return;
+          if (!remoteHistory.canUndo()) { toast.info('No saved timeline change to undo'); return; }
+          await remoteHistory.undo();
+        }).catch((error: unknown) => {
+          toast.error('Could not undo timeline', { description: error instanceof Error ? error.message : String(error) });
+        }).finally(() => { historyActionPendingRef.current = false; });
+        return;
+      }
+      if (!remoteHistory.canUndo()) return;
       void remoteHistory.undo().catch((error: unknown) => {
         toast.error('Could not undo timeline', { description: error instanceof Error ? error.message : String(error) });
       });
@@ -372,9 +390,26 @@ export function useTimelineHistory({
 
   const redo = useCallback(() => {
     if (remoteHistory) {
-      if (!remoteHistory.remoteHistoryAvailable() || !remoteHistory.canRedo()
-        || pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
-        || (editability?.checkTimeline && !editability.checkTimeline().allowed)) return;
+      if (pendingOpsRef.current > 0 || isInteractionActive(interactionStateRef)
+        || (editability?.checkTimeline && !editability.checkTimeline().allowed) || historyActionPendingRef.current) return;
+      if (!remoteHistory.remoteHistoryAvailable()) {
+        const basis = dataRef.current;
+        if (!basis?.head?.headRevisionId || !basis.head.headPublicationId) return;
+        if (!remoteHistory.canRequestHistory?.(basis.head) || !remoteHistory.refreshHistory) return;
+        const fingerprint = historyBasis(basis);
+        historyActionPendingRef.current = true;
+        void remoteHistory.refreshHistory().then(async () => {
+          if (dataRef.current !== basis || historyBasis(dataRef.current) !== fingerprint || pendingOpsRef.current > 0
+            || isInteractionActive(interactionStateRef) || (editability?.checkTimeline && !editability.checkTimeline().allowed)
+            || !remoteHistory.remoteHistoryAvailable()) return;
+          if (!remoteHistory.canRedo()) { toast.info('No saved timeline change to redo'); return; }
+          await remoteHistory.redo();
+        }).catch((error: unknown) => {
+          toast.error('Could not redo timeline', { description: error instanceof Error ? error.message : String(error) });
+        }).finally(() => { historyActionPendingRef.current = false; });
+        return;
+      }
+      if (!remoteHistory.canRedo()) return;
       void remoteHistory.redo().catch((error: unknown) => {
         toast.error('Could not redo timeline', { description: error instanceof Error ? error.message : String(error) });
       });
@@ -562,14 +597,18 @@ export function useTimelineHistory({
   // before the `finally` decrement), so the tree re-renders right after each
   // transition and this value cannot go stale for longer than that commit.
   const historyPausedForUploads = pendingOpsRef.current > 0;
+  const canRequestRemoteHistory = Boolean(dataRef.current?.head?.headRevisionId && dataRef.current.head.headPublicationId
+    && remoteHistory?.canRequestHistory?.(dataRef.current.head) && remoteHistory.refreshHistory
+    && !historyActionPendingRef.current && !historyPausedForUploads && !isInteractionActive(interactionStateRef)
+    && (!editability?.checkTimeline || editability.checkTimeline().allowed));
   const historyStale = Boolean(remoteHistory && canonicalHistoryBasisRef.current
     && (canonicalHistoryBasisRef.current !== dataRef.current
       || canonicalHistoryFingerprintRef.current !== historyBasis(dataRef.current)
       || !remoteHistory.remoteHistoryAvailable()));
 
   return {
-    canUndo: (remoteHistory ? remoteHistory.canUndo() : canUndo) && !historyPausedForUploads,
-    canRedo: (remoteHistory ? remoteHistory.canRedo() : canRedo) && !historyPausedForUploads,
+    canUndo: (remoteHistory ? remoteHistory.canUndo() || canRequestRemoteHistory : canUndo) && !historyPausedForUploads,
+    canRedo: (remoteHistory ? remoteHistory.canRedo() || canRequestRemoteHistory : canRedo) && !historyPausedForUploads,
     historyPausedForUploads,
     checkpoints,
     canonicalHistory: historyStale ? [] : canonicalHistory,

@@ -218,6 +218,7 @@ function setup(options: {
   return {
     provider,
     dataRef,
+    interactionStateRef,
     pendingOpsRef,
     commitCalls,
     commitData,
@@ -246,11 +247,43 @@ describe('useTimelineHistory', () => {
       canRedo: () => loaded,
       undo: vi.fn(async () => {}), redo: vi.fn(async () => {}),
     };
-    const harness = setup({ remoteHistory });
+    const initialData = { ...makeTimelineData(0), head: { projectId: 'project-1', timelineId: 'timeline-1',
+      headRevisionId: 'r0', headPublicationId: 'p0' } };
+    const harness = setup({ remoteHistory, initialData });
     expect(harness.result.current[action === 'undo' ? 'canUndo' : 'canRedo']).toBe(true);
     await act(async () => { harness.result.current[action](); await Promise.resolve(); });
     expect(remoteHistory.refreshHistory).toHaveBeenCalledTimes(1);
     expect(remoteHistory[action]).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['undo', 'redo'] as const)('rechecks %s after deferred history and refuses stale, unsafe, or missing targets', async action => {
+    for (const outcome of ['head', 'draft', 'upload', 'interaction', 'read-only', 'missing', 'failure'] as const) {
+      let loaded = false;
+      let editable = true;
+      let release!: () => void;
+      const remoteHistory = { remoteHistoryAvailable: () => loaded, canRequestHistory: () => !loaded,
+        refreshHistory: vi.fn(() => new Promise<void>((resolve, reject) => { release = () => {
+          if (outcome === 'failure') reject(new Error('history unavailable'));
+          else { loaded = true; resolve(); }
+        }; })),
+        canUndo: () => loaded && outcome !== 'missing', canRedo: () => loaded && outcome !== 'missing',
+        undo: vi.fn(async () => {}), redo: vi.fn(async () => {}) };
+      const initialData = { ...makeTimelineData(0), head: { projectId: 'project-1', timelineId: 'timeline-1',
+        headRevisionId: 'r0', headPublicationId: 'p0' } };
+      const harness = setup({ remoteHistory, initialData, editability: { checkTimeline: () => ({ allowed: editable }) } });
+      act(() => harness.result.current[action]());
+      if (outcome === 'head') harness.dataRef.current = { ...initialData, head: { ...initialData.head, headPublicationId: 'p1' } };
+      if (outcome === 'draft') harness.dataRef.current = { ...initialData, config: { ...initialData.config,
+        output: { ...initialData.config.output, file: 'changed.mp4' } } };
+      if (outcome === 'upload') harness.pendingOpsRef.current = 1;
+      if (outcome === 'interaction') harness.interactionStateRef.current.drag = true;
+      if (outcome === 'read-only') editable = false;
+      await act(async () => { release(); await Promise.resolve(); await Promise.resolve(); });
+      expect(remoteHistory[action]).not.toHaveBeenCalled();
+      if (outcome === 'missing') expect(harness.toast.info).toHaveBeenCalled();
+      if (outcome === 'failure') expect(harness.toast.error).toHaveBeenCalled();
+      harness.unmount();
+    }
   });
 
   it('does not expose unloaded or late history to restore after the draft changes', async () => {

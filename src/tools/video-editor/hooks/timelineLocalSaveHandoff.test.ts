@@ -1155,10 +1155,14 @@ describe('Undo/Redo target only this actor\'s own publications', () => {
     const handoff = createTimelineLocalSaveHandoff({ initial: env.initial, source: env.source,
       session: env.session, adopted: env.receipt, loadHistory });
     expect(handoff.remoteHistoryAvailable()).toBe(false);
+    expect(handoff.canRequestHistory!()).toBe(true);
+    expect(handoff.canRequestHistory!({ ...env.source.head!, headPublicationId: 'other' })).toBe(false);
+    expect(handoff.canRequestHistory!({ ...env.source.head!, projectId: 'other' })).toBe(false);
     expect(loadHistory).not.toHaveBeenCalled();
     await expect(handoff.undo()).rejects.toThrow('history is not settled');
     await handoff.refreshHistory!();
     expect(handoff.remoteHistoryAvailable()).toBe(true);
+    expect(handoff.canRequestHistory!()).toBe(false);
     expect(handoff.canUndo()).toBe(false);
     await env.session.dispose();
   });

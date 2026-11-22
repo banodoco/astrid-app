@@ -49,6 +49,7 @@ export interface TimelineLocalSaveHandoff {
   discharge?(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent?: () => boolean): Promise<TimelineSaveReceipt | void>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
+  canRequestHistory?(displayHead?: TimelineHeadRevision): boolean;
   refreshHistory?(): Promise<void>;
   canUndo(): boolean;
   canRedo(): boolean;
@@ -390,6 +391,13 @@ export function createTimelineLocalSaveHandoff(options: {
   function remoteHistoryAvailable(): boolean {
     return historyLoaded && !inversePending && options.session.getState().status === 'saved'
       && same(options.session.getBasis().head, initial.head) && same(options.session.getDocument(), document);
+  }
+  function canRequestHistory(displayHead?: TimelineHeadRevision): boolean {
+    return !historyLoaded && Boolean(options.loadHistory) && !inversePending && options.session.getState().status === 'saved'
+      && same(options.session.getBasis().head, initial.head) && same(options.session.getDocument(), document)
+      && (!displayHead || (displayHead.projectId === initial.canonicalDocument.project_id
+        && displayHead.timelineId === initial.canonicalDocument.timeline_id && displayHead.headRevisionId === initial.head.revisionId
+        && displayHead.headPublicationId === initial.head.publicationId));
   }
   async function refreshHistory(): Promise<void> {
     if (!options.loadHistory || options.session.getState().status !== 'saved') return;
@@ -1084,6 +1092,7 @@ export function createTimelineLocalSaveHandoff(options: {
       return adopted.receipt;
     },
     remoteHistoryAvailable,
+    canRequestHistory,
     refreshHistory,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,
     canRedo: () => remoteHistoryAvailable() && targets.redo.length > 0,

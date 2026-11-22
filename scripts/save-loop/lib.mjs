@@ -15,7 +15,7 @@ const {chromium}=await import(process.env.SAVE_LOOP_PLAYWRIGHT||'playwright');
 function need(name){ const v=process.env[name]; if(!v){ throw new Error(`missing env ${name} (see scripts/save-loop/lib.mjs header or run sweep.mjs --help)`); } return v; }
 const CHROME=need('SAVE_LOOP_CHROME');
 const RESULTS=process.env.SAVE_LOOP_RESULTS||'results.jsonl';
-export const URL_=`${need('SAVE_LOOP_BASE_URL')}/tools/video-editor?project=${encodeURIComponent(need('SAVE_LOOP_PROJECT'))}&timeline=${encodeURIComponent(need('SAVE_LOOP_TIMELINE'))}`;
+export const URL_=`${need('SAVE_LOOP_BASE_URL')}/tools/video-editor?connect=1&project=${encodeURIComponent(need('SAVE_LOOP_PROJECT'))}&timeline=${encodeURIComponent(need('SAVE_LOOP_TIMELINE'))}`;
 // Check before every browser run, including recovery/reopens. Never use the owner realm.
 export function checkDisk() {
   const diskPath = process.env.SAVE_LOOP_ROOT || os.homedir();

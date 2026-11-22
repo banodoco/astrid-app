@@ -362,6 +362,67 @@ async function expectSameRealm(page: Page, harness: DirectHarness, astrid: Astri
 /** The transition control of the clip panel, found by its label (the panel's selects carry no accessible name). */
 const transitionSelect = (page: Page): Locator => page.getByText('Transition', { exact: true }).locator('xpath=following::*[@role="combobox"][1]');
 
+// DIAGNOSTIC ONLY: attach allowlisted transition scalars; never attach network bodies or arbitrary DOM.
+function diagnosticTransition(value: any): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object') return null;
+  const result: Record<string, unknown> = {};
+  for (const key of ['id', 'type']) if (typeof value[key] === 'string') {
+    result[key] = /^(cross-?fade|fade)$/.test(value[key]) ? value[key] : '<other>';
+  }
+  for (const key of ['duration', 'durationFrames']) if (typeof value[key] === 'number') result[key] = value[key];
+  return result;
+}
+async function attachDiagnostic(name: string, data: unknown): Promise<void> {
+  try { await test.info().attach(name, { body: Buffer.from(JSON.stringify(data, null, 2)), contentType: 'application/json' }); }
+  catch (error) { console.log(`DIAG ${name} unavailable`, error instanceof Error ? error.name : 'error'); }
+}
+async function diagnoseTransitionControl(page: Page, name: string, openOptions: boolean): Promise<void> {
+  try {
+    const control = transitionSelect(page).first();
+    const state = await control.evaluate((node) => {
+      const safe = (v: unknown) => typeof v === 'string' && /^(cross-?fade|fade|__none__|None)$/.test(v) ? v : '<other>';
+      let fiber = (node as any)[Object.keys(node).find((key) => key.startsWith('__reactFiber$')) ?? ''];
+      let clip: any = null; let selectValue: unknown = null;
+      for (let depth = 0; fiber && depth < 60; depth++, fiber = fiber.return) {
+        const props = fiber.memoizedProps;
+        if (selectValue === null && typeof props?.value === 'string') selectValue = safe(props.value);
+        if (props?.clip && typeof props.clip === 'object' && 'transition' in props.clip) { clip = props.clip; break; }
+      }
+      const t = clip?.transition; const transition: Record<string, unknown> = {};
+      if (t && typeof t === 'object') {
+        for (const key of ['id', 'type']) if (typeof t[key] === 'string') transition[key] = safe(t[key]);
+        for (const key of ['duration', 'durationFrames']) if (typeof t[key] === 'number') transition[key] = t[key];
+      }
+      return { renderedText: /cross[\s-]?fade/i.test(node.textContent ?? '') ? 'crossfade' : safe(node.textContent?.trim()), ariaExpanded: node.getAttribute('aria-expanded'),
+        selectValue, clipFound: !!clip, transition: t ? transition : null };
+    });
+    let options: unknown = 'not opened';
+    if (openOptions) {
+      await control.click({ timeout: 3000 });
+      options = await page.getByRole('option').evaluateAll((nodes) => nodes.map((node) => ({
+        label: /cross[\s-]?fade/i.test(node.textContent ?? '') ? 'crossfade' : '<other>',
+        value: (() => {
+          const key = Object.keys(node).find((candidate) => candidate.startsWith('__reactFiber$'));
+          let fiber = key ? (node as any)[key] : null; let value: unknown = node.getAttribute('data-value');
+          for (let depth = 0; !value && fiber && depth < 8; depth++, fiber = fiber.return) value = fiber.memoizedProps?.value;
+          return typeof value === 'string' && /^(cross-?fade|fade|__none__)$/.test(value) ? value : '<other-or-unavailable>';
+        })(),
+      })));
+      await page.keyboard.press('Escape');
+    }
+    await attachDiagnostic(name, { ...state, options });
+  } catch (error) { await attachDiagnostic(name, { unavailable: error instanceof Error ? error.name : 'error' }); }
+}
+async function diagnoseRecovery(page: Page, name: string): Promise<void> {
+  try {
+    const alert = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' }).first();
+    const data = { visible: await alert.isVisible(), buttons: await alert.getByRole('button').allTextContents()
+      .then((values) => values.map((v) => /^(Save them|Try again|Restore|Discard)$/.test(v.trim()) ? v.trim() : '<other>')) };
+    await attachDiagnostic(name, data);
+    if (data.visible) await test.info().attach(`${name}-alert`, { body: await alert.screenshot(), contentType: 'image/png' });
+  } catch (error) { await attachDiagnostic(name, { unavailable: error instanceof Error ? error.name : 'error' }); }
+}
+
 async function selectClip(page: Page, clipId: string) {
   await page.locator(`[data-clip-id="${clipId}"]`).first().click();
 }
@@ -526,6 +587,12 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   expect(stateB.parentClips[seed3.transitionClipId].transition.id).toMatch(/cross[\s-]?fade/i);
   expect(stateB.parentClips[seed3.transitionClipId].transition).toBeTruthy();
 
+  await attachDiagnostic('diag-b-transition-mirrors', {
+    topLevel: diagnosticTransition((stateB.parent.clips as any[])?.find((clip) => clip.id === seed3.transitionClipId)?.transition),
+    config: diagnosticTransition((stateB.parent.config?.clips as any[])?.find((clip) => clip.id === seed3.transitionClipId)?.transition),
+  });
+  await diagnoseTransitionControl(page, 'diag-before-keep', false);
+
   // One publication per retried save: A was replayed under its own key and made exactly one revision; the agent's publication made one.
   const revisions = (await allRevisions(harness, seed3)).map((revision) => revision.revision_id);
   expect(revisions.length, 'two new revisions: A and B').toBe(revisionsBefore + 2);
@@ -544,6 +611,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await expect(conflict).toHaveCount(0, CEILING);
   await expect(firstTrackName(page)).toHaveValue(stateB.trackLabel!);
   await selectClip(page, seed3.transitionClipId);
+  await diagnoseTransitionControl(page, 'diag-after-keep', true);
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i, CEILING);
   const kept = await timelineDraft(page, seed3.timelineId);
   expect(kept?.draft).toEqual(draftC.draft);
@@ -3111,6 +3179,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   // The single native owner is recovered automatically. Its rejected draft remains durable;
   // rollback shows the Agent's canonical partial clear, and Save them reopens the refusal.
   const recovery = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
+  await diagnoseRecovery(page, 'diag-bulk-before-wait');
   await expect(recovery).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
   for (const id of ids) {
@@ -3118,6 +3187,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
     await page.getByRole('tab', { name: 'Effects', exact: true }).click();
     await expect(transitionSelect(page)).toContainText(id === seed3.appClipId ? 'None' : /cross[\s-]?fade/i);
   }
+  await diagnoseRecovery(page, 'diag-bulk-before-click');
   await recovery.getByRole('button', { name: 'Save them' }).click();
   await expect(page.getByRole('alertdialog', { name: CONFLICT_TITLE })).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);

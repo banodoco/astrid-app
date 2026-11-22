@@ -2782,12 +2782,22 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
   await expect(page.getByText('conflict: an intervening publication wrote a guarded address')).toBeVisible();
   await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
+  // REVIEW (#345): R13 showed the undo refusal inline only. R14 also opens the conflict dialog.
+  const conflict = page.getByRole('alertdialog', { name: CONFLICT_TITLE });
+  const useLatest = conflict.getByRole('button', { name: 'Use latest version' });
+  await expect(conflict).toBeVisible();
+  await expect(useLatest).toBeVisible();
+  await expect(conflict.getByRole('button', { name: 'Keep my changes' })).toBeVisible();
+  await useLatest.click();
+  await expect(conflict).toHaveCount(0, CEILING);
   await expect(firstTrackName(page)).toHaveValue(trackLabel);
+  await expect(page.locator('[data-track-id="f2-mixed-independent"]')).toBeVisible();
   await expectOpaqueDataKept(harness, seed3);
   expect(wire.legacy).toEqual([]);
   journey.facts = { ...journey.facts, acceptedMove: pinOf(move), acceptedRename: pinOf(rename),
     retainedOwner: kept.ownerId, retryKey: wire.posts[0].key, refusedUndo: { status: 409, reason: 'intervening_write' }, renderer: 'not started' };
   await sniff.expectClean(page, seed3.timelineId);
+  expect(wire.observed, 'Use latest version sends no commit POST').toHaveLength(observedBeforeUndo + 1);
 });
 
 // Separate worker seed: the original seven cases retain their ordinary fixture and bodies.

@@ -30,7 +30,9 @@ export type TimelineGestureReadBasis = {
   registry: AssetRegistry;
 } & ({ kind: 'track-label'; trackId: string; label: string } | ({ clipId: string } & ({ kind: 'split'; timeSeconds: number } | { kind: 'move'; trackId: string } | {
   kind: 'trim'; patch: Partial<Pick<TimelineConfig['clips'][number], 'from' | 'to' | 'hold' | 'speed'>>;
-} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext })));
+} | { kind: 'transition-clear'; clipIds: string[] } | { kind: 'prepared-media'; command: PlacePreparedMediaCommand;
+  /** Drops still in flight (this one included), by registry address and the entry each declared: the editor may already show them, and each drop's own save declares only its own asset. */
+  inFlight?: Readonly<Record<string, unknown>> } | { kind: 'element'; operation: TimelineElementOperation; context: AstridAgentElementContext })));
 
 /** Assembly supplies the ORIGINAL verified read, not loadTimelineCommandBasis at save time. */
 export interface TimelineLocalSaveHandoff {
@@ -477,7 +479,7 @@ export function createTimelineLocalSaveHandoff(options: {
     return baseline;
   }
   const handoff: TimelineLocalSaveHandoff = {
-    capture(input, gestureBasis) {
+    capture(input, inputGestureBasis) {
       try {
         const next = structuredClone(input);
         checkHead(initial, source, 'capture-source-head-unavailable');
@@ -486,13 +488,29 @@ export function createTimelineLocalSaveHandoff(options: {
         const parent = before.parent_revision.payload;
         const hasChildren = before.shot_revisions.length || before.internal_timeline_revisions.length
           || (Array.isArray(parent.occurrences) && parent.occurrences.length);
+        if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
+        if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
+        authoredJson(next); // Reject non-finite editor values before mutating the chain.
+        const normalizeGestureBasis = (basis: typeof inputGestureBasis) => {
+          if (basis?.kind !== 'prepared-media' || !basis.inFlight) return basis;
+          // Another drop's asset is left to that drop's own save. It is ignored only at its declared address and
+          // value (and never this drop's own); any other registry difference still reaches the guards below.
+          const ownKey = basis.command.payload.asset.assetKey;
+          const declared = basis.inFlight;
+          const withoutOthers = (registry: AssetRegistry, includeOwn: boolean): AssetRegistry => {
+            const assets = registry.assets;
+            if (!assets) return registry;
+            return { ...registry, assets: Object.fromEntries(Object.entries(assets).filter(([key, entry]) =>
+              (key === ownKey && !includeOwn) || !Object.prototype.hasOwnProperty.call(declared, key) || !same(authoredJson(entry), authoredJson(declared[key])))) };
+          };
+          next.registry = withoutOthers(next.registry, false);
+          return { ...basis, registry: withoutOthers(basis.registry, true) };
+        };
+        const gestureBasis = normalizeGestureBasis(inputGestureBasis);
         const parentGesture = gestureBasis?.kind === 'move' || gestureBasis?.kind === 'transition-clear';
         const trackLabelGesture = gestureBasis?.kind === 'track-label';
         // Trim and split edit one parent clip row; like move they prove that by an expected diff below.
         const clipGesture = gestureBasis?.kind === 'trim' || gestureBasis?.kind === 'split';
-        if (!sourceChecked) { checkSource(initial, source); sourceChecked = true; }
-        if (!same(before, document)) refuse('local authored document changed outside this handoff', 'local-document-changed');
-        authoredJson(next); // Reject non-finite editor values before mutating the chain.
         // A gesture proves its own effect below; an edit that names none must stay on rows the parent alone owns.
         const unnamedRefusal = hasChildren && gestureBasis === undefined
           ? unnamedEditRefusal(before, authoringSource, next) : undefined;

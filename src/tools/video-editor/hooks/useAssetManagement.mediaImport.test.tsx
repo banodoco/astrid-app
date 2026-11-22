@@ -10,6 +10,8 @@ import {
 import { buildPlacePreparedMediaCommand } from '@/tools/video-editor/hooks/useAssetManagement';
 import { useAssetManagement } from './useAssetManagement';
 import { RUNTIME_MEDIA_IMPORT_MAX_BYTES } from '@/tools/video-editor/data/AssetResolver.ts';
+import { createDefaultTimelineConfig } from '../lib/defaults.ts';
+import { buildTimelineData } from '../lib/timeline-data.ts';
 
 const extractVideoMetadataMock = vi.fn();
 
@@ -60,6 +62,111 @@ function renderAssetManagement(provider: Record<string, unknown>) {
 }
 
 describe('useAssetManagement Runtime media imports', () => {
+  it('keeps generic registrations out of drop markers and releases an owned marker after placement', async () => {
+    const dataRef = { current: await buildTimelineData(createDefaultTimelineConfig(), { assets: {} }) };
+    const applyEdit = vi.fn();
+    const patchRegistry = vi.fn((assetKey: string, entry: { file: string }) => {
+      dataRef.current = { ...dataRef.current!, registry: { ...dataRef.current!.registry,
+        assets: { ...dataRef.current!.registry.assets, [assetKey]: entry } } };
+    });
+    const { result } = renderHook(() => useAssetManagement({
+      ...buildArgs(), dataRef: dataRef as never, applyEdit, patchRegistry,
+    }), {
+      wrapper: ({ children }) => (
+        <VideoEditorRuntimeProvider value={buildRuntimeValue({ resolveAssetUrl: vi.fn() })}>
+          {children}
+        </VideoEditorRuntimeProvider>
+      ),
+    });
+    const staticKey = result.current.registerGenerationAsset({
+      generationId: 'gallery-generation', variantId: 'gallery-variant', variantType: 'image',
+      assetId: 'gallery-asset', imageUrl: 'https://media.test/gallery.png',
+      metadata: { content_type: 'image/png' },
+    } as never);
+    expect(staticKey).toBe('gallery-asset');
+    const activeDrop = result.current.prepareGenerationAsset({
+      generationId: 'drop-generation', variantId: 'drop-variant', variantType: 'image',
+      assetId: 'drop-asset', imageUrl: 'https://media.test/drop.png',
+      metadata: { content_type: 'image/png' },
+    } as never)!;
+    result.current.markGenerationAssetInFlight(activeDrop);
+    act(() => { result.current.handleAssetDrop(activeDrop.assetKey, 'V1', 0, false, false, activeDrop); });
+    expect(applyEdit).toHaveBeenCalledOnce();
+    expect(applyEdit.mock.calls[0][0]).toMatchObject({ type: 'prepared-media', inFlight: { 'drop-asset': activeDrop.entry } });
+    expect(applyEdit.mock.calls[0][0]).not.toHaveProperty('inFlight.gallery-asset');
+
+    const laterDrop = result.current.prepareGenerationAsset({
+      generationId: 'later-generation', variantId: 'later-variant', variantType: 'image',
+      assetId: 'later-asset', imageUrl: 'https://media.test/later.png',
+      metadata: { content_type: 'image/png' },
+    } as never)!;
+    act(() => { result.current.handleAssetDrop(laterDrop.assetKey, 'V1', 5, false, false, laterDrop); });
+    expect(applyEdit).toHaveBeenCalledTimes(2);
+    expect(applyEdit.mock.calls[1][0]).not.toHaveProperty('inFlight');
+
+    const declinedDrop = result.current.prepareGenerationAsset({
+      generationId: 'declined-generation', variantId: 'declined-variant', variantType: 'image',
+      assetId: 'declined-asset', imageUrl: 'https://media.test/declined.png',
+      metadata: { content_type: 'image/png' },
+    } as never)!;
+    result.current.markGenerationAssetInFlight(declinedDrop);
+    const savedData = dataRef.current;
+    dataRef.current = null;
+    let placed = true;
+    act(() => { placed = result.current.handleAssetDrop(declinedDrop.assetKey, 'V1', 10, false, false, declinedDrop); });
+    expect(placed).toBe(false);
+    dataRef.current = savedData;
+    const erroredDrop = result.current.prepareGenerationAsset({
+      generationId: 'errored-generation', variantId: 'errored-variant', variantType: 'image',
+      assetId: 'errored-asset', imageUrl: 'https://media.test/errored.png', metadata: { content_type: 'image/png' },
+    } as never)!;
+    result.current.markGenerationAssetInFlight(erroredDrop);
+    applyEdit.mockImplementationOnce(() => { throw new Error('edit dispatch failed'); });
+    expect(() => result.current.handleAssetDrop(erroredDrop.assetKey, 'V1', 12, false, false, erroredDrop)).toThrow('edit dispatch failed');
+    const afterDecline = result.current.prepareGenerationAsset({
+      generationId: 'after-decline', variantId: 'after-decline-variant', variantType: 'image',
+      assetId: 'after-decline-asset', imageUrl: 'https://media.test/after-decline.png',
+      metadata: { content_type: 'image/png' },
+    } as never)!;
+    act(() => { result.current.handleAssetDrop(afterDecline.assetKey, 'V1', 15, false, false, afterDecline); });
+    expect(applyEdit).toHaveBeenCalledTimes(4);
+    expect(applyEdit.mock.calls[3][0]).not.toHaveProperty('inFlight');
+  });
+
+  it('releases a retargeted drop by its original key and keeps another concurrent marker', async () => {
+    const dataRef = { current: await buildTimelineData(createDefaultTimelineConfig(), { assets: {} }) };
+    dataRef.current = { ...dataRef.current, registry: { assets: { 'shared-key': { file: 'old.png', type: 'image/png' } } } };
+    const applyEdit = vi.fn();
+    const { result } = renderHook(() => useAssetManagement({ ...buildArgs(), dataRef: dataRef as never, applyEdit }), {
+      wrapper: ({ children }) => (
+        <VideoEditorRuntimeProvider value={buildRuntimeValue({ resolveAssetUrl: vi.fn() })}>
+          {children}
+        </VideoEditorRuntimeProvider>
+      ),
+    });
+    const hash = `sha256:${'a'.repeat(64)}`;
+    const original = {
+      assetKey: 'shared-key', mediaType: 'image', durationSeconds: null, source: 'registered',
+      entry: { file: 'new.png', type: 'image/png', media_id: hash, generationId: 'g', variantId: 'v' },
+      mediaSelection: { asset: 'shared-key', generation_id: 'g', variant_id: 'v', object_id: hash, catalog_digest: `sha256:${'b'.repeat(64)}` },
+    } as never;
+    const other = { assetKey: 'other-key', mediaType: 'image', durationSeconds: null, source: 'registered', entry: { file: 'other.png', type: 'image/png' } } as never;
+    result.current.markGenerationAssetInFlight(original);
+    result.current.markGenerationAssetInFlight(other);
+    act(() => { result.current.handleAssetDrop('shared-key', 'V1', 0, false, false, original, 'uploading-placeholder'); });
+    const firstGesture = applyEdit.mock.calls[0][1] as { gestureBasis: { command: { payload: { asset: { assetKey: string } } }; inFlight: Record<string, unknown> } };
+    expect(firstGesture.gestureBasis.command.payload.asset.assetKey).not.toBe('shared-key');
+    expect(Object.keys(firstGesture.gestureBasis.inFlight).sort()).toEqual(['other-key', 'shared-key']);
+
+    const later = result.current.prepareGenerationAsset({
+      generationId: 'later-generation', variantId: 'later-variant', variantType: 'image',
+      assetId: 'later-key', imageUrl: 'https://media.test/later.png', metadata: { content_type: 'image/png' },
+    } as never)!;
+    act(() => { result.current.handleAssetDrop(later.assetKey, 'V1', 5, false, false, later); });
+    const secondMutation = applyEdit.mock.calls[1][0] as { inFlight: Record<string, unknown> };
+    expect(Object.keys(secondMutation.inFlight)).toEqual(['other-key']);
+  });
+
   it('carries an authentic Runtime selection through preparation and placement without inventing one', async () => {
     const mediaSelection = {
       asset: 'sha256:image',

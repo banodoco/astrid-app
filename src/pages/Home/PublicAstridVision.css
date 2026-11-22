@@ -2263,7 +2263,7 @@
 .astrid-vision-story > :not(.astrid-vision-planet-layer) {
   position: relative;
   z-index: 1;
-  width: min(100%, 1120px);
+  width: min(calc(100% - 2 * var(--astrid-vision-gutter)), 1120px);
   margin-inline: auto;
 }
 .astrid-vision-planet-pin {

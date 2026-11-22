@@ -78,6 +78,7 @@ async function dispatchTimelineDrop({
   resolveAssetUrl,
   registerGenerationAsset,
   prepareGenerationAsset,
+  markGenerationAssetInFlight,
   uploadImageGeneration,
   uploadVideoGeneration,
   dropAsset,
@@ -101,6 +102,7 @@ async function dispatchTimelineDrop({
   resolveAssetUrl: (file: string) => Promise<string>;
   registerGenerationAsset: UseAssetManagementResult['registerGenerationAsset'];
   prepareGenerationAsset?: UseAssetManagementResult['prepareGenerationAsset'];
+  markGenerationAssetInFlight?: UseAssetManagementResult['markGenerationAssetInFlight'];
   uploadImageGeneration: UseAssetManagementResult['uploadImageGeneration'];
   uploadVideoGeneration: UseAssetManagementResult['uploadVideoGeneration'];
   dropAsset: UseAssetManagementResult['handleAssetDrop'];
@@ -138,6 +140,7 @@ async function dispatchTimelineDrop({
     resolveAssetUrl,
     registerGenerationAsset,
     prepareGenerationAsset,
+    markGenerationAssetInFlight,
     uploadImageGeneration,
     uploadVideoGeneration,
     dropAsset,
@@ -436,6 +439,7 @@ async function dispatchTimelineDrop({
       insertAtTop,
       registerGenerationAsset,
       prepareGenerationAsset,
+      markGenerationAssetInFlight,
       selectedTrackId,
       dropAsset,
     });
@@ -451,6 +455,7 @@ async function dispatchTimelineDrop({
       insertAtTop,
       registerGenerationAsset,
       prepareGenerationAsset,
+      markGenerationAssetInFlight,
       selectedTrackId,
       dropAsset,
     });
@@ -482,6 +487,7 @@ export interface UseExternalDropArgs {
   coordinator: DragCoordinator;
   registerGenerationAsset: UseAssetManagementResult['registerGenerationAsset'];
   prepareGenerationAsset?: UseAssetManagementResult['prepareGenerationAsset'];
+  markGenerationAssetInFlight?: UseAssetManagementResult['markGenerationAssetInFlight'];
   uploadImageGeneration: UseAssetManagementResult['uploadImageGeneration'];
   uploadVideoGeneration: UseAssetManagementResult['uploadVideoGeneration'];
   handleAssetDrop: UseAssetManagementResult['handleAssetDrop'];
@@ -510,6 +516,7 @@ export function useExternalDrop({
   coordinator,
   registerGenerationAsset,
   prepareGenerationAsset,
+  markGenerationAssetInFlight,
   uploadImageGeneration,
   uploadVideoGeneration,
   handleAssetDrop: dropAsset,
@@ -711,6 +718,7 @@ export function useExternalDrop({
       resolveAssetUrl,
       registerGenerationAsset,
       prepareGenerationAsset,
+      markGenerationAssetInFlight,
       uploadImageGeneration,
       uploadVideoGeneration,
       dropAsset,

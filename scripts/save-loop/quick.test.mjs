@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {formatQuickTable, quickIndicatorRow, quickSaveValue, trafficLight} from './quick.mjs';
+import {formatQuickTable, quickIndicatorRow, quickSaveTiming, quickSaveValue, trafficLight} from './quick.mjs';
 import {quickTrackRenameScenario} from './edits.mjs';
 
 test('quick indicator applies the accepted limits and keeps missing observations unobserved', () => {
@@ -9,18 +9,51 @@ test('quick indicator applies the accepted limits and keeps missing observations
   assert.equal(trafficLight(10, {works:2, slow:10}).light, 'slow');
   assert.equal(trafficLight(10.01, {works:2, slow:10}).light, 'broken');
   assert.equal(trafficLight({refused:true}, {works:2, slow:10}).light, 'broken');
-  assert.equal(trafficLight(quickSaveValue({pass:false,reason:'no successful public timeline commit response was observed'}), {works:2,slow:10}).light, 'broken');
+  assert.equal(trafficLight(quickSaveValue({pass:false,reason:'no successful public timeline commit response was observed'}), {works:2,slow:10}).light, 'unobserved');
+  assert.equal(quickSaveValue({pass:false,final_badge:{state:'not saved',text:'Runtime rejected commit'},settlement_outcome:'refusal'}).refused,true);
+  assert.equal(trafficLight(quickSaveValue({pass:false,final_badge:{state:'not saved',text:'old dirty badge'},settlement_outcome:'dirty_before_gesture'}),{works:2,slow:10}).light,'unobserved');
+  assert.equal(trafficLight(quickSaveValue({pass:false,final_badge:{state:'saved'},reason:'fixture setup failed'}),{works:2,slow:10}).light,'unobserved');
+  assert.equal(trafficLight(quickSaveValue({pass:false,settlement_outcome:'deadline',settlement_timeout_ms:60000,settlement_elapsed_ms:60015}),{works:2,slow:10}).light,'broken');
+  assert.equal(trafficLight(quickSaveValue({pass:false,settlement_outcome:'deadline',settlement_timeout_ms:60000,settlement_elapsed_ms:1200}),{works:2,slow:10}).light,'unobserved');
+  assert.equal(trafficLight(quickSaveValue({pass:false,settlement_outcome:'deadline',settlement_timeout_ms:10000}),{works:2,slow:10}).light,'unobserved');
+});
+
+test('quick timings pair request to its own response and preserve unconfirmed states', () => {
+  const timing=quickSaveTiming([
+    {method:'POST',requestAt:1200,responseAt:1245,status:200},
+    {method:'POST',requestAt:1300,responseAt:1390,status:200},
+  ],1000);
+  assert.equal(timing.gesture_to_post_ms,200);
+  assert.equal(timing.post_to_response_ms,45);
+  assert.equal(timing.outcome,'accepted');
+  const unconfirmed=quickSaveTiming([{method:'POST',requestAt:1200,status:null}],1000);
+  assert.equal(unconfirmed.gesture_to_post_ms,200);
+  assert.equal(unconfirmed.post_to_response_ms,null);
+  assert.equal(unconfirmed.outcome,'response_unconfirmed');
+  const beforeGesture=quickSaveTiming([{method:'POST',requestAt:990,responseAt:1000,status:200}],1000);
+  assert.equal(beforeGesture.gesture_to_post_ms,null);
+  assert.equal(beforeGesture.post_to_response_ms,10);
+  assert.match(beforeGesture.reason,/preceded/);
+  assert.equal(quickSaveTiming([],1000).outcome,'unobserved');
+  const refusal=quickSaveTiming([{method:'POST',requestAt:1020,responseAt:1032,status:409}],1000);
+  assert.equal(refusal.outcome,'refused');
+  assert.equal(quickSaveValue({pass:false,quick_save_timing:refusal}).refused,true);
 });
 
 test('quick row and minute-readable table retain rough numbers and labels', () => {
-  const row = quickIndicatorRow({size:300, label:'heavy seed history, worst case', usableSeconds:14.8, blockedSeconds:1.2, immediateSave:{reason:'unsafe to attempt'}, quietSave:2.4});
+  const timing={gesture_to_post_ms:210,post_to_response_ms:51};
+  const row = quickIndicatorRow({size:300, label:'heavy seed history, worst case', usableSeconds:14.8, blockedSeconds:1.2, immediateSave:{reason:'unsafe to attempt',timing}, quietSave:{seconds:2.4,timing}});
   assert.equal(row.usable.light, 'slow');
   assert.equal(row.immediate_save.light, 'unobserved');
+  assert.equal(row.immediate_save_timing.reason, 'unsafe to attempt');
   assert.equal(row.quiet_save.light, 'slow');
+  assert.deepEqual(row.quiet_save_timing,timing);
   const table = formatQuickTable([row]);
   assert.match(table, /heavy seed history, worst case/);
   assert.match(table, /slow 14\.8s/);
   assert.match(table, /unobserved/);
+  assert.match(table, /210 ms/);
+  assert.match(table, /51 ms/);
 });
 
 test('empty quick arm targets exact V1 through the existing track-name control', async () => {

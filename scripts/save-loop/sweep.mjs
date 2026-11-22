@@ -146,14 +146,14 @@ try {
     if (quick) {
       const target = emptyFixture ? quickTrackRenameScenario(fixture) : edits.find(d => d.name === 'video-move-same-track');
       if (!target) throw new Error('quick fixture lacks a supported same-track move or empty-track rename target');
-      descriptors = [target];
+      descriptors = [{...target,measureSaveTimings:true,timeoutMs:60000}];
       record({type:'quick_matrix', names:[target.name], repetitions:2, arms:['immediate_after_cold_open','after_subsecond_read'], cleanup:'guarded_public_undo_between_arms'});
     }
   }
-  let quickImmediate=null, quickQuiet=null, quickImmediateClean=false;
+  let quickImmediate=null, quickQuiet=null, quickImmediateClean=false, quickQuietClean=false;
   if (quick) {
     const descriptor=descriptors[0];
-    const runArm=async (armName, initial=false) => {
+    const runArm=async armName => {
       const row=await recorder.runRow({...descriptor,iteration:armName});
       row.quick_arm=armName;
       rows.push(row);
@@ -179,6 +179,7 @@ try {
       if (postOpenObservation?.outcome==='available' && quickImmediateClean) {
         const second=await runArm('after_subsecond_read');
         quickQuiet=second.row;
+        quickQuietClean=second.clean;
       } else if (!postOpenObservation) record({type:'quick_quiet_skipped',reason:'post-open read result was not observed'});
     } else record({type:'quick_quiet_skipped',reason:first.cleanupError || 'immediate arm cleanup was not verified'});
     descriptors=[];
@@ -245,8 +246,8 @@ try {
       size, label:largeRestored || fixture.variant === 'v30' || fixture.measurement?.label === 'heavy seed history, worst case' ? 'heavy seed history, worst case' : `${size ?? 'unknown'} clips`,
       usableSeconds:usable,
       blockedSeconds:postOpenObservation?.post_open_blocked_s ?? null,
-      immediateSave:quickImmediate ? quickTools.quickSaveValue(quickImmediate) : {reason:'not observed'},
-      quietSave:quickQuiet ? quickTools.quickSaveValue(quickQuiet) : {reason:quickImmediateClean?'quiet arm not observed':'blocked by unverified immediate cleanup'},
+      immediateSave:quickImmediate ? quickTools.quickSaveValue(quickImmediate,quickImmediateClean) : {reason:'not observed'},
+      quietSave:quickQuiet ? quickTools.quickSaveValue(quickQuiet,quickQuietClean) : {reason:quickImmediateClean?'quiet arm not observed':'blocked by unverified immediate cleanup'},
     });
     record(row);
     quickRowWritten=true;

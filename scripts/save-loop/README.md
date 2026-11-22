@@ -11,6 +11,17 @@ read returns in under a second. It verifies Undo against the public snapshot
 between arms. If the read gate or Undo cannot be verified, the quiet arm is
 skipped and reported as unobserved.
 
+Each arm also records two independent durations using the recorder's page
+monotonic clock: gesture end to the first scoped timeline commit POST, and
+that POST to its own response. The raw arm row stores them as
+`quick_save_timing.gesture_to_post_ms` and `quick_save_timing.post_to_response_ms`;
+the `quick_indicator` JSON summary and table also print the same fields per
+arm. A missing POST, a response not
+confirmed, or a request that precedes the measured gesture end has a null
+duration and an explicit reason. Setup/verification failures stay unobserved.
+An observed save refusal is broken; a genuinely elapsed 60-second wait with
+no Saved is broken as well.
+
 ```sh
 SAVE_LOOP_BASE_URL=http://127.0.0.1:<port> \
 SAVE_LOOP_ROOT=/absolute/path/to/isolated-runtime-root \

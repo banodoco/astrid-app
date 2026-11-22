@@ -1,4 +1,6 @@
 import {expectedFixtureIds, sameIds} from './readiness.mjs';
+import {quickSaveTiming} from './quick.mjs';
+import {performance} from 'node:perf_hooks';
 /*
  * Public, browser-observable assertions for the Plan 77 save loop.
  * This deliberately observes only the sandbox editor page and Runtime public
@@ -398,7 +400,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
   async function runRow(descriptor) {
     await installBadgeObserver(page);
     const rowStartedAt = await page.evaluate(() => performance.timeOrigin + performance.now());
-    const eventStart = networkEvents.length;
+    let eventStart = networkEvents.length;
     let before;
     let after;
     let gestureOutput;
@@ -436,6 +438,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
       const observerStart = await readObserverState(page);
       result.badge_before = observerStart.badge;
       const transitionCount = observerStart.transitions.length;
+      if (descriptor.measureSaveTimings === true) eventStart = networkEvents.length;
 
       gestureOutput = await descriptor.gesture({page, fixture, before, helpers: await import('./lib.mjs'), iteration: descriptor.iteration, mark: () => {}});
       const gestureClock = await page.evaluate(() => ({at: performance.timeOrigin + performance.now()}));
@@ -447,18 +450,31 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
         ? (gestureOutput.actualInput ?? gestureOutput.input ?? null)
         : null;
 
-      const deadline = Date.now() + (Number.isFinite(descriptor.timeoutMs) ? descriptor.timeoutMs : DEFAULT_TIMEOUT_MS);
+      const settlementTimeoutMs = Number.isFinite(descriptor.timeoutMs) ? descriptor.timeoutMs : DEFAULT_TIMEOUT_MS;
+      const deadline = Date.now() + settlementTimeoutMs;
+      const settlementStartedAt = performance.now();
       let finalState;
+      let settlementOutcome='deadline';
       while (Date.now() < deadline) {
         finalState = await readObserverState(page);
         const changedTransitions = finalState.transitions.slice(transitionCount);
         const hasSavedTransition = changedTransitions.some((entry) => entry.state === 'saved' && entry.at >= gestureEndedAt) && finalState.badge.state === 'saved';
         const hasRefusal = finalState.badge.state === 'not saved' && finalState.badge.barCount > 0;
-        if (hasRefusal || (descriptor.expected === 'saved' && hasSavedTransition && !networkEvents.slice(eventStart).some(entry => entry.status === null))) break;
+        if (hasRefusal) {
+          const refusalTransition=changedTransitions.some(entry=>entry.state==='not saved'&&entry.at>=gestureEndedAt);
+          settlementOutcome=observerStart.badge.state!=='not saved'||refusalTransition?'refusal':'dirty_before_gesture';
+          break;
+        }
+        if (descriptor.expected === 'saved' && hasSavedTransition && !networkEvents.slice(eventStart).some(entry => entry.status === null)) { settlementOutcome='saved'; break; }
         await page.waitForTimeout(50);
       }
       finalState ??= await readObserverState(page);
       result.final_badge = finalState.badge;
+      if (descriptor.measureSaveTimings === true) {
+        result.settlement_outcome=settlementOutcome;
+        result.settlement_timeout_ms=settlementTimeoutMs;
+        result.settlement_elapsed_ms=performance.now()-settlementStartedAt;
+      }
       result.badge_transitions = finalState.transitions.slice(transitionCount);
       result.try_again_visible = await page.getByRole('button', {name: 'Try again', exact: true}).isVisible().catch(() => false);
       result.discard_visible = await page.getByRole('button', {name: 'Discard', exact: true}).isVisible().catch(() => false);
@@ -470,6 +486,7 @@ export async function createRecorder(page, {fixture, baseUrl, resultsPath, allow
         while (Date.now() < graceDeadline && scopedEvents.some((entry) => entry.status === null)) await page.waitForTimeout(20);
       }
       result.commit_requests = toRecordTimes(scopedEvents);
+      if (descriptor.measureSaveTimings === true) result.quick_save_timing=quickSaveTiming(scopedEvents,gestureEndedAt);
       after = await publicSnapshot(page, baseUrl, fixture, {allowEmpty});
       result.after_head = after.headRevision;
       result.public_snapshot = {

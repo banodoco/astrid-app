@@ -69,8 +69,11 @@ try {
     const idsMatch = sameIds(head.clipIds, expectedFixtureIds(fixture));
     opening.public_head = {project_id:head.project_id, timeline_id:head.timeline_id, revision:head.headRevision, publication:head.publicationId, exact_clip_ids:idsMatch};
     opening.full_ui_and_public_head_match = Boolean(opening.full_ui_saved && idsMatch && opening.head_before_ui.revision === head.headRevision && opening.head_before_ui.publication === head.publicationId);
+    opening.full_open_corroborated = opening.full_ui_and_public_head_match;
+    opening.full_open_ms = opening.full_open_corroborated ? opening.full_ui_saved.ui_saved_ms : null;
+    opening.full_open_target_pass = opening.full_open_ms === null ? null : opening.full_open_ms <= opening.target_full_open_ms;
     opening.full_open_confirmed = false;
-    opening.limitation += ' The editor does not expose a verified rendered head identity to this harness; public head and UI agreement alone cannot certify their correspondence.';
+    opening.limitation = opening.full_open_corroborated ? 'Exact UI IDs and tracks with sampled stable Saved agree with an unchanged public head and exact clip IDs. The editor does not independently expose its rendered head identity.' : opening.limitation + ' The editor does not independently expose its rendered head identity.';
     fs.appendFileSync(resultsPath, JSON.stringify(opening)+'\n');
     if (!idsMatch) throw new Error('public head clip IDs do not match expected fixture');
   }

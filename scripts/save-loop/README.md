@@ -27,36 +27,42 @@ foreground isolated stack. It uses `SL1_SCRATCH` and replaces only its own
 marked previous stack. The on-demand command always uses a new directory.
 
 Opening and CPU evidence is recorded for the standard fixture. The opening
-clock starts immediately before navigation. A real Enter selection on the
-manifest target records visibility and selection response; this is only a
-selection probe, not proof that the first 15 seconds are rendered or editable,
-or that the selection left the public head unchanged. Full open requires the
-exact standard clip IDs and nine tracks present with Saved in one UI sample,
-and the same exact public-head IDs and head/publication on both sides of that
-sample. The editor does not expose the rendered head identity to this harness,
-so even that agreement is recorded as corroboration, not a confirmed full-open
-claim. The UI timestamp is an observation upper bound: public-head verification
-precedes UI polling and may itself take time. If offscreen clips are virtualized this conservative check reports no
-full-open milestone; it does not equate a public snapshot with rendered UI.
-The approximately 5-second first-usable and 15-second full-open targets are
-reported separately from the existing gesture-to-Saved timing. The probe waits
-up to five minutes for full UI and retains the existing 15-second stability
-wait. Standard IDs derive from the manifest's clip count and prefix asset
-counts (or full asset counts), in image/video/audio order; unsupported fixture
-shapes must supply a suitable exact inventory before use.
+clock starts immediately before navigation. The harness derives the IDs that
+start in the first 15 seconds from the standard builder's image/video/audio
+placement rules and checks that each control intersects the visible viewport
+and clipping ancestors. A real Enter selection also records the manifest
+selection target's response. These are visibility and selection observations,
+not proof that the complete first 15 seconds are editable. The first-usable
+metric and its 5-second target result are unavailable: no additional write is
+made while the opening head and guarded restore are unverified.
 
-CPU collection requires Linux, `getconf CLK_TCK`, `/proc`, and `SAVE_LOOP_ROOT`
-(the on-demand runner sets it). The Runtime discovery PID, birth identity and
-instance must match the isolated sandbox; a missing or mismatched identity
-stops the run. Runtime CPU is the exact owned Runtime daemon process, not a claim
-about all Runtime descendants. Browser CPU includes the launched Chrome root
-and its observed descendants. These counters use user plus system ticks at
-250 ms polling, with monotonic interval duration and UTC timestamps. CPU can
-exceed wall time on multiple cores. Processes that start and exit between polls,
-exit before their final sample, or are reparented can lose CPU; observed exits
-and gaps are counted, and new descendants contribute their observed cumulative
-CPU. Tick resolution is reported with every interval. No process arguments or
-environment are read. Opening, each complete recorder row (including its
-read-only checks), and guarded cleanup are separate CPU intervals; scenario
-CPU is not gesture-to-Saved CPU. Compare CPU and wall time together on the same
-stack and host. macOS CPU collection is unavailable; no value is fabricated.
+The corroborated full-open milestone requires the exact standard clip IDs,
+exact nine track IDs, project/timeline URL and Saved to agree in UI samples for
+at least 800 ms, plus the same exact public-head IDs and head/publication on
+both sides. The result includes an explicit 15-second target comparison and the
+lack of an independently exposed rendered head identity. The UI timestamp is
+an observation upper bound: public-head verification precedes UI polling and
+may take time. If clipping, virtualization or another condition prevents this
+oracle, full open is unavailable rather than inferred. The probe waits up to
+five minutes for UI observations and retains the existing 15-second stability
+wait. Unsupported fixture shapes need their own exact inventory and placement
+contract.
+
+CPU collection requires `SAVE_LOOP_ROOT` (set by the on-demand runner), Linux
+`/proc` and `getconf CLK_TCK`, or macOS `ps`. The Runtime discovery PID, birth
+identity and instance must match the isolated sandbox; a missing or mismatched
+identity stops the run. Runtime CPU is the exact owned Runtime daemon process,
+not a claim about all Runtime descendants. Browser CPU includes the launched
+Chrome root and its observed descendants. Linux uses user plus system ticks;
+macOS uses the cumulative `ps` CPU time, with coarse, conservatively reported
+one-second resolution and second-resolution start identities. Short intervals
+can quantize to zero and same-PID reuse within a second cannot be distinguished
+on macOS. CPU may exceed wall time on multiple cores. Counters are sampled at
+250 ms with monotonic interval duration and UTC timestamps. Processes that start
+and exit between polls, exit before a final sample, or are reparented can lose
+CPU. An observed identity gap or exit makes that interval unqualified and its
+CPU values null. A lack of observed gaps does not eliminate missed short-lived
+processes. No process arguments or environment are inspected. Opening, each
+complete recorder row (including its read-only checks), and guarded cleanup are
+separate CPU intervals; scenario CPU is not gesture-to-Saved CPU. Compare CPU
+and wall time together on the same stack and host.

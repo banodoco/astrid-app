@@ -337,7 +337,7 @@ function TimelineEditorShellCoreComponent({
     if (chrome.loadError) chrome.retryLoad();
     if (chrome.saveStatus === 'error' || chrome.saveStatus === 'dirty') chrome.retryPendingSave();
   });
-  const guardedConflict = !!chrome.saveBar?.guardedConflict && !chrome.recoveryDraft;
+  const guardedConflict = chrome.saveBar?.guardedConflict === true;
   const keepTimelineConflict = guardedConflict ? chrome.tryAgain : chrome.retrySaveAfterConflict;
   const discardTimelineConflict = guardedConflict ? chrome.discardUnsaved
     : () => chrome.reloadFromServer({ discardRefusedSave: true });

@@ -374,6 +374,69 @@ describe('upstream local document handoff', () => {
     await env.session.dispose();
   });
 
+  // The reads a dependent intent carries are compared by the Runtime with the document its predecessor produced,
+  // where it may hold a registry entry in a thinner form than this optimistic copy (media-bound add, 18 Nov clip-2).
+  type DeclaredRead = { kind: string; path: string[]; state?: { state: string; value?: unknown } };
+  const serverState = (payload: Record<string, unknown>, path: string[]) => {
+    // Runtime resolves config/registry to the top-level raw registry when there is no mirror.
+    let node: unknown = path[0] === 'config' && path[1] === 'registry' ? payload.registry : payload.config;
+    for (const key of path.slice(path[1] === 'registry' ? 2 : 1)) {
+      if (Array.isArray(node) && key.startsWith('id:')) node = node.find((item) => (item as { id?: string }).id === key.slice(3));
+      else node = node !== null && typeof node === 'object' && Object.prototype.hasOwnProperty.call(node, key) ? (node as Record<string, unknown>)[key] : undefined;
+      if (node === undefined) return { state: 'absent' };
+    }
+    return { state: 'present', value: node };
+  };
+  const mismatches = (reads: DeclaredRead[], payload: Record<string, unknown>) =>
+    reads.filter((read) => read.kind === 'field' && JSON.stringify(serverState(payload, read.path)) !== JSON.stringify(read.state))
+      .map((read) => read.path.join('/')).filter((path, index, all) => all.indexOf(path) === index);
+
+  it.each([
+    ['the server stores the entry thinner than the optimistic copy', { generationId: 'g', media_id: 'm', type: 'image', variantId: 'v' }, []],
+    ['a changed duration still conflicts', { generationId: 'g', media_id: 'm', type: 'image', variantId: 'v', duration: 4 }, ['config/registry/assets/gen-asset/duration']],
+  ] as const)('a dependent move declares only the registry duration, so %s', async (_name, serverEntry, expected) => {
+    contractFixture.digest = CURRENT_V2_DIGEST;
+    const optimistic = { file: '/api/runtime/v1/objects/sha256%3A1da7', media_id: 'm', content_sha256: 'sha256:1da7', type: 'image/png',
+      generationId: 'g', variantId: 'v', metadata: { provenance: { tool: 'generate' } },
+      ...(expected.length ? { duration: 8 } : {}) };
+    const env = await environment(false, true, ['authored', 'sibling'], undefined,
+      { key: 'gen-asset', registry: { assets: { 'gen-asset': optimistic } } });
+    const move = (source: TimelineSaveSource) => structuredClone({ kind: 'move' as const, clipId: 'authored', trackId: 'V1',
+      config: source.config, registry: source.registry });
+    const a = structuredClone(env.source);
+    a.config.clips[0].at = 5;
+    await env.handoff.capture(a, move(env.source));
+    const b = structuredClone(a);
+    b.config.clips[0].at = 7;
+    await env.handoff.capture(b, move(a));
+    const [authored] = await env.outboxes.list(env.scope);
+    const reads = (authored.intents[1].payload.documentIntent as { reads: DeclaredRead[] }).reads;
+    const registryReads = reads.filter((read) => read.path.includes('registry'));
+    expect(registryReads.length).toBeGreaterThan(0);
+    for (const read of registryReads) expect(read.path).toEqual(['config', 'registry', 'assets', 'gen-asset', 'duration']);
+    for (const field of ['file', 'content_sha256', 'metadata', 'type', 'media_id', 'generationId']) {
+      expect(JSON.stringify(reads)).not.toContain(field === 'file' ? '/api/runtime' : field === 'type' ? 'image/png' : `"${field}"`);
+    }
+    // The server document after the predecessor: its payload with the registry entry in the server's form.
+    const server = structuredClone((authored.intents[0].payload.after as unknown as typeof env.initial.canonicalDocument).parent_revision.payload) as Record<string, unknown>;
+    (server.registry as { assets: Record<string, unknown> }).assets['gen-asset'] = serverEntry;
+    expect(mismatches(reads, server)).toEqual(expected);
+    await env.session.dispose();
+  });
+
+  it('a single-row clip removal is one list.remove at the clips collection (Runtime 4c18af59 shape)', async () => {
+    const env = await environment(false, true, ['authored', 'sibling']);
+    const next = structuredClone(env.source);
+    next.config.clips = next.config.clips.filter((clip) => clip.id !== 'sibling');
+    await env.handoff.capture(next);
+    const [stored] = await env.outboxes.list(env.scope);
+    const patch = (stored.intents[0].payload.documentIntent as { patch?: { changes: { op: string; path: string[]; id?: string }[] } }).patch
+      ?? (stored.intents[0].payload.documentIntent as { changes?: { op: string; path: string[]; id?: string }[] });
+    const changes = ('changes' in patch ? patch.changes : []) ?? [];
+    expect(changes.filter((change) => change.op === 'list.remove')).toMatchObject([{ op: 'list.remove', path: ['clips'], id: 'sibling' }]);
+    await env.session.dispose();
+  });
+
   it('persists original parent move reads and sends the exact dependent request after lost ACK and restart', async () => {
     contractFixture.digest = CURRENT_V2_DIGEST;
     const env = await environment(false, true, ['authored', 'sibling']);
@@ -521,8 +584,11 @@ describe('upstream local document handoff', () => {
     await env.handoff.capture(next, original);
     const [stored] = await env.outboxes.list(env.scope);
     const intent = stored.intents[0].payload.documentIntent as { reads: { kind: string; path: string[] }[] };
-    expect(intent.reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media'],
-      state: layout === 'absent' ? { state: 'absent' } : { state: 'present', value: media } });
+    // Only what the edit consults: the entry's existence and its duration, never the rest of the entry.
+    expect(intent.reads).toContainEqual(layout === 'absent'
+      ? { kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media'], state: { state: 'absent' } }
+      : { kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media', 'duration'], state: { state: 'present', value: 8 } });
+    expect(intent.reads.some((read) => read.path.join('/') === 'config/registry/assets/media')).toBe(layout === 'absent');
     // A trim reads its same-track siblings like a move does, so a concurrent sibling move conflicts.
     expect(intent.reads).toContainEqual(expect.objectContaining({ kind: 'collection', path: ['config', 'clips'] }));
     expect(intent.reads).toContainEqual(expect.objectContaining({ kind: 'field', path: ['config', 'clips', 'id:OTHERCLIP', 'track'] }));

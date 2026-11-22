@@ -123,15 +123,15 @@ vi.mock('@/tools/video-editor/components/PropertiesPanel/ClipPanel', () => ({
 }));
 
 vi.mock('@/tools/video-editor/components/PropertiesPanel/BulkClipPanel', () => ({
-  BulkClipPanel: ({ clips }: { clips: Array<{ id: string }> }) => (
-    <div data-testid="mock-bulk-clip-panel">Bulk clip panel ({clips.length})</div>
+  BulkClipPanel: ({ clips, sharedTransitionType }: { clips: Array<{ id: string }>; sharedTransitionType: string | null }) => (
+    <div data-testid="mock-bulk-clip-panel" data-transition={sharedTransitionType}>Bulk clip panel ({clips.length})</div>
   ),
 }));
 
-vi.mock('@/tools/video-editor/lib/bulk-utils', () => ({
+vi.mock('@/tools/video-editor/lib/bulk-utils', async importOriginal => ({
+  ...await importOriginal<typeof import('@/tools/video-editor/lib/bulk-utils')>(),
   getBulkVisibleTabs: () => ['effects', 'timing', 'position', 'audio', 'text'],
   getSharedNestedValue: () => undefined,
-  getSharedValue: () => undefined,
 }));
 
 function createBaseEditorData() {
@@ -488,6 +488,33 @@ describe('PropertiesPanel registry surfaces', () => {
     expect(screen.getByRole('tab', { name: 'Inspector' })).toBeInTheDocument();
     expect(screen.getByTestId('mock-public-editor-inspector')).toBeInTheDocument();
     expect(screen.queryByTestId('timeline-outline-panel')).not.toBeInTheDocument();
+  });
+
+  describe.each(['installed', 'public body'])('%s bulk transition selection', (surface) => {
+    it.each([
+      ['Agent reference', { id: 'cross-fade', durationFrames: 36 }, 'cross-fade'],
+      ['legacy reference', { type: 'crossfade', duration: 1.2 }, 'crossfade'],
+    ] as const)('reads the %s without writing the selected clips', (_name, transition, expected) => {
+      const data = createBaseEditorData();
+      const clips = data.resolvedConfig.clips.map(clip => ({ ...clip, transition: { ...transition } }));
+      const before = structuredClone(clips);
+      const ops = createEditorOps();
+      useTimelineEditorOpsMock.mockReturnValue(ops);
+      useTimelineEditorDataMock.mockReturnValue({
+        ...data, selectedClip: null, selectedClipIds: new Set(clips.map(clip => clip.id)),
+        resolvedConfig: { ...data.resolvedConfig, clips },
+      });
+      if (surface === 'installed') {
+        render(<PropertiesPanel />);
+      } else {
+        render(<PropertiesPanelBody hostObservations={{} as never} effectResources={{} as never}
+          BulkInspector={({ sharedTransitionType }) => <div data-testid="mock-bulk-clip-panel" data-transition={sharedTransitionType} />} />);
+      }
+      expect(screen.getByTestId('mock-bulk-clip-panel')).toHaveAttribute('data-transition', expected);
+      expect(clips).toEqual(before);
+      expect(ops.handleUpdateClips).not.toHaveBeenCalled();
+      expect(ops.handleUpdateClipsDeep).not.toHaveBeenCalled();
+    });
   });
 
   it('keeps the bulk inspector as the core panel when multiple clips are selected', () => {

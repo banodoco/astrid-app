@@ -13,7 +13,7 @@ function laterDocument(base: CanonicalDocument, label: string): CanonicalDocumen
 }
 
 describe('local save permanent rejections', () => {
-  it('removes a 413 change from the queue, tells the user, and lets the next edit save', async () => {
+  it('retains a 413 change, explains the refusal, and permits a next save only after explicit discard', async () => {
     const env = environment();
     const session = await env.mount();
     await env.append(session);
@@ -21,9 +21,14 @@ describe('local save permanent rejections', () => {
     const later = laterDocument(env.pair.document, 'Later');
     env.send.mockImplementation(async () => env.accepted(later, { revisionId: 'r1', publicationId: 'p1' }));
 
-    await session.flush();
+    await expect(session.flush()).rejects.toThrow('draft retained');
     expect(env.send).toHaveBeenCalledTimes(1);
-    expect(session.getState()).toMatchObject({ status: 'saved', notice: expect.stringContaining('This change is too large to save.') });
+    expect(session.getState()).toMatchObject({ status: 'error',
+      error: { kind: 'too_large', message: expect.stringContaining('This change is too large to save.') } });
+    expect(session.getDocument()).toEqual(JSON.parse(JSON.stringify(env.pair.after)));
+    expect((await env.outboxes.list({ realmId: 'realm', actorId: 'actor', projectId: 'project-commit', timelineId: 'timeline-commit' }))[0].intents).toHaveLength(1);
+    // The creator must choose to discard before a different change can save.
+    await session.discharge('latest');
     expect(session.getDocument()).toEqual(JSON.parse(JSON.stringify(env.pair.document)));
 
     await session.appendDocument({ before: env.pair.document, after: later, label: 'Later',
@@ -40,8 +45,9 @@ describe('local save permanent rejections', () => {
     const session = await env.mount();
     await env.append(session);
     env.send.mockRejectedValueOnce(new ApiError(413, 'http_error', 'HTTP 413', '', { max_bytes: 1024 }));
-    await session.flush();
-    expect(session.getState().notice).toContain('The limit is 1024 bytes.');
+    await expect(session.flush()).rejects.toThrow('draft retained');
+    expect(session.getState().error).toMatchObject({ kind: 'too_large',
+      message: expect.stringContaining('The limit is 1024 bytes.') });
   });
 
   it.each([404, 405])('keeps a %s retained and blocked with the unsupported-version reason', async (status) => {

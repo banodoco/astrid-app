@@ -1,5 +1,6 @@
 import { normalizeClipPlacementWithFindings, type PlacementMigrationFinding } from '@banodoco/timeline-composition';
 import { bridgeMediaUrl } from '@/shared/lib/media/bridgeMediaUrl.ts';
+import { withDefaultTimelineOutput, withNumericTimelineFps } from '@/tools/video-editor/lib/defaults.ts';
 import { cloneTimelineExtras } from '@/tools/video-editor/lib/timeline-domain.ts';
 import type {
   ResolvedAssetRegistryEntry,
@@ -623,7 +624,16 @@ export function projectCanonicalComposition(
     }
   }
   if (authoredBaseConfig) {
-    const result = normalizeClipPlacementWithFindings(authoredBaseConfig as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0]);
+    if (authoredBaseConfig.output != null && authoredBaseConfig.output.resolution == null) {
+      const defaulted = withDefaultTimelineOutput(authoredBaseConfig, findings => {
+        placementFindings.push(...findings.map(finding => ({...finding, scope: 'parent' as const})));
+      });
+      authoredBaseConfig = { ...authoredBaseConfig, output: defaulted.output,
+        tracks: defaulted.tracks ?? authoredBaseConfig.tracks, clips: defaulted.clips };
+    }
+    const result = normalizeClipPlacementWithFindings(
+      withNumericTimelineFps(authoredBaseConfig) as unknown as Parameters<typeof normalizeClipPlacementWithFindings>[0],
+    );
     authoredBaseConfig = result.config as unknown as ResolvedTimelineConfig;
     placementFindings.push(...result.findings.map(finding => ({...finding, scope: 'parent' as const})));
   }

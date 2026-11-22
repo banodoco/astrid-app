@@ -36,7 +36,7 @@ import {
 import { createLocalSaveSession, type LocalSave, type LocalSaveSession, type LocalSaveState } from '@/tools/video-editor/commands/localSaveSession.ts';
 import { bindTimelinePersistenceHandoff, type TimelinePersistenceBinding, type TimelinePersistenceHandoff } from '@/tools/video-editor/hooks/timelineLocalSaveHandoff.ts';
 import type { CanonicalDocument, CommitRequest } from '@/integrations/runtime/timeline-commit-types.ts';
-import { toOutboxJson, type OutboxJson } from '@/tools/video-editor/commands/commitOutbox.ts';
+import { toOutboxJson, type OutboxIntent, type OutboxJson } from '@/tools/video-editor/commands/commitOutbox.ts';
 import type {
   ResolvedAssetRegistryEntry,
   ResolvedTimelineConfig,
@@ -1272,6 +1272,13 @@ export function createShotTimelineDataProvider(
   let localSaveHead: TimelineAcceptedIdentity | undefined;
   let localSaveSessionPromise: Promise<LocalSaveSession> | undefined;
   let pendingLocalSaveSignature: string | null = null;
+  let localSaveState: LocalSaveState | undefined;
+  let rejectedRecovery: Promise<void> | undefined;
+  const localSaveListeners = new Set<(state: LocalSaveState) => void>();
+  const listenForLocalSave = (state: LocalSaveState) => {
+    localSaveState = state;
+    for (const listener of localSaveListeners) listener(state);
+  };
   let localSaveSource: { config: TimelineConfig; registry: unknown } | undefined;
   const localSaveEnabled = Boolean(
     timelineDataProvider?.loadTimelineCommandBasis
@@ -1341,10 +1348,11 @@ export function createShotTimelineDataProvider(
       return createLocalSaveSession({
         scope: { ...identity, projectId: composition.projectId, timelineId: composition.parentDocumentId },
         initial,
+        sourceKey: recoveryKey,
         document: toOutboxJson(initial.canonicalDocument),
         send: (request, key) => timelineDataProvider!.commitTimeline!(request, key),
         loadLatest: () => timelineDataProvider!.loadTimelineCommandBasis!(composition.parentDocumentId),
-        changed: () => {},
+        changed: listenForLocalSave,
         prepareDisplay: async (basis, draft) => ({
           document: draft ?? toOutboxJson(basis.canonicalDocument),
           adopt: draft === undefined ? prepareCanonicalSave(basis) : () => {},
@@ -1352,6 +1360,34 @@ export function createShotTimelineDataProvider(
       });
     })();
     void localSaveSessionPromise.catch(() => {});
+  }
+
+  function matchesLegacyPopupSave(intent: OutboxIntent): boolean {
+    const payload = object(intent.payload);
+    if (payload?.label !== 'Edit shot timeline') return false;
+    const commands = payload.commands;
+    if (Array.isArray(commands) && commands.some((command) => {
+      const selected = object(command)?.select;
+      return typeof selected === 'string'
+        && (selected === `occurrence:${occurrenceId}` || selected.startsWith(`occurrence:${occurrenceId}/`));
+    })) return true;
+
+    // Older popup patches identify the authored internal revision. A shared
+    // revision cannot identify a single occurrence without an explicit target.
+    const patch = object(payload.documentIntent);
+    const tags = object(patch?.step)?.tags;
+    const roots = patch?.roots;
+    if (!Array.isArray(tags) || !tags.includes('shot-popup') || !Array.isArray(roots)) return false;
+    const document = payload.before as unknown as CanonicalDocument;
+    const occurrences = object(document?.parent_revision?.payload)?.occurrences;
+    if (!Array.isArray(occurrences) || !Array.isArray(document.shot_revisions)) return false;
+    const internalTargets = occurrences.flatMap((value) => {
+      const row = object(value);
+      const shot = document.shot_revisions.find((item) => item.shot_id === row?.shot_id && item.revision_id === row?.shot_revision_id);
+      return shot && roots.some((root) => object(root)?.ref === `internal-revision:${shot.internal_timeline_revision_id}`)
+        ? [row?.occurrence_id] : [];
+    });
+    return internalTargets.length === 1 && internalTargets[0] === occurrenceId;
   }
 
   // Only the verified assembly read and our own accepted successors supply
@@ -1496,18 +1532,43 @@ export function createShotTimelineDataProvider(
       return { configVersion, head: { projectId: composition.projectId, timelineId: composition.parentDocumentId,
         headRevisionId: basis.head.revisionId, headPublicationId: basis.head.publicationId } };
     },
+    status: () => localSaveState?.status,
+    ownerId: () => localSaveState?.ownerId,
+    async writeRecoveryDraft(write) {
+      const session = await localSaveSessionPromise!.catch(() => undefined);
+      return session ? session.writeRecoveryDraft(write) : write();
+    },
+    subscribeState(listener) {
+      localSaveListeners.add(listener);
+      if (localSaveState) listener(localSaveState);
+      rejectedRecovery ??= localSaveSessionPromise!.then((session) => session.recoverRejected(matchesLegacyPopupSave));
+      void rejectedRecovery.catch(() => {});
+      return () => { localSaveListeners.delete(listener); };
+    },
+    async exportRejectedChange() {
+      return (await localSaveSessionPromise!).exportRejectedChange();
+    },
+    async discharge(mode, exported, stillCurrent) {
+      const session = await localSaveSessionPromise!;
+      await session.discharge(mode, exported, stillCurrent);
+      if (session.getState().status === 'saved') {
+        captureChain = Promise.resolve();
+        pendingLocalSaveSignature = null;
+        pendingPublication = null;
+      }
+    },
   } : undefined;
 
   const provider: ShotTimelineDataProvider = {
     localDocumentSave,
     bindLocalDocumentSave: (timelineId) => localDocumentSave
       ? bindTimelinePersistenceHandoff(provider, timelineId, {
+          ...localDocumentSave,
           capture(source) {
             const snapshot = structuredClone(source);
             const head = readSourceHead();
             return head.then(verified => localDocumentSave.capture({ ...snapshot, head: snapshot.head ?? verified }));
           },
-          flush: () => localDocumentSave.flush(),
         }) : undefined,
     get timelineQueryIdentity() {
       return timelineQueryIdentity;

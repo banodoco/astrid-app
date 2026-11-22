@@ -15,6 +15,7 @@ import { TIMELINE_CLIP_FIELDS } from '@/tools/video-editor/lib/serialize.ts';
 import type { DataProvider } from '@/tools/video-editor/data/DataProvider.ts';
 import {
   withDefaultTimelineOutput,
+  withNumericTimelineFps,
 } from '@/tools/video-editor/lib/defaults.ts';
 import type {
   AssetMissingRequest,
@@ -578,7 +579,9 @@ export const assembleTimelineData = ({
 export const materializeAuthoredOutput = (
   config: TimelineConfig,
   onMigration?: Parameters<typeof withDefaultTimelineOutput>[1],
-): TimelineConfig => config.output?.resolution == null ? withDefaultTimelineOutput(config, onMigration) : config;
+): TimelineConfig => config.output?.resolution == null
+  ? withDefaultTimelineOutput(config, onMigration)
+  : withNumericTimelineFps(config);
 
 export const buildTimelineData = async (
   config: TimelineConfig,

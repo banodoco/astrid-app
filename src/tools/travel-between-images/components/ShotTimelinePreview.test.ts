@@ -341,6 +341,7 @@ describe('shot timeline popup persistence', () => {
 
     await waitFor(() => expect(document.querySelector('[data-save-bar="recovered"]')).toBeTruthy());
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).not.toBeDisabled());
     fireEvent.click(screen.getByRole('button', { name: 'Discard' }));
     expect(popupChrome.tryAgain).toHaveBeenCalled();
     expect(popupChrome.discardUnsaved).toHaveBeenCalled();

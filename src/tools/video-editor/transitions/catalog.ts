@@ -91,6 +91,11 @@ const BUILT_IN_ID_ALIASES: Readonly<Record<string, string>> = Object.freeze({
   'cross-fade': 'crossfade',
 });
 
+/** ID written when a user selects a built-in transition in the editor. */
+export function authoredTransitionId(transitionId: string): string {
+  return Object.entries(BUILT_IN_ID_ALIASES).find(([, alias]) => alias === transitionId)?.[0] ?? transitionId;
+}
+
 function browserTransitionId(transitionId: string): string {
   return BUILT_IN_ID_ALIASES[transitionId] ?? transitionId;
 }

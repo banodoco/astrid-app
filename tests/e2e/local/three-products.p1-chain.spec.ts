@@ -255,8 +255,9 @@ async function seedOneClip(harness: DirectHarness, astrid: AstridCli): Promise<C
       opaque: { root: null, order: [0, false] },
     },
     registry: { assets: {
+      // REVIEW: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; preserve the tagged media ID.
       'p1-video': { file: harness.seed.video.mediaType === 'video/webm' ? 'p1-video.webm' : 'p1-video.mp4',
-        type: harness.seed.video.mediaType, duration: 8, media_id: harness.seed.video.objectId, content_sha256: harness.seed.video.digest },
+        type: harness.seed.video.mediaType, duration: 8, media_id: harness.seed.video.objectId, content_sha256: harness.seed.video.digest.replace(/^sha256:/, '') },
     } },
     clips: [clip], occurrences: [],
   };

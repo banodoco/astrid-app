@@ -13,6 +13,7 @@ import {
   type TransitionRegistryRecord,
 } from '@/tools/video-editor/transitions/registry/index.ts';
 import {
+  authoredTransitionId,
   listTransitions,
   resolveTransition,
   createTransitionSnapshot,
@@ -142,7 +143,7 @@ export function ClipTransitionSection({
             : undefined;
           onChange({
             transition: {
-              type: value,
+              type: authoredTransitionId(value),
               duration: clip.transition?.duration ?? 0.5,
               params: defaults && Object.keys(defaults).length > 0 ? defaults : undefined,
             },
@@ -254,6 +255,7 @@ export function ClipTransitionSection({
                 onChange({
                   transition: {
                     ...clip.transition,
+                    type: authoredTransitionId(clip.transition.type),
                     duration: value,
                   },
                 });
@@ -286,7 +288,7 @@ export function ClipTransitionSection({
                 if (!clip.transition || !resolvedTransitionRecord?.schema) return;
                 onChange({
                   transition: {
-                    type: clip.transition.type,
+                    type: authoredTransitionId(clip.transition.type),
                     duration: clip.transition.duration,
                     params: materializeTransitionDefaults(resolvedTransitionRecord.schema),
                   },
@@ -308,7 +310,7 @@ export function ClipTransitionSection({
             if (!clip.transition) return;
             onChange({
               transition: {
-                type: clip.transition.type,
+                type: authoredTransitionId(clip.transition.type),
                 duration: clip.transition.duration,
                 params: {
                   ...(clip.transition.params ?? {}),

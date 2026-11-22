@@ -12,7 +12,7 @@ import { projectCanonicalComposition } from '@/tools/video-editor/data/shotCompo
 import { clearTimelineDraft, loadTimelineDraft, saveTimelineDraft } from '@/tools/video-editor/data/timelineDraftIndexedDb.ts';
 import { VideoEditorProvider } from '@/tools/video-editor/contexts/VideoEditorProvider.tsx';
 import { TimelineEditorCore } from '@/tools/video-editor/components/TimelineEditor/TimelineEditorCore.tsx';
-import { useTimelineChromeContext } from '@/tools/video-editor/hooks/timelineStore.ts';
+import { createTimelineStore, TimelineStoreProvider, useTimelineChromeContext } from '@/tools/video-editor/hooks/timelineStore.ts';
 import { allowTimelineEdits } from '@/tools/video-editor/lib/timeline-editability.ts';
 import { ShotTimelinePreview } from './ShotTimelinePreview.tsx';
 import * as shotTimelineDataProvider from './shotTimelineDataProvider.ts';
@@ -107,6 +107,27 @@ describe('shot timeline popup real recovery integration', () => {
     staleVariantRepository.fetchPrimaryVariantLocations.mockReset();
     resetFakeIndexedDB();
     await clearTimelineDraft(recoveryKey);
+  });
+
+  it('FIX16-R2-POPUP-UI offers Copy for a rejected save in the popup and confirms before reload', async () => {
+    const copyRejectedSave = vi.fn().mockResolvedValue(true);
+    const reloadFromServer = vi.fn().mockResolvedValue(undefined);
+    const store = createTimelineStore();
+    store.getState().syncSlices({ chrome: { ...store.getState().chrome,
+      permanentSaveRejection: true, saveNotice: 'The Runtime rejected this shot edit.', copyRejectedSave, reloadFromServer,
+      recoveryDraft: { updatedAt: '2026-10-08T13:43:57Z', baseVersion: 1, retryAllowed: true },
+    } });
+    render(<TimelineStoreProvider store={store}><ShotTimelineRecoveryControls /></TimelineStoreProvider>);
+
+    expect(screen.getByRole('alert')).toHaveTextContent('The Runtime rejected this shot edit.');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Discard and reload the saved version' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Copy my change out' }));
+    expect(copyRejectedSave).toHaveBeenCalledOnce();
+    const confirm = await screen.findByRole('button', { name: 'I saved the file — reload the saved version' });
+    expect(reloadFromServer).not.toHaveBeenCalled();
+    fireEvent.click(confirm);
+    expect(reloadFromServer).toHaveBeenCalledExactlyOnceWith({ discardRefusedSave: true });
   });
 
   it('saves a mounted popup gesture through the durable A2 handoff without invoking the snapshot writer', async () => {
@@ -444,7 +465,8 @@ describe('shot timeline popup real recovery integration', () => {
       await waitFor(() => expect(loadCanonical).toHaveBeenCalledTimes(2));
       await waitFor(() => expect(screen.getByRole('button', { name: 'Discard' })).toBeInTheDocument());
       expect(await loadTimelineDraft(recoveryKey)).toMatchObject({ draftIdentity: 'durable-popup-recovery' });
-      expect(screen.getByRole('alert')).toHaveTextContent('You have unsaved changes');
+      // The failed Discard says why, instead of repeating the generic recovery headline.
+      expect(screen.getByRole('alert')).toHaveTextContent('canonical reload unavailable');
       expect(screen.getByRole('region', { name: 'Shot timeline' })).toHaveAttribute('data-shot-timeline-status', 'ready');
     } else {
       await waitFor(() => expect(screen.queryByText('You have unsaved changes')).toBeNull());

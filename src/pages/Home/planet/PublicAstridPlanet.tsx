@@ -12,7 +12,8 @@ export function PublicAstridPlanet({ live, contentReady = true, fixedPose = type
 
   useEffect(() => {
     setRendered(false);
-    if (!live || !contentReady) return;
+    // The native engine uses WebGL2; injected loaders define their own capabilities.
+    if (!live || !contentReady || (loadEngine === loadPlanetEngine && typeof WebGL2RenderingContext === 'undefined')) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 

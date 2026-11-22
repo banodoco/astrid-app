@@ -14,7 +14,7 @@ beforeEach(() => {
   seam.pending.mockReturnValue(false);
   seam.init.mockReturnValue({ dispose: seam.dispose });
 });
-afterEach(() => { cleanup(); vi.resetAllMocks(); });
+afterEach(() => { cleanup(); vi.resetAllMocks(); vi.unstubAllGlobals(); });
 
 describe('PublicAstridPlanet engine boundary', () => {
   it('keeps the poster and skips the import while still or content is pending', async () => {
@@ -26,6 +26,21 @@ describe('PublicAstridPlanet engine boundary', () => {
     await act(async () => { await Promise.resolve(); });
     expect(view.container.querySelector('img')).not.toBeNull();
     expect(loadEngine).not.toHaveBeenCalled();
+  });
+
+  it('keeps the native still without scheduling frames when WebGL2 is unavailable', async () => {
+    vi.stubGlobal('WebGL2RenderingContext', undefined);
+    const frame = vi.spyOn(window, 'requestAnimationFrame');
+    try {
+      const view = render(<PublicAstridPlanet live contentReady />);
+      await act(async () => { await Promise.resolve(); });
+      expect(view.container.querySelector('img')).not.toBeNull();
+      expect(seam.wait).not.toHaveBeenCalled();
+      expect(frame).not.toHaveBeenCalled();
+      expect(seam.init).not.toHaveBeenCalled();
+    } finally {
+      frame.mockRestore();
+    }
   });
 
   it('waits for the transition, holds the poster through the first frame, and disposes', async () => {

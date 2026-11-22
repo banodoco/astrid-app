@@ -1304,7 +1304,7 @@ type GestureExpectation = { kind: 'move'; clipId: string; trackId: string } | { 
 /**
  * The exact guard set a mounted drag-move must carry, re-derived independently from the authored parent payload the
  * gesture started from (the contract of the move branch in timelineLocalSaveHandoff.ts: selected clip timing fields,
- * output fps / theme canvas fallback, registry asset, the moved track kind, pinnedShotGroups, the clip collection
+ * output fps / theme canvas fallback, registry asset duration, the moved track kind, pinnedShotGroups, the clip collection
  * order and membership, and for every other clip its track, plus timing fields and asset for same-track siblings).
  */
 function expectedMoveReads(parent: Record<string, any>, clipId: string, trackId: string): Array<Record<string, unknown>> {
@@ -1321,7 +1321,8 @@ function expectedMoveReads(parent: Record<string, any>, clipId: string, trackId:
   };
   const timing = (item: Record<string, any>) => ['id', 'track', 'at', 'clipType', 'hold', 'from', 'to', 'speed', 'asset']
     .map((key) => read(item, key, [...clipPath, `id:${item.id}`]));
-  const assetRead = (item: Record<string, any>) => typeof item.asset === 'string' ? [readPath(parent.registry, ['assets', item.asset], ['config', 'registry'])] : [];
+  // REVIEW: Lead ruling 21/22 Nov: App #308 (25c5672d545) narrows the consulted registry read to duration (or its nearest absent ancestor).
+  const assetRead = (item: Record<string, any>) => typeof item.asset === 'string' ? [readPath(parent.registry, ['assets', item.asset, 'duration'], ['config', 'registry'])] : [];
   const clip = clips.find((item) => item.id === clipId)!;
   expect(clip, `the moved clip ${clipId} is in the authored parent`).toBeTruthy();
   expect(clip.track).toBe(trackId);

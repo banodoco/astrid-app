@@ -110,8 +110,8 @@ describe('mounted split and inspector trim authoring reads', () => {
         const reads = (trimIntent.documentIntent as Record<string, unknown>).reads as unknown[];
         expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'clips', `id:${rightId}`, 'to'],
           state: { state: 'present', value: 8 } });
-        expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media'],
-          state: { state: 'present', value: registry.assets.media } });
+        expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'registry', 'assets', 'media', 'duration'],
+          state: { state: 'present', value: 8 } });
         expect(reads).toContainEqual({ kind: 'field', ref: 'parent', path: ['config', 'output', 'fps'],
           state: { state: 'present', value: 30 } });
         // A named trim reads what resolveOverlaps consults: the collection order and every sibling's track,

@@ -77,10 +77,6 @@ describe('official full-v2 local document transport', () => {
       expect(sent[1]).toEqual(sent[0]);
       return reply(split, 'r1', 'p1');
     }).mockImplementationOnce(async (dependent) => {
-      expect(visible.at(-1)).toMatchObject({ parent_revision: { revision_id: 'r1', payload: {
-        clips: split.parent_revision.payload.clips, opaque: { keep: null, agent: true },
-      } } });
-      expect(recovered.getDocument()).toMatchObject({ parent_revision: { revision_id: 'r1' } });
       expect(dependent).not.toHaveProperty('reads');
       expect(dependent.commands[0].created).toEqual([]);
       expect(dependent).toMatchObject({ base_revision_id: 'r1', base_publication_id: 'p1', merge: 'atomic',

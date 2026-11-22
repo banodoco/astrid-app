@@ -25,7 +25,6 @@ import {
 import { getAssetResolutionToken } from '@/tools/video-editor/lib/asset-registry.ts';
 import type { UseAssetManagementResult } from '@/tools/video-editor/hooks/useAssetManagement.ts';
 import type { TimelineProvisionedAsset } from '@/tools/video-editor/commands/provisioning.ts';
-import { canonicalJsonStringify } from '@/tools/video-editor/data/typed/timelineBundle.ts';
 import type { DragCoordinator } from '@/tools/video-editor/hooks/useDragCoordinator.ts';
 import type {
   TimelineApplyEdit,
@@ -42,6 +41,17 @@ import {
 export type TimelineDropPosition = NonNullable<ReturnType<DragCoordinator['update']>>;
 
 type PreparedGenerationDropData = Parameters<UseAssetManagementResult['prepareGenerationAsset']>[0];
+
+const NOT_PREPARED_REASON = 'The uploaded file could not be prepared for the timeline.';
+const NOT_PLACED_REASON = 'The file could not be placed on the timeline.';
+
+export interface ParkedDrop {
+  id: string;
+  fileName: string;
+  reason: string;
+  tryAgain: () => Promise<void>;
+  discard: () => void;
+}
 
 function prepareGenerationForDrop(
   generationData: PreparedGenerationDropData,
@@ -264,6 +274,8 @@ export async function handleFileDrop({
   directAssetUploadAllFiles = false,
   mediaImportForImageVideo = false,
   onAssetDropError,
+  onDropParked,
+  onDropSettled,
 }: {
   files: File[];
   dataRef: MutableRefObject<TimelineData | null>;
@@ -283,6 +295,10 @@ export async function handleFileDrop({
   directAssetUploadAllFiles?: boolean;
   mediaImportForImageVideo?: boolean;
   onAssetDropError?: (error: unknown) => void;
+  /** A dropped file was not added: its placeholder stays and this is how the user retries or discards it. */
+  onDropParked?: (drop: ParkedDrop) => void;
+  /** A parked drop ended (placed, or discarded): stop offering it. */
+  onDropSettled?: (id: string) => void;
 }): Promise<boolean> {
   if (!files.length || !dataRef.current) {
     return false;
@@ -403,12 +419,15 @@ export async function handleFileDrop({
 
     const clipTime = dropPosition.time + timeOffset;
     timeOffset += defaultClipDuration;
-    const dropScope = canonicalJsonStringify({ head: dataRef.current.head,
-      composition: dataRef.current.config.app?.canonicalComposition });
+    // A save landing during the upload moves the head, and that must not cancel the drop: the clip is placed on the
+    // document as it is now. The drop is abandoned only when it no longer has a place: another timeline, or its
+    // target track is gone.
+    const dropTimeline = { projectId: dataRef.current.head?.projectId, timelineId: dataRef.current.head?.timelineId };
+    const dropTrackId: string = compatibleTrackId;
     const currentDropData = () => {
       const current = dataRef.current;
-      return current && canonicalJsonStringify({ head: current.head,
-        composition: current.config.app?.canonicalComposition }) === dropScope ? current : null;
+      return current && current.head?.projectId === dropTimeline.projectId && current.head?.timelineId === dropTimeline.timelineId
+        && current.rows.some((row) => row.id === dropTrackId) ? current : null;
     };
 
     const skeletonId = `uploading-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
@@ -452,82 +471,104 @@ export async function handleFileDrop({
       }, { save: false });
     };
 
-    pendingOpsRef.current += 1;
-    void (async () => {
+    // The upload finished but the drop has no place any more: say so, and take the placeholder away.
+    const abandonDrop = () => {
+      removeSkeleton();
+      onDropSettled?.(skeletonId);
+      onAssetDropError?.(new Error('The timeline changed while this file uploaded; drop it again.'));
+    };
+
+    // One attempt at uploading and placing this file. It resolves to nothing when the clip was placed (or the
+    // drop had no place any more and said so), and to the plain reason when the file was not added: the
+    // placeholder then stays, parked, until Try again succeeds or the user discards it.
+    const attempt = async (): Promise<string | undefined> => {
+      let declinedBecause: string | undefined;
+      const place = (preparedAsset: TimelineProvisionedAsset, trackId: string | undefined) =>
+        dropAsset(preparedAsset.assetKey, trackId, clipTime, false, false, preparedAsset, skeletonId,
+          (message) => { declinedBecause = message; })
+          ? undefined
+          : declinedBecause ?? NOT_PLACED_REASON;
+
+      if (isImageFile(file)) {
+        const generationData = await uploadImageGeneration(file);
+        if (!currentDropData()) {
+          abandonDrop();
+          return undefined;
+        }
+        const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset);
+        if (!preparedAsset) return NOT_PREPARED_REASON;
+        const preparedManagedImageTrackId = files.length === 1 && preparedAsset.mediaSelection
+          ? dropPosition.pointerTrackId
+          : undefined;
+        return place(preparedAsset, preparedManagedImageTrackId ?? compatibleTrackId ?? undefined);
+      }
+
+      if (isVideoFile(file)) {
+        const generationData = await uploadVideoGeneration(file);
+        if (!currentDropData()) {
+          abandonDrop();
+          return undefined;
+        }
+        const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset);
+        if (!preparedAsset) return NOT_PREPARED_REASON;
+        return place(preparedAsset, compatibleTrackId ?? undefined);
+      }
+
+      // Preparation is required for placement: the compound editor command
+      // owns registry + clip persistence.
+      if (!prepareAssetUpload) {
+        throw new Error('This editor backend does not support prepared asset placement');
+      }
+      const result = await prepareAssetUpload(file);
+      const sourceReference = getAssetResolutionToken(result.entry);
+      if (!sourceReference) throw new Error('Uploaded asset has no file locator or media identity');
+      await resolveAssetUrl(sourceReference);
+      const playableKind = getPlayableAssetKind(result.entry);
+      if (!playableKind) throw new Error('Uploaded asset is not playable media');
+      const preparedAsset: TimelineProvisionedAsset = {
+        assetKey: result.assetId,
+        mediaType: playableKind,
+        durationSeconds: result.entry.duration ?? null,
+        entry: result.entry,
+        source: 'registered',
+      };
+      const reason = place(preparedAsset, compatibleTrackId ?? undefined);
+      void invalidateAssetRegistry();
+      return reason;
+    };
+
+    // A drop that is not added never vanishes: the placeholder stays on the timeline, labelled with the plain
+    // reason, and the drop is offered as Try again / Discard (the retained File is uploaded and placed again).
+    const parkAs = (reason: string) => {
+      const current = dataRef.current;
+      if (current?.meta?.[skeletonId]) {
+        applyEdit({ type: 'rows', rows: current.rows,
+          metaUpdates: { [skeletonId]: { ...skeletonMeta, asset: `uploading:${file.name} (not added: ${reason})` } } }, { save: false });
+      }
+      onDropParked?.({ id: skeletonId, fileName: file.name, reason, tryAgain: run, discard: () => {
+        removeSkeleton();
+        onDropSettled?.(skeletonId);
+      } });
+    };
+    const run = async (): Promise<void> => {
+      pendingOpsRef.current += 1;
       try {
-        if (isImageFile(file)) {
-          const generationData = await uploadImageGeneration(file);
-          const current = currentDropData();
-          if (!current) {
-            removeSkeleton();
-            return;
-          }
-
-          const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset);
-          if (!preparedAsset) {
-            removeSkeleton();
-            return;
-          }
-          const preparedManagedImageTrackId = files.length === 1 && isImageFile(file) && preparedAsset.mediaSelection
-            ? dropPosition.pointerTrackId
-            : undefined;
-          if (!dropAsset(preparedAsset.assetKey, preparedManagedImageTrackId ?? compatibleTrackId ?? undefined, clipTime,
-            false, false, preparedAsset, skeletonId)) {
-            removeSkeleton();
-          }
-          return;
+        const current = dataRef.current;
+        if (current?.meta?.[skeletonId]) {
+          applyEdit({ type: 'rows', rows: current.rows, metaUpdates: { [skeletonId]: skeletonMeta } }, { save: false });
         }
-
-        if (isVideoFile(file)) {
-          const generationData = await uploadVideoGeneration(file);
-          const current = currentDropData();
-          if (!current) {
-            removeSkeleton();
-            return;
-          }
-
-          const preparedAsset = prepareGenerationForDrop(generationData, dataRef, registerGenerationAsset, prepareGenerationAsset);
-          if (!preparedAsset) {
-            removeSkeleton();
-            return;
-          }
-          if (!dropAsset(preparedAsset.assetKey, compatibleTrackId ?? undefined, clipTime, false, false, preparedAsset, skeletonId)) {
-            removeSkeleton();
-          }
-          return;
-        }
-
-        // Preparation is required for placement: the compound editor command
-        // owns registry + clip persistence.
-        if (!prepareAssetUpload) {
-          throw new Error('This editor backend does not support prepared asset placement');
-        }
-        const result = await prepareAssetUpload(file);
-        const sourceReference = getAssetResolutionToken(result.entry);
-        if (!sourceReference) throw new Error('Uploaded asset has no file locator or media identity');
-        await resolveAssetUrl(sourceReference);
-        const playableKind = getPlayableAssetKind(result.entry);
-        if (!playableKind) throw new Error('Uploaded asset is not playable media');
-        const preparedAsset: TimelineProvisionedAsset = {
-          assetKey: result.assetId,
-          mediaType: playableKind,
-          durationSeconds: result.entry.duration ?? null,
-          entry: result.entry,
-          source: 'registered',
-        };
-        const placed = dropAsset(result.assetId, compatibleTrackId ?? undefined, clipTime, false, false, preparedAsset, skeletonId);
-        if (!placed) {
-          removeSkeleton();
-        }
-        void invalidateAssetRegistry();
+        const reason = await attempt();
+        if (reason === undefined) onDropSettled?.(skeletonId);
+        else parkAs(reason);
       } catch (error) {
         console.error('[drop] Upload failed:', error);
         onAssetDropError?.(error);
-        removeSkeleton();
+        parkAs(error instanceof Error && error.message ? error.message : 'The upload failed.');
       } finally {
         pendingOpsRef.current -= 1;
       }
-    })();
+    };
+    void run();
   }
 
   return true;

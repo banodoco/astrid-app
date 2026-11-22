@@ -435,8 +435,9 @@ function assertParentMoveRequestV2(
   const reads = timingReads(selected!);
   reads.push(readPath(config, ['output', 'fps'], ['config']));
   const registry = payload.registry as JsonObject;
+  // REVIEW: The Lead's M1 ruling for App #308 (25c5672d545) also applies to this mounted move.
   const assetRead = (item: JsonObject): void => {
-    if (typeof item.asset === 'string') reads.push(readPath(registry, ['assets', item.asset], ['config', 'registry']));
+    if (typeof item.asset === 'string') reads.push(readPath(registry, ['assets', item.asset, 'duration'], ['config', 'registry']));
   };
   assetRead(selected!);
   const tracks = config.tracks as Array<JsonObject>;

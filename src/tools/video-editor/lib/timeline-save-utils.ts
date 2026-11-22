@@ -1,4 +1,4 @@
-import { assembleTimelineData, type TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
+import { assembleTimelineData, materializeAuthoredOutput, type TimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
 import { canonicalizeTimelinePair } from '@/tools/video-editor/lib/timeline-domain.ts';
 import type {
   AssetRegistry,
@@ -40,7 +40,7 @@ export function buildDataFromCurrentRegistry(
 ): TimelineData {
   const registry = overrides?.registry ?? current.registry;
   const resolvedRegistry = overrides?.resolvedRegistry ?? current.resolvedConfig.registry;
-  const canonical = canonicalizeTimelinePair(config, registry);
+  const canonical = canonicalizeTimelinePair(materializeAuthoredOutput(config), registry);
   const canonicalConfig = canonical.config;
 
   const resolvedConfig = {
@@ -76,7 +76,7 @@ export function buildDataFromSnapshot(
   current: TimelineData,
   sourceItemsBySchemaRef = current.sourceItemsBySchemaRef,
 ): TimelineData {
-  const canonical = canonicalizeTimelinePair(config, registry);
+  const canonical = canonicalizeTimelinePair(materializeAuthoredOutput(config), registry);
   const canonicalConfig = canonical.config;
 
   const snapshotResolvedRegistry: Record<string, ResolvedAssetRegistryEntry> = Object.fromEntries(

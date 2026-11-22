@@ -4,6 +4,7 @@ import {
   type PlacePreparedMediaCommand,
 } from '@/tools/video-editor/commands';
 import { getConfigSignature, getStableConfigSignature } from '@/tools/video-editor/lib/config-utils';
+import { newTrackPlacementMarkers } from '@/tools/video-editor/lib/placement-markers';
 import { migrateToFlatTracks, repairConfig } from '@/tools/video-editor/lib/migrate';
 import {
   buildDataFromCurrentRegistry,
@@ -31,7 +32,7 @@ const makeTrack = (id: string, kind: TrackDefinition['kind'] = 'visual'): TrackD
   // Canonical form: every canonicalized config carries the track-scale
   // semantics marker (`applyTrackScaleBakeMigration`). Fixtures include it so
   // signature comparisons against canonicalized outputs stay meaningful.
-  app: { scaleAppliesToPositionedClips: true },
+  app: newTrackPlacementMarkers(),
 });
 
 const makePinnedGroup = (args: {

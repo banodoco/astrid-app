@@ -474,7 +474,7 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await agent.edit('--clip', seed3.agentClipId, '--extend', '1');
   await agent.edit('--clip', seed3.agentClearClipId, '--clear-asset');
   // A competing transition change on the clip the App clears below: B's publication conflicts with C.
-  await agent.edit('--clip', seed3.transitionClipId, '--set', 'transition={"type":"crossfade","duration":1.2}');
+  await agent.edit('--clip', seed3.transitionClipId, '--set', 'transition={"type":"cross-fade","duration":1.2}');
   const published = await agent.commit('agent: extend and clear', 'f2-case2');
   expect(published.old_head, 'the agent built on the App\'s save').toBe(headA);
   const headB = published.new_head;
@@ -561,13 +561,14 @@ test('concurrent edit: the App\'s acknowledgement is lost, the agent publishes, 
   await openSeededTimeline(page, harness);
   const recovered = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
   await expect(recovered).toBeVisible(CEILING);
-  await expect(recovered.getByRole('button', { name: 'Save them' })).toBeEnabled();
+  // REVIEW (#334, #345): R13 showed 'Save them' for this refused save; R14 uses 'Try again'.
+  await expect(recovered.getByRole('button', { name: 'Try again' })).toBeEnabled();
   expect((await timelineDraft(page, seed3.timelineId))?.draft).toEqual(kept?.draft);
   // Selection is session-local: reopen the clip panel before checking the recovered transition behind the modal.
   await selectClip(page, seed3.transitionClipId);
   await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   const postsBeforeRecoveryRetry = posts.length;
-  await recovered.getByRole('button', { name: 'Save them' }).click();
+  await recovered.getByRole('button', { name: 'Try again' }).click();
   await expect(conflict).toBeVisible(CEILING);
   await expect(page.getByRole('textbox', { name: 'Track name', includeHidden: true }).first()).toHaveValue('F2 App A');
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(kept);
@@ -1304,7 +1305,7 @@ type GestureExpectation = { kind: 'move'; clipId: string; trackId: string } | { 
 /**
  * The exact guard set a mounted drag-move must carry, re-derived independently from the authored parent payload the
  * gesture started from (the contract of the move branch in timelineLocalSaveHandoff.ts: selected clip timing fields,
- * output fps / theme canvas fallback, registry asset, the moved track kind, pinnedShotGroups, the clip collection
+ * output fps / theme canvas fallback, registry asset duration, the moved track kind, pinnedShotGroups, the clip collection
  * order and membership, and for every other clip its track, plus timing fields and asset for same-track siblings).
  */
 function expectedMoveReads(parent: Record<string, any>, clipId: string, trackId: string): Array<Record<string, unknown>> {
@@ -1321,7 +1322,8 @@ function expectedMoveReads(parent: Record<string, any>, clipId: string, trackId:
   };
   const timing = (item: Record<string, any>) => ['id', 'track', 'at', 'clipType', 'hold', 'from', 'to', 'speed', 'asset']
     .map((key) => read(item, key, [...clipPath, `id:${item.id}`]));
-  const assetRead = (item: Record<string, any>) => typeof item.asset === 'string' ? [readPath(parent.registry, ['assets', item.asset], ['config', 'registry'])] : [];
+  // REVIEW: Lead ruling 21/22 Nov: App #308 (25c5672d545) narrows the consulted registry read to duration (or its nearest absent ancestor).
+  const assetRead = (item: Record<string, any>) => typeof item.asset === 'string' ? [readPath(parent.registry, ['assets', item.asset, 'duration'], ['config', 'registry'])] : [];
   const clip = clips.find((item) => item.id === clipId)!;
   expect(clip, `the moved clip ${clipId} is in the authored parent`).toBeTruthy();
   expect(clip.track).toBe(trackId);
@@ -1470,6 +1472,7 @@ async function prepareAfterAckLossMountedDocuments(page: Page, harness: DirectHa
   await harness.enableTimelineAuthoring(ASTRID_PYTHON);
   const wire = await faultFirstCommit(page);
   await openCommandTimeline(page, harness, seed);
+  await expect(page.locator('[data-save-bar]')).toHaveCount(0, CEILING);
   const before = await history(harness, seed);
   await dragTimelineClip(page, seed.appClipId, seed.transitionClipId, 0, 5, THREE_PRODUCTS_REFERENCE_AT, () => {
     expect(wire.attempts, 'pointer movement previews; the actual drop commits').toBe(0);
@@ -1774,6 +1777,8 @@ test('M2 real gate 5 (M1 real mounted path): Agent edit, lost ACK, newer local g
   const reset = await resetResponse;
   expect(reset.status(), await reset.text()).toBe(200);
   await expect.poll(async () => (await commandOutboxes(page, seed3.timelineId)).every((item) => !item.pending && !item.intents.length), CEILING).toBe(true);
+  // REVIEW: the outbox settles before the editor's asynchronous ACK cleanup clears the recovery slot.
+  await expect.poll(() => timelineDraft(page, seed3.timelineId), { ...CEILING, message: 'the reset must clear its mounted recovery draft before reopening' }).toBeNull();
   const { wire, before, a, owner } = await prepareAfterAckLossMountedDocuments(page, harness, seed3, async (acceptedA, commandWire) => {
     c = await astrid.commitCaptured(harness.seed.projectId, seed3.timelineId, pinOf(acceptedA),
       { kind: 'track', id: 'f2-gate5-independent-C' }, 'f2-gate5-independent-C');
@@ -2777,12 +2782,22 @@ test('M2 mixed editing: accepted pointer move and rename survive lost ACK, reloa
   await expect(page.getByText('Could not undo timeline')).toBeVisible(CEILING);
   await expect(page.getByText('conflict: an intervening publication wrote a guarded address')).toBeVisible();
   await expect(page.getByText('Saved', { exact: true })).toHaveCount(0);
+  // REVIEW (#345): R13 showed the undo refusal inline only. R14 also opens the conflict dialog.
+  const conflict = page.getByRole('alertdialog', { name: CONFLICT_TITLE });
+  const useLatest = conflict.getByRole('button', { name: 'Use latest version' });
+  await expect(conflict).toBeVisible();
+  await expect(useLatest).toBeVisible();
+  await expect(conflict.getByRole('button', { name: 'Keep my changes' })).toBeVisible();
+  await useLatest.click();
+  await expect(conflict).toHaveCount(0, CEILING);
   await expect(firstTrackName(page)).toHaveValue(trackLabel);
+  await expect(page.locator('[data-track-id="f2-mixed-independent"]')).toBeVisible();
   await expectOpaqueDataKept(harness, seed3);
   expect(wire.legacy).toEqual([]);
   journey.facts = { ...journey.facts, acceptedMove: pinOf(move), acceptedRename: pinOf(rename),
     retainedOwner: kept.ownerId, retryKey: wire.posts[0].key, refusedUndo: { status: 409, reason: 'intervening_write' }, renderer: 'not started' };
   await sniff.expectClean(page, seed3.timelineId);
+  expect(wire.observed, 'Use latest version sends no commit POST').toHaveLength(observedBeforeUndo + 1);
 });
 
 // Separate worker seed: the original seven cases retain their ordinary fixture and bodies.
@@ -2910,10 +2925,10 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   journey.facts.sameRealm = await expectSameRealm(page, harness, astrid);
   const before = await history(harness, seed3);
   const original = await revisionState(harness, seed3, before.head.revision_id);
-  expect(original.parentClips[seed3.transitionClipId].transition).toEqual({ type: 'crossfade', duration: 0.5 });
+  expect(original.parentClips[seed3.transitionClipId].transition).toEqual({ type: 'cross-fade', duration: 0.5 });
   await selectClip(page, seed3.transitionClipId);
   await page.getByRole('tab', { name: 'Effects', exact: true }).click();
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   await setTransitionToNone(page, seed3.transitionClipId);
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
   const cleared = accepted(wire.posts[0]);
@@ -2983,7 +2998,7 @@ nativeNoneTest('M2 native None single: ordinary default crossfade clears raw mir
   await openSeededTimeline(page, harness);
   await selectClip(page, seed3.transitionClipId);
   await page.getByRole('tab', { name: 'Effects', exact: true }).click();
-  await expect(transitionSelect(page)).toContainText('crossfade');
+  await expect(transitionSelect(page)).toContainText(/cross[\s-]?fade/i);
   const unavailableTarget = await expectFreshPreviewUnavailable(page, astrid, harness, seed3, pinOf(undone).revision_id);
   expect((await revisionState(harness, seed3, pinOf(undone).revision_id)).parent).toEqual(original.parent);
   await expectOpaqueDataKept(harness, seed3);
@@ -3003,7 +3018,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   const before = await history(harness, seed3);
   const original = await revisionState(harness, seed3, before.head.revision_id);
   const ids = [seed3.appClipId, seed3.transitionClipId];
-  expect(original.parentClips[seed3.appClipId].transition.revision).toBe('native-none-unknown-revision');
+  expect(original.parentClips[seed3.appClipId].transition.params.fixtureMetadata.revision).toBe('native-none-unknown-revision');
   expect(Object.hasOwn(original.parentClips[seed3.appClipId].transition.params, '__proto__')).toBe(true);
   await bulkTransitionNone(page, seed3);
   await expect.poll(() => wire.posts.length, CEILING).toBe(1);
@@ -3054,7 +3069,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect(undone.data.canonical_document.parent_revision.payload).toEqual(original.parent);
   const restored = (undone.data.canonical_document.parent_revision.payload.clips as Array<Record<string, any>>)
     .find((clip) => clip.id === seed3.appClipId)!;
-  expect(Object.hasOwn(restored.transition, '__proto__')).toBe(true);
+  expect(Object.hasOwn(restored.transition.params.fixtureMetadata, '__proto__')).toBe(true);
   expect(Object.hasOwn(restored.transition.params, '__proto__')).toBe(true);
   expect(Object.keys(restored.transition)).toEqual(Object.keys(original.parentClips[seed3.appClipId].transition));
   await expectImmutableClosure(harness, seed3, undone);
@@ -3108,7 +3123,8 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
   expect(reloaded.pending).toEqual(retained.pending);
   expect(reloaded.intents).toEqual(retained.intents);
   // The single native owner is recovered automatically. Its rejected draft remains durable;
-  // rollback shows the Agent's canonical partial clear, and Save them reopens the refusal.
+  // rollback shows the Agent's canonical partial clear.
+  // REVIEW (#334, #345): R13 showed 'Save them' for this refused save. R14 reopens it with 'Try again'.
   const recovery = page.getByRole('alert').filter({ hasText: 'You have unsaved changes' });
   await expect(recovery).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
@@ -3117,7 +3133,7 @@ nativeNoneTest('M2 native None bulk: one original-basis atomic clear preserves u
     await page.getByRole('tab', { name: 'Effects', exact: true }).click();
     await expect(transitionSelect(page)).toContainText(id === seed3.appClipId ? 'None' : /cross[\s-]?fade/i);
   }
-  await recovery.getByRole('button', { name: 'Save them' }).click();
+  await recovery.getByRole('button', { name: 'Try again' }).click();
   await expect(page.getByRole('alertdialog', { name: CONFLICT_TITLE })).toBeVisible(CEILING);
   expect(await timelineDraft(page, seed3.timelineId)).toEqual(retainedDraft);
   const recoveredConflict = (await commandOutboxes(page, seed3.timelineId)).find((item) => item.ownerId === pending.ownerId)!;
@@ -3776,8 +3792,10 @@ test('empty bootstrap: creating the first timeline in a fresh project then dropp
   expect(tracks).toEqual([
     { id: 'V1', kind: 'visual', label: 'V1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
     { id: 'A1', kind: 'audio', label: 'A1', scale: 1, fit: 'contain', opacity: 1, blendMode: 'normal' },
-    { id: 'V2', kind: 'visual', label: 'V2', app: { scaleAppliesToPositionedClips: true } },
+    { id: 'V2', kind: 'visual', label: 'V2', app: { scaleAppliesToPositionedClips: true, clipPlacementVersion: 1 } },
   ]);
+  expect(tracks[0]).not.toHaveProperty('app.clipPlacementVersion');
+  expect(tracks[1]).not.toHaveProperty('app.clipPlacementVersion');
 
   const assets = payload.registry?.assets ?? payload.config?.registry?.assets;
   const asset = assets?.[clip.asset];

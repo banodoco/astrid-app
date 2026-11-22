@@ -1,7 +1,7 @@
 import { createContext } from 'react';
 import { normalizeClipPlacementWithFindings } from '@banodoco/timeline-composition';
 import type { CanonicalDocument, CommitRequest, EditCommand, HistoryPage } from '@/integrations/runtime/timeline-commit-types.ts';
-import type { LocalSaveSession } from '../commands/localSaveSession.ts';
+import { LocalSaveDeclined, type LocalSaveSession, type LocalSaveState, type RejectedSaveReceipt } from '../commands/localSaveSession.ts';
 import { toOutboxJson, type OutboxJson } from '../commands/commitOutbox.ts';
 import { canonicalJsonStringify, type TimelineBundleEnvelope } from '../data/typed/timelineBundle.ts';
 import { authoringBundleFromDocument, type AuthoringBundle } from '../commands/authoringBundle.ts';
@@ -38,11 +38,15 @@ export interface TimelineLocalSaveHandoff {
   flush(): Promise<TimelineSaveReceipt>;
   /** The durable local save session's state, when the owner has one. */
   status?(): string | undefined;
+  ownerId?(): string | undefined;
+  writeRecoveryDraft?: LocalSaveSession['writeRecoveryDraft'];
+  subscribeState?(listener: (state: LocalSaveState) => void): () => void;
+  exportRejectedChange?(): ReturnType<LocalSaveSession['exportRejectedChange']>;
   /**
    * Leave a refused save. `latest` drops the rejected change and its dependants; `keep` resends them on the
    * latest head. Resolves once the owner is saved and the next edit can save; throws if it is not.
    */
-  discharge?(mode: 'latest' | 'keep'): Promise<void>;
+  discharge?(mode: 'latest' | 'keep', exported?: RejectedSaveReceipt, stillCurrent?: () => boolean): Promise<TimelineSaveReceipt | void>;
   /** True only when the durable owner is settled and has an accepted target. */
   remoteHistoryAvailable(): boolean;
   canUndo(): boolean;
@@ -52,7 +56,8 @@ export interface TimelineLocalSaveHandoff {
 }
 
 /** Scoped editors supply their own verified physical-image join and durable owner. */
-export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status' | 'discharge'>;
+export type TimelinePersistenceHandoff = Pick<TimelineLocalSaveHandoff, 'capture' | 'flush' | 'status' | 'ownerId'
+  | 'writeRecoveryDraft' | 'subscribeState' | 'exportRejectedChange' | 'discharge'>;
 export interface TimelinePersistenceBinding {
   readonly provider: DataProvider;
   readonly timelineId: string;
@@ -281,12 +286,26 @@ function checkSource(initial: TimelineCommandBasis, source: TimelineSaveSource) 
   const parentClips = !Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips)
     ? canonicalizeTimelinePair({ ...loaded, clips: structuredClone(parent.clips) } as TimelineConfig,
       structuredClone(parent.registry) as unknown as AssetRegistry) : undefined;
+  // Derive the provider-defaulted view from the verified parent only when
+  // the ordinary views did not match. Preserve physical top-level clips.
+  const matchesProviderView = () => {
+    const candidates = [config as unknown as TimelineConfig];
+    if (!Object.prototype.hasOwnProperty.call(parent.config, 'clips') && Array.isArray(parent.clips)) {
+      candidates.push({ ...config, clips: structuredClone(parent.clips) } as TimelineConfig);
+    }
+    return candidates.some(candidate => {
+      const defaulted = { ...candidate, ...withDefaultTimelineOutput(candidate) } as TimelineConfig;
+      const view = canonicalizeTimelinePair(defaulted, structuredClone(parent.registry) as unknown as AssetRegistry);
+      return same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(view.config)));
+    });
+  };
   // Accept the original raw view or main's actual load/build view. No arbitrary
   // display snapshot can establish an authored entity binding.
   if ((!same(authoredJson(source.config), authoredJson(loaded))
     && !same(authoredJson(source.config), authoredJson(projected.config))
     && !same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(projected.config)))
-    && !(parentClips && same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(parentClips.config)))))
+    && !(parentClips && same(authoredJson(source.config), authoredJson(projectTimelineTracksForDisplay(parentClips.config))))
+    && !matchesProviderView())
     || !same(authoredJson(source.registry), authoredJson(projected.registry))) {
     refuse('upstream source differs from the verified authored parent', 'source-parent-mismatch');
   }
@@ -902,7 +921,10 @@ export function createTimelineLocalSaveHandoff(options: {
             // resolve that path to the top-level raw registry when no mirror exists.
             if (Object.prototype.hasOwnProperty.call(config, 'registry')
               && (!object(config.registry) || !same(config.registry, parent.registry))) refuse('contradictory parent registry mirror', 'registry-mirror-mismatch');
-            reads!.push(readPath(parent.registry, ['assets', item.asset], ['config', 'registry']));
+            // The edit consults only the asset's source duration (getClipTimelineDuration -> registry duration), or
+            // that the entry exists. Reading the whole entry would conflict whenever the Runtime holds it in a
+            // different form than this optimistic copy (e.g. written by a queued predecessor and then normalised).
+            reads!.push(readPath(parent.registry, ['assets', item.asset, 'duration'], ['config', 'registry']));
           };
           assetRead(clip);
           if (gestureBasis.kind === 'split') {
@@ -978,6 +1000,9 @@ export function createTimelineLocalSaveHandoff(options: {
         // Only refuseEdit registers; unexpected errors and session or conflict errors stay unregistered.
         const rejection = error instanceof TimelineVersionConflictError || error instanceof TimelineSaveError ? error
           : new TimelineSaveError(`Local document save retained: ${error instanceof Error ? error.message : String(error)}`);
+        // A declined edit (earlier saves unresolved or replaying) never entered the queue: undo it on screen
+        // and say why, rather than leaving a failure that blocks every later save.
+        if (error instanceof LocalSaveDeclined) authoringRefusals.add(rejection);
         return Promise.reject(rejection);
       }
     },
@@ -1010,9 +1035,10 @@ export function createTimelineLocalSaveHandoff(options: {
         throw error;
       }
     },
-    async discharge(mode) {
+    async discharge(mode, exported, stillCurrent) {
       let failure: unknown;
-      try { await options.session.discharge(mode); } catch (error) { failure = error; }
+      try { await options.session.discharge(mode, exported, stillCurrent); }
+      catch (error) { if (exported) throw error; failure = error; }
       const state = options.session.getState();
       if (state.status !== 'saved') {
         const message = object(state.error) && typeof state.error.message === 'string' ? state.error.message
@@ -1020,10 +1046,23 @@ export function createTimelineLocalSaveHandoff(options: {
         if (state.status === 'conflict') throw new TimelineVersionConflictError(message);
         refuse(message);
       }
-      // The session document is canonical again (or the saved result); the next capture authors from it.
-      document = structuredClone(options.session.getDocument()) as unknown as CanonicalDocument;
-      authoringSource = structuredClone(source);
+      // After the creator discards or a conflict saves successfully, both
+      // the session and editor must author subsequent gestures from the new
+      // authenticated head. Reusing the original pre-discharge source would
+      // silently attach them to an obsolete revision.
+      const basis = options.session.getBasis();
+      const adopted = options.adopted(basis);
+      const head = adopted.receipt.head;
+      if (head.projectId !== basis.canonicalDocument.project_id || head.timelineId !== basis.canonicalDocument.timeline_id
+        || head.headRevisionId !== basis.head.revisionId || head.headPublicationId !== basis.head.publicationId
+        || !same(adopted.source.head, head)) refuse('canonical assembly did not adopt the discharged head');
+      initial = structuredClone(basis);
+      source = structuredClone(adopted.source);
+      authoringSource = structuredClone(adopted.source);
+      document = structuredClone(basis.canonicalDocument);
       sourceChecked = false;
+      targets = historyTargets(basis.history, basis.head, options.session.actorId);
+      return adopted.receipt;
     },
     remoteHistoryAvailable,
     canUndo: () => remoteHistoryAvailable() && targets.undo.length > 0,

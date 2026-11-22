@@ -13,6 +13,7 @@ import type { CanonicalDocument, CommitRequest, MediaSelection, MediaSelectionQu
 import { createCommitOutbox, type OutboxRecord } from '@/tools/video-editor/commands/commitOutbox.ts';
 import { createShotTimelineDataProvider, createShotTimelineInitialData, projectShotTimelineRenderConfig } from './shotTimelineDataProvider.ts';
 import { buildTimelineData } from '@/tools/video-editor/lib/timeline-data.ts';
+import { resolveTimelinePersistenceHandoff } from '@/tools/video-editor/hooks/timelineLocalSaveHandoff.ts';
 import { TimelineSaveError } from '@/tools/video-editor/data/DataProvider.ts';
 
 function canonicalDocument(): CanonicalDocument {
@@ -931,24 +932,52 @@ describe('shot popup A3 save ingress', () => {
     } finally { await first.dispose(); }
   });
 
+  it.each([400, 404, 405, 413, 422])('FIX16-R2-POPUP-%s offers Copy on reopen without posting again', async status => {
+    const h = harness();
+    h.send.mockRejectedValueOnce(new ApiError(status, 'http_error', 'Refused popup edit'));
+    const first = h.mount();
+    try {
+      await expect(first.saveTimeline('popup-timeline', h.add(), 1)).rejects.toThrow();
+    } finally { await first.dispose(); }
+    const [stored] = await h.records();
+    const reopened = h.mount();
+    try {
+      const binding = reopened.bindLocalDocumentSave('popup-reopened');
+      const handoff = resolveTimelinePersistenceHandoff(binding, reopened, 'popup-reopened')!;
+      expect(handoff.subscribeState).toBeTypeOf('function');
+      const changed = vi.fn();
+      const unsubscribe = handoff.subscribeState!(changed);
+      try {
+        await vi.waitFor(() => expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ status: 'error', ownerId: stored.ownerId })));
+        const copied = await handoff.exportRejectedChange!();
+        expect(copied.rejected_request).toEqual(stored.pending?.request);
+        expect(copied.edits).toEqual(stored.intents.map(({ id, basis, payload }) => ({ id, basis, payload })));
+        expect(JSON.stringify(copied)).toContain('popup-added-a3');
+        expect(h.send).toHaveBeenCalledTimes(1);
+      } finally { unsubscribe(); }
+    } finally { await reopened.dispose(); }
+  });
+
   it.each(['conflict', 'invalid'] as const)('rolls back a %s reply, retaining the exact rejected request through recovery', async (code) => {
     const h = harness();
     const details = code === 'conflict' ? { status: 'conflict', head: { revision_id: 'agent-head', publication_id: 'agent-pub' }, reason: 'dependency_changed' }
       : { code: 'invalid_media', path: ['clips', 'id:popup-added-a3'], hint: 'Choose verified media' };
     h.send.mockRejectedValueOnce(new ApiError(code === 'conflict' ? 409 : 422, code, code, '', details));
+    const message = code === 'conflict' ? 'conflict: conflict'
+      : 'The Runtime rejected this change as invalid: invalid: invalid. Your changes are kept here but have not been saved.';
     const first = h.mount();
     await expect(first.saveTimeline('popup-timeline', h.add(), 1)).rejects.toMatchObject({
-      code: code === 'conflict' ? 'timeline_version_conflict' : 'timeline_save_refused', message: `${code}: ${code}`,
+      code: code === 'conflict' ? 'timeline_version_conflict' : 'timeline_save_refused', message,
     });
     expect((await first.loadTimeline('popup-timeline')).config.clips).toHaveLength(h.config.clips.length);
-    expect(h.load).toHaveBeenCalledTimes(2);
+    expect(h.load).toHaveBeenCalledTimes(code === 'conflict' ? 2 : 1);
     const [stored] = await h.records();
     expect(stored.pending!.outcome).toMatchObject({ kind: 'rejected', error: { code, details } });
     expect(stored.intents).toHaveLength(1);
     await first.dispose();
     const second = h.mount();
     await expect(second.recoverLocalSaves(stored.ownerId)).rejects.toMatchObject({
-      code: code === 'conflict' ? 'timeline_version_conflict' : 'timeline_save_refused', message: `${code}: ${code}`,
+      code: code === 'conflict' ? 'timeline_version_conflict' : 'timeline_save_refused', message,
     });
     expect(h.send).toHaveBeenCalledTimes(1);
     expect((await h.records())[0].pending!.request).toEqual(stored.pending!.request);

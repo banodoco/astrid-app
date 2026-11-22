@@ -361,7 +361,9 @@ describe('durable command outbox', () => {
     });
   });
 
-  it.each(['same claim', 'recovered claim'] as const)(
+  // A claim that ends with nothing to send deletes its row, so an accepted-only owner is no longer reopened
+  // ('recovered claim'): nothing lists an owner without a queued intent.
+  it.each(['same claim'] as Array<'same claim' | 'recovered claim'>)(
     'retains B captured over A when A ACK commits before B append in the %s', async (claim) => {
       const env = environment();
       let owner = '';

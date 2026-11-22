@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
-  "release": 13,
+  "release": 14,
   "agent": {
-    "sha": "1be7ea2c2f9e46ef3b69f403661814150f7fd027"
+    "sha": "c0ad6b54aadd21630d98bb5039613e37efe92a8f"
   },
   "runtime": {
-    "sha": "ff154ba2079ac1afa58bb6e108410fdede14142a",
-    "schema_digest": "sha256:2c6a76e17b4441398ab91e3e9d6283a719fd5b08807447db9dbf2ecc5e1339a2"
+    "sha": "5120462d67479dc4719406d0d34440edb616ace1",
+    "schema_digest": "sha256:9c9e746eb5138f5e92baf5bcd87e8598c6aa92597c92083956b24517c4071923"
   },
   "tools": {
     "uv": {
@@ -114,15 +114,15 @@
     }
   },
   "vibecomfy": {
-    "sha": "b83db46e2694ac87a3985d7543b74ac60b7e8677"
+    "sha": "48b5fa9e45630e1bc502651975ec0ef3a5e74c4c"
   },
   "lifecycle": {
     "repo": "https://github.com/banodoco/runpod-lifecycle.git",
-    "sha": "7f0b025e9391baac9f5c2fb7393617ea6fef0704",
+    "sha": "9f88ef7640bc664f697112d966ecefa123d44340",
     "version": "0.3.1.dev0"
   },
   "required": {
-    "release": 13,
+    "release": 14,
     "reason": "This update fixes problems that could keep a rented machine billing after a job, or lose a finished result."
   }
 }

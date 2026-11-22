@@ -1982,12 +1982,15 @@ describe('TimelineRenderer — track.scale scales the whole track subtree', () =
     return (el.parentElement as HTMLElement | null)?.style.transform ?? '';
   };
 
+  // Scaling around the center of a 1280x720 canvas at 0.5 shifts its top-left by (320, 180).
+  const centeredHalfScale = 'translate(320px, 180px) scale(0.5)';
+
   it('wraps a plain media clip in the track scale transform', () => {
     render(<TimelineRenderer astridElementHost={fixtureAstridElementHost} config={scaledConfig([
       { id: 'clip-plain', clipType: 'media', track: 'V1', at: 0, hold: 2, asset: 'a' },
     ])} />);
 
-    expect(wrapperTransform('visual-clip-sequence')).toBe('scale(0.5)');
+    expect(wrapperTransform('visual-clip-sequence')).toBe(centeredHalfScale);
   });
 
   it('scales a media clip that carries a position override (track-local coordinates)', () => {
@@ -1995,7 +1998,7 @@ describe('TimelineRenderer — track.scale scales the whole track subtree', () =
       { id: 'clip-positioned', clipType: 'media', track: 'V1', at: 0, hold: 2, asset: 'a', x: 320, y: 180, width: 640, height: 360 },
     ])} />);
 
-    expect(wrapperTransform('visual-clip-sequence')).toBe('scale(0.5)');
+    expect(wrapperTransform('visual-clip-sequence')).toBe(centeredHalfScale);
   });
 
   it('scales text clips with the rest of the track', () => {
@@ -2003,7 +2006,7 @@ describe('TimelineRenderer — track.scale scales the whole track subtree', () =
       { id: 'clip-text', clipType: 'text', track: 'V1', at: 0, hold: 2, text: { content: 'SCALED?' } },
     ])} />);
 
-    expect(wrapperTransform('text-clip-sequence')).toBe('scale(0.5)');
+    expect(wrapperTransform('text-clip-sequence')).toBe(centeredHalfScale);
   });
 
   it('applies the transform once, at the track subtree, not per clip', () => {
@@ -2018,7 +2021,7 @@ describe('TimelineRenderer — track.scale scales the whole track subtree', () =
     const media = screen.getByTestId('visual-clip-sequence');
     const text = screen.getByTestId('text-clip-sequence');
     expect(media.parentElement).toBe(text.parentElement);
-    expect(media.parentElement?.style.transform).toBe('scale(0.5)');
+    expect(media.parentElement?.style.transform).toBe(centeredHalfScale);
   });
 });
 

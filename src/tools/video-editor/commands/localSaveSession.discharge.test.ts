@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '@/integrations/runtime/generated.ts';
+import { fixtureDigest } from '@/integrations/runtime/__tests__/timelineCommitFixture.ts';
 import type { CanonicalDocument } from '@/integrations/runtime/generated.ts';
 import type { CommitRequest } from '@/integrations/runtime/timeline-commit-types.ts';
 import { toOutboxJson } from './commitOutbox.ts';
@@ -38,6 +39,84 @@ async function laterEdit(env: ReturnType<typeof environment>, session: LocalSave
 }
 
 describe('a refused save can always be discharged', () => {
+  it('keeps a typed value-conflict transition draft while showing the latest transition', async () => {
+    const env = environment();
+    const original = structuredClone(env.initial.canonicalDocument);
+    const parent = original.parent_revision.payload as any;
+    parent.config.clips = [{ id: 'clip', track: 'V1', at: 0, hold: 3, transition: { type: 'cross-fade', duration: 0.5 } }];
+    parent.clips = structuredClone(parent.config.clips);
+    original.parent_revision.content_digest = fixtureDigest(parent);
+    const draft = structuredClone(original);
+    const draftParent = draft.parent_revision.payload as any;
+    delete draftParent.config.clips[0].transition;
+    delete draftParent.clips[0].transition;
+    const latestDoc = structuredClone(original);
+    const latestParent = latestDoc.parent_revision.payload as any;
+    latestParent.config.clips[0].transition = { id: 'cross-fade', durationFrames: 36 };
+    latestParent.clips[0].transition = { id: 'cross-fade', durationFrames: 36 };
+    const latest = env.accepted(latestDoc, h1);
+    const initial = { head: h0, canonicalDocument: original };
+    const session = await createLocalSaveSession({ scope, initial, document: toOutboxJson(original),
+      outboxes: env.outboxes, send: env.send, loadLatest: async () => ({ head: h1, canonicalDocument: latest.canonicalDocument }),
+      prepareDisplay: env.prepareDisplay, changed: () => {} });
+    await session.appendDocument({ before: original, after: draft, label: 'Clear transition',
+      roots: [{ ref: 'parent', revisionId: h0.revisionId, contentDigest: original.parent_revision.content_digest }],
+      step: { id: 'clear-transition', label: 'Clear transition', intent: 'Clear transition', tags: [] } });
+    env.send.mockRejectedValueOnce(new ApiError(409, 'conflict', 'transition changed', '', { status: 'conflict', reason: 'value_conflict' }));
+    await expect(session.flush()).rejects.toThrow();
+    const [retained] = await env.outboxes.list(scope);
+    expect(retained.pending?.outcome).toMatchObject({ kind: 'rejected', error: { kind: 'conflict', details: { status: 'conflict', reason: 'value_conflict' } } });
+    expect(env.visible()).toEqual(latest.canonicalDocument);
+    expect(session.getDocument()).toEqual(latest.canonicalDocument);
+    await session.discharge('keep');
+    expect(env.send).toHaveBeenCalledTimes(1);
+    expect((await env.outboxes.list(scope))[0]).toEqual(retained);
+    expect(session.getState().status).toBe('conflict');
+    expect(session.getDocument()).toEqual(latest.canonicalDocument);
+    expect(env.visible()).toEqual(latest.canonicalDocument);
+    await session.dispose();
+  });
+
+  it('retains the authored track-label display on a typed value conflict', async () => {
+    const env = environment();
+    const original = structuredClone(env.initial.canonicalDocument);
+    const parent = original.parent_revision.payload as any;
+    delete parent.tracks;
+    original.parent_revision.content_digest = fixtureDigest(parent);
+    const draft = structuredClone(original);
+    (draft.parent_revision.payload as any).config.tracks[0].label = 'Native label';
+    const latest = env.accepted(original, h1);
+    const session = await createLocalSaveSession({ scope, initial: { head: h0, canonicalDocument: original }, document: toOutboxJson(original),
+      outboxes: env.outboxes, send: env.send, loadLatest: async () => ({ head: h1, canonicalDocument: latest.canonicalDocument }),
+      prepareDisplay: env.prepareDisplay, changed: () => {} });
+    await session.appendDocument({ before: original, after: draft, label: 'Rename track',
+      roots: [{ ref: 'parent', revisionId: h0.revisionId, contentDigest: original.parent_revision.content_digest }],
+      step: { id: 'label', label: 'Rename track', intent: 'Rename track', tags: [] } });
+    env.send.mockRejectedValueOnce(new ApiError(409, 'conflict', 'label changed', '', { status: 'conflict', reason: 'value_conflict' }));
+    await expect(session.flush()).rejects.toThrow();
+    const [retained] = await env.outboxes.list(scope);
+    expect(session.getDocument()).toEqual(draft);
+    await session.discharge('keep');
+    expect(env.send).toHaveBeenCalledTimes(1);
+    expect((await env.outboxes.list(scope))[0]).toEqual(retained);
+    expect(session.getDocument()).toEqual(draft);
+    expect(session.getState().status).toBe('conflict');
+    await session.dispose();
+  });
+
+  it('still resends a dependency_changed conflict on the latest head', async () => {
+    const { env, latest, mount } = movedHead();
+    const session = await mount();
+    await env.append(session);
+    env.send.mockRejectedValueOnce(new ApiError(409, 'conflict', 'changed', '', { status: 'conflict', reason: 'dependency_changed' }));
+    await expect(session.flush()).rejects.toThrow();
+    env.send.mockImplementation(async () => env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' }));
+    await session.discharge('keep');
+    expect(env.send).toHaveBeenCalledTimes(2);
+    expect(session.getState().status).toBe('saved');
+    await session.dispose();
+  });
+
   describe('stale head', () => {
     it.each([
       ['typed refused', staleHead()],
@@ -104,25 +183,29 @@ describe('a refused save can always be discharged', () => {
       expect(env.send.mock.calls[1][0].base_revision_id).toBe(h1.revisionId);
     });
 
-    it('"keep" resends it on the latest head and the next edit saves', async () => {
+    it('"keep" does not resend an invalid request; explicit discard permits a next save', async () => {
       const { env, latest, session } = await rejected();
+      await expect(session.discharge('keep')).rejects.toThrow('permanently rejected');
+      expect(session.getState().status).toBe('error');
+      expect(env.send).toHaveBeenCalledTimes(1);
+      const copied = await session.exportRejectedChange();
+      expect(copied).toMatchObject({ format: 'astrid.rejected-local-save/v1' });
+      await session.discharge('latest');
+      expect(session.getState().status).toBe('saved');
+      expect(session.getDocument()).toEqual(JSON.parse(JSON.stringify(latest.canonicalDocument)));
       const saved = env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' });
       env.send.mockImplementation(async () => saved);
-      await session.discharge('keep');
-      expect(session.getState().status).toBe('saved');
+      await laterEdit(env, session, latest.canonicalDocument, 'Next');
+      await expect(session.flush()).resolves.toMatchObject({ head: { revisionId: 'r2' } });
+      expect(env.send).toHaveBeenCalledTimes(2);
       expect(env.send.mock.calls[1][0].base_revision_id).toBe(h1.revisionId);
-      const next = env.accepted(saved.canonicalDocument, { revisionId: 'r3', publicationId: 'p3' });
-      env.send.mockImplementation(async () => next);
-      await session.appendDocument({ before: session.getDocument() as unknown as CanonicalDocument, after: laterDocument(saved.canonicalDocument, 'Next'), label: 'Next',
-        roots: [{ ref: 'parent', revisionId: 'r2', contentDigest: saved.canonicalDocument.parent_revision.content_digest }],
-        step: { id: 'n', label: 'Next', intent: 'Next', tags: [] } } as Parameters<typeof session.appendDocument>[0]);
-      await expect(session.flush()).resolves.toMatchObject({ head: { revisionId: 'r3' } });
     });
 
-    it('a real refusal on "keep" refuses again and is still dischargeable', async () => {
+    it('a permanently refused save cannot be sent a second time and remains dischargeable', async () => {
       const { env, session } = await rejected();
       env.send.mockRejectedValue(validationRefusal());
-      await session.discharge('keep');
+      await expect(session.discharge('keep')).rejects.toThrow('permanently rejected');
+      expect(env.send).toHaveBeenCalledTimes(1);
       expect(session.getState().status).toBe('error');
       await session.discharge('latest');
       expect(session.getState().status).toBe('saved');
@@ -137,7 +220,14 @@ describe('a refused save can always be discharged', () => {
       await reopened.recover(owner).catch(() => {});
       expect(reopened.getState().status).toBe('error');
       env.send.mockImplementation(async () => env.accepted(latest.canonicalDocument, { revisionId: 'r2', publicationId: 'p2' }));
-      await reopened.discharge(mode);
+      if (mode === 'keep') {
+        await expect(reopened.discharge(mode)).rejects.toThrow('permanently rejected');
+        expect(reopened.getState().status).toBe('error');
+        expect(env.send).toHaveBeenCalledTimes(1);
+        await reopened.discharge('latest');
+      } else {
+        await reopened.discharge(mode);
+      }
       expect(reopened.getState().status).toBe('saved');
       expect((await env.outboxes.list(scope)).filter((entry) => entry.intents.length || entry.pending)).toEqual([]);
     });

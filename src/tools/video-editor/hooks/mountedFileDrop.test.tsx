@@ -28,8 +28,14 @@ const media: MediaSelection = { asset: 'import-image', generation_id: 'generatio
 const cleanups: Array<() => void | Promise<void>> = [];
 beforeEach(() => {
   vi.stubGlobal('indexedDB', createFakeIndexedDB());
+  // Exclusive like the browser's: a held name yields no lock, so the outbox's prune never removes a live owner.
+  const held = new Set<string>();
   Object.defineProperty(navigator, 'locks', { configurable: true,
-    value: { request: async (_name: string, _options: unknown, work: (lock: object) => Promise<unknown>) => work({}) } });
+    value: { request: async (name: string, _options: unknown, work: (lock: object | null) => Promise<unknown>) => {
+      if (held.has(name)) return work(null);
+      held.add(name);
+      try { return await work({}); } finally { held.delete(name); }
+    } } });
 });
 afterEach(async () => { for (const cleanup of cleanups.reverse()) await cleanup(); cleanups.length = 0; vi.unstubAllGlobals(); });
 
@@ -234,7 +240,8 @@ it.each(['scope', 'head', 'missing occurrence', 'wrong occurrence', 'ambiguous o
   await act(async () => { env.releaseImport(); });
   await Promise.all(env.captures);
   expect(env.captures).toEqual([]);
-  expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
+  // No owner row is required (empty owners are removed when the next session starts); no intent may be stored.
+  expect((await env.outboxes.list(env.scope)).flatMap((row) => row.intents)).toEqual([]);
   expect(env.send).not.toHaveBeenCalled();
 });
 
@@ -256,7 +263,8 @@ it.each([false, true])('retains an authored uploading-looking clip during drop c
   // The refusal is visible: a dropped file that cannot be placed never leaves the user with no clip and no reason.
   expect(env.toast).toHaveBeenCalledWith(expect.stringContaining('The file was not added to the timeline.'));
   expect(env.captures).toEqual([]);
-  expect((await env.outboxes.list(env.scope))[0].intents).toEqual([]);
+  // No owner row is required (empty owners are removed when the next session starts); no intent may be stored.
+  expect((await env.outboxes.list(env.scope)).flatMap((row) => row.intents)).toEqual([]);
 });
 
 it('chains another mounted file drop behind the first local semantic command', async () => {

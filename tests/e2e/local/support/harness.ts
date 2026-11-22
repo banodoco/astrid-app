@@ -1024,7 +1024,8 @@ if case['fixture'] == 'three-products':
 
     def asset(source, pin):
         row = {'file': source['file'], 'type': source['type'], 'media_id': source['object_id'],
-               'content_sha256': source['digest'],
+               # REVIEW: Lead ruling 21/22 Nov: registry uses bare SHA-256; Agent 86031e920 enforces the reader contract.
+               'content_sha256': source['digest'].removeprefix('sha256:'),
                'generationId': pin['generation_id'], 'variantId': pin['variant_id']}
         return row
 
@@ -1032,10 +1033,11 @@ if case['fixture'] == 'three-products':
     video = case['video']
     parent_clips = [
         {'id': 'f2-app-clip', 'at': 0, 'track': 'V1', 'clipType': 'media', 'asset': 'f2-app', 'from': 0, 'to': 3, 'speed': 1},
-        {'id': 'f2-transition-clip', 'at': case['reference_at'], 'track': 'V1', 'clipType': 'media', 'asset': 'f2-video', 'from': 0, 'to': 3, 'speed': 1, 'transition': {'type': 'crossfade', 'duration': 0.5}},
+        {'id': 'f2-transition-clip', 'at': case['reference_at'], 'track': 'V1', 'clipType': 'media', 'asset': 'f2-video', 'from': 0, 'to': 3, 'speed': 1, 'transition': {'type': 'cross-fade', 'duration': 0.5}},
     ]
     if case['transitions'] == 'native-none':
-        parent_clips[0].update(json.loads('{"opaqueClip":{"nullable":null,"ordered":[false,0,"",[],{"z":2,"a":1}]},"transition":{"type":"crossfade","duration":0.5,"revision":"native-none-unknown-revision","params":{"nullable":null,"__proto__":{"literal":true},"constructor":{"prototype":[null,false]}},"future":{"ordered":[null,0,false]},"__proto__":{"outer":true},"prototype":false}}'))
+        # REVIEW: Lead ruling 21/22 Nov: keep synthetic unknown data in admitted app/params namespaces (Agent 86031e920 strict reader; App #341 canonical ID).
+        parent_clips[0].update(json.loads('{"app":{"opaqueClip":{"nullable":null,"ordered":[false,0,"",[],{"z":2,"a":1}]}},"transition":{"type":"cross-fade","duration":0.5,"params":{"nullable":null,"__proto__":{"literal":true},"constructor":{"prototype":[null,false]},"fixtureMetadata":{"revision":"native-none-unknown-revision","future":{"ordered":[null,0,false]},"__proto__":{"outer":true},"prototype":false}}}}'))
     elif case['transitions'] == 'parent-delete':
         parent_clips[1].pop('transition', None)
     parent_registry = {
@@ -1326,7 +1328,8 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
       { id: sceneClipId, at: 0, track: 'V1', clipType: 'haus.astrid.liveScene', from: 0, to: 5, speed: 1, app: { liveScene } },
       { id: speechClipId, at: 5, track: 'V1', clipType: 'media', asset: assetKey, from: 0, to: 6, speed: 1 },
     ];
-    const registry = { assets: { [assetKey]: { file: 'journey-speech.webm', type: 'video', duration: 12, media_id: video.objectId, content_sha256: video.digest } } };
+    // REVIEW: Lead ruling 21/22 Nov: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; preserve the tagged media ID.
+    const registry = { assets: { [assetKey]: { file: 'journey-speech.webm', type: 'video', duration: 12, media_id: video.objectId, content_sha256: video.digest.replace(/^sha256:/, '') } } };
     const timelineId = randomUUID();
     // Runtime retired `composition-revisions` publication (410 retired_route); seed through `POST .../timelines/{t}/commit`.
     // The commit route admits only media the same commit names (`media.admit`): the speech asset is the seeded video object.
@@ -1402,10 +1405,11 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
       { id: imageClipId, at: 0, track: 'V1', clipType: 'media', asset: imageKey, from: 0, to: 5, speed: 1 },
       { id: videoClipId, at: 5, track: 'V1', clipType: 'media', asset: videoKey, from: 0, to: 5, speed: 1 },
     ];
+    // REVIEW: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; object IDs remain tagged.
     const registry = {
       assets: {
-        [imageKey]: { file: 'journey-image.png', type: 'image/png', media_id: image.objectId, content_sha256: image.digest },
-        [videoKey]: { file: `journey-video.${video.mediaType === 'video/webm' ? 'webm' : 'mp4'}`, type: video.mediaType, duration: 12, media_id: video.objectId, content_sha256: video.digest },
+        [imageKey]: { file: 'journey-image.png', type: 'image/png', media_id: image.objectId, content_sha256: image.digest.replace(/^sha256:/, '') },
+        [videoKey]: { file: `journey-video.${video.mediaType === 'video/webm' ? 'webm' : 'mp4'}`, type: video.mediaType, duration: 12, media_id: video.objectId, content_sha256: video.digest.replace(/^sha256:/, '') },
       },
     };
     const timelineId = randomUUID();
@@ -1532,7 +1536,8 @@ print(json.dumps({'revisionId': data['accepted_revision_id'], 'publicationId': r
     const patternObject = await ingest(pattern, 'video/webm', 'f2-render-pattern.webm');
     const placeholder = await ingest(grey, 'video/webm', 'f2-render-placeholder.webm');
     const toneObject = await ingest(tone, 'audio/webm', 'f2-render-tone.webm');
-    const entry = (object: SeededObject, duration: number) => ({ ...this.registryLocator(object), media_id: object.objectId, content_sha256: object.digest, type: object.mediaType, duration });
+    // REVIEW: Agent 86031e920 strict registry validation requires bare lowercase SHA-256; object IDs remain tagged.
+    const entry = (object: SeededObject, duration: number) => ({ ...this.registryLocator(object), media_id: object.objectId, content_sha256: object.digest.replace(/^sha256:/, ''), type: object.mediaType, duration });
 
     const ids = { shotId: 'f2-render-shot', occurrenceId: 'f2-render-occurrence', slotClipId: 'f2-render-slot', markerAssetKey: 'f2-render-marker', placeholderAssetKey: 'f2-render-placeholder' };
     const timelineId = randomUUID();

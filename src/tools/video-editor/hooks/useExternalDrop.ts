@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   getGenerationDropData,
   getMultiGenerationDropData,
@@ -39,6 +39,7 @@ import {
   isImageFile,
   type TimelineDropPosition,
 } from '@/tools/video-editor/lib/external-drop-utils.ts';
+import type { ParkedDrop } from '@/tools/video-editor/lib/external-drop-utils.ts';
 import { RafLoopDetector } from '@/tools/video-editor/lib/perf-diagnostics.ts';
 import { buildPinnedShotGroupsOverride } from '@/tools/video-editor/lib/shot-group-commands.ts';
 import type { TrackKind } from '@/tools/video-editor/types/index.ts';
@@ -83,6 +84,8 @@ async function dispatchTimelineDrop({
   directAssetUploadAllFiles,
   mediaImportForImageVideo,
   onAssetDropError,
+  onDropParked,
+  onDropSettled,
   shots,
   finalVideoMap,
   onPanelClipDrop,
@@ -104,6 +107,8 @@ async function dispatchTimelineDrop({
   directAssetUploadAllFiles: boolean;
   mediaImportForImageVideo: boolean;
   onAssetDropError?: (error: unknown) => void;
+  onDropParked?: (drop: ParkedDrop) => void;
+  onDropSettled?: (id: string) => void;
   shots: Shot[] | undefined;
   finalVideoMap: Map<string, { id: string; location: string; thumbnailUrl: string | null; durationSeconds?: number | null }>;
   onPanelClipDrop?: (dropPosition: TimelineDropPosition) => Promise<void>;
@@ -139,6 +144,8 @@ async function dispatchTimelineDrop({
     directAssetUploadAllFiles,
     mediaImportForImageVideo,
     onAssetDropError,
+    onDropParked,
+    onDropSettled,
   })) {
     return;
   }
@@ -487,6 +494,8 @@ export interface UseExternalDropResult {
   onTimelineDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
   onTimelineDragLeave: (event: React.DragEvent<HTMLDivElement>) => void;
   onTimelineDrop: (event: React.DragEvent<HTMLDivElement>) => void;
+  /** Dropped files that were not added: each keeps its placeholder until Try again places it or Discard removes it. */
+  parkedDrops: ParkedDrop[];
 }
 
 export function useExternalDrop({
@@ -509,6 +518,13 @@ export function useExternalDrop({
   finalVideoMap,
 }: UseExternalDropArgs): UseExternalDropResult {
   const runtime = useVideoEditorRuntime();
+  const [parkedDrops, setParkedDrops] = useState<ParkedDrop[]>([]);
+  const parkDrop = useCallback((drop: ParkedDrop) => {
+    setParkedDrops((list) => [...list.filter((entry) => entry.id !== drop.id), drop]);
+  }, []);
+  const settleDrop = useCallback((id: string) => {
+    setParkedDrops((list) => list.filter((entry) => entry.id !== id));
+  }, []);
   // Declared capability, not a type sniff: the Astrid provider declares it,
   // everything else (including future providers) opts in explicitly.
   const directAssetUploadAllFiles = runtime.provider.supportsDirectAssetUpload === true;
@@ -705,6 +721,8 @@ export function useExternalDrop({
           ...(error instanceof Error && error.message ? { description: error.message } : {}),
         });
       },
+      onDropParked: parkDrop,
+      onDropSettled: settleDrop,
       shots,
       finalVideoMap,
       onPanelClipDrop: panelClip ? (position) => placePanelClip(position, panelClip) : undefined,
@@ -734,11 +752,14 @@ export function useExternalDrop({
     onSeekToTime,
     uploadImageGeneration,
     uploadVideoGeneration,
+    parkDrop,
+    settleDrop,
   ]);
 
   return {
     onTimelineDragOver,
     onTimelineDragLeave,
     onTimelineDrop,
+    parkedDrops,
   };
 }

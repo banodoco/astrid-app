@@ -83,6 +83,8 @@ export interface UseAssetManagementResult {
     insertAtTop?: boolean,
     preparedAsset?: TimelineProvisionedAsset,
     removeClipId?: string,
+    /** Told the plain reason when a prepared drop is declined, so the caller can park it instead of losing it. */
+    onDecline?: (message: string) => void,
   ) => boolean;
 }
 
@@ -286,6 +288,7 @@ export function useAssetManagement({
     forceNewTrack: boolean,
     insertAtTop: boolean,
     removeClipId?: string,
+    onDecline?: (message: string) => void,
   ) => {
     let prepared = preparedInput;
     // A drop that cannot be placed must say so: the upload already finished, so a silent `false` leaves
@@ -295,6 +298,7 @@ export function useAssetManagement({
       console.warn('[video-editor] Dropped file was not added to the timeline', { reason, trackId, time });
       runtime.telemetry?.warn?.('[video-editor] drop declined', { reason, trackId, time });
       runtime.toast.error(fileNotAddedMessage(message));
+      onDecline?.(DECLINED_DETAIL[message] ?? message);
       return false;
     };
     const declined = (reason: string) => decline(reason);
@@ -422,9 +426,9 @@ export function useAssetManagement({
     return true;
   }, [getApplyEdit, getDataRef, getSelectedTrackId, runtime.toast, selectedProjectId]);
 
-  const handleAssetDrop = useCallback((assetKey: string, trackId: string | undefined, time: number, forceNewTrack = false, insertAtTop = false, preparedAsset?: TimelineProvisionedAsset, removeClipId?: string) => {
+  const handleAssetDrop = useCallback((assetKey: string, trackId: string | undefined, time: number, forceNewTrack = false, insertAtTop = false, preparedAsset?: TimelineProvisionedAsset, removeClipId?: string, onDecline?: (message: string) => void) => {
     if (preparedAsset) {
-      return placePreparedAsset(preparedAsset, trackId, time, forceNewTrack, insertAtTop, removeClipId);
+      return placePreparedAsset(preparedAsset, trackId, time, forceNewTrack, insertAtTop, removeClipId, onDecline);
     }
 
     const latestDataRef = getDataRef();

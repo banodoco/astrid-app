@@ -107,9 +107,12 @@ export function expectedGate5MoveReads(input: {
     }
   };
   const registry = object(payload.registry, 'pre-gesture registry');
+  // REVIEW: The Lead's M1 ruling for App #308 (25c5672d545) applies to expectedGate5MoveReads,
+  // assertParentMoveRequestV2 in three-products.p2-tour.spec.ts, and its p2-parent-oracle.test.mjs
+  // fixture. Each expects the duration leaf or its nearest missing ancestor.
   const assetRead = (item: JsonObject) => {
     if (typeof item.asset !== 'string') return;
-    readPath(registry, ['assets', item.asset], ['config', 'registry']);
+    readPath(registry, ['assets', item.asset, 'duration'], ['config', 'registry']);
   };
 
   timingReads(selectedClip);
